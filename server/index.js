@@ -58,7 +58,6 @@ passport.use(new SteamStrategy({
       // to associate the Steam account with a user record in your database,
       // and return that user instead.
       profile.identifier = identifier;
-      console.log('profile', profile)
       const user = await findUser({id: profile.id}, ['id', 'data']);
       if(!user) {
         const newUser = await createUser({"data": profile._json, "id": profile.id});
@@ -89,7 +88,7 @@ app.get('/auth/steam/return',
   passport.authenticate('steam', { failureRedirect: '/' }),
   function(req, res) {
     const token = getToken(req.user._json.steamid);
-    res.json(token);
+    res.json({token, user: req.user._json, id: req.user._json.steamid});
   }
 );
 
