@@ -26,7 +26,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
     if (!steamid) return reply.code(403).send('Steam login failed');
     const persona = await opts.fetchPersona(steamid, config.steamApiKey);
     upsertPlayer(db, { steamid, name: persona.name, avatar: persona.avatar }, config.adminSteamIds);
-    setSession(reply, steamid);
+    setSession(reply, steamid, config.publicUrl.startsWith('https://'));
     return reply.redirect('/');
   });
 

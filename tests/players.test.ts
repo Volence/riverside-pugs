@@ -37,6 +37,14 @@ describe('upsertPlayer', () => {
     expect(p.avatar).toBe('x.jpg');
     expect(p.status).toBe('active');
   });
+
+  it('promotes an existing player when they become admin', () => {
+    upsertPlayer(db, { steamid: P1, name: 'alice', avatar: null }, []);
+    upsertPlayer(db, { steamid: P1, name: 'alice', avatar: null }, [P1]);
+    const p = getPlayer(db, P1)!;
+    expect(p.status).toBe('active');
+    expect(p.is_admin).toBe(1);
+  });
 });
 
 describe('ratings', () => {

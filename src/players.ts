@@ -28,7 +28,11 @@ export function upsertPlayer(
   db.prepare(
     `INSERT INTO players (steamid, name, avatar, status, is_admin)
      VALUES (@steamid, @name, @avatar, @status, @is_admin)
-     ON CONFLICT(steamid) DO UPDATE SET name = excluded.name, avatar = excluded.avatar`,
+     ON CONFLICT(steamid) DO UPDATE SET
+       name = excluded.name,
+       avatar = excluded.avatar,
+       is_admin = MAX(players.is_admin, excluded.is_admin),
+       status = CASE WHEN excluded.is_admin = 1 THEN 'active' ELSE players.status END`,
   ).run({
     steamid: p.steamid,
     name: p.name,

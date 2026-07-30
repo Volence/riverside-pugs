@@ -3,6 +3,26 @@ const CLAIMED_ID_RE = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d{17})$/;
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
+const NONCE_TTL_MS = 5 * 60 * 1000;
+const seenNonces = new Map<string, number>(); // nonce -> expiry epoch ms
+
+/** Exported for tests only. */
+export function _resetNonces(): void {
+  seenNonces.clear();
+}
+
+function consumeNonce(nonce: string | undefined, now: number = Date.now()): boolean {
+  if (!nonce) return false;
+  const ts = Date.parse(nonce.slice(0, 20)); // ISO 8601 prefix per OpenID 2.0 spec
+  if (Number.isNaN(ts) || now - ts > NONCE_TTL_MS) return false;
+  for (const [n, exp] of seenNonces) {
+    if (exp < now) seenNonces.delete(n);
+  }
+  if (seenNonces.has(nonce)) return false;
+  seenNonces.set(nonce, now + NONCE_TTL_MS);
+  return true;
+}
+
 export function loginUrl(publicUrl: string): string {
   const params = new URLSearchParams({
     'openid.ns': 'http://specs.openid.net/auth/2.0',
@@ -21,6 +41,8 @@ export async function verifyLogin(
 ): Promise<string | null> {
   const match = CLAIMED_ID_RE.exec(query['openid.claimed_id'] ?? '');
   if (!match) return null;
+
+  if (!consumeNonce(query['openid.response_nonce'])) return null;
 
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
