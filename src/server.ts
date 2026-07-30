@@ -13,6 +13,7 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, type Orchestrator } from './orchestrator.js';
 import { apiRoutes } from './routes/api.js';
+import { devRoutes } from './routes/dev.js';
 
 export interface ServerDeps {
   config: Config;
@@ -47,6 +48,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   app.decorate('matchmaker', matchmaker);
   await app.register(apiRoutes, { db: deps.db, matchmaker });
+
+  if (deps.config.devMode) {
+    await app.register(devRoutes, { config: deps.config, db: deps.db, matchmaker, hub });
+  }
 
   return app;
 }
