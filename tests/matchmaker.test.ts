@@ -38,7 +38,7 @@ beforeEach(() => {
   setupCalls = [];
   mm = new Matchmaker(db, {
     broadcast: () => broadcasts++,
-    orchestrator: { setupMatch: async (id) => void setupCalls.push(id) },
+    orchestrator: { setupMatch: async (id) => void setupCalls.push(id), finishMatch: async () => {} },
     scheduler: sched,
     rng: () => 0,
   });
