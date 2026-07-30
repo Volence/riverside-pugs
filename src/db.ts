@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS matches (
   state TEXT NOT NULL CHECK (state IN ('configuring','live','completed','aborted')),
   campaign TEXT NOT NULL,
   server_id INTEGER REFERENCES servers(id),
+  token TEXT,
   team_a_score INTEGER NOT NULL DEFAULT 0,
   team_b_score INTEGER NOT NULL DEFAULT 0,
   winner TEXT CHECK (winner IN ('a','b','draw')),
