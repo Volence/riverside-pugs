@@ -1,0 +1,33 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh;
+  font-family: system-ui, sans-serif;
+  background: #16181d; color: #e6e6e6;
+}
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.75rem 1.25rem; background: #0f1114; border-bottom: 1px solid #2a2e36;
+}
+h1 { font-size: 1.1rem; margin: 0; color: #c33; }
+main { max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+section { background: #1d2026; border: 1px solid #2a2e36; border-radius: 8px; padding: 1.5rem; }
+.btn {
+  display: inline-block; padding: 0.6rem 1.4rem; border: 0; border-radius: 6px;
+  background: #c33; color: #fff; font-size: 1rem; cursor: pointer; text-decoration: none;
+}
+.btn:hover { background: #e44; }
+input { padding: 0.5rem; border-radius: 6px; border: 1px solid #2a2e36; background: #0f1114; color: #e6e6e6; }
+.error { color: #e66; }
+.note { color: #999; font-size: 0.9rem; }
+.teams { display: flex; gap: 2rem; }
+.teams > div { flex: 1; }
+ul { list-style: none; padding: 0; }
+li { padding: 0.25rem 0; border-bottom: 1px solid #2a2e36; }
+li.ready::after { content: " ✔"; color: #6c6; }
+#vote-options { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+#vote-options .btn.voted { outline: 2px solid #fff; }
+#devpanel {
+  position: fixed; bottom: 0; right: 0; padding: 0.5rem;
+  background: #0f1114; border: 1px dashed #555; font-size: 0.8rem;
+}
+#devpanel h3 { margin: 0 0 0.25rem; }
