@@ -5,5 +5,6 @@ export async function wsRoutes(app: FastifyInstance, opts: { hub: Hub }): Promis
   app.get('/ws', { websocket: true }, (socket) => {
     opts.hub.add(socket);
     socket.on('close', () => opts.hub.remove(socket));
+    socket.on('error', () => opts.hub.remove(socket));
   });
 }

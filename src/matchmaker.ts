@@ -42,6 +42,7 @@ export class Matchmaker {
 
   join(steamid: string): { ok: boolean; error?: string } {
     if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
+    if (this.hasOpenMatch(steamid)) return { ok: false, error: 'already in an active match' };
     this.queue.join(steamid);
     this.maybeStartLobby();
     this.deps.broadcast('refresh');
@@ -69,6 +70,15 @@ export class Matchmaker {
   private lobbyFor(steamid: string): Lobby | undefined {
     const id = this.playerLobby.get(steamid);
     return id ? this.lobbies.get(id) : undefined;
+  }
+
+  private hasOpenMatch(steamid: string): boolean {
+    return this.db
+      .prepare(
+        `SELECT 1 FROM matches m JOIN match_players mp ON mp.match_id = m.id
+         WHERE mp.player_id = ? AND m.state IN ('configuring','live') LIMIT 1`,
+      )
+      .get(steamid) !== undefined;
   }
 
   private maybeStartLobby(): void {
@@ -106,36 +116,47 @@ export class Matchmaker {
   }
 
   private onLobbyFail(id: string, ready: string[]): void {
-    this.dissolveLobby(id);
-    this.queue.requeueFront(ready);
-    this.maybeStartLobby();
-    this.deps.broadcast('refresh');
+    try {
+      this.dissolveLobby(id);
+      this.queue.requeueFront(ready);
+      this.maybeStartLobby();
+      this.deps.broadcast('refresh');
+    } catch (err) {
+      console.error(`lobby ${id} fail handler error:`, err);
+    }
   }
 
   private onLobbyComplete(id: string, result: { players: string[]; campaign: string }): void {
-    this.dissolveLobby(id);
-    const ratings = getRatings(this.db, result.players);
-    const { teamA, teamB } = balanceTeams(
-      result.players.map((steamid) => {
-        const r = ratings.get(steamid)!;
-        return { steamid, mu: r.mu, sigma: r.sigma };
-      }),
-    );
-    const season = currentSeasonId(this.db);
-    const insertMatch = this.db.prepare(
-      "INSERT INTO matches (season_id, state, campaign) VALUES (?, 'configuring', ?)",
-    );
-    const matchId = Number(insertMatch.run(season, result.campaign).lastInsertRowid);
-    const insertMp = this.db.prepare(
-      'INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)',
-    );
-    for (const p of teamA) insertMp.run(matchId, p, 'a');
-    for (const p of teamB) insertMp.run(matchId, p, 'b');
+    try {
+      this.dissolveLobby(id);
+      const ratings = getRatings(this.db, result.players);
+      const { teamA, teamB } = balanceTeams(
+        result.players.map((steamid) => {
+          const r = ratings.get(steamid)!;
+          return { steamid, mu: r.mu, sigma: r.sigma };
+        }),
+      );
+      const season = currentSeasonId(this.db);
+      const matchId = this.db.transaction(() => {
+        const insertMatch = this.db.prepare(
+          "INSERT INTO matches (season_id, state, campaign) VALUES (?, 'configuring', ?)",
+        );
+        const id = Number(insertMatch.run(season, result.campaign).lastInsertRowid);
+        const insertMp = this.db.prepare(
+          'INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)',
+        );
+        for (const p of teamA) insertMp.run(id, p, 'a');
+        for (const p of teamB) insertMp.run(id, p, 'b');
+        return id;
+      })();
 
-    this.deps.orchestrator.setupMatch(matchId).catch((err) => {
-      console.error(`orchestrator failed for match ${matchId}:`, err);
-    });
-    this.deps.broadcast('refresh');
+      this.deps.orchestrator.setupMatch(matchId).catch((err) => {
+        console.error(`orchestrator failed for match ${matchId}:`, err);
+      });
+      this.deps.broadcast('refresh');
+    } catch (err) {
+      console.error(`lobby ${id} complete handler error:`, err);
+    }
   }
 
   stateFor(steamid: string): StateSnapshot {

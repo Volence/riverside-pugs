@@ -89,4 +89,15 @@ describe('Matchmaker', () => {
     fillQueue();
     expect(mm.join(IDS[0]).ok).toBe(false);
   });
+
+  it('blocks joining while in an open match', () => {
+    fillQueue();
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    const res = mm.join(IDS[0]);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('already in an active match');
+    db.prepare("UPDATE matches SET state = 'aborted'").run();
+    expect(mm.join(IDS[0]).ok).toBe(true);
+  });
 });
