@@ -1,0 +1,35 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
+import websocket from '@fastify/websocket';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import type { Config } from './config.js';
+import type { DB } from './db.js';
+import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
+import { authRoutes } from './routes/auth.js';
+
+export interface ServerDeps {
+  config: Config;
+  db: DB;
+  verifyLogin?: typeof realVerifyLogin;
+  fetchPersona?: typeof realFetchPersona;
+}
+
+export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  await app.register(cookie, { secret: deps.config.cookieSecret });
+  await app.register(websocket);
+  await app.register(fastifyStatic, {
+    root: join(dirname(fileURLToPath(import.meta.url)), '..', 'public'),
+  });
+
+  await app.register(authRoutes, {
+    config: deps.config,
+    db: deps.db,
+    verifyLogin: deps.verifyLogin ?? realVerifyLogin,
+    fetchPersona: deps.fetchPersona ?? realFetchPersona,
+  });
+
+  return app;
+}
