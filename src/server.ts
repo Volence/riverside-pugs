@@ -10,6 +10,9 @@ import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from
 import { authRoutes } from './routes/auth.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
+import { Matchmaker } from './matchmaker.js';
+import { DevOrchestrator, type Orchestrator } from './orchestrator.js';
+import { apiRoutes } from './routes/api.js';
 
 export interface ServerDeps {
   config: Config;
@@ -17,6 +20,7 @@ export interface ServerDeps {
   verifyLogin?: typeof realVerifyLogin;
   fetchPersona?: typeof realFetchPersona;
   hub?: Hub;
+  orchestrator?: Orchestrator;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -37,5 +41,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const hub = deps.hub ?? new Hub();
   await app.register(wsRoutes, { hub });
 
+  const matchmaker = new Matchmaker(deps.db, {
+    broadcast: (event) => hub.broadcast(event),
+    orchestrator: deps.orchestrator ?? new DevOrchestrator(),
+  });
+  app.decorate('matchmaker', matchmaker);
+  await app.register(apiRoutes, { db: deps.db, matchmaker });
+
   return app;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    matchmaker: Matchmaker;
+  }
 }
