@@ -578,9 +578,9 @@ import {
 function fakeServer(password = 'secret'): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve) => {
     const server = net.createServer((sock) => {
-      let buf = Buffer.alloc(0);
+      let buf: Buffer = Buffer.alloc(0);
       sock.on('data', (chunk) => {
-        buf = Buffer.concat([buf, chunk]);
+        buf = Buffer.concat([buf, chunk as Buffer]);
         const { packets, rest } = decodePackets(buf);
         buf = rest;
         for (const p of packets) {
@@ -966,6 +966,7 @@ Expected: FAIL — cannot find module `../src/logListener.js`.
 
 ```ts
 import dgram from 'node:dgram';
+import type { AddressInfo } from 'node:net';
 import { parseLogDatagram, type LogEvent } from './logParse.js';
 
 /**
@@ -989,7 +990,7 @@ export class LogListener {
         if (ev && this.tokens.has(ev.token)) this.onEvent(ev);
       });
       sock.bind(port, address, () => {
-        resolve((sock.address() as dgram.AddressInfo).port);
+        resolve((sock.address() as AddressInfo).port);
       });
     });
   }
@@ -1120,9 +1121,9 @@ function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; c
   const cmds: string[] = [];
   return new Promise((resolve) => {
     const server = net.createServer((sock) => {
-      let buf = Buffer.alloc(0);
+      let buf: Buffer = Buffer.alloc(0);
       sock.on('data', (chunk) => {
-        buf = Buffer.concat([buf, chunk]);
+        buf = Buffer.concat([buf, chunk as Buffer]);
         const { packets, rest } = decodePackets(buf);
         buf = rest;
         for (const p of packets) {
@@ -1471,9 +1472,9 @@ const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 function fakeServer(dumpFor: (mid: string) => string) {
   return new Promise<{ port: number; close: () => Promise<void> }>((resolve) => {
     const server = net.createServer((sock) => {
-      let buf = Buffer.alloc(0);
+      let buf: Buffer = Buffer.alloc(0);
       sock.on('data', (chunk) => {
-        buf = Buffer.concat([buf, chunk]);
+        buf = Buffer.concat([buf, chunk as Buffer]);
         const { packets, rest } = decodePackets(buf); buf = rest;
         for (const p of packets) {
           if (p.type === SERVERDATA_AUTH) {
