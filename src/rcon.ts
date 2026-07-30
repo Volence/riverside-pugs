@@ -19,7 +19,7 @@ export interface RconOpts {
  */
 export class RconClient {
   private sock: net.Socket | null = null;
-  private buf = Buffer.alloc(0);
+  private buf: Buffer = Buffer.alloc(0);
   private nextId = 1;
   private pending = new Map<number, { resolve: (body: string) => void; reject: (e: Error) => void }>();
   private readonly timeoutMs: number;
@@ -36,7 +36,7 @@ export class RconClient {
       const timer = setTimeout(() => reject(new Error('rcon connect timeout')), this.timeoutMs);
 
       sock.on('error', (err) => { clearTimeout(timer); reject(err); });
-      sock.on('data', (chunk) => this.onData(chunk));
+      sock.on('data', (chunk) => this.onData(chunk as Buffer));
       sock.on('connect', () => {
         sock.write(encodePacket(authId, SERVERDATA_AUTH, this.opts.password));
       });

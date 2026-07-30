@@ -9,9 +9,9 @@ import {
 function fakeServer(password = 'secret'): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve) => {
     const server = net.createServer((sock) => {
-      let buf = Buffer.alloc(0);
+      let buf: Buffer = Buffer.alloc(0);
       sock.on('data', (chunk) => {
-        buf = Buffer.concat([buf, chunk]);
+        buf = Buffer.concat([buf, chunk as Buffer]);
         const { packets, rest } = decodePackets(buf);
         buf = rest;
         for (const p of packets) {
