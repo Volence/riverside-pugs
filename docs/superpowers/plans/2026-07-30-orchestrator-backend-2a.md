@@ -1279,8 +1279,9 @@ export interface RealOrchestratorDeps {
   db: DB;
   listener: LogListener;
   logPublicAddress: string;
-  /** Injectable so tests can pass a fake; production uses the real RconClient. */
-  makeRcon?: (opts: RconOpts) => RconClient;
+  /** Opts-transform hook (default identity). The real RconClient is always used;
+   *  this lets tests point it at a fake TCP server via injected opts. */
+  makeRcon?: (opts: RconOpts) => RconOpts;
 }
 
 interface MatchRow {
@@ -1294,17 +1295,18 @@ export class RealOrchestrator implements Orchestrator {
   private db: DB;
   private listener: LogListener;
   private logPublicAddress: string;
-  private makeRcon: (opts: RconOpts) => RconClient;
+  private makeRcon: (opts: RconOpts) => RconOpts;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
     this.listener = deps.listener;
     this.logPublicAddress = deps.logPublicAddress;
-    this.makeRcon = deps.makeRcon ?? ((o) => new RealRcon(o));
+    this.makeRcon = deps.makeRcon ?? ((o) => o);
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
-    const client = this.makeRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+    const opts = this.makeRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+    const client = new RealRcon(opts);
     await client.connect();
     return client;
   }
