@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
-import { authedCookie } from './helpers.js';
+import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 
@@ -13,7 +13,7 @@ let cookies: Record<string, Record<string, string>>;
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
   cookies = {};
   for (const id of IDS) cookies[id] = authedCookie(app, db, id);
 });

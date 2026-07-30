@@ -2,10 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
+import { stubOrchestrator } from './helpers.js';
 
 describe('dev routes', () => {
   it('is 404 when dev mode is off', async () => {
-    const app = await buildServer({ config: loadConfig({}), db: openDb(':memory:') });
+    const app = await buildServer({ config: loadConfig({}), db: openDb(':memory:'), orchestrator: stubOrchestrator() });
     expect((await app.inject({ method: 'GET', url: '/api/dev/enabled' })).statusCode).toBe(404);
   });
 

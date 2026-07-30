@@ -5,7 +5,7 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { setSetting } from '../src/settings.js';
 import { getPlayer } from '../src/players.js';
-import { authedCookie } from './helpers.js';
+import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const P1 = '76561198000000001';
 
@@ -19,6 +19,7 @@ beforeEach(async () => {
     db,
     verifyLogin: async () => P1,
     fetchPersona: async (steamid) => ({ name: 'alice', avatar: null }),
+    orchestrator: stubOrchestrator(),
   });
 });
 
