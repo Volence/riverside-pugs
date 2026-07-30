@@ -1,4 +1,5 @@
 import dgram from 'node:dgram';
+import type { AddressInfo } from 'node:net';
 import { parseLogDatagram, type LogEvent } from './logParse.js';
 
 /**
@@ -22,7 +23,7 @@ export class LogListener {
         if (ev && this.tokens.has(ev.token)) this.onEvent(ev);
       });
       sock.bind(port, address, () => {
-        resolve((sock.address() as dgram.AddressInfo).port);
+        resolve((sock.address() as AddressInfo).port);
       });
     });
   }
