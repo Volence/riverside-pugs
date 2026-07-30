@@ -8,12 +8,15 @@ import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { authRoutes } from './routes/auth.js';
+import { Hub } from './ws.js';
+import { wsRoutes } from './routes/ws.js';
 
 export interface ServerDeps {
   config: Config;
   db: DB;
   verifyLogin?: typeof realVerifyLogin;
   fetchPersona?: typeof realFetchPersona;
+  hub?: Hub;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -30,6 +33,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     verifyLogin: deps.verifyLogin ?? realVerifyLogin,
     fetchPersona: deps.fetchPersona ?? realFetchPersona,
   });
+
+  const hub = deps.hub ?? new Hub();
+  await app.register(wsRoutes, { hub });
 
   return app;
 }
