@@ -18,12 +18,12 @@ function show(id) {
 }
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    method: opts.method ?? 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return res;
+  const init = { method: opts.method ?? 'POST' };
+  if (opts.body) {
+    init.headers = { 'content-type': 'application/json' };
+    init.body = JSON.stringify(opts.body);
+  }
+  return fetch(path, init);
 }
 
 async function refresh() {

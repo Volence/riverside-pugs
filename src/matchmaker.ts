@@ -120,9 +120,10 @@ export class Matchmaker {
       this.dissolveLobby(id);
       this.queue.requeueFront(ready);
       this.maybeStartLobby();
-      this.deps.broadcast('refresh');
     } catch (err) {
       console.error(`lobby ${id} fail handler error:`, err);
+    } finally {
+      this.deps.broadcast('refresh');
     }
   }
 
@@ -153,9 +154,10 @@ export class Matchmaker {
       this.deps.orchestrator.setupMatch(matchId).catch((err) => {
         console.error(`orchestrator failed for match ${matchId}:`, err);
       });
-      this.deps.broadcast('refresh');
     } catch (err) {
       console.error(`lobby ${id} complete handler error:`, err);
+    } finally {
+      this.deps.broadcast('refresh');
     }
   }
 
