@@ -131,4 +131,99 @@ describe('RealOrchestrator', () => {
     expect(mp.si_damage).toBe(100);
     expect(JSON.parse(mp.stats_json).sidmg).toBe('100');
   });
+
+  it('finishMatch still releases the server and completes the match when sm_pug_abort fails', async () => {
+    const mid = 1;
+    const dump = [
+      `DUMP match=${mid}`,
+      'MAP map=l4d_hospital01 a=245 b=310',
+      ...IDS.map((id, i) => `STAT steamid=${id} team=${i < 4 ? 'a' : 'b'} sidmg=${100 + i} sikill=${i} ck=${i * 10} ff=${i} rev=${i}`),
+      'END winner=b a=245 b=310',
+    ].join('\n');
+
+    const cmds: string[] = [];
+    const srv = await new Promise<{ port: number; close: () => Promise<void> }>((resolve) => {
+      const server = net.createServer((sock) => {
+        let buf: Buffer = Buffer.alloc(0);
+        sock.on('data', (chunk) => {
+          buf = Buffer.concat([buf, chunk as Buffer]);
+          const { packets, rest } = decodePackets(buf);
+          buf = rest;
+          for (const p of packets) {
+            if (p.type === SERVERDATA_AUTH) {
+              sock.write(encodePacket(0, SERVERDATA_RESPONSE_VALUE, ''));
+              sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
+            } else if (p.type === SERVERDATA_EXECCOMMAND) {
+              cmds.push(p.body);
+              if (p.body.startsWith('sm_pug_abort')) {
+                sock.destroy();
+              } else {
+                const body = p.body.startsWith('sm_pug_dump') ? dump : 'ok';
+                sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, body));
+              }
+            }
+          }
+        });
+      });
+      server.listen(0, '127.0.0.1', () => {
+        resolve({
+          port: (server.address() as net.AddressInfo).port,
+          close: () => new Promise((r) => server.close(() => r())),
+        });
+      });
+    });
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500',
+      // sm_pug_abort never gets a response once the fake server destroys the socket;
+      // use a short rcon exec timeout so the test doesn't wait out the default 5s.
+      makeRcon: (o) => ({ ...o, timeoutMs: 300 }),
+    });
+
+    const realMid = seedMatch(db);
+    expect(realMid).toBe(mid);
+    await orch.setupMatch(realMid);
+    await orch.finishMatch(realMid);
+
+    const m = db.prepare('SELECT * FROM matches WHERE id = ?').get(realMid) as any;
+    expect(m.state).toBe('completed');
+    expect(getServer(db, serverId)!.status).toBe('idle');
+  });
+
+  it('finishMatch is a no-op when called again after the match already completed', async () => {
+    const mid = 1;
+    const dump = [
+      `DUMP match=${mid}`,
+      'MAP map=l4d_hospital01 a=245 b=310',
+      ...IDS.map((id, i) => `STAT steamid=${id} team=${i < 4 ? 'a' : 'b'} sidmg=${100 + i} sikill=${i} ck=${i * 10} ff=${i} rev=${i}`),
+      'END winner=b a=245 b=310',
+    ].join('\n');
+    const srv = await fakeServer(dump);
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', makeRcon: (o) => o });
+
+    const realMid = seedMatch(db);
+    expect(realMid).toBe(mid);
+    await orch.setupMatch(realMid);
+    await orch.finishMatch(realMid);
+
+    const before = db.prepare('SELECT * FROM matches WHERE id = ?').get(realMid) as any;
+    expect(before.state).toBe('completed');
+    expect(getServer(db, serverId)!.status).toBe('idle');
+
+    await expect(orch.finishMatch(realMid)).resolves.not.toThrow();
+
+    const after = db.prepare('SELECT * FROM matches WHERE id = ?').get(realMid) as any;
+    expect(after.state).toBe('completed');
+    expect(after.ended_at).toBe(before.ended_at);
+    expect(getServer(db, serverId)!.status).toBe('idle');
+  });
 });

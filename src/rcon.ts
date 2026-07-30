@@ -33,7 +33,7 @@ export class RconClient {
       const sock = net.createConnection({ host: this.opts.host, port: this.opts.port });
       this.sock = sock;
       const authId = this.nextId++;
-      const timer = setTimeout(() => reject(new Error('rcon connect timeout')), this.timeoutMs);
+      const timer = setTimeout(() => { sock.destroy(); reject(new Error('rcon connect timeout')); }, this.timeoutMs);
 
       sock.on('error', (err) => { clearTimeout(timer); reject(err); });
       sock.on('data', (chunk) => this.onData(chunk as Buffer));
@@ -43,7 +43,7 @@ export class RconClient {
 
       this.onAuth = (p: RconPacket) => {
         clearTimeout(timer);
-        if (p.id === -1) reject(new Error('rcon auth failed'));
+        if (p.id === -1) { sock.destroy(); reject(new Error('rcon auth failed')); }
         else resolve();
         this.onAuth = null;
       };

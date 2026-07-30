@@ -32,6 +32,7 @@ export interface RealOrchestratorDeps {
 
 interface MatchRow {
   id: number;
+  state: string;
   campaign: string;
   server_id: number | null;
   token: string | null;
@@ -103,13 +104,14 @@ export class RealOrchestrator implements Orchestrator {
 
   async finishMatch(matchId: number): Promise<void> {
     const match = this.db
-      .prepare('SELECT id, campaign, server_id, token FROM matches WHERE id = ?')
+      .prepare('SELECT id, state, campaign, server_id, token FROM matches WHERE id = ?')
       .get(matchId) as MatchRow | undefined;
-    if (!match || match.server_id === null || match.token === null) return;
+    if (!match || match.state !== 'live' || match.server_id === null || match.token === null) return;
     const server = getServer(this.db, match.server_id);
     if (!server) return;
 
     let rcon: RconClient | null = null;
+    let persisted = false;
     try {
       rcon = await this.connectRcon(server);
       const body = await rcon.exec(`sm_pug_dump ${match.token}`);
@@ -118,17 +120,27 @@ export class RealOrchestrator implements Orchestrator {
         console.error(`[orchestrator] unparseable dump for match ${matchId}; leaving live for retry`);
         return;
       }
+      if (dump.matchId !== matchId) {
+        console.error(`[orchestrator] dump match id ${dump.matchId} != expected ${matchId}; leaving live for retry`);
+        return;
+      }
       this.persist(matchId, dump);
-      await rcon.exec(`sm_pug_abort ${match.token}`);
+      persisted = true;
+      try {
+        await rcon.exec(`sm_pug_abort ${match.token}`);
+      } catch (abortErr) {
+        console.error(`[orchestrator] sm_pug_abort failed for match ${matchId} (non-fatal):`, abortErr);
+      }
     } catch (err) {
       console.error(`[orchestrator] finish failed for match ${matchId}:`, err);
-      return;
     } finally {
       rcon?.close();
     }
 
-    this.listener.unregister(match.token);
-    release(this.db, match.server_id);
+    if (persisted) {
+      this.listener.unregister(match.token);
+      release(this.db, match.server_id);
+    }
   }
 
   private persist(matchId: number, d: Dump): void {
