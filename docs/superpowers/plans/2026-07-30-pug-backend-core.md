@@ -2389,6 +2389,11 @@ const CAMPAIGN_NAMES = {
   blood_harvest: 'Blood Harvest',
 };
 
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 let state = null;
 
 function show(id) {
@@ -2427,13 +2432,13 @@ function render() {
     $('match-info').textContent =
       `Campaign: ${CAMPAIGN_NAMES[match.campaign] ?? match.campaign} — status: ${match.state}`;
     for (const [elId, team] of [['team-a', match.teamA], ['team-b', match.teamB]]) {
-      $(elId).innerHTML = team.map((p) => `<li>${p.name}</li>`).join('');
+      $(elId).innerHTML = team.map((p) => `<li>${esc(p.name)}</li>`).join('');
     }
     show('match');
   } else if (lobby && lobby.phase === 'ready_check') {
     $('ready-timer').textContent = secondsLeft(lobby.deadline);
     $('ready-list').innerHTML = lobby.players
-      .map((p) => `<li class="${lobby.ready.includes(p.steamid) ? 'ready' : ''}">${p.name}</li>`)
+      .map((p) => `<li class="${lobby.ready.includes(p.steamid) ? 'ready' : ''}">${esc(p.name)}</li>`)
       .join('');
     show('ready');
   } else if (lobby && lobby.phase === 'map_vote') {
@@ -2442,7 +2447,7 @@ function render() {
       .map((c) => {
         const votes = lobby.votes[c] ?? 0;
         const cls = lobby.myVote === c ? 'btn voted' : 'btn';
-        return `<button class="${cls}" data-campaign="${c}">${CAMPAIGN_NAMES[c] ?? c} (${votes})</button>`;
+        return `<button class="${cls}" data-campaign="${esc(c)}">${esc(CAMPAIGN_NAMES[c] ?? c)} (${votes})</button>`;
       })
       .join('');
     for (const btn of $('vote-options').querySelectorAll('button')) {
