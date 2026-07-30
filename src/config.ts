@@ -6,6 +6,8 @@ export interface Config {
   adminSteamIds: string[];
   devMode: boolean;
   steamApiKey: string | null;
+  logListenPort: number;
+  logPublicAddress: string;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -17,5 +19,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     adminSteamIds: (env.ADMIN_STEAMIDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     devMode: env.DEV_MODE === '1',
     steamApiKey: env.STEAM_API_KEY ?? null,
+    logListenPort: Number(env.LOG_LISTEN_PORT ?? 27500),
+    logPublicAddress: env.LOG_PUBLIC_ADDRESS ?? '127.0.0.1:27500',
   };
 }
