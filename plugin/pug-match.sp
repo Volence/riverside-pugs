@@ -364,12 +364,267 @@ public Action Timer_TeamLock(Handle timer)
 	return Plugin_Continue;
 }
 
-// ---------- Task 2 will replace these stubs ----------
-public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {}
-public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {}
-public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {}
-public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {}
-public void Event_InfectedDeath(Event event, const char[] name, bool dontBroadcast) {}
-public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {}
-public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {}
-void WriteDump() { DumpLine("DUMP match=%d", g_iMatchId); DumpLine("END winner=draw a=0 b=0"); }
+// ---------- match flow ----------
+
+public void OnMapStart()
+{
+	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+	g_iHalfScoreA = 0;
+	g_iHalfScoreB = 0;
+	g_iRound1Logical = 0;
+	g_bRoundEnded = false;
+	g_bHalfWasLive = false;
+
+	if (g_State == MS_Live && L4D_IsMissionFinalMap(true))
+	{
+		// Campaign-minus-finale complete: freeze and report. Backend follows with
+		// sm_pug_dump (authoritative) + sm_pug_abort.
+		g_State = MS_Ended;
+		int a, b;
+		TotalScores(a, b);
+		char winner[8];
+		WinnerOf(a, b, winner, sizeof(winner));
+		EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
+	}
+}
+
+/** Rotoblin ready-up go-live signal (global forward; fires even if we never call
+ *  the readyup natives). First live round flips Pending -> Live. */
+public void OnRoundIsLive()
+{
+	g_bHalfWasLive = true;
+	if (g_State == MS_Pending)
+	{
+		g_State = MS_Live;
+		EmitPug("MATCH_START map=%s", g_sCurrentMap);
+	}
+}
+
+public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
+{
+	g_bRoundEnded = false;
+	g_bHalfWasLive = false;
+	for (int i = 0; i <= MAXPLAYERS; i++)
+	{
+		g_iLockAttempts[i] = 0;
+		g_iLastHealth[i] = 0;
+	}
+}
+
+/** End-of-half scoring. Scores may be written by the engine marginally after
+ *  round_end, so the actual read happens on a 2.0s one-shot timer (versus map
+ *  transitions take ~10s; safe) with up to 3 retries while the score reads -1.
+ *
+ *  Self-calibration (avoids the logical-team relabeling trap, see plan header):
+ *  at half-1 end exactly one logical team has played, so its score != -1 —
+ *  that index IS the half-1 survivor team. Half 2's survivors are the other. */
+public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
+{
+	if (g_State != MS_Live || g_bRoundEnded || !g_bHalfWasLive) return;
+	g_bRoundEnded = true;
+	bool second = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
+	int survPug = ObserveSurvivorPugTeam();
+	DataPack pack;
+	CreateDataTimer(2.0, Timer_ReadScore, pack, TIMER_FLAG_NO_MAPCHANGE);
+	pack.WriteCell(second ? 1 : 0);
+	pack.WriteCell(survPug);
+	pack.WriteCell(0); // retry counter
+}
+
+/** Which pug team currently holds the survivor side, by majority of rostered
+ *  in-game players. 0 if unknown (no rostered survivors visible). */
+int ObserveSurvivorPugTeam()
+{
+	int count[3];
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		int slot = g_iClientRoster[c];
+		if (slot == -1 || !IsClientInGame(c)) continue;
+		if (GetClientTeam(c) == TEAM_SURVIVOR) count[g_iRosterTeam[slot]]++;
+	}
+	if (count[1] > count[2]) return 1;
+	if (count[2] > count[1]) return 2;
+	return 0;
+}
+
+public Action Timer_ReadScore(Handle timer, DataPack pack)
+{
+	pack.Reset();
+	bool second = pack.ReadCell() != 0;
+	int survPug = pack.ReadCell();
+	int attempt = pack.ReadCell();
+	if (g_State != MS_Live) return Plugin_Stop;
+
+	int survLogical;
+	if (!second)
+	{
+		int s1 = L4D_GetTeamScore(1, false);
+		int s2 = L4D_GetTeamScore(2, false);
+		survLogical = (s1 != -1) ? 1 : (s2 != -1) ? 2 : 0;
+		if (survLogical != 0) g_iRound1Logical = survLogical;
+	}
+	else
+	{
+		survLogical = (g_iRound1Logical != 0) ? (3 - g_iRound1Logical) : 0;
+	}
+
+	int score = (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
+	if (score < 0)
+	{
+		if (attempt < 3)
+		{
+			DataPack retry;
+			CreateDataTimer(2.0, Timer_ReadScore, retry, TIMER_FLAG_NO_MAPCHANGE);
+			retry.WriteCell(second ? 1 : 0);
+			retry.WriteCell(survPug);
+			retry.WriteCell(attempt + 1);
+		}
+		else
+		{
+			LogError("[pug] could not read round score (half %d, logical %d)", second ? 2 : 1, survLogical);
+			if (second) FinalizeMap();
+		}
+		return Plugin_Stop;
+	}
+
+	if (survPug == 1) g_iHalfScoreA += score;
+	else if (survPug == 2) g_iHalfScoreB += score;
+	else LogError("[pug] round score %d unattributable: no rostered survivors observed", score);
+
+	if (second) FinalizeMap();
+	return Plugin_Stop;
+}
+
+void FinalizeMap()
+{
+	if (g_iMapCount >= MAX_MAPS) return;
+	strcopy(g_sMapName[g_iMapCount], 64, g_sCurrentMap);
+	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
+	g_iMapScoreB[g_iMapCount] = g_iHalfScoreB;
+	g_iMapCount++;
+	EmitPug("MAP_RESULT map=%s a=%d b=%d", g_sCurrentMap, g_iHalfScoreA, g_iHalfScoreB);
+}
+
+void TotalScores(int &a, int &b)
+{
+	a = 0;
+	b = 0;
+	for (int i = 0; i < g_iMapCount; i++)
+	{
+		a += g_iMapScoreA[i];
+		b += g_iMapScoreB[i];
+	}
+}
+
+void WinnerOf(int a, int b, char[] out, int maxlen)
+{
+	if (a > b) strcopy(out, maxlen, "a");
+	else if (b > a) strcopy(out, maxlen, "b");
+	else strcopy(out, maxlen, "draw");
+}
+
+// ---------- stats (l4dcompstats.sp port, core five, keyed by roster slot) ----------
+
+bool StatsActive()
+{
+	return g_State == MS_Live && !g_bRoundEnded && !InReadyUp();
+}
+
+bool IsSurvivorClient(int client)
+{
+	return client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR;
+}
+
+bool IsInfectedClient(int client)
+{
+	return client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_INFECTED;
+}
+
+public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
+{
+	if (!StatsActive()) return;
+	int victim = GetClientOfUserId(event.GetInt("userid"));
+	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (attacker <= 0) return;
+	int damage = event.GetInt("dmg_health");
+	if (damage <= 0) return;
+	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
+	if (slot == -1 || !IsSurvivorClient(attacker)) return;
+
+	if (IsSurvivorClient(victim))
+	{
+		g_iStatFf[slot] += damage;      // friendly fire dealt
+	}
+	else if (IsInfectedClient(victim) && !IsFakeClient(victim))
+	{
+		// SI damage: player-controlled smoker/boomer/hunter. Tank excluded
+		// (compstats convention). Overkill remainder is granted on player_death.
+		if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
+		int remaining = event.GetInt("health");
+		if (remaining <= 0) return;
+		g_iLastHealth[victim] = remaining;
+		g_iStatSiDmg[slot] += damage;
+	}
+}
+
+public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
+{
+	if (!StatsActive()) return;
+	int victim = GetClientOfUserId(event.GetInt("userid"));
+	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (attacker <= 0 || victim <= 0) return;
+	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
+	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
+	if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
+	g_iStatSiKill[slot]++;
+	g_iStatSiDmg[slot] += g_iLastHealth[victim]; // overkill remainder
+	g_iLastHealth[victim] = 0;
+}
+
+public void Event_InfectedDeath(Event event, const char[] name, bool dontBroadcast)
+{
+	if (!StatsActive()) return;
+	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (attacker <= 0 || attacker > MaxClients) return;
+	int slot = g_iClientRoster[attacker];
+	if (slot == -1 || !IsSurvivorClient(attacker)) return;
+	g_iStatCk[slot]++;
+}
+
+public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast)
+{
+	if (!StatsActive()) return;
+	int reviver = GetClientOfUserId(event.GetInt("userid"));
+	if (reviver <= 0 || reviver > MaxClients) return;
+	int slot = g_iClientRoster[reviver];
+	if (slot == -1) return;
+	g_iStatRev[slot]++;
+}
+
+public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	if (client > 0 && client <= MaxClients) g_iLastHealth[client] = 0;
+}
+
+/** Authoritative match record over the RCON response body. Idempotent:
+ *  the backend may call sm_pug_dump repeatedly. */
+void WriteDump()
+{
+	DumpLine("DUMP match=%d", g_iMatchId);
+	for (int i = 0; i < g_iMapCount; i++)
+	{
+		DumpLine("MAP map=%s a=%d b=%d", g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
+	}
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		DumpLine("STAT steamid=%s team=%s sidmg=%d sikill=%d ck=%d ff=%d rev=%d",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
+			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
+	}
+	int a, b;
+	TotalScores(a, b);
+	char winner[8];
+	WinnerOf(a, b, winner, sizeof(winner));
+	DumpLine("END winner=%s a=%d b=%d", winner, a, b);
+}
