@@ -49,9 +49,9 @@ Absolute Unix paths break spcomp under wine (parsed as flags) — always copy in
 
 **Files:** Create `plugin/pug-match.sp`. Compile gate at the end.
 
-- [ ] **Step 1:** Read `src/logParse.ts`, `src/dumpParse.ts`, and the `setupMatch` body of `src/orchestrator.ts` in this repo to internalize the wire contracts (do not modify them).
+- [x] **Step 1:** Read `src/logParse.ts`, `src/dumpParse.ts`, and the `setupMatch` body of `src/orchestrator.ts` in this repo to internalize the wire contracts (do not modify them).
 
-- [ ] **Step 2:** Create `plugin/pug-match.sp`:
+- [x] **Step 2:** Create `plugin/pug-match.sp`:
 
 ```sourcepawn
 #pragma semicolon 1
@@ -189,7 +189,7 @@ void DumpLine(const char[] fmt, any ...)
 }
 ```
 
-- [ ] **Step 3:** Command handlers (append):
+- [x] **Step 3:** Command handlers (append):
 
 ```sourcepawn
 // ---------- RCON command intake ----------
@@ -333,7 +333,7 @@ public Action Timer_Heartbeat(Handle timer)
 }
 ```
 
-- [ ] **Step 4:** Roster lookup + enforcement (append):
+- [x] **Step 4:** Roster lookup + enforcement (append):
 
 ```sourcepawn
 // ---------- roster / enforcement ----------
@@ -429,7 +429,7 @@ public Action Timer_TeamLock(Handle timer)
 }
 ```
 
-- [ ] **Step 5:** Add temporary stubs so Task 1 compiles standalone (Task 2 replaces them):
+- [x] **Step 5:** Add temporary stubs so Task 1 compiles standalone (Task 2 replaces them):
 
 ```sourcepawn
 // ---------- Task 2 will replace these stubs ----------
@@ -443,9 +443,9 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 void WriteDump() { DumpLine("DUMP match=%d", g_iMatchId); DumpLine("END winner=draw a=0 b=0"); }
 ```
 
-- [ ] **Step 6:** Compile via the compile-gate command above → 0 errors. Report any warnings verbatim.
+- [x] **Step 6:** Compile via the compile-gate command above → 0 errors. Report any warnings verbatim.
 
-- [ ] **Step 7:** Commit:
+- [x] **Step 7:** Commit:
 ```bash
 git add plugin/pug-match.sp
 git commit -m "feat(plugin): pug-match skeleton — match intake, roster enforcement, emission, heartbeat"
@@ -457,7 +457,7 @@ git commit -m "feat(plugin): pug-match skeleton — match intake, roster enforce
 
 **Files:** Modify `plugin/pug-match.sp` (replace Task 1 stubs). Compile gate at the end.
 
-- [ ] **Step 1:** Match go-live + map lifecycle (replace the `Event_RoundStart` stub; add `OnMapStart` and `OnRoundIsLive`):
+- [x] **Step 1:** Match go-live + map lifecycle (replace the `Event_RoundStart` stub; add `OnMapStart` and `OnRoundIsLive`):
 
 ```sourcepawn
 // ---------- match flow ----------
@@ -508,7 +508,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 }
 ```
 
-- [ ] **Step 2:** Scoring (replace the `Event_RoundEnd` stub):
+- [x] **Step 2:** Scoring (replace the `Event_RoundEnd` stub):
 
 ```sourcepawn
 /** End-of-half scoring. Scores may be written by the engine marginally after
@@ -624,7 +624,7 @@ void WinnerOf(int a, int b, char[] out, int maxlen)
 }
 ```
 
-- [ ] **Step 3:** Stats (replace the remaining event stubs). Port of `l4dcompstats.sp` semantics, trimmed to the core five, keyed by roster slot:
+- [x] **Step 3:** Stats (replace the remaining event stubs). Port of `l4dcompstats.sp` semantics, trimmed to the core five, keyed by roster slot:
 
 ```sourcepawn
 // ---------- stats (l4dcompstats.sp port, core five, keyed by roster slot) ----------
@@ -712,7 +712,7 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 }
 ```
 
-- [ ] **Step 4:** Real dump (replace the `WriteDump` stub). Grammar must match `src/dumpParse.ts` byte-for-byte:
+- [x] **Step 4:** Real dump (replace the `WriteDump` stub). Grammar must match `src/dumpParse.ts` byte-for-byte:
 
 ```sourcepawn
 /** Authoritative match record over the RCON response body. Idempotent:
@@ -738,9 +738,9 @@ void WriteDump()
 }
 ```
 
-- [ ] **Step 5:** Compile gate → 0 errors. Then cross-check every emitted line against `src/logParse.ts` and `src/dumpParse.ts` (read the parser regexes/splitters and confirm field order, separators, lowercase team letters, winner values).
+- [x] **Step 5:** Compile gate → 0 errors. Then cross-check every emitted line against `src/logParse.ts` and `src/dumpParse.ts` (read the parser regexes/splitters and confirm field order, separators, lowercase team letters, winner values).
 
-- [ ] **Step 6:** Commit:
+- [x] **Step 6:** Commit:
 ```bash
 git add plugin/pug-match.sp
 git commit -m "feat(plugin): match flow, self-calibrating scoring, stats capture, sm_pug_dump"
@@ -752,7 +752,7 @@ git commit -m "feat(plugin): match flow, self-calibrating scoring, stats capture
 
 **Files:** Create `plugin/build.sh`, `plugin/README.md`. Modify repo `README.md` (one short section pointer).
 
-- [ ] **Step 1:** `plugin/build.sh` (make executable):
+- [x] **Step 1:** `plugin/build.sh` (make executable):
 
 ```bash
 #!/usr/bin/env bash
@@ -768,7 +768,7 @@ mv "$SCRIPTING/pug-match.smx" ./pug-match.smx
 echo "built: $(pwd)/pug-match.smx"
 ```
 
-- [ ] **Step 2:** `plugin/README.md` covering: what the plugin does (one paragraph); the RCON command set; both wire grammars (copy from the plan header); build instructions (`./build.sh`, or on-server `./spcomp pug-match.sp` per the l4d_clipvis NEXT.md workflow); install path (`deploy/overrides/left4dead/addons/sourcemod/plugins/` + `deploy.sh` — NOT to be done while the server is in use); and a **manual staging checklist** for the joint session:
+- [x] **Step 2:** `plugin/README.md` covering: what the plugin does (one paragraph); the RCON command set; both wire grammars (copy from the plan header); build instructions (`./build.sh`, or on-server `./spcomp pug-match.sp` per the l4d_clipvis NEXT.md workflow); install path (`deploy/overrides/left4dead/addons/sourcemod/plugins/` + `deploy.sh` — NOT to be done while the server is in use); and a **manual staging checklist** for the joint session:
   1. Compile on server, install to plugins/, `sm plugins list` shows pug-match.
   2. RCON `sm_pug_match 999 testtoken no_mercy` + 8 `sm_pug_roster` lines (use real friends' steamid64s) → `PUGOK` responses.
   3. Non-rostered player joins → kicked with roster message.
@@ -780,9 +780,9 @@ echo "built: $(pwd)/pug-match.smx"
   9. On finale load → `MATCH_END`; `sm_pug_dump testtoken` over RCON returns full DUMP/MAP/STAT/END; run it twice (idempotent).
   10. `sm_pug_abort testtoken` → `PUGOK aborted`; players no longer kicked on rejoin... (verify roster enforcement stops).
   11. Heartbeats arrive every 30s throughout.
-- [ ] **Step 3:** Add `plugin/*.smx` to `.gitignore` (create if missing). Repo `README.md`: add a short "plugin/" section pointing at `plugin/README.md`.
-- [ ] **Step 4:** Run `./plugin/build.sh` one final time → clean build. `npm test && npm run typecheck` (should be untouched/green).
-- [ ] **Step 5:** Commit:
+- [x] **Step 3:** Add `plugin/*.smx` to `.gitignore` (create if missing). Repo `README.md`: add a short "plugin/" section pointing at `plugin/README.md`.
+- [x] **Step 4:** Run `./plugin/build.sh` one final time → clean build. `npm test && npm run typecheck` (should be untouched/green).
+- [x] **Step 5:** Commit:
 ```bash
 git add plugin/build.sh plugin/README.md .gitignore README.md
 git commit -m "feat(plugin): build script, docs, staging checklist"
