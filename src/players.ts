@@ -55,8 +55,8 @@ export function currentSeasonId(db: DB): number {
   return row.id;
 }
 
-export function ensureRating(db: DB, steamid: string): RatingRow {
-  const season = currentSeasonId(db);
+export function ensureRating(db: DB, steamid: string, seasonId?: number): RatingRow {
+  const season = seasonId ?? currentSeasonId(db);
   const existing = db
     .prepare('SELECT * FROM player_ratings WHERE player_id = ? AND season_id = ?')
     .get(steamid, season) as RatingRow | undefined;
