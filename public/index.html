@@ -9,6 +9,11 @@
 <body>
   <header>
     <h1>L4D1 PUG</h1>
+    <nav>
+      <a href="#/">Play</a>
+      <a href="#/leaderboard">Leaderboard</a>
+      <a href="#/matches">Matches</a>
+    </nav>
     <div id="whoami"></div>
   </header>
 
@@ -51,6 +56,24 @@
       </div>
       <p class="note">Server assignment lands in the next milestone — for now, arrange the game manually.</p>
     </section>
+
+    <section id="leaderboard" hidden>
+      <h2>Leaderboard — <span id="lb-season"></span></h2>
+      <div id="lb-body"></div>
+    </section>
+
+    <section id="matches-page" hidden>
+      <h2>Recent matches</h2>
+      <div id="matches-body"></div>
+    </section>
+
+    <section id="match-detail" hidden>
+      <div id="match-detail-body"></div>
+    </section>
+
+    <section id="profile" hidden>
+      <div id="profile-body"></div>
+    </section>
   </main>
 
   <div id="devpanel" hidden>
@@ -61,6 +84,7 @@
     <button id="dev-ready">ready all</button>
     <button id="dev-vote">vote all</button>
     <button id="dev-clear">clear matches</button>
+    <button id="dev-sim">simulate match</button>
   </div>
 
   <script src="/app.js"></script>
