@@ -3,9 +3,10 @@ import type { RconClient, RconOpts } from './rcon.js';
 import { RconClient as RealRcon } from './rcon.js';
 import type { LogListener } from './logListener.js';
 import { newToken } from './matchToken.js';
-import { parseDump } from './dumpParse.js';
+import { parseDump, type Dump } from './dumpParse.js';
 import { claimIdle, release, markLive, getServer, type ServerRow } from './serverPool.js';
 import { completeMatch } from './matchResult.js';
+import { CAMPAIGNS } from './campaigns.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
 export interface Orchestrator {
@@ -29,6 +30,7 @@ export interface RealOrchestratorDeps {
   logPublicAddress: string;
   /** Injectable opts transform so tests can redirect the connection; production leaves opts untouched. */
   makeRcon?: (opts: RconOpts) => RconOpts;
+  notify?: (msg: string) => void;
 }
 
 interface MatchRow {
@@ -44,12 +46,14 @@ export class RealOrchestrator implements Orchestrator {
   private listener: LogListener;
   private logPublicAddress: string;
   private makeRcon: (opts: RconOpts) => RconOpts;
+  private notify: (msg: string) => void;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
     this.listener = deps.listener;
     this.logPublicAddress = deps.logPublicAddress;
     this.makeRcon = deps.makeRcon ?? ((o) => o);
+    this.notify = deps.notify ?? (() => {});
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
@@ -93,6 +97,7 @@ export class RealOrchestrator implements Orchestrator {
       await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
       markLive(this.db, server.id);
       this.db.prepare("UPDATE matches SET state = 'live' WHERE id = ?").run(matchId);
+      this.notify(`🎮 Match #${matchId} is live — ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
       this.listener.unregister(token);
@@ -113,10 +118,11 @@ export class RealOrchestrator implements Orchestrator {
 
     let rcon: RconClient | null = null;
     let persisted = false;
+    let dump: Dump | null = null;
     try {
       rcon = await this.connectRcon(server);
       const body = await rcon.exec(`sm_pug_dump ${match.token}`);
-      const dump = parseDump(body);
+      dump = parseDump(body);
       if (!dump) {
         console.error(`[orchestrator] unparseable dump for match ${matchId}; leaving live for retry`);
         return;
@@ -144,6 +150,10 @@ export class RealOrchestrator implements Orchestrator {
     if (persisted) {
       this.listener.unregister(match.token);
       release(this.db, match.server_id);
+      if (dump) {
+        const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
+        this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA} — Team B ${dump.totalB}. ${winnerText}!`);
+      }
     }
   }
 }

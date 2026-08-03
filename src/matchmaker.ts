@@ -11,6 +11,8 @@ export interface MatchmakerDeps {
   orchestrator: Orchestrator;
   scheduler?: Scheduler;
   rng?: () => number;
+  /** Optional out-of-band notification hook (Discord). Must never throw. */
+  notify?: (msg: string) => void;
 }
 
 export interface NamedPlayer {
@@ -44,6 +46,10 @@ export class Matchmaker {
     if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
     if (this.hasOpenMatch(steamid)) return { ok: false, error: 'already in an active match' };
     this.queue.join(steamid);
+    const thresholds = JSON.parse(getSetting(this.db, 'discord_queue_thresholds') ?? '[]') as number[];
+    if (thresholds.includes(this.queue.count())) {
+      this.deps.notify?.(`🧟 ${this.queue.count()}/${QUEUE_SIZE} in queue`);
+    }
     this.maybeStartLobby();
     this.deps.broadcast('refresh');
     return { ok: true };
@@ -102,6 +108,7 @@ export class Matchmaker {
         this.deps.scheduler ?? realScheduler,
       );
       this.lobbies.set(id, lobby);
+      this.deps.notify?.('🔔 Queue popped — ready check started!');
       for (const p of players) this.playerLobby.set(p, id);
     }
   }

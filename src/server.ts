@@ -15,6 +15,7 @@ import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestr
 import { LogListener } from './logListener.js';
 import { apiRoutes } from './routes/api.js';
 import { devRoutes } from './routes/dev.js';
+import { notifyDiscord } from './discord.js';
 
 export interface ServerDeps {
   config: Config;
@@ -43,6 +44,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const hub = deps.hub ?? new Hub();
   await app.register(wsRoutes, { hub });
 
+  const notify = (msg: string) => notifyDiscord(deps.db, msg);
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   if (!orchestrator) {
@@ -60,6 +63,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         db: deps.db,
         listener: logListener,
         logPublicAddress: deps.config.logPublicAddress,
+        notify,
       });
     }
   }
@@ -67,6 +71,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const matchmaker = new Matchmaker(deps.db, {
     broadcast: (event) => hub.broadcast(event),
     orchestrator,
+    notify,
   });
   app.decorate('matchmaker', matchmaker);
   app.addHook('onClose', async () => { if (logListener) await logListener.close(); });

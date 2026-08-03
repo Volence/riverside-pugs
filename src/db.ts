@@ -92,6 +92,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   ready_seconds: '60',
   vote_seconds: '30',
   map_pool: JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
+  discord_webhook_url: '',
+  discord_queue_thresholds: JSON.stringify([4, 6]),
 };
 
 export function openDb(path: string): DB {
