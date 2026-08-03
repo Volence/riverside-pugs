@@ -42,11 +42,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       .get(steamid, seasonId) as { mu: number; sigma: number; wins: number; losses: number } | undefined;
 
     const totals = db.prepare(
-      `SELECT COUNT(*) AS games, COALESCE(SUM(mp.si_damage),0) AS si_damage, COALESCE(SUM(mp.si_kills),0) AS si_kills,
-              COALESCE(SUM(mp.common_kills),0) AS common_kills, COALESCE(SUM(mp.ff_dealt),0) AS ff_dealt, COALESCE(SUM(mp.revives),0) AS revives
+      `SELECT COUNT(*) AS games, COALESCE(SUM(mp.si_damage),0) AS siDamage, COALESCE(SUM(mp.si_kills),0) AS siKills,
+              COALESCE(SUM(mp.common_kills),0) AS commonKills, COALESCE(SUM(mp.ff_dealt),0) AS ffDealt, COALESCE(SUM(mp.revives),0) AS revives
        FROM match_players mp JOIN matches m ON m.id = mp.match_id
        WHERE mp.player_id = ? AND m.state = 'completed'`,
-    ).get(steamid) as { games: number; si_damage: number; si_kills: number; common_kills: number; ff_dealt: number; revives: number };
+    ).get(steamid) as { games: number; siDamage: number; siKills: number; commonKills: number; ffDealt: number; revives: number };
 
     const matches = (db.prepare(
       `SELECT m.id, m.campaign, m.ended_at, m.team_a_score, m.team_b_score, m.winner, mp.team,
@@ -104,7 +104,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        WHERE mp.match_id = ?`,
     ).all(id) as any[]).map((p) => ({
       steamid: p.steamid, name: p.name, team: p.team,
-      si_damage: p.si_damage, si_kills: p.si_kills, common_kills: p.common_kills, ff_dealt: p.ff_dealt, revives: p.revives,
+      siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       srDelta: p.mu_after === null ? 0
         : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
     }));
