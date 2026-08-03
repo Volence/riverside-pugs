@@ -5,7 +5,9 @@ import { applyMatchRatings } from './rating.js';
 /** Persist a finished match (result, per-map scores, per-player stats) and
  *  apply ratings, atomically. Returns false when the match is missing or
  *  already completed/aborted. The single write-path for match completion —
- *  used by the real orchestrator and by dev-mode simulation. */
+ *  used by the real orchestrator and by dev-mode simulation. Dump stats for
+ *  a steamid not on the match's roster match no row and are ignored, with a
+ *  warning logged. */
 export function completeMatch(db: DB, matchId: number, d: Dump): boolean {
   const row = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string } | undefined;
   if (!row || row.state === 'completed' || row.state === 'aborted') return false;
@@ -22,9 +24,12 @@ export function completeMatch(db: DB, matchId: number, d: Dump): boolean {
        WHERE match_id = ? AND player_id = ?`,
     );
     for (const p of d.players) {
-      upd.run(p.sidmg, p.sikill, p.ck, p.ff, p.rev,
+      const result = upd.run(p.sidmg, p.sikill, p.ck, p.ff, p.rev,
         JSON.stringify({ sidmg: String(p.sidmg), sikill: String(p.sikill), ck: String(p.ck), ff: String(p.ff), rev: String(p.rev) }),
         matchId, p.steamid);
+      if (result.changes === 0) {
+        console.warn(`[matchResult] dump stat for ${p.steamid} matched no roster row in match ${matchId}`);
+      }
     }
     applyMatchRatings(db, matchId);
   })();
