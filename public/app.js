@@ -33,12 +33,13 @@ function sparkline(values, w = 560, h = 80) {
 
 async function fetchJson(path) {
   const res = await fetch(path);
-  if (res.status === 401 || res.status === 403) { location.hash = '#/'; refresh(); return null; }
+  if (res.status === 401 || res.status === 403) { location.hash = '#/'; return null; }
   if (!res.ok) return null;
   return res.json();
 }
 
 let state = null;
+let nav = 0; // navigation token — bumped by route() so stale async renders can bail out
 
 function show(id) {
   for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== id;
@@ -140,8 +141,9 @@ function playerLink(p) {
   return `<a href="#/player/${esc(p.steamid)}">${esc(p.name)}</a>`;
 }
 
-async function renderLeaderboard() {
+async function renderLeaderboard(myNav) {
   const data = await fetchJson('/api/leaderboard');
+  if (myNav !== nav) return;
   if (!data) return;
   $('lb-season').textContent = data.season.name;
   $('lb-body').innerHTML = data.rows.length === 0
@@ -153,8 +155,9 @@ async function renderLeaderboard() {
   show('leaderboard');
 }
 
-async function renderMatches() {
+async function renderMatches(myNav) {
   const data = await fetchJson('/api/matches');
+  if (myNav !== nav) return;
   if (!data) return;
   $('matches-body').innerHTML = data.matches.length === 0
     ? '<p class="note">No completed matches yet.</p>'
@@ -167,8 +170,9 @@ async function renderMatches() {
   show('matches-page');
 }
 
-async function renderMatchDetail(id) {
+async function renderMatchDetail(id, myNav) {
   const data = await fetchJson(`/api/matches/${encodeURIComponent(id)}`);
+  if (myNav !== nav) return;
   if (!data) { $('match-detail-body').innerHTML = '<p class="note">Match not found.</p>'; show('match-detail'); return; }
   const { match, maps, players } = data;
   const teamTable = (team) =>
@@ -186,8 +190,9 @@ async function renderMatchDetail(id) {
   show('match-detail');
 }
 
-async function renderProfile(steamid) {
+async function renderProfile(steamid, myNav) {
   const data = await fetchJson(`/api/players/${encodeURIComponent(steamid)}`);
+  if (myNav !== nav) return;
   if (!data) { $('profile-body').innerHTML = '<p class="note">Player not found.</p>'; show('profile'); return; }
   const { player, rating, totals, matches, history } = data;
   const avatar = player.avatar ? `<img class="avatar" src="${esc(player.avatar)}" alt="">` : '';
@@ -205,22 +210,23 @@ async function renderProfile(steamid) {
       : `<table><thead><tr><th>#</th><th>Campaign</th><th></th><th>Score</th><th>SR</th><th>Ended</th></tr></thead><tbody>` +
         matches.map((m) =>
           `<tr><td><a href="#/match/${m.id}">${m.id}</a></td><td>${esc(CAMPAIGN_NAMES[m.campaign] ?? m.campaign)}</td>` +
-          `<td class="result-${m.result}">${RESULT_LABEL[m.result]}</td><td>${m.teamAScore} — ${m.teamBScore}</td>` +
+          `<td class="result-${m.result}">${RESULT_LABEL[m.result] ?? ''}</td><td>${m.teamAScore} — ${m.teamBScore}</td>` +
           `<td>${srDeltaHtml(m.srDelta)}</td><td>${esc(fmtDate(m.endedAt))}</td></tr>`,
         ).join('') + '</tbody></table>');
   show('profile');
 }
 
 function route() {
+  const myNav = ++nav;
   const hash = location.hash || '#/';
   for (const a of document.querySelectorAll('header nav a')) {
     a.classList.toggle('active', a.getAttribute('href') === hash);
   }
   if (hash === '#/') refresh();
-  else if (hash === '#/leaderboard') renderLeaderboard();
-  else if (hash === '#/matches') renderMatches();
-  else if (hash.startsWith('#/match/')) renderMatchDetail(hash.slice('#/match/'.length));
-  else if (hash.startsWith('#/player/')) renderProfile(hash.slice('#/player/'.length));
+  else if (hash === '#/leaderboard') renderLeaderboard(myNav);
+  else if (hash === '#/matches') renderMatches(myNav);
+  else if (hash.startsWith('#/match/')) renderMatchDetail(hash.slice('#/match/'.length), myNav);
+  else if (hash.startsWith('#/player/')) renderProfile(hash.slice('#/player/'.length), myNav);
   else { location.hash = '#/'; }
 }
 
