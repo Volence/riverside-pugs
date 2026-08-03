@@ -56,6 +56,10 @@ int g_iHalfScoreB;
 int g_iRound1Logical;                    // logical team (1|2) that played survivors in half 1; 0 = unknown
 bool g_bRoundEnded;                      // round_end latch (round_end can fire more than once)
 bool g_bHalfWasLive;                     // set by OnRoundIsLive; guards ready-up restarts
+bool g_bPendingFinalize;                 // set when 2nd-half round_end fires; cleared by FinalizeMap.
+                                          // OnMapStart failsafe: if still set at changelevel, finalize
+                                          // with whatever half scores were accumulated so far so the
+                                          // map can never silently vanish from the record.
 
 // Enforcement.
 int g_iPugSide[3];                       // [1] = game team of pug team a, [2] = of pug b (0 = unknown)
@@ -95,6 +99,10 @@ public void OnPluginStart()
 
 	g_bReadyUpAvailable = LibraryExists("readyup");
 	for (int i = 0; i <= MAXPLAYERS; i++) g_iClientRoster[i] = -1;
+
+	// So MATCH_START can never emit an empty map= on a late plugin load/reload
+	// mid-map (OnMapStart won't fire again until the next changelevel).
+	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
 }
 
 public void OnLibraryAdded(const char[] name)
@@ -247,6 +255,7 @@ void ResetMatchState()
 	g_iRound1Logical = 0;
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
+	g_bPendingFinalize = false;
 	g_iPugSide[1] = 0;
 	g_iPugSide[2] = 0;
 	for (int i = 0; i < MAX_ROSTER; i++)
@@ -304,6 +313,10 @@ public void OnClientPostAdminCheck(int client)
 	EmitPug("PLAYER steamid=%s event=connect", id);
 }
 
+/** NOTE: SourceMod re-fires OnClientPostAdminCheck/OnClientDisconnect for every
+ *  client across a map transition (clients "reconnect" through the changelevel),
+ *  so PLAYER connect/disconnect lines pulse once per changelevel for players who
+ *  never actually left. The backend must not treat these as abandons. */
 public void OnClientDisconnect(int client)
 {
 	int slot = g_iClientRoster[client];
@@ -316,12 +329,18 @@ public void OnClientDisconnect(int client)
 }
 
 /** Observation-based cohesion lock. Every tick:
- *  1. Adopt the pug-team<->side mapping from where rostered players actually sit
- *     (strict majority of a pug team on one side updates the mapping; the other
- *     team gets the opposite side). Seeded a=survivors/b=infected at match set.
+ *  1. Adopt the pug-team<->side mapping from where rostered players actually sit,
+ *     via a single JOINT orientation vote (not two independent per-team votes —
+ *     independent votes can transiently contradict each other, e.g. both pug
+ *     teams momentarily showing players on the survivor side during join-in,
+ *     causing a last-writer-wins flip that inverts the map-1 seed). Only a clear
+ *     combined majority moves the mapping; otherwise the current mapping (seed:
+ *     a=survivors/b=infected at match set) stands.
  *  2. Move any rostered player not on their team's side via Rotoblin's own
  *     sm_sur / sm_inf (the l4d_team_unscramble pattern), with a per-client
- *     attempt cap so we never fight the engine forever. */
+ *     attempt cap so we never fight the engine forever. Infected -> survivor
+ *     moves bounce through spectate first (l4d_team_unscramble.sp:441-455) —
+ *     a direct sm_sur from the infected side can silently fail to stick. */
 public Action Timer_TeamLock(Handle timer)
 {
 	if (g_State == MS_None || g_State == MS_Ended) return Plugin_Continue;
@@ -334,18 +353,18 @@ public Action Timer_TeamLock(Handle timer)
 		int gt = GetClientTeam(c);
 		if (gt == TEAM_SURVIVOR || gt == TEAM_INFECTED) onSide[g_iRosterTeam[slot]][gt]++;
 	}
-	for (int pug = 1; pug <= 2; pug++)
+
+	int straight = onSide[1][TEAM_SURVIVOR] + onSide[2][TEAM_INFECTED]; // a=surv, b=inf
+	int inverted = onSide[1][TEAM_INFECTED] + onSide[2][TEAM_SURVIVOR]; // a=inf, b=surv
+	if (straight > inverted && straight >= 3)
 	{
-		if (onSide[pug][TEAM_SURVIVOR] > onSide[pug][TEAM_INFECTED] && onSide[pug][TEAM_SURVIVOR] >= 2)
-		{
-			g_iPugSide[pug] = TEAM_SURVIVOR;
-			g_iPugSide[3 - pug] = TEAM_INFECTED;
-		}
-		else if (onSide[pug][TEAM_INFECTED] > onSide[pug][TEAM_SURVIVOR] && onSide[pug][TEAM_INFECTED] >= 2)
-		{
-			g_iPugSide[pug] = TEAM_INFECTED;
-			g_iPugSide[3 - pug] = TEAM_SURVIVOR;
-		}
+		g_iPugSide[1] = TEAM_SURVIVOR;
+		g_iPugSide[2] = TEAM_INFECTED;
+	}
+	else if (inverted > straight && inverted >= 3)
+	{
+		g_iPugSide[1] = TEAM_INFECTED;
+		g_iPugSide[2] = TEAM_SURVIVOR;
 	}
 
 	for (int c = 1; c <= MaxClients; c++)
@@ -358,7 +377,11 @@ public Action Timer_TeamLock(Handle timer)
 		if (have == want) { g_iLockAttempts[c] = 0; continue; }
 		if (g_iLockAttempts[c] >= LOCK_ATTEMPT_CAP) continue;
 		g_iLockAttempts[c]++;
-		if (want == TEAM_SURVIVOR) FakeClientCommand(c, "sm_sur");
+		if (want == TEAM_SURVIVOR)
+		{
+			if (have == TEAM_INFECTED) ChangeClientTeam(c, TEAM_SPEC);
+			FakeClientCommand(c, "sm_sur");
+		}
 		else FakeClientCommand(c, "sm_inf");
 	}
 	return Plugin_Continue;
@@ -368,6 +391,15 @@ public Action Timer_TeamLock(Handle timer)
 
 public void OnMapStart()
 {
+	// Failsafe for the score-read/changelevel race: a 2nd-half round_end set
+	// g_bPendingFinalize, but the map changed before FinalizeMap ran (e.g. the
+	// delayed score-read retry chain — up to ~8s — was still in flight and got
+	// silently dropped by TIMER_FLAG_NO_MAPCHANGE). Finalize now with whatever
+	// half scores were accumulated so this map can never vanish from the record.
+	// Must run before the per-map resets below and before the finale check, so
+	// a finale-triggering MATCH_END totals include this map.
+	if (g_bPendingFinalize) FinalizeMap();
+
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
@@ -411,9 +443,20 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	}
 }
 
-/** End-of-half scoring. Scores may be written by the engine marginally after
- *  round_end, so the actual read happens on a 2.0s one-shot timer (versus map
- *  transitions take ~10s; safe) with up to 3 retries while the score reads -1.
+/** End-of-half scoring.
+ *
+ *  Primary path: read the score SYNCHRONOUSLY, right here in the round_end
+ *  handler. l4dscores.sp reads GetTeamRoundScore synchronously in its own
+ *  round_end handler, and our Post hook runs after its Pre-hook recompute, so
+ *  the score is normally already final by the time we get here. This avoids
+ *  racing a changelevel against the delayed retry chain below (that chain used
+ *  TIMER_FLAG_NO_MAPCHANGE, so a race could silently drop the last map's score
+ *  before the finale — see g_bPendingFinalize / the OnMapStart failsafe for the
+ *  backstop if this synchronous read genuinely isn't ready yet).
+ *
+ *  Fallback path: only if the sync read returns -1, fall back to the delayed
+ *  0.0s+2.0s retry chain (versus map transitions take ~10s; safe) with up to 3
+ *  retries while the score reads -1.
  *
  *  Self-calibration (avoids the logical-team relabeling trap, see plan header):
  *  at half-1 end exactly one logical team has played, so its score != -1 —
@@ -424,11 +467,56 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	g_bRoundEnded = true;
 	bool second = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 	int survPug = ObserveSurvivorPugTeam();
+	if (second) g_bPendingFinalize = true;
+
+	int score = TryReadRoundScore(second);
+	if (score >= 0)
+	{
+		AttributeScore(survPug, score);
+		if (second) FinalizeMap();
+		return;
+	}
+
 	DataPack pack;
 	CreateDataTimer(2.0, Timer_ReadScore, pack, TIMER_FLAG_NO_MAPCHANGE);
 	pack.WriteCell(second ? 1 : 0);
 	pack.WriteCell(survPug);
 	pack.WriteCell(0); // retry counter
+}
+
+/** One read attempt of the current half's survivor round score. Returns the
+ *  score (>=0), or -1 if the engine hasn't written it yet. Shared by the
+ *  synchronous primary path (Event_RoundEnd) and the delayed retry chain
+ *  (Timer_ReadScore) so the calibration logic lives in exactly one place. */
+int TryReadRoundScore(bool second)
+{
+	int survLogical;
+	if (!second)
+	{
+		int s1 = L4D_GetTeamScore(1, false);
+		int s2 = L4D_GetTeamScore(2, false);
+		if (s1 != -1 && s2 != -1)
+		{
+			// Should be impossible per the plan's self-calibration design (exactly
+			// one logical team has played by half-1 end) — surface it on staging.
+			LogError("[pug] half-1 calibration: both logical teams have scores (s1=%d s2=%d)", s1, s2);
+		}
+		survLogical = (s1 != -1) ? 1 : (s2 != -1) ? 2 : 0;
+		if (survLogical != 0) g_iRound1Logical = survLogical;
+	}
+	else
+	{
+		survLogical = (g_iRound1Logical != 0) ? (3 - g_iRound1Logical) : 0;
+	}
+	return (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
+}
+
+/** Credit a read round score to the observed pug team's half accumulator. */
+void AttributeScore(int survPug, int score)
+{
+	if (survPug == 1) g_iHalfScoreA += score;
+	else if (survPug == 2) g_iHalfScoreB += score;
+	else LogError("[pug] round score %d unattributable: no rostered survivors observed", score);
 }
 
 /** Which pug team currently holds the survivor side, by majority of rostered
@@ -455,20 +543,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	int attempt = pack.ReadCell();
 	if (g_State != MS_Live) return Plugin_Stop;
 
-	int survLogical;
-	if (!second)
-	{
-		int s1 = L4D_GetTeamScore(1, false);
-		int s2 = L4D_GetTeamScore(2, false);
-		survLogical = (s1 != -1) ? 1 : (s2 != -1) ? 2 : 0;
-		if (survLogical != 0) g_iRound1Logical = survLogical;
-	}
-	else
-	{
-		survLogical = (g_iRound1Logical != 0) ? (3 - g_iRound1Logical) : 0;
-	}
-
-	int score = (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
+	int score = TryReadRoundScore(second);
 	if (score < 0)
 	{
 		if (attempt < 3)
@@ -481,22 +556,25 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 		}
 		else
 		{
-			LogError("[pug] could not read round score (half %d, logical %d)", second ? 2 : 1, survLogical);
+			LogError("[pug] could not read round score after retries (half %d)", second ? 2 : 1);
+			// Finalize now (prompt MAP_RESULT) if the map hasn't changed yet.
+			// If it HAS already changed, this TIMER_FLAG_NO_MAPCHANGE timer never
+			// runs at all — g_bPendingFinalize is still set in that case, so the
+			// OnMapStart failsafe finalizes with whatever was accumulated,
+			// guaranteeing the map is recorded either way.
 			if (second) FinalizeMap();
 		}
 		return Plugin_Stop;
 	}
 
-	if (survPug == 1) g_iHalfScoreA += score;
-	else if (survPug == 2) g_iHalfScoreB += score;
-	else LogError("[pug] round score %d unattributable: no rostered survivors observed", score);
-
+	AttributeScore(survPug, score);
 	if (second) FinalizeMap();
 	return Plugin_Stop;
 }
 
 void FinalizeMap()
 {
+	g_bPendingFinalize = false;
 	if (g_iMapCount >= MAX_MAPS) return;
 	strcopy(g_sMapName[g_iMapCount], 64, g_sCurrentMap);
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
@@ -545,24 +623,34 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (!StatsActive()) return;
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
-	if (attacker <= 0) return;
+	if (attacker <= 0 || attacker > MaxClients || !IsSurvivorClient(attacker)) return;
 	int damage = event.GetInt("dmg_health");
 	if (damage <= 0) return;
-	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
-	if (slot == -1 || !IsSurvivorClient(attacker)) return;
+
+	// SI damage: player-controlled smoker/boomer/hunter. Tank excluded
+	// (compstats convention). Overkill remainder is granted on player_death.
+	bool siVictim = IsInfectedClient(victim) && !IsFakeClient(victim)
+		&& GetEntProp(victim, Prop_Send, "m_zombieClass") != ZC_TANK;
+	int remaining = siVictim ? event.GetInt("health") : 0;
+	if (siVictim && remaining > 0)
+	{
+		// Track remaining health for the death-time overkill-remainder credit for
+		// ANY survivor attacker (rostered or not), not just the one we're about
+		// to credit stats to below. If un-rostered/bot damage were skipped here,
+		// g_iLastHealth would go stale (too high) and inflate the remainder later
+		// credited to whichever rostered player actually lands the kill.
+		g_iLastHealth[victim] = remaining;
+	}
+
+	int slot = g_iClientRoster[attacker];
+	if (slot == -1) return;
 
 	if (IsSurvivorClient(victim))
 	{
-		g_iStatFf[slot] += damage;      // friendly fire dealt
+		g_iStatFf[slot] += damage;      // friendly fire dealt (includes self-damage, matching l4dcompstats)
 	}
-	else if (IsInfectedClient(victim) && !IsFakeClient(victim))
+	else if (siVictim && remaining > 0)
 	{
-		// SI damage: player-controlled smoker/boomer/hunter. Tank excluded
-		// (compstats convention). Overkill remainder is granted on player_death.
-		if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
-		int remaining = event.GetInt("health");
-		if (remaining <= 0) return;
-		g_iLastHealth[victim] = remaining;
 		g_iStatSiDmg[slot] += damage;
 	}
 }
@@ -604,7 +692,17 @@ public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadca
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
-	if (client > 0 && client <= MaxClients) g_iLastHealth[client] = 0;
+	if (client <= 0 || client > MaxClients) return;
+	g_iLastHealth[client] = 0;
+	// A fresh one-shot SI (e.g. a hunter that gets skeeted before ever taking
+	// non-lethal damage through player_hurt) needs its full spawn health latched
+	// as the "remainder" up front, per l4dcompstats.sp's Event_PlayerSpawn — else
+	// such kills would credit sidmg += 0 despite a full-health SI going down.
+	if (IsInfectedClient(client) && !IsFakeClient(client)
+		&& GetEntProp(client, Prop_Send, "m_zombieClass") != ZC_TANK)
+	{
+		g_iLastHealth[client] = GetClientHealth(client);
+	}
 }
 
 /** Authoritative match record over the RCON response body. Idempotent:
