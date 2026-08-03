@@ -120,3 +120,12 @@ Dev-mode-only (`DEV_MODE=1`), on top of the existing `/api/dev/*` routes:
   ratings update for real).
 - `POST /api/dev/simulate-match` — one-click fill queue → ready-all →
   vote-all → finish, for exercising the whole pipeline without a live server.
+
+## SourcePawn plugin (`plugin/`)
+
+`plugin/pug-match.sp` is the server-side counterpart of the orchestrator: it
+runs on the L4D1 box, handles match intake / roster enforcement over RCON,
+and reports back over the live UDP `logaddress` feed and the authoritative
+`sm_pug_dump` RCON response. See `plugin/README.md` for the RCON command
+set, both wire grammars, build instructions, the install path, and the
+manual staging checklist.
