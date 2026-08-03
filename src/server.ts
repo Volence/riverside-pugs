@@ -14,6 +14,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { LogListener } from './logListener.js';
 import { apiRoutes } from './routes/api.js';
+import { statsRoutes } from './routes/stats.js';
 import { devRoutes } from './routes/dev.js';
 import { notifyDiscord } from './discord.js';
 
@@ -76,6 +77,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.decorate('matchmaker', matchmaker);
   app.addHook('onClose', async () => { if (logListener) await logListener.close(); });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
+  await app.register(statsRoutes, { db: deps.db });
 
   if (deps.config.devMode) {
     await app.register(devRoutes, { config: deps.config, db: deps.db, matchmaker, hub });

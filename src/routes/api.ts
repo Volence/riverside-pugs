@@ -1,8 +1,7 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
-import { getSession } from '../session.js';
-import { getPlayer } from '../players.js';
+import { makeRequireActive } from './guards.js';
 
 export interface ApiRouteOpts {
   db: DB;
@@ -11,21 +10,7 @@ export interface ApiRouteOpts {
 
 export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promise<void> {
   const { db, matchmaker } = opts;
-
-  /** Returns the steamid of an active player or sends the error reply and returns null. */
-  function requireActive(req: FastifyRequest, reply: FastifyReply): string | null {
-    const steamid = getSession(req);
-    if (!steamid) {
-      reply.code(401).send({ error: 'not logged in' });
-      return null;
-    }
-    const player = getPlayer(db, steamid);
-    if (!player || player.status !== 'active') {
-      reply.code(403).send({ error: 'not an active player' });
-      return null;
-    }
-    return steamid;
-  }
+  const requireActive = makeRequireActive(db);
 
   app.post('/api/queue/join', async (req, reply) => {
     const steamid = requireActive(req, reply);

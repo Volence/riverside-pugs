@@ -1,0 +1,113 @@
+import type { FastifyInstance } from 'fastify';
+import type { DB } from '../db.js';
+import { makeRequireActive } from './guards.js';
+import { displaySr } from '../rating.js';
+import { getPlayer, currentSeasonId } from '../players.js';
+
+export interface StatsRouteOpts { db: DB }
+
+const RECENT_MATCH_LIMIT = 50;
+const PROFILE_MATCH_LIMIT = 20;
+
+export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): Promise<void> {
+  const { db } = opts;
+  const requireActive = makeRequireActive(db);
+
+  app.get('/api/leaderboard', async (req, reply) => {
+    if (!requireActive(req, reply)) return;
+    const seasonId = currentSeasonId(db);
+    const season = db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string };
+    const rows = db.prepare(
+      `SELECT pr.player_id AS steamid, p.name, p.avatar, pr.mu, pr.sigma, pr.wins, pr.losses,
+              (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = pr.player_id AND rh.season_id = pr.season_id) AS games
+       FROM player_ratings pr JOIN players p ON p.steamid = pr.player_id
+       WHERE pr.season_id = ?`,
+    ).all(seasonId) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
+    return {
+      season,
+      rows: rows
+        .map((r) => ({ steamid: r.steamid, name: r.name, avatar: r.avatar, sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games }))
+        .sort((x, y) => y.sr - x.sr),
+    };
+  });
+
+  app.get('/api/players/:steamid', async (req, reply) => {
+    if (!requireActive(req, reply)) return;
+    const { steamid } = req.params as { steamid: string };
+    const player = getPlayer(db, steamid);
+    if (!player) return reply.code(404).send({ error: 'no such player' });
+    const seasonId = currentSeasonId(db);
+
+    const r = db.prepare('SELECT mu, sigma, wins, losses FROM player_ratings WHERE player_id = ? AND season_id = ?')
+      .get(steamid, seasonId) as { mu: number; sigma: number; wins: number; losses: number } | undefined;
+
+    const totals = db.prepare(
+      `SELECT COUNT(*) AS games, COALESCE(SUM(mp.si_damage),0) AS si_damage, COALESCE(SUM(mp.si_kills),0) AS si_kills,
+              COALESCE(SUM(mp.common_kills),0) AS common_kills, COALESCE(SUM(mp.ff_dealt),0) AS ff_dealt, COALESCE(SUM(mp.revives),0) AS revives
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+       WHERE mp.player_id = ? AND m.state = 'completed'`,
+    ).get(steamid) as { games: number; si_damage: number; si_kills: number; common_kills: number; ff_dealt: number; revives: number };
+
+    const matches = (db.prepare(
+      `SELECT m.id, m.campaign, m.ended_at, m.team_a_score, m.team_b_score, m.winner, mp.team,
+              rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
+       FROM match_players mp
+       JOIN matches m ON m.id = mp.match_id
+       LEFT JOIN rating_history rh ON rh.match_id = m.id AND rh.player_id = mp.player_id
+       WHERE mp.player_id = ? AND m.state = 'completed'
+       ORDER BY m.id DESC LIMIT ?`,
+    ).all(steamid, PROFILE_MATCH_LIMIT) as any[]).map((m) => ({
+      id: m.id, campaign: m.campaign, endedAt: m.ended_at,
+      teamAScore: m.team_a_score, teamBScore: m.team_b_score, team: m.team,
+      result: m.winner === 'draw' ? 'draw' : m.winner === m.team ? 'win' : 'loss',
+      srDelta: m.mu_after === null ? 0
+        : displaySr(m.mu_after, m.sigma_after) - displaySr(m.mu_before, m.sigma_before),
+    }));
+
+    const history = (db.prepare(
+      'SELECT match_id, mu_after, sigma_after FROM rating_history WHERE player_id = ? AND season_id = ? ORDER BY id',
+    ).all(steamid, seasonId) as any[]).map((h) => ({ matchId: h.match_id, sr: displaySr(h.mu_after, h.sigma_after) }));
+
+    return {
+      player: { steamid: player.steamid, name: player.name, avatar: player.avatar, createdAt: player.created_at },
+      rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
+      totals, matches, history,
+    };
+  });
+
+  app.get('/api/matches', async (req, reply) => {
+    if (!requireActive(req, reply)) return;
+    const matches = db.prepare(
+      `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
+       FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT ?`,
+    ).all(RECENT_MATCH_LIMIT);
+    return { matches };
+  });
+
+  app.get('/api/matches/:id', async (req, reply) => {
+    if (!requireActive(req, reply)) return;
+    const id = Number((req.params as { id: string }).id);
+    const match = db.prepare(
+      `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
+       FROM matches WHERE id = ? AND state = 'completed'`,
+    ).get(id);
+    if (!match) return reply.code(404).send({ error: 'no such match' });
+    const maps = db.prepare(
+      'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
+    ).all(id);
+    const players = (db.prepare(
+      `SELECT mp.player_id AS steamid, p.name, mp.team, mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
+              rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
+       FROM match_players mp
+       JOIN players p ON p.steamid = mp.player_id
+       LEFT JOIN rating_history rh ON rh.match_id = mp.match_id AND rh.player_id = mp.player_id
+       WHERE mp.match_id = ?`,
+    ).all(id) as any[]).map((p) => ({
+      steamid: p.steamid, name: p.name, team: p.team,
+      si_damage: p.si_damage, si_kills: p.si_kills, common_kills: p.common_kills, ff_dealt: p.ff_dealt, revives: p.revives,
+      srDelta: p.mu_after === null ? 0
+        : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
+    }));
+    return { match, maps, players };
+  });
+}
