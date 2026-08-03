@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS match_players (
   stats_json TEXT NOT NULL DEFAULT '{}',
   PRIMARY KEY (match_id, player_id)
 );
+CREATE TABLE IF NOT EXISTS match_maps (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  ordinal INTEGER NOT NULL,
+  map TEXT NOT NULL,
+  team_a_score INTEGER NOT NULL DEFAULT 0,
+  team_b_score INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (match_id, ordinal)
+);
 CREATE TABLE IF NOT EXISTS rating_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   player_id TEXT NOT NULL,
@@ -72,6 +80,7 @@ CREATE TABLE IF NOT EXISTS rating_history (
   mu_after REAL NOT NULL,
   sigma_after REAL NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rating_history_match_player ON rating_history (match_id, player_id);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

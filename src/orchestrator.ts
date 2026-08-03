@@ -3,8 +3,9 @@ import type { RconClient, RconOpts } from './rcon.js';
 import { RconClient as RealRcon } from './rcon.js';
 import type { LogListener } from './logListener.js';
 import { newToken } from './matchToken.js';
-import { parseDump, type Dump } from './dumpParse.js';
+import { parseDump } from './dumpParse.js';
 import { claimIdle, release, markLive, getServer, type ServerRow } from './serverPool.js';
+import { completeMatch } from './matchResult.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
 export interface Orchestrator {
@@ -124,8 +125,11 @@ export class RealOrchestrator implements Orchestrator {
         console.error(`[orchestrator] dump match id ${dump.matchId} != expected ${matchId}; leaving live for retry`);
         return;
       }
-      this.persist(matchId, dump);
-      persisted = true;
+      persisted = completeMatch(this.db, matchId, dump);
+      if (!persisted) {
+        console.error(`[orchestrator] match ${matchId} was not completable (state changed?); skipping`);
+        return;
+      }
       try {
         await rcon.exec(`sm_pug_abort ${match.token}`);
       } catch (abortErr) {
@@ -141,23 +145,6 @@ export class RealOrchestrator implements Orchestrator {
       this.listener.unregister(match.token);
       release(this.db, match.server_id);
     }
-  }
-
-  private persist(matchId: number, d: Dump): void {
-    this.db.transaction(() => {
-      this.db
-        .prepare("UPDATE matches SET state = 'completed', team_a_score = ?, team_b_score = ?, winner = ?, ended_at = datetime('now') WHERE id = ?")
-        .run(d.totalA, d.totalB, d.winner, matchId);
-      const upd = this.db.prepare(
-        `UPDATE match_players SET si_damage = ?, si_kills = ?, common_kills = ?, ff_dealt = ?, revives = ?, stats_json = ?
-         WHERE match_id = ? AND player_id = ?`,
-      );
-      for (const p of d.players) {
-        upd.run(p.sidmg, p.sikill, p.ck, p.ff, p.rev,
-          JSON.stringify({ sidmg: String(p.sidmg), sikill: String(p.sikill), ck: String(p.ck), ff: String(p.ff), rev: String(p.rev) }),
-          matchId, p.steamid);
-      }
-    })();
   }
 }
 

@@ -52,6 +52,7 @@ describe('applyMatchRatings', () => {
     expect(r.wins).toBe(0);
     expect(r.losses).toBe(0);
     expect(Math.abs(r.mu - 25)).toBeLessThan(0.5); // equal teams draw ≈ no shift
+    expect(r.sigma).toBeLessThan(25 / 3); // draws still convey information
     expect(db.prepare('SELECT COUNT(*) n FROM rating_history WHERE match_id = ?').get(matchId)).toEqual({ n: 8 });
   });
 
