@@ -87,6 +87,7 @@ export class RealOrchestrator implements Orchestrator {
     this.listener.register(token);
 
     let rcon: RconClient | null = null;
+    let live = false;
     try {
       rcon = await this.connectRcon(server);
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
@@ -97,7 +98,7 @@ export class RealOrchestrator implements Orchestrator {
       await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
       markLive(this.db, server.id);
       this.db.prepare("UPDATE matches SET state = 'live' WHERE id = ?").run(matchId);
-      this.notify(`🎮 Match #${matchId} is live — ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
+      live = true;
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
       this.listener.unregister(token);
@@ -105,6 +106,10 @@ export class RealOrchestrator implements Orchestrator {
       this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
     } finally {
       rcon?.close();
+    }
+
+    if (live) {
+      this.notify(`🎮 Match #${matchId} is live — ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
     }
   }
 

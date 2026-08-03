@@ -30,4 +30,10 @@ describe('notifyDiscord', () => {
     expect(() => notifyDiscord(db, 'x', fetchFn)).not.toThrow();
     await new Promise((r) => setImmediate(r)); // let the rejection settle
   });
+
+  it('swallows a synchronously-throwing fetchFn', () => {
+    setSetting(db, 'discord_webhook_url', 'https://discord.test/hook');
+    const fetchFn = vi.fn(() => { throw new Error('boom'); });
+    expect(() => notifyDiscord(db, 'x', fetchFn)).not.toThrow();
+  });
 });

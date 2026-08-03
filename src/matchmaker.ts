@@ -15,6 +15,18 @@ export interface MatchmakerDeps {
   notify?: (msg: string) => void;
 }
 
+/** Parse discord_queue_thresholds defensively — a malformed or non-array
+ *  setting (admin typo, hand-edited sqlite row) must never break join(). */
+function safeThresholds(raw: string | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface NamedPlayer {
   steamid: string;
   name: string;
@@ -46,7 +58,7 @@ export class Matchmaker {
     if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
     if (this.hasOpenMatch(steamid)) return { ok: false, error: 'already in an active match' };
     this.queue.join(steamid);
-    const thresholds = JSON.parse(getSetting(this.db, 'discord_queue_thresholds') ?? '[]') as number[];
+    const thresholds = safeThresholds(getSetting(this.db, 'discord_queue_thresholds'));
     if (thresholds.includes(this.queue.count())) {
       this.deps.notify?.(`🧟 ${this.queue.count()}/${QUEUE_SIZE} in queue`);
     }

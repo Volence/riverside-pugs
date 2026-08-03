@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer } from '../src/players.js';
+import { setSetting } from '../src/settings.js';
 import type { Scheduler } from '../src/lobby.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
@@ -99,5 +100,34 @@ describe('Matchmaker', () => {
     expect(res.error).toBe('already in an active match');
     db.prepare("UPDATE matches SET state = 'aborted'").run();
     expect(mm.join(IDS[0]).ok).toBe(true);
+  });
+
+  it('notifies at queue thresholds and on queue pop', () => {
+    const notifications: string[] = [];
+    const notifyMm = new Matchmaker(db, {
+      broadcast: () => broadcasts++,
+      orchestrator: { setupMatch: async (id) => void setupCalls.push(id), finishMatch: async () => {} },
+      scheduler: sched,
+      rng: () => 0,
+      notify: (msg) => notifications.push(msg),
+    });
+    for (const id of IDS) notifyMm.join(id);
+    expect(notifications).toContain('🧟 4/8 in queue');
+    expect(notifications).toContain('🔔 Queue popped — ready check started!');
+  });
+
+  it('join succeeds and skips the notify when discord_queue_thresholds is malformed JSON', () => {
+    setSetting(db, 'discord_queue_thresholds', '[4,6');
+    const notifications: string[] = [];
+    const notifyMm = new Matchmaker(db, {
+      broadcast: () => broadcasts++,
+      orchestrator: { setupMatch: async (id) => void setupCalls.push(id), finishMatch: async () => {} },
+      scheduler: sched,
+      rng: () => 0,
+      notify: (msg) => notifications.push(msg),
+    });
+    const res = notifyMm.join(IDS[0]);
+    expect(res.ok).toBe(true);
+    expect(notifications).toEqual([]);
   });
 });
