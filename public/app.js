@@ -203,7 +203,7 @@ async function renderProfile(steamid, myNav) {
       : '<p class="note">Unrated this season.</p>') +
     '</div></div>' +
     sparkline(history.map((h) => h.sr)) +
-    `<h3>Season totals</h3><p>${totals.games} games · ${totals.siDamage} SI damage · ${totals.siKills} SI kills · ` +
+    `<h3>Totals</h3><p>${totals.games} games · ${totals.siDamage} SI damage · ${totals.siKills} SI kills · ` +
     `${totals.commonKills} commons · ${totals.ffDealt} FF · ${totals.revives} revives</p>` +
     '<h3>Recent matches</h3>' +
     (matches.length === 0 ? '<p class="note">None yet.</p>'

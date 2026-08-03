@@ -24,7 +24,7 @@
 - Modify: `src/players.ts` (season-parameterized `ensureRating`)
 - Test: `tests/rating.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/rating.test.ts`:
 
@@ -114,12 +114,12 @@ describe('applyMatchRatings', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/rating.test.ts`
 Expected: FAIL — cannot resolve `../src/rating.js`.
 
-- [ ] **Step 3: Season-parameterize `ensureRating` in `src/players.ts`**
+- [x] **Step 3: Season-parameterize `ensureRating` in `src/players.ts`**
 
 Replace the existing `ensureRating` (keep everything else):
 
@@ -138,7 +138,7 @@ export function ensureRating(db: DB, steamid: string, seasonId?: number): Rating
 }
 ```
 
-- [ ] **Step 4: Implement `src/rating.ts`**
+- [x] **Step 4: Implement `src/rating.ts`**
 
 ```ts
 import { rating, rate } from 'openskill';
@@ -195,12 +195,12 @@ export function applyMatchRatings(db: DB, matchId: number): void {
 }
 ```
 
-- [ ] **Step 5: Run the new tests, then the full suite + typecheck**
+- [x] **Step 5: Run the new tests, then the full suite + typecheck**
 
 Run: `npx vitest run tests/rating.test.ts` → PASS.
 Run: `npm test && npm run typecheck` → all green (ensureRating change is backwards compatible).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/rating.ts src/players.ts tests/rating.test.ts
@@ -217,7 +217,7 @@ git commit -m "feat: openskill post-match rating engine + displayed SR"
 - Modify: `src/orchestrator.ts` (replace private `persist` with `completeMatch` call)
 - Test: `tests/matchResult.test.ts`; Modify: `tests/db.test.ts` (table list)
 
-- [ ] **Step 1: Add the table to `src/db.ts` SCHEMA** (after the `match_players` block):
+- [x] **Step 1: Add the table to `src/db.ts` SCHEMA** (after the `match_players` block):
 
 ```sql
 CREATE TABLE IF NOT EXISTS match_maps (
@@ -241,7 +241,7 @@ expect(names).toEqual([
 
 Note: SCHEMA is `CREATE TABLE IF NOT EXISTS` — new tables appear on existing DBs at next boot; no migration needed. (The live Dallas deploy is not running this backend yet.)
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `tests/matchResult.test.ts`:
 
@@ -317,11 +317,11 @@ describe('completeMatch', () => {
 
 Note: the second seedLiveMatch reuses the same 8 players — `upsertPlayer` is an upsert, so that's fine.
 
-- [ ] **Step 3: Run to verify fail**
+- [x] **Step 3: Run to verify fail**
 
 Run: `npx vitest run tests/matchResult.test.ts` → FAIL (module missing).
 
-- [ ] **Step 4: Implement `src/matchResult.ts`**
+- [x] **Step 4: Implement `src/matchResult.ts`**
 
 ```ts
 import type { DB } from './db.js';
@@ -358,7 +358,7 @@ export function completeMatch(db: DB, matchId: number, d: Dump): boolean {
 }
 ```
 
-- [ ] **Step 5: Refactor `src/orchestrator.ts` to use it**
+- [x] **Step 5: Refactor `src/orchestrator.ts` to use it**
 
 Add import `import { completeMatch } from './matchResult.js';`, delete the entire private `persist` method and the now-unused `import { parseDump, type Dump }` Dump type import if unreferenced (keep `parseDump`). In `finishMatch`, replace:
 
@@ -377,12 +377,12 @@ with:
       }
 ```
 
-- [ ] **Step 6: Full suite + typecheck**
+- [x] **Step 6: Full suite + typecheck**
 
 Run: `npm test && npm run typecheck`
 Expected: all green — orchestrator e2e tests now also exercise map/rating persistence. If an orchestrator test seeds match_players without players rows and FK errors appear on player_ratings, fix the TEST seed to insert players first (players are always real rows in production).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/db.ts src/matchResult.ts src/orchestrator.ts tests/matchResult.test.ts tests/db.test.ts
@@ -398,7 +398,7 @@ git commit -m "feat: match_maps table + shared completeMatch write-path with rat
 - Modify: `src/db.ts` (DEFAULT_SETTINGS), `src/matchmaker.ts` (notify dep + queue/pop pings), `src/orchestrator.ts` (notify dep + live/result pings), `src/server.ts` (wire notify)
 - Test: `tests/discord.test.ts`; Modify: `tests/matchmaker.test.ts` only if constructor typing forces it (dep is optional — it shouldn't)
 
-- [ ] **Step 1: Failing tests** — `tests/discord.test.ts`:
+- [x] **Step 1: Failing tests** — `tests/discord.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -436,9 +436,9 @@ describe('notifyDiscord', () => {
 });
 ```
 
-- [ ] **Step 2: Run to fail** — `npx vitest run tests/discord.test.ts` → module missing.
+- [x] **Step 2: Run to fail** — `npx vitest run tests/discord.test.ts` → module missing.
 
-- [ ] **Step 3: Implement `src/discord.ts`**
+- [x] **Step 3: Implement `src/discord.ts`**
 
 ```ts
 import type { DB } from './db.js';
@@ -464,7 +464,7 @@ export function notifyDiscord(db: DB, content: string, fetchFn: FetchLike = fetc
 }
 ```
 
-- [ ] **Step 4: Settings defaults** — in `src/db.ts` DEFAULT_SETTINGS add:
+- [x] **Step 4: Settings defaults** — in `src/db.ts` DEFAULT_SETTINGS add:
 
 ```ts
   discord_webhook_url: '',
@@ -473,7 +473,7 @@ export function notifyDiscord(db: DB, content: string, fetchFn: FetchLike = fetc
 
 (`notifyDiscord` treats `''` as unset. `tests/db.test.ts` doesn't assert the full settings list, only specific keys — no change needed there.)
 
-- [ ] **Step 5: Matchmaker pings** — in `src/matchmaker.ts`:
+- [x] **Step 5: Matchmaker pings** — in `src/matchmaker.ts`:
 
 Add to `MatchmakerDeps`:
 
@@ -497,7 +497,7 @@ In `maybeStartLobby()`, right after `this.lobbies.set(id, lobby);`:
       this.deps.notify?.('🔔 Queue popped — ready check started!');
 ```
 
-- [ ] **Step 6: Orchestrator pings** — in `src/orchestrator.ts`:
+- [x] **Step 6: Orchestrator pings** — in `src/orchestrator.ts`:
 
 Add to `RealOrchestratorDeps`: `notify?: (msg: string) => void;` and store it (`private notify: (msg: string) => void;` initialized `deps.notify ?? (() => {})` in the constructor). Import `CAMPAIGNS` from `./campaigns.js`.
 
@@ -518,7 +518,7 @@ In `finishMatch`, inside the `if (persisted) { ... }` block:
 
 `dump` must be in scope there — declare `let dump: Dump | null = null;` alongside `persisted` and assign inside the try (keep the `Dump` type import). Guard with `if (persisted && dump)`.
 
-- [ ] **Step 7: Wire in `src/server.ts`**
+- [x] **Step 7: Wire in `src/server.ts`**
 
 ```ts
 import { notifyDiscord } from './discord.js';
@@ -527,9 +527,9 @@ import { notifyDiscord } from './discord.js';
 Before the orchestrator block: `const notify = (msg: string) => notifyDiscord(deps.db, msg);`
 Pass `notify` into `new RealOrchestrator({ ... , notify })` and into the Matchmaker deps: `{ broadcast: ..., orchestrator, notify }`.
 
-- [ ] **Step 8: Full suite + typecheck** — `npm test && npm run typecheck` → green (notify is optional everywhere; existing tests unaffected).
+- [x] **Step 8: Full suite + typecheck** — `npm test && npm run typecheck` → green (notify is optional everywhere; existing tests unaffected).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/discord.ts src/db.ts src/matchmaker.ts src/orchestrator.ts src/server.ts tests/discord.test.ts
@@ -545,7 +545,7 @@ git commit -m "feat: discord webhook notifications (queue thresholds, pop, live,
 - Modify: `src/routes/api.ts` (use shared guard), `src/server.ts` (register statsRoutes)
 - Test: `tests/stats.test.ts`
 
-- [ ] **Step 1: Extract the guard** — create `src/routes/guards.ts`:
+- [x] **Step 1: Extract the guard** — create `src/routes/guards.ts`:
 
 ```ts
 import type { FastifyRequest, FastifyReply } from 'fastify';
@@ -574,7 +574,7 @@ export function makeRequireActive(db: DB) {
 
 In `src/routes/api.ts`: delete the inline `requireActive` and its `getSession`/`getPlayer` imports; add `import { makeRequireActive } from './guards.js';` and `const requireActive = makeRequireActive(db);` at the top of `apiRoutes`. Behavior identical; `npx vitest run tests/api.test.ts` must stay green.
 
-- [ ] **Step 2: Failing tests** — `tests/stats.test.ts`:
+- [x] **Step 2: Failing tests** — `tests/stats.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -690,9 +690,9 @@ describe('stats routes', () => {
 
 Check `tests/http-e2e.test.ts` / `tests/api.test.ts` for how `config` objects are actually built (there may be a `loadConfig`/factory to reuse instead of the inline literal above — mirror the existing pattern exactly).
 
-- [ ] **Step 3: Run to fail** — `npx vitest run tests/stats.test.ts` → 404s (routes missing).
+- [x] **Step 3: Run to fail** — `npx vitest run tests/stats.test.ts` → 404s (routes missing).
 
-- [ ] **Step 4: Implement `src/routes/stats.ts`**
+- [x] **Step 4: Implement `src/routes/stats.ts`**
 
 ```ts
 import type { FastifyInstance } from 'fastify';
@@ -810,7 +810,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
 }
 ```
 
-- [ ] **Step 5: Register in `src/server.ts`** — after `apiRoutes`:
+- [x] **Step 5: Register in `src/server.ts`** — after `apiRoutes`:
 
 ```ts
 import { statsRoutes } from './routes/stats.js';
@@ -818,9 +818,9 @@ import { statsRoutes } from './routes/stats.js';
 await app.register(statsRoutes, { db: deps.db });
 ```
 
-- [ ] **Step 6: Run** — `npx vitest run tests/stats.test.ts tests/api.test.ts` → PASS, then `npm test && npm run typecheck`.
+- [x] **Step 6: Run** — `npx vitest run tests/stats.test.ts tests/api.test.ts` → PASS, then `npm test && npm run typecheck`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/routes/guards.ts src/routes/stats.ts src/routes/api.ts src/server.ts tests/stats.test.ts
@@ -835,7 +835,7 @@ git commit -m "feat: leaderboard, profile, and match history read API"
 - Modify: `src/routes/dev.ts`
 - Test: `tests/dev.test.ts` (extend)
 
-- [ ] **Step 1: Failing tests** — append to `tests/dev.test.ts` (mirror its existing setup; it already builds a dev-mode server):
+- [x] **Step 1: Failing tests** — append to `tests/dev.test.ts` (mirror its existing setup; it already builds a dev-mode server):
 
 ```ts
   it('finish-match completes the open match with fake stats and ratings', async () => {
@@ -867,9 +867,9 @@ git commit -m "feat: leaderboard, profile, and match history read API"
 
 Note: `/api/dev/fill` uses a module-level `fakeSeq` counter, so fake steamids differ across tests — fine, players are upserted per test DB.
 
-- [ ] **Step 2: Run to fail** — `npx vitest run tests/dev.test.ts`.
+- [x] **Step 2: Run to fail** — `npx vitest run tests/dev.test.ts`.
 
-- [ ] **Step 3: Implement** — in `src/routes/dev.ts` add imports:
+- [x] **Step 3: Implement** — in `src/routes/dev.ts` add imports:
 
 ```ts
 import { completeMatch } from '../matchResult.js';
@@ -926,9 +926,9 @@ Add inside `devRoutes` (near the other routes):
 
 (If self-`app.inject` inside a handler misbehaves, refactor the bodies of fill/ready-all/vote-all into local `fillQueue()`, `readyAll()`, `voteAll()` functions and have both the routes and simulate-match call those directly — preferred if any flakiness appears.)
 
-- [ ] **Step 4: Run** — `npx vitest run tests/dev.test.ts` → PASS; `npm test && npm run typecheck` → green.
+- [x] **Step 4: Run** — `npx vitest run tests/dev.test.ts` → PASS; `npm test && npm run typecheck` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/routes/dev.ts tests/dev.test.ts
@@ -944,7 +944,7 @@ git commit -m "feat: dev-mode fake match completion + one-click simulate"
 
 No unit tests (no frontend test rig); verification is `npm run dev` + the overseer's browser pass. Keep the existing vanilla style: `$()`, `esc()`, innerHTML templates.
 
-- [ ] **Step 1: `public/index.html`** — replace `<header>` contents with:
+- [x] **Step 1: `public/index.html`** — replace `<header>` contents with:
 
 ```html
   <header>
@@ -982,7 +982,7 @@ Add before `</main>`:
 
 Make `#whoami` a profile link target (handled in JS below).
 
-- [ ] **Step 2: `public/app.js`** — add routing + page renderers.
+- [x] **Step 2: `public/app.js`** — add routing + page renderers.
 
 After the `esc` helper add:
 
@@ -1121,13 +1121,13 @@ Change `connectWs`'s `ws.onmessage = () => refresh();` to `ws.onmessage = () => 
 
 (`/api/me` already returns `steamid`.) Also guard `render()` so it only touches play sections when on the play route: first line `if (location.hash !== '#/' && location.hash !== '') return;`.
 
-- [ ] **Step 3: Dev panel button** — in `index.html` devpanel add `<button id="dev-sim">simulate match</button>`; in `initDevPanel` add:
+- [x] **Step 3: Dev panel button** — in `index.html` devpanel add `<button id="dev-sim">simulate match</button>`; in `initDevPanel` add:
 
 ```js
   $('dev-sim').onclick = () => api('/api/dev/simulate-match').then(route);
 ```
 
-- [ ] **Step 4: `public/style.css`** — append:
+- [x] **Step 4: `public/style.css`** — append:
 
 ```css
 header nav { display: flex; gap: 1rem; }
@@ -1149,9 +1149,9 @@ td a { color: #e6e6e6; }
 .avatar { width: 64px; height: 64px; border-radius: 8px; }
 ```
 
-- [ ] **Step 5: Manual smoke check** — start `npm run dev`, then via dev panel: login, simulate match ×3, visit Leaderboard / Matches / a match detail / a profile. All pages render with data; Play tab still works. (The overseer does a browser pass after this task; the implementer should at minimum run the server and curl the pages' APIs.)
+- [x] **Step 5: Manual smoke check** — start `npm run dev`, then via dev panel: login, simulate match ×3, visit Leaderboard / Matches / a match detail / a profile. All pages render with data; Play tab still works. (The overseer does a browser pass after this task; the implementer should at minimum run the server and curl the pages' APIs.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add public/index.html public/app.js public/style.css
@@ -1165,11 +1165,11 @@ git commit -m "feat: leaderboard, match history, match detail, and profile pages
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1:** Update `README.md`: add sub-project 3 to the feature list (rating updates, match_maps, stats API routes, frontend pages, Discord settings keys `discord_webhook_url` / `discord_queue_thresholds`, dev routes `finish-match` / `simulate-match`). Follow the README's existing structure/tone.
+- [x] **Step 1:** Update `README.md`: add sub-project 3 to the feature list (rating updates, match_maps, stats API routes, frontend pages, Discord settings keys `discord_webhook_url` / `discord_queue_thresholds`, dev routes `finish-match` / `simulate-match`). Follow the README's existing structure/tone.
 
-- [ ] **Step 2:** `npm test && npm run typecheck` → everything green.
+- [x] **Step 2:** `npm test && npm run typecheck` → everything green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add README.md
