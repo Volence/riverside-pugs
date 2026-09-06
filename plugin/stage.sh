@@ -49,11 +49,31 @@ if [ "$STATUS_ONLY" = 1 ]; then show_status; exit 0; fi
 
 [ -f "$HERE/pug-match.smx" ] || { echo "no pug-match.smx; run ./build.sh first"; exit 1; }
 
-# Refuse to touch a server with people on it. `status` lists one line per
-# connected client; the SourceTV bot is not a player and is filtered out.
+# Refuse to touch a server with people on it.
+#
+# Counted two independent ways, taking the larger so the guard fails safe:
+#  a) the "players : N humans" summary line
+#  b) client lines, matched on the quoted name because some Source builds print
+#     "#2 \"name\"" with no space after the hash, which a positional
+#     ($2 is numeric) match silently reads as zero players. That exact case was
+#     wrong in the first version of this script.
+# SourceTV is subtracted from both; it is a spectator slot, not a player.
+count_players() {
+  local txt="$1" humans tv lines
+  humans=$(printf '%s\n' "$txt" | sed -n 's/.*players *: *\([0-9]\+\) humans.*/\1/p' | head -1)
+  humans=${humans:-0}
+  tv=$(printf '%s\n' "$txt" | grep -c '^#.*"SourceTV"' || true)
+  lines=$(printf '%s\n' "$txt" | grep -c '^#.*".*"' || true)
+  lines=$(( lines - tv )); [ "$lines" -lt 0 ] && lines=0
+  humans=$(( humans - tv )); [ "$humans" -lt 0 ] && humans=0
+  if [ "$humans" -gt "$lines" ]; then echo "$humans"; else echo "$lines"; fi
+}
+
 echo "==> Checking whether anyone is playing..."
-PLAYERS=$("$RCON" "status" | awk '/^#/ && !/SourceTV/ && $2 ~ /^[0-9]+$/' | wc -l || echo 0)
-echo "    $PLAYERS connected"
+STATUS_OUT=$("$RCON" "status" || true)
+printf '%s\n' "$STATUS_OUT" | sed -n '1,12p'
+PLAYERS=$(count_players "$STATUS_OUT")
+echo "    -> $PLAYERS player(s) connected"
 if [ "$PLAYERS" -gt 0 ] && [ "$FORCE" != 1 ]; then
   echo
   echo "REFUSING: $PLAYERS player(s) connected."
