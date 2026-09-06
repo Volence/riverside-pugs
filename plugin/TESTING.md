@@ -39,12 +39,21 @@ is a missing `left4dhooks`. Check `addons/sourcemod/logs/errors_*.log`.
 
 ## 2. Match intake (RCON contract)
 
-Use your own SteamID64 for slot 1 so you can actually join. The other seven can
-be any well-formed 17-digit numbers that never connect; the roster does not have
-to be full for the plugin to arm.
+You need your own SteamID64. Three ways:
+
+    ./players.sh              # names + SteamID64 of everyone connected
+    ./players.sh --roster     # ready-made sm_pug_roster lines, alternating a/b
+
+or from the admin list without touching the server at all:
+`deploy/overrides/left4dead/addons/sourcemod/configs/admins_simple.ini` holds
+`STEAM_X:Y:Z` forms; `id64 = 76561197960265728 + Z*2 + Y`. Yours is
+`76561198030413993`.
+
+The other seven roster entries can be any well-formed 17-digit numbers that
+never connect; the roster does not have to be full for the plugin to arm.
 
     R 'sm_pug_match 999 testtoken no_mercy'
-    R 'sm_pug_roster "76561198XXXXXXXXX:a"'      # <- you
+    R 'sm_pug_roster "76561198030413993:a"'      # <- you
     R 'sm_pug_roster "76561198000000002:a"'
     R 'sm_pug_roster "76561198000000003:a"'
     R 'sm_pug_roster "76561198000000004:a"'
