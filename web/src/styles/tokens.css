@@ -1,0 +1,73 @@
+/* "Safe Room" design tokens.
+ *
+ * Every color, space, and type step in the app resolves to something in here.
+ * A change of heart about the look is an edit to this file, not a grep through
+ * components. See docs/superpowers/specs/2026-09-06-frontend-migration-4a-design.md.
+ *
+ * Contrast ratios below were computed against WCAG relative luminance, not
+ * eyeballed. Body text clears 4.5:1 on every surface it is used on. */
+
+:root {
+  /* Surfaces — warm near-black, not the usual blue-black. */
+  --bg: #141210;
+  --surface: #1c1916;
+  --surface-2: #242019;
+  --border: #2f2a24;
+
+  /* Text. --text 14.8:1 on bg. --text-muted 5.9:1 on bg, 5.2:1 on surface-2. */
+  --text: #ebe4d6;
+  --text-muted: #9a9082;
+
+  /* Sodium-lamp amber. The only interactive color on the page, which is what
+   * makes the primary action obvious without making it loud. 7.0:1 on bg. */
+  --accent: #e3892b;
+  --accent-ink: #1a1206;
+
+  /* Reserved for SR/rating numbers everywhere on the site, so the number is
+   * recognizable at a glance even inside a dense table. 12.2:1 on bg. */
+  --rating: #f2cd6a;
+
+  /* Results. Teal-vs-red reads better than green-vs-red for deuteranopes, but
+   * color is never the only signal — a W/L/D glyph always accompanies it. */
+  --win: #45b39c;
+  --loss: #e35d5d;
+  --draw: #9a9082;
+
+  /* Campaign tints. Used only as a 4px left rule on match and vote rows, which
+   * is enough to stop a match list from looking like a generic log. */
+  --c-no-mercy: #6f8a7a;
+  --c-death-toll: #5a6f8c;
+  --c-dead-air: #b8842f;
+  --c-blood-harvest: #8a3f32;
+
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+
+  --fs-label: 0.75rem;
+  --fs-dense: 0.875rem;
+  --fs-body: 1rem;
+  --fs-h3: 1.25rem;
+  --fs-h2: 1.75rem;
+  --fs-h1: 2.5rem;
+  --fs-hero: 4.5rem; /* profile SR and the ready-check countdown only */
+
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+}
+
+/* The final ten seconds of a ready check. Set on the countdown panel and on
+ * <body>, so the nav border also turns red and the state is visible from any
+ * page. Locally reassigning --accent means every amber affordance inside the
+ * panel goes red at once without each one naming the urgent color itself. */
+[data-urgent='true'] {
+  --accent: var(--loss);
+  --accent-ink: #1a0606;
+}

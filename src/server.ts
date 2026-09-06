@@ -31,9 +31,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(cookie, { secret: deps.config.cookieSecret });
   await app.register(websocket);
-  await app.register(fastifyStatic, {
-    root: join(dirname(fileURLToPath(import.meta.url)), '..', 'public'),
-  });
+  // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
+  // owns the browser and proxies here, so this path only matters in production.
+  const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
+  await app.register(fastifyStatic, { root: staticRoot });
 
   await app.register(authRoutes, {
     config: deps.config,
@@ -82,6 +83,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   if (deps.config.devMode) {
     await app.register(devRoutes, { config: deps.config, db: deps.db, matchmaker, hub });
   }
+
+  // SPA fallback. The frontend uses real URLs (/player/765…, /match/12) rather
+  // than hash routes, so a refresh or a pasted link hits the server at a path
+  // that has no route and must still be answered with the app shell.
+  //
+  // Only page navigations get the shell: an unknown /api/, /auth/, or /ws path
+  // must keep returning a JSON 404, or a typo'd endpoint would hand the client
+  // a 200 full of HTML and fail somewhere much less obvious. Non-GET methods
+  // are likewise never a page navigation.
+  app.setNotFoundHandler((req, reply) => {
+    const isPageRequest =
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      !req.url.startsWith('/api/') &&
+      !req.url.startsWith('/auth/') &&
+      !req.url.startsWith('/ws');
+    if (isPageRequest) return reply.type('text/html').sendFile('index.html');
+    return reply.code(404).send({ error: 'not found' });
+  });
 
   return app;
 }

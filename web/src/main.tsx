@@ -1,0 +1,53 @@
+import { render } from 'preact';
+import { LocationProvider, Route, Router } from 'preact-iso';
+import { useLiveState } from './hooks/useLiveState';
+import { Nav } from './components/Nav';
+import { DevPanel } from './components/DevPanel';
+import { Play } from './routes/Play';
+import { Leaderboard } from './routes/Leaderboard';
+import { Matches } from './routes/Matches';
+import { MatchDetail } from './routes/MatchDetail';
+import { Profile } from './routes/Profile';
+import { Empty, Panel } from './components/bits';
+import './styles/app.css';
+
+function NotFound() {
+  return (
+    <div class="page page--list">
+      <Panel><Empty>No such page.</Empty></Panel>
+    </div>
+  );
+}
+
+/** Live state is held at the root rather than inside the Play route, because
+ *  the websocket connection and the ready-check countdown must survive
+ *  navigation — a player browsing the leaderboard still needs the nav border to
+ *  turn red when a ready check starts. */
+function App() {
+  const { session, state, refresh } = useLiveState();
+  const me = session.kind === 'active' ? session.me.steamid : null;
+
+  return (
+    <>
+      <Nav session={session} />
+      <main>
+        <Router>
+          <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
+          <Route path="/leaderboard" component={Leaderboard} me={me} />
+          <Route path="/matches" component={Matches} />
+          <Route path="/match/:id" component={MatchDetail} me={me} />
+          <Route path="/player/:steamid" component={Profile} />
+          <Route default component={NotFound} />
+        </Router>
+      </main>
+      <DevPanel refresh={refresh} />
+    </>
+  );
+}
+
+render(
+  <LocationProvider>
+    <App />
+  </LocationProvider>,
+  document.getElementById('app')!,
+);

@@ -18,23 +18,39 @@ completion (`src/matchResult.ts::completeMatch`) is now the single write-path
 used by both the real orchestrator and dev-mode simulation: in one transaction
 it records the final score, per-map scores (`match_maps`), per-player stats,
 and applies OpenSkill rating updates (`src/rating.ts::applyMatchRatings`).
-Read-only stats endpoints and hash-routed frontend pages (leaderboard, match
-history, match detail, player profile with an SR-over-time graph) expose the
-result, and a fire-and-forget Discord webhook posts queue-pop / match-live /
-match-final notifications.
+Read-only stats endpoints and frontend pages (leaderboard, match history, match
+detail, player profile with an SR-over-time graph) expose the result, and a
+fire-and-forget Discord webhook posts queue-pop / match-live / match-final
+notifications.
 
-**Not yet built (need the live box):** the `pug-match` SourcePawn plugin (2b) and
-the second-srcds-instance infrastructure (2c). Designed in
+Sub-project 4a (frontend migration + redesign) complete: the placeholder
+`public/` files are replaced by a Vite + Preact app in `web/`, on real URLs
+instead of hash routes, with the "Safe Room" design language described in
+`docs/superpowers/specs/2026-09-06-frontend-migration-4a-design.md`. No API
+changed; the only backend edits were the static root and an SPA fallback route.
+
+**Partly validated on the live box (2026-08-29):** the `pug-match` plugin (2b)
+had a first staging pass, which produced the quoted-roster-arg fix, the
+PUGOK/PUGERR contract, and a real `logaddress` wire capture now pinned in
+`tests/logParse.test.ts`. The rest of the 2b checklist and the
+second-srcds-instance infrastructure (2c) still need the box. Designed in
 `docs/superpowers/specs/2026-07-30-sub-project-2-orchestrator-plugin-design.md`.
-The `logaddress` line format is pinned against synthetic samples until a real
-capture from the L4D1 binary is taken during the 2b/2c dry-run.
 
 ## Run
 
     npm install
-    npm run dev        # dev mode on :8080 (DEV_MODE=1, fake logins enabled)
-    npm test           # vitest
-    npm run typecheck  # tsc --noEmit
+    npm run dev        # dev mode: API on :8080 + Vite dev server on :5173
+    npm test           # vitest (server + web projects)
+    npm run typecheck  # tsc --noEmit, both tsconfigs
+    npm run build      # vite build -> dist/public
+
+In dev, open **http://localhost:5173** — the Vite server owns the browser and
+proxies `/api`, `/auth`, and `/ws` to the API on :8080, so the frontend gets HMR
+without the API moving. `npm run dev:api` and `npm run dev:web` run the halves
+separately.
+
+In production, `npm run build` must run before `npm start`: Fastify serves the
+built frontend from `dist/public`, which is a build artifact and is gitignored.
 
 ## Environment
 
@@ -78,11 +94,15 @@ Webhook posts also fire on lobby pop, match-live, and match-final (see
   (`api.ts` matchmaking, `auth.ts` Steam login, `stats.ts` leaderboard/player/
   match read routes, `dev.ts` dev-mode routes, `ws.ts`, `guards.ts`
   `requireActive`).
-- `public/` — static frontend, no build step. `app.js` hash-routes between the
-  live queue/lobby/match view (`#/`), `#/leaderboard`, `#/matches`,
-  `#/match/:id`, and `#/player/:steamid` (SR-over-time sparkline via inline
-  SVG).
-- `tests/` — vitest.
+- `web/` — frontend source (Vite + Preact + TypeScript). `src/routes/` holds one
+  component per page — Play (`/`), Leaderboard, Matches, MatchDetail
+  (`/match/:id`), Profile (`/player/:steamid`) — routed with `preact-iso` over
+  real URLs, not hash routes. `src/api.ts` is the typed client, `src/format.ts`
+  the pure display helpers, `src/hooks/` the data plumbing (`useLiveState` =
+  websocket nudge + re-fetch; `useFetch` = per-route load with a stale-response
+  guard), `src/styles/tokens.css` every design token.
+- `dist/public/` — build output, gitignored. Fastify's static root.
+- `tests/` — vitest (server). Frontend tests live beside their source in `web/`.
 
 ## Ratings
 
@@ -120,6 +140,13 @@ Dev-mode-only (`DEV_MODE=1`), on top of the existing `/api/dev/*` routes:
   ratings update for real).
 - `POST /api/dev/simulate-match` — one-click fill queue → ready-all →
   vote-all → finish, for exercising the whole pipeline without a live server.
+
+## What's next
+
+Sub-project 4 turns the one-way Discord webhook into a real bot, with the queue
+working identically from the website and from Discord. Design and build order
+(4a done, 4b-4f queued) in
+`docs/superpowers/specs/2026-09-06-dual-surface-design.md`.
 
 ## SourcePawn plugin (`plugin/`)
 
