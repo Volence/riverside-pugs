@@ -104,7 +104,7 @@ hurting, it can be done later as its own change without touching the bot.
 | | Sub-project | Delivers |
 |---|---|---|
 | **4a** | Frontend migration + redesign | Vite + Preact, existing pages ported, real visual design |
-| **4b** | Identity: Discord linking + gate | `players.discord_id`, OAuth link, `/link` code, membership gate |
+| **4b** | Identity: Discord linking + gate | `players.discord_id`, OAuth link, membership gate (see its own design — the `/link` code flow moved to 4c, since it needs a running bot) |
 | **4c** | Bot core + live lobby embed | discord.js in-process, slash commands, self-editing lobby message — dual-surface goes live |
 | **4d** | Captains draft | New lobby phase, both surfaces |
 | **4e** | Suspensions / no-show penalties | Ready-fail and leaver tracking, escalating queue bans |
