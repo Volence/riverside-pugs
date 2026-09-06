@@ -69,6 +69,11 @@ int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
 
 bool g_bReadyUpAvailable;
 
+// Staging knobs. Both default to production behaviour; they exist so the plugin
+// can be exercised on a test instance without eight people in the server.
+ConVar g_cvMinOrient;                    // rostered players needed to move the orientation mapping
+ConVar g_cvDebug;                        // 1 = verbose state logging to the SourceMod log
+
 public Plugin myinfo =
 {
 	name = "PUG Match",
@@ -84,6 +89,15 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_roster", Cmd_Roster, "sm_pug_roster <steamid64>:<a|b>");
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token>");
+	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
+
+	g_cvMinOrient = CreateConVar("sm_pug_min_orient", "3",
+		"Rostered players that must agree before the pug-team<->side mapping moves. \
+Production value is 3. Set to 1 on a test instance to drive a match solo.",
+		FCVAR_NOTIFY, true, 1.0, true, 8.0);
+	g_cvDebug = CreateConVar("sm_pug_debug", "0",
+		"1 = log orientation flips, team-lock moves, score reads and state changes to the SourceMod log.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 
 	HookEvent("round_start", Event_RoundStart);
 	HookEvent("round_end", Event_RoundEnd);
@@ -130,6 +144,19 @@ void EmitPug(const char[] fmt, any ...)
 	char body[480];
 	VFormat(body, sizeof(body), fmt, 2);
 	LogToGame("PUG %s %s", g_sToken, body);
+}
+
+/** Verbose diagnostic, off by default. Goes to the SourceMod log rather than
+ *  the logaddress stream on purpose: the UDP grammar is parsed by the backend
+ *  (src/logParse.ts) and free-text debug lines there would be noise at best and
+ *  mis-parses at worst. Read these with
+ *  `tail -f addons/sourcemod/logs/L<date>.log` on the box. */
+void PugDebug(const char[] fmt, any ...)
+{
+	if (!g_cvDebug.BoolValue) return;
+	char line[480];
+	VFormat(line, sizeof(line), fmt, 2);
+	LogMessage("[pug] %s", line);
 }
 
 /** Authoritative dump line into the RCON response body of the running server cmd. */
@@ -217,6 +244,91 @@ public Action Cmd_Dump(int args)
 	if (!TokenArgOk(args)) return Plugin_Handled;
 	WriteDump();
 	return Plugin_Handled;
+}
+
+/** Full current state over the RCON response body. Takes no token, because the
+ *  moment you most want it is when the match did NOT set up the way you expected
+ *  and you do not trust your own idea of what the token is.
+ *
+ *  This is the "what does the plugin actually think right now" command: state,
+ *  roster with live connection and side, the orientation mapping and the vote
+ *  that produced it, per-map results so far, and the pending-finalize flag. */
+public Action Cmd_Status(int args)
+{
+	DumpLine("STATUS state=%s match=%d token=%s campaign=%s map=%s",
+		StateName(g_State), g_iMatchId,
+		g_sToken[0] == '\0' ? "(none)" : g_sToken,
+		g_sCampaign[0] == '\0' ? "(none)" : g_sCampaign,
+		g_sCurrentMap);
+	DumpLine("STATUS orient a=%s b=%s round1Logical=%d minOrient=%d debug=%d",
+		SideName(g_iPugSide[1]), SideName(g_iPugSide[2]),
+		g_iRound1Logical, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
+	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
+		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
+
+	int straight, inverted;
+	OrientationVote(straight, inverted);
+	DumpLine("STATUS vote straight=%d inverted=%d", straight, inverted);
+
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		int client = ClientOfSlot(i);
+		DumpLine("STATUS roster slot=%d steamid=%s team=%s connected=%d side=%s name=%s",
+			i, g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
+			client != -1 ? 1 : 0,
+			client != -1 ? SideName(GetClientTeam(client)) : "-",
+			client != -1 ? NameOf(client) : "-");
+	}
+	for (int i = 0; i < g_iMapCount; i++)
+	{
+		DumpLine("STATUS map ordinal=%d map=%s a=%d b=%d", i, g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
+	}
+	DumpLine("STATUS end");
+	return Plugin_Handled;
+}
+
+char[] NameOf(int client)
+{
+	char n[MAX_NAME_LENGTH];
+	GetClientName(client, n, sizeof(n));
+	return n;
+}
+
+/** Roster slot -> in-game client, or -1 if that player is not connected. */
+int ClientOfSlot(int slot)
+{
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientInGame(c) && g_iClientRoster[c] == slot) return c;
+	}
+	return -1;
+}
+
+char[] StateName(MatchState st)
+{
+	char out[16];
+	switch (st)
+	{
+		case MS_None:    strcopy(out, sizeof(out), "none");
+		case MS_Pending: strcopy(out, sizeof(out), "pending");
+		case MS_Live:    strcopy(out, sizeof(out), "live");
+		case MS_Ended:   strcopy(out, sizeof(out), "ended");
+		default:         strcopy(out, sizeof(out), "?");
+	}
+	return out;
+}
+
+char[] SideName(int gameTeam)
+{
+	char out[16];
+	switch (gameTeam)
+	{
+		case TEAM_SURVIVOR: strcopy(out, sizeof(out), "survivor");
+		case TEAM_INFECTED: strcopy(out, sizeof(out), "infected");
+		case TEAM_SPEC:     strcopy(out, sizeof(out), "spectator");
+		default:            strcopy(out, sizeof(out), "unknown");
+	}
+	return out;
 }
 
 /** Shared token check for abort/dump: arg 1 must equal the active match token. */
@@ -328,6 +440,24 @@ public void OnClientDisconnect(int client)
 	}
 }
 
+/** Count the joint orientation vote from where rostered players actually sit.
+ *  `straight` = pug a on survivors, `inverted` = pug a on infected. Shared by the
+ *  lock timer and sm_pug_status so the number you read while debugging is the
+ *  same number the lock is acting on. */
+void OrientationVote(int &straight, int &inverted)
+{
+	int onSide[3][4]; // [pugTeam][gameTeam] counts; gameTeam index 2|3 used
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		int slot = g_iClientRoster[c];
+		if (slot == -1 || !IsClientInGame(c)) continue;
+		int gt = GetClientTeam(c);
+		if (gt == TEAM_SURVIVOR || gt == TEAM_INFECTED) onSide[g_iRosterTeam[slot]][gt]++;
+	}
+	straight = onSide[1][TEAM_SURVIVOR] + onSide[2][TEAM_INFECTED];
+	inverted = onSide[1][TEAM_INFECTED] + onSide[2][TEAM_SURVIVOR];
+}
+
 /** Observation-based cohesion lock. Every tick:
  *  1. Adopt the pug-team<->side mapping from where rostered players actually sit,
  *     via a single JOINT orientation vote (not two independent per-team votes, because
@@ -345,26 +475,24 @@ public Action Timer_TeamLock(Handle timer)
 {
 	if (g_State == MS_None || g_State == MS_Ended) return Plugin_Continue;
 
-	int onSide[3][4]; // [pugTeam][gameTeam] counts; gameTeam index 2|3 used
-	for (int c = 1; c <= MaxClients; c++)
-	{
-		int slot = g_iClientRoster[c];
-		if (slot == -1 || !IsClientInGame(c)) continue;
-		int gt = GetClientTeam(c);
-		if (gt == TEAM_SURVIVOR || gt == TEAM_INFECTED) onSide[g_iRosterTeam[slot]][gt]++;
-	}
-
-	int straight = onSide[1][TEAM_SURVIVOR] + onSide[2][TEAM_INFECTED]; // a=surv, b=inf
-	int inverted = onSide[1][TEAM_INFECTED] + onSide[2][TEAM_SURVIVOR]; // a=inf, b=surv
-	if (straight > inverted && straight >= 3)
+	int straight, inverted;
+	OrientationVote(straight, inverted);
+	int need = g_cvMinOrient.IntValue;
+	int wasA = g_iPugSide[1];
+	if (straight > inverted && straight >= need)
 	{
 		g_iPugSide[1] = TEAM_SURVIVOR;
 		g_iPugSide[2] = TEAM_INFECTED;
 	}
-	else if (inverted > straight && inverted >= 3)
+	else if (inverted > straight && inverted >= need)
 	{
 		g_iPugSide[1] = TEAM_INFECTED;
 		g_iPugSide[2] = TEAM_SURVIVOR;
+	}
+	if (g_iPugSide[1] != wasA)
+	{
+		PugDebug("orientation -> a=%s (straight=%d inverted=%d need=%d)",
+			g_iPugSide[1] == TEAM_SURVIVOR ? "survivor" : "infected", straight, inverted, need);
 	}
 
 	for (int c = 1; c <= MaxClients; c++)
@@ -375,8 +503,15 @@ public Action Timer_TeamLock(Handle timer)
 		if (want == 0) continue;
 		int have = GetClientTeam(c);
 		if (have == want) { g_iLockAttempts[c] = 0; continue; }
-		if (g_iLockAttempts[c] >= LOCK_ATTEMPT_CAP) continue;
+		if (g_iLockAttempts[c] >= LOCK_ATTEMPT_CAP)
+		{
+			PugDebug("lock giving up on %N after %d attempts (want %d, have %d)",
+				c, LOCK_ATTEMPT_CAP, want, have);
+			continue;
+		}
 		g_iLockAttempts[c]++;
+		PugDebug("lock moving %N to %s (attempt %d)",
+			c, want == TEAM_SURVIVOR ? "survivor" : "infected", g_iLockAttempts[c]);
 		if (want == TEAM_SURVIVOR)
 		{
 			if (have == TEAM_INFECTED) ChangeClientTeam(c, TEAM_SPEC);
@@ -508,14 +643,17 @@ int TryReadRoundScore(bool second)
 	{
 		survLogical = (g_iRound1Logical != 0) ? (3 - g_iRound1Logical) : 0;
 	}
-	return (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
+	int score = (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
+	PugDebug("score read half=%d logical=%d score=%d (round1Logical=%d)",
+		second ? 2 : 1, survLogical, score, g_iRound1Logical);
+	return score;
 }
 
 /** Credit a read round score to the observed pug team's half accumulator. */
 void AttributeScore(int survPug, int score)
 {
-	if (survPug == 1) g_iHalfScoreA += score;
-	else if (survPug == 2) g_iHalfScoreB += score;
+	if (survPug == 1) { g_iHalfScoreA += score; PugDebug("credit %d to pug team a (half total %d)", score, g_iHalfScoreA); }
+	else if (survPug == 2) { g_iHalfScoreB += score; PugDebug("credit %d to pug team b (half total %d)", score, g_iHalfScoreB); }
 	else LogError("[pug] round score %d unattributable: no rostered survivors observed", score);
 }
 

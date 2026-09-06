@@ -22,10 +22,51 @@ Two reporting channels, per the sub-project 2 design spec:
 | `sm_pug_roster` | `<steamid64>:<a\|b>` | Call once per player (×8). Team letters are lowercase `a`/`b`; convention: team `a` starts as survivors on map 1. |
 | `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. |
 | `sm_pug_abort` | `<token>` | Clears match state. Roster enforcement stops immediately. |
+| `sm_pug_status` | none | Full current plugin state over the RCON response body. Takes no token deliberately, since the moment you most want it is when setup went wrong and you do not trust your own idea of the token. Read-only, safe at any time. |
 
 `sm_pug_dump` and `sm_pug_abort` both check `<token>` against the token set by
 the most recent `sm_pug_match` and reply `PUGERR bad token` if it doesn't
 match.
+
+## Cvars
+
+Both default to production behaviour. They exist so the plugin can be exercised
+without eight people in the server.
+
+| Cvar | Default | Notes |
+|---|---|---|
+| `sm_pug_min_orient` | `3` | Rostered players that must agree before the pug-team/side mapping moves. Set to `1` on a test instance to drive a match solo. |
+| `sm_pug_debug` | `0` | `1` logs orientation flips, team-lock moves, score reads and attribution to the SourceMod log. |
+
+Debug output goes to the SourceMod log, not the `logaddress` stream, because the
+UDP grammar is parsed by `src/logParse.ts` and free-text lines there would be
+noise at best and mis-parses at worst. Read it with:
+
+    tail -f addons/sourcemod/logs/L<date>.log
+
+## Testing this alone
+
+Roughly eight of the eleven checklist items below need only you. Roster yourself
+plus placeholder SteamID64s that never connect; the roster does not have to be
+full for the plugin to arm.
+
+**Solo, unmodified:** items 1, 2, 3, 4, 5, 9, 10, 11. That is the whole RCON
+contract, the kick path, the UDP line format, the dump grammar and its
+idempotency, abort, and heartbeats. `sm_pug_status` after each step tells you
+what the plugin thinks happened.
+
+**Needs `sm_pug_min_orient 1`:** items 6 and 8, the score attribution and the
+cross-map relabeling case. The orientation vote at `Timer_TeamLock` normally
+needs three rostered players agreeing, and bots cannot help because the vote only
+counts clients matched to a roster slot by SteamID64. With the threshold at 1 you
+can drive a full versus round with bots and verify that scores land on the right
+pug team across a map change, which is the riskiest logic in the plugin.
+
+**Genuinely needs people:** item 7 (team lock fighting a real mid-round swap) and
+a true 4v4 run of items 6 and 8. Solo testing proves the mechanism; it does not
+prove the vote itself, since you are the only voter.
+
+Set the threshold back to 3 before any real match.
 
 ## Wire grammars
 
@@ -105,7 +146,9 @@ maintenance-window change, not a hot deploy.
 
 ## Manual staging checklist
 
-For the joint session, once the server is free:
+For the joint session, once the server is free. Run `sm_pug_status` between
+steps and turn on `sm_pug_debug 1` for the whole session: together they turn "it
+didn't work" into a specific line.
 
 1. Compile on server, install to `plugins/`, `sm plugins list` shows
    `pug-match`.
