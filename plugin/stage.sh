@@ -25,6 +25,22 @@ HOST=${L4D_HOST:?set L4D_HOST in deploy/server.env}
 REMOTE=/home/l4d/l4d1-server/left4dead/addons/sourcemod/plugins
 RCON="$DEPLOY/rcon.py"
 
+# rcon.py needs L4D_RCON_PW in the environment and does not read it from a file.
+# The password already lives in exactly one place, so source it from there rather
+# than making you export it by hand every session. secrets.cfg is gitignored.
+if [ -z "${L4D_RCON_PW:-}" ]; then
+  SECRETS="$DEPLOY/overrides/left4dead/cfg/secrets.cfg"
+  if [ -f "$SECRETS" ]; then
+    L4D_RCON_PW=$(sed -n 's/^[[:space:]]*rcon_password[[:space:]]*"\([^"]*\)".*/\1/p' "$SECRETS" | head -1)
+    export L4D_RCON_PW
+  fi
+fi
+[ -n "${L4D_RCON_PW:-}" ] || {
+  echo "No RCON password. Set L4D_RCON_PW, or put rcon_password in"
+  echo "  $DEPLOY/overrides/left4dead/cfg/secrets.cfg"
+  exit 1
+}
+
 SOLO=0; FORCE=0; STATUS_ONLY=0
 for a in "$@"; do
   case "$a" in

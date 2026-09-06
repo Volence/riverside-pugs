@@ -6,6 +6,13 @@ Copy-pasteable. Assumes you are in `/home/volence/l4d/pug/plugin` and that
 
     alias R='/home/volence/l4d/deploy/rcon.py'
 
+`rcon.py` needs `L4D_RCON_PW` in the environment. `stage.sh` sources it from
+`deploy/overrides/left4dead/cfg/secrets.cfg` automatically, but for bare `R`
+calls you need it exported yourself:
+
+    export L4D_RCON_PW=$(sed -n 's/^ *rcon_password *"\([^"]*\)".*/\1/p' \
+      /home/volence/l4d/deploy/overrides/left4dead/cfg/secrets.cfg | head -1)
+
 ## 0. Install
 
     ./build.sh          # only if you changed the .sp
