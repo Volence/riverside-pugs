@@ -15,9 +15,9 @@ export interface FetchState<T> {
  *  response must not be written to state, or a slow /api/players/:id paints
  *  over whatever page the user navigated to since.
  *
- *  The abort signal alone is not enough to guarantee that — an already-resolved
+ *  The abort signal alone is not enough to guarantee that. An already-resolved
  *  promise still runs its `.then`, and a fetch stub may ignore the signal
- *  entirely — so the flag is checked on every settle path, not just relied upon
+ *  entirely, so the flag is checked on every settle path, not just relied upon
  *  as a nicety. The signal is passed as well so a genuinely in-flight request
  *  stops occupying a connection. */
 export function useFetch<T>(

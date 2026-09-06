@@ -77,14 +77,14 @@ describe('completeMatch', () => {
     const m = db.prepare('SELECT state, ended_at FROM matches WHERE id = ?').get(matchId) as any;
     expect(m.state).toBe('live');
     expect(m.ended_at).toBeNull();
-    // Only the pre-existing conflict row remains — nothing from completeMatch was inserted.
+    // Only the pre-existing conflict row remains. Nothing from completeMatch was inserted.
     const maps = db.prepare('SELECT COUNT(*) n FROM match_maps WHERE match_id = ?').get(matchId) as any;
     expect(maps.n).toBe(1);
     expect(db.prepare('SELECT COUNT(*) n FROM rating_history WHERE match_id = ?').get(matchId)).toEqual({ n: 0 });
     const mp = db.prepare('SELECT si_damage FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, IDS[0]) as any;
     expect(mp.si_damage).toBe(0); // player stat update also rolled back
 
-    // Clear the conflict and retry — completeMatch should now succeed cleanly.
+    // Clear the conflict and retry. completeMatch should now succeed cleanly.
     db.prepare('DELETE FROM match_maps WHERE match_id = ? AND ordinal = 0').run(matchId);
     expect(completeMatch(db, matchId, dumpFor(matchId))).toBe(true);
     const m2 = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as any;

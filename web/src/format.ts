@@ -50,7 +50,7 @@ export function secondsLeft(deadline: number, now: number = Date.now()): number 
 /** SVG polyline points for the SR-over-time graph.
  *
  *  Returns null when there are fewer than two points, because a one-match
- *  "graph" is a dot that implies a trend it cannot support — callers render a
+ *  "graph" is a dot that implies a trend it cannot support, so callers render a
  *  note instead. A flat series (span 0) is drawn as a centered horizontal line
  *  rather than dividing by zero. */
 export function sparklinePoints(values: number[], w: number, h: number, pad = 5): string | null {

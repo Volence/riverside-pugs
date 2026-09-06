@@ -30,7 +30,7 @@ describe('real-fetch HTTP (frontend request shapes)', () => {
     expect(login.status).toBe(200);
     const cookie = login.headers.get('set-cookie')!.split(';')[0];
 
-    // queue join with NO body and NO content-type — exactly how app.js api() now sends it
+    // queue join with NO body and NO content-type, exactly how the frontend api() sends it
     const join = await fetch(`${base}/api/queue/join`, {
       method: 'POST',
       headers: { cookie },

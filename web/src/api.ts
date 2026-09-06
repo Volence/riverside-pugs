@@ -1,5 +1,5 @@
 /** Typed wrappers over the backend. These types mirror the JSON the routes in
- *  src/routes/{api,stats,auth}.ts actually return — if a shape changes there,
+ *  src/routes/{api,stats,auth}.ts actually return. If a shape changes there,
  *  it changes here. 4a introduces no new endpoints and alters no existing one. */
 
 export type Team = 'a' | 'b';

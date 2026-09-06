@@ -113,7 +113,7 @@ describe('Matchmaker', () => {
     });
     for (const id of IDS) notifyMm.join(id);
     expect(notifications).toContain('🧟 4/8 in queue');
-    expect(notifications).toContain('🔔 Queue popped — ready check started!');
+    expect(notifications).toContain('🔔 Queue popped, ready check started!');
   });
 
   it('join succeeds and skips the notify when discord_queue_thresholds is malformed JSON', () => {

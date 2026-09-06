@@ -21,7 +21,7 @@ function NotFound() {
 
 /** Live state is held at the root rather than inside the Play route, because
  *  the websocket connection and the ready-check countdown must survive
- *  navigation — a player browsing the leaderboard still needs the nav border to
+ *  navigation: a player browsing the leaderboard still needs the nav border to
  *  turn red when a ready check starts. */
 function App() {
   const { session, state, refresh } = useLiveState();

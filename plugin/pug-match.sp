@@ -36,14 +36,14 @@ char g_sRosterId[MAX_ROSTER][32];
 int g_iRosterTeam[MAX_ROSTER];          // 1 = a, 2 = b
 int g_iRosterCount;
 
-// Per-player stats (parallel to roster slots) — survive reconnects and map changes.
+// Per-player stats (parallel to roster slots). These survive reconnects and map changes.
 int g_iStatSiDmg[MAX_ROSTER];
 int g_iStatSiKill[MAX_ROSTER];
 int g_iStatCk[MAX_ROSTER];
 int g_iStatFf[MAX_ROSTER];
 int g_iStatRev[MAX_ROSTER];
 
-// Per-map results — survive map changes.
+// Per-map results. These survive map changes.
 char g_sMapName[MAX_MAPS][64];
 int g_iMapScoreA[MAX_MAPS];
 int g_iMapScoreB[MAX_MAPS];
@@ -93,7 +93,7 @@ public void OnPluginStart()
 	HookEvent("revive_success", Event_ReviveSuccess);
 	HookEvent("player_spawn", Event_PlayerSpawn);
 
-	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE — they must survive changelevel).
+	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
 	CreateTimer(2.0, Timer_TeamLock, _, TIMER_REPEAT);
 
@@ -123,7 +123,7 @@ bool InReadyUp()
 // ---------- emission helpers: the wire grammar lives here and only here ----------
 
 /** Live-view line over the logaddress UDP stream. LogToGame is the ONLY native
- *  that reaches logaddress — LogMessage/LogAction stay on the box. */
+ *  that reaches logaddress. LogMessage/LogAction stay on the box. */
 void EmitPug(const char[] fmt, any ...)
 {
 	if (g_State == MS_None) return;
@@ -330,7 +330,7 @@ public void OnClientDisconnect(int client)
 
 /** Observation-based cohesion lock. Every tick:
  *  1. Adopt the pug-team<->side mapping from where rostered players actually sit,
- *     via a single JOINT orientation vote (not two independent per-team votes —
+ *     via a single JOINT orientation vote (not two independent per-team votes, because
  *     independent votes can transiently contradict each other, e.g. both pug
  *     teams momentarily showing players on the survivor side during join-in,
  *     causing a last-writer-wins flip that inverts the map-1 seed). Only a clear
@@ -339,7 +339,7 @@ public void OnClientDisconnect(int client)
  *  2. Move any rostered player not on their team's side via Rotoblin's own
  *     sm_sur / sm_inf (the l4d_team_unscramble pattern), with a per-client
  *     attempt cap so we never fight the engine forever. Infected -> survivor
- *     moves bounce through spectate first (l4d_team_unscramble.sp:441-455) —
+ *     moves bounce through spectate first (l4d_team_unscramble.sp:441-455), so
  *     a direct sm_sur from the infected side can silently fail to stick. */
 public Action Timer_TeamLock(Handle timer)
 {
@@ -393,7 +393,7 @@ public void OnMapStart()
 {
 	// Failsafe for the score-read/changelevel race: a 2nd-half round_end set
 	// g_bPendingFinalize, but the map changed before FinalizeMap ran (e.g. the
-	// delayed score-read retry chain — up to ~8s — was still in flight and got
+	// delayed score-read retry chain (up to ~8s) was still in flight and got
 	// silently dropped by TIMER_FLAG_NO_MAPCHANGE). Finalize now with whatever
 	// half scores were accumulated so this map can never vanish from the record.
 	// Must run before the per-map resets below and before the finale check, so
@@ -451,7 +451,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
  *  the score is normally already final by the time we get here. This avoids
  *  racing a changelevel against the delayed retry chain below (that chain used
  *  TIMER_FLAG_NO_MAPCHANGE, so a race could silently drop the last map's score
- *  before the finale — see g_bPendingFinalize / the OnMapStart failsafe for the
+ *  before the finale. See g_bPendingFinalize / the OnMapStart failsafe for the
  *  backstop if this synchronous read genuinely isn't ready yet).
  *
  *  Fallback path: only if the sync read returns -1, fall back to the delayed
@@ -459,7 +459,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
  *  retries while the score reads -1.
  *
  *  Self-calibration (avoids the logical-team relabeling trap, see plan header):
- *  at half-1 end exactly one logical team has played, so its score != -1 —
+ *  at half-1 end exactly one logical team has played, so its score != -1.
  *  that index IS the half-1 survivor team. Half 2's survivors are the other. */
 public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
@@ -498,7 +498,7 @@ int TryReadRoundScore(bool second)
 		if (s1 != -1 && s2 != -1)
 		{
 			// Should be impossible per the plan's self-calibration design (exactly
-			// one logical team has played by half-1 end) — surface it on staging.
+			// one logical team has played by half-1 end), so surface it on staging.
 			LogError("[pug] half-1 calibration: both logical teams have scores (s1=%d s2=%d)", s1, s2);
 		}
 		survLogical = (s1 != -1) ? 1 : (s2 != -1) ? 2 : 0;
@@ -559,7 +559,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			LogError("[pug] could not read round score after retries (half %d)", second ? 2 : 1);
 			// Finalize now (prompt MAP_RESULT) if the map hasn't changed yet.
 			// If it HAS already changed, this TIMER_FLAG_NO_MAPCHANGE timer never
-			// runs at all — g_bPendingFinalize is still set in that case, so the
+			// runs at all. g_bPendingFinalize is still set in that case, so the
 			// OnMapStart failsafe finalizes with whatever was accumulated,
 			// guaranteeing the map is recorded either way.
 			if (second) FinalizeMap();
@@ -696,7 +696,7 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 	g_iLastHealth[client] = 0;
 	// A fresh one-shot SI (e.g. a hunter that gets skeeted before ever taking
 	// non-lethal damage through player_hurt) needs its full spawn health latched
-	// as the "remainder" up front, per l4dcompstats.sp's Event_PlayerSpawn — else
+	// as the "remainder" up front, per l4dcompstats.sp's Event_PlayerSpawn. Otherwise
 	// such kills would credit sidmg += 0 despite a full-health SI going down.
 	if (IsInfectedClient(client) && !IsFakeClient(client)
 		&& GetEntProp(client, Prop_Send, "m_zombieClass") != ZC_TANK)

@@ -39,7 +39,7 @@ export function useCountdownChrome(label: string | null, left: number): void {
 /** A hero countdown with a draining bar.
  *
  *  The bar is not animated per tick. It is set to full width, then on the next
- *  frame to zero with `transition: width <remaining>ms linear` — the browser
+ *  frame to zero with `transition: width <remaining>ms linear`. The browser
  *  interpolates it, so a smooth bar costs no per-frame JavaScript and does not
  *  stutter when the tab is throttled. The digits still tick from a timer,
  *  because those must show a truthful number rather than an interpolated one. */

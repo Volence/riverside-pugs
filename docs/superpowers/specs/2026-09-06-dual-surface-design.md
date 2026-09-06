@@ -1,4 +1,4 @@
-# Dual-Surface PUG — Website + Discord Bot Design
+# Dual-Surface PUG: Website + Discord Bot Design
 
 **Date:** 2026-09-06
 **Status:** Approved direction (topology + decomposition), pre-implementation
@@ -10,7 +10,7 @@
 Sub-project 4 of the PUG system: turning the one-way Discord webhook into a real
 bot, and turning the placeholder frontend into a site people want to sit on
 between matches. The two are one design because the decision that shapes both is
-**dual-surface** — a player can queue, ready up, and vote from either the website
+**dual-surface**. A player can queue, ready up, and vote from either the website
 or Discord, and both views stay live and identical.
 
 This document records the decisions and the decomposition. Each sub-project below
@@ -18,12 +18,12 @@ gets its own design doc, implementation plan, and build.
 
 ## Prior art considered
 
-- **[InHouseQueue](https://docs.inhousequeue.xyz/docs)** — Discord-first in-house
+- **[InHouseQueue](https://docs.inhousequeue.xyz/docs)**: Discord-first in-house
   queue bot (seasons, captain draft, MMR decay, map ban/vote, suspensions, role
   promotions, admin logs, and a secondary "Website Queue"). The feature list is
   the closest thing to a spec for what a friend group actually uses; the shape
   (Discord primary, web secondary) is the inverse of what we built.
-- **[l4dpug.com](https://www.l4dpug.com)** — EU-focused L4D pug site. Same
+- **[l4dpug.com](https://www.l4dpug.com)**: EU-focused L4D pug site. Same
   problem domain, web-first.
 
 We are neither: we are both surfaces at parity.
@@ -33,23 +33,23 @@ We are neither: we are both surfaces at parity.
 | Topic | Decision |
 |---|---|
 | Surface parity | **True dual-surface.** Queue, ready-up, and campaign vote all work identically from the website and from Discord, synced live. Not "web-first with a megaphone", not "Discord-first with a web scoreboard". |
-| Identity | Steam remains the canonical account (it has to — rosters are SteamID64). Discord is *linked* to it, by either flow: "Connect Discord" (OAuth) on the profile page, or `/link` in Discord issuing a short code to paste on the site. |
+| Identity | Steam remains the canonical account (it has to, since rosters are SteamID64). Discord is *linked* to it, by either flow: "Connect Discord" (OAuth) on the profile page, or `/link` in Discord issuing a short code to paste on the site. |
 | Gate | **Discord guild membership (optionally a role) replaces the invite code.** `settings.invite_code` stays in the schema as a fallback for people not in the server, but membership is the normal path to `active`. |
 | Process topology | **Bot runs in-process** with Fastify. One Node process, one SQLite writer, one `Matchmaker`. See below. |
 | Frontend stack | **Vite + Preact**, built to static output that Fastify serves exactly as it serves `public/` today. Replaces no-build vanilla JS + hand-rolled hash routing. |
-| Feature set | Live-updating lobby embed, captains draft, suspensions/no-show penalties, and admin tooling — all four wanted, all four sequenced separately. |
+| Feature set | Live-updating lobby embed, captains draft, suspensions/no-show penalties, and admin tooling. All four wanted, all four sequenced separately. |
 | Lobby durability | **Out of scope, deliberately.** Lobby state stays in memory. See "Rejected" below. |
 
 ## Why the bot runs in-process
 
-`Matchmaker` holds the live `Lobby` object — phase, ready-set, votes, and
-`setTimeout` deadlines — entirely **in memory**. Nothing about an in-flight lobby
+`Matchmaker` holds the live `Lobby` object (phase, ready-set, votes, and
+`setTimeout` deadlines) entirely **in memory**. Nothing about an in-flight lobby
 is in SQLite. `Hub.broadcast(event)` sends only an event *name*; clients re-fetch
 state over HTTP.
 
 That single fact decides the topology. A separate bot process cannot see lobby
 state without either IPC or persisting the lobby, so "separate service" is not a
-free choice — it is a prerequisite refactor wearing a topology costume.
+free choice. It is a prerequisite refactor wearing a topology costume.
 
 In-process instead means both surfaces call the same `Matchmaker` methods.
 Dual-surface parity stops being an invariant somebody has to maintain by hand and
@@ -93,8 +93,8 @@ requires WS payloads to start carrying real state, makes every button press an
 HTTP round-trip, and gives two components independent views of a state machine
 that must agree. Real cost, theoretical benefit at eight players.
 
-**Persisting lobby state to SQLite first.** Genuinely fixes a real bug — a backend
-restart mid-ready-check drops the lobby — and would unlock either topology. But it
+**Persisting lobby state to SQLite first.** Genuinely fixes a real bug (a backend
+restart mid-ready-check drops the lobby) and would unlock either topology. But it
 is the largest refactor of the best-tested code in the repo, in service of
 durability nobody has complained about. It stays separable: if restarts start
 hurting, it can be done later as its own change without touching the bot.
@@ -104,8 +104,8 @@ hurting, it can be done later as its own change without touching the bot.
 | | Sub-project | Delivers |
 |---|---|---|
 | **4a** | Frontend migration + redesign | Vite + Preact, existing pages ported, real visual design |
-| **4b** | Identity: Discord linking + gate | `players.discord_id`, OAuth link, membership gate (see its own design — the `/link` code flow moved to 4c, since it needs a running bot) |
-| **4c** | Bot core + live lobby embed | discord.js in-process, slash commands, self-editing lobby message — dual-surface goes live |
+| **4b** | Identity: Discord linking + gate | `players.discord_id`, OAuth link, membership gate (see its own design; the `/link` code flow moved to 4c, since it needs a running bot) |
+| **4c** | Bot core + live lobby embed | discord.js in-process, slash commands, self-editing lobby message, so dual-surface goes live |
 | **4d** | Captains draft | New lobby phase, both surfaces |
 | **4e** | Suspensions / no-show penalties | Ready-fail and leaver tracking, escalating queue bans |
 | **4f** | Admin tooling + settings UI | Web admin page + admin slash commands, replacing `sqlite3`-by-hand |
@@ -127,5 +127,5 @@ cleanup pass that benefits from everything above it.
    a vote. (4d.)
 3. Whether suspensions block the Discord surface, the website, or both, and how
    escalation resets. (4e.)
-4. Voice-channel moves on match start — InHouseQueue does this; unclear whether
+4. Voice-channel moves on match start. InHouseQueue does this; unclear whether
    the group wants it. Not in the accepted feature set; revisit after 4c.

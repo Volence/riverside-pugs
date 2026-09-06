@@ -4,7 +4,7 @@ import { applyMatchRatings } from './rating.js';
 
 /** Persist a finished match (result, per-map scores, per-player stats) and
  *  apply ratings, atomically. Returns false when the match is missing or
- *  already completed/aborted. The single write-path for match completion —
+ *  already completed/aborted. This is the single write-path for match completion:
  *  used by the real orchestrator and by dev-mode simulation. Dump stats for
  *  a steamid not on the match's roster match no row and are ignored, with a
  *  warning logged. */

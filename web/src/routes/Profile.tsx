@@ -39,7 +39,7 @@ export function Profile({ steamid }: { steamid: string }) {
                   {lastDelta !== null && <SrDelta value={lastDelta} />}
                 </div>
                 <p class="muted">
-                  {rating.wins}W — {rating.losses}L
+                  {rating.wins}W - {rating.losses}L
                   {peak !== null && <> · peak {peak}</>}
                 </p>
               </>
@@ -88,7 +88,7 @@ export function Profile({ steamid }: { steamid: string }) {
                       <tr key={m.id} data-campaign={m.campaign}>
                         <td><ResultChip result={m.result} /></td>
                         <td class="campaign-cell"><a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a></td>
-                        <td class="num">{m.teamAScore} — {m.teamBScore}</td>
+                        <td class="num">{m.teamAScore} - {m.teamBScore}</td>
                         <td class="num"><SrDelta value={m.srDelta} /></td>
                         <td class="num muted">{fmtDate(m.endedAt)}</td>
                       </tr>

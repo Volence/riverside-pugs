@@ -33,7 +33,7 @@ a:hover { text-decoration: underline; }
 table, .num { font-variant-numeric: tabular-nums; }
 
 /* An uppercase tracked label. Used above hero numerals and as a section
- * eyebrow — the one piece of chrome that carries the HUD voice. */
+ * eyebrow, the one piece of chrome that carries the HUD voice. */
 .eyebrow {
   font-family: var(--font-display);
   font-size: var(--fs-label);
@@ -201,7 +201,7 @@ tbody tr.is-me { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--a
 }
 .rank--top { color: var(--rating); }
 
-/* Campaign tint as a left rule — four hex values instead of artwork. It is
+/* Campaign tint as a left rule: four hex values instead of artwork. It is
  * attached to the cell that names the campaign rather than to the first cell,
  * because on the profile table the first cell is the W/L/D chip and a colored
  * rule there reads as a second, contradictory result color. */
@@ -286,7 +286,7 @@ td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
   color: var(--text-muted);
 }
 
-/* Eight fixed slots. Empty slots are the information — a half-full queue
+/* Eight fixed slots. Empty slots are the information: a half-full queue
  * should look half full rather than just showing a smaller number. */
 .slots { display: flex; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-5); }
 .slot {

@@ -15,7 +15,7 @@ export interface MatchmakerDeps {
   notify?: (msg: string) => void;
 }
 
-/** Parse discord_queue_thresholds defensively — a malformed or non-array
+/** Parse discord_queue_thresholds defensively. A malformed or non-array
  *  setting (admin typo, hand-edited sqlite row) must never break join(). */
 function safeThresholds(raw: string | undefined): number[] {
   if (!raw) return [];
@@ -120,7 +120,7 @@ export class Matchmaker {
         this.deps.scheduler ?? realScheduler,
       );
       this.lobbies.set(id, lobby);
-      this.deps.notify?.('🔔 Queue popped — ready check started!');
+      this.deps.notify?.('🔔 Queue popped, ready check started!');
       for (const p of players) this.playerLobby.set(p, id);
     }
   }

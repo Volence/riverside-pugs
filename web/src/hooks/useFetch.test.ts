@@ -11,7 +11,7 @@ function deferred<T>() {
 }
 
 /** Let a settled promise's continuation run AND let Preact flush the rerender
- *  it would cause. Awaiting a couple of microtasks is not enough — the render
+ *  it would cause. Awaiting a couple of microtasks is not enough, because the render
  *  is scheduled on a later task, so a test that only drains microtasks passes
  *  whether or not the stale-response guard is present. Verified: removing the
  *  guard makes the two "stale" cases below fail with this helper, and not

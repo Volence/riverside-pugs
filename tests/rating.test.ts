@@ -56,7 +56,7 @@ describe('applyMatchRatings', () => {
     expect(db.prepare('SELECT COUNT(*) n FROM rating_history WHERE match_id = ?').get(matchId)).toEqual({ n: 8 });
   });
 
-  it('is idempotent — second call is a no-op', () => {
+  it('is idempotent: second call is a no-op', () => {
     const matchId = seedCompletedMatch(db, 'a');
     applyMatchRatings(db, matchId);
     const first = ensureRating(db, IDS[0]).mu;
@@ -74,7 +74,7 @@ describe('applyMatchRatings', () => {
 
   it('uses the match season, not the current season', () => {
     const matchId = seedCompletedMatch(db, 'a');
-    // close season 1, open season 2 — the match still belongs to season 1
+    // close season 1, open season 2. The match still belongs to season 1
     db.prepare("UPDATE seasons SET ended_at = datetime('now') WHERE id = 1").run();
     db.prepare("INSERT INTO seasons (name) VALUES ('Season 2')").run();
     applyMatchRatings(db, matchId);

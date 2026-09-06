@@ -1,11 +1,11 @@
-# pug-match — SourcePawn plugin
+# pug-match: SourcePawn plugin
 
 Server-side counterpart of the `pug-web` orchestrator (`src/orchestrator.ts`).
 It runs on the L4D1 server, layered on Rotoblin-AZMod, and handles match
 intake over RCON, roster enforcement, per-map score + per-player stat
 capture, live-view `LogToGame` lines, and the authoritative `sm_pug_dump`
 response. All state is keyed by SteamID64 (reconnect-safe) and survives map
-transitions — a match spans a campaign minus its finale.
+transitions. A match spans a campaign minus its finale.
 
 Two reporting channels, per the sub-project 2 design spec:
 
@@ -20,7 +20,7 @@ Two reporting channels, per the sub-project 2 design spec:
 |---|---|---|
 | `sm_pug_match` | `<matchid> <token> <campaign>` | Starts match intake. Resets all match state, arms the roster. |
 | `sm_pug_roster` | `<steamid64>:<a\|b>` | Call once per player (×8). Team letters are lowercase `a`/`b`; convention: team `a` starts as survivors on map 1. |
-| `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent — safe to call more than once. |
+| `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. |
 | `sm_pug_abort` | `<token>` | Clears match state. Roster enforcement stops immediately. |
 
 `sm_pug_dump` and `sm_pug_abort` both check `<token>` against the token set by
@@ -29,7 +29,7 @@ match.
 
 ## Wire grammars
 
-### Live view — UDP `logaddress` lines (`src/logParse.ts`)
+### Live view: UDP `logaddress` lines (`src/logParse.ts`)
 
 ```
 PUG <token> MATCH_START map=<map>
@@ -39,7 +39,7 @@ PUG <token> PLAYER steamid=<id64> event=connect|disconnect
 PUG <token> MATCH_END a=<n> b=<n> winner=a|b|draw
 ```
 
-### Authoritative — RCON `sm_pug_dump` response body (`src/dumpParse.ts`)
+### Authoritative: RCON `sm_pug_dump` response body (`src/dumpParse.ts`)
 
 ```
 DUMP match=<id>
@@ -62,7 +62,7 @@ lives in one place. Any change here must be mirrored in `src/logParse.ts` /
 ```
 
 Copies `pug-match.sp` into the Rotoblin-AZMod scripting tree (spcomp under
-wine breaks on absolute Unix paths — must compile with relative paths from
+wine breaks on absolute Unix paths, so it must compile with relative paths from
 inside that directory), compiles with that tree's `spcomp.exe` and its
 `include/`, copies `pug-match.smx` back into `plugin/`, and cleans up the
 tree via a `trap` on exit. Must end with `Code size: ...` and 0 errors.
@@ -72,7 +72,7 @@ tree via a `trap` on exit. Must end with `Code size: ...` and 0 errors.
 Same idea as the `l4d_clipvis` workflow (see
 `/home/volence/l4d/l4d_clipvis/NEXT.md`'s "Build loop" section): copy the
 `.sp` up, compile in place with the server's own `spcomp`, then install the
-resulting `.smx` — gate the install on the compile actually succeeding so a
+resulting `.smx`. Gate the install on the compile actually succeeding so a
 failed build doesn't silently leave the previous binary running:
 
 ```
@@ -98,7 +98,7 @@ deploy/overrides/left4dead/addons/sourcemod/plugins/pug-match.smx
 `deploy.sh` (in `/home/volence/l4d/deploy/`) rsyncs `overrides/` onto the live
 box.
 
-**Do not run `deploy.sh` — or otherwise push this plugin to the server — while
+**Do not run `deploy.sh`, or otherwise push this plugin to the server, while
 the server is in use.** Staging this plugin means new RCON commands,
 event hooks, and a repeating team-lock timer running live; treat it as a
 maintenance-window change, not a hot deploy.
@@ -113,15 +113,15 @@ For the joint session, once the server is free:
    real friends' steamid64s) → `PUGOK` responses.
 3. Non-rostered player joins → kicked with roster message.
 4. Rostered players join → placed on their teams; `PLAYER ... event=connect`
-   lines reach the backend UDP listener (capture real line format — research
-   item #1 — and pin `logParse.ts` tests with it).
+   lines reach the backend UDP listener (capture the real line format, research
+   item #1, and pin `logParse.ts` tests with it).
 5. Ready-up → live → `MATCH_START` line.
 6. Play a map both halves → `MAP_RESULT` with plausible a/b scores; verify
    against scoreboard.
 7. Deliberately swap a player mid-round → lock timer moves them back within
    ~4s.
 8. Second map: verify scores still attribute to the right pug teams (the
-   cross-map relabeling case — the plan's biggest risk).
+   cross-map relabeling case, the plan's biggest risk).
 9. On finale load → `MATCH_END`; `sm_pug_dump testtoken` over RCON returns
    full DUMP/MAP/STAT/END; run it twice (idempotent).
 10. `sm_pug_abort testtoken` → `PUGOK aborted`; after the abort, roster

@@ -8,7 +8,7 @@
  * eyeballed. Body text clears 4.5:1 on every surface it is used on. */
 
 :root {
-  /* Surfaces — warm near-black, not the usual blue-black. */
+  /* Surfaces: warm near-black, not the usual blue-black. */
   --bg: #141210;
   --surface: #1c1916;
   --surface-2: #242019;
@@ -28,7 +28,7 @@
   --rating: #f2cd6a;
 
   /* Results. Teal-vs-red reads better than green-vs-red for deuteranopes, but
-   * color is never the only signal — a W/L/D glyph always accompanies it. */
+   * color is never the only signal: a W/L/D glyph always accompanies it. */
   --win: #45b39c;
   --loss: #e35d5d;
   --draw: #9a9082;

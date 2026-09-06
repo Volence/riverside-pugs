@@ -5,7 +5,7 @@ import { parseLogDatagram, type LogEvent } from './logParse.js';
 /**
  * Binds a UDP socket for srcds `logaddress` traffic. Datagrams are parsed and,
  * if their token is registered, handed to the callback. Everything else (bad
- * parse, unknown token) is dropped — the stream is untrusted and lossy by design.
+ * parse, unknown token) is dropped, because the stream is untrusted and lossy by design.
  */
 export class LogListener {
   private sock: dgram.Socket | null = null;

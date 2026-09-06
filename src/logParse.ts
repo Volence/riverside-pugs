@@ -25,7 +25,7 @@ function intOf(s: string | undefined): number | null {
 /**
  * Decode a raw srcds log UDP datagram into a typed PUG event, or null if it is
  * not one of ours or is malformed. Never throws. Tolerant of the engine framing
- * being present or absent — it locates the `PUG ` marker rather than assuming an
+ * being present or absent. It locates the `PUG ` marker rather than assuming an
  * offset.
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {

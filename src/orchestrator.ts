@@ -14,7 +14,7 @@ export interface Orchestrator {
   finishMatch(matchId: number): Promise<void>;
 }
 
-/** Stub used in dev mode — no real server contact. */
+/** Stub used in dev mode. Makes no real server contact. */
 export class DevOrchestrator implements Orchestrator {
   async setupMatch(matchId: number): Promise<void> {
     console.log(`[orchestrator-stub] match ${matchId} created; real orchestration is sub-project 2`);
@@ -97,7 +97,7 @@ export class RealOrchestrator implements Orchestrator {
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
       // unquoted args on ':', so the plugin would receive a bare steamid, reject
       // the line, and then kick every player as non-rostered. Verified on the
-      // live box 2026-08-29 — the fake RCON server in tests does not tokenize.
+      // live box 2026-08-29. The fake RCON server in tests does not tokenize.
       for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
       await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
       markLive(this.db, server.id);
@@ -113,7 +113,7 @@ export class RealOrchestrator implements Orchestrator {
     }
 
     if (live) {
-      this.notify(`🎮 Match #${matchId} is live — ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
+      this.notify(`🎮 Match #${matchId} is live: ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
     }
   }
 
@@ -161,7 +161,7 @@ export class RealOrchestrator implements Orchestrator {
       release(this.db, match.server_id);
       if (dump) {
         const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
-        this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA} — Team B ${dump.totalB}. ${winnerText}!`);
+        this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA}, Team B ${dump.totalB}. ${winnerText}!`);
       }
     }
   }

@@ -1,19 +1,19 @@
-# L4D1 PUG Backend Core — Implementation Plan (Sub-project 1 of 4)
+# L4D1 PUG Backend Core: Implementation Plan (Sub-project 1 of 4)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The `pug-web` backend core: SQLite schema, Steam login with invite gate, the queue → ready-check → map-vote → team-assignment pipeline, websocket refresh pushes, a minimal working web UI, and a dev mode for testing without 8 real humans.
 
-**Architecture:** Single Node.js/TypeScript monolith (Fastify) on SQLite via better-sqlite3. Match pipeline state (queue, lobbies, votes) is in-memory by design; only players/ratings/matches persist. Server↔game communication (RCON/logaddress) is **sub-project 2** — here the orchestrator is a no-op stub and matches end at state `configuring`. Full system spec: `docs/superpowers/specs/2026-07-30-l4d1-pug-system-design.md` (read it first).
+**Architecture:** Single Node.js/TypeScript monolith (Fastify) on SQLite via better-sqlite3. Match pipeline state (queue, lobbies, votes) is in-memory by design; only players/ratings/matches persist. Server↔game communication (RCON/logaddress) is **sub-project 2**, here the orchestrator is a no-op stub and matches end at state `configuring`. Full system spec: `docs/superpowers/specs/2026-07-30-l4d1-pug-system-design.md` (read it first).
 
-**Tech Stack:** Node 22, TypeScript (strict, ESM, run via tsx — no build step), Fastify 5 (@fastify/cookie, @fastify/static, @fastify/websocket), better-sqlite3, openskill, vitest.
+**Tech Stack:** Node 22, TypeScript (strict, ESM, run via tsx, no build step), Fastify 5 (@fastify/cookie, @fastify/static, @fastify/websocket), better-sqlite3, openskill, vitest.
 
 **Refinements vs spec (intentional):**
 - The spec lists match states `ready_check → map_vote → configuring → live → completed/aborted`. The first two are **in-memory lobby phases**; a `matches` row is only created at `configuring`. The DB CHECK constraint therefore only allows the persisted four.
 - Websocket messages carry no data: every state change broadcasts `refresh` and clients re-fetch `GET /api/state`. Richer events are YAGNI for now.
 - SteamIDs are stored as SteamID64 strings everywhere. Conversion to `STEAM_1:X:Y` is sub-project 2's problem.
 
-**Project location:** `/home/volence/l4d/pug` — a NEW git repository created in Task 1. All paths below are relative to it. Run all commands from inside it.
+**Project location:** `/home/volence/l4d/pug`, a NEW git repository created in Task 1. All paths below are relative to it. Run all commands from inside it.
 
 ---
 
@@ -152,7 +152,7 @@ describe('campaigns', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/config.test.ts`
-Expected: FAIL — cannot find module `../src/config.js`.
+Expected: FAIL, cannot find module `../src/config.js`.
 
 - [ ] **Step 3: Write `src/config.ts`**
 
@@ -253,7 +253,7 @@ describe('openDb', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/db.test.ts`
-Expected: FAIL — cannot find module `../src/db.js`.
+Expected: FAIL, cannot find module `../src/db.js`.
 
 - [ ] **Step 3: Write `src/db.ts`**
 
@@ -477,7 +477,7 @@ describe('ratings', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/players.test.ts`
-Expected: FAIL — cannot find module `../src/players.js`.
+Expected: FAIL, cannot find module `../src/players.js`.
 
 - [ ] **Step 3: Write `src/players.ts`**
 
@@ -627,7 +627,7 @@ describe('verifyLogin', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/steamAuth.test.ts`
-Expected: FAIL — cannot find module `../src/steamAuth.js`.
+Expected: FAIL, cannot find module `../src/steamAuth.js`.
 
 - [ ] **Step 3: Write `src/steamAuth.ts`**
 
@@ -738,7 +738,7 @@ export function getSession(req: FastifyRequest): string | null {
 
 - [ ] **Step 2: Write `src/server.ts`**
 
-The `verifyLogin` dependency is injectable so tests can fake Steam. More route files register here in Tasks 10, 12, 13 — the `deps` object grows then too.
+The `verifyLogin` dependency is injectable so tests can fake Steam. More route files register here in Tasks 10, 12, 13, the `deps` object grows then too.
 
 ```ts
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -861,7 +861,7 @@ console.log(`pug-web listening on :${config.port} (devMode=${config.devMode})`);
 
 - [ ] **Step 5: Write failing test `tests/auth.test.ts`**
 
-The helper `authedCookie` is reused by later test files — export it from a shared helper file.
+The helper `authedCookie` is reused by later test files, export it from a shared helper file.
 
 Create `tests/helpers.ts`:
 
@@ -954,7 +954,7 @@ describe('auth', () => {
 - [ ] **Step 6: Run tests**
 
 Run: `npx vitest run tests/auth.test.ts && npx tsc --noEmit`
-Expected: PASS (4 tests), clean typecheck. (An empty `public/` dir is fine for @fastify/static — if it errors on a missing dir, `mkdir -p public` and add `public/.gitkeep`.)
+Expected: PASS (4 tests), clean typecheck. (An empty `public/` dir is fine for @fastify/static, if it errors on a missing dir, `mkdir -p public` and add `public/.gitkeep`.)
 
 - [ ] **Step 7: Commit**
 
@@ -1010,7 +1010,7 @@ describe('Queue', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/queue.test.ts`
-Expected: FAIL — cannot find module `../src/queue.js`.
+Expected: FAIL, cannot find module `../src/queue.js`.
 
 - [ ] **Step 3: Write `src/queue.ts`**
 
@@ -1176,7 +1176,7 @@ describe('map vote', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/lobby.test.ts`
-Expected: FAIL — cannot find module `../src/lobby.js`.
+Expected: FAIL, cannot find module `../src/lobby.js`.
 
 - [ ] **Step 3: Write `src/lobby.ts`**
 
@@ -1383,7 +1383,7 @@ describe('balanceTeams', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/balance.test.ts`
-Expected: FAIL — cannot find module `../src/balance.js`.
+Expected: FAIL, cannot find module `../src/balance.js`.
 
 - [ ] **Step 3: Write `src/balance.ts`**
 
@@ -1491,7 +1491,7 @@ describe('Hub', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/ws.test.ts`
-Expected: FAIL — cannot find module `../src/ws.js`.
+Expected: FAIL, cannot find module `../src/ws.js`.
 
 - [ ] **Step 3: Write `src/ws.ts`**
 
@@ -1537,7 +1537,7 @@ export async function wsRoutes(app: FastifyInstance, opts: { hub: Hub }): Promis
 }
 ```
 
-- [ ] **Step 5: Modify `src/server.ts` — create the hub and register the route**
+- [ ] **Step 5: Modify `src/server.ts`, create the hub and register the route**
 
 Add imports at the top:
 
@@ -1546,7 +1546,7 @@ import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 ```
 
-Inside `buildServer`, after the auth route registration, add (and expose the hub on the returned deps — later tasks need it):
+Inside `buildServer`, after the auth route registration, add (and expose the hub on the returned deps, later tasks need it):
 
 ```ts
   const hub = deps.hub ?? new Hub();
@@ -1701,7 +1701,7 @@ describe('Matchmaker', () => {
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `npx vitest run tests/matchmaker.test.ts`
-Expected: FAIL — cannot find module `../src/matchmaker.js`.
+Expected: FAIL, cannot find module `../src/matchmaker.js`.
 
 - [ ] **Step 4: Write `src/matchmaker.ts`**
 
@@ -1976,7 +1976,7 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
 }
 ```
 
-- [ ] **Step 2: Modify `src/server.ts` — construct the matchmaker and register api routes**
+- [ ] **Step 2: Modify `src/server.ts`, construct the matchmaker and register api routes**
 
 Add imports:
 
@@ -2085,7 +2085,7 @@ describe('match pipeline over HTTP', () => {
 - [ ] **Step 4: Run tests**
 
 Run: `npx vitest run tests/api.test.ts && npx tsc --noEmit`
-Expected: PASS (3 tests), clean typecheck. Note: the full-pipeline test never waits on timers — every phase advances via the all-players-acted early paths.
+Expected: PASS (3 tests), clean typecheck. Note: the full-pipeline test never waits on timers, every phase advances via the all-players-acted early paths.
 
 - [ ] **Step 5: Commit**
 
@@ -2193,7 +2193,7 @@ Add this public method to the `Matchmaker` class:
   }
 ```
 
-- [ ] **Step 3: Modify `src/server.ts` — register dev routes only in dev mode**
+- [ ] **Step 3: Modify `src/server.ts`, register dev routes only in dev mode**
 
 Add import:
 
@@ -2265,7 +2265,7 @@ git add -A && git commit -m "feat: dev mode routes for single-human testing"
 **Files:**
 - Create: `public/index.html`, `public/style.css`, `public/app.js`
 
-No build step, no framework — one static page that renders whichever phase the player is in and re-fetches `/api/state` whenever the websocket says `refresh`.
+No build step, no framework, one static page that renders whichever phase the player is in and re-fetches `/api/state` whenever the websocket says `refresh`.
 
 - [ ] **Step 1: Write `public/index.html`**
 
@@ -2304,7 +2304,7 @@ No build step, no framework — one static page that renders whichever phase the
     </section>
 
     <section id="ready" hidden>
-      <h2>Match found — ready up! (<span id="ready-timer"></span>s)</h2>
+      <h2>Match found, ready up! (<span id="ready-timer"></span>s)</h2>
       <button id="ready-btn" class="btn">READY</button>
       <ul id="ready-list"></ul>
     </section>
@@ -2321,7 +2321,7 @@ No build step, no framework — one static page that renders whichever phase the
         <div><h3>Team A</h3><ul id="team-a"></ul></div>
         <div><h3>Team B</h3><ul id="team-b"></ul></div>
       </div>
-      <p class="note">Server assignment lands in the next milestone — for now, arrange the game manually.</p>
+      <p class="note">Server assignment lands in the next milestone, for now, arrange the game manually.</p>
     </section>
   </main>
 
@@ -2430,7 +2430,7 @@ function render() {
   const { queue, lobby, match } = state;
   if (match) {
     $('match-info').textContent =
-      `Campaign: ${CAMPAIGN_NAMES[match.campaign] ?? match.campaign} — status: ${match.state}`;
+      `Campaign: ${CAMPAIGN_NAMES[match.campaign] ?? match.campaign}, status: ${match.state}`;
     for (const [elId, team] of [['team-a', match.teamA], ['team-b', match.teamB]]) {
       $(elId).innerHTML = team.map((p) => `<li>${esc(p.name)}</li>`).join('');
     }
@@ -2504,13 +2504,13 @@ npm run dev
 
 Then in a browser at `http://localhost:8080`:
 
-1. Dev panel visible bottom-right. Click **login** (default steamid) — the queue section should appear with your dev name in the header.
-2. Click **Join queue** — count becomes 1/8.
-3. Click **fill queue** — ready screen appears (websocket refresh; countdown ticking).
-4. Click **READY**, then **ready all** — vote screen appears.
-5. Vote for a campaign, then **vote all** — match screen appears with two teams of 4.
-6. Reload the page — match screen persists (state comes from the DB).
-7. Click **clear matches** — back to the queue screen, ready for another run.
+1. Dev panel visible bottom-right. Click **login** (default steamid), the queue section should appear with your dev name in the header.
+2. Click **Join queue**, count becomes 1/8.
+3. Click **fill queue**, ready screen appears (websocket refresh; countdown ticking).
+4. Click **READY**, then **ready all**, vote screen appears.
+5. Vote for a campaign, then **vote all**, match screen appears with two teams of 4.
+6. Reload the page, match screen persists (state comes from the DB).
+7. Click **clear matches**, back to the queue screen, ready for another run.
 
 Expected: no console errors; every transition happens without a manual reload.
 
@@ -2530,7 +2530,7 @@ git add -A && git commit -m "feat: static frontend with dev panel"
 - [ ] **Step 1: Write `README.md`**
 
 ```markdown
-# pug — L4D1 ranked PUG system
+# pug: L4D1 ranked PUG system
 
 Web backend + (eventually) game-server plugin for ranked 4v4 Left 4 Dead 1
 pick-up games. Design spec: `docs/superpowers/specs/2026-07-30-l4d1-pug-system-design.md`.
@@ -2539,7 +2539,7 @@ pick-up games. Design spec: `docs/superpowers/specs/2026-07-30-l4d1-pug-system-d
 
 Sub-project 1 (backend core) complete: Steam login, invite gate, queue →
 ready-check → map-vote → SR-balanced teams, websocket live updates, dev mode.
-Matches stop at state `configuring` — real server orchestration (RCON +
+Matches stop at state `configuring`, real server orchestration (RCON +
 logaddress) is sub-project 2.
 
 ## Run
@@ -2566,11 +2566,11 @@ Change it: `sqlite3 data/pug.db "UPDATE settings SET value='...' WHERE key='invi
 
 ## Layout
 
-- `src/` — Fastify app: `matchmaker.ts` (queue/lobby pipeline), `lobby.ts`
+- `src/`: Fastify app: `matchmaker.ts` (queue/lobby pipeline), `lobby.ts`
   (ready-check + vote state machine), `balance.ts` (OpenSkill team split),
   `orchestrator.ts` (stub until sub-project 2), `routes/`.
-- `public/` — static frontend, no build step.
-- `tests/` — vitest.
+- `public/`: static frontend, no build step.
+- `tests/`: vitest.
 ```
 
 - [ ] **Step 2: Full verification**

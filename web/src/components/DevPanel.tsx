@@ -20,7 +20,7 @@ export function DevPanel({ refresh }: { refresh: () => void }) {
 
   // Collapsible, because the panel is fixed to the bottom-right corner and at
   // full height it sits on top of the last rows of the leaderboard and stat
-  // tables — exactly the rows you are usually trying to read while testing.
+  // tables, exactly the rows you are usually trying to read while testing.
   return (
     <details class="devpanel" open>
       <summary class="eyebrow">dev</summary>

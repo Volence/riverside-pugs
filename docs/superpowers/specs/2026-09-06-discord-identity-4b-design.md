@@ -1,13 +1,13 @@
-# Sub-project 4b — Discord Identity: Linking + Gate
+# Sub-project 4b: Discord Identity, Linking + Gate
 
 **Date:** 2026-09-06
-**Status:** Design, awaiting review — **blocked on credentials only you can create**
+**Status:** Design, awaiting review. **Blocked on credentials only you can create.**
 **Parent:** `2026-09-06-dual-surface-design.md`
 
 ## Goal
 
 Make a Discord user resolve to a player row, and let Discord server membership be
-what makes someone `active` — replacing the shared invite code as the normal path
+what makes someone `active`, replacing the shared invite code as the normal path
 in. Everything Discord-facing in 4c–4f depends on this and nothing else does, which
 is why it comes first among the bot pieces.
 
@@ -19,7 +19,7 @@ The umbrella design put both link flows in 4b. One of them can't be here: the
 Splitting it along the real dependency:
 
 - **4b (this):** the OAuth link flow, the membership gate, and the schema. Needs a
-  bot **token**, but no gateway connection — Discord's REST API answers membership
+  bot **token**, but no gateway connection. Discord's REST API answers membership
   questions over plain HTTPS with `Authorization: Bot <token>`. No discord.js, no
   always-on socket, nothing to crash.
 - **4c:** the `/link` code flow arrives with the rest of the slash commands, on top
@@ -41,9 +41,9 @@ This is the blocker, and it needs your Discord account:
 4. An OAuth **redirect URI** registered on the application, matching
    `PUBLIC_URL` + `/auth/discord/callback`.
 
-I can build and test the whole thing against a fake Discord before those exist —
-the codebase already injects `verifyLogin` and `fetchPersona` for exactly this
-reason — but the first real link can only be tried once you've made the app.
+I can build and test the whole thing against a fake Discord before those exist.
+The codebase already injects `verifyLogin` and `fetchPersona` for exactly this
+reason. But the first real link can only be tried once you've made the app.
 
 ## Schema
 
@@ -56,7 +56,7 @@ CREATE UNIQUE INDEX players_discord_id ON players(discord_id) WHERE discord_id I
 The partial unique index is the important part: one Discord account maps to exactly
 one Steam account, but many players legitimately have no Discord linked, and a
 plain UNIQUE would collide all of them on NULL in some engines. Attempting to link
-an already-claimed Discord id fails loudly rather than silently stealing it — that
+an already-claimed Discord id fails loudly rather than silently stealing it. That
 case is somebody trying to link a second Steam account to their Discord, and
 quietly moving the link would orphan their rating.
 
@@ -88,7 +88,7 @@ body carries their roles), 404 means not.
 - Optional `settings.discord_required_role_id` (default `''`). Empty means
   membership alone is enough; set it and the member must also hold that role.
 - Checked at link time **and** at login, because membership can be revoked. A
-  player who leaves the server does not lose their rating or history — they lose
+  player who leaves the server does not lose their rating or history. They lose
   the ability to queue, which is what `status` already controls.
 - `settings.invite_code` stays and keeps working. It is the fallback for someone
   not in the Discord, and the only path in if Discord is unconfigured.
@@ -99,13 +99,13 @@ default, so an unconfigured deploy is never a broken deploy.
 
 ## Structure
 
-- `src/discordApi.ts` — a `DiscordApi` interface (`exchangeCode`, `getUser`,
+- `src/discordApi.ts`: a `DiscordApi` interface (`exchangeCode`, `getUser`,
   `getGuildMember`) plus the real fetch-backed implementation. Injected into
   routes the way `verifyLogin` is, so tests never touch the network.
-- `src/routes/discordAuth.ts` — the two routes above.
-- `src/players.ts` — `linkDiscord`, `unlinkDiscord`, `playerByDiscordId`. That last
+- `src/routes/discordAuth.ts`: the two routes above.
+- `src/players.ts`: `linkDiscord`, `unlinkDiscord`, `playerByDiscordId`. That last
   one is the function 4c's every slash command starts with.
-- `web/` — a "Connect Discord" / "Disconnect" control on the profile page, and the
+- `web/`: a "Connect Discord" / "Disconnect" control on the profile page, and the
   registration page gaining Discord as the primary path with the invite code
   demoted to a secondary option.
 
@@ -125,6 +125,6 @@ Against a fake `DiscordApi`, no network:
 ## Open question for you
 
 **Should leaving the Discord server deactivate someone immediately, or only stop
-them queueing?** The design above does the milder thing — they keep everything,
+them queueing?** The design above does the milder thing: they keep everything,
 they just can't queue. Worth confirming that matches what you want for a friend
 group where someone might leave the server in a huff and come back.

@@ -25,7 +25,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
           <h2>{campaignName(match.campaign)}</h2>
         </div>
         <div class="scoreline">
-          <span class="scoreline__score num">{match.teamAScore} — {match.teamBScore}</span>
+          <span class="scoreline__score num">{match.teamAScore} - {match.teamBScore}</span>
           <span class="muted">{winnerLabel(match.winner)} · {fmtDate(match.endedAt)}</span>
         </div>
       </div>

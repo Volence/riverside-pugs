@@ -1,17 +1,17 @@
-# Sub-Project 3: Ratings, Stats, Leaderboard, History, Discord — Implementation Plan
+# Sub-Project 3 Implementation Plan: Ratings, Stats, Leaderboard, History, Discord
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Post-match OpenSkill rating updates, per-map/per-player stat persistence, leaderboard + profile + match-history pages, and Discord webhook notifications — completing sub-project 3 of the L4D1 PUG design.
+**Goal:** Post-match OpenSkill rating updates, per-map/per-player stat persistence, leaderboard + profile + match-history pages, and Discord webhook notifications, completing sub-project 3 of the L4D1 PUG design.
 
 **Architecture:** A new pure `src/rating.ts` module owns SR math and post-match OpenSkill updates. A new `src/matchResult.ts` owns the single "persist a finished match" transaction (matches + match_players + new match_maps + ratings), used by both the real orchestrator and a new dev-mode fake-finish route. Read-only stats endpoints live in a new `src/routes/stats.ts`; the vanilla-JS frontend gains hash-routing with leaderboard/matches/profile views. Discord is one fire-and-forget webhook function with injectable fetch.
 
-**Tech Stack:** TypeScript ESM, Fastify 5, better-sqlite3, `openskill` 5 (`rate` — first use), vitest, vanilla JS frontend (no build step).
+**Tech Stack:** TypeScript ESM, Fastify 5, better-sqlite3, `openskill` 5 (`rate`, first use), vitest, vanilla JS frontend (no build step).
 
 **Repo:** `/home/volence/l4d/pug`, branch `sub-project-3` (created by the overseer). Run tests with `npx vitest run <file>` (or `npm test` for all), typecheck with `npm run typecheck`.
 
 **Conventions (match existing code):**
-- DB access: `db.prepare(...).get/all/run`, `db.transaction(() => {...})()`. better-sqlite3 nests transactions via savepoints — calling a transaction-wrapped fn inside another is fine.
+- DB access: `db.prepare(...).get/all/run`, `db.transaction(() => {...})()`. better-sqlite3 nests transactions via savepoints, calling a transaction-wrapped fn inside another is fine.
 - Tests: in-memory DB per test (`openDb(':memory:')`), `describe/it/expect`, helpers in `tests/helpers.ts`. HTTP tests use `app.inject`.
 - Commit after each task with the given message. Never use `--no-verify`.
 
@@ -86,7 +86,7 @@ describe('applyMatchRatings', () => {
     expect(db.prepare('SELECT COUNT(*) n FROM rating_history WHERE match_id = ?').get(matchId)).toEqual({ n: 8 });
   });
 
-  it('is idempotent — second call is a no-op', () => {
+  it('is idempotent, second call is a no-op', () => {
     const matchId = seedCompletedMatch(db, 'a');
     applyMatchRatings(db, matchId);
     const first = ensureRating(db, IDS[0]).mu;
@@ -104,7 +104,7 @@ describe('applyMatchRatings', () => {
 
   it('uses the match season, not the current season', () => {
     const matchId = seedCompletedMatch(db, 'a');
-    // close season 1, open season 2 — the match still belongs to season 1
+    // close season 1, open season 2, the match still belongs to season 1
     db.prepare("UPDATE seasons SET ended_at = datetime('now') WHERE id = 1").run();
     db.prepare("INSERT INTO seasons (name) VALUES ('Season 2')").run();
     applyMatchRatings(db, matchId);
@@ -117,7 +117,7 @@ describe('applyMatchRatings', () => {
 - [x] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/rating.test.ts`
-Expected: FAIL — cannot resolve `../src/rating.js`.
+Expected: FAIL, cannot resolve `../src/rating.js`.
 
 - [x] **Step 3: Season-parameterize `ensureRating` in `src/players.ts`**
 
@@ -239,7 +239,7 @@ expect(names).toEqual([
 ]);
 ```
 
-Note: SCHEMA is `CREATE TABLE IF NOT EXISTS` — new tables appear on existing DBs at next boot; no migration needed. (The live Dallas deploy is not running this backend yet.)
+Note: SCHEMA is `CREATE TABLE IF NOT EXISTS`, new tables appear on existing DBs at next boot; no migration needed. (The live Dallas deploy is not running this backend yet.)
 
 - [x] **Step 2: Write the failing tests**
 
@@ -315,7 +315,7 @@ describe('completeMatch', () => {
 });
 ```
 
-Note: the second seedLiveMatch reuses the same 8 players — `upsertPlayer` is an upsert, so that's fine.
+Note: the second seedLiveMatch reuses the same 8 players, `upsertPlayer` is an upsert, so that's fine.
 
 - [x] **Step 3: Run to verify fail**
 
@@ -330,7 +330,7 @@ import { applyMatchRatings } from './rating.js';
 
 /** Persist a finished match (result, per-map scores, per-player stats) and
  *  apply ratings, atomically. Returns false when the match is missing or
- *  already completed/aborted. The single write-path for match completion —
+ *  already completed/aborted. The single write-path for match completion,
  *  used by the real orchestrator and by dev-mode simulation. */
 export function completeMatch(db: DB, matchId: number, d: Dump): boolean {
   const row = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string } | undefined;
@@ -380,7 +380,7 @@ with:
 - [x] **Step 6: Full suite + typecheck**
 
 Run: `npm test && npm run typecheck`
-Expected: all green — orchestrator e2e tests now also exercise map/rating persistence. If an orchestrator test seeds match_players without players rows and FK errors appear on player_ratings, fix the TEST seed to insert players first (players are always real rows in production).
+Expected: all green, orchestrator e2e tests now also exercise map/rating persistence. If an orchestrator test seeds match_players without players rows and FK errors appear on player_ratings, fix the TEST seed to insert players first (players are always real rows in production).
 
 - [x] **Step 7: Commit**
 
@@ -396,9 +396,9 @@ git commit -m "feat: match_maps table + shared completeMatch write-path with rat
 **Files:**
 - Create: `src/discord.ts`
 - Modify: `src/db.ts` (DEFAULT_SETTINGS), `src/matchmaker.ts` (notify dep + queue/pop pings), `src/orchestrator.ts` (notify dep + live/result pings), `src/server.ts` (wire notify)
-- Test: `tests/discord.test.ts`; Modify: `tests/matchmaker.test.ts` only if constructor typing forces it (dep is optional — it shouldn't)
+- Test: `tests/discord.test.ts`; Modify: `tests/matchmaker.test.ts` only if constructor typing forces it (dep is optional, it shouldn't)
 
-- [x] **Step 1: Failing tests** — `tests/discord.test.ts`:
+- [x] **Step 1: Failing tests**, `tests/discord.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -436,7 +436,7 @@ describe('notifyDiscord', () => {
 });
 ```
 
-- [x] **Step 2: Run to fail** — `npx vitest run tests/discord.test.ts` → module missing.
+- [x] **Step 2: Run to fail**, `npx vitest run tests/discord.test.ts` → module missing.
 
 - [x] **Step 3: Implement `src/discord.ts`**
 
@@ -464,16 +464,16 @@ export function notifyDiscord(db: DB, content: string, fetchFn: FetchLike = fetc
 }
 ```
 
-- [x] **Step 4: Settings defaults** — in `src/db.ts` DEFAULT_SETTINGS add:
+- [x] **Step 4: Settings defaults**, in `src/db.ts` DEFAULT_SETTINGS add:
 
 ```ts
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
 ```
 
-(`notifyDiscord` treats `''` as unset. `tests/db.test.ts` doesn't assert the full settings list, only specific keys — no change needed there.)
+(`notifyDiscord` treats `''` as unset. `tests/db.test.ts` doesn't assert the full settings list, only specific keys, no change needed there.)
 
-- [x] **Step 5: Matchmaker pings** — in `src/matchmaker.ts`:
+- [x] **Step 5: Matchmaker pings**, in `src/matchmaker.ts`:
 
 Add to `MatchmakerDeps`:
 
@@ -494,29 +494,29 @@ In `join()`, after `this.queue.join(steamid);` and BEFORE `this.maybeStartLobby(
 In `maybeStartLobby()`, right after `this.lobbies.set(id, lobby);`:
 
 ```ts
-      this.deps.notify?.('🔔 Queue popped — ready check started!');
+      this.deps.notify?.('🔔 Queue popped, ready check started!');
 ```
 
-- [x] **Step 6: Orchestrator pings** — in `src/orchestrator.ts`:
+- [x] **Step 6: Orchestrator pings**, in `src/orchestrator.ts`:
 
 Add to `RealOrchestratorDeps`: `notify?: (msg: string) => void;` and store it (`private notify: (msg: string) => void;` initialized `deps.notify ?? (() => {})` in the constructor). Import `CAMPAIGNS` from `./campaigns.js`.
 
 In `setupMatch`, right after the `state = 'live'` UPDATE:
 
 ```ts
-      this.notify(`🎮 Match #${matchId} is live — ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
+      this.notify(`🎮 Match #${matchId} is live, ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
 ```
 
-(`ServerRow` already carries `name` — verify in `src/serverPool.ts` and adjust the accessor if the field differs.)
+(`ServerRow` already carries `name`, verify in `src/serverPool.ts` and adjust the accessor if the field differs.)
 
 In `finishMatch`, inside the `if (persisted) { ... }` block:
 
 ```ts
       const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
-      this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA} — Team B ${dump.totalB}. ${winnerText}!`);
+      this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA}, Team B ${dump.totalB}. ${winnerText}!`);
 ```
 
-`dump` must be in scope there — declare `let dump: Dump | null = null;` alongside `persisted` and assign inside the try (keep the `Dump` type import). Guard with `if (persisted && dump)`.
+`dump` must be in scope there, declare `let dump: Dump | null = null;` alongside `persisted` and assign inside the try (keep the `Dump` type import). Guard with `if (persisted && dump)`.
 
 - [x] **Step 7: Wire in `src/server.ts`**
 
@@ -527,7 +527,7 @@ import { notifyDiscord } from './discord.js';
 Before the orchestrator block: `const notify = (msg: string) => notifyDiscord(deps.db, msg);`
 Pass `notify` into `new RealOrchestrator({ ... , notify })` and into the Matchmaker deps: `{ broadcast: ..., orchestrator, notify }`.
 
-- [x] **Step 8: Full suite + typecheck** — `npm test && npm run typecheck` → green (notify is optional everywhere; existing tests unaffected).
+- [x] **Step 8: Full suite + typecheck**, `npm test && npm run typecheck` → green (notify is optional everywhere; existing tests unaffected).
 
 - [x] **Step 9: Commit**
 
@@ -538,14 +538,14 @@ git commit -m "feat: discord webhook notifications (queue thresholds, pop, live,
 
 ---
 
-### Task 4: Read API — leaderboard, profiles, match history
+### Task 4: Read API (leaderboard, profiles, match history)
 
 **Files:**
 - Create: `src/routes/guards.ts`, `src/routes/stats.ts`
 - Modify: `src/routes/api.ts` (use shared guard), `src/server.ts` (register statsRoutes)
 - Test: `tests/stats.test.ts`
 
-- [x] **Step 1: Extract the guard** — create `src/routes/guards.ts`:
+- [x] **Step 1: Extract the guard**, create `src/routes/guards.ts`:
 
 ```ts
 import type { FastifyRequest, FastifyReply } from 'fastify';
@@ -574,7 +574,7 @@ export function makeRequireActive(db: DB) {
 
 In `src/routes/api.ts`: delete the inline `requireActive` and its `getSession`/`getPlayer` imports; add `import { makeRequireActive } from './guards.js';` and `const requireActive = makeRequireActive(db);` at the top of `apiRoutes`. Behavior identical; `npx vitest run tests/api.test.ts` must stay green.
 
-- [x] **Step 2: Failing tests** — `tests/stats.test.ts`:
+- [x] **Step 2: Failing tests**, `tests/stats.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -688,9 +688,9 @@ describe('stats routes', () => {
 });
 ```
 
-Check `tests/http-e2e.test.ts` / `tests/api.test.ts` for how `config` objects are actually built (there may be a `loadConfig`/factory to reuse instead of the inline literal above — mirror the existing pattern exactly).
+Check `tests/http-e2e.test.ts` / `tests/api.test.ts` for how `config` objects are actually built (there may be a `loadConfig`/factory to reuse instead of the inline literal above, mirror the existing pattern exactly).
 
-- [x] **Step 3: Run to fail** — `npx vitest run tests/stats.test.ts` → 404s (routes missing).
+- [x] **Step 3: Run to fail**, `npx vitest run tests/stats.test.ts` → 404s (routes missing).
 
 - [x] **Step 4: Implement `src/routes/stats.ts`**
 
@@ -810,7 +810,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
 }
 ```
 
-- [x] **Step 5: Register in `src/server.ts`** — after `apiRoutes`:
+- [x] **Step 5: Register in `src/server.ts`**, after `apiRoutes`:
 
 ```ts
 import { statsRoutes } from './routes/stats.js';
@@ -818,7 +818,7 @@ import { statsRoutes } from './routes/stats.js';
 await app.register(statsRoutes, { db: deps.db });
 ```
 
-- [x] **Step 6: Run** — `npx vitest run tests/stats.test.ts tests/api.test.ts` → PASS, then `npm test && npm run typecheck`.
+- [x] **Step 6: Run**, `npx vitest run tests/stats.test.ts tests/api.test.ts` → PASS, then `npm test && npm run typecheck`.
 
 - [x] **Step 7: Commit**
 
@@ -835,7 +835,7 @@ git commit -m "feat: leaderboard, profile, and match history read API"
 - Modify: `src/routes/dev.ts`
 - Test: `tests/dev.test.ts` (extend)
 
-- [x] **Step 1: Failing tests** — append to `tests/dev.test.ts` (mirror its existing setup; it already builds a dev-mode server):
+- [x] **Step 1: Failing tests**, append to `tests/dev.test.ts` (mirror its existing setup; it already builds a dev-mode server):
 
 ```ts
   it('finish-match completes the open match with fake stats and ratings', async () => {
@@ -865,11 +865,11 @@ git commit -m "feat: leaderboard, profile, and match history read API"
   });
 ```
 
-Note: `/api/dev/fill` uses a module-level `fakeSeq` counter, so fake steamids differ across tests — fine, players are upserted per test DB.
+Note: `/api/dev/fill` uses a module-level `fakeSeq` counter, so fake steamids differ across tests, fine, players are upserted per test DB.
 
-- [x] **Step 2: Run to fail** — `npx vitest run tests/dev.test.ts`.
+- [x] **Step 2: Run to fail**, `npx vitest run tests/dev.test.ts`.
 
-- [x] **Step 3: Implement** — in `src/routes/dev.ts` add imports:
+- [x] **Step 3: Implement**, in `src/routes/dev.ts` add imports:
 
 ```ts
 import { completeMatch } from '../matchResult.js';
@@ -924,9 +924,9 @@ Add inside `devRoutes` (near the other routes):
   });
 ```
 
-(If self-`app.inject` inside a handler misbehaves, refactor the bodies of fill/ready-all/vote-all into local `fillQueue()`, `readyAll()`, `voteAll()` functions and have both the routes and simulate-match call those directly — preferred if any flakiness appears.)
+(If self-`app.inject` inside a handler misbehaves, refactor the bodies of fill/ready-all/vote-all into local `fillQueue()`, `readyAll()`, `voteAll()` functions and have both the routes and simulate-match call those directly, preferred if any flakiness appears.)
 
-- [x] **Step 4: Run** — `npx vitest run tests/dev.test.ts` → PASS; `npm test && npm run typecheck` → green.
+- [x] **Step 4: Run**, `npx vitest run tests/dev.test.ts` → PASS; `npm test && npm run typecheck` → green.
 
 - [x] **Step 5: Commit**
 
@@ -937,14 +937,14 @@ git commit -m "feat: dev-mode fake match completion + one-click simulate"
 
 ---
 
-### Task 6: Frontend — nav, leaderboard, matches, match detail, profile
+### Task 6: Frontend (nav, leaderboard, matches, match detail, profile)
 
 **Files:**
 - Modify: `public/index.html`, `public/app.js`, `public/style.css`
 
 No unit tests (no frontend test rig); verification is `npm run dev` + the overseer's browser pass. Keep the existing vanilla style: `$()`, `esc()`, innerHTML templates.
 
-- [x] **Step 1: `public/index.html`** — replace `<header>` contents with:
+- [x] **Step 1: `public/index.html`**, replace `<header>` contents with:
 
 ```html
   <header>
@@ -962,7 +962,7 @@ Add before `</main>`:
 
 ```html
     <section id="leaderboard" hidden>
-      <h2>Leaderboard — <span id="lb-season"></span></h2>
+      <h2>Leaderboard, <span id="lb-season"></span></h2>
       <div id="lb-body"></div>
     </section>
 
@@ -982,7 +982,7 @@ Add before `</main>`:
 
 Make `#whoami` a profile link target (handled in JS below).
 
-- [x] **Step 2: `public/app.js`** — add routing + page renderers.
+- [x] **Step 2: `public/app.js`**, add routing + page renderers.
 
 After the `esc` helper add:
 
@@ -1043,7 +1043,7 @@ async function renderMatches() {
     : `<table><thead><tr><th>#</th><th>Campaign</th><th>Score</th><th>Winner</th><th>Ended</th></tr></thead><tbody>` +
       data.matches.map((m) =>
         `<tr><td><a href="#/match/${m.id}">${m.id}</a></td><td>${esc(CAMPAIGN_NAMES[m.campaign] ?? m.campaign)}</td>` +
-        `<td>${m.teamAScore} — ${m.teamBScore}</td><td>${m.winner === 'draw' ? 'Draw' : `Team ${m.winner.toUpperCase()}`}</td>` +
+        `<td>${m.teamAScore}, ${m.teamBScore}</td><td>${m.winner === 'draw' ? 'Draw' : `Team ${m.winner.toUpperCase()}`}</td>` +
         `<td>${esc(fmtDate(m.endedAt))}</td></tr>`,
       ).join('') + '</tbody></table>';
   show('matches-page');
@@ -1059,8 +1059,8 @@ async function renderMatchDetail(id) {
       `<tr><td>${playerLink(p)}</td><td>${p.si_damage}</td><td>${p.si_kills}</td><td>${p.common_kills}</td><td>${p.ff_dealt}</td><td>${p.revives}</td><td>${srDeltaHtml(p.srDelta)}</td></tr>`,
     ).join('') + '</tbody></table>';
   $('match-detail-body').innerHTML =
-    `<h2>Match #${match.id} — ${esc(CAMPAIGN_NAMES[match.campaign] ?? match.campaign)}</h2>` +
-    `<p>${match.teamAScore} — ${match.teamBScore} · ${match.winner === 'draw' ? 'Draw' : `Team ${match.winner.toUpperCase()} wins`} · ${esc(fmtDate(match.endedAt))}</p>` +
+    `<h2>Match #${match.id}, ${esc(CAMPAIGN_NAMES[match.campaign] ?? match.campaign)}</h2>` +
+    `<p>${match.teamAScore}, ${match.teamBScore} · ${match.winner === 'draw' ? 'Draw' : `Team ${match.winner.toUpperCase()} wins`} · ${esc(fmtDate(match.endedAt))}</p>` +
     `<table><thead><tr><th>Map</th><th>A</th><th>B</th></tr></thead><tbody>` +
     maps.map((m) => `<tr><td>${esc(m.map)}</td><td>${m.teamAScore}</td><td>${m.teamBScore}</td></tr>`).join('') +
     '</tbody></table>' +
@@ -1076,7 +1076,7 @@ async function renderProfile(steamid) {
   $('profile-body').innerHTML =
     `<div class="profile-head">${avatar}<div><h2>${esc(player.name)}</h2>` +
     (rating
-      ? `<p class="sr big">${rating.sr} SR</p><p>${rating.wins}W — ${rating.losses}L</p>`
+      ? `<p class="sr big">${rating.sr} SR</p><p>${rating.wins}W, ${rating.losses}L</p>`
       : '<p class="note">Unrated this season.</p>') +
     '</div></div>' +
     sparkline(history.map((h) => h.sr)) +
@@ -1087,7 +1087,7 @@ async function renderProfile(steamid) {
       : `<table><thead><tr><th>#</th><th>Campaign</th><th></th><th>Score</th><th>SR</th><th>Ended</th></tr></thead><tbody>` +
         matches.map((m) =>
           `<tr><td><a href="#/match/${m.id}">${m.id}</a></td><td>${esc(CAMPAIGN_NAMES[m.campaign] ?? m.campaign)}</td>` +
-          `<td class="result-${m.result}">${RESULT_LABEL[m.result]}</td><td>${m.teamAScore} — ${m.teamBScore}</td>` +
+          `<td class="result-${m.result}">${RESULT_LABEL[m.result]}</td><td>${m.teamAScore}, ${m.teamBScore}</td>` +
           `<td>${srDeltaHtml(m.srDelta)}</td><td>${esc(fmtDate(m.endedAt))}</td></tr>`,
         ).join('') + '</tbody></table>');
   show('profile');
@@ -1121,13 +1121,13 @@ Change `connectWs`'s `ws.onmessage = () => refresh();` to `ws.onmessage = () => 
 
 (`/api/me` already returns `steamid`.) Also guard `render()` so it only touches play sections when on the play route: first line `if (location.hash !== '#/' && location.hash !== '') return;`.
 
-- [x] **Step 3: Dev panel button** — in `index.html` devpanel add `<button id="dev-sim">simulate match</button>`; in `initDevPanel` add:
+- [x] **Step 3: Dev panel button**, in `index.html` devpanel add `<button id="dev-sim">simulate match</button>`; in `initDevPanel` add:
 
 ```js
   $('dev-sim').onclick = () => api('/api/dev/simulate-match').then(route);
 ```
 
-- [x] **Step 4: `public/style.css`** — append:
+- [x] **Step 4: `public/style.css`**, append:
 
 ```css
 header nav { display: flex; gap: 1rem; }
@@ -1149,7 +1149,7 @@ td a { color: #e6e6e6; }
 .avatar { width: 64px; height: 64px; border-radius: 8px; }
 ```
 
-- [x] **Step 5: Manual smoke check** — start `npm run dev`, then via dev panel: login, simulate match ×3, visit Leaderboard / Matches / a match detail / a profile. All pages render with data; Play tab still works. (The overseer does a browser pass after this task; the implementer should at minimum run the server and curl the pages' APIs.)
+- [x] **Step 5: Manual smoke check**, start `npm run dev`, then via dev panel: login, simulate match ×3, visit Leaderboard / Matches / a match detail / a profile. All pages render with data; Play tab still works. (The overseer does a browser pass after this task; the implementer should at minimum run the server and curl the pages' APIs.)
 
 - [x] **Step 6: Commit**
 

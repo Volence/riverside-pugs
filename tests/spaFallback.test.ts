@@ -19,7 +19,7 @@ beforeEach(async () => {
 describe('SPA fallback', () => {
   /* Asserted on content type rather than status, deliberately. dist/public is a
    * build artifact this suite does not produce, so the status depends on whether
-   * someone has run `npm run build` — 200 with the shell if so, 404 from
+   * someone has run `npm run build`: 200 with the shell if so, 404 from
    * fastify-static if not. What is invariant either way, and what this test is
    * actually about, is that the request went down the static/page path at all:
    * it is answered as HTML and never as the JSON 404 below. */

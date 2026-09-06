@@ -4,15 +4,15 @@
 
 **Goal:** Replace the `DevOrchestrator` stub with a real backend orchestrator that configures a match on a game server over RCON, receives a lossy live-view feed over a UDP `logaddress` listener, and pulls the authoritative final scores/stats over RCON to drive a match from `configuring` → `live` → `completed`.
 
-**Architecture:** Small, single-purpose TypeScript modules — a Source RCON TCP client, a DB-backed server pool, a pure log-line parser wrapped in a UDP listener, a match-token helper, and a real `Orchestrator` that composes them. Everything is tested in isolation against a fake RCON TCP server and synthetic log datagrams; **no live game server is contacted anywhere in this plan.**
+**Architecture:** Small, single-purpose TypeScript modules, a Source RCON TCP client, a DB-backed server pool, a pure log-line parser wrapped in a UDP listener, a match-token helper, and a real `Orchestrator` that composes them. Everything is tested in isolation against a fake RCON TCP server and synthetic log datagrams; **no live game server is contacted anywhere in this plan.**
 
 **Tech Stack:** Node 22 built-ins only (`node:net`, `node:dgram`, `node:crypto`), TypeScript strict ESM, vitest, better-sqlite3 (already present).
 
 **Context:** Builds on the completed sub-project 1 in `/home/volence/l4d/pug`. Read the spec first: `docs/superpowers/specs/2026-07-30-sub-project-2-orchestrator-plugin-design.md`. Key existing pieces you will consume or modify: `src/orchestrator.ts` (currently `Orchestrator` interface + `DevOrchestrator` stub), `src/db.ts` (`openDb`, `type DB`; the `servers` and `matches`/`match_players` tables already exist), `src/matchmaker.ts` (calls `orchestrator.setupMatch(matchId)`), `src/server.ts` (`buildServer`, constructs the orchestrator), `src/config.ts` (`loadConfig`, `Config`).
 
-**Scope boundary:** This plan is 2a only. The `pug-match` SourcePawn plugin (2b) and the second-srcds-instance infrastructure (2c) are deliberately out of scope — they require the live box and are designed but not built here. This plan's `Orchestrator` is fully exercised against fakes; pinning the log parser against *real* captured srcds samples happens during the 2b/2c dry-run.
+**Scope boundary:** This plan is 2a only. The `pug-match` SourcePawn plugin (2b) and the second-srcds-instance infrastructure (2c) are deliberately out of scope, they require the live box and are designed but not built here. This plan's `Orchestrator` is fully exercised against fakes; pinning the log parser against *real* captured srcds samples happens during the 2b/2c dry-run.
 
-**Contract shared with the (future) plugin — do not drift from this:**
+**Contract shared with the (future) plugin, do not drift from this:**
 
 Live-view UDP lines (lossy, cosmetic), one datagram each, engine-wrapped as
 `\xFF\xFF\xFF\xFFR` + `L MM/DD/YYYY - HH:MM:SS: ` + body + `\n`:
@@ -68,7 +68,7 @@ describe('matchToken', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/matchToken.test.ts`
-Expected: FAIL — cannot find module `../src/matchToken.js`.
+Expected: FAIL, cannot find module `../src/matchToken.js`.
 
 - [ ] **Step 3: Write `src/matchToken.ts`**
 
@@ -106,7 +106,7 @@ git add src/matchToken.ts tests/matchToken.test.ts && git commit -m "feat: per-m
 - Create: `src/logParse.ts`
 - Test: `tests/logParse.test.ts`
 
-Design: `parseLogDatagram(buf)` takes a raw UDP datagram `Buffer` and returns a typed `LogEvent | null` (null = not one of our lines, or malformed — never throw). It strips the engine framing (`0xFF 0xFF 0xFF 0xFF 0x52 'R'`-style prefix is `FF FF FF FF` then a single `R` byte, then the ASCII text; the text begins with the `L MM/DD/YYYY - HH:MM:SS: ` stamp) and then matches the `PUG <token> <VERB> ...` body. Tolerant of the framing being absent (some capture paths hand us just the text), so it searches for `PUG ` rather than assuming a fixed offset.
+Design: `parseLogDatagram(buf)` takes a raw UDP datagram `Buffer` and returns a typed `LogEvent | null` (null = not one of our lines, or malformed, never throw). It strips the engine framing (`0xFF 0xFF 0xFF 0xFF 0x52 'R'`-style prefix is `FF FF FF FF` then a single `R` byte, then the ASCII text; the text begins with the `L MM/DD/YYYY - HH:MM:SS: ` stamp) and then matches the `PUG <token> <VERB> ...` body. Tolerant of the framing being absent (some capture paths hand us just the text), so it searches for `PUG ` rather than assuming a fixed offset.
 
 - [ ] **Step 1: Write failing test `tests/logParse.test.ts`**
 
@@ -175,7 +175,7 @@ describe('parseLogDatagram', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/logParse.test.ts`
-Expected: FAIL — cannot find module `../src/logParse.js`.
+Expected: FAIL, cannot find module `../src/logParse.js`.
 
 - [ ] **Step 3: Write `src/logParse.ts`**
 
@@ -207,7 +207,7 @@ function intOf(s: string | undefined): number | null {
 /**
  * Decode a raw srcds log UDP datagram into a typed PUG event, or null if it is
  * not one of ours or is malformed. Never throws. Tolerant of the engine framing
- * being present or absent — it locates the `PUG ` marker rather than assuming an
+ * being present or absent, it locates the `PUG ` marker rather than assuming an
  * offset.
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {
@@ -330,7 +330,7 @@ describe('parseDump', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/dumpParse.test.ts`
-Expected: FAIL — cannot find module `../src/dumpParse.js`.
+Expected: FAIL, cannot find module `../src/dumpParse.js`.
 
 - [ ] **Step 3: Write `src/dumpParse.ts`**
 
@@ -493,7 +493,7 @@ describe('rcon packet', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/rconPacket.test.ts`
-Expected: FAIL — cannot find module `../src/rconPacket.js`.
+Expected: FAIL, cannot find module `../src/rconPacket.js`.
 
 - [ ] **Step 3: Write `src/rconPacket.ts`**
 
@@ -560,7 +560,7 @@ Design: `RconClient` opens a TCP socket, authenticates, and `exec(cmd)` resolves
 with the response body of the matching-id `RESPONSE_VALUE` packet. Our commands
 all produce a single small (<4 KB) response, so single-packet handling is
 sufficient; a comment notes multi-packet fragmentation is out of scope. The test
-stands up a real in-process `net.Server` speaking the protocol — no game server.
+stands up a real in-process `net.Server` speaking the protocol, no game server.
 
 - [ ] **Step 1: Write failing test `tests/rcon.test.ts`**
 
@@ -632,7 +632,7 @@ describe('RconClient', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/rcon.test.ts`
-Expected: FAIL — cannot find module `../src/rcon.js`.
+Expected: FAIL, cannot find module `../src/rcon.js`.
 
 - [ ] **Step 3: Write `src/rcon.ts`**
 
@@ -818,7 +818,7 @@ describe('serverPool', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/serverPool.test.ts`
-Expected: FAIL — cannot find module `../src/serverPool.js`.
+Expected: FAIL, cannot find module `../src/serverPool.js`.
 
 - [ ] **Step 3: Write `src/serverPool.ts`**
 
@@ -960,7 +960,7 @@ describe('LogListener', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/logListener.test.ts`
-Expected: FAIL — cannot find module `../src/logListener.js`.
+Expected: FAIL, cannot find module `../src/logListener.js`.
 
 - [ ] **Step 3: Write `src/logListener.ts`**
 
@@ -972,7 +972,7 @@ import { parseLogDatagram, type LogEvent } from './logParse.js';
 /**
  * Binds a UDP socket for srcds `logaddress` traffic. Datagrams are parsed and,
  * if their token is registered, handed to the callback. Everything else (bad
- * parse, unknown token) is dropped — the stream is untrusted and lossy by design.
+ * parse, unknown token) is dropped, the stream is untrusted and lossy by design.
  */
 export class LogListener {
   private sock: dgram.Socket | null = null;
@@ -1027,7 +1027,7 @@ git add src/logListener.ts tests/logListener.test.ts && git commit -m "feat: udp
 - Modify: `src/config.ts`
 - Test: `tests/config.test.ts` (extend)
 
-Design: add orchestration settings to `Config` — the UDP listen port, and the
+Design: add orchestration settings to `Config`, the UDP listen port, and the
 backend's own reachable `host:port` that gets handed to `logaddress_add` so the
 server knows where to send logs. Keep defaults dev-friendly.
 
@@ -1052,7 +1052,7 @@ Add these cases inside the existing `describe('loadConfig', ...)` block:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/config.test.ts`
-Expected: FAIL — `logListenPort` is undefined.
+Expected: FAIL, `logListenPort` is undefined.
 
 - [ ] **Step 3: Modify `src/config.ts`**
 
@@ -1083,7 +1083,7 @@ git add src/config.ts tests/config.test.ts && git commit -m "feat: orchestration
 
 ---
 
-### Task 9: Real orchestrator — setup and finish
+### Task 9: Real orchestrator (setup and finish)
 
 **Files:**
 - Modify: `src/orchestrator.ts`
@@ -1246,7 +1246,7 @@ describe('RealOrchestrator', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/orchestrator.test.ts`
-Expected: FAIL — `RealOrchestrator` is not exported.
+Expected: FAIL, `RealOrchestrator` is not exported.
 
 - [ ] **Step 3: Rewrite `src/orchestrator.ts`**
 
@@ -1265,7 +1265,7 @@ export interface Orchestrator {
   finishMatch(matchId: number): Promise<void>;
 }
 
-/** Stub used in dev mode — no real server contact. */
+/** Stub used in dev mode, no real server contact. */
 export class DevOrchestrator implements Orchestrator {
   async setupMatch(matchId: number): Promise<void> {
     console.log(`[orchestrator-stub] match ${matchId} created; real orchestration is sub-project 2`);
@@ -1418,7 +1418,7 @@ function firstMapOf(campaign: string): string {
 
 - [ ] **Step 4: Add the `token` column to the schema**
 
-The `matches` table needs a `token` column. Modify `src/db.ts` — in the
+The `matches` table needs a `token` column. Modify `src/db.ts`, in the
 `CREATE TABLE IF NOT EXISTS matches (...)` block, add `token TEXT` after
 `server_id INTEGER REFERENCES servers(id),`:
 
@@ -1557,7 +1557,7 @@ describe('orchestrator end-to-end (fake server + real UDP)', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/orchestrator-e2e.test.ts`
-Expected: PASS already? No — it constructs `RealOrchestrator` directly (which exists from Task 9), so this test may pass without any server.ts change. Run it: if it passes, that confirms the orchestrator wiring works end-to-end via a real UDP round-trip. If it fails, fix per the error. Either way, proceed to Step 3 to wire the production path into `buildServer`.
+Expected: PASS already? No, it constructs `RealOrchestrator` directly (which exists from Task 9), so this test may pass without any server.ts change. Run it: if it passes, that confirms the orchestrator wiring works end-to-end via a real UDP round-trip. If it fails, fix per the error. Either way, proceed to Step 3 to wire the production path into `buildServer`.
 
 - [ ] **Step 3: Modify `src/server.ts` to construct the real orchestrator + listener outside dev mode**
 
@@ -1638,7 +1638,7 @@ complete: Source RCON client, DB-backed server pool, UDP `logaddress` listener +
 parser, per-match token, and a real orchestrator that configures a match over
 RCON, receives a lossy live-view feed over UDP, and pulls the authoritative
 final scores/stats over RCON (`sm_pug_dump`) to drive `configuring` → `live` →
-`completed`. All exercised against a fake RCON server + synthetic UDP datagrams —
+`completed`. All exercised against a fake RCON server + synthetic UDP datagrams,
 no live game server is contacted.
 
 **Not yet built (need the live box):** the `pug-match` SourcePawn plugin (2b) and

@@ -77,7 +77,7 @@ describe('stats routes', () => {
     expect(body.matches).toHaveLength(1);
     expect(body.matches[0].result).toBe('win');
     expect(typeof body.matches[0].srDelta).toBe('number');
-    // ME is on the winning team ('a') — SR should have gone up.
+    // ME is on the winning team ('a'), so SR should have gone up.
     expect(body.matches[0].srDelta).toBeGreaterThan(0);
     expect(body.history).toHaveLength(1);
     expect(typeof body.history[0].sr).toBe('number');
@@ -122,7 +122,7 @@ describe('stats routes', () => {
     expect(p.team).toBe('a');
     expect(p.siDamage).toBe(500);
     expect(typeof p.srDelta).toBe('number');
-    // match was won by team 'b' — team 'a' (ME) lost SR, team 'b' gained SR.
+    // match was won by team 'b', so team 'a' (ME) lost SR and team 'b' gained SR.
     expect(p.srDelta).toBeLessThan(0);
     const winnerPlayer = body.players.find((x: any) => x.steamid === IDS[4]);
     expect(winnerPlayer.team).toBe('b');

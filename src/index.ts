@@ -9,5 +9,5 @@ const app = await buildServer({ config, db });
 await app.listen({ port: config.port, host: '0.0.0.0' });
 console.log(`pug-web listening on :${config.port} (devMode=${config.devMode})`);
 if (config.devMode) {
-  console.warn('*** DEV MODE ENABLED — /api/dev/* routes allow unauthenticated login as any SteamID. Never run this in production. ***');
+  console.warn('*** DEV MODE ENABLED: /api/dev/* routes allow unauthenticated login as any SteamID. Never run this in production. ***');
 }

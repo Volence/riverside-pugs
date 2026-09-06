@@ -34,7 +34,7 @@ export function Matches() {
                       <a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a>
                       <span class="muted match-id"> #{m.id}</span>
                     </td>
-                    <td class="num">{m.teamAScore} — {m.teamBScore}</td>
+                    <td class="num">{m.teamAScore} - {m.teamBScore}</td>
                     <td>{winnerLabel(m.winner)}</td>
                     <td class="num muted">{fmtDate(m.endedAt)}</td>
                   </tr>

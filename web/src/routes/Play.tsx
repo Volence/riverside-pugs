@@ -144,7 +144,7 @@ function QueuePanel(
 }
 
 /** Eight fixed slots rather than a list that grows. A half-full queue should
- *  look like a half-full queue — the empty slots are the information. */
+ *  look like a half-full queue: the empty slots are the information. */
 function Slots({ filled }: { filled: number }) {
   return (
     <div class="slots">
@@ -164,7 +164,7 @@ function ReadyCheck(
 
   return (
     <Panel class="urgent-panel">
-      <p class="eyebrow">Match found — ready up</p>
+      <p class="eyebrow">Match found, ready up</p>
       <Countdown deadline={lobby.deadline} left={left} />
       <ul class="roster roster--ready">
         {lobby.players.map((p) => (
@@ -181,7 +181,7 @@ function ReadyCheck(
         disabled={iAmReady}
         onClick={() => api.ready().catch(() => {}).then(refresh)}
       >
-        {iAmReady ? `Ready — waiting for ${lobby.players.length - lobby.ready.length}` : 'Ready'}
+        {iAmReady ? `Ready, waiting for ${lobby.players.length - lobby.ready.length}` : 'Ready'}
       </button>
     </Panel>
   );
@@ -218,7 +218,7 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
           );
         })}
       </div>
-      {total === 0 && <Empty>No votes yet — a random campaign is picked if nobody votes.</Empty>}
+      {total === 0 && <Empty>No votes yet. A random campaign is picked if nobody votes.</Empty>}
     </Panel>
   );
 }

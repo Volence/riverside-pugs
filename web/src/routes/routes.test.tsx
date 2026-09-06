@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/preact';
 
 /* Deliberately shallow. These assert that each route reaches its loaded state
- * and puts the right data on screen — not how it is marked up, so a design
+ * and puts the right data on screen, not how it is marked up, so a design
  * change does not break the suite. The logic worth testing properly lives in
  * format.ts and useFetch.ts, which have their own tests. */
 
@@ -82,7 +82,7 @@ describe('MatchDetail', () => {
     });
     const { container } = render(<MatchDetail id="7" me="1" />);
     await waitFor(() => expect(screen.getByText('l4d_hospital01_apartment')).toBeTruthy());
-    // "Team A" appears twice here — as the winner and as a table heading.
+    // "Team A" appears twice here: as the winner and as a table heading.
     expect(screen.getAllByText('Team A').length).toBeGreaterThan(0);
     expect(screen.getByText('Team B')).toBeTruthy();
     // ordinal is a 0-based index in the DB but must read as map 1. Scoped to the

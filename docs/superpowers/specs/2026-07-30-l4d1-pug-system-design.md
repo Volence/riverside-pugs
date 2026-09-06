@@ -1,4 +1,4 @@
-# L4D1 Ranked PUG System — Design
+# L4D1 Ranked PUG System: Design
 
 **Date:** 2026-07-30
 **Status:** Approved design, pre-implementation
@@ -20,11 +20,11 @@ stats back. Ratings update after each match.
 | Concurrency | Pool of 2-3 fixed servers, picked per match. No dynamic provisioning. |
 | Server topology | Start with one new srcds instance on the existing Dallas box (alongside the casual server, separate port). Second box added later by inserting a `servers` row. |
 | Audience | Friends-only at launch (invite/vouch). Registration gates (hours, versus games) built but toggled off until opening to the public. |
-| Rating system | OpenSkill (Weng-Lin/Plackett-Luce) — TrueSkill-family with native team support. Not Glicko-2 (1v1-only model, needs ad-hoc team hacks; rating periods don't fit per-match updates). |
+| Rating system | OpenSkill (Weng-Lin/Plackett-Luce), TrueSkill-family with native team support. Not Glicko-2 (1v1-only model, needs ad-hoc team hacks; rating periods don't fit per-match updates). |
 | Match format | Full campaign **minus finale**, winner by total score. Finale inclusion becomes a toggle later. |
 | Stats | Results + core per-player stats at launch, schema designed for expansion. |
 | Stack | TypeScript monolith. Chosen by Claude per "you pick." |
-| Backend↔server transport | RCON (backend→server) + `logaddress_add` UDP log stream (server→backend). **No SourceMod extensions** — nothing that risks not loading on the 2009 L4D1 engine. HTTP-extension approach (SteamWorks/ripext) deliberately rejected as foundation; possible later upgrade. |
+| Backend↔server transport | RCON (backend→server) + `logaddress_add` UDP log stream (server→backend). **No SourceMod extensions**, nothing that risks not loading on the 2009 L4D1 engine. HTTP-extension approach (SteamWorks/ripext) deliberately rejected as foundation; possible later upgrade. |
 | Discord | Webhook notifications only (queue status, match found, results). No bot. |
 | Seasons | Not a launch feature, but the schema is season-aware from day one (all ratings/matches keyed by season) so a future leaderboard reset is an insert, not a migration. |
 
@@ -32,7 +32,7 @@ stats back. Ratings update after each match.
 
 Two deployables plus existing infrastructure:
 
-### 1. `pug-web` — TypeScript monolith
+### 1. `pug-web`: TypeScript monolith
 
 One Node.js process on the Dallas box behind Caddy (TLS + domain). Contains:
 
@@ -48,7 +48,7 @@ One Node.js process on the Dallas box behind Caddy (TLS + domain). Contains:
 - **Discord notifier:** webhook POSTs.
 - **Storage:** SQLite (friend-group scale; zero-ops; easy backup).
 
-### 2. `pug-match` — SourcePawn plugin
+### 2. `pug-match`: SourcePawn plugin
 
 Pure SourcePawn, no extensions. Installed on PUG server instances through the
 existing `deploy/overrides/` + `deploy.sh` mechanism. Sits on top of the
@@ -60,12 +60,12 @@ Rotoblin-AZMod config and match flow. Responsibilities:
 - Run the campaign minus finale; detect map/match completion.
 - Emit structured log lines (see Transport) for match start, per-map scores,
   per-player stats, player connect/disconnect, heartbeat, match end.
-- Keep business logic out — the plugin enforces and reports; the backend decides.
+- Keep business logic out: the plugin enforces and reports; the backend decides.
 
 ### 3. Server pool
 
 `servers` table: name, host, game port, RCON port + password, status
-(`idle` / `reserved` / `live` / `offline`). Day one: one row — a second srcds
+(`idle` / `reserved` / `live` / `offline`). Day one: one row, a second srcds
 instance on the Dallas box (e.g. `:27016`), leaving the casual server untouched.
 
 **Risk noted:** the Dallas box is 2 vCPU; casual server + live 100-tick PUG
@@ -123,24 +123,24 @@ for an active match are dropped.
 
 ## Data model (SQLite)
 
-- **players** — steamid (key), name, avatar, status (`invited`/`active`/`banned`),
-  admin flag, created_at. (No rating columns here — see player_ratings.)
-- **seasons** — id, name, started_at, ended_at (null = current). Season 1 is
+- **players**: steamid (key), name, avatar, status (`invited`/`active`/`banned`),
+  admin flag, created_at. (No rating columns here, see player_ratings.)
+- **seasons**: id, name, started_at, ended_at (null = current). Season 1 is
   seeded at first launch; exactly one season is current at any time.
-- **player_ratings** — (player_id, season_id) → mu, sigma, wins, losses. The
+- **player_ratings**: (player_id, season_id) → mu, sigma, wins, losses. The
   leaderboard and all rating updates operate on the current season's row; a new
   row with fresh priors is created on a player's first match of a season.
-- **matches** — id, season_id, state (`ready_check`→`map_vote`→`configuring`→
+- **matches**: id, season_id, state (`ready_check`→`map_vote`→`configuring`→
   `live`→`completed`/`aborted`), campaign, server_id, team scores, winner,
   timestamps.
-- **match_players** — match_id, player_id, team; per-map core stats (SI damage,
+- **match_players**: match_id, player_id, team; per-map core stats (SI damage,
   SI kills, common kills, FF dealt, revives) as columns + raw stats JSON.
-- **rating_history** — player_id, match_id, mu/sigma before and after.
-- **servers** — the pool (above).
-- **settings** — config keys: gate toggles/thresholds, map pool, finale toggle,
+- **rating_history**: player_id, match_id, mu/sigma before and after.
+- **servers**: the pool (above).
+- **settings**: config keys: gate toggles/thresholds, map pool, finale toggle,
   reconnect grace, Discord webhook URL.
 
-Queue, ready-check, and vote state live **in memory only** — ephemeral by
+Queue, ready-check, and vote state live **in memory only**, ephemeral by
 design; a backend restart just means players re-queue.
 
 ## Ratings
@@ -167,11 +167,11 @@ either.
 
 Evaluated at registration; each toggleable in settings:
 
-- `invite_or_approval` — **on at launch.** Invite code or admin approval.
-- `min_l4d1_hours` — off at launch. Steam Web API `GetOwnedGames` (appid 500).
+- `invite_or_approval`: **on at launch.** Invite code or admin approval.
+- `min_l4d1_hours`: off at launch. Steam Web API `GetOwnedGames` (appid 500).
   Private profiles hide playtime → escape hatch: admin vouch.
-- `min_versus_games` — off at launch. Tracked internally by our own match
-  history (Steam's public L4D1 stats are not assumed to expose versus counts —
+- `min_versus_games`: off at launch. Tracked internally by our own match
+  history (Steam's public L4D1 stats are not assumed to expose versus counts,
   verify during implementation; internal tracking is the fallback and default).
 
 ## Failure handling
@@ -205,7 +205,7 @@ Evaluated at registration; each toggleable in settings:
 1. **Backend core:** schema, Steam login, queue → ready → vote → teams state
    machine, websockets, dev mode. *(No game server needed yet.)*
 2. **Orchestrator + plugin:** server pool, RCON setup, roster enforcement, log
-   reporting — first real end-to-end match.
+   reporting, first real end-to-end match.
 3. **Ratings + stats:** OpenSkill integration, profiles, leaderboard, match
    history pages, Discord webhooks.
 4. **Opening up:** eligibility gates on, admin tooling, ban handling.
