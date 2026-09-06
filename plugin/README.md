@@ -144,6 +144,24 @@ the server is in use.** Staging this plugin means new RCON commands,
 event hooks, and a repeating team-lock timer running live; treat it as a
 maintenance-window change, not a hot deploy.
 
+## Staging and testing
+
+    ./build.sh            # compile (wine + the Rotoblin tree's spcomp)
+    ./stage.sh --solo     # install/reload on the box, set solo-test cvars
+
+`stage.sh` deliberately does not use `deploy/deploy.sh`, which rsyncs every
+override and restarts the service. SourceMod loads a plugin on a running server,
+so staging copies one file and calls `sm plugins load`: no restart, no map
+change, nobody kicked. It refuses to run while players are connected unless you
+pass `--force`.
+
+**The plugin is inert until a match is configured.** Every hook early-returns at
+`MS_None`, including the kick path in `OnClientPostAdminCheck`, so it is safe to
+leave installed on the casual server between test sessions. The only things
+running are two timers that return immediately.
+
+Step-by-step runbook with copy-pasteable RCON: `plugin/TESTING.md`.
+
 ## Manual staging checklist
 
 For the joint session, once the server is free. Run `sm_pug_status` between
