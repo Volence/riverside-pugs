@@ -7,6 +7,7 @@
     "dev:api": "DEV_MODE=1 tsx watch src/index.ts",
     "dev:web": "vite",
     "build": "vite build",
+    "prestart": "npm run build",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json"
