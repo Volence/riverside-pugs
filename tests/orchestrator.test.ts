@@ -9,6 +9,7 @@ import {
   decodePackets, encodePacket, SERVERDATA_AUTH, SERVERDATA_AUTH_RESPONSE,
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
+import { pugReply } from './helpers.js';
 
 function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
   const cmds: string[] = [];
@@ -25,8 +26,7 @@ function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; c
             sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
             cmds.push(p.body);
-            const body = p.body.startsWith('sm_pug_dump') ? dumpBody : 'ok';
-            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, body));
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dumpBody)));
           }
         }
       });
@@ -158,8 +158,7 @@ describe('RealOrchestrator', () => {
               if (p.body.startsWith('sm_pug_abort')) {
                 sock.destroy();
               } else {
-                const body = p.body.startsWith('sm_pug_dump') ? dump : 'ok';
-                sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, body));
+                sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dump)));
               }
             }
           }

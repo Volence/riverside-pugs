@@ -10,6 +10,7 @@ import {
   decodePackets, encodePacket, SERVERDATA_AUTH, SERVERDATA_AUTH_RESPONSE,
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
+import { pugReply } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 
@@ -25,8 +26,7 @@ function fakeServer(dumpFor: (mid: string) => string) {
             sock.write(encodePacket(0, SERVERDATA_RESPONSE_VALUE, ''));
             sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
-            const m = p.body.match(/^sm_pug_dump \S+/);
-            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, m ? dumpFor(p.body) : 'ok'));
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dumpFor)));
           }
         }
       });

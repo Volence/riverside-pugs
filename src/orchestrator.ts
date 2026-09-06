@@ -93,8 +93,12 @@ export class RealOrchestrator implements Orchestrator {
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
       await rcon.exec('exec pug_match');
       await rcon.exec(`sv_password "pug_${token.slice(0, 8)}"`);
-      await rcon.exec(`sm_pug_match ${matchId} ${token} ${match.campaign}`);
-      for (const r of roster) await rcon.exec(`sm_pug_roster ${r.player_id}:${r.team}`);
+      await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}`);
+      // The steamid:team arg MUST be quoted: Source's console tokenizer splits
+      // unquoted args on ':', so the plugin would receive a bare steamid, reject
+      // the line, and then kick every player as non-rostered. Verified on the
+      // live box 2026-08-29 — the fake RCON server in tests does not tokenize.
+      for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
       await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
       markLive(this.db, server.id);
       this.db.prepare("UPDATE matches SET state = 'live' WHERE id = ?").run(matchId);
@@ -161,6 +165,16 @@ export class RealOrchestrator implements Orchestrator {
       }
     }
   }
+}
+
+/** Run a pug-match server command and require it to answer PUGOK. The plugin
+ *  reports refusals as `PUGERR ...` on stdout rather than failing the RCON call,
+ *  so without this check a malformed match/roster setup looks like success and
+ *  only surfaces in-game as every player being kicked. */
+async function expectPugOk(rcon: RconClient, cmd: string): Promise<string> {
+  const res = await rcon.exec(cmd);
+  if (!res.includes('PUGOK')) throw new Error(`${cmd.split(' ')[0]} rejected: ${res.trim() || '(no response)'}`);
+  return res;
 }
 
 /** First playable map of a campaign. Full per-campaign map lists live in the plugin;
