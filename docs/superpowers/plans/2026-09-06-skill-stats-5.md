@@ -1030,7 +1030,26 @@ Note: this file lives in the `l4d` tree, not the `pug` repo. Commit it wherever 
  *  match where nobody skeeted), so g_bSkillDetect is sampled at MATCH_START and
  *  stamped on the dump. */
 
+// The include MUST be wrapped. l4d2_skill_detect.inc:427 declares
+//
+//     public SharedPlugin __pl_l4d2_skill_detect = {
+//         name = "skill_detect", file = "l4d2_skill_detect.smx",
+//     #if defined REQUIRE_PLUGIN
+//         required = 1,
+//     #else
+//         required = 0,
+//     #endif
+//     };
+//
+// REQUIRE_PLUGIN is defined by default, so a bare `#include <l4d2_skill_detect>`
+// makes skill_detect a HARD dependency and SourceMod refuses to load pug-match
+// on any server without it. That would break the skilldetect=0 design, break the
+// casual server, and break Task 9's verification step, which unloads
+// skill_detect on purpose. pug-match already uses this exact idiom for
+// readyup.inc at pug-match.sp:7-9; match it.
+#undef REQUIRE_PLUGIN
 #include <l4d2_skill_detect>
+#define REQUIRE_PLUGIN
 
 enum PugStat
 {
