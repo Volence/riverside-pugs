@@ -61,7 +61,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
 
     const q = req.query as { season?: string; limit?: string };
     const seasonId = q.season ? Number(q.season) : currentSeasonId(db);
-    const limit = Math.min(Math.max(Number(q.limit ?? 25) || 25, 1), 100);
+    const limit = Math.min(Math.max(Math.trunc(Number(q.limit ?? 25) || 25), 1), 100);
 
     const rows = db.prepare(
       `SELECT mps.player_id AS steamid, p.name, p.avatar, SUM(mps.value) AS total

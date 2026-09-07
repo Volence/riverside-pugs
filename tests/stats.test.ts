@@ -193,5 +193,21 @@ describe('stats routes', () => {
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/wat', cookies });
       expect(res.statusCode).toBe(404);
     });
+
+    it('truncates a fractional limit instead of passing it to SQLite unchanged', async () => {
+      const matchId = playCompletedMatch(db);
+      IDS.forEach((id, i) => seedStats(db, matchId, id, { skeets: i + 1 }));
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=50.7', cookies });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().rows.length).toBeLessThanOrEqual(50);
+    });
+
+    it('falls back to the default limit on a garbage limit string', async () => {
+      const matchId = playCompletedMatch(db);
+      IDS.forEach((id, i) => seedStats(db, matchId, id, { skeets: i + 1 }));
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=abc', cookies });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().rows.length).toBeLessThanOrEqual(25);
+    });
   });
 });
