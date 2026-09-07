@@ -155,6 +155,8 @@ kick your casual players.
 This runbook is run against a live ranked match to verify the skill-detection
 integration end to end. Everything above is unproven until this passes.
 
+**WARNING: Every step below changes the live server. Real players are usually connected. Before you start, run `R "status"` to see who is online and get the owner's explicit go-ahead before proceeding.**
+
 ### 1. Stage the plugin
 
     ./stage.sh --solo
@@ -169,7 +171,7 @@ With skill_detect loaded, set up a match and take it live, then:
 
 Expected: `DUMP match=<id> skilldetect=1`
 
-Then unload skill_detect (`sm plugins unload l4d2_skill_detect`), set up a fresh match, take it live, and dump again. Expected: `skilldetect=0`, and `SKILL` lines carrying only `tank_damage`, `damage_as_si` and `tank_punches`. This is the check that proves "not measured" cannot be persisted as zero.
+Then unload skill_detect (`sm plugins unload l4d2_skill_detect`), set up a fresh match, take it live, and dump again. **This unload will disrupt anyone playing with the plugin loaded; confirm no one is mid-match first.** Expected: `skilldetect=0`, and `SKILL` lines carrying only `tank_damage`, `damage_as_si` and `tank_punches`. This is the check that proves "not measured" cannot be persisted as zero.
 
 ### 3. Verify counting against ground truth
 
@@ -192,6 +194,8 @@ Put `sm_skill_report_enable` back to 0 when done.
 Create a match through the app so `RealOrchestrator.setupMatch()` runs (this has never been exercised against the live server). Play two halves. Confirm rows land in `match_player_stats`, the match page renders the new columns, and your own profile shows the private panel while another account's does not.
 
 ### 5. Restore the server
+
+**This step resets all config back to production. Confirm the match is finished first.**
 
     R "sm_pug_abort <token>"
     R "sm_pug_min_orient 3"
