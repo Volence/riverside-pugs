@@ -53,7 +53,7 @@ describe('stats routes', () => {
   afterEach(async () => { await app.close(); });
 
   it('requires auth', async () => {
-    for (const url of ['/api/leaderboard', `/api/players/${ME}`, '/api/matches', '/api/matches/1']) {
+    for (const url of ['/api/leaderboard', '/api/leaderboard/stat/skeets', `/api/players/${ME}`, '/api/matches', '/api/matches/1']) {
       const res = await app.inject({ method: 'GET', url });
       expect(res.statusCode).toBe(401);
     }
@@ -170,6 +170,28 @@ describe('stats routes', () => {
       seedStats(db, matchId, ME, { times_skeeted: 5 });
       const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
       expect(res.json().privateStatTotals.times_skeeted).toBe(5);
+    });
+  });
+
+  describe('stat leaderboard', () => {
+    it('ranks players by summed stat across completed matches in a season', async () => {
+      const matchId = playCompletedMatch(db);
+      seedStats(db, matchId, IDS[0], { skeets: 5 });
+      seedStats(db, matchId, IDS[1], { skeets: 9 });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
+      expect(res.json().rows[0].total).toBe(9);
+    });
+
+    it('refuses a self-only stat even though the key is valid', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/times_skeeted', cookies });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('refuses an unknown stat key', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/wat', cookies });
+      expect(res.statusCode).toBe(404);
     });
   });
 });

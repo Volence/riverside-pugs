@@ -50,6 +50,33 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     };
   });
 
+  /** Per-stat ladder. `self`-visibility stats are refused here rather than
+   *  filtered later: a "most skeeted" board is exactly what the private
+   *  visibility rule exists to prevent, so it must not be reachable by URL. */
+  app.get('/api/leaderboard/stat/:key', async (req, reply) => {
+    if (!requireActive(req, reply)) return;
+    const { key } = req.params as { key: string };
+    const def = statDef(key);
+    if (!def || def.visibility !== 'public') return reply.code(404).send({ error: 'unknown stat' });
+
+    const q = req.query as { season?: string; limit?: string };
+    const seasonId = q.season ? Number(q.season) : currentSeasonId(db);
+    const limit = Math.min(Math.max(Number(q.limit ?? 25) || 25, 1), 100);
+
+    const rows = db.prepare(
+      `SELECT mps.player_id AS steamid, p.name, p.avatar, SUM(mps.value) AS total
+       FROM match_player_stats mps
+       JOIN matches m ON m.id = mps.match_id
+       JOIN players p ON p.steamid = mps.player_id
+       WHERE mps.stat = ? AND m.season_id = ? AND m.state = 'completed'
+       GROUP BY mps.player_id
+       ORDER BY total DESC, p.name ASC
+       LIMIT ?`,
+    ).all(key, seasonId, limit);
+
+    return { stat: def, seasonId, rows };
+  });
+
   app.get('/api/players/:steamid', async (req, reply) => {
     const viewer = requireActive(req, reply);
     if (!viewer) return;
