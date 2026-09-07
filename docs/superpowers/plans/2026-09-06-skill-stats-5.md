@@ -354,42 +354,38 @@ git commit -m "feat(stats): parse SKILL dump lines and the skilldetect capabilit
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// append to tests/matchResult.test.ts, following the existing setup helpers there
-it('persists skill stats and is idempotent across repeat dumps', () => {
-  const { db, matchId, dump } = setupCompletableMatch();   // existing helper in this file
-  const d = { ...dump, skillDetect: true, skills: [
-    { steamid: '76561198000000001', stats: { skeets: 2, tank_damage: 1699 } },
+// Append INSIDE the existing `describe('completeMatch')` block in
+// tests/matchResult.test.ts, which already provides `db` and `matchId` via
+// beforeEach, plus the helpers `seedLiveMatch(db)`, `dumpFor(matchId)` and `IDS`.
+it('persists skill stats keyed by roster slot', () => {
+  const d: Dump = { ...dumpFor(matchId), skillDetect: true, skills: [
+    { steamid: IDS[0], stats: { skeets: 2, tank_damage: 1699 } },
   ] };
   expect(completeMatch(db, matchId, d)).toBe(true);
-
   const rows = db.prepare(
-    'SELECT stat, value FROM match_player_stats WHERE match_id = ? AND player_id = ? ORDER BY stat'
-  ).all(matchId, '76561198000000001');
+    'SELECT stat, value FROM match_player_stats WHERE match_id = ? AND player_id = ? ORDER BY stat',
+  ).all(matchId, IDS[0]);
   expect(rows).toEqual([{ stat: 'skeets', value: 2 }, { stat: 'tank_damage', value: 1699 }]);
 });
 
-it('writes no skill rows when skilldetect was 0', () => {
-  const { db, matchId, dump } = setupCompletableMatch();
-  const d = { ...dump, skillDetect: false, skills: [
-    { steamid: '76561198000000001', stats: { tank_damage: 500 } },
+it('writes no skill-detect stats when skilldetect was 0, but still writes native ones', () => {
+  const d: Dump = { ...dumpFor(matchId), skillDetect: false, skills: [
+    { steamid: IDS[0], stats: { skeets: 9, tank_damage: 500 } },
   ] };
   completeMatch(db, matchId, d);
-  const skeets = db.prepare(
-    "SELECT value FROM match_player_stats WHERE match_id = ? AND stat = 'skeets'"
-  ).all(matchId);
-  expect(skeets).toEqual([]);
-  // The natively captured stats are still written: they do not need skill_detect.
-  const tank = db.prepare(
-    "SELECT value FROM match_player_stats WHERE match_id = ? AND stat = 'tank_damage'"
-  ).get(matchId) as { value: number };
-  expect(tank.value).toBe(500);
+  expect(db.prepare(
+    "SELECT value FROM match_player_stats WHERE match_id = ? AND stat = 'skeets'",
+  ).all(matchId)).toEqual([]);
+  // tank_damage does not need skill_detect, so it survives.
+  expect(db.prepare(
+    "SELECT value FROM match_player_stats WHERE match_id = ? AND stat = 'tank_damage'",
+  ).get(matchId)).toEqual({ value: 500 });
 });
 ```
 
 ```ts
 it('skips skill stats for a steamid not on the roster instead of throwing', () => {
-  const { db, matchId, dump } = setupCompletableMatch();
-  const d = { ...dump, skillDetect: true, skills: [
+  const d: Dump = { ...dumpFor(matchId), skillDetect: true, skills: [
     { steamid: '76561199999999999', stats: { skeets: 3 } },
   ] };
   // Must not throw: foreign_keys is ON, so an unguarded insert would abort the
@@ -489,62 +485,61 @@ git commit -m "feat(stats): persist skill stats to match_player_stats"
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// append to tests/stats.test.ts
+// Append to tests/stats.test.ts, INSIDE `describe('stats routes')`, which already
+// provides `db`, `app` and `cookies` (an authedCookie for ME) via beforeEach,
+// plus `IDS`, `ME` and `playCompletedMatch(db, winner)`.
 describe('stat visibility', () => {
   it('hides self-only stats from other viewers on a match page', async () => {
-    const app = await makeApp();                       // existing helper in this file
-    seedMatchWithStats(app, { steamid: SID_A, stats: { skeets: 2, times_skeeted: 5 } });
-    const res = await app.inject({ method: 'GET', url: '/api/matches/1' });
-    const row = res.json().players.find((p: any) => p.steamid === SID_A);
+    const matchId = playCompletedMatch(db);
+    seedStats(db, matchId, IDS[1], { skeets: 2, times_skeeted: 5 });
+    // `cookies` authenticates ME (IDS[0]), who is NOT IDS[1].
+    const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies });
+    const row = res.json().players.find((p: any) => p.steamid === IDS[1]);
     expect(row.stats.skeets).toBe(2);
     expect(row.stats).not.toHaveProperty('times_skeeted');
   });
 
-  it('shows self-only stats in your own row when logged in as you', async () => {
-    const app = await makeApp();
-    seedMatchWithStats(app, { steamid: SID_A, stats: { skeets: 2, times_skeeted: 5 } });
-    const res = await app.inject({ method: 'GET', url: '/api/matches/1', cookies: sessionCookie(SID_A) });
-    const row = res.json().players.find((p: any) => p.steamid === SID_A);
+  it('shows self-only stats in your own row', async () => {
+    const matchId = playCompletedMatch(db);
+    seedStats(db, matchId, ME, { skeets: 2, times_skeeted: 5 });
+    const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies });
+    const row = res.json().players.find((p: any) => p.steamid === ME);
     expect(row.stats.times_skeeted).toBe(5);
   });
 
   it('returns privateStatTotals null on someone else profile', async () => {
-    const app = await makeApp();
-    seedMatchWithStats(app, { steamid: SID_A, stats: { times_skeeted: 5 } });
-    const res = await app.inject({ method: 'GET', url: `/api/players/${SID_A}`, cookies: sessionCookie(SID_B) });
+    const matchId = playCompletedMatch(db);
+    seedStats(db, matchId, IDS[1], { times_skeeted: 5 });
+    const res = await app.inject({ method: 'GET', url: `/api/players/${IDS[1]}`, cookies });
     expect(res.json().privateStatTotals).toBeNull();
   });
 
   it('returns privateStatTotals on your own profile', async () => {
-    const app = await makeApp();
-    seedMatchWithStats(app, { steamid: SID_A, stats: { times_skeeted: 5 } });
-    const res = await app.inject({ method: 'GET', url: `/api/players/${SID_A}`, cookies: sessionCookie(SID_A) });
+    const matchId = playCompletedMatch(db);
+    seedStats(db, matchId, ME, { times_skeeted: 5 });
+    const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
     expect(res.json().privateStatTotals.times_skeeted).toBe(5);
   });
 });
 ```
 
-Authentication in these tests uses the existing helper `authedCookie(app, db, steamid)` from
-`tests/helpers.ts:7`, which upserts and activates the player and returns
-`{ [SESSION_COOKIE]: app.signCookie(steamid) }`. Do not invent a second mechanism. Replace
-`sessionCookie(SID_A)` above with `authedCookie(app, db, SID_A)`.
+Authentication already exists on these routes. `tests/stats.test.ts` sets `cookies` in
+`beforeEach` via `authedCookie(app, db, ME)` from `tests/helpers.ts:7`. Do not invent a
+session helper.
 
-Add this seeding helper to `tests/stats.test.ts`, matching the file's existing style:
+Add this seeding helper at module scope in `tests/stats.test.ts`, next to `playCompletedMatch`:
 
 ```ts
-const SID_A = '76561198000000001';
-const SID_B = '76561198000000002';
-
-function seedMatchWithStats(db: DB, opts: { steamid: string; stats: Record<string, number> }): void {
-  for (const [stat, value] of Object.entries(opts.stats)) {
-    db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, ?)')
-      .run(opts.steamid, stat, value);
-  }
+function seedStats(db: DB, matchId: number, steamid: string, stats: Record<string, number>): void {
+  const ins = db.prepare(
+    'INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, ?, ?)',
+  );
+  for (const [stat, value] of Object.entries(stats)) ins.run(matchId, steamid, stat, value);
 }
 ```
 
-The player rows must exist before the stat rows, because `src/db.ts:103` sets
-`foreign_keys = ON`. `authedCookie` upserts the player, so call it before `seedMatchWithStats`.
+`src/db.ts:103` sets `foreign_keys = ON`, so the player and match rows must exist first.
+`playCompletedMatch` creates both, so always call it before `seedStats`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -553,10 +548,15 @@ Expected: FAIL, `row.stats` is undefined
 
 - [ ] **Step 3: Implement the filter helper**
 
-In `src/routes/stats.ts`, add imports:
+**Correction to the spec.** The spec says this is "the first authenticated read path" in
+`stats.ts`. That is wrong: every route here is already guarded by `makeRequireActive(db)`
+(`src/routes/guards.ts`), and `tests/stats.test.ts` has a `requires auth` test asserting 401
+on all of them. The guard **returns the viewer's steamid** and the handlers currently discard
+it. Use that return value rather than importing `getSession`.
+
+In `src/routes/stats.ts`, add one import:
 
 ```ts
-import { getSession } from '../session.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 ```
 
@@ -568,9 +568,9 @@ Add near the top of the module:
  *  Enforced here rather than in the UI on purpose: a value the server sends is
  *  a value the viewer can read, regardless of what the page chooses to render. */
 function visibleStats(
-  raw: Record<string, number>, subject: string, viewer: string | null,
+  raw: Record<string, number>, subject: string, viewer: string,
 ): Record<string, number> {
-  const isSelf = viewer !== null && viewer === subject;
+  const isSelf = viewer === subject;
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(raw)) {
     const def = statDef(k);
@@ -587,7 +587,10 @@ function visibleStats(
 In the `GET /api/matches/:id` handler, after the players query, load and attach:
 
 ```ts
-    const viewer = getSession(req);
+    // requireActive already returns the steamid; the existing line discards it.
+    // Change `if (!requireActive(req, reply)) return;` at the top of this handler to:
+    //     const viewer = requireActive(req, reply);
+    //     if (!viewer) return;
     const statRows = db.prepare(
       'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',
     ).all(id) as { player_id: string; stat: string; value: number }[];
@@ -610,7 +613,9 @@ and in the mapping that builds each player row, add:
 In the `GET /api/players/:steamid` handler, after the existing `totals` query:
 
 ```ts
-    const viewer = getSession(req);
+    // Same change as the match handler: capture requireActive's return value.
+    //     const viewer = requireActive(req, reply);
+    //     if (!viewer) return;
     const rows = db.prepare(
       `SELECT mps.stat, SUM(mps.value) AS total
        FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
@@ -625,7 +630,7 @@ In the `GET /api/players/:steamid` handler, after the existing `totals` query:
       if (!def) continue;
       (def.visibility === 'self' ? privateTotals : statTotals)[r.stat] = r.total;
     }
-    const isSelf = viewer !== null && viewer === steamid;
+    const isSelf = viewer === steamid;
 ```
 
 Add to the response object:
@@ -665,30 +670,37 @@ The existing `GET /api/leaderboard` is the SR ladder and is left alone.
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// append to tests/stats.test.ts
+// Append INSIDE `describe('stats routes')` in tests/stats.test.ts, using the
+// same `db`, `app`, `cookies`, `IDS`, `playCompletedMatch` and `seedStats` as Task 4.
 describe('stat leaderboard', () => {
   it('ranks players by summed stat across completed matches in a season', async () => {
-    const app = await makeApp();
-    seedMatchWithStats(app, { steamid: SID_A, stats: { skeets: 5 } });
-    seedMatchWithStats(app, { steamid: SID_B, stats: { skeets: 9 } });
-    const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets' });
+    const matchId = playCompletedMatch(db);
+    seedStats(db, matchId, IDS[0], { skeets: 5 });
+    seedStats(db, matchId, IDS[1], { skeets: 9 });
+    const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
     expect(res.statusCode).toBe(200);
-    expect(res.json().rows.map((r: any) => r.steamid)).toEqual([SID_B, SID_A]);
+    expect(res.json().rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
     expect(res.json().rows[0].total).toBe(9);
   });
 
-  it('refuses a self-only stat even when the key is valid', async () => {
-    const app = await makeApp();
-    const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/times_skeeted' });
+  it('refuses a self-only stat even though the key is valid', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/times_skeeted', cookies });
     expect(res.statusCode).toBe(404);
   });
 
   it('refuses an unknown stat key', async () => {
-    const app = await makeApp();
-    const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/wat' });
+    const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/wat', cookies });
     expect(res.statusCode).toBe(404);
   });
 });
+```
+
+Also add the new URL to the existing `requires auth` test near the top of
+`describe('stats routes')`, so the new endpoint cannot silently become the one
+unauthenticated stats route:
+
+```ts
+    for (const url of ['/api/leaderboard', '/api/leaderboard/stat/skeets', `/api/players/${ME}`, '/api/matches', '/api/matches/1']) {
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -705,6 +717,7 @@ Add to `statsRoutes` in `src/routes/stats.ts`:
    *  filtered later: a "most skeeted" board is exactly what the private
    *  visibility rule exists to prevent, so it must not be reachable by URL. */
   app.get('/api/leaderboard/stat/:key', async (req, reply) => {
+    if (!requireActive(req, reply)) return;
     const { key } = req.params as { key: string };
     const def = statDef(key);
     if (!def || def.visibility !== 'public') return reply.code(404).send({ error: 'unknown stat' });
@@ -757,23 +770,57 @@ git commit -m "feat(stats): add per-stat season leaderboard endpoint"
 - [ ] **Step 1: Write the failing test**
 
 ```tsx
-// append to web/src/routes/routes.test.tsx, following its existing render helpers
-it('renders skill stat columns on the match page', async () => {
-  renderMatch({ players: [{ steamid: '76561198000000001', name: 'Mal', team: 'a',
-    siDamage: 1850, siKills: 13, commonKills: 44, ffDealt: 4, revives: 2, srDelta: 12,
-    stats: { skeets: 2, deadstops: 1, tank_damage: 1699 } }] });
-  expect(await screen.findByText('Skeets')).toBeTruthy();
-  expect(await screen.findByText('1699')).toBeTruthy();
-});
+// Append to web/src/routes/routes.test.tsx. That file mocks the api module via
+// `mockApi` and renders components directly; there are no renderMatch/renderProfile
+// helpers. Follow the existing MatchDetail test at line 73 for the shape.
+describe('skill stats display', () => {
+  it('renders skill stat columns on the match page', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300 }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12,
+          stats: { skeets: 2, deadstops: 1, tank_damage: 1699 } },
+      ],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('Skeets')).toBeTruthy());
+    expect(screen.getByText('1699')).toBeTruthy();
+  });
 
-it('shows the private panel only when privateStatTotals is present', async () => {
-  renderProfile({ statTotals: { skeets: 12 }, privateStatTotals: { times_skeeted: 7 } });
-  expect(await screen.findByText('Times skeeted')).toBeTruthy();
+  it('shows the private panel only when privateStatTotals is present', async () => {
+    mockApi.profile.mockResolvedValue({
+      player: { steamid: '1', name: 'alice', avatar: null },
+      sr: 1500, wins: 3, losses: 1, games: 4,
+      totals: { siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
+      matches: [],
+      statTotals: { skeets: 12 },
+      privateStatTotals: { times_skeeted: 7 },
+    });
+    render(<Profile steamid="1" />);
+    await waitFor(() => expect(screen.getByText('Times skeeted')).toBeTruthy());
+  });
 
-  renderProfile({ statTotals: { skeets: 12 }, privateStatTotals: null });
-  expect(screen.queryByText('Times skeeted')).toBeNull();
+  it('hides the private panel when privateStatTotals is null', async () => {
+    mockApi.profile.mockResolvedValue({
+      player: { steamid: '2', name: 'bob', avatar: null },
+      sr: 1500, wins: 3, losses: 1, games: 4,
+      totals: { siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
+      matches: [],
+      statTotals: { skeets: 12 },
+      privateStatTotals: null,
+    });
+    render(<Profile steamid="2" />);
+    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+    expect(screen.queryByText('Times skeeted')).toBeNull();
+  });
 });
 ```
+
+The exact prop names for `Profile` and the exact shape of the profile response must be
+read from `web/src/routes/Profile.tsx` and `web/src/api.ts` before writing these tests;
+the fields above other than `statTotals` and `privateStatTotals` are illustrative of the
+existing shape, not authoritative. Match whatever those files already declare.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1056,7 +1103,11 @@ void WriteSkillLines()
 			if (!g_bSkillDetect && StatNeedsSkillDetect(view_as<PugStat>(s))) continue;
 			Format(line, sizeof(line), "%s %s=%d", line, g_sStatKey[s], g_iSkill[i][s]);
 		}
-		DumpLine(line);
+		// DumpLine is `DumpLine(const char[] fmt, any ...)` (pug-match.sp:164) and
+		// VFormats its first argument, so a runtime-built string must never be
+		// passed as the format. Current keys and steamids cannot contain '%', but
+		// a non-literal format string is a latent defect regardless.
+		DumpLine("%s", line);
 	}
 }
 

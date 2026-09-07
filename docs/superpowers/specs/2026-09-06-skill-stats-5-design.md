@@ -204,9 +204,10 @@ in exactly one place:
 Three rules follow, and all three are enforced server-side in `src/routes/stats.ts`, never by
 the UI hiding a value it was sent:
 
-- **Profile** (`/api/players/:steamid`): `self` stats are included only when
-  `getSession(req) === steamid`. This is the first authenticated read path in `stats.ts`,
-  which is public today.
+- **Profile** (`/api/players/:steamid`): `self` stats are included only when the viewer is
+  the subject. Every route in `stats.ts` is already guarded by `makeRequireActive(db)`
+  (`src/routes/guards.ts`) and that guard returns the viewer's steamid, so the identity is
+  already in hand; the handlers simply discard it today.
 - **Match detail**: a match page carries all eight players. `self` keys are stripped from
   every row except the requesting player's own.
 - **Leaderboards**: `self` stats are **never** eligible. Enforced by filtering the registry
