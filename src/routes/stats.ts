@@ -136,7 +136,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
       totals, matches, history,
       statTotals,
-      privateStatTotals: isSelf ? privateTotals : null,
+      // Contract (web/src/api.ts: Profile['privateStatTotals']) is populated-or-
+      // null, never an empty object: Profile.tsx gates its private-stats panel
+      // on truthiness, and {} is truthy, so a self-viewer with no private stats
+      // recorded yet would otherwise render an empty panel.
+      privateStatTotals: (isSelf && Object.keys(privateTotals).length > 0) ? privateTotals : null,
       statDefs: STAT_DEFS,
     };
   });

@@ -105,7 +105,18 @@ function TeamStats(
                 <td class="num">{p.commonKills}</td>
                 <td class="num">{p.ffDealt}</td>
                 <td class="num">{p.revives}</td>
-                {skillCols.map((k) => <td class="num" key={k}>{p.stats?.[k] ?? 0}</td>)}
+                {skillCols.map((k) => (
+                  <td class="num" key={k}>
+                    {/* skillCols is a match-wide union: a key present in some
+                        other row can be absent from this one because the
+                        server stripped a self-only stat for a viewer who
+                        isn't the subject. Absent must read as "not shown",
+                        never as a fabricated 0. */}
+                    {Object.hasOwn(p.stats ?? {}, k)
+                      ? p.stats![k]
+                      : <span class="muted">n/a</span>}
+                  </td>
+                ))}
                 <td class="num"><SrDelta value={p.srDelta} /></td>
               </tr>
             ))}
