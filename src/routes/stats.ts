@@ -3,11 +3,30 @@ import type { DB } from '../db.js';
 import { makeRequireActive } from './guards.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
+import { STAT_DEFS, statDef } from '../statKeys.js';
 
 export interface StatsRouteOpts { db: DB }
 
 const RECENT_MATCH_LIMIT = 50;
 const PROFILE_MATCH_LIMIT = 20;
+
+/** Strip self-only stats unless the requester IS the subject.
+ *
+ *  Enforced here rather than in the UI on purpose: a value the server sends is
+ *  a value the viewer can read, regardless of what the page chooses to render. */
+function visibleStats(
+  raw: Record<string, number>, subject: string, viewer: string,
+): Record<string, number> {
+  const isSelf = viewer === subject;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const def = statDef(k);
+    if (!def) continue;
+    if (def.visibility === 'self' && !isSelf) continue;
+    out[k] = v;
+  }
+  return out;
+}
 
 export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): Promise<void> {
   const { db } = opts;
@@ -32,7 +51,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   app.get('/api/players/:steamid', async (req, reply) => {
-    if (!requireActive(req, reply)) return;
+    const viewer = requireActive(req, reply);
+    if (!viewer) return;
     const { steamid } = req.params as { steamid: string };
     const player = getPlayer(db, steamid);
     if (!player) return reply.code(404).send({ error: 'no such player' });
@@ -68,10 +88,29 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       'SELECT match_id, mu_after, sigma_after FROM rating_history WHERE player_id = ? AND season_id = ? ORDER BY id',
     ).all(steamid, seasonId) as any[]).map((h) => ({ matchId: h.match_id, sr: displaySr(h.mu_after, h.sigma_after) }));
 
+    const statRows = db.prepare(
+      `SELECT mps.stat, SUM(mps.value) AS total
+       FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
+       WHERE mps.player_id = ? AND m.state = 'completed'
+       GROUP BY mps.stat`,
+    ).all(steamid) as { stat: string; total: number }[];
+
+    const statTotals: Record<string, number> = {};
+    const privateTotals: Record<string, number> = {};
+    for (const r2 of statRows) {
+      const def = statDef(r2.stat);
+      if (!def) continue;
+      (def.visibility === 'self' ? privateTotals : statTotals)[r2.stat] = r2.total;
+    }
+    const isSelf = viewer === steamid;
+
     return {
       player: { steamid: player.steamid, name: player.name, avatar: player.avatar, createdAt: player.created_at },
       rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
       totals, matches, history,
+      statTotals,
+      privateStatTotals: isSelf ? privateTotals : null,
+      statDefs: STAT_DEFS,
     };
   });
 
@@ -85,7 +124,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   app.get('/api/matches/:id', async (req, reply) => {
-    if (!requireActive(req, reply)) return;
+    const viewer = requireActive(req, reply);
+    if (!viewer) return;
     const id = Number((req.params as { id: string }).id);
     const match = db.prepare(
       `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
@@ -95,6 +135,15 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const maps = db.prepare(
       'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
     ).all(id);
+    const statRows = db.prepare(
+      'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',
+    ).all(id) as { player_id: string; stat: string; value: number }[];
+    const byPlayer = new Map<string, Record<string, number>>();
+    for (const sr of statRows) {
+      const bucket = byPlayer.get(sr.player_id) ?? {};
+      bucket[sr.stat] = sr.value;
+      byPlayer.set(sr.player_id, bucket);
+    }
     const players = (db.prepare(
       `SELECT mp.player_id AS steamid, p.name, mp.team, mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
               rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
@@ -107,6 +156,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       srDelta: p.mu_after === null ? 0
         : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
+      stats: visibleStats(byPlayer.get(p.steamid) ?? {}, p.steamid, viewer),
     }));
     return { match, maps, players };
   });

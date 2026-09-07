@@ -32,6 +32,13 @@ function playCompletedMatch(db: DB, winner: 'a' | 'b' | 'draw' = 'b'): number {
   return matchId;
 }
 
+function seedStats(db: DB, matchId: number, steamid: string, stats: Record<string, number>): void {
+  const ins = db.prepare(
+    'INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, ?, ?)',
+  );
+  for (const [stat, value] of Object.entries(stats)) ins.run(matchId, steamid, stat, value);
+}
+
 describe('stats routes', () => {
   let db: DB;
   let app: FastifyInstance;
@@ -130,5 +137,39 @@ describe('stats routes', () => {
     expect(winnerPlayer.team).toBe('b');
     expect(winnerPlayer.srDelta).toBeGreaterThan(0);
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
+  });
+
+  describe('stat visibility', () => {
+    it('hides self-only stats from other viewers on a match page', async () => {
+      const matchId = playCompletedMatch(db);
+      seedStats(db, matchId, IDS[1], { skeets: 2, times_skeeted: 5 });
+      // `cookies` authenticates ME (IDS[0]), who is NOT IDS[1].
+      const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies });
+      const row = res.json().players.find((p: any) => p.steamid === IDS[1]);
+      expect(row.stats.skeets).toBe(2);
+      expect(row.stats).not.toHaveProperty('times_skeeted');
+    });
+
+    it('shows self-only stats in your own row', async () => {
+      const matchId = playCompletedMatch(db);
+      seedStats(db, matchId, ME, { skeets: 2, times_skeeted: 5 });
+      const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies });
+      const row = res.json().players.find((p: any) => p.steamid === ME);
+      expect(row.stats.times_skeeted).toBe(5);
+    });
+
+    it('returns privateStatTotals null on someone else profile', async () => {
+      const matchId = playCompletedMatch(db);
+      seedStats(db, matchId, IDS[1], { times_skeeted: 5 });
+      const res = await app.inject({ method: 'GET', url: `/api/players/${IDS[1]}`, cookies });
+      expect(res.json().privateStatTotals).toBeNull();
+    });
+
+    it('returns privateStatTotals on your own profile', async () => {
+      const matchId = playCompletedMatch(db);
+      seedStats(db, matchId, ME, { times_skeeted: 5 });
+      const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
+      expect(res.json().privateStatTotals.times_skeeted).toBe(5);
+    });
   });
 });
