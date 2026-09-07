@@ -70,6 +70,12 @@ int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
 
 bool g_bReadyUpAvailable;
 
+// Included here, after MAX_ROSTER and the roster globals above are declared:
+// pug-stats.inc consumes them directly (array sizes and global-variable
+// references are resolved by textual/declaration order, unlike function
+// calls), so the include must sit below them.
+#include "pug-stats.inc"
+
 // Staging knobs. Both default to production behaviour; they exist so the plugin
 // can be exercised on a test instance without eight people in the server.
 ConVar g_cvMinOrient;                    // rostered players needed to move the orientation mapping
@@ -387,6 +393,7 @@ void ResetMatchState()
 		g_iClientRoster[i] = -1;
 		g_iLockAttempts[i] = 0;
 	}
+	ResetSkillStats();
 }
 
 public Action Timer_Heartbeat(Handle timer)
@@ -582,6 +589,7 @@ public void OnRoundIsLive()
 	if (g_State == MS_Pending)
 	{
 		g_State = MS_Live;
+		SampleSkillDetect();
 		EmitPug("MATCH_START map=%s", g_sCurrentMap);
 	}
 }
@@ -807,9 +815,37 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (!StatsActive()) return;
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
-	if (attacker <= 0 || attacker > MaxClients || !IsSurvivorClient(attacker)) return;
+	if (attacker <= 0 || attacker > MaxClients) return;
 	int damage = event.GetInt("dmg_health");
 	if (damage <= 0) return;
+
+	// Infected-side capture MUST sit above the survivor-only guard: this handler
+	// used to return at line 810 for any non-survivor attacker, which is why
+	// nothing has ever recorded the infected half of a match. An infected
+	// attacker contributes nothing to the survivor stats below, so return here.
+	if (IsInfectedClient(attacker) && !IsFakeClient(attacker) && IsSurvivorClient(victim))
+	{
+		AddStat(attacker, PS_DamageAsSi, damage);
+		if (GetEntProp(attacker, Prop_Send, "m_zombieClass") == ZC_TANK)
+		{
+			char wpn[32];
+			event.GetString("weapon", wpn, sizeof(wpn));
+			if (StrEqual(wpn, "tank_claw")) AddStat(attacker, PS_TankPunches);
+		}
+		return;
+	}
+
+	// Restores the behaviour the original line-810 guard had for every path below.
+	if (!IsSurvivorClient(attacker)) return;
+
+	// Tank damage stays out of sidmg on purpose: the compstats convention exists so
+	// tank damage does not distort survivor damage totals. But the hook already runs
+	// for tanks and the existing siVictim check just discards it, so route it to its
+	// own key instead of dropping it.
+	if (IsInfectedClient(victim) && GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK)
+	{
+		AddStat(attacker, PS_TankDamage, damage);
+	}
 
 	// SI damage: player-controlled smoker/boomer/hunter. Tank excluded
 	// (compstats convention). Overkill remainder is granted on player_death.
@@ -893,7 +929,7 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
  *  the backend may call sm_pug_dump repeatedly. */
 void WriteDump()
 {
-	DumpLine("DUMP match=%d", g_iMatchId);
+	DumpLine("DUMP match=%d skilldetect=%d", g_iMatchId, g_bSkillDetect ? 1 : 0);
 	for (int i = 0; i < g_iMapCount; i++)
 	{
 		DumpLine("MAP map=%s a=%d b=%d", g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
@@ -904,6 +940,7 @@ void WriteDump()
 			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
 			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
 	}
+	WriteSkillLines();
 	int a, b;
 	TotalScores(a, b);
 	char winner[8];
