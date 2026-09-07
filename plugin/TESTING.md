@@ -150,6 +150,54 @@ kick your casual players.
 `PUG <token> HEARTBEAT` every 30s while a match is configured, none at
 `state=none`.
 
+## Skill stats verification
+
+This runbook is run against a live ranked match to verify the skill-detection
+integration end to end. Everything above is unproven until this passes.
+
+### 1. Stage the plugin
+
+    ./stage.sh --solo
+
+Expected: `Plugin PUG Match reloaded successfully.` Do NOT accept a `FAILED to load` message without checking `sm plugins list` for `"PUG Match"` yourself; that grep was wrong until 2026-09-06.
+
+### 2. Confirm the capability flag samples correctly
+
+With skill_detect loaded, set up a match and take it live, then:
+
+    R "sm_pug_dump testtoken" | head -1
+
+Expected: `DUMP match=<id> skilldetect=1`
+
+Then unload skill_detect (`sm plugins unload l4d2_skill_detect`), set up a fresh match, take it live, and dump again. Expected: `skilldetect=0`, and `SKILL` lines carrying only `tank_damage`, `damage_as_si` and `tank_punches`. This is the check that proves "not measured" cannot be persisted as zero.
+
+### 3. Verify counting against ground truth
+
+Practice mode gives AI special infected with no cheats: `!load 1v4` in chat, then
+
+    R "l4d_infectedbots_hunter_limit 4"
+
+Set `sm_skill_report_enable 1` temporarily so the starred chat lines are visible, skeet a known number of hunters, then compare three sources that must agree:
+
+1. the starred `skill_detect` chat lines
+2. the `l4dcompstats` end-of-round SURVIVOR STATS table
+3. `skeets` in the `SKILL` dump line
+
+All three agreed on 2026-09-06 (2, 2 and n/a). A disagreement between 1 and 2 is a `skill_detect` threshold issue on L4D1; a disagreement between 1 and 3 is a bug in this code.
+
+Put `sm_skill_report_enable` back to 0 when done.
+
+### 4. Verify the full loop
+
+Create a match through the app so `RealOrchestrator.setupMatch()` runs (this has never been exercised against the live server). Play two halves. Confirm rows land in `match_player_stats`, the match page renders the new columns, and your own profile shows the private panel while another account's does not.
+
+### 5. Restore the server
+
+    R "sm_pug_abort <token>"
+    R "sm_pug_min_orient 3"
+    R "sm_pug_debug 0"
+    R "exec rotoblin_pub.cfg"
+
 ## Before you leave
 
     R "sm_pug_abort testtoken"     # if a match is still configured
