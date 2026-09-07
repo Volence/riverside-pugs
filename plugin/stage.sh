@@ -51,9 +51,16 @@ for a in "$@"; do
   esac
 done
 
+# `sm plugins list` prints each plugin's myinfo.name, NOT its filename, so this
+# must match "PUG Match" and not "pug-match". Matching the filename silently
+# never matched, which made stage.sh take the `load` branch every time (a no-op
+# on an already-loaded plugin) and then report a bogus left4dhooks failure. Found
+# 2026-09-06 after a staged fix appeared to fail while the old code kept running.
+PLUGIN_NAME="PUG Match"
+
 show_status() {
-  echo "==> sm plugins list (pug-match):"
-  "$RCON" "sm plugins list" | grep -i "pug-match" || echo "    NOT LOADED"
+  echo "==> sm plugins list ($PLUGIN_NAME):"
+  "$RCON" "sm plugins list" | grep -F "$PLUGIN_NAME" || echo "    NOT LOADED"
   echo "==> cvars:"
   "$RCON" "sm_pug_min_orient" || true
   "$RCON" "sm_pug_debug" || true
@@ -102,16 +109,20 @@ echo "==> Copying pug-match.smx to $HOST"
 rsync -az --info=stats1 "$HERE/pug-match.smx" "root@$HOST:$REMOTE/pug-match.smx"
 ssh "root@$HOST" "chown l4d:l4d $REMOTE/pug-match.smx"
 
-# `sm plugins load` on an already-loaded plugin is a no-op, so reload if present.
+# `sm plugins load` on an already-loaded plugin is a no-op, so reload first and
+# fall back to load only when SourceMod says there is nothing to reload. Driven
+# off the command's own reply rather than off `plugins list`, so it does not
+# depend on the name-vs-filename distinction at all.
 echo "==> Loading plugin"
-if "$RCON" "sm plugins list" | grep -qi "pug-match"; then
-  "$RCON" "sm plugins reload pug-match"
-else
+RELOAD_OUT=$("$RCON" "sm plugins reload pug-match" 2>&1 || true)
+printf '%s\n' "$RELOAD_OUT"
+if printf '%s' "$RELOAD_OUT" | grep -qiE "not loaded|not found|unable to|invalid"; then
+  echo "    not loaded yet, loading fresh"
   "$RCON" "sm plugins load pug-match"
 fi
 
 echo "==> Verifying"
-if ! "$RCON" "sm plugins list" | grep -i "pug-match"; then
+if ! "$RCON" "sm plugins list" | grep -F "$PLUGIN_NAME"; then
   echo
   echo "FAILED to load. Most likely cause is a missing dependency: this plugin"
   echo "needs left4dhooks. Check the SourceMod error log:"

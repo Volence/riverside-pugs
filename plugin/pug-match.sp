@@ -54,6 +54,7 @@ char g_sCurrentMap[64];
 int g_iHalfScoreA;
 int g_iHalfScoreB;
 int g_iRound1Logical;                    // logical team (1|2) that played survivors in half 1; 0 = unknown
+int g_iRound1SurvPug;                    // pug team (1|2) that played survivors in half 1; 0 = unknown
 bool g_bRoundEnded;                      // round_end latch (round_end can fire more than once)
 bool g_bHalfWasLive;                     // set by OnRoundIsLive; guards ready-up restarts
 bool g_bPendingFinalize;                 // set when 2nd-half round_end fires; cleared by FinalizeMap.
@@ -260,9 +261,9 @@ public Action Cmd_Status(int args)
 		g_sToken[0] == '\0' ? "(none)" : g_sToken,
 		g_sCampaign[0] == '\0' ? "(none)" : g_sCampaign,
 		g_sCurrentMap);
-	DumpLine("STATUS orient a=%s b=%s round1Logical=%d minOrient=%d debug=%d",
+	DumpLine("STATUS orient a=%s b=%s round1Logical=%d round1SurvPug=%d minOrient=%d debug=%d",
 		SideName(g_iPugSide[1]), SideName(g_iPugSide[2]),
-		g_iRound1Logical, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
+		g_iRound1Logical, g_iRound1SurvPug, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
 	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
 
@@ -365,6 +366,7 @@ void ResetMatchState()
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
+	g_iRound1SurvPug = 0;
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
 	g_bPendingFinalize = false;
@@ -495,6 +497,22 @@ public Action Timer_TeamLock(Handle timer)
 			g_iPugSide[1] == TEAM_SURVIVOR ? "survivor" : "infected", straight, inverted, need);
 	}
 
+	// Blind vote: no rostered player is on survivor OR infected right now. That is
+	// the map-transition window, where clients have reconnected and passed the
+	// admin check (so the loop below sees them as rostered and in game) but the
+	// engine has not yet put them on a side. g_iPugSide still holds the PREVIOUS
+	// half's mapping, which is inverted for the new map, so enforcing it here
+	// drags people to the wrong side until the next tick corrects it. Observed
+	// 2026-09-06 19:48:41, one tick after the reconnect at 19:48:41.
+	//
+	// Declining is safe rather than deadlocky: a player on no team is exactly the
+	// one we must not move, and once the engine assigns anyone the vote sees them
+	// and enforcement resumes. Deliberately narrower than "wait for the vote to
+	// reach need": with all rostered players auto-assigned to one side the joint
+	// vote ties at straight == inverted, so gating on confirmation would stall
+	// enforcement forever.
+	if (straight == 0 && inverted == 0) return Plugin_Continue;
+
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		int slot = g_iClientRoster[c];
@@ -539,6 +557,7 @@ public void OnMapStart()
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
+	g_iRound1SurvPug = 0;
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
 
@@ -607,7 +626,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	int score = TryReadRoundScore(second);
 	if (score >= 0)
 	{
-		AttributeScore(survPug, score);
+		AttributeScore(survPug, score, second);
 		if (second) FinalizeMap();
 		return;
 	}
@@ -649,9 +668,36 @@ int TryReadRoundScore(bool second)
 	return score;
 }
 
-/** Credit a read round score to the observed pug team's half accumulator. */
-void AttributeScore(int survPug, int score)
+/** Credit a read round score to the observed pug team's half accumulator.
+ *
+ *  Observation stays primary; that is the locked design decision (plan 2b,
+ *  decision 1): credit whoever is actually standing on the survivor side, never
+ *  a predicted flip. But ObserveSurvivorPugTeam() returns 0 whenever it cannot
+ *  see, which happens two ways: nobody rostered is on survivors (short-handed,
+ *  or solo testing), or the count is tied because the team-lock timer is
+ *  mid-move at round_end. Both silently discarded the round. A half-2 score of
+ *  50 vanished exactly this way on 2026-09-06.
+ *
+ *  Last-resort fallback, half 2 only: in versus the teams swap sides between
+ *  the halves of one map, so half 2's survivors are whichever pug team was NOT
+ *  survivors in half 1 of this same map. That is a rule of the game mode rather
+ *  than a guess, and it is scoped inside one map (reset in OnMapStart next to
+ *  g_iRound1Logical), so it never re-opens the cross-map logical-team
+ *  relabeling problem decision 1 was defending against.
+ *
+ *  Deliberately LogError, not PugDebug: in a real 4v4 the observation path
+ *  should always see four survivors, so this firing means something is wrong
+ *  and it should be loud even with sm_pug_debug 0. */
+void AttributeScore(int survPug, int score, bool second)
 {
+	if (!second && survPug != 0) g_iRound1SurvPug = survPug;
+	else if (second && survPug == 0 && g_iRound1SurvPug != 0)
+	{
+		survPug = 3 - g_iRound1SurvPug;
+		LogError("[pug] half-2 score %d unobserved, attributing to pug team %s by half-1 inversion",
+			score, survPug == 1 ? "a" : "b");
+	}
+
 	if (survPug == 1) { g_iHalfScoreA += score; PugDebug("credit %d to pug team a (half total %d)", score, g_iHalfScoreA); }
 	else if (survPug == 2) { g_iHalfScoreB += score; PugDebug("credit %d to pug team b (half total %d)", score, g_iHalfScoreB); }
 	else LogError("[pug] round score %d unattributable: no rostered survivors observed", score);
@@ -705,7 +751,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 		return Plugin_Stop;
 	}
 
-	AttributeScore(survPug, score);
+	AttributeScore(survPug, score, second);
 	if (second) FinalizeMap();
 	return Plugin_Stop;
 }
