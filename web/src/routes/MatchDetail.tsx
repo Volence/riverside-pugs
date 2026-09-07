@@ -1,6 +1,6 @@
 import { api, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, fmtDate, winnerLabel } from '../format';
+import { campaignName, fmtDate, labelFor, winnerLabel } from '../format';
 import { Empty, Panel, PlayerLink, SrDelta } from '../components/bits';
 
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
@@ -16,6 +16,11 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   if (!data) return <div class="page page--match" />;
 
   const { match, maps, players } = data;
+  // Columns are derived from the data actually present, so a match played on
+  // a server without skill_detect shows no empty columns rather than zeros.
+  const skillCols = Array.from(
+    new Set(players.flatMap((p) => Object.keys(p.stats ?? {}))),
+  ).sort();
 
   return (
     <div class="page page--match">
@@ -61,6 +66,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
               team={team}
               players={players.filter((p) => p.team === team)}
               me={me}
+              skillCols={skillCols}
             />
           ))}
         </div>
@@ -70,7 +76,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
 }
 
 function TeamStats(
-  { team, players, me }: { team: Team; players: MatchPlayerStats[]; me: string | null },
+  { team, players, me, skillCols }:
+    { team: Team; players: MatchPlayerStats[]; me: string | null; skillCols: string[] },
 ) {
   return (
     <Panel class="panel--table">
@@ -85,6 +92,7 @@ function TeamStats(
               <th class="num">Commons</th>
               <th class="num">FF</th>
               <th class="num">Revives</th>
+              {skillCols.map((k) => <th class="num" key={k}>{labelFor(k)}</th>)}
               <th class="num">SR</th>
             </tr>
           </thead>
@@ -97,6 +105,7 @@ function TeamStats(
                 <td class="num">{p.commonKills}</td>
                 <td class="num">{p.ffDealt}</td>
                 <td class="num">{p.revives}</td>
+                {skillCols.map((k) => <td class="num" key={k}>{p.stats?.[k] ?? 0}</td>)}
                 <td class="num"><SrDelta value={p.srDelta} /></td>
               </tr>
             ))}

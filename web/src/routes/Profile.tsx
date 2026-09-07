@@ -1,6 +1,6 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, fmtDate } from '../format';
+import { campaignName, fmtDate, labelFor } from '../format';
 import { Empty, Panel, ResultChip, Sparkline, SrDelta } from '../components/bits';
 
 export function Profile({ steamid }: { steamid: string }) {
@@ -15,7 +15,7 @@ export function Profile({ steamid }: { steamid: string }) {
   }
   if (!data) return <div class="page page--profile" />;
 
-  const { player, rating, totals, matches, history } = data;
+  const { player, rating, totals, matches, history, privateStatTotals } = data;
   const peak = history.length ? Math.max(...history.map((h) => h.sr)) : null;
   const lastDelta = matches.length ? matches[0].srDelta : null;
 
@@ -99,6 +99,22 @@ export function Profile({ steamid }: { steamid: string }) {
             )}
           </Panel>
         </div>
+
+        {privateStatTotals && (
+          <Panel>
+            <h3>Only you can see this</h3>
+            <p class="muted">
+              Shown to you alone. Nobody else sees these numbers and they never appear on a leaderboard.
+            </p>
+            <table>
+              <tbody>
+                {Object.entries(privateStatTotals).map(([k, v]) => (
+                  <tr key={k}><td>{labelFor(k)}</td><td class="num">{v}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </Panel>
+        )}
       </div>
     </div>
   );

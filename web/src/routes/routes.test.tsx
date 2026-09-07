@@ -126,6 +126,68 @@ describe('Profile', () => {
   });
 });
 
+describe('skill stats display', () => {
+  it('renders skill stat columns on the match page', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300 }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12,
+          stats: { skeets: 2, deadstops: 1, tank_damage: 1699 } },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12,
+          stats: {} },
+      ],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getAllByText('Skeets').length).toBeGreaterThan(0));
+    expect(screen.getByText('1699')).toBeTruthy();
+  });
+
+  it('does not add skill columns for a match with no skill stats', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 8, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300 }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12, stats: {} },
+      ],
+    });
+    render(<MatchDetail id="8" me="1" />);
+    await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
+    expect(screen.queryByText('Skeets')).toBeNull();
+  });
+
+  it('shows the private panel only when privateStatTotals is present', async () => {
+    mockApi.profile.mockResolvedValue({
+      player: { steamid: '1', name: 'alice', avatar: null, createdAt: '2026-01-01T00:00:00' },
+      rating: { sr: 1500, mu: 25, sigma: 5, wins: 3, losses: 1 },
+      totals: { games: 4, siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
+      matches: [],
+      history: [],
+      statTotals: { skeets: 12 },
+      privateStatTotals: { times_skeeted: 7 },
+      statDefs: [],
+    });
+    render(<Profile steamid="1" />);
+    await waitFor(() => expect(screen.getByText('Times skeeted')).toBeTruthy());
+  });
+
+  it('hides the private panel when privateStatTotals is null', async () => {
+    mockApi.profile.mockResolvedValue({
+      player: { steamid: '2', name: 'bob', avatar: null, createdAt: '2026-01-01T00:00:00' },
+      rating: { sr: 1500, mu: 25, sigma: 5, wins: 3, losses: 1 },
+      totals: { games: 4, siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
+      matches: [],
+      history: [],
+      statTotals: { skeets: 12 },
+      privateStatTotals: null,
+      statDefs: [],
+    });
+    render(<Profile steamid="2" />);
+    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+    expect(screen.queryByText('Times skeeted')).toBeNull();
+  });
+});
+
 describe('Play', () => {
   const noop = () => {};
 

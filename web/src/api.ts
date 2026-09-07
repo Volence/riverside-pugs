@@ -79,6 +79,17 @@ export interface MatchPlayerStats {
   ffDealt: number;
   revives: number;
   srDelta: number;
+  /** Skill-detect stats, already filtered server-side for the viewer: a
+   *  self-visibility stat is present only when the viewer is the subject. */
+  stats: Record<string, number>;
+}
+
+export interface StatDef {
+  key: string;
+  side: 'survivor' | 'infected';
+  visibility: 'public' | 'self';
+  label: string;
+  needsSkillDetect: boolean;
 }
 
 export interface MatchDetail {
@@ -106,6 +117,12 @@ export interface Profile {
   };
   matches: ProfileMatch[];
   history: { matchId: number; sr: number }[];
+  /** Public skill-stat lifetime totals, keyed by stat. */
+  statTotals: Record<string, number>;
+  /** Lifetime totals for self-visibility stats. Only ever populated for the
+   *  subject themselves; null for anyone else, never an empty object. */
+  privateStatTotals: Record<string, number> | null;
+  statDefs: StatDef[];
 }
 
 /** Thrown for any non-OK response, carrying the status so callers can tell

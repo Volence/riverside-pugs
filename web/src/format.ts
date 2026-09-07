@@ -47,6 +47,27 @@ export function secondsLeft(deadline: number, now: number = Date.now()): number 
   return Math.max(0, Math.round((deadline - now) / 1000));
 }
 
+/** Human labels for skill stat keys. Duplicates the registry in
+ *  src/statKeys.ts rather than importing it, because web/ cannot import
+ *  server code. Kept here so MatchDetail and Profile share one copy. */
+export const STAT_LABELS: Record<string, string> = {
+  skeets: 'Skeets', team_skeets: 'Team skeets', skeets_hurt: 'Hurt skeets',
+  skeet_assists: 'Skeet assists', skeets_shotgun: 'Shotgun skeets',
+  skeets_sniper: 'Sniper skeets', skeets_melee: 'Melee skeets',
+  deadstops: 'Deadstops', boomer_pops: 'Boomer pops', crowns: 'Crowns',
+  draw_crowns: 'Draw crowns', tongue_cuts: 'Tongue cuts', self_clears: 'Self clears',
+  rock_skeets: 'Rock skeets', clears: 'Clears', insta_clears: 'Insta clears',
+  dps_landed: 'DPs landed', pounce_damage_high: 'High pounce damage',
+  biles_landed: 'Biles landed', survivors_biled: 'Survivors biled',
+  tank_rocks_landed: 'Tank rocks landed', times_skeeted: 'Times skeeted',
+  times_deadstopped: 'Times deadstopped', tank_damage: 'Tank damage',
+  damage_as_si: 'Damage as SI', tank_punches: 'Tank punches',
+};
+
+export function labelFor(key: string): string {
+  return STAT_LABELS[key] ?? key;
+}
+
 /** SVG polyline points for the SR-over-time graph.
  *
  *  Returns null when there are fewer than two points, because a one-match
