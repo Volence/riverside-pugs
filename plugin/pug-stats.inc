@@ -96,7 +96,10 @@ void WriteSkillLines()
 {
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
-		char line[512];
+		// MUST stay >= DumpLine's own buffer (pug-match.sp, 1024): if this buffer
+		// were smaller, IT would become the truncation point instead, silently
+		// dropping trailing stat keys before the line ever reaches DumpLine.
+		char line[1024];
 		Format(line, sizeof(line), "SKILL steamid=%s", g_sRosterId[i]);
 		for (int s = 0; s < view_as<int>(PS_MAX); s++)
 		{

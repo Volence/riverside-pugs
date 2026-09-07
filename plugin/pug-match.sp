@@ -166,10 +166,15 @@ void PugDebug(const char[] fmt, any ...)
 	LogMessage("[pug] %s", line);
 }
 
-/** Authoritative dump line into the RCON response body of the running server cmd. */
+/** Authoritative dump line into the RCON response body of the running server cmd.
+ *
+ *  1024, not 480: a full 26-key SKILL line (pug-stats.inc's WriteSkillLines) can
+ *  run past 480 once several stats hit multi-digit values, and the backend
+ *  parser ignores unknown/missing keys by design, so a line truncated here
+ *  would silently drop stats rather than error anywhere. */
 void DumpLine(const char[] fmt, any ...)
 {
-	char line[480];
+	char line[1024];
 	VFormat(line, sizeof(line), fmt, 2);
 	PrintToServer("%s", line);
 }
