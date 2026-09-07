@@ -143,6 +143,29 @@ describe('skill stats display', () => {
     expect(screen.getByText('1699')).toBeTruthy();
   });
 
+  it('renders an absent stat as n/a, not a fabricated 0, while a present zero still shows 0', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 9, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300 }],
+      players: [
+        // alice is the viewer; her self-only stat is present and genuinely 0.
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12,
+          stats: { times_skeeted: 0 } },
+        // bob is not the viewer, so the server stripped times_skeeted from his
+        // row entirely; it must not render as if he were skeeted zero times.
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12,
+          stats: {} },
+      ],
+    });
+    const { container } = render(<MatchDetail id="9" me="1" />);
+    await waitFor(() => expect(screen.getAllByText('Times skeeted').length).toBeGreaterThan(0));
+    const bobRow = container.querySelector('tr:has(a[href="/player/2"])') as HTMLElement;
+    expect(within(bobRow).getByText('n/a')).toBeTruthy();
+    expect(within(bobRow).queryByText('0')).toBeNull();
+    const aliceRow = container.querySelector('tr:has(a[href="/player/1"])') as HTMLElement;
+    expect(within(aliceRow).getByText('0')).toBeTruthy();
+  });
+
   it('does not add skill columns for a match with no skill stats', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 8, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },

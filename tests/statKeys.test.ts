@@ -32,8 +32,12 @@ describe('stat registry', () => {
   });
 
   it('every key is snake_case and short enough for the wire format', () => {
+    // The plugin stores keys in g_sStatKey[PS_MAX][24] (plugin/pug-stats.inc),
+    // which holds 23 characters plus a NUL. {0,22} (24 total with the leading
+    // char) matches that budget exactly; {0,23} would pass a 24-char key that
+    // does not fit.
     for (const d of STAT_DEFS) {
-      expect(d.key).toMatch(/^[a-z][a-z0-9_]{0,23}$/);
+      expect(d.key).toMatch(/^[a-z][a-z0-9_]{0,22}$/);
       expect(d.label.length).toBeGreaterThan(0);
     }
   });

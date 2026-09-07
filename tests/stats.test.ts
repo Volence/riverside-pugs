@@ -171,6 +171,12 @@ describe('stats routes', () => {
       const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
       expect(res.json().privateStatTotals.times_skeeted).toBe(5);
     });
+
+    it('returns privateStatTotals null (not {}) on your own profile with no private stats recorded', async () => {
+      playCompletedMatch(db);
+      const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
+      expect(res.json().privateStatTotals).toBeNull();
+    });
   });
 
   describe('stat leaderboard', () => {
