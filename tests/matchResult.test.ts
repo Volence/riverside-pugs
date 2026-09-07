@@ -26,6 +26,8 @@ function dumpFor(matchId: number): Dump {
     players: IDS.map((steamid, i) => ({
       steamid, team: i < 4 ? 'a' : 'b', sidmg: 1000 + i, sikill: i, ck: 200 + i, ff: 10 + i, rev: i % 3,
     })),
+    skillDetect: false,
+    skills: [],
     winner: 'b',
     totalA: 220,
     totalB: 310,
@@ -90,5 +92,41 @@ describe('completeMatch', () => {
     const m2 = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as any;
     expect(m2.state).toBe('completed');
     expect(db.prepare('SELECT COUNT(*) n FROM rating_history WHERE match_id = ?').get(matchId)).toEqual({ n: 8 });
+  });
+
+  it('persists skill stats keyed by roster slot', () => {
+    const d: Dump = { ...dumpFor(matchId), skillDetect: true, skills: [
+      { steamid: IDS[0], stats: { skeets: 2, tank_damage: 1699 } },
+    ] };
+    expect(completeMatch(db, matchId, d)).toBe(true);
+    const rows = db.prepare(
+      'SELECT stat, value FROM match_player_stats WHERE match_id = ? AND player_id = ? ORDER BY stat',
+    ).all(matchId, IDS[0]);
+    expect(rows).toEqual([{ stat: 'skeets', value: 2 }, { stat: 'tank_damage', value: 1699 }]);
+  });
+
+  it('writes no skill-detect stats when skilldetect was 0, but still writes native ones', () => {
+    const d: Dump = { ...dumpFor(matchId), skillDetect: false, skills: [
+      { steamid: IDS[0], stats: { skeets: 9, tank_damage: 500 } },
+    ] };
+    completeMatch(db, matchId, d);
+    expect(db.prepare(
+      "SELECT value FROM match_player_stats WHERE match_id = ? AND stat = 'skeets'",
+    ).all(matchId)).toEqual([]);
+    // tank_damage does not need skill_detect, so it survives.
+    expect(db.prepare(
+      "SELECT value FROM match_player_stats WHERE match_id = ? AND stat = 'tank_damage'",
+    ).get(matchId)).toEqual({ value: 500 });
+  });
+
+  it('skips skill stats for a steamid not on the roster instead of throwing', () => {
+    const d: Dump = { ...dumpFor(matchId), skillDetect: true, skills: [
+      { steamid: '76561199999999999', stats: { skeets: 3 } },
+    ] };
+    // Must not throw: foreign_keys is ON, so an unguarded insert would abort the
+    // whole completion transaction and lose the match result.
+    expect(() => completeMatch(db, matchId, d)).not.toThrow();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_player_stats').get()).toEqual({ n: 0 });
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as any).state).toBe('completed');
   });
 });

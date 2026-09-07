@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS match_maps (
   team_b_score INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, ordinal)
 );
+CREATE TABLE IF NOT EXISTS match_player_stats (
+  match_id  INTEGER NOT NULL REFERENCES matches(id),
+  player_id TEXT    NOT NULL REFERENCES players(steamid),
+  stat      TEXT    NOT NULL,
+  value     INTEGER NOT NULL,
+  PRIMARY KEY (match_id, player_id, stat)
+);
+CREATE INDEX IF NOT EXISTS idx_mps_stat ON match_player_stats(stat, value DESC);
 CREATE TABLE IF NOT EXISTS rating_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   player_id TEXT NOT NULL,

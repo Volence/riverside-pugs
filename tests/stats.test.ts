@@ -23,6 +23,8 @@ function playCompletedMatch(db: DB, winner: 'a' | 'b' | 'draw' = 'b'): number {
     matchId,
     maps: [{ map: 'm1', a: totalA, b: totalB }],
     players: IDS.map((steamid, i) => ({ steamid, team: i < 4 ? 'a' : 'b', sidmg: 500, sikill: 5, ck: 100, ff: 20, rev: 1 })),
+    skillDetect: false,
+    skills: [],
     winner,
     totalA, totalB,
   };

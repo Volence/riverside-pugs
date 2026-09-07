@@ -84,6 +84,8 @@ export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promi
         steamid: p.player_id, team: p.team,
         sidmg: rnd(2500), sikill: rnd(40), ck: rnd(600), ff: rnd(120), rev: rnd(8),
       })),
+      skillDetect: false,
+      skills: [],
       winner: totalA === totalB ? 'draw' : totalA > totalB ? 'a' : 'b',
       totalA, totalB,
     };
