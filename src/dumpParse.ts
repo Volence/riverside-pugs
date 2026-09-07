@@ -1,3 +1,5 @@
+import { isKnownStat } from './statKeys.js';
+
 export interface DumpMap {
   map: string;
   a: number;
@@ -14,10 +16,21 @@ export interface DumpPlayer {
   rev: number;
 }
 
+export interface DumpSkill {
+  steamid: string;
+  /** Only keys present in the registry. Absent means not measured, which is
+   *  different from zero: see skillDetect. */
+  stats: Record<string, number>;
+}
+
 export interface Dump {
   matchId: number;
   maps: DumpMap[];
   players: DumpPlayer[];
+  /** False when skill_detect was not loaded at MATCH_START. Skill-derived stats
+   *  are then absent rather than zero, and must not be persisted as zeros. */
+  skillDetect: boolean;
+  skills: DumpSkill[];
   winner: 'a' | 'b' | 'draw';
   totalA: number;
   totalB: number;
@@ -54,9 +67,11 @@ export function parseDump(body: string): Dump | null {
   const header = kv(lines[start].split(/\s+/).slice(1));
   const matchId = intOf(header.match);
   if (matchId === null) return null;
+  const skillDetect = header.skilldetect === '1';
 
   const maps: DumpMap[] = [];
   const players: DumpPlayer[] = [];
+  const skills: DumpSkill[] = [];
   let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number } | null = null;
 
   for (const line of lines.slice(start + 1)) {
@@ -74,6 +89,19 @@ export function parseDump(body: string): Dump | null {
       if (nums.some((n) => n === null)) return null;
       const [sidmg, sikill, ck, ff, rev] = nums as number[];
       players.push({ steamid: rest.steamid, team: rest.team, sidmg, sikill, ck, ff, rev });
+    } else if (verb === 'SKILL') {
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      const stats: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rest)) {
+        if (k === 'steamid') continue;
+        // Unknown keys are ignored so a newer plugin degrades against an older
+        // backend instead of failing the whole dump. Known keys must be valid.
+        if (!isKnownStat(k)) continue;
+        const n = intOf(v);
+        if (n === null) return null;
+        stats[k] = n;
+      }
+      skills.push({ steamid: rest.steamid, stats });
     } else if (verb === 'END') {
       const a = intOf(rest.a), b = intOf(rest.b);
       if (a === null || b === null) return null;
@@ -84,5 +112,5 @@ export function parseDump(body: string): Dump | null {
   }
 
   if (!end) return null;
-  return { matchId, maps, players, winner: end.winner, totalA: end.totalA, totalB: end.totalB };
+  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB };
 }
