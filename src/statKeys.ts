@@ -29,6 +29,11 @@ const def = (
 
 export const STAT_DEFS: readonly StatDef[] = [
   // Survivor, from skill_detect. A team skeet is not also a skeet.
+  //
+  // Invariant, intended, not a bug: skeets_shotgun + skeets_sniper + skeets_melee
+  // can exceed skeets. A team skeet credits team_skeets and the weapon key but
+  // NOT skeets, so summing the weapon columns counts team skeets that the
+  // skeets column itself excludes.
   def('skeets', 'survivor', 'Skeets'),
   def('team_skeets', 'survivor', 'Team skeets'),
   def('skeets_hurt', 'survivor', 'Hurt skeets'),

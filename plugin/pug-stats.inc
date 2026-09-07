@@ -86,6 +86,14 @@ void SampleSkillDetect()
 
 void AddStat(int client, PugStat stat, int amount = 1)
 {
+	// Every other stat handler in pug-match.sp gates on StatsActive() (defined
+	// there as g_State == MS_Live && !g_bRoundEnded && !InReadyUp()); the skill_detect
+	// forwards below must do the same or ready-up warmup skeets/deadstops/pounces
+	// and anything landed after round_end get counted as match results. Do not
+	// remove this: it is the only thing that makes this function's behavior match
+	// the tank_damage/damage_as_si/tank_punches handlers, which get the same gate
+	// for free because they ride Event_PlayerHurt.
+	if (!StatsActive()) return;
 	if (client < 1 || client > MaxClients) return;
 	int slot = g_iClientRoster[client];
 	if (slot == -1) return;
@@ -123,6 +131,10 @@ void WriteSkillLines()
 // count. OnSkeetMagnum and OnSkeetGL can never fire on L4D1 (no such weapons)
 // and are implemented only so the totals stay right if pointed at L4D2.
 
+/** Invariant, intended, not a bug: skeets_shotgun + skeets_sniper + skeets_melee
+ *  can exceed skeets. A team skeet below credits team_skeets and weaponStat but
+ *  never PS_Skeets, so summing the weapon columns also counts team skeets that
+ *  the skeets column itself excludes. */
 static void CountSkeet(int survivor, int victim, bool isTeamSkeet, PugStat weaponStat)
 {
 	AddStat(survivor, isTeamSkeet ? PS_TeamSkeets : PS_Skeets);
@@ -196,9 +208,27 @@ public void OnHunterHighPounce(int hunter, int victim, int actualDamage, float c
 public void OnBoomerVomitLanded(int boomer, int amount)
 { AddStat(boomer, PS_BilesLanded); AddStat(boomer, PS_SurvivorsBiled, amount); }
 
+static ConVar g_cvInstaClearTime;
+static bool g_bInstaClearTimeCached;
+
+/** Cached on first use rather than in an OnPluginStart, because skill_detect
+ *  (which declares this cvar, l4d2_skill_detect.sp:580) may load after
+ *  pug-match does; by the time a clear can actually happen the server has
+ *  finished loading plugins either way. Falls back to skill_detect's own
+ *  default of 0.75 if the plugin is not loaded at all. */
+static float InstaClearTime()
+{
+	if (!g_bInstaClearTimeCached)
+	{
+		g_cvInstaClearTime = FindConVar("sm_skill_instaclear_time");
+		g_bInstaClearTimeCached = true;
+	}
+	return (g_cvInstaClearTime != null) ? g_cvInstaClearTime.FloatValue : 0.75;
+}
+
 /** insta_clears is a SUBSET of clears, not additional to it. */
 public void OnSpecialClear(int clearer, int pinner, int pinvictim, int zombieClass, float timeA, float timeB, bool withShove, bool headshot)
 {
 	AddStat(clearer, PS_Clears);
-	if (timeA > 0.0 && timeA <= 0.75) AddStat(clearer, PS_InstaClears);
+	if (timeA > 0.0 && timeA < InstaClearTime()) AddStat(clearer, PS_InstaClears);
 }
