@@ -274,3 +274,124 @@ whole match instead of one per map.
 - **`sm_pug_min_orient` is currently 1** from `stage.sh --solo`. `pug_match.cfg`
   sets it back to 3 on exec, so `!load_4v4p` self-heals this. Check status
   after loading if you care.
+
+## Round capture verification
+
+This runbook verifies that round-level event capture works end to end on the live
+server: that the plugin fires hooks, encodes timing, and that the backend parser
+reads team orientation correctly across map halves. **WARNING: This changes the
+live server. Real players are usually connected. Before you start, run `R "status"`
+to see who is online and get the owner's explicit go-ahead before proceeding.**
+
+### 1. Stage the plugin
+
+    ./stage.sh
+
+Expected: `Plugin PUG Match reloaded successfully.` This copies one file and calls
+`sm plugins load`. No server restart; the plugin stays inert until a match is
+configured.
+
+### 2. Play or simulate one full map of a PUG
+
+Both halves must go live and end normally. If debugging the orientation mapping
+is needed, set `sm_pug_debug 1` first; otherwise the default output is sufficient.
+
+You can play with bots, simulate with a full human roster, or use the existing
+`!load_4v4p` flow. The point is that each half must transition from pending to
+live to ended, so the plugin records `ROUND_START` and `ROUND_END` for both half 1
+and half 2.
+
+### 3. Confirm the rounds landed and the sides are opposite
+
+    sqlite3 data/pug.db "SELECT match_id, ordinal, half, surv_team, score, reliable FROM match_rounds ORDER BY match_id DESC, ordinal, half LIMIT 10;"
+
+Expected: two rows per map, one for half 1 and one for half 2, with **different**
+`surv_team` values between the two halves (one row should have `surv_team=a` and
+the other `surv_team=b`, or vice versa). If both halves show the same `surv_team`,
+the orientation mapping is being read too early and this is the bug the check
+exists to catch.
+
+### 4. Confirm events carry timing
+
+    sqlite3 data/pug.db "SELECT kind, half, t_ms FROM match_live_events WHERE t_ms >= 0 ORDER BY match_id DESC, seq DESC LIMIT 10;"
+
+Expected: all `t_ms` values are non-negative, and within each half they increase
+in sequence. The `half` column should reflect which round the event occurred in.
+If all values are -1, the staged plugin did not actually reload and the event
+capture is not running.
+
+### 5. Confirm the new event kinds actually fire
+
+    sqlite3 data/pug.db "SELECT kind, COUNT(*) FROM match_live_events GROUP BY kind ORDER BY 2 DESC;"
+
+Expected: after one full map you should see `pinned`, `cleared`, `incap`, `death`,
+`ff` and `si_spawn` all present with nonzero counts. A kind showing zero rows after
+a full map is either a hook that did not fire or an event name mismatched to this
+engine, both of which need investigation before future work builds on the timeline.
+
+Note that `tank_take` and `tank_give` legitimately show zero if tank control never
+changed hands during the half, `skeet` and `dp` show zero on a server with no `skill_detect`
+loaded (both kinds cannot be captured without it), and `car_alarm` and
+the witch events (`witch_aggro`, `witch_killed`) are map-dependent and may be absent
+on maps that do not have them.
+
+`ff` is coalesced: damage to a teammate is accumulated per attacker/victim pair and
+flushed once a second, at 50 damage, or at round end. So expect far fewer `ff` rows
+than shots fired, each carrying the total of a burst. The authoritative per-player
+friendly fire total is still the counter in the dump, not a count of these rows.
+
+### 6. Confirm per-round attribution through the API
+
+Pick a player who you know played both sides (survivor and infected). Then query
+the match from the backend:
+
+    curl -s localhost:8080/api/matches/<match_id> | python3 -m json.tool | head -60
+
+Expected: the `rounds` array has two entries per map. For your chosen player, their
+survivor-side keys appear only in the round(s) where their assigned pug team held
+survivor, and their infected-side keys appear only in the other half. If a player's
+keys appear in both halves on the same side, the attribution is wrong and the
+team-to-side binding is unstable across the map.
+
+The keys to look at, using their real names:
+
+- survivor side, present in every match: `ck` (common kills), `sidmg` (SI damage),
+  `sikill` (SI kills), `ff` (friendly fire dealt), `rev` (revives), `tank_damage`
+- infected side, present in every match: `damage_as_si`, `tank_punches`,
+  `boomer_spawns`, `boom_successes`, `boomed_vomit`, `boomed_proxy`
+- with `skill_detect` loaded, also `skeets` and the rest of the skill keys on the
+  survivor side, and `dps_landed` / `biles_landed` on the infected side
+
+`hp` is deliberately absent from both halves: it is a health reading at one moment,
+not a counter that accrues, so there is no half it can honestly belong to.
+
+Also check `endedAt` on each round. A round with `endedAt: null` never received a
+`ROUND_END`, which makes its `score` the column default rather than a result; do not
+read a zero there as "they scored nothing".
+
+### 7. Check the SourceMod log for failed event hooks
+
+    ssh root@$L4D_HOST 'tail -100 /home/l4d/l4d1-server/left4dead/addons/sourcemod/logs/L*.log' | grep -i "hook\|failed"
+
+Look for any error lines about hooking. The specific event `triggered_car_alarm` is
+unverified on L4D1: it is commented out and L4D2-gated in `l4d2_skill_detect.sp`,
+so it may not exist on this engine. A log line saying it failed to hook is an
+expected, tolerable outcome, not a failure of the deployment. If `triggered_car_alarm`
+fails to hook, `car_alarm` is simply absent and nothing else is affected. An entity
+hook on `prop_car_alarm` is NOT a drop-in fallback: an entity hook fires game code,
+not a game event, so it produces no event for `HookEventEx` to catch and would need
+its own emission written against whatever the hook can see. Treat that as unbuilt
+work rather than as a switch to flip.
+
+### 8. What a mid-round restart does now
+
+An admin restarting a live round mid-half used to break the rest of the map: the
+half was a counter that `OnRoundIsLive` incremented unconditionally, so a re-fire
+pushed it past 2, the backend dropped that round entirely, and every later event
+carried `half=-1`. The half is now read from `m_bInSecondHalfOfRound` each time a
+round goes live, so a restart re-reads the same value and the rows stay correct.
+
+What a restart still costs is the round's accrued stats: the counters are not
+rewound, so damage and kills from before the restart remain in that half's totals.
+`match_rounds.reliable` does not detect this. If a restart happens during
+verification, record it in your notes and treat that half's stats as approximate.

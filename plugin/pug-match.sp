@@ -78,6 +78,10 @@ int g_iHalfScoreA;
 int g_iHalfScoreB;
 int g_iRound1Logical;                    // logical team (1|2) that played survivors in half 1; 0 = unknown
 int g_iRound1SurvPug;                    // pug team (1|2) that played survivors in half 1; 0 = unknown
+int g_iHalf;                             // 1 or 2 within the current map, DERIVED from
+                                          // m_bInSecondHalfOfRound at go-live, never counted;
+                                          // 0 only before the first half of a match goes live
+float g_fRoundLiveAt;                    // GetGameTime() when this half went live; 0 = not live
 bool g_bRoundEnded;                      // round_end latch (round_end can fire more than once)
 bool g_bHalfWasLive;                     // set by OnRoundIsLive; guards ready-up restarts
 bool g_bPendingFinalize;                 // set when 2nd-half round_end fires; cleared by FinalizeMap.
@@ -90,6 +94,27 @@ int g_iPugSide[3];                       // [1] = game team of pug team a, [2] =
 int g_iClientRoster[MAXPLAYERS + 1];     // client -> roster slot, -1 = not rostered
 int g_iLockAttempts[MAXPLAYERS + 1];
 int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
+
+/** Friendly fire damage accumulated per attacker/victim pair, not yet emitted
+ *  as an event. See FlushFriendlyFire. The g_iStatFf counter is credited per
+ *  hit exactly as before and is unaffected by any of this; only the EVENT is
+ *  coalesced. */
+int g_iFfPending[MAXPLAYERS + 1][MAXPLAYERS + 1];
+
+/** How often pending friendly fire is swept out as events. One second is long
+ *  enough that a whole SMG burst or shotgun blast lands inside a single flush,
+ *  and short enough that the live feed still reads as live. */
+#define FF_FLUSH_INTERVAL 1.0
+
+/** Emit immediately once a pair reaches this much pending damage, so a burst
+ *  big enough to matter is not held back for up to a second. Roughly a
+ *  quarter of a survivor's health. */
+#define FF_FLUSH_DAMAGE 50
+
+// Who currently has each survivor pinned, as a client index; 0 = free.
+// Needed because a "cleared" event has to name the survivor who did the
+// clearing, which is not carried by any release event.
+int g_iPinnedBy[MAXPLAYERS + 1];
 
 bool g_bReadyUpAvailable;
 
@@ -167,6 +192,47 @@ orientation threshold. Changing this changes the rules under every rating earned
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
+	// Names verified against l4d2_skill_detect.sp and the Rotoblin-AZMod
+	// plugins, both proven running on L4D1 in this deployment. Note
+	// player_incapacitated_START: the bare player_incapacitated does not
+	// fire on this engine.
+	//
+	// These use HookEventEx, not HookEvent, on purpose. L4D1 defines some
+	// events partly inside VPK archives, so we cannot fully confirm from the
+	// filesystem alone that every name below exists on this engine (see, for
+	// example, triggered_car_alarm, which l4d2_skill_detect.sp itself only
+	// hooks behind an L4D2 version check). HookEvent raises a native error
+	// for an unknown event, and inside OnPluginStart that error aborts the
+	// whole plugin load, taking roster enforcement, scoring and reporting
+	// down with it for one missing telemetry stream. HookEventEx instead
+	// returns false, so a missing event costs only that one capture feed.
+	// The block above this one hooks events already proven live in
+	// production and stays on plain HookEvent; do not move those down here.
+	if (!HookEventEx("lunge_pounce", Event_Pounce))
+		LogMessage("pug-match: event 'lunge_pounce' does not exist on this engine; pinned/cleared capture for pounces will be silently absent.");
+	if (!HookEventEx("tongue_grab", Event_TongueGrab))
+		LogMessage("pug-match: event 'tongue_grab' does not exist on this engine; pinned capture for tongue grabs will be silently absent.");
+	if (!HookEventEx("tongue_release", Event_TongueRelease))
+		LogMessage("pug-match: event 'tongue_release' does not exist on this engine; pin-clear capture for tongue releases will be silently absent.");
+	if (!HookEventEx("player_incapacitated_start", Event_Incap))
+		LogMessage("pug-match: event 'player_incapacitated_start' does not exist on this engine; incap capture will be silently absent.");
+	if (!HookEventEx("witch_harasser_set", Event_WitchAggro))
+		LogMessage("pug-match: event 'witch_harasser_set' does not exist on this engine; witch_aggro capture will be silently absent.");
+	if (!HookEventEx("witch_killed", Event_WitchKilled))
+		LogMessage("pug-match: event 'witch_killed' does not exist on this engine; witch_killed capture will be silently absent.");
+	if (!HookEventEx("triggered_car_alarm", Event_CarAlarm))
+		LogMessage("pug-match: event 'triggered_car_alarm' does not exist on this engine; car_alarm capture will be silently absent.");
+	if (!HookEventEx("tank_spawn", Event_TankSpawn))
+		LogMessage("pug-match: event 'tank_spawn' does not exist on this engine; tank_spawn capture will be silently absent.");
+	// Tank control passing goes through a bot swap on this engine: a human
+	// losing the tank fires player_bot_replace, a human taking over a bot
+	// tank fires bot_player_replace. Verified against l4d_tank_pass.sp and
+	// l4dscores.sp; there is no bare "player_replace" event on this engine.
+	if (!HookEventEx("player_bot_replace", Event_PlayerBotReplace))
+		LogMessage("pug-match: event 'player_bot_replace' does not exist on this engine; tank_give capture (human giving up tank) will be silently absent.");
+	if (!HookEventEx("bot_player_replace", Event_BotPlayerReplace))
+		LogMessage("pug-match: event 'bot_player_replace' does not exist on this engine; tank_take capture (human taking tank) will be silently absent.");
+
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
 	CreateTimer(2.0, Timer_TeamLock, _, TIMER_REPEAT);
@@ -175,6 +241,8 @@ orientation threshold. Changing this changes the rules under every rating earned
 	// spectator refresh where 30s feels dead. Separate timers so neither
 	// constrains the other.
 	CreateTimer(10.0, Timer_LiveStats, _, TIMER_REPEAT);
+	// Coalesces the per-bullet friendly fire events. See AccumulateFriendlyFire.
+	CreateTimer(FF_FLUSH_INTERVAL, Timer_FlushFf, _, TIMER_REPEAT);
 
 	g_bReadyUpAvailable = LibraryExists("readyup");
 	for (int i = 0; i <= MAXPLAYERS; i++) g_iClientRoster[i] = -1;
@@ -214,13 +282,86 @@ void EmitPug(const char[] fmt, any ...)
 	LogToGame("PUG %s %s", g_sToken, body);
 }
 
-/** One discrete thing that happened, for the live feed.
+/** Which pug team is on the survivor side right now, as "a"/"b", or "" when
+ *  the orientation mapping has not settled. g_iPugSide[1] is the GAME team of
+ *  pug team a; TEAM_SURVIVOR is 2. */
+void SurvPugTeam(char[] out, int maxlen)
+{
+	if (g_iPugSide[1] == TEAM_SURVIVOR) strcopy(out, maxlen, "a");
+	else if (g_iPugSide[2] == TEAM_SURVIVOR) strcopy(out, maxlen, "b");
+	else out[0] = '\0';
+}
+
+/** The side to RECORD for a round, given the pug team observed holding
+ *  survivor at round_end (1 = a, 2 = b, 0 = could not see).
+ *
+ *  The recorded side and the recorded score must come from ONE observer. They
+ *  used to come from two: the score was credited by AttributeScore using
+ *  ObserveSurvivorPugTeam() (plain majority of rostered players standing on
+ *  survivors), while the side was read from SurvPugTeam() (the enforcement
+ *  mapping, which only moves on a clear joint majority and otherwise keeps its
+ *  previous value). When those two disagreed the round recorded one team's
+ *  letter against the other team's score, marked reliable, and contradicted
+ *  the match_maps row the same round produced.
+ *
+ *  So the observation wins, and SurvPugTeam() is consulted only when there was
+ *  no observation to have. */
+void SurvSideOf(int survPug, char[] out, int maxlen)
+{
+	if (survPug == 1) strcopy(out, maxlen, "a");
+	else if (survPug == 2) strcopy(out, maxlen, "b");
+	else SurvPugTeam(out, maxlen);
+}
+
+/** Milliseconds since this half went live. -1 before it does, which the
+ *  parser treats as "no round timing", distinct from 0. */
+int RoundMs()
+{
+	if (g_fRoundLiveAt <= 0.0) return -1;
+	return RoundToNearest((GetGameTime() - g_fRoundLiveAt) * 1000.0);
+}
+
+/** Close out a half: emit ROUND_END (if a side was resolved) and mark the
+ *  half no longer live. This is the single exit point for all three
+ *  terminal paths of Event_RoundEnd's score read: the synchronous success,
+ *  the delayed retry's success, and the retries-exhausted branch. Missing
+ *  any one of the three used to leave that half without its authoritative
+ *  surv/score/ended_at AND leave g_fRoundLiveAt stuck, which corrupts
+ *  RoundMs() for every event of the NEXT half.
+ *
+ *  `surv` may be empty when the orientation mapping never settled; the
+ *  parser only accepts surv=a or surv=b, so an empty side is skipped rather
+ *  than emitted malformed. `half` and `surv` must be values CAPTURED at
+ *  round_end time, not read fresh from g_iHalf/g_iPugSide here. The half is
+ *  derived from m_bInSecondHalfOfRound at the time the round goes live, and
+ *  the team lock timer may have flipped g_iPugSide by the time this is called. */
+void EmitRoundEnd(int half, const char[] surv, int score)
+{
+	if (surv[0] != '\0')
+	{
+		// map= rides along for the same reason ROUND_START carries it: the
+		// backend otherwise derives this round's map ordinal from how many
+		// maps have finished at ARRIVAL time, and the half-2 ROUND_END is
+		// emitted immediately before FinalizeMap's MAP_RESULT. Those two
+		// datagrams reordering in flight would file the round on the next map.
+		// g_sCurrentMap is safe to read here even from the retry chain: that
+		// chain is TIMER_FLAG_NO_MAPCHANGE, so it cannot outlive this map.
+		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d", g_sCurrentMap, half, surv, score);
+	}
+	g_fRoundLiveAt = 0.0;
+}
+
+/** One discrete thing that happened, for the live feed and the timeline.
  *
  *  Deliberately generic (kind/actor/target/value) rather than a line type per
  *  event: the backend stores it opaquely and the page renders by kind, so
  *  adding another kind later is a plugin-only change. Cosmetic like the rest
  *  of the UDP stream; the authoritative per-player totals still come from the
- *  dump. target may be 0 for events with no second party. */
+ *  dump. target may be 0 for events with no second party. half/t ride along
+ *  so the viewer can align events against replay frames without a clock.
+ *
+ *  `kind` MUST exist in src/eventKinds.ts. tests/eventKindsParity.test.ts
+ *  enforces that. */
 void EmitEvent(const char[] kind, int actor, int target, int value)
 {
 	if (g_State != MS_Live) return;
@@ -233,8 +374,20 @@ void EmitEvent(const char[] kind, int actor, int target, int value)
 		strcopy(targetId, sizeof(targetId), g_sRosterId[g_iClientRoster[target]]);
 
 	g_iEventSeq++;
-	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d",
-		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value);
+	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d half=%d t=%d",
+		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value, g_iHalf, RoundMs());
+}
+
+/** Emit with actor/target as client indices, gated on StatsActive() so
+ *  nothing fires between rounds or during ready-up (the same gate the "dp"
+ *  emission in pug-stats.inc already uses). EmitEvent itself resolves
+ *  actor/target to roster ids and silently drops anything whose actor is not
+ *  rostered, so an unrostered spectator or admin can never appear in the
+ *  feed. */
+void EmitClientEvent(const char[] kind, int actor, int target, int value)
+{
+	if (!StatsActive()) return;
+	EmitEvent(kind, actor, target, value);
 }
 
 /** Verbose diagnostic, off by default. Goes to the SourceMod log rather than
@@ -684,6 +837,8 @@ void ResetMatchState()
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
 	g_iRound1SurvPug = 0;
+	g_iHalf = 0;
+	g_fRoundLiveAt = 0.0;
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
 	g_bPendingFinalize = false;
@@ -704,7 +859,9 @@ void ResetMatchState()
 	{
 		g_iClientRoster[i] = -1;
 		g_iLockAttempts[i] = 0;
+		g_iPinnedBy[i] = 0;
 	}
+	ClearFriendlyFire();
 	ResetSkillStats();
 }
 
@@ -982,6 +1139,35 @@ public void OnRoundIsLive()
 		SampleSkillDetect();
 		EmitPug("MATCH_START map=%s", g_sCurrentMap);
 	}
+
+	// readyup's go-live forward fires for every round on the box, PUG match or
+	// not, so gate this on an actually-tracked match.
+	if (g_State == MS_Live)
+	{
+		// Derived from the engine, never counted. This used to be g_iHalf++,
+		// which walked past 2 whenever the go-live forward re-fired (an admin
+		// restarting a live round mid-half is enough). The backend accepts
+		// only half 1 or 2, so from that point on the map's ROUND_START and
+		// ROUND_END were dropped AND every EVENT carried half=-1, the sentinel
+		// for "no round timing", silently poisoning the rest of the timeline.
+		// m_bInSecondHalfOfRound is the same property Event_RoundEnd already
+		// trusts for the `second` flag that drives FinalizeMap, so reading it
+		// here makes the round row's half agree with it by construction.
+		g_iHalf = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")) ? 2 : 1;
+		g_fRoundLiveAt = GetGameTime();
+		char surv[2];
+		SurvPugTeam(surv, sizeof(surv));
+		// An empty side means the orientation mapping has not settled. Emit
+		// the line WITHOUT surv= rather than guessing "a": ROUND_END is one UDP
+		// datagram with no retransmit, so a guess here survives as a fabricated
+		// side marked reliable whenever that datagram is lost. The backend
+		// accepts a sideless ROUND_START, records the round unreliable, and
+		// promotes it when ROUND_END supplies the real side. The line still
+		// goes out so the round keeps a started_at, which every event's t is
+		// measured against.
+		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
+		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
+	}
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
@@ -992,7 +1178,13 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	{
 		g_iLockAttempts[i] = 0;
 		g_iLastHealth[i] = 0;
+		g_iPinnedBy[i] = 0;
 	}
+	// Anything still pending belongs to the round that just finished and has
+	// already been flushed by Event_RoundEnd. Dropping it here rather than
+	// carrying it forward keeps a stale pair from being stamped with the new
+	// round's clock.
+	ClearFriendlyFire();
 }
 
 /** End-of-half scoring.
@@ -1021,10 +1213,28 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	int survPug = ObserveSurvivorPugTeam();
 	if (second) g_bPendingFinalize = true;
 
+	// Captured now, not re-derived in the timer: the next half's go-live
+	// rewrites g_iHalf and the team lock timer can flip g_iPugSide before
+	// Timer_ReadScore's retry chain (2-8s out) ever fires. See EmitRoundEnd.
+	int half = g_iHalf;
+	char survEnd[2];
+	SurvSideOf(survPug, survEnd, sizeof(survEnd));
+
+	// Flush here, while this round's clock is still valid: g_iHalf still names
+	// this half and EmitRoundEnd has not yet zeroed g_fRoundLiveAt. Left to
+	// the periodic sweep, the last burst of a round would be stamped t=-1.
+	FlushFriendlyFire();
+
 	int score = TryReadRoundScore(second);
 	if (score >= 0)
 	{
 		AttributeScore(survPug, score, second);
+
+		// The survivor team's own score for this half. g_iHalfScoreA/B are
+		// already the per-half accumulators.
+		int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
+		EmitRoundEnd(half, survEnd, mine);
+
 		if (second) FinalizeMap();
 		return;
 	}
@@ -1034,6 +1244,8 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	pack.WriteCell(second ? 1 : 0);
 	pack.WriteCell(survPug);
 	pack.WriteCell(0); // retry counter
+	pack.WriteCell(half);
+	pack.WriteString(survEnd);
 }
 
 /** One read attempt of the current half's survivor round score. Returns the
@@ -1123,6 +1335,9 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	bool second = pack.ReadCell() != 0;
 	int survPug = pack.ReadCell();
 	int attempt = pack.ReadCell();
+	int half = pack.ReadCell();
+	char survEnd[2];
+	pack.ReadString(survEnd, sizeof(survEnd));
 	if (g_State != MS_Live) return Plugin_Stop;
 
 	int score = TryReadRoundScore(second);
@@ -1135,6 +1350,8 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			retry.WriteCell(second ? 1 : 0);
 			retry.WriteCell(survPug);
 			retry.WriteCell(attempt + 1);
+			retry.WriteCell(half);
+			retry.WriteString(survEnd);
 		}
 		else
 		{
@@ -1144,12 +1361,20 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// runs at all. g_bPendingFinalize is still set in that case, so the
 			// OnMapStart failsafe finalizes with whatever was accumulated,
 			// guaranteeing the map is recorded either way.
+			//
+			// Emit ROUND_END anyway with whatever score accumulated before the
+			// reads gave up: a round with a wrong score is still recoverable,
+			// a round with no side recorded at all is not.
+			int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
+			EmitRoundEnd(half, survEnd, mine);
 			if (second) FinalizeMap();
 		}
 		return Plugin_Stop;
 	}
 
 	AttributeScore(survPug, score, second);
+	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
+	EmitRoundEnd(half, survEnd, mine);
 	if (second) FinalizeMap();
 	return Plugin_Stop;
 }
@@ -1162,6 +1387,10 @@ void FinalizeMap()
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
 	g_iMapScoreB[g_iMapCount] = g_iHalfScoreB;
 	g_iMapCount++;
+	// No g_iHalf reset here any more. It was needed while the half was a
+	// counter that had to restart at each map; it is now read from
+	// m_bInSecondHalfOfRound every time a half goes live, so zeroing it would
+	// only create a window where events carry half=0.
 	EmitPug("MAP_RESULT map=%s a=%d b=%d", g_sCurrentMap, g_iHalfScoreA, g_iHalfScoreB);
 }
 
@@ -1198,6 +1427,11 @@ bool IsSurvivorClient(int client)
 bool IsInfectedClient(int client)
 {
 	return client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_INFECTED;
+}
+
+bool IsTankClient(int client)
+{
+	return IsInfectedClient(client) && GetEntProp(client, Prop_Send, "m_zombieClass") == ZC_TANK;
 }
 
 public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
@@ -1258,11 +1492,71 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (IsSurvivorClient(victim))
 	{
 		g_iStatFf[slot] += damage;      // friendly fire dealt (includes self-damage, matching l4dcompstats)
+		// Accumulated, not emitted here. player_hurt fires once per bullet and
+		// once per shotgun pellet, and every recorded event makes the backend
+		// broadcast 'live', which makes every connected spectator refetch the
+		// whole /api/live payload. Emptying an SMG into a teammate used to
+		// mean ~20 log lines on the game thread, 20 upserts and 20 full
+		// refetches per viewer. One burst now produces one event carrying the
+		// total. The counter above still moves per hit and stays
+		// authoritative; only the EVENT is coalesced.
+		AccumulateFriendlyFire(attacker, victim, damage);
 	}
 	else if (siVictim && remaining > 0)
 	{
 		g_iStatSiDmg[slot] += damage;
 	}
+}
+
+/** Add one friendly fire hit to its attacker/victim pair, emitting early if
+ *  the pair has already piled up enough damage to be worth reporting now.
+ *  Called only from the StatsActive-gated part of Event_PlayerHurt. */
+void AccumulateFriendlyFire(int attacker, int victim, int damage)
+{
+	if (attacker < 1 || attacker > MaxClients || victim < 1 || victim > MaxClients) return;
+	g_iFfPending[attacker][victim] += damage;
+	if (g_iFfPending[attacker][victim] >= FF_FLUSH_DAMAGE) EmitPendingFf(attacker, victim);
+}
+
+/** Emit one pair's accumulated friendly fire as a single event and clear it.
+ *
+ *  EmitEvent rather than EmitClientEvent on purpose: the damage was accrued
+ *  under the StatsActive gate at the time it happened, and this may run from
+ *  the sweep or from Event_RoundEnd, by which point that gate reads false. Its
+ *  roster and MS_Live checks still apply, so an unrostered attacker is still
+ *  dropped. */
+void EmitPendingFf(int attacker, int victim)
+{
+	int total = g_iFfPending[attacker][victim];
+	if (total <= 0) return;
+	g_iFfPending[attacker][victim] = 0;
+	EmitEvent("ff", attacker, victim, total);
+}
+
+/** Sweep every pending pair out as events. Bounded by MaxClients squared,
+ *  which on this box is a few hundred integer reads. */
+void FlushFriendlyFire()
+{
+	for (int a = 1; a <= MaxClients; a++)
+	{
+		for (int v = 1; v <= MaxClients; v++)
+		{
+			if (g_iFfPending[a][v] > 0) EmitPendingFf(a, v);
+		}
+	}
+}
+
+void ClearFriendlyFire()
+{
+	for (int a = 0; a <= MAXPLAYERS; a++)
+		for (int v = 0; v <= MAXPLAYERS; v++)
+			g_iFfPending[a][v] = 0;
+}
+
+public Action Timer_FlushFf(Handle timer)
+{
+	if (g_State == MS_Live) FlushFriendlyFire();
+	return Plugin_Continue;
 }
 
 public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
@@ -1271,6 +1565,22 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
 	if (attacker <= 0 || victim <= 0) return;
+
+	// Timeline emissions live here, ahead of the SI-kill stat guards below,
+	// because those guards return early for exactly the cases (a survivor
+	// dying, a fake-client tank dying) that "death" and "tank_death" need to
+	// see. Nothing below this block is reordered or altered.
+	//
+	// Free anyone this player was pinning, and credit whoever killed them.
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (g_iPinnedBy[i] != victim) continue;
+		g_iPinnedBy[i] = 0;
+		EmitClientEvent("cleared", attacker, i, 0);
+	}
+	if (GetClientTeam(victim) == TEAM_SURVIVOR) EmitClientEvent("death", victim, attacker, 0);
+	else if (IsTankClient(victim)) EmitClientEvent("tank_death", attacker, 0, 0);
+
 	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
 	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
 	if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
@@ -1297,6 +1607,9 @@ public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadca
 	int slot = g_iClientRoster[reviver];
 	if (slot == -1) return;
 	g_iStatRev[slot]++;
+	// "subject" is the revived survivor (verified against l4d_dynamic_light.sp's
+	// own revive_success handler); "userid" above is the reviver.
+	EmitClientEvent("revive", reviver, GetClientOfUserId(event.GetInt("subject")), 0);
 }
 
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -1331,6 +1644,9 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 		// nothing. Deriving this from pops instead would miss those.
 		if (!IsFakeClient(client) && StatsActive()) AddStat(client, PS_BoomerSpawns);
 	}
+
+	if (GetClientTeam(client) == TEAM_INFECTED)
+		EmitClientEvent("si_spawn", client, 0, GetEntProp(client, Prop_Send, "m_zombieClass"));
 }
 
 /** player_now_it: a survivor just became "it". Fires once per survivor caught,
@@ -1348,6 +1664,101 @@ public void Event_PlayerBoomed(Event event, const char[] name, bool dontBroadcas
 		g_bHasBoomLanded = true;
 	}
 	AddStat(g_iBoomerClient, event.GetBool("exploded") ? PS_BoomedProxy : PS_BoomedVomit);
+
+	// The feed's "boom". Emitted from here rather than from skill_detect's
+	// OnBoomerVomitLanded for two reasons: player_now_it is one of pug-match's
+	// own hooks, so this kind is present even on a server with no skill_detect
+	// loaded (which is the current state of the box), and it names the
+	// survivor caught, which the forward's (boomer, amount) signature cannot.
+	// One line per survivor caught, bounded by the four survivors and latched
+	// by boomer life, so this cannot become a per-hit stream.
+	EmitClientEvent("boom", g_iBoomerClient, GetClientOfUserId(event.GetInt("userid")), 0);
+}
+
+// ---------- live timeline: pin cycle, tank cycle, map hazards ----------
+
+/** lunge_pounce: a hunter pins a survivor. */
+public void Event_Pounce(Event event, const char[] name, bool dontBroadcast)
+{
+	int hunter = GetClientOfUserId(event.GetInt("userid"));
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = hunter;
+	EmitClientEvent("pinned", hunter, victim, 0);
+}
+
+/** tongue_grab: a smoker pins a survivor. */
+public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
+{
+	int smoker = GetClientOfUserId(event.GetInt("userid"));
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = smoker;
+	EmitClientEvent("pinned", smoker, victim, 0);
+}
+
+/** tongue_release: the pull ends without anyone dying, so just clear the pin.
+ *  "cleared" is a survivor credit for killing the infected that was pinning
+ *  someone (see Event_PlayerDeath); a smoker letting go on its own earns no
+ *  such credit. */
+public void Event_TongueRelease(Event event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = 0;
+}
+
+/** player_incapacitated_start: the bare player_incapacitated does not fire on
+ *  this engine. */
+public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(event.GetInt("userid"));
+	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = 0;
+	// Actor is the survivor it happened to, so the feed reads
+	// "<name> was incapped by <attacker>".
+	EmitClientEvent("incap", victim, attacker, 0);
+}
+
+public void Event_WitchAggro(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("witch_aggro", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+public void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("witch_killed", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+/** triggered_car_alarm: userid may be absent or 0 when the director trips an
+ *  alarm with nobody responsible. EmitClientEvent (via EmitEvent) drops an
+ *  unrostered/invalid actor, which is correct: an unattributed alarm is not
+ *  a blame stat. */
+public void Event_CarAlarm(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("car_alarm", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+public void Event_TankSpawn(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("tank_spawn", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+/** bot_player_replace: a human takes over a bot. When the bot being taken
+ *  over was the tank, this human has just TAKEN the tank.
+ *
+ *  No target: the party on the other side of the swap is the bot, which is
+ *  never rostered and has no name worth putting in the feed. */
+public void Event_BotPlayerReplace(Event event, const char[] name, bool dontBroadcast)
+{
+	int player = GetClientOfUserId(event.GetInt("player"));
+	if (IsTankClient(player)) EmitClientEvent("tank_take", player, 0, 0);
+}
+
+/** player_bot_replace: a human is replaced by a bot, handing the tank back to
+ *  the AI. The opposite direction from the above, and a different kind: one
+ *  verb cannot honestly describe both taking and giving up control. */
+public void Event_PlayerBotReplace(Event event, const char[] name, bool dontBroadcast)
+{
+	int player = GetClientOfUserId(event.GetInt("player"));
+	if (IsTankClient(player)) EmitClientEvent("tank_give", player, 0, 0);
 }
 
 /** Authoritative match record over the RCON response body. Idempotent:

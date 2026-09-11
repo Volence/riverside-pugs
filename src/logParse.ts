@@ -18,6 +18,21 @@ export type LogEvent =
   // Cosmetic: the identical counters are pulled authoritatively over rcon at
   // the end, so these are never read back when a result is computed.
   | { kind: 'live_stat'; token: string; steamid: string; stats: Record<string, number> }
+  // One half of one map. Emitted at OnRoundIsLive and again at round_end.
+  // The END value of `surv` is authoritative: the plugin's orientation
+  // mapping is unreliable early in a round, which is exactly why that
+  // reconciliation logic exists at all.
+  //
+  // round_start's `surv` is NULL when the plugin could not yet tell which pug
+  // team holds survivor. The plugin used to guess "a" in that case on the
+  // reasoning that ROUND_END would correct it, but ROUND_END is one UDP
+  // datagram with no retransmit: losing it left a fabricated side recorded as
+  // reliable. An absent field is the honest signal, and the round is stored
+  // unreliable until ROUND_END supplies the real one.
+  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null }
+  // `map` rides along so recordRoundEnd can resolve the round to the map it
+  // actually belongs to rather than to whatever had finished by arrival time.
+  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number }
   // One discrete thing that happened, for the live feed. Generic on purpose:
   // the plugin decides the `kind` and the page renders per kind, so a new
   // event type needs no backend change. `seq` is per-match monotonic and makes
@@ -25,6 +40,9 @@ export type LogEvent =
   | {
       kind: 'live_event'; token: string; seq: number; event: string;
       actor: string; target: string | null; value: number;
+      // -1 when the plugin predates round timing. Distinct from 0, which is
+      // a real event in the first millisecond of a round.
+      half: number; tMs: number;
     };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
@@ -40,6 +58,15 @@ function kv(parts: string[]): Record<string, string> {
 function intOf(s: string | undefined): number | null {
   if (s === undefined || !/^-?\d+$/.test(s)) return null;
   return Number(s);
+}
+
+function teamOf(s: string | undefined): 'a' | 'b' | null {
+  return s === 'a' || s === 'b' ? s : null;
+}
+
+function halfOf(s: string | undefined): number | null {
+  const n = intOf(s);
+  return n === 1 || n === 2 ? n : null;
 }
 
 /**
@@ -114,6 +141,26 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (Object.keys(stats).length === 0) return null;
       return { kind: 'live_stat', token, steamid: rest.steamid, stats };
     }
+    case 'ROUND_START': {
+      const half = halfOf(rest.half);
+      // An ABSENT surv= is accepted: the plugin omits it rather than guessing
+      // when the orientation mapping has not settled. A PRESENT but malformed
+      // one is still rejected, because that is a corrupt line, not an
+      // admission of not knowing.
+      if (rest.surv !== undefined && teamOf(rest.surv) === null) return null;
+      const surv = teamOf(rest.surv);
+      if (!rest.map || half === null) return null;
+      return { kind: 'round_start', token, map: rest.map, half, surv };
+    }
+    case 'ROUND_END': {
+      const half = halfOf(rest.half);
+      const surv = teamOf(rest.surv);
+      const score = intOf(rest.score);
+      if (half === null || surv === null || score === null) return null;
+      // Optional: a staged older plugin does not send it, and the ordinal
+      // falls back to the map count in that case.
+      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score };
+    }
     case 'EVENT': {
       const seq = intOf(rest.seq);
       const value = intOf(rest.value);
@@ -122,7 +169,10 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (!/^\d{17}$/.test(rest.actor ?? '')) return null;
       // target is "0" when the event has no second party.
       const target = /^\d{17}$/.test(rest.target ?? '') ? rest.target : null;
-      return { kind: 'live_event', token, seq, event: rest.kind, actor: rest.actor, target, value };
+      // Optional so a staged older plugin still produces usable events.
+      const half = halfOf(rest.half) ?? -1;
+      const tMs = intOf(rest.t) ?? -1;
+      return { kind: 'live_event', token, seq, event: rest.kind, actor: rest.actor, target, value, half, tMs };
     }
     case 'MATCH_END': {
       const a = intOf(rest.a), b = intOf(rest.b);

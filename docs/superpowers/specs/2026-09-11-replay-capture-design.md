@@ -72,8 +72,18 @@ half going live, `Event_RoundEnd` already closes it, `g_iPugSide[]` already hold
 pug-team to game-team mapping, and `StatsActive()` is already exactly the "capture is
 valid right now" predicate. None of it is persisted today.
 
-- `ROUND_START map=%s half=%d surv=%s` from `OnRoundIsLive`
-- `ROUND_END half=%d surv=%s score=%d` from `Event_RoundEnd`
+- `ROUND_START map=%s half=%d surv=%s` from `OnRoundIsLive`. `surv=` is OMITTED, not
+  guessed, when the orientation mapping has not settled yet: `ROUND_END` is a single
+  datagram with no retransmit, so a guess here survives as a fabricated side whenever
+  that datagram is lost. Ingest records such a round unreliable and promotes it when
+  `ROUND_END` supplies the real side.
+- `ROUND_END map=%s half=%d surv=%s score=%d` from `Event_RoundEnd`. `map=` rides along
+  so ingest can resolve the round's map ordinal by name; the half-2 `ROUND_END` is
+  emitted immediately before `MAP_RESULT`, and those two reordering in flight would
+  otherwise file the round on the next map.
+
+`half` is read from `m_bInSecondHalfOfRound`, never counted. It was a counter, and a
+re-fire of the go-live forward walked it past 2, which ingest rejects.
 
 ### Event vocabulary
 
@@ -86,26 +96,45 @@ valid right now" predicate. None of it is persisted today.
 | `ff` | survivor, survivor, damage | FF timeline | existing (`player_hurt`) |
 | `si_spawn` | SI, class | Spawn positioning, spawn-to-engage time | existing (`player_spawn`) |
 | `tank_spawn` | player | Tank-fight segmentation | existing (`player_spawn`) |
-| `tank_pass` | from, to | Tank-fight segmentation. Tank control passes in this ruleset | new |
+| `tank_take` | player | Tank-fight segmentation. A human takes the tank over from the AI | new (`bot_player_replace`) |
+| `tank_give` | player | Tank-fight segmentation. A human hands the tank back to the AI | new (`player_bot_replace`) |
 | `tank_death` | tank, killer | Tank-fight segmentation | existing |
 | `revive` | survivor, survivor | Round timeline | existing (`revive_success`) |
 | `witch_aggro` | witch, survivor | Round timeline, pairs with `crowns` | new (`witch_harasser_set`) |
 | `witch_killed` | survivor | Round timeline | new (`witch_killed`) |
-| `car_alarm` | player | Round timeline, blame | new (`triggered_car_alarm`) |
+| `car_alarm` | player | Round timeline, blame | new (`triggered_car_alarm`, UNVERIFIED on L4D1) |
 | `skeet`, `boom`, `dp` | as today | Killfeed timing only | existing / skill_detect |
 
 `heal` is absent because kits are disabled in this ruleset, pills only. Pill detection
 is deferred (see Deferred below).
 
-`car_alarm` needs no entity hook after all. `triggered_car_alarm` is a real game event
-and `l4d2_skill_detect.sp` hooks it, which is proof it fires on L4D1 in this deployment.
-Corrected 2026-09-11 while writing plan 6a; the earlier `prop_car_alarm` entity-hook plan
-was more work for the same result.
+`car_alarm` is UNVERIFIED and may not fire on L4D1. An earlier revision of this document
+claimed `triggered_car_alarm` was proven because `l4d2_skill_detect.sp` hooks it. That was
+wrong: at `l4d2_skill_detect.sp:559` the hook is both commented out and gated behind an
+L4D2 version check, so its author evidently believed the event is L4D2 only. Caught during
+plan 6a implementation. The hook is registered anyway, defensively (see below), and if it
+never fires the fallback is the original approach: an entity hook on `prop_car_alarm`,
+which `Rotoblin-AZMod/SourceCode/scripting-az/l4d_car_alarm_hittable_fix.sp:67` already
+demonstrates. Confirm in game before relying on the event.
 
-Every event name in the table above is taken from a plugin verified running on L4D1 here:
-`l4d2_skill_detect.sp` for the pin, witch, incap and alarm events, and Rotoblin-AZMod's
-`l4dscores.sp` and `l4d_slowdown_control.sp` for `tank_spawn` and the `player_replace` /
-`bot_player_replace` pair that tank passing goes through on this engine. None are guessed.
+Tank passing uses `player_bot_replace` and `bot_player_replace`. An earlier revision named
+`player_replace`, which exists nowhere in either reference tree. `player_bot_replace` is
+used by `l4dscores.sp`, `l4d_collision_adjustments.sp` and `l4d_useful_upgrades.sp`, and
+`L4D1_2-Plugins/l4d_tank_pass/scripting/l4d_tank_pass.sp` is the reference for the handover
+itself.
+
+**The event list cannot be settled from the filesystem.** L4D1 defines events partly inside
+VPK archives, so grepping the loose `resource/*.res` files reports `player_bot_replace` and
+`witch_killed` as absent even though plugins hook both successfully in this deployment.
+Anyone tempted to "verify" an event name that way will get a confident wrong answer.
+
+Because of that, every event hook added by this work uses `HookEventEx` rather than
+`HookEvent`. `HookEvent` on an undefined event raises a native error, and raised inside
+`OnPluginStart` that aborts plugin load, which would take down roster enforcement, scoring
+and reporting for every ranked PUG. `HookEventEx` returns false instead, and a failure is
+logged once by name. An absent event then costs one telemetry stream rather than the match
+system. The hooks that predate this work stay on plain `HookEvent`: they are proven in
+production and changing them buys nothing.
 
 ### Position and state frames
 
@@ -122,13 +151,38 @@ only the storage view behind it.
 - **Pills taken.** Detectable as a temp-health jump, but `temphealthfix.sp` in
   Roto-AZMod already modifies temp health behaviour, so the threshold must be read from
   the live pill value rather than hardcoded. Not worth blocking v1 on.
-- **World entities** at a reduced sample rate.
+### Reinstated 2026-09-11: world entities are in scope after all
+
+Reversed the same day it was decided, on evidence. The user demonstrated suprep's existing
+viewer at https://l4dpug.com/player.html, which already renders all of it: individual
+common infected (its status bar reports a live `common` count), the tank rock as an entity
+with its flight path drawn, ghost SI visually distinguished from spawned SI with per-entity
+health and entity ids, the witch, per-player view-direction lines, and per-player weapon
+and ammo.
+
+That settles the cost question empirically. The worry behind deferring these was that
+per-frame entity iteration would be too expensive on a 100-tick server. A working viewer
+fed by a plugin on the same hardware is a stronger argument than my estimate, so the
+estimate loses.
+
+Consequences, all landing in plan 6b, which is not yet written:
+
+- The frame format needs a variable-length entity section after the fixed player block,
+  not merely reserved space. Entity count varies per frame, so the fixed-stride property
+  holds only for the player block; the file needs a per-frame entity count and the seek
+  index has to account for it.
+- Ghost versus spawned is a state bit on an SI, not a separate entity kind. Ghost position
+  is also the most competitively sensitive data in the file, which makes the
+  server-side live delay load bearing rather than merely prudent.
+- View direction is already covered: yaw and pitch are in the player record.
+- Per-entity health is needed for the witch and the tank, so the entity record carries
+  health, not just position.
+
+Still to decide in 6b: whether entities sample at the full 10Hz or a lower rate with
+interpolation, and whether commons are worth individual identity or can be an anonymous
+point cloud. Measure before choosing.
 
 ### Non-goals for v1
-
-- **World entities.** Commons, witch, rocks, fires and bile clouds are excluded. They
-  need per-frame entity iteration, which is genuinely expensive, unlike reading 8 known
-  client indices. The frame format reserves space to add them later.
 - **Any display of this data.** Pieces 2 through 4.
 - **Map background images.** Piece 3. The four analytics metrics do not need them.
 - **Per-round stat snapshots.** See the decision below; they turn out to be unnecessary.
@@ -176,9 +230,20 @@ survivor, and their infected stats from the other. The five fixed columns on
 `match_players` (`si_damage`, `si_kills`, `common_kills`, `ff_dealt`, `revives`) are all
 survivor-side, so the partition holds across the whole schema.
 
-This breaks only if a round is restarted after stats accrued, or a player changes team
-mid-match. Both are handled by marking that round's attribution unreliable rather than
-guessing, consistent with the existing refusal to render absent stats as zeros.
+This breaks if a round is restarted after stats accrued, or a player changes team
+mid-match. Neither is detected yet, and this is the honest state of the column: nothing
+in the plugin or the ingest path notices either case, so `match_rounds.reliable` cannot
+report them. The suppressions that DO exist are narrower:
+
+- `recordRoundStart` stores `reliable = 0` for a round whose `ROUND_START` carried no
+  side at all, and `ROUND_END` promotes it back to 1 when it supplies the real one.
+- `roundAttribution` forces both halves of a map unreliable in its return value when
+  they fail to partition the sides (both recorded as the same team on survivor).
+
+So `reliable = 1` means "nothing has shown this round to be wrong", not "this round has
+been verified". Detecting restarts and mid-match team changes is outstanding plugin
+work; until it lands, a consumer that treats a reliable round as guaranteed correct is
+trusting more than this column can deliver.
 
 The test named under Testing is what this decision rests on. If it fails, this section
 is wrong and a snapshot table is needed after all.
@@ -337,14 +402,44 @@ ordinal, half, sample rate, map name, wall-clock start, and the slot table mappi
 roster slots 0 to 7 to SteamID64. Frames reference slot indices, which is where most of
 the size saving comes from.
 
-Frame, 132 bytes, repeated: `t_ms` as uint32, then eight 16-byte player records of
-position as three int16, yaw as int16, pitch as int8, health as uint16 (the tank needs
-the range), a state bitfield, class, weapon and ammo.
+Frame, variable length, repeated. Three parts:
 
-1,320 bytes per second, about 4.75 MB per hour, about 4 MB for a typical match.
+1. **Frame header, 8 bytes**: `t_ms` as uint32, an entity count as uint16, and 2 bytes
+   reserved. The count is what makes the frame self-describing.
+2. **Player block, 128 bytes fixed**: eight 16-byte records of position as three int16,
+   yaw as int16, pitch as int8, health as uint16 (the tank needs the range), a state
+   bitfield, class, weapon and ammo. Always eight, even when a slot is empty, so this
+   block alone stays fixed-stride.
+3. **Entity block, 8 bytes per entity**: entity index as uint16, kind as uint8, a state
+   bitfield as uint8, and position as three int16. Health is not carried per entity; a
+   witch or a tank is a PLAYER-slot record when a human controls it, and an AI boss
+   carries its health in the state byte's high bits.
+
+Revised 2026-09-11 when world entities came back into scope. The earlier design was a
+flat 132-byte fixed-stride frame with "reserved space" for entities, which does not work:
+entity count varies per frame, so no fixed stride can hold them.
+
+**The cost of variability is seeking.** A fixed-stride file lets a viewer jump to frame N
+by multiplication. With variable frames it cannot, so the writer must emit a keyframe
+index: every 10 seconds, record `(t_ms, byte offset)` into a table written at the END of
+the file, with the table's own offset stored in the header. The viewer reads the header,
+seeks to the table, and binary-searches it. A crash mid-round leaves no table, which is
+exactly why the reader must also support a linear scan fallback; a truncated file then
+degrades to "playable but slow to seek" rather than "unreadable".
+
+Size, with entities: players are 1,360 bytes per second at 10Hz. Commons run roughly 20
+to 30 alive in a versus round, so the entity block adds about 2,000 bytes per second.
+Call it 3.4 KB/s, 12 MB per hour, 10 to 15 MB for a full match. Still small next to the
+1.7 GB/day the demo recorder was producing, and the 90 day retention still lands near
+4 GB at 30 matches a week.
 
 Timestamps are explicit rather than implied by frame index, costing 4 bytes per frame,
 so a hitch or pause cannot silently desync motion from the event timeline.
+
+**Open, to be settled by measurement in 6b, not by argument:** whether entities sample at
+the full 10Hz or at a lower rate with viewer-side interpolation. Entities get their own
+cvar so the two rates move independently, and the frame-time comparison decides the
+default.
 
 ## Error handling
 
@@ -359,8 +454,8 @@ never-throws discipline in `src/demos.ts`.
 | Free space below floor | Refuse to open new replay files. Cheap insurance given the prior incident |
 | File missing at ingest | No `match_replays` row, UI shows unavailable. Not an error |
 | Truncated file | Round down to the last whole frame |
-| Round restarted after stats accrued | `match_rounds.reliable = 0`, attribution shown as unavailable |
-| Player changes team mid-match | Same |
+| Round restarted after stats accrued | Not currently detected. Known gap: `reliable` is only lowered at derivation time when a map's two halves fail to partition the two sides between them |
+| Player changes team mid-match | Not currently detected. Known gap: same as above |
 | Start/end side disagreement | Trust round end, log the disagreement |
 | Duplicate UDP datagram | Idempotent upsert, as `match_live_maps` already does |
 
@@ -408,9 +503,11 @@ design is wrong and we learn that before it is load-bearing.
 **Live server.** Deployment requires an explicit go-ahead; players are frequently on the
 box.
 
-**Unknown hooks.** Resolved for v1. `car_alarm` uses `triggered_car_alarm` and every other
-event name is taken from a plugin verified on L4D1 here. Only `pills` remains without a
-confirmed hook, and it is deferred rather than in scope.
+**Unknown hooks.** `car_alarm` is unverified: `triggered_car_alarm` is commented out and
+L4D2-gated in skill_detect, so it may never fire here. Every hook added by this work uses
+`HookEventEx`, so an absent event logs and degrades rather than aborting plugin load. The
+fallback if it never fires is a `prop_car_alarm` entity hook. `pills` remains unhooked and
+is deferred rather than in scope. Confirm both in game.
 
 **Scope.** Piece 1 ships nothing visible except the admin panel. The product is pieces 2
 through 4, and this spec exists to serve them.
@@ -422,7 +519,9 @@ through 4, and this spec exists to serve them.
 - Sample carries full player state; world entities deferred, format left extensible
 - Storage is files on disk plus a DB index row, 90 day retention
 - Per-round stat snapshots are unnecessary given the side partition in `statKeys.ts`
-- Tank control passes in this ruleset, so `tank_pass` is meaningful
+- Tank control passes in this ruleset, so it is worth capturing, but it passes THROUGH
+  the AI: the other party in both directions is a bot, so `tank_take` and `tank_give`
+  name one player each rather than a single `tank_pass` with a from and a to
 - Kits are disabled, so `heal` becomes `pills`
 - Admin storage panel ships in this piece
 - `skill_detect` is already loaded and silenced for ranked play; no change needed
