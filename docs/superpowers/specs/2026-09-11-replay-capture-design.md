@@ -1,0 +1,387 @@
+# Sub-project 6: Round-Aware Capture, Replay Recording, and Admin Storage
+
+## What this is
+
+The capture layer beneath a set of analytics pages. It persists three things a PUG
+already produces and currently throws away: which team played survivor in each round,
+when each notable event happened, and where every player was while it happened.
+
+Written 2026-09-11. This is piece 1 of four; the other three are named under
+"What this feeds" and are not designed here.
+
+Large enough that the implementation plan will almost certainly stage it: plugin and
+schema first, then ingest, then the admin panel. That staging is the plan's job, not
+this document's.
+
+## What this feeds
+
+This spec captures data. It does not display any of it. Every stream below exists to
+serve a specific display in a later piece, and nothing is captured speculatively.
+
+| Stream | Feeds |
+|---|---|
+| Round and side (`match_rounds`) | Per-round survivor/infected splits on the match page and the player page (piece 2) |
+| Event timestamps and vocabulary | Match timeline and killfeed (piece 3); clear latency, FF timeline, tank-fight segmentation (piece 4) |
+| Position and state frames | Replay viewer, live and saved (piece 3); isolation, pacing, death heatmaps (piece 4) |
+| Admin storage panel | Ships here, because this spec introduces pruning |
+
+**The point of the project is the stat display**, specifically letting a player find the
+games that went badly and see what the data says about why. Piece 1 is plumbing. If a
+proposed capture does not feed a number someone would look up, it does not belong here.
+
+### The four positional metrics this exists for
+
+Named explicitly because they are the justification for 10Hz sampling, and because none
+of them can be produced by any counter in `statKeys.ts`:
+
+1. **Isolation.** Mean distance to nearest living teammate while alive. Getting caught
+   out alone is the most common way a PUG survivor round dies and nothing currently
+   measures it.
+2. **Pacing.** Position along survivor flow relative to the team median. Persistently
+   ahead is overrushing, persistently behind is lagging. Both are correctable habits.
+3. **Death and incap heatmaps**, per chapter.
+4. **Clear latency.** Seconds a teammate stayed pinned before being cleared. Derived from
+   event timestamps rather than positions, but it lands in the same analytics surface.
+
+All four work with no background map image. The map art is required for the replay
+viewer in piece 3, not for these.
+
+## Why now, and what it depends on
+
+Capture is the only piece whose data cannot be recovered retroactively. Every PUG played
+before this lands is permanently missing round sides, event timestamps and positions,
+while every presentation piece applies to matches already in the database. That
+asymmetry is the entire reason this is first despite shipping nothing visible.
+
+**No dependency on skill_detect changes.** An earlier concern that skill stats had been
+dead since 2026-09-08 was wrong.
+`deploy/overrides/left4dead/cfg/pug_match.cfg:37-43` already loads `l4d2_skill_detect.smx`
+and sets `sm_skill_report_enable 0`, so it is loaded and silent for ranked PUGs and
+unloaded only for casual play. That is the correct scoping and needs no change.
+
+**Merged into one plugin change on purpose.** Round capture, event timestamps and
+position logging all touch `pug-match.sp`. Doing them as one change means one deploy to
+a live box rather than three.
+
+## Scope
+
+### Round and side capture
+
+Two new emissions on code paths that already exist. `OnRoundIsLive()` already marks a
+half going live, `Event_RoundEnd` already closes it, `g_iPugSide[]` already holds the
+pug-team to game-team mapping, and `StatsActive()` is already exactly the "capture is
+valid right now" predicate. None of it is persisted today.
+
+- `ROUND_START map=%s half=%d surv=%s` from `OnRoundIsLive`
+- `ROUND_END half=%d surv=%s score=%d` from `Event_RoundEnd`
+
+### Event vocabulary
+
+| kind | actor, target, value | Feeds | Hook |
+|---|---|---|---|
+| `pinned` | SI, survivor, class | Clear latency, pin heatmap | new (`lunge_pounce`, `tongue_grab`) |
+| `cleared` | survivor, survivor | Clear latency, paired with `pinned` | new (`pounce_stopped`, `tongue_release`) |
+| `incap` | survivor, cause | Death heatmap, round timeline | new (`player_incapacitated`) |
+| `death` | survivor, killer | Death heatmap, round timeline | existing (`player_death`) |
+| `ff` | survivor, survivor, damage | FF timeline | existing (`player_hurt`) |
+| `si_spawn` | SI, class | Spawn positioning, spawn-to-engage time | existing (`player_spawn`) |
+| `tank_spawn` | player | Tank-fight segmentation | existing (`player_spawn`) |
+| `tank_pass` | from, to | Tank-fight segmentation. Tank control passes in this ruleset | new |
+| `tank_death` | tank, killer | Tank-fight segmentation | existing |
+| `revive` | survivor, survivor | Round timeline | existing (`revive_success`) |
+| `pills` | survivor | Round timeline | new, hook TBD |
+| `witch_aggro` | witch, survivor | Round timeline, pairs with `crowns` | new (`witch_harasser_set`) |
+| `witch_killed` | survivor | Round timeline | new (`witch_killed`) |
+| `car_alarm` | player | Round timeline, blame | new, hook TBD |
+| `skeet`, `boom`, `dp` | as today | Killfeed timing only | existing / skill_detect |
+
+`pills` rather than `heal`: kits are disabled in this ruleset, pills only.
+
+### Position and state frames
+
+10Hz sampling of the 8 rostered players: position, facing, health, state
+(alive/incap/ledged/dead/pinned/biled/burning), class, weapon and ammo.
+
+### Admin storage panel
+
+First admin surface in the app. A generic `requireAdmin` guard and page shell, with
+only the storage view behind it.
+
+### Non-goals for v1
+
+- **World entities.** Commons, witch, rocks, fires and bile clouds are excluded. They
+  need per-frame entity iteration, which is genuinely expensive, unlike reading 8 known
+  client indices. The frame format reserves space to add them later.
+- **Any display of this data.** Pieces 2 through 4.
+- **Map background images.** Piece 3. The four analytics metrics do not need them.
+- **Per-round stat snapshots.** See the decision below; they turn out to be unnecessary.
+- **Common kills as events.** Hundreds per round, feeds nothing anyone looks up.
+
+## Decisions
+
+### Three streams, three transports
+
+Round facts are low-volume and must be exact, because a wrong side mapping corrupts
+every downstream attribution; they ride the existing UDP log line into a new table.
+Events are sparse and heterogeneous and tolerate loss; they ride the existing `EVENT`
+line into `match_live_events`. Frames are dense, uniform and highly loss-tolerant; they
+go to a file the plugin writes directly.
+
+**Events are not in the replay file.** The viewer composes the two by timestamp. This
+keeps the file a pure fixed-stride array so seeking is arithmetic rather than scanning,
+and keeps events in SQLite where analytics can query and rank them. The killfeed overlay
+and the clear-latency metric then read the same rows.
+
+### Counters stay authoritative for totals; events carry timing only
+
+Never derive a total by counting events. The event feed rides lossy UDP, so counting it
+would produce numbers disagreeing with `match_player_stats` and create two sources of
+truth for "how many skeets". This is the discipline the boomer attribution comment in
+`plugin/pug-match.sp` already follows. Events answer *when* and *in what order*, never
+*how many*.
+
+### Round-relative timestamps, not wall clock
+
+An event row gains `half` and `t_ms`, milliseconds since that round went live, alongside
+the `map_ordinal` it already carries. Replay frames are indexed the same way. The viewer
+then aligns motion and events by arithmetic with no clock synchronisation, and analytics
+get "4:32 into the round" for free.
+
+### No new stat snapshot table
+
+Per-round side attribution appears to need per-round stat snapshots. It does not.
+
+Every key in `src/statKeys.ts` already declares a `side`, and survivor stats can only
+accrue while the player is survivor. Given `match_rounds.surv_team`, the existing
+per-map snapshots in `match_live_map_stats` therefore already yield per-round
+attribution: a team's survivor stats on a map came from whichever half they held
+survivor, and their infected stats from the other. The five fixed columns on
+`match_players` (`si_damage`, `si_kills`, `common_kills`, `ff_dealt`, `revives`) are all
+survivor-side, so the partition holds across the whole schema.
+
+This breaks only if a round is restarted after stats accrued, or a player changes team
+mid-match. Both are handled by marking that round's attribution unreliable rather than
+guessing, consistent with the existing refusal to render absent stats as zeros.
+
+The test named under Testing is what this decision rests on. If it fails, this section
+is wrong and a snapshot table is needed after all.
+
+### Side is stamped at both round start and round end
+
+The orientation logic in `pug-match.sp` exists precisely because the mapping is
+unreliable early in a round. The round-end value is authoritative; ingest compares the
+two and logs a disagreement rather than silently trusting the provisional one.
+
+### Files on disk with a DB index, not blobs in SQLite
+
+Live tailing needs an appendable file a second process can follow, which SQLite cannot
+provide, so the file exists either way. Putting the bytes in the database is therefore
+strictly additional machinery, and it has to earn that. It does not:
+
+- `better-sqlite3` is synchronous, so pulling a 4 MB blob blocks the event loop for its
+  duration, including live WebSocket traffic and the log listener.
+- A static file gets HTTP range requests, caching and sendfile for free. A seeking
+  viewer needs those.
+- The DB is in WAL mode; 4 MB inserts would make replays the dominant content of a file
+  that is otherwise counters and text, and every backup a multi-GB copy of immutable data.
+- A crash mid-round truncates one file rather than damaging the database that holds
+  ratings.
+
+`match_replays` mirrors `match_demos`: bytes on disk, one index row per file. The row
+outlives the file so the UI can say "replay expired" rather than 404.
+
+### Binary fixed-stride frames
+
+Chosen for plugin cost more than for size. Text means eight `Format()` calls with float
+conversion per sample; packing bytes is a handful of Pawn ops. Fixed stride also makes
+seeking O(1) arithmetic and makes a truncated file trivially recoverable by rounding
+down to the last whole frame.
+
+### One file per round
+
+The survivor/infected mapping is constant within a round, and a round is the natural
+unit of "let me look at that again". A map view plays two files in sequence. Naming
+follows the demo precedent so the file-to-match link is a property of the filename and
+survives a backend restart or a lost datagram: `pug_<token>_<ordinal>_<half>.rpl`.
+
+### Live delay is enforced server-side
+
+The 10 second delay is anti-ghosting, not buffering. A live top-down view showing every
+infected player's position is perfect information for anyone watching a ranked PUG on a
+second monitor. If the client delays, someone reads the WebSocket directly and ghosts.
+The backend therefore never sends a frame newer than `now - delay`.
+
+### Retention is 90 days, controllable from the browser
+
+Roughly a season. At 30 PUGs a week this is about 1.5 GB steady state. Retention
+settings live in the existing `settings` table rather than in env, so they are
+changeable without a redeploy, exactly as `map_pool` and `ready_seconds` already are.
+Env supplies defaults only.
+
+### The admin panel ships with this piece
+
+Shipping a retention policy with no visibility into what it is deleting is how a second
+disk incident happens. This box has already had one: `tv_autorecord` filling the disk at
+~1.7 GB/day recording an empty server, 7.76 GB pruned by hand on 2026-09-10, root cause
+still open.
+
+Those demos are orphans, files with no matching pug token, and `discoverMatchDemos`
+already distinguishes them by the `pug_<token>_...` convention. Classifying every file
+as belonging-to-a-match or orphaned is the diagnostic that has been missing, so this
+panel closes an open incident rather than only serving the new feature.
+
+The `requireAdmin` guard and page shell are built generically. Once an admin surface
+exists, invite code, map pool, ready timers and bans will all want to live there. Build
+the door properly, ship only the storage room.
+
+## Data flow
+
+```
+pug-match.sp
+  OnRoundIsLive    -> ROUND_START (udp)  -> match_rounds
+                   -> open pug_<token>_<ordinal>_<half>.rpl
+  Timer 0.1s       -> 132-byte frame     -> replay file (no flush)
+  hooks            -> EVENT ... t_ms     -> match_live_events
+  Event_RoundEnd   -> ROUND_END (udp)    -> match_rounds
+                   -> close file, REPLAY line -> match_replays
+
+pug-web
+  live:  tail open file -> hold to now-10s -> websocket
+  saved: static file + range requests
+  daily: prune job over settings-driven windows
+  admin: /api/admin/storage, /api/admin/storage/prune, /api/admin/settings
+```
+
+### Schema additions
+
+```sql
+CREATE TABLE match_rounds (
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  ordinal    INTEGER NOT NULL,
+  half       INTEGER NOT NULL,
+  surv_team  TEXT NOT NULL CHECK (surv_team IN ('a','b')),
+  score      INTEGER NOT NULL DEFAULT 0,
+  reliable   INTEGER NOT NULL DEFAULT 1,
+  started_at TEXT, ended_at TEXT,
+  PRIMARY KEY (match_id, ordinal, half)
+);
+
+CREATE TABLE match_replays (
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  ordinal     INTEGER NOT NULL,
+  half        INTEGER NOT NULL,
+  filename    TEXT    NOT NULL,
+  bytes       INTEGER NOT NULL,
+  frames      INTEGER NOT NULL,
+  sample_hz   INTEGER NOT NULL,
+  pruned_at   TEXT,
+  PRIMARY KEY (match_id, ordinal, half)
+);
+```
+
+`match_live_events` gains `half` and `t_ms` via the existing `ensureColumn` helper, which
+is the established pattern here; there is deliberately no migration framework.
+
+### Replay file format
+
+Header, 160 bytes fixed, including reserved space: magic and version, match token, map
+ordinal, half, sample rate, map name, wall-clock start, and the slot table mapping
+roster slots 0 to 7 to SteamID64. Frames reference slot indices, which is where most of
+the size saving comes from.
+
+Frame, 132 bytes, repeated: `t_ms` as uint32, then eight 16-byte player records of
+position as three int16, yaw as int16, pitch as int8, health as uint16 (the tank needs
+the range), a state bitfield, class, weapon and ammo.
+
+1,320 bytes per second, about 4.75 MB per hour, about 4 MB for a typical match.
+
+Timestamps are explicit rather than implied by frame index, costing 4 bytes per frame,
+so a hitch or pause cannot silently desync motion from the event timeline.
+
+## Error handling
+
+**Governing rule: a replay failure must never affect a ranked result.** The rating
+pipeline must not be able to notice that replay capture exists. This mirrors the
+never-throws discipline in `src/demos.ts`.
+
+| Case | Handling |
+|---|---|
+| `replayDir` unset | Feature off entirely, silent. Mirrors `demoDir` defaulting to empty |
+| File write fails | Log once, disable replay for the rest of the match, match continues |
+| Free space below floor | Refuse to open new replay files. Cheap insurance given the prior incident |
+| File missing at ingest | No `match_replays` row, UI shows unavailable. Not an error |
+| Truncated file | Round down to the last whole frame |
+| Round restarted after stats accrued | `match_rounds.reliable = 0`, attribution shown as unavailable |
+| Player changes team mid-match | Same |
+| Start/end side disagreement | Trust round end, log the disagreement |
+| Duplicate UDP datagram | Idempotent upsert, as `match_live_maps` already does |
+
+### Admin panel safety
+
+Deletion is irreversible. Dry run is mandatory, and the confirm call must echo back the
+exact file and byte count from that preview, so a stale tab cannot delete something the
+preview never showed. Files belonging to a live or configuring match are never eligible.
+Every deletion is logged. Orphan demos get their own toggle defaulting to **off**, since
+that is the one category where a misclassification actually costs something.
+
+## Testing
+
+**Event-kind registry with a parity test.** This mirrors `src/statKeys.ts` and
+`tests/statKeysParity.test.ts`, and exists for the identical reason: the comment there is
+right that a typo'd key is not a DB error but a silently empty leaderboard. Event kinds
+fail the same way. The plugin emits `witch_agro`, the web looks for `witch_aggro`, and
+the timeline is quietly missing witches forever. One registry, resolved by plugin,
+parser and API alike.
+
+- **Format round-trip.** Synthesize a file, parse it, assert frames match. Includes a
+  deliberately truncated file.
+- **Ingest.** `ROUND_START` and `ROUND_END` parsing, start-vs-end side disagreement,
+  duplicate datagrams upserting idempotently.
+- **Side attribution.** Given `match_rounds` plus existing per-map snapshots, assert
+  survivor stats land on the right round. This is the test the "no new snapshot table"
+  decision rests on and must fail if that decision is wrong.
+- **Prune safety.** Dry-run and confirm counts must match; live-match files excluded;
+  orphan classification correct against known filenames.
+- **Frame-time gate.** An `l4d_tickstats` capture at `sm_pug_replay_hz 0` versus 10,
+  comparing p99 and p999. This is an acceptance criterion, not a footnote.
+
+## Risks
+
+**Frame time.** Estimated cost is ~40 to 50 microseconds on one frame in ten, about
+0.05% amortized against a 10ms budget at 100 tick. But the recorded baseline p99 is
+11.25ms against that 10ms budget, so roughly 1% of frames already overrun and the box
+does not have headroom to spare. Mitigations: never flush per sample, since the page
+cache serves live tailing without it and a 10Hz `FlushFile()` is the easiest way to turn
+this into a real problem; binary packing rather than text; and `sm_pug_replay_hz` as an
+instant rcon off switch needing no reload. If p99 moves measurably, drop to 5Hz, which
+halves the cost and is visually identical after interpolation. If it still moves, the
+design is wrong and we learn that before it is load-bearing.
+
+**Live server.** Deployment requires an explicit go-ahead; players are frequently on the
+box.
+
+**Unknown hooks.** `pills` and `car_alarm` have no confirmed L4D1 game event. Both need a
+hook spike before implementation rather than an assumed event name.
+
+**Scope.** Piece 1 ships nothing visible except the admin panel. The product is pieces 2
+through 4, and this spec exists to serve them.
+
+## Resolved 2026-09-11
+
+- Player page organizes by survivor versus infected, not by campaign or stat family
+- Goal is finding games that went badly and diagnosing why, not pure record-keeping
+- Sample carries full player state; world entities deferred, format left extensible
+- Storage is files on disk plus a DB index row, 90 day retention
+- Per-round stat snapshots are unnecessary given the side partition in `statKeys.ts`
+- Tank control passes in this ruleset, so `tank_pass` is meaningful
+- Kits are disabled, so `heal` becomes `pills`
+- Admin storage panel ships in this piece
+- `skill_detect` is already loaded and silenced for ranked play; no change needed
+
+## Still open
+
+- Exact L4D1 hook for pill consumption
+- Exact L4D1 hook and attribution method for car alarms
+- Whether live replay is public, hidden from participants, or admin-only. Capture does
+  not care; decide in piece 3
+- Whether world entities are worth adding at a reduced sample rate later
