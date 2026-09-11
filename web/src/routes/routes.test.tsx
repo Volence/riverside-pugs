@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/preact';
 import { StatTable } from '../components/StatTable';
 import type { StatDef } from '../api';
+import { roundsMessage } from './MatchDetail';
+import type { MatchDetail } from '../api';
 
 /* Deliberately shallow. These assert that each route reaches its loaded state
  * and puts the right data on screen, not how it is marked up, so a design
@@ -125,6 +127,118 @@ describe('MatchDetail', () => {
     mockApi.match.mockRejectedValue(new Error('404'));
     render(<MatchDetail id="999" me={null} />);
     await waitFor(() => expect(screen.getByText(/match not found/i)).toBeTruthy());
+  });
+
+  it('says round data was not captured when rounds is an empty array', async () => {
+    // Empty is not the same as "this match had no rounds" (Task 6 brief): it
+    // means round capture did not exist yet, and must not render as a table.
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+      ],
+      demos: [], events: [], rounds: [],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(
+      screen.getByText('Round data was not captured for this match.'),
+    ).toBeTruthy());
+  });
+
+  it('renders a reliable round with a per-half score and stat table', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+      ],
+      demos: [], events: [],
+      rounds: [{
+        ordinal: 0, half: 1, survTeam: 'a', score: 300,
+        endedAt: '2026-09-06 04:00', reliable: true,
+        byPlayer: { '1': { ck: 5, sidmg: 0 }, '2': { sidmg: 40 } },
+      }],
+    });
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(
+      screen.getByText((_t, el) => el?.tagName === 'H4'
+        && /Half 1/.test(el.textContent ?? '') && /300/.test(el.textContent ?? '')),
+    ).toBeTruthy());
+    // The round's own table renders both teams' players, in addition to the
+    // match totals table (the per-map table is absent here since this match
+    // has no per-map stats captured, per the mocked map's empty `stats`).
+    expect(container.querySelectorAll('table').length).toBe(2);
+  });
+
+  it('shows an unreliable round as unavailable rather than guessing its attribution', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+      ],
+      demos: [], events: [],
+      rounds: [{
+        ordinal: 0, half: 1, survTeam: 'a', score: 300,
+        endedAt: '2026-09-06 04:00', reliable: false, byPlayer: {},
+      }],
+    });
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(
+      screen.getByText('Attribution for this round is unreliable and is not shown.'),
+    ).toBeTruthy());
+    // No stat table for the unreliable round, and no per-map table either
+    // (this match has no per-map stats captured): just the match totals.
+    expect(container.querySelectorAll('table').length).toBe(1);
+  });
+
+  it('shows a round score as unavailable, not the stored 0, when the end message never arrived', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+      ],
+      demos: [], events: [],
+      rounds: [{
+        // The score column defaults to 0 in the database when the end-of-round
+        // message never arrived; endedAt null is the only reliable signal.
+        ordinal: 0, half: 1, survTeam: 'a', score: 0,
+        endedAt: null, reliable: true, byPlayer: {},
+      }],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    const heading = await screen.findByText((_t, el) => el?.tagName === 'H4'
+      && /Half 1/.test(el.textContent ?? ''));
+    expect(within(heading as HTMLElement).getByText('n/a')).toBeTruthy();
+    expect(within(heading as HTMLElement).queryByText('0')).toBeNull();
+  });
+});
+
+const round = (over: Partial<MatchDetail['rounds'][number]> = {}) => ({
+  ordinal: 0, half: 1, survTeam: 'a' as const, score: 300,
+  endedAt: '2026-09-11 12:00', reliable: true, byPlayer: {}, ...over,
+});
+
+describe('roundsMessage', () => {
+  it('explains that an empty array means rounds were never captured', () => {
+    // Empty means "this match predates round capture", which is NOT the same
+    // as "this match had no rounds". It must never render as an empty table.
+    expect(roundsMessage([])).toBe('Round data was not captured for this match.');
+  });
+
+  it('returns null when there is something to show', () => {
+    expect(roundsMessage([round()])).toBeNull();
+  });
+
+  it('still returns null when the only round is unreliable', () => {
+    // The section renders; the unreliable round inside it is what gets
+    // suppressed, with its own note. Handled per round, not for the section.
+    expect(roundsMessage([round({ reliable: false })])).toBeNull();
   });
 });
 

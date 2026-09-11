@@ -1,9 +1,19 @@
-import { api, type MatchPlayerStats, type Team } from '../api';
+import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderLiveStatKeys, winnerLabel } from '../format';
 import { Empty, Panel, SrDelta, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { sideTotals } from '../matchTotals';
+
+/** Why the round section has nothing to show, or null when it does.
+ *
+ *  An empty array means round capture did not exist when this match was
+ *  played. That is not the same as a match with no rounds, and it must not
+ *  render as an empty table. */
+export function roundsMessage(rounds: MatchDetailData['rounds']): string | null {
+  if (rounds.length === 0) return 'Round data was not captured for this match.';
+  return null;
+}
 
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
@@ -79,6 +89,22 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     }));
   const hasMapStats = maps.some((mp) => Object.keys(mp.stats ?? {}).length > 0);
 
+  // Absent on matches recorded before round capture existed (sub-project 6a),
+  // same reasoning as statDefs above: an old match's response simply has no
+  // `rounds` field rather than an empty array, so both are folded together
+  // here and roundsMessage treats the empty-array case as "never captured".
+  const rounds = data.rounds ?? [];
+  const roundsMsg = roundsMessage(rounds);
+  const roundOrdinals = Array.from(new Set(rounds.map((r) => r.ordinal))).sort((a, b) => a - b);
+  const roundsForMap = (ordinal: number) =>
+    rounds.filter((r) => r.ordinal === ordinal).sort((a, b) => a.half - b.half);
+  const roundRows = (round: MatchDetailData['rounds'][number], team: 'a' | 'b'): StatRow[] =>
+    players.filter((p) => p.team === team).map((p) => ({
+      steamid: p.steamid,
+      name: p.name,
+      stats: deriveLiveStats(round.byPlayer?.[p.steamid] ?? {}),
+    }));
+
   return (
     <div class="page page--match">
       <div class="page__head">
@@ -131,6 +157,47 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
 
         {!hasMapStats && maps.length === 0 && (
           <Panel><Empty>No maps recorded.</Empty></Panel>
+        )}
+
+        {roundsMsg ? (
+          <Panel>
+            <h3>Rounds</h3>
+            <Empty>{roundsMsg}</Empty>
+          </Panel>
+        ) : (
+          roundOrdinals.map((ordinal) => {
+            const mp = maps.find((m) => m.ordinal === ordinal);
+            return (
+              <Panel key={`rounds-${ordinal}`}>
+                <h3>Map {ordinal + 1}{mp && <> · {mp.map}</>} rounds</h3>
+                <div class="stack">
+                  {roundsForMap(ordinal).map((round) => {
+                    const infTeam: Team = round.survTeam === 'a' ? 'b' : 'a';
+                    return (
+                      <div key={round.half}>
+                        <h4>
+                          Half {round.half} · Team {round.survTeam.toUpperCase()} survivors,
+                          {' '}Team {infTeam.toUpperCase()} infected
+                          {' · '}
+                          {round.endedAt !== null
+                            ? <span class="num">{round.score}</span>
+                            : <span class="muted">n/a</span>}
+                        </h4>
+                        {round.reliable ? (
+                          <StatTable
+                            teamA={roundRows(round, 'a')} teamB={roundRows(round, 'b')}
+                            cols={cols} statDefs={statDefs}
+                          />
+                        ) : (
+                          <p class="muted">Attribution for this round is unreliable and is not shown.</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Panel>
+            );
+          })
         )}
 
         {data.events && data.events.length > 0 && (
