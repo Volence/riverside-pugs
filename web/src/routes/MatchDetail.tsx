@@ -1,7 +1,7 @@
 import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderLiveStatKeys, winnerLabel } from '../format';
-import { Empty, Panel, SrDelta, Tile, Tiles } from '../components/bits';
+import { Empty, Panel, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { sideTotals } from '../matchTotals';
 
@@ -28,9 +28,11 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   if (!data) return <div class="page page--match" />;
 
   const { match, maps, players } = data;
-  // Absent on matches recorded before the registry was served with the match;
-  // sideTotals treats a missing registry as "nothing has a known side" rather
-  // than crashing on it.
+  // statDefs is a property of the server build, not of the match: a current
+  // server always returns it. This guard is for new frontend JS running
+  // against an older, not-yet-upgraded server that has no such field; sideTotals
+  // treats a missing registry as "nothing has a known side" rather than crashing
+  // on it.
   const statDefs = data.statDefs ?? [];
 
   // The two teams' stats, split into what each did as survivors versus as
@@ -89,10 +91,12 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     }));
   const hasMapStats = maps.some((mp) => Object.keys(mp.stats ?? {}).length > 0);
 
-  // Absent on matches recorded before round capture existed (sub-project 6a),
-  // same reasoning as statDefs above: an old match's response simply has no
-  // `rounds` field rather than an empty array, so both are folded together
-  // here and roundsMessage treats the empty-array case as "never captured".
+  // rounds is also a property of the server build, not of the match: a current
+  // server always returns the field, using an empty array (not an omitted
+  // field) to mean "round capture did not exist when this match was played".
+  // This guard, like statDefs above, is for new frontend JS running against an
+  // older server that omits the field entirely; roundsMessage treats the
+  // empty-array case as "never captured" regardless of which path produced it.
   const rounds = data.rounds ?? [];
   const roundsMsg = roundsMessage(rounds);
   const roundOrdinals = Array.from(new Set(rounds.map((r) => r.ordinal))).sort((a, b) => a - b);
@@ -149,7 +153,12 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                 </a></>}
               </h3>
               {Object.keys(mp.stats ?? {}).length > 0
-                ? <StatTable teamA={mapRows(mp, 'a')} teamB={mapRows(mp, 'b')} cols={cols} />
+                ? (
+                  <StatTable
+                    teamA={mapRows(mp, 'a')} teamB={mapRows(mp, 'b')}
+                    cols={cols} statDefs={statDefs}
+                  />
+                  )
                 : <p class="muted">Per-map stats were not captured for this match.</p>}
             </Panel>
           );
