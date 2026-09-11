@@ -70,6 +70,28 @@ CREATE TABLE IF NOT EXISTS match_maps (
   team_b_score INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, ordinal)
 );
+-- Which pug team played survivor in each round, and what they scored.
+--
+-- Written from the UDP feed, unlike match_maps which is written once at
+-- completion from the rcon dump. That is acceptable here because nothing in
+-- the rating path reads this table: it exists so stats and events can be
+-- attributed to a side and a moment, which is presentation, not scoring.
+--
+-- 'reliable' goes to 0 when the round was restarted after stats accrued, or a
+-- rostered player changed team mid-match. Consumers must show an unreliable
+-- round as unavailable rather than guessing, the same way absent stats are
+-- never rendered as fabricated zeros.
+CREATE TABLE IF NOT EXISTS match_rounds (
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  ordinal    INTEGER NOT NULL,
+  half       INTEGER NOT NULL,
+  surv_team  TEXT    NOT NULL CHECK (surv_team IN ('a','b')),
+  score      INTEGER NOT NULL DEFAULT 0,
+  reliable   INTEGER NOT NULL DEFAULT 1,
+  started_at TEXT,
+  ended_at   TEXT,
+  PRIMARY KEY (match_id, ordinal, half)
+);
 CREATE TABLE IF NOT EXISTS match_player_stats (
   match_id  INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT    NOT NULL REFERENCES players(steamid),
@@ -188,6 +210,11 @@ export function openDb(path: string): DB {
   // exists, so a column introduced after a database was created needs this.
   // Idempotent and cheap; there is no migration framework here by design.
   ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
+  // -1, not 0 or NULL: ALTER TABLE ADD COLUMN on a populated table needs a
+  // non-null default, and 0 is a real value here (an event in the first
+  // millisecond of a round). -1 means "recorded before round timing existed".
+  ensureColumn(db, 'match_live_events', 'half', 'INTEGER NOT NULL DEFAULT -1');
+  ensureColumn(db, 'match_live_events', 't_ms', 'INTEGER NOT NULL DEFAULT -1');
   seed(db);
   return db;
 }
