@@ -402,14 +402,44 @@ ordinal, half, sample rate, map name, wall-clock start, and the slot table mappi
 roster slots 0 to 7 to SteamID64. Frames reference slot indices, which is where most of
 the size saving comes from.
 
-Frame, 132 bytes, repeated: `t_ms` as uint32, then eight 16-byte player records of
-position as three int16, yaw as int16, pitch as int8, health as uint16 (the tank needs
-the range), a state bitfield, class, weapon and ammo.
+Frame, variable length, repeated. Three parts:
 
-1,320 bytes per second, about 4.75 MB per hour, about 4 MB for a typical match.
+1. **Frame header, 8 bytes**: `t_ms` as uint32, an entity count as uint16, and 2 bytes
+   reserved. The count is what makes the frame self-describing.
+2. **Player block, 128 bytes fixed**: eight 16-byte records of position as three int16,
+   yaw as int16, pitch as int8, health as uint16 (the tank needs the range), a state
+   bitfield, class, weapon and ammo. Always eight, even when a slot is empty, so this
+   block alone stays fixed-stride.
+3. **Entity block, 8 bytes per entity**: entity index as uint16, kind as uint8, a state
+   bitfield as uint8, and position as three int16. Health is not carried per entity; a
+   witch or a tank is a PLAYER-slot record when a human controls it, and an AI boss
+   carries its health in the state byte's high bits.
+
+Revised 2026-09-11 when world entities came back into scope. The earlier design was a
+flat 132-byte fixed-stride frame with "reserved space" for entities, which does not work:
+entity count varies per frame, so no fixed stride can hold them.
+
+**The cost of variability is seeking.** A fixed-stride file lets a viewer jump to frame N
+by multiplication. With variable frames it cannot, so the writer must emit a keyframe
+index: every 10 seconds, record `(t_ms, byte offset)` into a table written at the END of
+the file, with the table's own offset stored in the header. The viewer reads the header,
+seeks to the table, and binary-searches it. A crash mid-round leaves no table, which is
+exactly why the reader must also support a linear scan fallback; a truncated file then
+degrades to "playable but slow to seek" rather than "unreadable".
+
+Size, with entities: players are 1,360 bytes per second at 10Hz. Commons run roughly 20
+to 30 alive in a versus round, so the entity block adds about 2,000 bytes per second.
+Call it 3.4 KB/s, 12 MB per hour, 10 to 15 MB for a full match. Still small next to the
+1.7 GB/day the demo recorder was producing, and the 90 day retention still lands near
+4 GB at 30 matches a week.
 
 Timestamps are explicit rather than implied by frame index, costing 4 bytes per frame,
 so a hitch or pause cannot silently desync motion from the event timeline.
+
+**Open, to be settled by measurement in 6b, not by argument:** whether entities sample at
+the full 10Hz or at a lower rate with viewer-side interpolation. Entities get their own
+cvar so the two rates move independently, and the frame-time comparison decides the
+default.
 
 ## Error handling
 
