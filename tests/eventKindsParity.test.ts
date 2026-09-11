@@ -45,14 +45,17 @@ describe('event kind parity', () => {
     expect(unknown).toEqual([]);
   });
 
-  it('emits every kind the registry promises except the ones explicitly deferred', () => {
-    // `skeet` and `boom` come from skill_detect forwards rather than from a
-    // pug-match hook, and are emitted in pug-stats.inc. Everything else must
-    // have an emission site here, or the registry is advertising a feed the
-    // plugin does not produce.
-    const deferred = new Set(['skeet', 'boom']);
+  it('emits every kind the registry promises', () => {
+    // No exclusion list. There used to be one holding `skeet` and `boom`,
+    // justified by a comment saying they were emitted in pug-stats.inc, which
+    // was not true once this test started reading that file: neither had an
+    // emission site anywhere. The registry exists precisely to stop a feed
+    // category from going silently missing, so a kind that nothing emits is a
+    // failure, not an exemption. If a kind ever genuinely cannot be emitted,
+    // give it a field in src/eventKinds.ts saying so and drive this from that
+    // field; do not reintroduce a hardcoded list.
     const emitted = new Set(emittedKinds(pluginSrc));
-    const missing = eventKindKeys().filter((k) => !deferred.has(k) && !emitted.has(k));
+    const missing = eventKindKeys().filter((k) => !emitted.has(k));
     expect(missing).toEqual([]);
   });
 });

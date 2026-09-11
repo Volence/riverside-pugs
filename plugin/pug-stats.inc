@@ -144,6 +144,13 @@ static void CountSkeet(int survivor, int victim, bool isTeamSkeet, PugStat weapo
 	AddStat(survivor, isTeamSkeet ? PS_TeamSkeets : PS_Skeets);
 	if (weaponStat != PS_MAX) AddStat(survivor, weaponStat);
 	AddStat(victim, PS_TimesSkeeted);
+	// One feed entry per skeet, beside the counters rather than instead of
+	// them: the counters stay authoritative for totals, this carries when and
+	// to whom. Emitted here rather than from the six weapon-specific forwards
+	// because they all funnel through this one function. A skeet cannot be
+	// detected at all without skill_detect, so unlike the rest of the feed
+	// this kind is inherently absent on a server without it.
+	EmitClientEvent("skeet", survivor, victim, 0);
 }
 
 public void OnSkeet(int survivor, int victim, bool isTeamSkeet, bool isHunter, bool headshot, int shots)

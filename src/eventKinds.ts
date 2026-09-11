@@ -49,9 +49,17 @@ export const EVENT_KINDS: readonly EventKindDef[] = [
   def('dp', 'infected', 'pounced', true, 'for'),
   def('boom', 'infected', 'boomed', true),
 
-  // Tank. Control passes in this ruleset, so tank_pass has a target.
+  // Tank. Control passes in this ruleset, but it passes THROUGH THE AI: a
+  // human losing the tank fires player_bot_replace and a human taking one over
+  // fires bot_player_replace, so the other party in both directions is a bot.
+  // There is never a rostered second party to name, which is why these have no
+  // target. They were one `tank_pass` kind with a target and the verb "passed
+  // the tank to", which rendered as a dangling sentence with nothing after it
+  // and described a player TAKING the tank as if they had given it away. Two
+  // kinds, because they are opposite events and one verb cannot cover both.
   def('tank_spawn', 'infected', 'became the tank', false),
-  def('tank_pass', 'infected', 'passed the tank to', true),
+  def('tank_take', 'infected', 'took control of the tank', false),
+  def('tank_give', 'infected', 'gave up the tank', false),
   def('tank_death', 'survivor', 'killed the tank', false),
 
   // Survivor answers.
