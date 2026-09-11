@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/preact';
+import { StatTable } from '../components/StatTable';
+import type { StatDef } from '../api';
 
 /* Deliberately shallow. These assert that each route reaches its loaded state
  * and puts the right data on screen, not how it is marked up, so a design
@@ -403,5 +405,44 @@ describe('MapDetail', () => {
     mockApi.map.mockRejectedValue(new Error('404'));
     render(<MapDetail map="nope" />);
     await waitFor(() => expect(screen.getByText('Nobody has played that map yet.')).toBeTruthy());
+  });
+});
+
+const markDefs = [
+  { key: 'skeets', side: 'survivor', visibility: 'public', label: 'Skeets',
+    needsSkillDetect: true, direction: 'high_good' },
+] as unknown as StatDef[];
+
+const markRows = (vals: number[]) => vals.map((v, i) => ({
+  steamid: `s${i}`, name: `p${i}`, stats: { skeets: v },
+}));
+
+describe('StatTable comparison', () => {
+  it('marks the standout cell when given the registry', () => {
+    const { container } = render(
+      <StatTable teamA={markRows([1, 2])} teamB={markRows([3, 40])}
+                 cols={['skeets']} statDefs={markDefs} />,
+    );
+    expect(container.querySelectorAll('.is-good')).toHaveLength(1);
+  });
+
+  it('marks nothing without the registry, so the live page is unchanged', () => {
+    const { container } = render(
+      <StatTable teamA={markRows([1, 2])} teamB={markRows([3, 40])} cols={['skeets']} />,
+    );
+    expect(container.querySelectorAll('.is-good')).toHaveLength(0);
+  });
+
+  it('renders a team total row per team when asked', () => {
+    render(
+      <StatTable teamA={markRows([1, 2])} teamB={markRows([3, 4])}
+                 cols={['skeets']} showTotals />,
+    );
+    expect(screen.getAllByText('Team total')).toHaveLength(2);
+  });
+
+  it('omits total rows by default', () => {
+    render(<StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets']} />);
+    expect(screen.queryByText('Team total')).toBeNull();
   });
 });
