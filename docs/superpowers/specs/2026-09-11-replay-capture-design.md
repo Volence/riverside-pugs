@@ -122,13 +122,38 @@ only the storage view behind it.
 - **Pills taken.** Detectable as a temp-health jump, but `temphealthfix.sp` in
   Roto-AZMod already modifies temp health behaviour, so the threshold must be read from
   the live pill value rather than hardcoded. Not worth blocking v1 on.
-- **World entities** at a reduced sample rate.
+### Reinstated 2026-09-11: world entities are in scope after all
+
+Reversed the same day it was decided, on evidence. The user demonstrated suprep's existing
+viewer at https://l4dpug.com/player.html, which already renders all of it: individual
+common infected (its status bar reports a live `common` count), the tank rock as an entity
+with its flight path drawn, ghost SI visually distinguished from spawned SI with per-entity
+health and entity ids, the witch, per-player view-direction lines, and per-player weapon
+and ammo.
+
+That settles the cost question empirically. The worry behind deferring these was that
+per-frame entity iteration would be too expensive on a 100-tick server. A working viewer
+fed by a plugin on the same hardware is a stronger argument than my estimate, so the
+estimate loses.
+
+Consequences, all landing in plan 6b, which is not yet written:
+
+- The frame format needs a variable-length entity section after the fixed player block,
+  not merely reserved space. Entity count varies per frame, so the fixed-stride property
+  holds only for the player block; the file needs a per-frame entity count and the seek
+  index has to account for it.
+- Ghost versus spawned is a state bit on an SI, not a separate entity kind. Ghost position
+  is also the most competitively sensitive data in the file, which makes the
+  server-side live delay load bearing rather than merely prudent.
+- View direction is already covered: yaw and pitch are in the player record.
+- Per-entity health is needed for the witch and the tank, so the entity record carries
+  health, not just position.
+
+Still to decide in 6b: whether entities sample at the full 10Hz or a lower rate with
+interpolation, and whether commons are worth individual identity or can be an anonymous
+point cloud. Measure before choosing.
 
 ### Non-goals for v1
-
-- **World entities.** Commons, witch, rocks, fires and bile clouds are excluded. They
-  need per-frame entity iteration, which is genuinely expensive, unlike reading 8 known
-  client indices. The frame format reserves space to add them later.
 - **Any display of this data.** Pieces 2 through 4.
 - **Map background images.** Piece 3. The four analytics metrics do not need them.
 - **Per-round stat snapshots.** See the decision below; they turn out to be unnecessary.
