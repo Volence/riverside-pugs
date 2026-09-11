@@ -330,7 +330,7 @@ a full map is either a hook that did not fire or an event name mismatched to thi
 engine, both of which need investigation before future work builds on the timeline.
 
 Note that `tank_pass` legitimately shows zero if nobody passed the tank during the
-half, and `car_alarm` and the witch events (`witch_incap`, `witch_death`) are
+half, and `car_alarm` and the witch events (`witch_aggro`, `witch_killed`) are
 map-dependent and may be absent on maps that do not have them.
 
 ### 6. Confirm per-round attribution through the API
