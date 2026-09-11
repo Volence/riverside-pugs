@@ -274,3 +274,95 @@ whole match instead of one per map.
 - **`sm_pug_min_orient` is currently 1** from `stage.sh --solo`. `pug_match.cfg`
   sets it back to 3 on exec, so `!load_4v4p` self-heals this. Check status
   after loading if you care.
+
+## Round capture verification
+
+This runbook verifies that round-level event capture works end to end on the live
+server: that the plugin fires hooks, encodes timing, and that the backend parser
+reads team orientation correctly across map halves. **WARNING: This changes the
+live server. Real players are usually connected. Before you start, run `R "status"`
+to see who is online and get the owner's explicit go-ahead before proceeding.**
+
+### 1. Stage the plugin
+
+    ./stage.sh
+
+Expected: `Plugin PUG Match reloaded successfully.` This copies one file and calls
+`sm plugins load`. No server restart; the plugin stays inert until a match is
+configured.
+
+### 2. Play or simulate one full map of a PUG
+
+Both halves must go live and end normally. If debugging the orientation mapping
+is needed, set `sm_pug_debug 1` first; otherwise the default output is sufficient.
+
+You can play with bots, simulate with a full human roster, or use the existing
+`!load_4v4p` flow. The point is that each half must transition from pending to
+live to ended, so the plugin records `ROUND_START` and `ROUND_END` for both half 1
+and half 2.
+
+### 3. Confirm the rounds landed and the sides are opposite
+
+    sqlite3 data/pug.db "SELECT match_id, ordinal, half, surv_team, score, reliable FROM match_rounds ORDER BY match_id DESC, ordinal, half LIMIT 10;"
+
+Expected: two rows per map, one for half 1 and one for half 2, with **different**
+`surv_team` values between the two halves (one row should have `surv_team=a` and
+the other `surv_team=b`, or vice versa). If both halves show the same `surv_team`,
+the orientation mapping is being read too early and this is the bug the check
+exists to catch.
+
+### 4. Confirm events carry timing
+
+    sqlite3 data/pug.db "SELECT kind, half, t_ms FROM match_live_events WHERE t_ms >= 0 ORDER BY match_id DESC, seq DESC LIMIT 10;"
+
+Expected: all `t_ms` values are non-negative, and within each half they increase
+in sequence. The `half` column should reflect which round the event occurred in.
+If all values are -1, the staged plugin did not actually reload and the event
+capture is not running.
+
+### 5. Confirm the new event kinds actually fire
+
+    sqlite3 data/pug.db "SELECT kind, COUNT(*) FROM match_live_events GROUP BY kind ORDER BY 2 DESC;"
+
+Expected: after one full map you should see `pinned`, `cleared`, `incap`, `death`,
+`ff` and `si_spawn` all present with nonzero counts. A kind showing zero rows after
+a full map is either a hook that did not fire or an event name mismatched to this
+engine, both of which need investigation before future work builds on the timeline.
+
+Note that `tank_pass` legitimately shows zero if nobody passed the tank during the
+half, and `car_alarm` and the witch events (`witch_incap`, `witch_death`) are
+map-dependent and may be absent on maps that do not have them.
+
+### 6. Confirm per-round attribution through the API
+
+Pick a player who you know played both sides (survivor and infected). Then query
+the match from the backend:
+
+    curl -s localhost:8080/api/matches/<match_id> | python3 -m json.tool | head -60
+
+Expected: the `rounds` array has two entries per map. For your chosen player, their
+survivor-side keys (like `incap_count`, `pinned_count`) appear only in the round(s)
+where their assigned pug team held survivor, and their infected-side keys appear
+only in the other half. If a player's keys appear in both halves on the same side,
+the attribution is wrong and the team-to-side binding is unstable across the map.
+
+### 7. Check the SourceMod log for failed event hooks
+
+    ssh root@$L4D_HOST 'tail -100 /home/l4d/l4d1-server/left4dead/addons/sourcemod/logs/L*.log' | grep -i "hook\|failed"
+
+Look for any error lines about hooking. The specific event `triggered_car_alarm` is
+unverified on L4D1: it is commented out and L4D2-gated in `l4d2_skill_detect.sp`,
+so it may not exist on this engine. A log line saying it failed to hook is an
+expected, tolerable outcome, not a failure of the deployment. If `triggered_car_alarm`
+fails to hook, the fallback is an entity hook on `prop_car_alarm`, which will still
+fire the event (via the entity think function) on maps that have it.
+
+### 8. Known limitation: mid-round restart
+
+If an admin restarts a live round mid-half using `mp_restartgame`, the plugin's
+`OnRoundIsLive` increments the half counter unconditionally, pushing it past 2.
+The backend parser only accepts a half of 1 or 2, so that round's `ROUND_START` and
+`ROUND_END` are then silently discarded. If a restart happens during this
+verification, expect that map's rows to be missing from the database and do not
+mistake it for a different bug. Record in your notes that a restart occurred; this
+is a known limitation that will be addressed in a future iteration.
