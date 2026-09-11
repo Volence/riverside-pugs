@@ -329,9 +329,16 @@ Expected: after one full map you should see `pinned`, `cleared`, `incap`, `death
 a full map is either a hook that did not fire or an event name mismatched to this
 engine, both of which need investigation before future work builds on the timeline.
 
-Note that `tank_pass` legitimately shows zero if nobody passed the tank during the
-half, and `car_alarm` and the witch events (`witch_aggro`, `witch_killed`) are
-map-dependent and may be absent on maps that do not have them.
+Note that `tank_take` and `tank_give` legitimately show zero if tank control never
+changed hands during the half, `skeet` shows zero on a server with no `skill_detect`
+loaded (it is the only kind that cannot be captured without it), and `car_alarm` and
+the witch events (`witch_aggro`, `witch_killed`) are map-dependent and may be absent
+on maps that do not have them.
+
+`ff` is coalesced: damage to a teammate is accumulated per attacker/victim pair and
+flushed once a second, at 50 damage, or at round end. So expect far fewer `ff` rows
+than shots fired, each carrying the total of a burst. The authoritative per-player
+friendly fire total is still the counter in the dump, not a count of these rows.
 
 ### 6. Confirm per-round attribution through the API
 
@@ -341,10 +348,26 @@ the match from the backend:
     curl -s localhost:8080/api/matches/<match_id> | python3 -m json.tool | head -60
 
 Expected: the `rounds` array has two entries per map. For your chosen player, their
-survivor-side keys (like `incap_count`, `pinned_count`) appear only in the round(s)
-where their assigned pug team held survivor, and their infected-side keys appear
-only in the other half. If a player's keys appear in both halves on the same side,
-the attribution is wrong and the team-to-side binding is unstable across the map.
+survivor-side keys appear only in the round(s) where their assigned pug team held
+survivor, and their infected-side keys appear only in the other half. If a player's
+keys appear in both halves on the same side, the attribution is wrong and the
+team-to-side binding is unstable across the map.
+
+The keys to look at, using their real names:
+
+- survivor side, present in every match: `ck` (common kills), `sidmg` (SI damage),
+  `sikill` (SI kills), `ff` (friendly fire dealt), `rev` (revives), `tank_damage`
+- infected side, present in every match: `damage_as_si`, `tank_punches`,
+  `boomer_spawns`, `boom_successes`, `boomed_vomit`, `boomed_proxy`
+- with `skill_detect` loaded, also `skeets` and the rest of the skill keys on the
+  survivor side, and `dps_landed` / `biles_landed` on the infected side
+
+`hp` is deliberately absent from both halves: it is a health reading at one moment,
+not a counter that accrues, so there is no half it can honestly belong to.
+
+Also check `endedAt` on each round. A round with `endedAt: null` never received a
+`ROUND_END`, which makes its `score` the column default rather than a result; do not
+read a zero there as "they scored nothing".
 
 ### 7. Check the SourceMod log for failed event hooks
 
@@ -354,15 +377,21 @@ Look for any error lines about hooking. The specific event `triggered_car_alarm`
 unverified on L4D1: it is commented out and L4D2-gated in `l4d2_skill_detect.sp`,
 so it may not exist on this engine. A log line saying it failed to hook is an
 expected, tolerable outcome, not a failure of the deployment. If `triggered_car_alarm`
-fails to hook, the fallback is an entity hook on `prop_car_alarm`, which will still
-fire the event (via the entity think function) on maps that have it.
+fails to hook, `car_alarm` is simply absent and nothing else is affected. An entity
+hook on `prop_car_alarm` is NOT a drop-in fallback: an entity hook fires game code,
+not a game event, so it produces no event for `HookEventEx` to catch and would need
+its own emission written against whatever the hook can see. Treat that as unbuilt
+work rather than as a switch to flip.
 
-### 8. Known limitation: mid-round restart
+### 8. What a mid-round restart does now
 
-If an admin restarts a live round mid-half using `mp_restartgame`, the plugin's
-`OnRoundIsLive` increments the half counter unconditionally, pushing it past 2.
-The backend parser only accepts a half of 1 or 2, so that round's `ROUND_START` and
-`ROUND_END` are then silently discarded. If a restart happens during this
-verification, expect that map's rows to be missing from the database and do not
-mistake it for a different bug. Record in your notes that a restart occurred; this
-is a known limitation that will be addressed in a future iteration.
+An admin restarting a live round mid-half used to break the rest of the map: the
+half was a counter that `OnRoundIsLive` incremented unconditionally, so a re-fire
+pushed it past 2, the backend dropped that round entirely, and every later event
+carried `half=-1`. The half is now read from `m_bInSecondHalfOfRound` each time a
+round goes live, so a restart re-reads the same value and the rows stay correct.
+
+What a restart still costs is the round's accrued stats: the counters are not
+rewound, so damage and kills from before the restart remain in that half's totals.
+`match_rounds.reliable` does not detect this. If a restart happens during
+verification, record it in your notes and treat that half's stats as approximate.
