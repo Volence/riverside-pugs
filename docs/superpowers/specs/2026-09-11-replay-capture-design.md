@@ -89,13 +89,19 @@ valid right now" predicate. None of it is persisted today.
 | `tank_pass` | from, to | Tank-fight segmentation. Tank control passes in this ruleset | new |
 | `tank_death` | tank, killer | Tank-fight segmentation | existing |
 | `revive` | survivor, survivor | Round timeline | existing (`revive_success`) |
-| `pills` | survivor | Round timeline | new, hook TBD |
 | `witch_aggro` | witch, survivor | Round timeline, pairs with `crowns` | new (`witch_harasser_set`) |
 | `witch_killed` | survivor | Round timeline | new (`witch_killed`) |
-| `car_alarm` | player | Round timeline, blame | new, hook TBD |
+| `car_alarm` | player | Round timeline, blame | new, `prop_car_alarm` entity hook |
 | `skeet`, `boom`, `dp` | as today | Killfeed timing only | existing / skill_detect |
 
-`pills` rather than `heal`: kits are disabled in this ruleset, pills only.
+`heal` is absent because kits are disabled in this ruleset, pills only. Pill detection
+is deferred (see Deferred below).
+
+`car_alarm` attribution follows
+`Rotoblin-AZMod/SourceCode/scripting-az/l4d_car_alarm_hittable_fix.sp:67`, which hooks
+`prop_car_alarm` on `OnEntityCreated` and then tracks touch and damage. The in-game chat
+line appears to come from the map entity rather than a plugin, so we capture the event
+ourselves rather than scraping chat.
 
 ### Position and state frames
 
@@ -106,6 +112,13 @@ valid right now" predicate. None of it is persisted today.
 
 First admin surface in the app. A generic `requireAdmin` guard and page shell, with
 only the storage view behind it.
+
+### Deferred
+
+- **Pills taken.** Detectable as a temp-health jump, but `temphealthfix.sp` in
+  Roto-AZMod already modifies temp health behaviour, so the threshold must be read from
+  the live pill value rather than hardcoded. Not worth blocking v1 on.
+- **World entities** at a reduced sample rate.
 
 ### Non-goals for v1
 
@@ -210,6 +223,26 @@ The 10 second delay is anti-ghosting, not buffering. A live top-down view showin
 infected player's position is perfect information for anyone watching a ranked PUG on a
 second monitor. If the client delays, someone reads the WebSocket directly and ghosts.
 The backend therefore never sends a frame newer than `now - delay`.
+
+### Map imagery comes from nav meshes first, screenshots second
+
+Recorded here because it determines whether piece 3 is blocked on art. It is not.
+
+The install carries 318 `.nav` files (magic `0xFEEDFACE`, version 13). A nav mesh is the
+walkable footprint as quads with corner heights, so projecting it to 2D yields a
+schematic top-down for every map with no manual work. `cl_leveloverview` screenshots
+then upgrade the background one map at a time, and because that mode reports world
+origin and scale, the world-to-image transform is derived rather than eyeballed.
+
+The nav mesh also carries per-area flow distance, which is the pacing axis directly. It
+makes "ahead of or behind the team" exact rather than inferred from raw XY, matches what
+the patched `l4d_current_survivor_progress` already computes, and sidesteps vertical
+overlap for analytics because flow is one-dimensional. Confirming which fields nav v13
+exposes is a one-hour spike before relying on it.
+
+Unsolved by either track: L4D maps overlap vertically, so one flat image cannot show
+both No Mercy's sewers and its streets. The viewer either switches Z-banded layers or
+accepts overlap and shows height as a badge. A piece 3 decision.
 
 ### Retention is 90 days, controllable from the browser
 
@@ -377,11 +410,19 @@ through 4, and this spec exists to serve them.
 - Kits are disabled, so `heal` becomes `pills`
 - Admin storage panel ships in this piece
 - `skill_detect` is already loaded and silenced for ranked play; no change needed
+- Car alarm hook is `prop_car_alarm` entity creation plus touch/damage, per Rotoblin's
+  own `l4d_car_alarm_hittable_fix.sp`
+- Pills deferred; `temphealthfix.sp` means the temp-health threshold cannot be hardcoded
+- Replay placement: live viewer sits at the top of the live page above the stats; a
+  finished map's replay sits under that map's section on the scrim page. One viewer
+  component, two sources. This makes the server-side delay load-bearing rather than
+  cosmetic, since the live page is public
+- Map imagery: nav-derived schematic first for all maps, `cl_leveloverview` screenshots
+  layered in per map afterwards, so art never blocks the viewer
 
 ## Still open
 
-- Exact L4D1 hook for pill consumption
-- Exact L4D1 hook and attribution method for car alarms
-- Whether live replay is public, hidden from participants, or admin-only. Capture does
-  not care; decide in piece 3
+- Whether live replay is public, hidden from participants, or admin-only. Placement is
+  decided (below); visibility is not. Capture does not care; decide in piece 3
+- Whether the viewer handles vertical overlap by Z-banded layers or a height badge
 - Whether world entities are worth adding at a reduced sample rate later
