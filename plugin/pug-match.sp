@@ -116,6 +116,26 @@ int g_iFfPending[MAXPLAYERS + 1][MAXPLAYERS + 1];
 // clearing, which is not carried by any release event.
 int g_iPinnedBy[MAXPLAYERS + 1];
 
+// The smoker a survivor was released from, and when, in game time.
+//
+// tongue_release fires BEFORE player_death when a smoker is shot off someone:
+// measured at 0 to 1 seconds ahead of it on this engine, 2026-09-11. Hard
+// zeroing the link there meant the death handler always found nothing to credit
+// and every smoker clear was silently lost, which is why the match on
+// 2026-09-11 recorded skill_detect clears=5 against 2 captured events.
+//
+// So the release records rather than erases, and the death handler accepts a
+// link released within the grace window below. A release with no death after it
+// simply expires. tongue_pull_stopped would have been the clean signal (it
+// names who stopped the pull) but it does not fire at all on L4D1: verified
+// across a whole session of grabs, chokes, kills and incaps.
+int g_iPinReleasedFrom[MAXPLAYERS + 1];
+float g_fPinReleasedAt[MAXPLAYERS + 1];
+
+// Generous against the 0-1s gap observed, but far shorter than the time needed
+// to find and kill a smoker that genuinely let go on its own.
+#define PIN_RELEASE_GRACE 2.0
+
 bool g_bReadyUpAvailable;
 
 /** Boomer attribution, mirroring l4dcompstats.sp so the numbers on the site
@@ -232,6 +252,20 @@ orientation threshold. Changing this changes the rules under every rating earned
 		LogMessage("pug-match: event 'player_bot_replace' does not exist on this engine; tank_give capture (human giving up tank) will be silently absent.");
 	if (!HookEventEx("bot_player_replace", Event_BotPlayerReplace))
 		LogMessage("pug-match: event 'bot_player_replace' does not exist on this engine; tank_take capture (human taking tank) will be silently absent.");
+
+	// pounce_stopped names the survivor who ended a pounce, and fires for a
+	// shove clear as well as a kill, so it is the only signal that catches both.
+	// Measured 2026-09-11: it fires once per real pin end, carrying the stopper
+	// and the victim, with our link still intact.
+	//
+	// Its neighbours are deliberately NOT hooked. pounce_end fires on every
+	// pounce that merely ends, dozens of times a round with victim=0, so
+	// crediting from it would invent clears for pounces that never landed.
+	// tongue_pull_stopped does not fire at all on this engine, verified across a
+	// session of grabs, chokes, kills and incaps, which is why the smoker case
+	// has to go through the release grace window instead.
+	if (!HookEventEx("pounce_stopped", Event_PounceStopped))
+		LogMessage("pug-match: event 'pounce_stopped' does not exist on this engine; shove clears will not be captured.");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -860,6 +894,7 @@ void ResetMatchState()
 		g_iClientRoster[i] = -1;
 		g_iLockAttempts[i] = 0;
 		g_iPinnedBy[i] = 0;
+		ClearPinRelease(i);
 	}
 	ClearFriendlyFire();
 	ResetSkillStats();
@@ -1179,6 +1214,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 		g_iLockAttempts[i] = 0;
 		g_iLastHealth[i] = 0;
 		g_iPinnedBy[i] = 0;
+		ClearPinRelease(i);
 	}
 	// Anything still pending belongs to the round that just finished and has
 	// already been flushed by Event_RoundEnd. Dropping it here rather than
@@ -1571,35 +1607,27 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	// dying, a fake-client tank dying) that "death" and "tank_death" need to
 	// see. Nothing below this block is reordered or altered.
 	//
-	// Instrumentation for the "cleared never fires" investigation (2026-09-11).
-	// Snapshot the pin links BEFORE the loop consumes them, so the log can say
-	// whether a dying SI still held anyone. Costs nothing when debug is off.
-	char links[192];
-	if (g_cvDebug.BoolValue)
-	{
-		links[0] = '\0';
-		for (int i = 1; i <= MaxClients; i++)
-			if (g_iPinnedBy[i] != 0) Format(links, sizeof(links), "%s %d<-%d", links, i, g_iPinnedBy[i]);
-	}
-
 	// Free anyone this player was pinning, and credit whoever killed them.
+	// PinCreditable also accepts a link released a moment ago, which is the
+	// whole smoker case: tongue_release reaches the link before this handler.
 	int freed = 0;
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (g_iPinnedBy[i] != victim) continue;
+		if (!PinCreditable(i, victim)) continue;
 		g_iPinnedBy[i] = 0;
+		ClearPinRelease(i);
+		// A pinned survivor killing their own pinner is a self-clear, which
+		// skill_detect counts under its own key. Emitting "cleared" for it
+		// would read as clearing a teammate with actor and target identical.
+		if (attacker == i) continue;
 		freed++;
 		EmitClientEvent("cleared", attacker, i, 0);
 	}
 
-	// The decisive line: separates "the link was already zeroed" (freed=0 with
-	// no link naming this victim) from "the killer was not rostered so the emit
-	// was dropped" (freed>0, attackerSlot=-1).
 	if (g_cvDebug.BoolValue && IsInfectedClient(victim))
 	{
-		PugDebug("SI death: victim=%d attacker=%d attackerSlot=%d freed=%d linksBefore:%s",
-			victim, attacker, (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1,
-			freed, links[0] != '\0' ? links : " none");
+		PugDebug("SI death: victim=%d attacker=%d attackerSlot=%d freed=%d",
+			victim, attacker, (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1, freed);
 	}
 	if (GetClientTeam(victim) == TEAM_SURVIVOR) EmitClientEvent("death", victim, attacker, 0);
 	else if (IsTankClient(victim)) EmitClientEvent("tank_death", attacker, 0, 0);
@@ -1720,16 +1748,39 @@ public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
 	EmitClientEvent("pinned", smoker, victim, 0);
 }
 
-/** tongue_release: the pull ends without anyone dying, so just clear the pin.
- *  "cleared" is a survivor credit for killing the infected that was pinning
- *  someone (see Event_PlayerDeath); a smoker letting go on its own earns no
- *  such credit. */
+/** Forget both the live link and any pending release for one client. */
+void ClearPinRelease(int client)
+{
+	g_iPinReleasedFrom[client] = 0;
+	g_fPinReleasedAt[client] = 0.0;
+}
+
+/** True when `victim` was being held by `pinner` recently enough that a kill
+ *  landing now is what ended it. Covers the smoker case, where tongue_release
+ *  beats player_death to the link by up to a second. */
+bool PinCreditable(int victim, int pinner)
+{
+	if (victim < 1 || victim > MaxClients) return false;
+	if (g_iPinnedBy[victim] == pinner) return true;
+	return g_iPinReleasedFrom[victim] == pinner
+		&& (GetGameTime() - g_fPinReleasedAt[victim]) <= PIN_RELEASE_GRACE;
+}
+
+/** tongue_release: the pull ended, for any reason including the smoker being
+ *  shot off. The event carries no cause (userid, victim, distance only), so it
+ *  cannot say which, and it arrives BEFORE the death that caused it. Record the
+ *  release instead of erasing it and let Event_PlayerDeath decide; see
+ *  g_iPinReleasedFrom. A release nobody kills for simply ages out. */
 public void Event_TongueRelease(Event event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(event.GetInt("victim"));
 	if (victim > 0 && victim <= MaxClients)
 	{
-		PugDebug("pin zeroed (tongue_release): victim=%d was=%d", victim, g_iPinnedBy[victim]);
+		if (g_iPinnedBy[victim] != 0)
+		{
+			g_iPinReleasedFrom[victim] = g_iPinnedBy[victim];
+			g_fPinReleasedAt[victim] = GetGameTime();
+		}
 		g_iPinnedBy[victim] = 0;
 	}
 }
@@ -1742,8 +1793,10 @@ public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
 	if (victim > 0 && victim <= MaxClients)
 	{
-		PugDebug("pin zeroed (incap): victim=%d was=%d", victim, g_iPinnedBy[victim]);
+		// A hard forget, not a recorded release: someone who has gone down was
+		// not cleared, so a kill on their pinner afterwards earns no credit.
 		g_iPinnedBy[victim] = 0;
+		ClearPinRelease(victim);
 	}
 	// Actor is the survivor it happened to, so the feed reads
 	// "<name> was incapped by <attacker>".
@@ -1815,4 +1868,29 @@ void WriteDump()
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
 	DumpLine("END winner=%s a=%d b=%d", winner, a, b);
+}
+
+/** pounce_stopped: a hunter's pounce ended and the event names who ended it.
+ *
+ *  This is the credit path for BOTH shove clears and kill clears on hunters.
+ *  For a kill it fires just ahead of player_death, and because it clears the
+ *  link here, the death handler then finds nothing and cannot double count.
+ *
+ *  Guarded three ways: the victim must actually have been pinned by this
+ *  hunter (the event also fires with victim=0), a survivor already incapped was
+ *  not cleared but lost, and freeing yourself is a self-clear that
+ *  skill_detect counts under its own key. */
+public void Event_PounceStopped(Event event, const char[] name, bool dontBroadcast)
+{
+	int stopper = GetClientOfUserId(event.GetInt("userid"));
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim < 1 || victim > MaxClients || stopper < 1 || stopper > MaxClients) return;
+	if (g_iPinnedBy[victim] == 0) return;
+
+	g_iPinnedBy[victim] = 0;
+	ClearPinRelease(victim);
+
+	if (stopper == victim) return;
+	if (GetEntProp(victim, Prop_Send, "m_isIncapacitated") != 0) return;
+	EmitClientEvent("cleared", stopper, victim, 0);
 }
