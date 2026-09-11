@@ -199,9 +199,10 @@ function currentOrdinal(db: DB, matchId: number): number {
  *  The plugin omits `surv` when its orientation mapping has not settled, which
  *  is honest but leaves a NOT NULL column to fill. 'a' is written as a
  *  PLACEHOLDER and the row is marked reliable = 0 in the same statement, so
- *  nothing downstream can mistake it for an observation: roundAttribution
- *  refuses to attribute an unreliable round's stats, and ROUND_END promotes
- *  the row back to reliable = 1 when it supplies the authoritative side.
+ *  nothing downstream can mistake it for an observation. The reliable flag is
+ *  reported to consumers, and it is the consumer's responsibility to refuse to
+ *  display an unreliable round. ROUND_END promotes the row back to reliable = 1
+ *  when it supplies the authoritative side.
  *
  *  Writing the row at all, rather than skipping it, is what preserves
  *  started_at: every event's t_ms is measured from the round going live, and

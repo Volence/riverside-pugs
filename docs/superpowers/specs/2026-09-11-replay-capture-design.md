@@ -424,8 +424,8 @@ never-throws discipline in `src/demos.ts`.
 | Free space below floor | Refuse to open new replay files. Cheap insurance given the prior incident |
 | File missing at ingest | No `match_replays` row, UI shows unavailable. Not an error |
 | Truncated file | Round down to the last whole frame |
-| Round restarted after stats accrued | `match_rounds.reliable = 0`, attribution shown as unavailable |
-| Player changes team mid-match | Same |
+| Round restarted after stats accrued | Not currently detected. Known gap: `reliable` is only lowered at derivation time when a map's two halves fail to partition the two sides between them |
+| Player changes team mid-match | Not currently detected. Known gap: same as above |
 | Start/end side disagreement | Trust round end, log the disagreement |
 | Duplicate UDP datagram | Idempotent upsert, as `match_live_maps` already does |
 
