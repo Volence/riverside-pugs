@@ -44,4 +44,15 @@ describe('event kind parity', () => {
     const unknown = emittedKinds(pluginSrc).filter((k) => !known.has(k));
     expect(unknown).toEqual([]);
   });
+
+  it('emits every kind the registry promises except the ones explicitly deferred', () => {
+    // `skeet` and `boom` come from skill_detect forwards rather than from a
+    // pug-match hook, and are emitted in pug-stats.inc. Everything else must
+    // have an emission site here, or the registry is advertising a feed the
+    // plugin does not produce.
+    const deferred = new Set(['skeet', 'boom']);
+    const emitted = new Set(emittedKinds(pluginSrc));
+    const missing = eventKindKeys().filter((k) => !deferred.has(k) && !emitted.has(k));
+    expect(missing).toEqual([]);
+  });
 });

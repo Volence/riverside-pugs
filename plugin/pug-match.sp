@@ -93,6 +93,11 @@ int g_iClientRoster[MAXPLAYERS + 1];     // client -> roster slot, -1 = not rost
 int g_iLockAttempts[MAXPLAYERS + 1];
 int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
 
+// Who currently has each survivor pinned, as a client index; 0 = free.
+// Needed because a "cleared" event has to name the survivor who did the
+// clearing, which is not carried by any release event.
+int g_iPinnedBy[MAXPLAYERS + 1];
+
 bool g_bReadyUpAvailable;
 
 /** Boomer attribution, mirroring l4dcompstats.sp so the numbers on the site
@@ -168,6 +173,25 @@ orientation threshold. Changing this changes the rules under every rating earned
 	HookEvent("revive_success", Event_ReviveSuccess);
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
+
+	// Names verified against l4d2_skill_detect.sp and the Rotoblin-AZMod
+	// plugins, both proven running on L4D1 in this deployment. Note
+	// player_incapacitated_START: the bare player_incapacitated does not
+	// fire on this engine.
+	HookEvent("lunge_pounce", Event_Pounce);
+	HookEvent("tongue_grab", Event_TongueGrab);
+	HookEvent("tongue_release", Event_TongueRelease);
+	HookEvent("player_incapacitated_start", Event_Incap);
+	HookEvent("witch_harasser_set", Event_WitchAggro);
+	HookEvent("witch_killed", Event_WitchKilled);
+	HookEvent("triggered_car_alarm", Event_CarAlarm);
+	HookEvent("tank_spawn", Event_TankSpawn);
+	// Tank control passing goes through a bot swap on this engine: a human
+	// losing the tank fires player_bot_replace, a human taking over a bot
+	// tank fires bot_player_replace. Verified against l4d_tank_pass.sp and
+	// l4dscores.sp; there is no bare "player_replace" event on this engine.
+	HookEvent("player_bot_replace", Event_PlayerBotReplace);
+	HookEvent("bot_player_replace", Event_BotPlayerReplace);
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -283,6 +307,18 @@ void EmitEvent(const char[] kind, int actor, int target, int value)
 	g_iEventSeq++;
 	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d half=%d t=%d",
 		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value, g_iHalf, RoundMs());
+}
+
+/** Emit with actor/target as client indices, gated on StatsActive() so
+ *  nothing fires between rounds or during ready-up (the same gate the "dp"
+ *  emission in pug-stats.inc already uses). EmitEvent itself resolves
+ *  actor/target to roster ids and silently drops anything whose actor is not
+ *  rostered, so an unrostered spectator or admin can never appear in the
+ *  feed. */
+void EmitClientEvent(const char[] kind, int actor, int target, int value)
+{
+	if (!StatsActive()) return;
+	EmitEvent(kind, actor, target, value);
 }
 
 /** Verbose diagnostic, off by default. Goes to the SourceMod log rather than
@@ -754,6 +790,7 @@ void ResetMatchState()
 	{
 		g_iClientRoster[i] = -1;
 		g_iLockAttempts[i] = 0;
+		g_iPinnedBy[i] = 0;
 	}
 	ResetSkillStats();
 }
@@ -1058,6 +1095,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	{
 		g_iLockAttempts[i] = 0;
 		g_iLastHealth[i] = 0;
+		g_iPinnedBy[i] = 0;
 	}
 }
 
@@ -1295,6 +1333,11 @@ bool IsInfectedClient(int client)
 	return client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_INFECTED;
 }
 
+bool IsTankClient(int client)
+{
+	return IsInfectedClient(client) && GetEntProp(client, Prop_Send, "m_zombieClass") == ZC_TANK;
+}
+
 public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 {
 	if (!StatsActive()) return;
@@ -1353,6 +1396,9 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (IsSurvivorClient(victim))
 	{
 		g_iStatFf[slot] += damage;      // friendly fire dealt (includes self-damage, matching l4dcompstats)
+		// Emitted beside the counter above, never instead of it: the counter
+		// stays authoritative for totals, this carries only when and to whom.
+		EmitClientEvent("ff", attacker, victim, damage);
 	}
 	else if (siVictim && remaining > 0)
 	{
@@ -1366,6 +1412,22 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
 	if (attacker <= 0 || victim <= 0) return;
+
+	// Timeline emissions live here, ahead of the SI-kill stat guards below,
+	// because those guards return early for exactly the cases (a survivor
+	// dying, a fake-client tank dying) that "death" and "tank_death" need to
+	// see. Nothing below this block is reordered or altered.
+	//
+	// Free anyone this player was pinning, and credit whoever killed them.
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (g_iPinnedBy[i] != victim) continue;
+		g_iPinnedBy[i] = 0;
+		EmitClientEvent("cleared", attacker, i, 0);
+	}
+	if (GetClientTeam(victim) == TEAM_SURVIVOR) EmitClientEvent("death", victim, attacker, 0);
+	else if (IsTankClient(victim)) EmitClientEvent("tank_death", attacker, 0, 0);
+
 	int slot = (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1;
 	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
 	if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
@@ -1392,6 +1454,9 @@ public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadca
 	int slot = g_iClientRoster[reviver];
 	if (slot == -1) return;
 	g_iStatRev[slot]++;
+	// "subject" is the revived survivor (verified against l4d_dynamic_light.sp's
+	// own revive_success handler); "userid" above is the reviver.
+	EmitClientEvent("revive", reviver, GetClientOfUserId(event.GetInt("subject")), 0);
 }
 
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -1426,6 +1491,9 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 		// nothing. Deriving this from pops instead would miss those.
 		if (!IsFakeClient(client) && StatsActive()) AddStat(client, PS_BoomerSpawns);
 	}
+
+	if (GetClientTeam(client) == TEAM_INFECTED)
+		EmitClientEvent("si_spawn", client, 0, GetEntProp(client, Prop_Send, "m_zombieClass"));
 }
 
 /** player_now_it: a survivor just became "it". Fires once per survivor caught,
@@ -1443,6 +1511,89 @@ public void Event_PlayerBoomed(Event event, const char[] name, bool dontBroadcas
 		g_bHasBoomLanded = true;
 	}
 	AddStat(g_iBoomerClient, event.GetBool("exploded") ? PS_BoomedProxy : PS_BoomedVomit);
+}
+
+// ---------- live timeline: pin cycle, tank cycle, map hazards ----------
+
+/** lunge_pounce: a hunter pins a survivor. */
+public void Event_Pounce(Event event, const char[] name, bool dontBroadcast)
+{
+	int hunter = GetClientOfUserId(event.GetInt("userid"));
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = hunter;
+	EmitClientEvent("pinned", hunter, victim, 0);
+}
+
+/** tongue_grab: a smoker pins a survivor. */
+public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
+{
+	int smoker = GetClientOfUserId(event.GetInt("userid"));
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = smoker;
+	EmitClientEvent("pinned", smoker, victim, 0);
+}
+
+/** tongue_release: the pull ends without anyone dying, so just clear the pin.
+ *  "cleared" is a survivor credit for killing the infected that was pinning
+ *  someone (see Event_PlayerDeath); a smoker letting go on its own earns no
+ *  such credit. */
+public void Event_TongueRelease(Event event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = 0;
+}
+
+/** player_incapacitated_start: the bare player_incapacitated does not fire on
+ *  this engine. */
+public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(event.GetInt("userid"));
+	int attacker = GetClientOfUserId(event.GetInt("attacker"));
+	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = 0;
+	// Actor is the survivor it happened to, so the feed reads
+	// "<name> was incapped by <attacker>".
+	EmitClientEvent("incap", victim, attacker, 0);
+}
+
+public void Event_WitchAggro(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("witch_aggro", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+public void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("witch_killed", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+/** triggered_car_alarm: userid may be absent or 0 when the director trips an
+ *  alarm with nobody responsible. EmitClientEvent (via EmitEvent) drops an
+ *  unrostered/invalid actor, which is correct: an unattributed alarm is not
+ *  a blame stat. */
+public void Event_CarAlarm(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("car_alarm", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+public void Event_TankSpawn(Event event, const char[] name, bool dontBroadcast)
+{
+	EmitClientEvent("tank_spawn", GetClientOfUserId(event.GetInt("userid")), 0, 0);
+}
+
+/** bot_player_replace: a human takes over a bot. When the bot being taken
+ *  over was the tank, this is a tank pass. */
+public void Event_BotPlayerReplace(Event event, const char[] name, bool dontBroadcast)
+{
+	int player = GetClientOfUserId(event.GetInt("player"));
+	if (IsTankClient(player)) EmitClientEvent("tank_pass", player, 0, 0);
+}
+
+/** player_bot_replace: a human is replaced by a bot, handing the tank back
+ *  to the AI. Same "tank_pass" kind as the reverse direction; the feed cares
+ *  that control changed hands, not which way. */
+public void Event_PlayerBotReplace(Event event, const char[] name, bool dontBroadcast)
+{
+	int player = GetClientOfUserId(event.GetInt("player"));
+	if (IsTankClient(player)) EmitClientEvent("tank_pass", player, 0, 0);
 }
 
 /** Authoritative match record over the RCON response body. Idempotent:
