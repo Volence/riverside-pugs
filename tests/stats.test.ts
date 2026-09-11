@@ -226,6 +226,14 @@ describe('stats routes', () => {
     expect(body.rounds).toEqual([]);
   });
 
+  it('serves the stat registry with the match so the page can read direction', async () => {
+    const matchId = playCompletedMatch(db, 'a');
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(Array.isArray(body.statDefs)).toBe(true);
+    const skeets = body.statDefs.find((d: { key: string }) => d.key === 'skeets');
+    expect(skeets.direction).toBe('high_good');
+  });
+
   describe('stat visibility', () => {
     it('hides self-only stats from other viewers on a match page', async () => {
       const matchId = playCompletedMatch(db);

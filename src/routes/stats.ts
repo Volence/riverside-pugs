@@ -284,7 +284,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       target: e.target ? { steamid: e.target, name: nameOf(e.target) } : null,
     }));
 
-    return { match, maps, players, rounds, demos, events };
+    return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS };
   });
 
   /**
