@@ -153,17 +153,92 @@ export function recordLiveEvent(
     .prepare('SELECT COUNT(*) AS n FROM match_live_maps WHERE match_id = ?')
     .get(id) as { n: number };
   db.prepare(
-    `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (match_id, seq) DO UPDATE SET
        kind = excluded.kind, actor = excluded.actor,
        target = excluded.target, value = excluded.value`,
-    // map_ordinal is deliberately NOT updated on conflict. A duplicate
-    // datagram can arrive after the map it belongs to has ended, and
-    // re-stamping would silently move an old event onto the current map.
-    // The first write is the one that saw the right map.
-  ).run(id, ev.seq, ev.event, ev.actor, ev.target, ev.value, done.n);
+    // map_ordinal, half and t_ms are deliberately NOT updated on conflict. A
+    // duplicate datagram can arrive after the map it belongs to has ended,
+    // and re-stamping would silently move an old event onto the current map
+    // or overwrite its timing with whatever the duplicate happened to carry.
+    // The first write is the one that saw the right map and timing.
+  ).run(id, ev.seq, ev.event, ev.actor, ev.target, ev.value, done.n, ev.half, ev.tMs);
   touch(db, id);
+}
+
+export interface RoundRow {
+  ordinal: number;
+  half: number;
+  survTeam: 'a' | 'b';
+  score: number;
+  reliable: boolean;
+}
+
+/** Which map this round belongs to: however many have already finished.
+ *  Same derivation recordLiveEvent uses for map_ordinal, and for the same
+ *  reason: nothing on the wire carries it. */
+function currentOrdinal(db: DB, matchId: number): number {
+  const done = db
+    .prepare('SELECT COUNT(*) AS n FROM match_live_maps WHERE match_id = ?')
+    .get(matchId) as { n: number };
+  return done.n;
+}
+
+export function recordRoundStart(
+  db: DB, token: string,
+  ev: Extract<LogEvent, { kind: 'round_start' }>,
+): void {
+  const id = liveMatchIdOf(db, token);
+  if (id === null) return;
+  db.prepare(
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (match_id, ordinal, half) DO NOTHING`,
+    // DO NOTHING, not an update: a duplicated ROUND_START must not reset the
+    // started_at that t_ms values are already measured against.
+  ).run(id, currentOrdinal(db, id), ev.half, ev.surv);
+  touch(db, id);
+}
+
+export function recordRoundEnd(
+  db: DB, token: string,
+  ev: Extract<LogEvent, { kind: 'round_end' }>,
+): void {
+  const id = liveMatchIdOf(db, token);
+  if (id === null) return;
+  const ordinal = currentOrdinal(db, id);
+  const existing = db.prepare(
+    'SELECT surv_team FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
+  ).get(id, ordinal, ev.half) as { surv_team: string } | undefined;
+  if (existing && existing.surv_team !== ev.surv) {
+    // Not an error. The orientation mapping is provisional early in a round,
+    // which is why pug-match reconciles it at all. Logged so a systematic
+    // disagreement is visible rather than silently absorbed.
+    console.warn(
+      `[rounds] match ${id} map ${ordinal} half ${ev.half}: side moved ${existing.surv_team} -> ${ev.surv}`,
+    );
+  }
+  db.prepare(
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
+       surv_team = excluded.surv_team,
+       score = excluded.score,
+       ended_at = excluded.ended_at`,
+  ).run(id, ordinal, ev.half, ev.surv, ev.score);
+  touch(db, id);
+}
+
+export function roundsFor(db: DB, matchId: number): RoundRow[] {
+  return (db.prepare(
+    `SELECT ordinal, half, surv_team, score, reliable FROM match_rounds
+     WHERE match_id = ? ORDER BY ordinal, half`,
+  ).all(matchId) as { ordinal: number; half: number; surv_team: 'a' | 'b'; score: number; reliable: number }[])
+    .map((r) => ({
+      ordinal: r.ordinal, half: r.half, survTeam: r.surv_team,
+      score: r.score, reliable: r.reliable === 1,
+    }));
 }
 
 export function recordMapResult(db: DB, token: string, map: string, a: number, b: number): void {

@@ -4,6 +4,7 @@ import { upsertPlayer } from '../src/players.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, clearLive, getLiveMatches,
   STALE_AFTER_MS, LIVE_EVENT_LIMIT, reapOrphanedMatches, ORPHAN_AFTER_MS, mapStatsFor, eventsFor,
+  recordRoundStart, recordRoundEnd, roundsFor,
 } from '../src/liveView.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -479,5 +480,56 @@ describe('liveView: events know their map', () => {
     // Still map 1 (ordinal 0), where it actually happened, not the map that
     // happened to be in progress when the duplicate turned up.
     expect(feed[0].mapOrdinal).toBe(0);
+  });
+});
+
+const ROUND_TOKEN = 'b'.repeat(32);
+
+function liveMatchForRounds() {
+  const db = openDb(':memory:');
+  db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+  db.prepare("INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)").run(ROUND_TOKEN);
+  db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (1, 'm', datetime('now'))").run();
+  return db;
+}
+
+describe('round persistence', () => {
+  it('records a round and closes it with the score', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, half: 1, surv: 'a', score: 300 });
+    expect(roundsFor(db, 1)).toEqual([
+      { ordinal: 0, half: 1, survTeam: 'a', score: 300, reliable: true },
+    ]);
+  });
+
+  it('is idempotent across a duplicated datagram', () => {
+    const db = liveMatchForRounds();
+    const ev = { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' } as const;
+    recordRoundStart(db, ROUND_TOKEN, ev);
+    recordRoundStart(db, ROUND_TOKEN, ev);
+    expect(roundsFor(db, 1)).toHaveLength(1);
+  });
+
+  it('trusts the round-end side when start and end disagree', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, half: 1, surv: 'b', score: 120 });
+    expect(roundsFor(db, 1)[0].survTeam).toBe('b');
+  });
+
+  it('stamps the ordinal from how many maps have finished', () => {
+    const db = liveMatchForRounds();
+    db.prepare("INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (1, 'm0', 0, 1, 2)").run();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm1', half: 1, surv: 'a' });
+    expect(roundsFor(db, 1)[0].ordinal).toBe(1);
+  });
+
+  it('ignores a round for an unknown token rather than throwing', () => {
+    const db = liveMatchForRounds();
+    expect(() => recordRoundStart(db, 'c'.repeat(32), {
+      kind: 'round_start', token: 'c'.repeat(32), map: 'm', half: 1, surv: 'a',
+    })).not.toThrow();
+    expect(roundsFor(db, 1)).toEqual([]);
   });
 });
