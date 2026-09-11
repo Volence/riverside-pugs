@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
-  deriveLiveStats,
+  deriveLiveStats, fmtLatency,
 } from './format';
 
 describe('campaignName', () => {
@@ -312,5 +312,13 @@ describe('statGroupStarts', () => {
     expect(starts.has('skeets')).toBe(true);
     expect(starts.has('team_skeets')).toBe(false);
     expect(starts.has('crowns')).toBe(true);
+  });
+});
+
+describe('fmtLatency', () => {
+  it('reads in seconds to one decimal, which is the resolution that matters', () => {
+    expect(fmtLatency(910)).toBe('0.9s');
+    expect(fmtLatency(1800)).toBe('1.8s');
+    expect(fmtLatency(0)).toBe('0.0s');
   });
 });

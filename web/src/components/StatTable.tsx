@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import type { LiveEvent, StatDef } from '../api';
-import { labelFor, liveGroupStarts } from '../format';
+import { fmtLatency, labelFor, liveGroupStarts } from '../format';
+import { clearLatencies } from '../clearLatency';
 import { PlayerLink } from './bits';
 import { markColumn, directionOf, type Mark } from '../outliers';
 
@@ -138,6 +139,11 @@ export function EventFeed(
   const nameOfMap = (ordinal: number) =>
     maps.find((mp) => mp.ordinal === ordinal)?.map ?? null;
 
+  // How long each clear took, keyed by the clear's own seq. Computed here
+  // rather than passed in: the feed already holds every event the pairing
+  // needs, and a clear with no pairable pin simply gets no annotation.
+  const latencyOf = new Map(clearLatencies(events).map((c) => [c.seq, c.latencyMs]));
+
   const rows: JSX.Element[] = [];
   let lastOrdinal: number | null = null;
   for (const e of events) {
@@ -160,6 +166,9 @@ export function EventFeed(
           {' '}
           <span class="muted">{verb?.verb ?? e.kind}</span>
           {e.target && <> <strong>{e.target.name}</strong></>}
+          {latencyOf.has(e.seq) && (
+            <> <span class="feed__val num">{fmtLatency(latencyOf.get(e.seq)!)}</span></>
+          )}
           {e.value > 0 && (
             <>
               {' '}

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/preact';
-import { StatTable } from '../components/StatTable';
+import { StatTable, EventFeed } from '../components/StatTable';
 import type { StatDef } from '../api';
 import { statGroupStarts } from '../format';
 import { roundsMessage } from './MatchDetail';
@@ -734,5 +734,52 @@ describe('StatTable group dividers', () => {
     expect(cls('Commons')).not.toContain('is-groupstart');
     expect(cls('Boomer pops')).toContain('is-groupstart');
     expect(cls('Crowns')).toContain('is-groupstart');
+  });
+});
+
+describe('clear latency surfaces', () => {
+  const ce = (seq: number, kind: string, actor: string, target: string | null, tMs: number) => ({
+    seq, kind, mapOrdinal: 0, half: 1, tMs,
+    actor: { steamid: actor, name: actor }, target: target ? { steamid: target, name: target } : null,
+    value: 0,
+  });
+
+  it('annotates a cleared row in the feed with how long it took', () => {
+    const { container } = render(
+      <EventFeed
+        events={[ce(2, 'cleared', 'mal', 'zoey', 1910), ce(1, 'pinned', 'tami', 'zoey', 1000)]}
+        maps={[{ ordinal: 0, map: 'l4d_hospital01_apartment' }]}
+      />,
+    );
+    expect(container.textContent).toContain('0.9s');
+  });
+
+  it('leaves a clear with no pairable pin unannotated rather than guessing', () => {
+    const { container } = render(
+      <EventFeed events={[ce(1, 'cleared', 'mal', null, 1910)]} maps={[]} />,
+    );
+    // The latency renders into .feed__val, which is also the value slot; this
+    // event has value 0, so any .feed__val at all would be a fabricated timing.
+    expect(container.querySelector('.feed__val')).toBeNull();
+  });
+
+  it('shows a clear latency panel on the match page', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: 0, stats: {} },
+      ],
+      demos: [],
+      statDefs: [],
+      events: [ce(2, 'cleared', '1', 'zoey', 1910), ce(1, 'pinned', 'tami', 'zoey', 1000)],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('Clear latency')).toBeTruthy());
+    // The feed shows the same number, so scope to the panel to prove it is the
+    // panel rendering the row and not the feed being found twice.
+    const panel = screen.getByText('Clear latency').closest('.panel') as HTMLElement;
+    expect(within(panel).getByText('0.9s')).toBeTruthy();
+    expect(within(panel).getByText('alice')).toBeTruthy();
   });
 });
