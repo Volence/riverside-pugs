@@ -86,26 +86,44 @@ valid right now" predicate. None of it is persisted today.
 | `ff` | survivor, survivor, damage | FF timeline | existing (`player_hurt`) |
 | `si_spawn` | SI, class | Spawn positioning, spawn-to-engage time | existing (`player_spawn`) |
 | `tank_spawn` | player | Tank-fight segmentation | existing (`player_spawn`) |
-| `tank_pass` | from, to | Tank-fight segmentation. Tank control passes in this ruleset | new |
+| `tank_pass` | from, to | Tank-fight segmentation. Tank control passes in this ruleset | new (`player_bot_replace` / `bot_player_replace`) |
 | `tank_death` | tank, killer | Tank-fight segmentation | existing |
 | `revive` | survivor, survivor | Round timeline | existing (`revive_success`) |
 | `witch_aggro` | witch, survivor | Round timeline, pairs with `crowns` | new (`witch_harasser_set`) |
 | `witch_killed` | survivor | Round timeline | new (`witch_killed`) |
-| `car_alarm` | player | Round timeline, blame | new (`triggered_car_alarm`) |
+| `car_alarm` | player | Round timeline, blame | new (`triggered_car_alarm`, UNVERIFIED on L4D1) |
 | `skeet`, `boom`, `dp` | as today | Killfeed timing only | existing / skill_detect |
 
 `heal` is absent because kits are disabled in this ruleset, pills only. Pill detection
 is deferred (see Deferred below).
 
-`car_alarm` needs no entity hook after all. `triggered_car_alarm` is a real game event
-and `l4d2_skill_detect.sp` hooks it, which is proof it fires on L4D1 in this deployment.
-Corrected 2026-09-11 while writing plan 6a; the earlier `prop_car_alarm` entity-hook plan
-was more work for the same result.
+`car_alarm` is UNVERIFIED and may not fire on L4D1. An earlier revision of this document
+claimed `triggered_car_alarm` was proven because `l4d2_skill_detect.sp` hooks it. That was
+wrong: at `l4d2_skill_detect.sp:559` the hook is both commented out and gated behind an
+L4D2 version check, so its author evidently believed the event is L4D2 only. Caught during
+plan 6a implementation. The hook is registered anyway, defensively (see below), and if it
+never fires the fallback is the original approach: an entity hook on `prop_car_alarm`,
+which `Rotoblin-AZMod/SourceCode/scripting-az/l4d_car_alarm_hittable_fix.sp:67` already
+demonstrates. Confirm in game before relying on the event.
 
-Every event name in the table above is taken from a plugin verified running on L4D1 here:
-`l4d2_skill_detect.sp` for the pin, witch, incap and alarm events, and Rotoblin-AZMod's
-`l4dscores.sp` and `l4d_slowdown_control.sp` for `tank_spawn` and the `player_replace` /
-`bot_player_replace` pair that tank passing goes through on this engine. None are guessed.
+Tank passing uses `player_bot_replace` and `bot_player_replace`. An earlier revision named
+`player_replace`, which exists nowhere in either reference tree. `player_bot_replace` is
+used by `l4dscores.sp`, `l4d_collision_adjustments.sp` and `l4d_useful_upgrades.sp`, and
+`L4D1_2-Plugins/l4d_tank_pass/scripting/l4d_tank_pass.sp` is the reference for the handover
+itself.
+
+**The event list cannot be settled from the filesystem.** L4D1 defines events partly inside
+VPK archives, so grepping the loose `resource/*.res` files reports `player_bot_replace` and
+`witch_killed` as absent even though plugins hook both successfully in this deployment.
+Anyone tempted to "verify" an event name that way will get a confident wrong answer.
+
+Because of that, every event hook added by this work uses `HookEventEx` rather than
+`HookEvent`. `HookEvent` on an undefined event raises a native error, and raised inside
+`OnPluginStart` that aborts plugin load, which would take down roster enforcement, scoring
+and reporting for every ranked PUG. `HookEventEx` returns false instead, and a failure is
+logged once by name. An absent event then costs one telemetry stream rather than the match
+system. The hooks that predate this work stay on plain `HookEvent`: they are proven in
+production and changing them buys nothing.
 
 ### Position and state frames
 
@@ -433,9 +451,11 @@ design is wrong and we learn that before it is load-bearing.
 **Live server.** Deployment requires an explicit go-ahead; players are frequently on the
 box.
 
-**Unknown hooks.** Resolved for v1. `car_alarm` uses `triggered_car_alarm` and every other
-event name is taken from a plugin verified on L4D1 here. Only `pills` remains without a
-confirmed hook, and it is deferred rather than in scope.
+**Unknown hooks.** `car_alarm` is unverified: `triggered_car_alarm` is commented out and
+L4D2-gated in skill_detect, so it may never fire here. Every hook added by this work uses
+`HookEventEx`, so an absent event logs and degrades rather than aborting plugin load. The
+fallback if it never fires is a `prop_car_alarm` entity hook. `pills` remains unhooked and
+is deferred rather than in scope. Confirm both in game.
 
 **Scope.** Piece 1 ships nothing visible except the admin panel. The product is pieces 2
 through 4, and this spec exists to serve them.
