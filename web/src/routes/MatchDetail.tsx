@@ -1,6 +1,6 @@
 import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderLiveStatKeys, winnerLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { Empty, Panel, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { sideTotals } from '../matchTotals';
@@ -79,8 +79,13 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   });
   const totalsA = players.filter((p) => p.team === 'a').map(rowFor);
   const totalsB = players.filter((p) => p.team === 'b').map(rowFor);
-  const cols = orderLiveStatKeys(
+  // Ordered by side rather than by the live view's curated list. That list only
+  // knows the columns the live card shows, and its fallback appended everything
+  // else into one alphabetical tail shared by both sides, which interleaved
+  // survivor and infected columns and separated stats from their own family.
+  const cols = orderStatKeysBySide(
     Array.from(new Set([...totalsA, ...totalsB].flatMap((r) => Object.keys(r.stats)))),
+    statDefs,
   );
 
   const mapRows = (mp: typeof maps[number], team: 'a' | 'b'): StatRow[] =>
@@ -138,7 +143,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       <div class="stack">
         <Panel>
           <h3>Match totals</h3>
-          <StatTable teamA={totalsA} teamB={totalsB} cols={cols} statDefs={statDefs} showTotals />
+          <StatTable teamA={totalsA} teamB={totalsB} cols={cols} statDefs={statDefs} groupStarts={statGroupStarts} showTotals />
         </Panel>
 
         {maps.map((mp) => {
@@ -156,7 +161,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                 ? (
                   <StatTable
                     teamA={mapRows(mp, 'a')} teamB={mapRows(mp, 'b')}
-                    cols={cols} statDefs={statDefs}
+                    cols={cols} statDefs={statDefs} groupStarts={statGroupStarts}
                   />
                   )
                 : <p class="muted">Per-map stats were not captured for this match.</p>}
@@ -207,7 +212,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                         {round.reliable ? (
                           <StatTable
                             teamA={roundRows(round, 'a')} teamB={roundRows(round, 'b')}
-                            cols={cols} statDefs={statDefs}
+                            cols={cols} statDefs={statDefs} groupStarts={statGroupStarts}
                           />
                         ) : (
                           <p class="muted">Attribution for this round is unreliable and is not shown.</p>

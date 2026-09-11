@@ -22,7 +22,7 @@ export interface FeedMap { ordinal: number; map: string }
  *  player column is sticky so it never scrolls out of view, which is what made
  *  the first version unreadable: a wall of numbers with no names attached. */
 export function StatTable(
-  { teamA, teamB, cols, statDefs, showTotals }: {
+  { teamA, teamB, cols, statDefs, showTotals, groupStarts }: {
     teamA: StatRow[]; teamB: StatRow[]; cols: string[];
     /** When present, cells that stand out across all players are marked.
      *  Absent on the live page, which is a running scoreboard rather than a
@@ -31,9 +31,14 @@ export function StatTable(
     /** Adds a "Team total" row to the end of each team's group. Off by
      *  default so the live page's running scoreboard is unchanged. */
     showTotals?: boolean;
+    /** Which columns begin a group, so the table can rule a line before them.
+     *  Defaults to the live card's own grouping. The match page passes
+     *  statGroupStarts instead, because it splits columns into finer families
+     *  than the live scoreboard does. */
+    groupStarts?: (cols: string[]) => Set<string>;
   },
 ) {
-  const starts = liveGroupStarts(cols);
+  const starts = (groupStarts ?? liveGroupStarts)(cols);
   const cls = (k: string) => `num${starts.has(k) ? ' is-groupstart' : ''}`;
 
   const all = [...teamA, ...teamB];
