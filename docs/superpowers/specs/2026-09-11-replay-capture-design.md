@@ -240,9 +240,20 @@ the patched `l4d_current_survivor_progress` already computes, and sidesteps vert
 overlap for analytics because flow is one-dimensional. Confirming which fields nav v13
 exposes is a one-hour spike before relying on it.
 
-Unsolved by either track: L4D maps overlap vertically, so one flat image cannot show
-both No Mercy's sewers and its streets. The viewer either switches Z-banded layers or
-accepts overlap and shows height as a badge. A piece 3 decision.
+Vertical overlap is accepted rather than solved. A flat top-down drops Z, so places at
+the same X,Y and different heights share a pixel. No Mercy 4's hospital interior is the
+worst case, an elevator ride through floors on one footprint; most L4D1 chapters are
+linear and ground-level, so it is the outlier.
+
+Decided 2026-09-11: **scale the player avatar by height**, roughly plus or minus 20%.
+Higher reads as closer to an overhead camera, so it matches the intuition the view
+already creates, and it separates a rooftop from the alley beneath it without a layer
+system or a UI. If one map is still unreadable, dim anything far outside the survivor
+team's current height band; the team is nearly always together.
+
+The analytics are unaffected either way. Isolation uses true 3D distance, pacing uses
+one-dimensional nav flow, and heatmaps can bin by height. Only the viewer sees a flat
+image.
 
 ### Retention is 90 days, controllable from the browser
 
@@ -419,10 +430,17 @@ through 4, and this spec exists to serve them.
   cosmetic, since the live page is public
 - Map imagery: nav-derived schematic first for all maps, `cl_leveloverview` screenshots
   layered in per map afterwards, so art never blocks the viewer
+- Live replay is visible to anyone, on both the live page and a finished map. Tightening
+  is a later option, not a v1 requirement. This is only acceptable because the delay is
+  enforced server-side
+- Vertical overlap: accepted, with avatars scaled by height. Not a layer system
 
 ## Still open
 
-- Whether live replay is public, hidden from participants, or admin-only. Placement is
-  decided (below); visibility is not. Capture does not care; decide in piece 3
-- Whether the viewer handles vertical overlap by Z-banded layers or a height badge
-- Whether world entities are worth adding at a reduced sample rate later
+Nothing blocking. Both remaining questions were resolved 2026-09-11 and moved above.
+
+Revisit later, not now:
+
+- Whether world entities are worth adding at a reduced sample rate (see Deferred)
+- Whether live replay visibility needs tightening. It ships visible to everyone; the
+  server-side delay is what makes that safe, so the delay is not optional
