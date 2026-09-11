@@ -90,6 +90,9 @@ body[data-urgent='true'] .nav { border-bottom-color: var(--loss); }
 .page--list { max-width: 880px; }
 .page--profile { max-width: 960px; }
 .page--match { max-width: 1120px; }
+/* Same reason: panels hold wide scrolling tables. */
+.stack > * { min-width: 0; }
+.stack { min-width: 0; }
 
 .page__head {
   display: flex;
@@ -258,6 +261,10 @@ td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
 /* ---------- teams ---------- */
 
 .teams { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+/* A grid item defaults to min-width:auto, so a wide table inside one forces
+   the COLUMN wider instead of scrolling within its own .table-wrap, which blew
+   the whole match page past the viewport. */
+.teams > * { min-width: 0; }
 /* Only when the rosters sit directly inside a panel (the Play page). In match
  * detail each team is its own panel inside a .stack, which already has a gap. */
 .panel > .teams { margin-top: var(--sp-4); }
@@ -429,3 +436,255 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   cursor: pointer;
 }
 .devpanel button:hover { color: var(--text); border-color: var(--text-muted); }
+
+/* Demo downloads on the match page. Three columns so the map, the size and
+   the action line up down the list rather than reflowing per row. */
+.demos { list-style: none; margin: 0; padding: 0; }
+.demos__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.demos__row:last-child { border-bottom: 0; }
+
+/* Live spectator cards. */
+.live__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.live__head h3 { margin: 0 0 var(--sp-1); }
+.live__head p { margin: 0; }
+.live__stale { color: var(--loss); }
+.live__teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.live__teams h4 { margin: 0 0 var(--sp-2); font-size: 0.85rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.live__roster { list-style: none; margin: 0; padding: 0; }
+.live__roster li { padding: var(--sp-1) 0; }
+@media (max-width: 640px) { .live__teams { grid-template-columns: 1fr; } }
+
+
+/* Live stats table. Fifteen numeric columns will always overflow on anything
+   narrower than a desktop, so the goal is not to avoid the scroll but to make
+   it survivable: the player column stays put, group rules break the wall of
+   numbers into families, and zeros recede so the non-zero values are what the
+   eye lands on. */
+.live__stats table { border-collapse: separate; border-spacing: 0; }
+.live__stats th,
+.live__stats td { white-space: nowrap; border-bottom: 1px solid var(--border); }
+
+.live__pcol {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  text-align: left;
+  /* Opaque, or the scrolling numbers show through underneath it. */
+  background: var(--surface);
+  padding-right: var(--sp-4);
+}
+.live__stats thead .live__pcol { z-index: 3; }
+
+/* Divider between stat families (core / tank / skill). */
+.live__stats .is-groupstart { border-left: 1px solid var(--border); }
+
+/* A zero is real information, but it is not what you are scanning for. */
+.live__stats td.is-dim { opacity: 0.35; }
+
+.live__teamrow th,
+.live__teamrow td {
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}
+
+/* Live event feed. Deliberately a list rather than a table: entries are short,
+   newest-first, and read as a narrative rather than as columns to compare. */
+.feed { margin-top: var(--sp-4); }
+.feed h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.feed ul { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; }
+.feed li {
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-dense);
+  color: var(--text-muted);
+}
+/* Names and the number carry the meaning; the connecting words recede. */
+.feed__line strong { color: var(--text); font-weight: 600; }
+.feed__val { color: var(--accent); font-weight: 600; }
+
+/* Each stat table on the live card gets a labelled section: this map, one per
+   completed map, then match totals. Without the headings the three tables are
+   indistinguishable and the numbers mean nothing. */
+.live__section { margin-top: var(--sp-4); }
+.live__section > h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.live__section > h4 .muted { text-transform: none; letter-spacing: 0; }
+
+/* Map separator inside the feed. Grouped rather than badged per row, since
+   consecutive entries are nearly always from the same map. */
+.feed__map {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.feed li:first-child.feed__map { margin-top: 0; padding-top: 0; border-top: 0; }
+
+/* Demo playback warning. Collapsed by default: it only matters the first time,
+   but when it matters it looks exactly like a corrupt file. */
+.demohint { margin-bottom: var(--sp-3); font-size: var(--fs-dense); }
+.demohint summary { cursor: pointer; color: var(--accent); }
+.demohint p { margin: var(--sp-2) 0; }
+.demohint pre {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Headline stat tiles. Auto-fit so the row reflows rather than needing a
+   breakpoint per count, since how many tiles exist depends on what the player
+   has actually done. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--sp-3);
+  /* No margin: .stack already supplies the gap between sections, and adding
+     one here double-spaced the tile row against everything around it. */
+}
+.tile {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  /* A hairline of accent on the leading edge: enough to make the row read as a
+     group of figures rather than as plain boxes, without colouring the number
+     itself and implying good/bad. */
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.tile__label {
+  margin: 0 0 var(--sp-1);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.tile__value { margin: 0; font-size: 1.5rem; line-height: 1.1; color: var(--text); }
+.tile__sub { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); }
+
+/* Sortable leaderboard. Many numeric columns, so the same treatment as the
+   live table: pinned player column, dimmed zeros, clear sort affordance. */
+.lb table { border-collapse: separate; border-spacing: 0; }
+.lb th, .lb td { white-space: nowrap; border-bottom: 1px solid var(--border); }
+.lb__pcol {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  text-align: left;
+  background: var(--surface);
+  padding-right: var(--sp-4);
+}
+.lb thead .lb__pcol { z-index: 3; }
+.lb td.is-dim { opacity: 0.35; }
+
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { color: var(--text); }
+.sortable.is-sorted { color: var(--accent); }
+.sortable__arrow { margin-left: 0.25em; font-size: 0.8em; }
+
+/* Comparison bars. Length is volume, colour is quality. */
+.bars { margin-top: var(--sp-3); }
+.bars__label {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bar { margin-bottom: var(--sp-3); }
+.bar__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: 4px;
+  font-size: var(--fs-dense);
+}
+.bar__name { color: var(--text); }
+.bar__name a { color: var(--text); }
+.bar__name a:hover { color: var(--accent); }
+.bar__value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.bar__value--good { color: var(--win); }
+.bar__value--bad { color: var(--loss); }
+.bar__value--neutral { color: var(--text); }
+.bar__detail { font-weight: 400; color: var(--text-muted); }
+.bar__track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.bar__fill { height: 100%; border-radius: 3px; transition: width 200ms ease; }
+.bar__fill--good { background: linear-gradient(90deg, var(--win), color-mix(in srgb, var(--win) 45%, transparent)); }
+.bar__fill--bad { background: linear-gradient(90deg, var(--loss), color-mix(in srgb, var(--loss) 45%, transparent)); }
+.bar__fill--neutral { background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, transparent)); }
+
+/* Tab strip. */
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tabs__tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-dense);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tabs__tab:hover { color: var(--text); }
+.tabs__tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs__count {
+  margin-left: 0.4em;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 0.85em;
+}

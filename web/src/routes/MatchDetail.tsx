@@ -1,7 +1,8 @@
 import { api, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, fmtDate, labelFor, winnerLabel } from '../format';
-import { Empty, Panel, PlayerLink, SrDelta } from '../components/bits';
+import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderLiveStatKeys, winnerLabel } from '../format';
+import { Empty, Panel, SrDelta } from '../components/bits';
+import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
@@ -16,11 +17,32 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   if (!data) return <div class="page page--match" />;
 
   const { match, maps, players } = data;
-  // Columns are derived from the data actually present, so a match played on
-  // a server without skill_detect shows no empty columns rather than zeros.
-  const skillCols = Array.from(
-    new Set(players.flatMap((p) => Object.keys(p.stats ?? {}))),
-  ).sort();
+
+  // The dump gives per-player totals as fixed columns plus a bag of skill
+  // stats; fold them into one object so the match page and the live page share
+  // exactly one table component and one column order.
+  const rowFor = (p: typeof players[number]): StatRow => ({
+    steamid: p.steamid,
+    name: p.name,
+    stats: deriveLiveStats({
+      ck: p.commonKills, sidmg: p.siDamage, sikill: p.siKills,
+      ff: p.ffDealt, rev: p.revives,
+      ...(p.stats ?? {}),
+    }),
+  });
+  const totalsA = players.filter((p) => p.team === 'a').map(rowFor);
+  const totalsB = players.filter((p) => p.team === 'b').map(rowFor);
+  const cols = orderLiveStatKeys(
+    Array.from(new Set([...totalsA, ...totalsB].flatMap((r) => Object.keys(r.stats)))),
+  );
+
+  const mapRows = (mp: typeof maps[number], team: 'a' | 'b'): StatRow[] =>
+    players.filter((p) => p.team === team).map((p) => ({
+      steamid: p.steamid,
+      name: p.name,
+      stats: deriveLiveStats(mp.stats?.[p.steamid] ?? {}),
+    }));
+  const hasMapStats = maps.some((mp) => Object.keys(mp.stats ?? {}).length > 0);
 
   return (
     <div class="page page--match">
@@ -36,93 +58,55 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       </div>
 
       <div class="stack">
-        <Panel class="panel--table">
-          <h3>Maps</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th class="num">#</th><th>Map</th><th class="num">A</th><th class="num">B</th></tr>
-              </thead>
-              <tbody>
-                {maps.map((m) => (
-                  <tr key={m.ordinal}>
-                    {/* `ordinal` is a 0-based array index in match_maps; humans
-                        count maps from one. */}
-                    <td class="num muted">{m.ordinal + 1}</td>
-                    <td>{m.map}</td>
-                    <td class="num">{m.teamAScore}</td>
-                    <td class="num">{m.teamBScore}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <Panel>
+          <h3>Match totals</h3>
+          <StatTable teamA={totalsA} teamB={totalsB} cols={cols} />
         </Panel>
 
-        <div class="teams">
-          {(['a', 'b'] as Team[]).map((team) => (
-            <TeamStats
-              key={team}
-              team={team}
-              players={players.filter((p) => p.team === team)}
-              me={me}
-              skillCols={skillCols}
-            />
-          ))}
-        </div>
+        {maps.map((mp) => {
+          const demo = data.demos?.find((d) => d.ordinal === mp.ordinal);
+          return (
+            <Panel key={mp.ordinal}>
+              <h3>
+                Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mp.map}</a>
+                <span class="muted"> · {mp.teamAScore} - {mp.teamBScore}</span>
+                {demo && <> · <a href={`/api/matches/${match.id}/demos/${demo.ordinal}`} download>
+                  demo {fmtBytes(demo.bytes)}
+                </a></>}
+              </h3>
+              {Object.keys(mp.stats ?? {}).length > 0
+                ? <StatTable teamA={mapRows(mp, 'a')} teamB={mapRows(mp, 'b')} cols={cols} />
+                : <p class="muted">Per-map stats were not captured for this match.</p>}
+            </Panel>
+          );
+        })}
+
+        {!hasMapStats && maps.length === 0 && (
+          <Panel><Empty>No maps recorded.</Empty></Panel>
+        )}
+
+        {data.events && data.events.length > 0 && (
+          <Panel>
+            <EventFeed events={data.events} maps={maps} />
+          </Panel>
+        )}
+
+        {data.demos && data.demos.length > 0 && (
+          <Panel>
+            <h3>Demos</h3>
+            <DemoPlaybackHint />
+            <ul class="demos">
+              {data.demos.map((d) => (
+                <li class="demos__row" key={d.ordinal}>
+                  <span>{d.map}</span>
+                  <span class="muted num">{fmtBytes(d.bytes)}</span>
+                  <a href={`/api/matches/${match.id}/demos/${d.ordinal}`} download>Download</a>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
       </div>
     </div>
-  );
-}
-
-function TeamStats(
-  { team, players, me, skillCols }:
-    { team: Team; players: MatchPlayerStats[]; me: string | null; skillCols: string[] },
-) {
-  return (
-    <Panel class="panel--table">
-      <h3>Team {team.toUpperCase()}</h3>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th class="num">SI dmg</th>
-              <th class="num">SI</th>
-              <th class="num">Commons</th>
-              <th class="num">FF</th>
-              <th class="num">Revives</th>
-              {skillCols.map((k) => <th class="num" key={k}>{labelFor(k)}</th>)}
-              <th class="num">SR</th>
-            </tr>
-          </thead>
-          <tbody>
-            {players.map((p) => (
-              <tr key={p.steamid} class={p.steamid === me ? 'is-me' : ''}>
-                <td><PlayerLink steamid={p.steamid} name={p.name} /></td>
-                <td class="num">{p.siDamage}</td>
-                <td class="num">{p.siKills}</td>
-                <td class="num">{p.commonKills}</td>
-                <td class="num">{p.ffDealt}</td>
-                <td class="num">{p.revives}</td>
-                {skillCols.map((k) => (
-                  <td class="num" key={k}>
-                    {/* skillCols is a match-wide union: a key present in some
-                        other row can be absent from this one because the
-                        server stripped a self-only stat for a viewer who
-                        isn't the subject. Absent must read as "not shown",
-                        never as a fabricated 0. */}
-                    {Object.hasOwn(p.stats ?? {}, k)
-                      ? p.stats![k]
-                      : <span class="muted">n/a</span>}
-                  </td>
-                ))}
-                <td class="num"><SrDelta value={p.srDelta} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
   );
 }

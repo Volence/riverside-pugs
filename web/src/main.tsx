@@ -6,7 +6,10 @@ import { DevPanel } from './components/DevPanel';
 import { Play } from './routes/Play';
 import { Leaderboard } from './routes/Leaderboard';
 import { Matches } from './routes/Matches';
+import { Live } from './routes/Live';
 import { MatchDetail } from './routes/MatchDetail';
+import { MapDetail } from './routes/MapDetail';
+import { Maps } from './routes/Maps';
 import { Profile } from './routes/Profile';
 import { Empty, Panel } from './components/bits';
 import './styles/app.css';
@@ -35,7 +38,10 @@ function App() {
           <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
           <Route path="/leaderboard" component={Leaderboard} me={me} />
           <Route path="/matches" component={Matches} />
+          <Route path="/live" component={Live} me={me} />
           <Route path="/match/:id" component={MatchDetail} me={me} />
+          <Route path="/maps" component={Maps} />
+          <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} />
           <Route default component={NotFound} />
         </Router>

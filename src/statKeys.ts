@@ -68,6 +68,19 @@ export const STAT_DEFS: readonly StatDef[] = [
   def('tank_damage', 'survivor', 'Tank damage', false),
   def('damage_as_si', 'infected', 'Damage as SI', false),
   def('tank_punches', 'infected', 'Tank punches', false),
+  // Denominator for boomer success rate. Counted from player_spawn by
+  // pug-match itself, so it needs no skill_detect. The rate is derived at
+  // display time rather than stored: storing a ratio would go stale the moment
+  // either side of it changed.
+  def('boomer_spawns', 'infected', 'Boomer spawns', false),
+  // Mirrors l4dcompstats.sp's BoomSuccesses/BoomedSurvivorsBy* so the site
+  // agrees with the numbers already printed in console. A success is
+  // once per boomer LIFE, not per survivor caught, which is what makes
+  // successes/attempts a meaningful ratio; the two survivor counters below
+  // are per survivor. Proxy is the death explosion, vomit is a direct hit.
+  def('boom_successes', 'infected', 'Booms landed', false),
+  def('boomed_vomit', 'infected', 'Boomed by vomit', false),
+  def('boomed_proxy', 'infected', 'Boomed by proxy', false),
 ];
 
 const BY_KEY = new Map(STAT_DEFS.map((d) => [d.key, d]));

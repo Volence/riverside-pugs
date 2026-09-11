@@ -92,3 +92,130 @@ describe('parseLogDatagram', () => {
     ))).toBeNull();
   });
 });
+
+describe('parseLogDatagram: self-started match lines', () => {
+  it('parses MATCH_CREATE', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} MATCH_CREATE map=l4d_vs_hospital01_apartment players=8`));
+    expect(ev).toEqual({
+      kind: 'match_create',
+      token: TOKEN,
+      map: 'l4d_vs_hospital01_apartment',
+      players: 8,
+    });
+  });
+
+  it('parses MATCH_ROSTER', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=a name=volence`));
+    expect(ev).toEqual({
+      kind: 'match_roster',
+      token: TOKEN,
+      steamid: '76561198030413993',
+      team: 'a',
+      name: 'volence',
+    });
+  });
+
+  // name= is emitted last precisely so that spaces are safe. If this ever
+  // regresses, names get silently truncated at the first space.
+  it('keeps everything after name= including spaces', () => {
+    const ev = parseLogDatagram(
+      framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=b name=Big Bill  Overbeck`),
+    );
+    expect(ev).toMatchObject({ kind: 'match_roster', name: 'Big Bill  Overbeck' });
+  });
+
+  it('does not let an = inside a name break parsing', () => {
+    const ev = parseLogDatagram(
+      framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=a name=x=y z`),
+    );
+    expect(ev).toMatchObject({ kind: 'match_roster', name: 'x=y z', team: 'a' });
+  });
+
+  it('rejects MATCH_ROSTER with a bad team letter', () => {
+    expect(
+      parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=c name=x`)),
+    ).toBeNull();
+  });
+
+  it('rejects MATCH_ROSTER with a malformed steamid', () => {
+    expect(
+      parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=123 team=a name=x`)),
+    ).toBeNull();
+  });
+
+  it('rejects MATCH_ROSTER with an empty name', () => {
+    expect(
+      parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=a name=`)),
+    ).toBeNull();
+  });
+
+  it('parses MATCH_CREATE_END', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} MATCH_CREATE_END players=8`));
+    expect(ev).toEqual({ kind: 'match_create_end', token: TOKEN, players: 8 });
+  });
+
+  it('rejects MATCH_CREATE without a map', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} MATCH_CREATE players=8`))).toBeNull();
+  });
+});
+
+describe('parseLogDatagram: LIVESTAT', () => {
+  it('parses the core counters', () => {
+    const ev = parseLogDatagram(framed(
+      `PUG ${TOKEN} LIVESTAT steamid=76561198030413993 hp=88 ck=142 sidmg=930 sikill=4 ff=12 rev=2`,
+    ));
+    expect(ev).toEqual({
+      kind: 'live_stat',
+      token: TOKEN,
+      steamid: '76561198030413993',
+      stats: { hp: 88, ck: 142, sidmg: 930, sikill: 4, ff: 12, rev: 2 },
+    });
+  });
+
+  it('carries tank and skill keys when present', () => {
+    const ev = parseLogDatagram(framed(
+      `PUG ${TOKEN} LIVESTAT steamid=76561198030413993 hp=-1 ck=0 tank_damage=2400 skeets=3 boomer_pops=1 dps_landed=650`,
+    ));
+    expect(ev).toMatchObject({
+      kind: 'live_stat',
+      stats: { hp: -1, tank_damage: 2400, skeets: 3, boomer_pops: 1, dps_landed: 650 },
+    });
+  });
+
+  // skill_detect keys are omitted entirely when it is not loaded, so that a
+  // missing stat never reaches the page as a fabricated zero.
+  it('accepts a line with the skill keys absent', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} LIVESTAT steamid=76561198030413993 hp=50 ck=7`));
+    expect(ev).toMatchObject({ kind: 'live_stat', stats: { hp: 50, ck: 7 } });
+    expect((ev as any).stats.skeets).toBeUndefined();
+  });
+
+  it('rejects a bad steamid or a line with no numeric stats', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} LIVESTAT steamid=123 hp=1`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} LIVESTAT steamid=76561198030413993`))).toBeNull();
+  });
+})
+
+describe('parseLogDatagram: EVENT', () => {
+  const A = '76561198030413993';
+  const B = '76561198000000002';
+
+  it('parses a deadly pounce with actor, target and damage', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=7 kind=dp actor=${A} target=${B} value=34`));
+    expect(ev).toEqual({
+      kind: 'live_event', token: TOKEN, seq: 7, event: 'dp', actor: A, target: B, value: 34,
+    });
+  });
+
+  it('treats target=0 as no second party', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=crown actor=${A} target=0 value=0`));
+    expect(ev).toMatchObject({ kind: 'live_event', target: null, value: 0 });
+  });
+
+  it('rejects a malformed seq, actor or kind', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=0 kind=dp actor=${A} target=0 value=1`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=dp actor=123 target=0 value=1`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=DP! actor=${A} target=0 value=1`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=dp actor=${A} target=0`))).toBeNull();
+  });
+});

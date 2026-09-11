@@ -89,6 +89,73 @@ CREATE TABLE IF NOT EXISTS rating_history (
   sigma_after REAL NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rating_history_match_player ON rating_history (match_id, player_id);
+-- Live-view scratch state, written from the LOSSY UDP feed.
+-- Deliberately SEPARATE from match_maps: the authoritative record is written
+-- once, at completion, from the rcon dump. Keeping the cosmetic running score
+-- in its own tables means a duplicated or dropped datagram can never corrupt
+-- the result a rating was computed from. Rows are dropped once the match
+-- completes.
+CREATE TABLE IF NOT EXISTS match_live (
+  match_id    INTEGER PRIMARY KEY REFERENCES matches(id),
+  current_map TEXT,
+  last_seen   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS match_live_maps (
+  match_id     INTEGER NOT NULL REFERENCES matches(id),
+  map          TEXT    NOT NULL,
+  ordinal      INTEGER NOT NULL,
+  team_a_score INTEGER NOT NULL,
+  team_b_score INTEGER NOT NULL,
+  -- Keyed by map, not ordinal: MAP_RESULT carries no ordinal, and UDP can
+  -- deliver the same datagram twice. Upserting on the map name makes a
+  -- duplicate idempotent instead of a second row.
+  PRIMARY KEY (match_id, map)
+);
+CREATE TABLE IF NOT EXISTS match_live_players (
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  player_id  TEXT    NOT NULL,
+  -- JSON rather than a row per stat: this is throwaway spectator scratch, the
+  -- key set changes with what the plugin decides to send, and it is never
+  -- queried by stat. The authoritative per-stat rows live in
+  -- match_player_stats, written once from the dump.
+  stats_json TEXT    NOT NULL,
+  PRIMARY KEY (match_id, player_id)
+);
+-- Cumulative per-player stats as they stood when each map ENDED. Map N's own
+-- stats are snapshot(N) - snapshot(N-1); the map in progress is
+-- totals - snapshot(last). Storing snapshots rather than per-map deltas means
+-- the plugin keeps sending one simple cumulative line and a lost datagram
+-- self-corrects on the next one.
+CREATE TABLE IF NOT EXISTS match_live_map_stats (
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  ordinal    INTEGER NOT NULL,
+  player_id  TEXT    NOT NULL,
+  stats_json TEXT    NOT NULL,
+  PRIMARY KEY (match_id, ordinal, player_id)
+);
+CREATE TABLE IF NOT EXISTS match_live_events (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  -- Which map of the match this happened on, stamped at write time from the
+  -- number of maps already completed. Without it a feed is ambiguous three
+  -- maps in: "volence pounced Bone Breaker for 15" could be from any of them.
+  map_ordinal INTEGER NOT NULL DEFAULT 0,
+  -- Plugin-assigned, monotonic per match. Primary key with match_id so a
+  -- duplicated UDP datagram upserts over itself instead of double-counting.
+  seq      INTEGER NOT NULL,
+  kind     TEXT    NOT NULL,
+  actor    TEXT    NOT NULL,
+  target   TEXT,
+  value    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (match_id, seq)
+);
+CREATE TABLE IF NOT EXISTS match_demos (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  ordinal  INTEGER NOT NULL,
+  map      TEXT    NOT NULL,
+  filename TEXT    NOT NULL,
+  bytes    INTEGER NOT NULL,
+  PRIMARY KEY (match_id, ordinal)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -104,12 +171,23 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_queue_thresholds: JSON.stringify([4, 6]),
 };
 
+/** Add a column if the table lacks it. No-op when already present. */
+function ensureColumn(db: DB, table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // CREATE TABLE IF NOT EXISTS never adds a column to a table that already
+  // exists, so a column introduced after a database was created needs this.
+  // Idempotent and cheap; there is no migration framework here by design.
+  ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
   seed(db);
   return db;
 }

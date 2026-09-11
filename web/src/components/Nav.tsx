@@ -3,8 +3,10 @@ import type { Session } from '../hooks/useLiveState';
 
 const LINKS = [
   ['/', 'Play'],
+  ['/live', 'Live'],
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
+  ['/maps', 'Maps'],
 ] as const;
 
 export function Nav({ session }: { session: Session }) {

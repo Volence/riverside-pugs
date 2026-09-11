@@ -7,9 +7,17 @@ import { parseLogDatagram, type LogEvent } from './logParse.js';
  * if their token is registered, handed to the callback. Everything else (bad
  * parse, unknown token) is dropped, because the stream is untrusted and lossy by design.
  */
+/** The only line kinds a not-yet-registered token may carry. These are the
+ *  in-game `!load_4v4p` burst, whose token the plugin generates and we
+ *  therefore cannot have registered in advance. Everything else stays
+ *  token-gated: a spoofed MATCH_END or MAP_RESULT must never be able to invent
+ *  a score. */
+const SELF_START_KINDS = new Set(['match_create', 'match_roster', 'match_create_end']);
+
 export class LogListener {
   private sock: dgram.Socket | null = null;
   private tokens = new Set<string>();
+  private matchCreateSources = new Set<string>();
 
   constructor(private onEvent: (ev: LogEvent) => void) {}
 
@@ -18,9 +26,17 @@ export class LogListener {
       const sock = dgram.createSocket('udp4');
       this.sock = sock;
       sock.on('error', reject);
-      sock.on('message', (msg) => {
+      sock.on('message', (msg, rinfo) => {
         const ev = parseLogDatagram(msg);
-        if (ev && this.tokens.has(ev.token)) this.onEvent(ev);
+        if (!ev) return;
+        if (this.tokens.has(ev.token)) return this.onEvent(ev);
+        // MATCH_CREATE is the first line that can cause database writes, and
+        // UDP source addresses are trivially spoofable off-path but not from
+        // the open internet against a localhost-only feed. Admission is
+        // therefore pinned to the configured game server's address.
+        if (SELF_START_KINDS.has(ev.kind) && this.matchCreateSources.has(rinfo.address)) {
+          return this.onEvent(ev);
+        }
       });
       sock.bind(port, address, () => {
         resolve((sock.address() as AddressInfo).port);
@@ -30,6 +46,10 @@ export class LogListener {
 
   register(token: string): void { this.tokens.add(token); }
   unregister(token: string): void { this.tokens.delete(token); }
+
+  /** Permit the in-game match-create burst from this source address. Call once
+   *  per known game server. Without it, self-started matches are ignored. */
+  allowMatchCreateFrom(address: string): void { this.matchCreateSources.add(address); }
 
   close(): Promise<void> {
     return new Promise((resolve) => {
