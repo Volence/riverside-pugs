@@ -59,7 +59,10 @@ export function StatTable(
   };
 
   const rows = (label: string, players: StatRow[], indexOffset: number) => {
-    const totals = totalsFor(players);
+    // Only computed when the row is actually rendered below: this is a full
+    // players-by-columns scan, and the live page polls this component with
+    // showTotals unset, so it must not pay for a result it then discards.
+    const totals = showTotals ? totalsFor(players) : null;
     return [
       <tr class="live__teamrow" key={`h-${label}`}>
         <th class="live__pcol" scope="rowgroup">Team {label}</th>
@@ -79,7 +82,7 @@ export function StatTable(
       )),
       // The totals row is never marked: it is a sum, not a player competing
       // with the others.
-      ...(showTotals
+      ...(totals
         ? [
           <tr key={`t-${label}`}>
             <td class="live__pcol">Team total</td>
