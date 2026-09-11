@@ -552,6 +552,29 @@ gave up a few hours later. What survives is the part that actually mattered: **n
 carrying a match result or a rating changes**. `CHAT` is purely additive, and like `EVENT`
 it is cosmetic, so losing a datagram costs one line of transcript and nothing else.
 
+### The free-space floor lives in the backend, and the plugin gets a size cap
+
+Corrected 2026-09-11 while planning. The error-handling table assigned "refuse to open
+new replay files when free space is below a floor" to the recorder. SourceMod exposes no
+disk-free-space native, so the plugin cannot evaluate that condition at all. The check was
+specified against a component with no way to perform it.
+
+Split along what each side can actually see:
+
+- **The plugin enforces a per-round byte cap**, `sm_pug_replay_max_mb`, default 64. A
+  full round is expected to run 10 to 15 MB, so this is roughly four times the expected
+  size: it is a runaway bound, not a budget. On reaching it the writer closes the file
+  cleanly, keeping the frames already written, and logs once. `FilePosition` is the only
+  thing this needs and it exists.
+- **The backend enforces the free-space floor**, in the same daily job that applies the
+  retention window, using `statfs`. Below the floor it prunes oldest-first past the
+  retention window until it is back above, and logs what it removed.
+
+The guarantee that survives is the one that mattered: replays cannot fill this disk. What
+is given up is instant refusal at the moment of a low-space open, which was never the
+failure mode the 2026-09-10 incident took. That incident was steady 1.7 GB/day
+accumulation with nothing pruning it, which is exactly what the daily job addresses.
+
 ### Chat is captured, on a new CHAT line
 
 Added 2026-09-11 after suprep's viewer was seen carrying a `Chat` toggle. Nothing in
@@ -607,7 +630,7 @@ never-throws discipline in `src/demos.ts`.
 |---|---|
 | `replayDir` unset | Feature off entirely, silent. Mirrors `demoDir` defaulting to empty |
 | File write fails | Log once, disable replay for the rest of the match, match continues |
-| Free space below floor | Refuse to open new replay files. Cheap insurance given the prior incident |
+| Free space below floor | Split in two, because the plugin cannot ask. See "The free-space floor lives in the backend" |
 | File missing at ingest | No `match_replays` row, UI shows unavailable. Not an error |
 | Truncated file | Round down to the last whole frame |
 | Round restarted after stats accrued | Not currently detected. Known gap: `reliable` is only lowered at derivation time when a map's two halves fail to partition the two sides between them |
