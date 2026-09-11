@@ -176,8 +176,10 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                     return (
                       <div key={round.half}>
                         <h4>
-                          Half {round.half} · Team {round.survTeam.toUpperCase()} survivors,
-                          {' '}Team {infTeam.toUpperCase()} infected
+                          {round.reliable
+                            ? <>Half {round.half} · Team {round.survTeam.toUpperCase()} survivors,
+                              {' '}Team {infTeam.toUpperCase()} infected</>
+                            : <>Half {round.half}, attribution unreliable</>}
                           {' · '}
                           {round.endedAt !== null
                             ? <span class="num">{round.score}</span>

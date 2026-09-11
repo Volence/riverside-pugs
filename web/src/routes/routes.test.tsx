@@ -195,6 +195,52 @@ describe('MatchDetail', () => {
     expect(container.querySelectorAll('table').length).toBe(1);
   });
 
+  it('does not assert a team-to-side mapping in the heading when attribution is unreliable', async () => {
+    // The heading must not contradict the note below it. If the mapping is
+    // unreliable, the heading cannot claim "Team A survivors, Team B
+    // infected" as fact; a reliable round keeps making that claim.
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+      ],
+      demos: [], events: [],
+      rounds: [{
+        ordinal: 0, half: 1, survTeam: 'a', score: 300,
+        endedAt: '2026-09-06 04:00', reliable: false, byPlayer: {},
+      }],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    const heading = await screen.findByText((_t, el) => el?.tagName === 'H4'
+      && /Half 1/.test(el.textContent ?? ''));
+    expect(heading.textContent ?? '').not.toMatch(/survivors/);
+    expect(heading.textContent ?? '').not.toMatch(/infected/);
+  });
+
+  it('keeps naming which team held which side in the heading when the round is reliable', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+      ],
+      demos: [], events: [],
+      rounds: [{
+        ordinal: 0, half: 1, survTeam: 'a', score: 300,
+        endedAt: '2026-09-06 04:00', reliable: true,
+        byPlayer: { '1': { ck: 5, sidmg: 0 }, '2': { sidmg: 40 } },
+      }],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    const heading = await screen.findByText((_t, el) => el?.tagName === 'H4'
+      && /Half 1/.test(el.textContent ?? ''));
+    expect(heading.textContent ?? '').toMatch(/Team A survivors/);
+    expect(heading.textContent ?? '').toMatch(/Team B infected/);
+  });
+
   it('shows a round score as unavailable, not the stored 0, when the end message never arrived', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
