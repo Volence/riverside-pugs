@@ -204,6 +204,7 @@ describe('parseLogDatagram: EVENT', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=7 kind=dp actor=${A} target=${B} value=34`));
     expect(ev).toEqual({
       kind: 'live_event', token: TOKEN, seq: 7, event: 'dp', actor: A, target: B, value: 34,
+      half: -1, tMs: -1,
     });
   });
 
@@ -217,5 +218,59 @@ describe('parseLogDatagram: EVENT', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=dp actor=123 target=0 value=1`))).toBeNull();
     expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=DP! actor=${A} target=0 value=1`))).toBeNull();
     expect(parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=1 kind=dp actor=${A} target=0`))).toBeNull();
+  });
+});
+
+describe('round lines', () => {
+  const ACTOR = '76561198030413993';
+  const TARGET = '76561198000000002';
+
+  it('parses ROUND_START', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=l4d_hospital01_apartment half=1 surv=a`))).toEqual({
+      kind: 'round_start', token: TOKEN, map: 'l4d_hospital01_apartment', half: 1, surv: 'a',
+    });
+  });
+
+  it('parses ROUND_END', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=l4d_hospital01_apartment half=2 surv=b score=412`))).toEqual({
+      kind: 'round_end', token: TOKEN, map: 'l4d_hospital01_apartment', half: 2, surv: 'b', score: 412,
+    });
+  });
+
+  it('parses a ROUND_END from an older plugin that carries no map', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END half=2 surv=b score=412`))).toEqual({
+      kind: 'round_end', token: TOKEN, map: null, half: 2, surv: 'b', score: 412,
+    });
+  });
+
+  it('accepts a ROUND_START with no side, rather than one that invents one', () => {
+    // The plugin omits surv= when its orientation mapping has not settled.
+    // Dropping the line would lose started_at, which every event's t_ms is
+    // measured from, so the absence is carried through as null instead.
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1`))).toEqual({
+      kind: 'round_start', token: TOKEN, map: 'm', half: 1, surv: null,
+    });
+  });
+
+  it('rejects a survivor team that is not a or b', () => {
+    // Present but malformed is a corrupt line, which is not the same thing as
+    // the plugin admitting it does not know.
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1 surv=c`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=1 surv=c score=1`))).toBeNull();
+  });
+
+  it('rejects a half that is not 1 or 2', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=3 surv=a`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END half=0 surv=a score=1`))).toBeNull();
+  });
+
+  it('carries half and t_ms on an EVENT line', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=7 kind=pinned actor=${ACTOR} target=${TARGET} value=0 half=1 t=4320`));
+    expect(ev).toMatchObject({ kind: 'live_event', event: 'pinned', half: 1, tMs: 4320 });
+  });
+
+  it('defaults half and t_ms to -1 on an EVENT line from an older plugin', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=7 kind=dp actor=${ACTOR} target=${TARGET} value=22`));
+    expect(ev).toMatchObject({ kind: 'live_event', half: -1, tMs: -1 });
   });
 });

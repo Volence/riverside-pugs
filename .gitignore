@@ -4,3 +4,7 @@ data/
 *.db-*
 plugin/*.smx
 dist/
+
+# Scratch: worktrees and SDD ledgers/briefs. Never part of the source tree.
+.claude/worktrees/
+.superpowers/

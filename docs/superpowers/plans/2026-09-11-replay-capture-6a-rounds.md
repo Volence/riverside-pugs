@@ -418,10 +418,19 @@ In the existing `case 'EVENT':` block, before the `return`, read the two optiona
 
 and add `half, tMs` to the returned object.
 
+- [ ] **Step 3b: Repair the existing fixtures the new required fields break**
+
+Making `half` and `tMs` required on the `live_event` variant breaks every object literal of that shape. Five call sites need the two fields added as `half: -1, tMs: -1`:
+
+- `tests/logParse.test.ts:206` is a full `toEqual`, so the fields must be added to the expected object or it fails on extra properties.
+- `tests/liveView.test.ts` lines 130, 251, 353 and 451 are literals passed to `recordLiveEvent`, which will not typecheck without them.
+
+Use `-1`, not `0`. Zero is a real event in the first millisecond of a round; these fixtures represent events with no round timing at all.
+
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run tests/logParse.test.ts && npm run typecheck`
-Expected: PASS. Typecheck will flag `recordLiveEvent` callers only if they construct the object literally; the server passes `ev` through, so it should be clean.
+Run: `npx vitest run tests/logParse.test.ts tests/liveView.test.ts && npm run typecheck`
+Expected: PASS, and typecheck clean. If typecheck still reports a `live_event` literal missing properties, a fixture exists that Step 3b did not list; add the two fields there too.
 
 - [ ] **Step 5: Commit**
 
@@ -915,9 +924,13 @@ import { eventKindKeys } from '../src/eventKinds.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginSrc = readFileSync(join(__dirname, '../plugin/pug-match.sp'), 'utf8');
 
-/** Every literal passed as `kind` to the plugin's event emitter. */
+/** Every literal passed as `kind` to the plugin's event emitters.
+ *
+ *  Matches EmitEvent AND EmitClientEvent. Note that "EmitClientEvent(" does
+ *  not contain the substring "EmitEvent(", so a regex anchored on the bare
+ *  name silently matches nothing in the client-resolved handlers. */
 function emittedKinds(src: string): string[] {
-  const calls = src.match(/EmitEvent\s*\(\s*"([a-z_]{1,24})"/g) ?? [];
+  const calls = src.match(/Emit(?:Client)?Event\s*\(\s*"([a-z_]{1,24})"/g) ?? [];
   return [...new Set(calls.map((c) => c.replace(/.*"([a-z_]+)".*/, '$1')))];
 }
 

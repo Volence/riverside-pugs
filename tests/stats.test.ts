@@ -185,6 +185,55 @@ describe('stats routes', () => {
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
   });
 
+  it('returns rounds with side attribution', async () => {
+    const matchId = playCompletedMatch(db, 'a');
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 300, '2026-09-11 00:10:00')").run(matchId);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score) VALUES (?, 0, 2, 'b', 250)").run(matchId);
+    // Cumulative end-of-map snapshot with the keys the LIVESTAT line really
+    // carries: the five core counters (ck/sidmg/sikill/ff/rev) alongside the
+    // registry keys, plus hp, which is a level and must be dropped. IDS[0]
+    // is on team a, IDS[4] on team b (playCompletedMatch splits at index 4).
+    const ins = db.prepare(
+      'INSERT INTO match_live_map_stats (match_id, ordinal, player_id, stats_json) VALUES (?, 0, ?, ?)',
+    );
+    ins.run(matchId, IDS[0], JSON.stringify({
+      hp: 100, ck: 42, sidmg: 1200, sikill: 5, ff: 33, rev: 2,
+      skeets: 3, damage_as_si: 500,
+    }));
+
+    const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.rounds).toHaveLength(2);
+    expect(body.rounds[0]).toMatchObject({
+      ordinal: 0, half: 1, survTeam: 'a', score: 300,
+      endedAt: '2026-09-11 00:10:00', reliable: true,
+    });
+    // Team a held survivor in half 1, so every survivor-side key belongs
+    // there, including the five core counters, and their SI damage does not.
+    expect(body.rounds[0].byPlayer[IDS[0]]).toEqual({
+      ck: 42, sidmg: 1200, sikill: 5, ff: 33, rev: 2, skeets: 3,
+    });
+    expect(body.rounds[1].byPlayer[IDS[0]]).toEqual({ damage_as_si: 500 });
+    // Half 2 was never closed by a ROUND_END, so the API reports endedAt null
+    // and a consumer must refuse to render its score as a result.
+    expect(body.rounds[1].endedAt).toBeNull();
+  });
+
+  it('returns an empty rounds array for a match recorded before rounds existed', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(body.rounds).toEqual([]);
+  });
+
+  it('serves the stat registry with the match so the page can read direction', async () => {
+    const matchId = playCompletedMatch(db, 'a');
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(Array.isArray(body.statDefs)).toBe(true);
+    const skeets = body.statDefs.find((d: { key: string }) => d.key === 'skeets');
+    expect(skeets.direction).toBe('high_good');
+  });
+
   describe('stat visibility', () => {
     it('hides self-only stats from other viewers on a match page', async () => {
       const matchId = playCompletedMatch(db);

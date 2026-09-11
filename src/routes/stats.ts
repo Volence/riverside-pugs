@@ -8,6 +8,7 @@ import { playerMapBreakdown, mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
+import { roundAttribution } from '../roundStats.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string }
 
@@ -261,6 +262,16 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
         : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
       stats: visibleStats(byPlayer.get(p.steamid) ?? {}, p.steamid, viewer),
     }));
+    // Per-round side attribution. Derived, not stored: see src/roundStats.ts.
+    // teamOf comes from match_players, which is the authoritative roster
+    // written at completion, rather than from anything on the live feed.
+    const teamOf = new Map(players.map((p) => [p.steamid, p.team as 'a' | 'b']));
+    // roundAttribution carries score and endedAt through from the same
+    // roundsFor() query it already runs internally. This used to run that
+    // query a second time here and join the two results by array index; one
+    // query, no positional join.
+    const rounds = roundAttribution(db, id, teamOf);
+
     const demos = db.prepare(
       'SELECT ordinal, map, bytes FROM match_demos WHERE match_id = ? ORDER BY ordinal',
     ).all(id);
@@ -273,7 +284,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       target: e.target ? { steamid: e.target, name: nameOf(e.target) } : null,
     }));
 
-    return { match, maps, players, demos, events };
+    return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS };
   });
 
   /**
