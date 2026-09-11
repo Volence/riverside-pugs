@@ -178,20 +178,42 @@ orientation threshold. Changing this changes the rules under every rating earned
 	// plugins, both proven running on L4D1 in this deployment. Note
 	// player_incapacitated_START: the bare player_incapacitated does not
 	// fire on this engine.
-	HookEvent("lunge_pounce", Event_Pounce);
-	HookEvent("tongue_grab", Event_TongueGrab);
-	HookEvent("tongue_release", Event_TongueRelease);
-	HookEvent("player_incapacitated_start", Event_Incap);
-	HookEvent("witch_harasser_set", Event_WitchAggro);
-	HookEvent("witch_killed", Event_WitchKilled);
-	HookEvent("triggered_car_alarm", Event_CarAlarm);
-	HookEvent("tank_spawn", Event_TankSpawn);
+	//
+	// These use HookEventEx, not HookEvent, on purpose. L4D1 defines some
+	// events partly inside VPK archives, so we cannot fully confirm from the
+	// filesystem alone that every name below exists on this engine (see, for
+	// example, triggered_car_alarm, which l4d2_skill_detect.sp itself only
+	// hooks behind an L4D2 version check). HookEvent raises a native error
+	// for an unknown event, and inside OnPluginStart that error aborts the
+	// whole plugin load, taking roster enforcement, scoring and reporting
+	// down with it for one missing telemetry stream. HookEventEx instead
+	// returns false, so a missing event costs only that one capture feed.
+	// The block above this one hooks events already proven live in
+	// production and stays on plain HookEvent; do not move those down here.
+	if (!HookEventEx("lunge_pounce", Event_Pounce))
+		LogMessage("pug-match: event 'lunge_pounce' does not exist on this engine; pinned/cleared capture for pounces will be silently absent.");
+	if (!HookEventEx("tongue_grab", Event_TongueGrab))
+		LogMessage("pug-match: event 'tongue_grab' does not exist on this engine; pinned capture for tongue grabs will be silently absent.");
+	if (!HookEventEx("tongue_release", Event_TongueRelease))
+		LogMessage("pug-match: event 'tongue_release' does not exist on this engine; pin-clear capture for tongue releases will be silently absent.");
+	if (!HookEventEx("player_incapacitated_start", Event_Incap))
+		LogMessage("pug-match: event 'player_incapacitated_start' does not exist on this engine; incap capture will be silently absent.");
+	if (!HookEventEx("witch_harasser_set", Event_WitchAggro))
+		LogMessage("pug-match: event 'witch_harasser_set' does not exist on this engine; witch_aggro capture will be silently absent.");
+	if (!HookEventEx("witch_killed", Event_WitchKilled))
+		LogMessage("pug-match: event 'witch_killed' does not exist on this engine; witch_killed capture will be silently absent.");
+	if (!HookEventEx("triggered_car_alarm", Event_CarAlarm))
+		LogMessage("pug-match: event 'triggered_car_alarm' does not exist on this engine; car_alarm capture will be silently absent.");
+	if (!HookEventEx("tank_spawn", Event_TankSpawn))
+		LogMessage("pug-match: event 'tank_spawn' does not exist on this engine; tank_spawn capture will be silently absent.");
 	// Tank control passing goes through a bot swap on this engine: a human
 	// losing the tank fires player_bot_replace, a human taking over a bot
 	// tank fires bot_player_replace. Verified against l4d_tank_pass.sp and
 	// l4dscores.sp; there is no bare "player_replace" event on this engine.
-	HookEvent("player_bot_replace", Event_PlayerBotReplace);
-	HookEvent("bot_player_replace", Event_BotPlayerReplace);
+	if (!HookEventEx("player_bot_replace", Event_PlayerBotReplace))
+		LogMessage("pug-match: event 'player_bot_replace' does not exist on this engine; tank_pass capture (human giving up tank) will be silently absent.");
+	if (!HookEventEx("bot_player_replace", Event_BotPlayerReplace))
+		LogMessage("pug-match: event 'bot_player_replace' does not exist on this engine; tank_pass capture (human taking tank) will be silently absent.");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
