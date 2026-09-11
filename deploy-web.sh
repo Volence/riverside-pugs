@@ -13,6 +13,11 @@ HOST=${L4D_HOST:-45.32.199.85}
 REMOTE=/home/pug/app
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Two .git excludes on purpose. In a normal checkout .git is a DIRECTORY and
+# '.git/' matches it. In a git worktree .git is a FILE holding a gitdir pointer,
+# which a trailing-slash pattern does not match, so deploying from a worktree
+# would push a stray .git file naming a path that does not exist on the server.
+#
 # .env and data/ live ONLY on the server. They are excluded not just to avoid
 # overwriting them but because --delete would otherwise remove them outright,
 # which is exactly what happened on 2026-09-11: the sync wiped the env file and
@@ -22,6 +27,7 @@ rsync -az --delete --info=stats1 \
   --exclude 'data/' \
   --exclude 'dist/' \
   --exclude '.git/' \
+  --exclude '.git' \
   --exclude '.env' \
   --exclude '*.db' \
   --exclude '*.db-*' \
