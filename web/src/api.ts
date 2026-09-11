@@ -93,6 +93,7 @@ export interface StatDef {
   visibility: 'public' | 'self';
   label: string;
   needsSkillDetect: boolean;
+  direction: 'high_good' | 'high_bad' | 'neutral';
 }
 
 export interface LivePlayer extends NamedPlayer {
