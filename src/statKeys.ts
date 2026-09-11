@@ -97,6 +97,31 @@ export const STAT_DEFS: readonly StatDef[] = [
   def('boom_successes', 'infected', 'Booms landed', 'high_good', false),
   def('boomed_vomit', 'infected', 'Boomed by vomit', 'high_good', false),
   def('boomed_proxy', 'infected', 'Boomed by proxy', 'high_good', false),
+
+  // Appended, never inserted. This list is index-aligned with the plugin's
+  // PugStat enum, so inserting mid-list silently relabels every stat after it;
+  // tests/statKeysParity.test.ts compares order for exactly that reason.
+  // Freeing someone from a tongue before choke_start, so they were never
+  // dragged in. A state boundary rather than a time threshold: drag time scales
+  // with the smoker's distance, so "cleared within N seconds" would punish
+  // handling a long grab well.
+  def('tongue_clears', 'survivor', 'Tongue clears', 'high_good', false),
+  // damage_as_si split by the class dealing it, and by whether the survivor was
+  // already down. The parts sum to damage_as_si exactly, which is what keeps
+  // dmg_as_boomer worth a key despite a boomer's negligible direct damage: a
+  // drifting total means a class going unaccounted.
+  //
+  // Neutral, not high_good, because they are breakdowns of a stat that is
+  // already marked, and the registry's rule is that marking a total and its
+  // parts counts one good performance several times over.
+  def('dmg_as_hunter', 'infected', 'As hunter', 'neutral', false),
+  def('dmg_as_smoker', 'infected', 'As smoker', 'neutral', false),
+  def('dmg_as_boomer', 'infected', 'As boomer', 'neutral', false),
+  def('dmg_as_tank', 'infected', 'As tank', 'neutral', false),
+  // The part of damage_as_si that only drained an already-incapped survivor's
+  // bleedout pool. Runs into the thousands and reflects no skill, which is why
+  // it is separated out rather than left to inflate the total.
+  def('dmg_to_incapped', 'infected', 'On incapped', 'neutral', false),
 ];
 
 const BY_KEY = new Map(STAT_DEFS.map((d) => [d.key, d]));

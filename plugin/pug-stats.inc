@@ -42,6 +42,8 @@ enum PugStat
 	PS_TankRocksLanded, PS_TimesSkeeted, PS_TimesDeadstopped,
 	PS_TankDamage, PS_DamageAsSi, PS_TankPunches, PS_BoomerSpawns,
 	PS_BoomSuccesses, PS_BoomedVomit, PS_BoomedProxy,
+	PS_TongueClears,
+	PS_DmgAsHunter, PS_DmgAsSmoker, PS_DmgAsBoomer, PS_DmgAsTank, PS_DmgToIncapped,
 	PS_MAX
 };
 
@@ -56,17 +58,30 @@ static const char g_sStatKey[PS_MAX][24] = {
 	"dps_landed", "pounce_damage_high", "biles_landed", "survivors_biled",
 	"tank_rocks_landed", "times_skeeted", "times_deadstopped",
 	"tank_damage", "damage_as_si", "tank_punches", "boomer_spawns",
-	"boom_successes", "boomed_vomit", "boomed_proxy"
+	"boom_successes", "boomed_vomit", "boomed_proxy",
+	"tongue_clears",
+	"dmg_as_hunter", "dmg_as_smoker", "dmg_as_boomer", "dmg_as_tank", "dmg_to_incapped"
 };
 
 /** True for stats that come from skill_detect and must be omitted (not zeroed)
- *  from the dump when it was not loaded. The last four are captured by
- *  pug-match's own hooks and are always available. */
+ *  from the dump when it was not loaded.
+ *
+ *  Listed the other way round, as the stats pug-match captures itself and can
+ *  therefore always report. That was a chain of `s != X` negations, which is
+ *  unreadable past a handful and fails silently in the dangerous direction: a
+ *  new own-capture stat left out of it is not an error, it is a stat quietly
+ *  dropped from every dump taken without skill_detect loaded. */
 static bool StatNeedsSkillDetect(PugStat s)
 {
-	return s != PS_TankDamage && s != PS_DamageAsSi && s != PS_TankPunches
-		&& s != PS_BoomerSpawns && s != PS_BoomSuccesses
-		&& s != PS_BoomedVomit && s != PS_BoomedProxy;
+	switch (s)
+	{
+		case PS_TankDamage, PS_DamageAsSi, PS_TankPunches, PS_BoomerSpawns,
+			PS_BoomSuccesses, PS_BoomedVomit, PS_BoomedProxy, PS_TongueClears,
+			PS_DmgAsHunter, PS_DmgAsSmoker, PS_DmgAsBoomer, PS_DmgAsTank,
+			PS_DmgToIncapped:
+			return false;
+	}
+	return true;
 }
 
 int g_iSkill[MAX_ROSTER][PS_MAX];
