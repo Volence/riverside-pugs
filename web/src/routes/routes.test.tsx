@@ -170,6 +170,12 @@ describe('MatchDetail', () => {
     // match totals table (the per-map table is absent here since this match
     // has no per-map stats captured, per the mocked map's empty `stats`).
     expect(container.querySelectorAll('table').length).toBe(2);
+    // alice's commons this round (5) differ from her match-total commons (2).
+    // Asserting the round-specific value is present, scoped to the round's own
+    // table, pins it to its own data source: fed the match totals instead,
+    // this would fail.
+    const roundTable = container.querySelectorAll('table')[1] as HTMLElement;
+    expect(within(roundTable).getByText('5')).toBeTruthy();
   });
 
   it('shows an unreliable round as unavailable rather than guessing its attribution', async () => {
@@ -333,6 +339,30 @@ describe('skill stats display', () => {
     // Appears twice: alice's own row, and the team total row (the match totals
     // table now shows one, per task 5), since alice is the only source of it.
     expect(screen.getAllByText('1699')).toHaveLength(2);
+  });
+
+  it('renders a headline card as present-against-absent when only one team recorded the stat', async () => {
+    // sideTotals (matchTotals.ts) needs the registry to know tank_damage is a
+    // survivor-side stat; without it the headline card would not appear at
+    // all, which is a different bug than the one this pins: that a team with
+    // no recorded value reads as "n/a", not as a fabricated 0 to compare
+    // against the other team's real number.
+    mockApi.match.mockResolvedValue({
+      match: { id: 10, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300 }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12,
+          stats: { tank_damage: 1699 } },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12,
+          stats: {} },
+      ],
+      statDefs: [
+        { key: 'tank_damage', side: 'survivor', visibility: 'public', label: 'Tank damage',
+          needsSkillDetect: true, direction: 'high_good' },
+      ],
+    });
+    render(<MatchDetail id="10" me="1" />);
+    await waitFor(() => expect(screen.getByText('1699 - n/a')).toBeTruthy());
   });
 
   it('renders an absent stat as n/a, not a fabricated 0, while a present zero still shows 0', async () => {
@@ -586,6 +616,13 @@ describe('StatTable comparison', () => {
                  cols={['skeets']} statDefs={markDefs} />,
     );
     expect(container.querySelectorAll('.is-good')).toHaveLength(1);
+    // The same fixture also produces a bad mark, on the column's low end
+    // (skeets is high_good, so the fewest skeets is the weak link). An
+    // implementation that emitted is-bad unconditionally, or swapped the two
+    // marks, would still pass the is-good assertion above.
+    const badCells = container.querySelectorAll('.is-bad');
+    expect(badCells).toHaveLength(1);
+    expect(badCells[0].textContent).toBe('1');
   });
 
   it('marks nothing without the registry, so the live page is unchanged', () => {
