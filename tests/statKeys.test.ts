@@ -47,3 +47,36 @@ describe('stat registry', () => {
     expect(isKnownStat('__proto__')).toBe(false);
   });
 });
+
+describe('stat direction', () => {
+  it('declares a direction for every stat', () => {
+    const missing = STAT_DEFS.filter((d) => d.direction === undefined).map((d) => d.key);
+    expect(missing).toEqual([]);
+  });
+
+  it('only uses the three known directions', () => {
+    const allowed = new Set(['high_good', 'high_bad', 'neutral']);
+    const bad = STAT_DEFS.filter((d) => !allowed.has(d.direction)).map((d) => d.key);
+    expect(bad).toEqual([]);
+  });
+
+  it('marks achievements good and punishments bad', () => {
+    expect(statDef('skeets')?.direction).toBe('high_good');
+    expect(statDef('clears')?.direction).toBe('high_good');
+    expect(statDef('times_skeeted')?.direction).toBe('high_bad');
+  });
+
+  it('marks a denominator neutral rather than good', () => {
+    // boomer_spawns counts how many boomers you drew. Drawing more is not an
+    // achievement, it is the denominator of boomer success rate.
+    expect(statDef('boomer_spawns')?.direction).toBe('neutral');
+  });
+
+  it('marks weapon-specific skeet breakdowns neutral', () => {
+    // These are subsets of `skeets`, not independent achievements. Marking the
+    // total and its parts would count one good play several times.
+    expect(statDef('skeets_shotgun')?.direction).toBe('neutral');
+    expect(statDef('skeets_sniper')?.direction).toBe('neutral');
+    expect(statDef('skeets_melee')?.direction).toBe('neutral');
+  });
+});
