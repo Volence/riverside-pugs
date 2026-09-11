@@ -505,6 +505,17 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .live__stats td.is-good { color: var(--win); font-weight: 600; }
 .live__stats td.is-bad { color: var(--loss); font-weight: 600; }
 
+/* A marked cell whose value happens to be 0 or absent still gets .is-dim from
+ * the class-concatenation in StatTable, and that rule's opacity would mute the
+ * exact mark this feature exists to draw attention to (a 0 that is the best or
+ * worst value in the column, which is common for stats like friendly fire).
+ * Undo the dimming wherever a mark is also present; dimming stays for the
+ * unmarked case, which is correct as is. */
+.live__stats td.is-dim.is-good,
+.live__stats td.is-dim.is-bad {
+  opacity: 1;
+}
+
 .live__teamrow th,
 .live__teamrow td {
   background: var(--surface-2);

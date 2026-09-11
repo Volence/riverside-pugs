@@ -17,6 +17,12 @@ const CORE_DIRECTION: Record<string, StatDirection> = {
   rev: 'high_good',
   ff: 'high_bad',
   hp: 'neutral',
+  // boomer_rate is synthesised by deriveLiveStats (format.ts) from
+  // boom_successes / boomer_spawns and is not a registry entry either. Left
+  // neutral on purpose: the denominator is typically two to four boomer
+  // lives, so a marked percentage would be the noisiest column on the page.
+  // The underlying boom_successes count is still marked normally.
+  boomer_rate: 'neutral',
 };
 
 /** How far apart a column has to be before anyone is called an outlier.
@@ -25,7 +31,12 @@ const CORE_DIRECTION: Record<string, StatDirection> = {
  *  0.5, seven players on 2 clears and one on 3 marks nobody (spread of 1
  *  against a required 1.5), while one player on 300 friendly fire among others
  *  in the 20s marks loudly. Tunable: the spec leaves the exact value open until
- *  there are enough matches to watch it behave. */
+ *  there are enough matches to watch it behave.
+ *
+ *  The formula (max - min) < threshold * abs(max) assumes every value in the
+ *  column is non-negative. Every current stat is a non-negative counter, but a
+ *  future signed stat (a net delta, say) could push max toward zero or below
+ *  it and silently disable this guard rather than fail loudly. */
 export const SPREAD_THRESHOLD = 0.5;
 
 export function directionOf(key: string, defs: StatDef[]): StatDirection {

@@ -182,7 +182,17 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                             : <>Half {round.half}, attribution unreliable</>}
                           {' · '}
                           {round.endedAt !== null
-                            ? <span class="num">{round.score}</span>
+                            ? (
+                              <span class="num">
+                                {/* The score is always the survivor team's score. When the
+                                    round is reliable, the heading above already names that
+                                    team, so the bare number reads unambiguously. When it is
+                                    not, the number needs its own label: which team survived
+                                    is exactly the fact just declared untrustworthy, so a bare
+                                    score would default to reading as Team A's. */}
+                                {round.reliable ? '' : 'survivor score '}{round.score}
+                              </span>
+                              )
                             : <span class="muted">n/a</span>}
                         </h4>
                         {round.reliable ? (
