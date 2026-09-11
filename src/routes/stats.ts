@@ -1,11 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
-import { makeRequireActive } from './guards.js';
+import { createReadStream } from 'node:fs';
+import { makeOptionalViewer } from './guards.js';
+import { resolveDemoPath } from '../demos.js';
+import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
+import { playerMapBreakdown, mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 
-export interface StatsRouteOpts { db: DB }
+export interface StatsRouteOpts { db: DB; demoDir?: string }
 
 const RECENT_MATCH_LIMIT = 50;
 const PROFILE_MATCH_LIMIT = 20;
@@ -15,9 +19,11 @@ const PROFILE_MATCH_LIMIT = 20;
  *  Enforced here rather than in the UI on purpose: a value the server sends is
  *  a value the viewer can read, regardless of what the page chooses to render. */
 function visibleStats(
-  raw: Record<string, number>, subject: string, viewer: string,
+  raw: Record<string, number>, subject: string, viewer: string | null,
 ): Record<string, number> {
-  const isSelf = viewer === subject;
+  // A null viewer is anonymous, and null never equals a steamid, so every
+  // self-only stat is stripped. No special case needed.
+  const isSelf = viewer !== null && viewer === subject;
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(raw)) {
     const def = statDef(k);
@@ -30,10 +36,16 @@ function visibleStats(
 
 export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): Promise<void> {
   const { db } = opts;
-  const requireActive = makeRequireActive(db);
+  const demoDir = opts.demoDir ?? '';
+  // These are PUBLIC read routes: a leaderboard nobody can see is not a
+  // leaderboard, and people want to link results to friends who have not
+  // signed up. The viewer is still identified when present, because
+  // self-visibility stats depend on it. Everything that MUTATES state, and
+  // the personal /api/state dashboard, stays behind requireActive in
+  // routes/api.ts.
+  const viewerOf = makeOptionalViewer(db);
 
-  app.get('/api/leaderboard', async (req, reply) => {
-    if (!requireActive(req, reply)) return;
+  app.get('/api/leaderboard', async () => {
     const seasonId = currentSeasonId(db);
     const season = db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string };
     const rows = db.prepare(
@@ -42,10 +54,50 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        FROM player_ratings pr JOIN players p ON p.steamid = pr.player_id
        WHERE pr.season_id = ?`,
     ).all(seasonId) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
+    // Per-player season totals, so the leaderboard can be sorted by any stat
+    // client side without a request per column. Two queries for the whole
+    // table rather than one per player.
+    const fixed = db.prepare(
+      `SELECT mp.player_id AS steamid,
+              COALESCE(SUM(mp.si_damage),0)    AS sidmg,
+              COALESCE(SUM(mp.si_kills),0)     AS sikill,
+              COALESCE(SUM(mp.common_kills),0) AS ck,
+              COALESCE(SUM(mp.ff_dealt),0)     AS ff,
+              COALESCE(SUM(mp.revives),0)      AS rev
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+       WHERE m.season_id = ? AND m.state = 'completed'
+       GROUP BY mp.player_id`,
+    ).all(seasonId) as Record<string, number | string>[];
+
+    const skill = db.prepare(
+      `SELECT mps.player_id AS steamid, mps.stat, SUM(mps.value) AS total
+       FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
+       WHERE m.season_id = ? AND m.state = 'completed'
+       GROUP BY mps.player_id, mps.stat`,
+    ).all(seasonId) as { steamid: string; stat: string; total: number }[];
+
+    const statsBy = new Map<string, Record<string, number>>();
+    for (const r of fixed) {
+      const { steamid, ...rest } = r as { steamid: string } & Record<string, number>;
+      statsBy.set(steamid, { ...rest });
+    }
+    for (const r of skill) {
+      // self-visibility stats are never rankable and must not ride along on a
+      // public payload, so they are dropped here rather than filtered in the UI.
+      if (statDef(r.stat)?.visibility === 'self') continue;
+      const bucket = statsBy.get(r.steamid) ?? {};
+      bucket[r.stat] = r.total;
+      statsBy.set(r.steamid, bucket);
+    }
+
     return {
       season,
       rows: rows
-        .map((r) => ({ steamid: r.steamid, name: r.name, avatar: r.avatar, sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games }))
+        .map((r) => ({
+          steamid: r.steamid, name: r.name, avatar: r.avatar,
+          sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games,
+          stats: statsBy.get(r.steamid) ?? {},
+        }))
         .sort((x, y) => y.sr - x.sr),
     };
   });
@@ -54,7 +106,6 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    *  filtered later: a "most skeeted" board is exactly what the private
    *  visibility rule exists to prevent, so it must not be reachable by URL. */
   app.get('/api/leaderboard/stat/:key', async (req, reply) => {
-    if (!requireActive(req, reply)) return;
     const { key } = req.params as { key: string };
     const def = statDef(key);
     if (!def || def.visibility !== 'public') return reply.code(404).send({ error: 'unknown stat' });
@@ -78,8 +129,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   app.get('/api/players/:steamid', async (req, reply) => {
-    const viewer = requireActive(req, reply);
-    if (!viewer) return;
+    const viewer = viewerOf(req);
     const { steamid } = req.params as { steamid: string };
     const player = getPlayer(db, steamid);
     if (!player) return reply.code(404).send({ error: 'no such player' });
@@ -136,6 +186,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
       totals, matches, history,
       statTotals,
+      // How this player does on each map, across every match. Only meaningful
+      // once per-map capture exists, so older matches contribute win/loss with
+      // an empty stat bag rather than being omitted.
+      byMap: playerMapBreakdown(db, steamid),
       // Contract (web/src/api.ts: Profile['privateStatTotals']) is populated-or-
       // null, never an empty object: Profile.tsx gates its private-stats panel
       // on truthiness, and {} is truthy, so a self-viewer with no private stats
@@ -145,8 +199,23 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     };
   });
 
-  app.get('/api/matches', async (req, reply) => {
-    if (!requireActive(req, reply)) return;
+  /** What is being played right now. Public: the whole point is that someone
+   *  who is not in the game, and may not have an account, can watch. Carries
+   *  no stats, so there is nothing viewer-dependent to redact. */
+  app.get('/api/live', async () => ({ matches: getLiveMatches(db) }));
+
+  /** Every map that has been played, so the map pages are discoverable. */
+  app.get('/api/maps', async () => ({ maps: mapIndex(db) }));
+
+  /** Everyone's record on one map. Counterpart to the profile's by-map view. */
+  app.get('/api/maps/:map', async (req, reply) => {
+    const { map } = req.params as { map: string };
+    const d = mapDetail(db, map);
+    if (!d) return reply.code(404).send({ error: 'no such map' });
+    return d;
+  });
+
+  app.get('/api/matches', async () => {
     const matches = db.prepare(
       `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
        FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT ?`,
@@ -155,17 +224,20 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   app.get('/api/matches/:id', async (req, reply) => {
-    const viewer = requireActive(req, reply);
-    if (!viewer) return;
+    const viewer = viewerOf(req);
     const id = Number((req.params as { id: string }).id);
     const match = db.prepare(
       `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
        FROM matches WHERE id = ? AND state = 'completed'`,
     ).get(id);
     if (!match) return reply.code(404).send({ error: 'no such match' });
-    const maps = db.prepare(
+    // Per-map player stats come from the end-of-map snapshots kept by the
+    // live pipeline; the authoritative dump only carries match totals. Absent
+    // for any match played before that existed, hence the ?? {}.
+    const byMap = mapStatsFor(db, id);
+    const maps = (db.prepare(
       'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
-    ).all(id);
+    ).all(id) as { ordinal: number }[]).map((mp) => ({ ...mp, stats: byMap.get(mp.ordinal) ?? {} }));
     const statRows = db.prepare(
       'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',
     ).all(id) as { player_id: string; stat: string; value: number }[];
@@ -189,6 +261,43 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
         : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
       stats: visibleStats(byPlayer.get(p.steamid) ?? {}, p.steamid, viewer),
     }));
-    return { match, maps, players };
+    const demos = db.prepare(
+      'SELECT ordinal, map, bytes FROM match_demos WHERE match_id = ? ORDER BY ordinal',
+    ).all(id);
+
+    const nameOf = (sid: string) =>
+      (players.find((p) => p.steamid === sid)?.name) ?? sid;
+    const events = eventsFor(db, id).map((e) => ({
+      seq: e.seq, kind: e.kind, mapOrdinal: e.mapOrdinal, value: e.value,
+      actor: { steamid: e.actor, name: nameOf(e.actor) },
+      target: e.target ? { steamid: e.target, name: nameOf(e.target) } : null,
+    }));
+
+    return { match, maps, players, demos, events };
+  });
+
+  /**
+   * Download one match demo. Public, at the user's request (2026-09-11).
+   *
+   * The bytes were behind a login because a demo is 100+ MB served off the
+   * same two cores that are holding 100 tick, so anonymous bulk downloading
+   * competes with srcds for I/O and bandwidth. That tradeoff has not gone
+   * away; it was accepted deliberately so demos can be shared with people who
+   * have no account. If the box ever starts struggling under demo traffic,
+   * restoring `requireActive` here is the one-line fix.
+   */
+  app.get('/api/matches/:id/demos/:ordinal', async (req, reply) => {
+    const { id, ordinal } = req.params as { id: string; ordinal: string };
+    const found = resolveDemoPath(db, Number(id), Number(ordinal), demoDir);
+    if (!found) return reply.code(404).send({ error: 'no such demo' });
+    reply.header('Content-Type', 'application/octet-stream');
+    reply.header('Content-Length', String(found.bytes));
+    // Served under a SHORT name, not the on-disk one. The stored filename
+    // carries a 32-char token, and `playdemo` takes the filename with no
+    // extension, so the real name means typing 60+ characters into the Source
+    // console with no tab completion. pug8-1 is match 8, map 1.
+    const friendly = `pug${Number(id)}-${Number(ordinal) + 1}.dem`;
+    reply.header('Content-Disposition', `attachment; filename="${friendly}"`);
+    return reply.send(createReadStream(found.path));
   });
 }

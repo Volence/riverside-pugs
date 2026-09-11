@@ -5,7 +5,27 @@ export type LogEvent =
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
   | { kind: 'heartbeat'; token: string }
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
-  | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' };
+  | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
+  // Emitted by !load_4v4p for a match started in-game rather than by us. The
+  // three arrive as a burst: one MATCH_CREATE, one MATCH_ROSTER per player,
+  // then MATCH_CREATE_END. UDP is lossy and unordered, so the consumer must
+  // treat players as a set it accumulates and MATCH_CREATE_END as the signal
+  // that it should have `players` of them, not as a guarantee that it does.
+  | { kind: 'match_create'; token: string; map: string; players: number }
+  | { kind: 'match_roster'; token: string; steamid: string; team: 'a' | 'b'; name: string }
+  | { kind: 'match_create_end'; token: string; players: number }
+  // Per-player counters for the spectator view, emitted every 10s while live.
+  // Cosmetic: the identical counters are pulled authoritatively over rcon at
+  // the end, so these are never read back when a result is computed.
+  | { kind: 'live_stat'; token: string; steamid: string; stats: Record<string, number> }
+  // One discrete thing that happened, for the live feed. Generic on purpose:
+  // the plugin decides the `kind` and the page renders per kind, so a new
+  // event type needs no backend change. `seq` is per-match monotonic and makes
+  // a duplicated datagram an upsert over itself rather than a double count.
+  | {
+      kind: 'live_event'; token: string; seq: number; event: string;
+      actor: string; target: string | null; value: number;
+    };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 function kv(parts: string[]): Record<string, string> {
@@ -56,6 +76,53 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       if (rest.event !== 'connect' && rest.event !== 'disconnect') return null;
       return { kind: 'player', token, steamid: rest.steamid, event: rest.event };
+    }
+    case 'MATCH_CREATE': {
+      const players = intOf(rest.players);
+      if (!rest.map || players === null || players < 1) return null;
+      return { kind: 'match_create', token, map: rest.map, players };
+    }
+    case 'MATCH_ROSTER': {
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      if (rest.team !== 'a' && rest.team !== 'b') return null;
+      // The name is taken from the raw line rather than from kv(), because
+      // in-game names contain spaces and may contain '=' too. The plugin emits
+      // name= last on the line for exactly this reason, so everything after the
+      // first `name=` is the name.
+      const at = line.indexOf(' name=');
+      if (at < 0) return null;
+      const name = line.slice(at + ' name='.length).trim();
+      if (!name) return null;
+      return { kind: 'match_roster', token, steamid: rest.steamid, team: rest.team, name };
+    }
+    case 'MATCH_CREATE_END': {
+      const players = intOf(rest.players);
+      if (players === null || players < 1) return null;
+      return { kind: 'match_create_end', token, players };
+    }
+    case 'LIVESTAT': {
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      const stats: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rest)) {
+        if (k === 'steamid') continue;
+        const n = intOf(v);
+        // Skip rather than reject: the plugin omits skill_detect keys entirely
+        // when it is not loaded, and a future key we do not know about must not
+        // invalidate the whole line.
+        if (n !== null) stats[k] = n;
+      }
+      if (Object.keys(stats).length === 0) return null;
+      return { kind: 'live_stat', token, steamid: rest.steamid, stats };
+    }
+    case 'EVENT': {
+      const seq = intOf(rest.seq);
+      const value = intOf(rest.value);
+      if (seq === null || seq < 1 || value === null) return null;
+      if (!rest.kind || !/^[a-z_]{1,24}$/.test(rest.kind)) return null;
+      if (!/^\d{17}$/.test(rest.actor ?? '')) return null;
+      // target is "0" when the event has no second party.
+      const target = /^\d{17}$/.test(rest.target ?? '') ? rest.target : null;
+      return { kind: 'live_event', token, seq, event: rest.kind, actor: rest.actor, target, value };
     }
     case 'MATCH_END': {
       const a = intOf(rest.a), b = intOf(rest.b);

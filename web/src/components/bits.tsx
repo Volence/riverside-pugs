@@ -42,3 +42,100 @@ export function Sparkline({ values }: { values: number[] }) {
     </svg>
   );
 }
+
+/** One headline figure. The single tile implementation used by every page, so
+ *  the profile, the match list and the live page cannot drift apart. */
+export function Tile(
+  { label, value, sub }: { label: string; value: string | number; sub?: string },
+) {
+  return (
+    <div class="tile">
+      <p class="tile__label">{label}</p>
+      <p class="tile__value num">{value}</p>
+      {sub && <p class="tile__sub muted num">{sub}</p>}
+    </div>
+  );
+}
+
+export function Tiles({ children }: { children: ComponentChildren }) {
+  return <div class="tiles">{children}</div>;
+}
+
+/**
+ * One horizontal comparison bar.
+ *
+ * Two channels carrying two different facts, which is what makes this more
+ * readable than a column of numbers: the bar's LENGTH is volume (how much of
+ * this thing happened, relative to the biggest row) and its COLOUR is quality
+ * (whether that was good). A long red bar and a short green one are instantly
+ * distinguishable in a way that "12" and "3" are not.
+ *
+ * `fraction` is expected in 0..1 and is clamped, so a caller that divides by a
+ * stale maximum cannot produce a bar that overflows its track.
+ */
+export function BarRow(
+  { name, value, detail, fraction, tone = 'neutral', href }: {
+    name: string;
+    value: string;
+    detail?: string;
+    fraction: number;
+    tone?: 'good' | 'bad' | 'neutral';
+    href?: string;
+  },
+) {
+  const pct = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0)) * 100;
+  return (
+    <div class="bar">
+      <div class="bar__head">
+        <span class="bar__name">{href ? <a href={href}>{name}</a> : name}</span>
+        <span class={`bar__value bar__value--${tone}`}>
+          {value}
+          {detail && <span class="bar__detail"> {detail}</span>}
+        </span>
+      </div>
+      <div class="bar__track">
+        <div class={`bar__fill bar__fill--${tone}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** A labelled group of bars. */
+export function Bars({ label, children }: { label?: string; children: ComponentChildren }) {
+  return (
+    <div class="bars">
+      {label && <p class="bars__label">{label}</p>}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Simple tab strip. State lives in the caller so a tab choice can be lifted or
+ * persisted later without rewriting every use site.
+ */
+export function Tabs(
+  { tabs, active, onSelect }: {
+    tabs: { key: string; label: string; count?: number }[];
+    active: string;
+    onSelect: (key: string) => void;
+  },
+) {
+  return (
+    <div class="tabs" role="tablist">
+      {tabs.map((t) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={t.key === active}
+          class={`tabs__tab${t.key === active ? ' is-active' : ''}`}
+          key={t.key}
+          onClick={() => onSelect(t.key)}
+        >
+          {t.label}
+          {t.count !== undefined && <span class="tabs__count">{t.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}

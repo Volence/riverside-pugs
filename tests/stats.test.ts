@@ -7,6 +7,7 @@ import { authedCookie, stubOrchestrator } from './helpers.js';
 import { completeMatch } from '../src/matchResult.js';
 import { upsertPlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
+import { STAT_DEFS } from '../src/statKeys.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -52,11 +53,56 @@ describe('stats routes', () => {
   });
   afterEach(async () => { await app.close(); });
 
-  it('requires auth', async () => {
+  it('read routes are public: no session still gets a 200', async () => {
+    // Deliberate, 2026-09-11: results and the ladder are readable by anyone so
+    // they can be linked to people who have not signed up. Everything that
+    // mutates state stays authed (see api.test.ts).
+    playCompletedMatch(db, 'b');
     for (const url of ['/api/leaderboard', '/api/leaderboard/stat/skeets', `/api/players/${ME}`, '/api/matches', '/api/matches/1']) {
       const res = await app.inject({ method: 'GET', url });
-      expect(res.statusCode).toBe(401);
+      expect(res.statusCode, url).toBe(200);
     }
+  });
+
+  it('an anonymous reader never receives a self-only stat VALUE', async () => {
+    // The redaction must hold for a viewer with no session at all, not just
+    // for a logged-in non-subject. Asserting on values, not on a string search
+    // of the response: statDefs legitimately carries every stat KEY as schema,
+    // so a substring check would be testing the wrong thing.
+    playCompletedMatch(db, 'b');
+    const selfKeys = STAT_DEFS.filter((d) => d.visibility === 'self').map((d) => d.key);
+    expect(selfKeys.length).toBeGreaterThan(0);
+    for (const k of selfKeys) {
+      db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, 7)')
+        .run(ME, k);
+    }
+
+    const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
+    expect(body.privateStatTotals).toBeNull();
+    for (const k of selfKeys) expect(Object.keys(body.statTotals)).not.toContain(k);
+
+    const detail = (await app.inject({ method: 'GET', url: '/api/matches/1' })).json();
+    for (const p of detail.players ?? []) {
+      for (const k of selfKeys) expect(Object.keys(p.stats ?? {})).not.toContain(k);
+    }
+  });
+
+  it('the subject still sees their own self-only stats when logged in', async () => {
+    // Guards against "fix the leak by deleting the feature". privateStats is
+    // deliberately absent when there are none, so seed one to have something
+    // to see.
+    playCompletedMatch(db, 'b');
+    const selfKey = STAT_DEFS.find((d) => d.visibility === 'self')!.key;
+    db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, 3)')
+      .run(ME, selfKey);
+
+    const mine = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
+    expect(mine.json().privateStatTotals).toMatchObject({ [selfKey]: 3 });
+
+    // ...and the same request without a session must not carry the value.
+    const anon = await app.inject({ method: 'GET', url: `/api/players/${ME}` });
+    expect(anon.json().privateStatTotals).toBeNull();
+    expect(Object.keys(anon.json().statTotals)).not.toContain(selfKey);
   });
 
   it('leaderboard: SR-sorted current-season rows with games count', async () => {
@@ -215,5 +261,30 @@ describe('stats routes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().rows.length).toBeLessThanOrEqual(25);
     });
+  });
+  it('carries per-player season totals so the table can sort by any column', async () => {
+    playCompletedMatch(db, 'b');
+    const res = await app.inject({ method: 'GET', url: '/api/leaderboard' });
+    expect(res.statusCode).toBe(200);
+    const row = res.json().rows.find((r: any) => r.steamid === ME);
+    expect(row.stats).toBeDefined();
+    // Fixed columns are always present, even at zero.
+    for (const k of ['sidmg', 'sikill', 'ck', 'ff', 'rev']) {
+      expect(Object.keys(row.stats)).toContain(k);
+    }
+  });
+
+  it('never puts a self-visibility stat on the public leaderboard', async () => {
+    // These are not rankable by design. Dropped server side rather than
+    // filtered in the UI, so they cannot leak via the payload.
+    playCompletedMatch(db, 'b');
+    const selfKeys = STAT_DEFS.filter((d) => d.visibility === 'self').map((d) => d.key);
+    for (const k of selfKeys) {
+      db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, 9)')
+        .run(ME, k);
+    }
+    const res = await app.inject({ method: 'GET', url: '/api/leaderboard' });
+    const row = res.json().rows.find((r: any) => r.steamid === ME);
+    for (const k of selfKeys) expect(Object.keys(row.stats)).not.toContain(k);
   });
 });

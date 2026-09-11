@@ -6,6 +6,8 @@ import { newToken } from './matchToken.js';
 import { parseDump, type Dump } from './dumpParse.js';
 import { claimIdle, release, markLive, getServer, type ServerRow } from './serverPool.js';
 import { completeMatch } from './matchResult.js';
+import { recordMatchDemos } from './demos.js';
+import { clearLive } from './liveView.js';
 import { CAMPAIGNS } from './campaigns.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
@@ -31,6 +33,8 @@ export interface RealOrchestratorDeps {
   /** Injectable opts transform so tests can redirect the connection; production leaves opts untouched. */
   makeRcon?: (opts: RconOpts) => RconOpts;
   notify?: (msg: string) => void;
+  /** Where srcds writes demos. Empty disables demo recording on the site. */
+  demoDir?: string;
 }
 
 interface MatchRow {
@@ -47,6 +51,7 @@ export class RealOrchestrator implements Orchestrator {
   private logPublicAddress: string;
   private makeRcon: (opts: RconOpts) => RconOpts;
   private notify: (msg: string) => void;
+  private demoDir: string;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -54,6 +59,7 @@ export class RealOrchestrator implements Orchestrator {
     this.logPublicAddress = deps.logPublicAddress;
     this.makeRcon = deps.makeRcon ?? ((o) => o);
     this.notify = deps.notify ?? (() => {});
+    this.demoDir = deps.demoDir ?? '';
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
@@ -117,6 +123,22 @@ export class RealOrchestrator implements Orchestrator {
     }
   }
 
+  /** Tell the plugin the match id we allocated for a match it started itself
+   *  with !load_4v4p. Public because SelfStartedMatches needs rcon and this
+   *  class already owns how to reach a server. Throws on failure; the caller
+   *  decides whether that is fatal (it is not: the match row still exists). */
+  async assignMatchId(serverId: number, token: string, matchId: number): Promise<void> {
+    const server = getServer(this.db, serverId);
+    if (!server) throw new Error(`assignMatchId: no server row ${serverId}`);
+    let rcon: RconClient | null = null;
+    try {
+      rcon = await this.connectRcon(server);
+      await expectPugOk(rcon, `sm_pug_setid ${token} ${matchId}`);
+    } finally {
+      rcon?.close();
+    }
+  }
+
   async finishMatch(matchId: number): Promise<void> {
     const match = this.db
       .prepare('SELECT id, state, campaign, server_id, token FROM matches WHERE id = ?')
@@ -157,6 +179,18 @@ export class RealOrchestrator implements Orchestrator {
     }
 
     if (persisted) {
+      // After completion, never before: the demo for the last map is still
+      // being written until the match ends. Wrapped because a match result is
+      // not allowed to fail over a download link.
+      try {
+        const n = recordMatchDemos(this.db, matchId, match.token, this.demoDir);
+        if (n > 0) console.log(`[orchestrator] recorded ${n} demo(s) for match ${matchId}`);
+      } catch (err) {
+        console.error(`[orchestrator] demo scan failed for match ${matchId} (non-fatal):`, err);
+      }
+      // The match is no longer live, so the spectator scratch rows are done.
+      // The authoritative match_maps rows were just written by completeMatch.
+      clearLive(this.db, matchId);
       this.listener.unregister(match.token);
       release(this.db, match.server_id);
       if (dump) {

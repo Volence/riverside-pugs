@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
-  secondsLeft, sparklinePoints,
+  secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
+  deriveLiveStats,
 } from './format';
 
 describe('campaignName', () => {
@@ -91,5 +92,117 @@ describe('sparklinePoints', () => {
     const pts = sparklinePoints([1200, 1200, 1200], 100, 50)!;
     expect(pts).not.toContain('NaN');
     for (const p of pts.split(' ')) expect(Number(p.split(',')[1])).toBe(25);
+  });
+});
+
+describe('fmtBytes', () => {
+  it('scales the unit across the range a demo can span', () => {
+    expect(fmtBytes(0)).toBe('0 B');
+    expect(fmtBytes(512)).toBe('512 B');
+    expect(fmtBytes(1024)).toBe('1.0 KB');
+    expect(fmtBytes(1536)).toBe('1.5 KB');
+    expect(fmtBytes(20 * 1024 * 1024)).toBe('20 MB');
+    expect(fmtBytes(1.5 * 1024 * 1024 * 1024)).toBe('1.5 GB');
+  });
+
+  it('returns empty for nonsense rather than NaN', () => {
+    expect(fmtBytes(NaN)).toBe('');
+    expect(fmtBytes(-1)).toBe('');
+  });
+});
+
+describe('orderLiveStatKeys', () => {
+  it('puts known keys in display order and appends unknown ones alphabetically', () => {
+    expect(orderLiveStatKeys(['zzz_new', 'skeets', 'ck', 'aaa_new', 'hp']))
+      .toEqual(['hp', 'ck', 'skeets', 'aaa_new', 'zzz_new']);
+  });
+
+  it('omits known keys that are not present', () => {
+    expect(orderLiveStatKeys(['ck'])).toEqual(['ck']);
+  });
+
+  it('labels the live-only keys', () => {
+    expect(labelFor('ck')).toBe('Commons');
+    expect(labelFor('hp')).toBe('HP');
+    expect(labelFor('tank_damage')).toBe('Tank damage');
+  });
+});
+
+describe('liveGroupStarts', () => {
+  it('marks the first present column of each group, never the leading column', () => {
+    const keys = orderLiveStatKeys(['hp', 'ck', 'tank_damage', 'skeets']);
+    const starts = liveGroupStarts(keys);
+    expect(starts.has('hp')).toBe(false);   // leading column gets no divider
+    expect(starts.has('tank_damage')).toBe(true);
+    expect(starts.has('skeets')).toBe(true);
+    expect(starts.has('ck')).toBe(false);
+  });
+
+  it('falls through to the next present key when a group leader is missing', () => {
+    const keys = orderLiveStatKeys(['ck', 'tank_punches', 'boomer_pops']);
+    const starts = liveGroupStarts(keys);
+    expect(starts.has('tank_punches')).toBe(true);
+    expect(starts.has('boomer_pops')).toBe(true);
+  });
+
+  it('no longer offers deadstops or tongue cuts as live columns', () => {
+    expect(LIVE_STAT_ORDER).not.toContain('deadstops');
+    expect(LIVE_STAT_ORDER).not.toContain('tongue_cuts');
+    expect(LIVE_STAT_ORDER).toContain('tank_rocks_landed');
+    expect(LIVE_STAT_ORDER).toContain('rock_skeets');
+  });
+});
+
+describe('live columns: skeet variants and biles', () => {
+  it('includes the chipped and team skeet variants', () => {
+    expect(LIVE_STAT_ORDER).toContain('team_skeets');
+    expect(LIVE_STAT_ORDER).toContain('skeets_hurt');
+    expect(LIVE_STAT_ORDER).toContain('skeet_assists');
+  });
+
+  it('uses the l4dcompstats boom counters rather than the skill_detect bile ones', () => {
+    // The console prints successes/attempts (N Vomit/M Proxy); the live table
+    // shows the same four numbers so they can never disagree.
+    expect(LIVE_STAT_ORDER).toContain('boomer_spawns');
+    expect(LIVE_STAT_ORDER).toContain('boom_successes');
+    expect(LIVE_STAT_ORDER).toContain('boomed_vomit');
+    expect(LIVE_STAT_ORDER).toContain('boomed_proxy');
+  });
+
+  it('keeps the skeet family contiguous and gives it its own divider', () => {
+    const keys = orderLiveStatKeys(['ck', 'skeets', 'team_skeets', 'skeets_hurt', 'boomer_spawns']);
+    expect(keys).toEqual(['ck', 'skeets', 'team_skeets', 'skeets_hurt', 'boomer_spawns']);
+    const starts = liveGroupStarts(keys);
+    expect(starts.has('skeets')).toBe(true);
+    expect(starts.has('team_skeets')).toBe(false);
+    expect(starts.has('boomer_spawns')).toBe(true);
+  });
+
+  it('drops the summed pounce damage column in favour of the event feed', () => {
+    expect(LIVE_STAT_ORDER).not.toContain('pounce_damage_high');
+  });
+});
+
+describe('deriveLiveStats', () => {
+  it('computes boomer success rate from biles over spawns', () => {
+    expect(deriveLiveStats({ boomer_spawns: 4, boom_successes: 3 }).boomer_rate).toBe(75);
+    expect(deriveLiveStats({ boomer_spawns: 3, boom_successes: 1 }).boomer_rate).toBe(33);
+  });
+
+  it('omits the rate entirely when nobody has played boomer', () => {
+    // Absent, not 0: "has not played boomer" is a different fact from
+    // "played boomer and landed nothing", and the table renders absent as n/a.
+    expect(deriveLiveStats({ boom_successes: 0 }).boomer_rate).toBeUndefined();
+    expect(deriveLiveStats({ boomer_spawns: 0, boom_successes: 0 }).boomer_rate).toBeUndefined();
+  });
+
+  it('reports 0% for a boomer who landed nothing', () => {
+    expect(deriveLiveStats({ boomer_spawns: 2, boom_successes: 0 }).boomer_rate).toBe(0);
+  });
+
+  it('does not mutate its input', () => {
+    const input = { boomer_spawns: 2, boom_successes: 1 };
+    deriveLiveStats(input);
+    expect(input).toEqual({ boomer_spawns: 2, boom_successes: 1 });
   });
 });

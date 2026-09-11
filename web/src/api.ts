@@ -53,6 +53,9 @@ export interface LeaderboardRow {
   wins: number;
   losses: number;
   games: number;
+  /** Season totals per stat, so the table sorts by any column without a
+   *  request per column. Self-visibility stats are dropped server side. */
+  stats?: Record<string, number>;
 }
 
 export interface Leaderboard {
@@ -92,10 +95,97 @@ export interface StatDef {
   needsSkillDetect: boolean;
 }
 
+export interface LivePlayer extends NamedPlayer {
+  /** Missing key means "not measured", never zero. skill_detect keys are
+   *  absent entirely when that plugin is not loaded. */
+  stats: Record<string, number>;
+}
+
+export interface LiveEvent {
+  seq: number;
+  kind: string;
+  /** Which map of the match it happened on, zero-based. */
+  mapOrdinal: number;
+  actor: NamedPlayer;
+  target: NamedPlayer | null;
+  value: number;
+}
+
+export interface LiveMatch {
+  id: number;
+  campaign: string;
+  currentMap: string | null;
+  teamA: LivePlayer[];
+  teamB: LivePlayer[];
+  maps: {
+    ordinal: number; map: string; teamAScore: number; teamBScore: number;
+    /** This map's own per-player stats, keyed by steamid. */
+    stats: Record<string, Record<string, number>>;
+  }[];
+  teamAScore: number;
+  teamBScore: number;
+  lastSeen: string | null;
+  /** No heartbeat for a while. The match is shown anyway, flagged, because a
+   *  died-quietly match is information rather than something to hide. */
+  stale: boolean;
+  demos: MatchDemo[];
+  /** Most recent first. Discrete things that happened, so a big deadly pounce
+   *  is distinguishable from six small ones. */
+  events: LiveEvent[];
+}
+
+export interface MatchDemo {
+  ordinal: number;
+  map: string;
+  bytes: number;
+}
+
 export interface MatchDetail {
   match: MatchSummary & { state: string };
-  maps: { ordinal: number; map: string; teamAScore: number; teamBScore: number }[];
+  maps: {
+    ordinal: number; map: string; teamAScore: number; teamBScore: number;
+    /** Per-player stats for this map, keyed by steamid. Empty for matches
+     *  played before per-map capture existed. */
+    stats: Record<string, Record<string, number>>;
+  }[];
   players: MatchPlayerStats[];
+  events?: LiveEvent[];
+  /** Metadata is public; downloading the bytes needs a session. Absent or
+   *  empty when the server has no demo directory configured. */
+  demos?: MatchDemo[];
+}
+
+export interface MapIndexRow {
+  map: string;
+  campaign: string | null;
+  played: number;
+  avgTeamA: number;
+  avgTeamB: number;
+}
+
+export interface MapLeaderRow {
+  steamid: string;
+  name: string;
+  games: number;
+  wins: number;
+  losses: number;
+  stats: Record<string, number>;
+}
+
+export interface MapDetail {
+  map: string;
+  played: number;
+  avgTeamA: number;
+  avgTeamB: number;
+  players: MapLeaderRow[];
+}
+
+export interface MapBreakdownRow {
+  map: string;
+  games: number;
+  wins: number;
+  losses: number;
+  stats: Record<string, number>;
 }
 
 export interface ProfileMatch extends MatchSummary {
@@ -123,6 +213,9 @@ export interface Profile {
    *  subject themselves; null for anyone else, never an empty object. */
   privateStatTotals: Record<string, number> | null;
   statDefs: StatDef[];
+  /** Per-map performance across every completed match. `stats` can be empty
+   *  for matches played before per-map capture existed, while `games` is not. */
+  byMap?: MapBreakdownRow[];
 }
 
 /** Thrown for any non-OK response, carrying the status so callers can tell
@@ -163,6 +256,10 @@ export const api = {
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
   leaderboard: (signal?: AbortSignal) => get<Leaderboard>('/api/leaderboard', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
+  live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
+  maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[] }>('/api/maps', signal),
+  map: (map: string, signal?: AbortSignal) =>
+    get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
     get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
   profile: (steamid: string, signal?: AbortSignal) =>

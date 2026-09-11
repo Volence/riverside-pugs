@@ -11,6 +11,7 @@ const { mockApi } = vi.hoisted(() => ({
     leaderboard: vi.fn(),
     matches: vi.fn(),
     match: vi.fn(),
+    map: vi.fn(),
     profile: vi.fn(),
   },
 }));
@@ -23,6 +24,7 @@ vi.mock('../api', async (importOriginal) => {
 const { Leaderboard } = await import('./Leaderboard');
 const { Matches } = await import('./Matches');
 const { MatchDetail } = await import('./MatchDetail');
+const { MapDetail } = await import('./MapDetail');
 const { Profile } = await import('./Profile');
 const { Play } = await import('./Play');
 
@@ -65,30 +67,56 @@ describe('Matches', () => {
       ],
     });
     render(<Matches />);
-    await waitFor(() => expect(screen.getByText('Blood Harvest')).toBeTruthy());
+    // Appears twice now: in the summary tiles and in the table row.
+    await waitFor(() => expect(screen.getAllByText('Blood Harvest').length).toBeGreaterThan(0));
     expect(screen.getByText('Team A')).toBeTruthy();
+    // The tile row is derived from the same fetch, so it must render too.
+    expect(screen.getByText('Matches')).toBeTruthy();
   });
 });
 
 describe('MatchDetail', () => {
-  it('renders per-map scores and both team tables', async () => {
+  it('renders match totals plus a per-map section with that map own stats', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
-      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300 }],
+      maps: [{
+        ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300,
+        stats: { '1': { ck: 2, sidmg: 10 }, '2': { ck: 3, sidmg: 20 } },
+      }],
       players: [
         { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
         { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
       ],
+      demos: [],
+      events: [],
     });
     const { container } = render(<MatchDetail id="7" me="1" />);
-    await waitFor(() => expect(screen.getByText('l4d_hospital01_apartment')).toBeTruthy());
-    // "Team A" appears twice here: as the winner and as a table heading.
+    // The map name now sits in a heading alongside its score, so match on the
+    // heading rather than on the bare name.
+    await waitFor(() => expect(
+      screen.getByText((_t, el) => el?.tagName === 'H3'
+        && /Map 1 · l4d_hospital01_apartment/.test(el.textContent ?? '')),
+    ).toBeTruthy());
+    expect(screen.getByText('Match totals')).toBeTruthy();
+    // Totals table and the map table both render both teams.
     expect(screen.getAllByText('Team A').length).toBeGreaterThan(0);
-    expect(screen.getByText('Team B')).toBeTruthy();
-    // ordinal is a 0-based index in the DB but must read as map 1. Scoped to the
-    // maps table, since a bare "1" also occurs among the per-player stats.
-    const mapsTable = container.querySelectorAll('table')[0] as HTMLElement;
-    expect(within(mapsTable).getByText('1')).toBeTruthy();
+    expect(screen.getAllByText('Team B').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('table').length).toBe(2);
+  });
+
+  it('says so rather than faking zeros when a match has no per-map stats', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+      ],
+      demos: [], events: [],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(
+      screen.getByText('Per-map stats were not captured for this match.'),
+    ).toBeTruthy());
   });
 
   it('shows a not-found message instead of blowing up on a bad id', async () => {
@@ -277,5 +305,103 @@ describe('Play', () => {
     expect(screen.getByText('No Mercy')).toBeTruthy();
     expect(screen.getByText('Team A')).toBeTruthy();
     expect(screen.getByText('Team B')).toBeTruthy();
+  });
+});
+
+describe('Leaderboard sorting', () => {
+  const rows = [
+    { steamid: '1', name: 'alice', avatar: null, sr: 900, wins: 1, losses: 3, games: 4, stats: { ck: 10, tank_damage: 500 } },
+    { steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, stats: { ck: 99 } },
+  ];
+
+  it('defaults to SR descending and renders every stat column', async () => {
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+
+    const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
+    expect(names).toEqual(['bob', 'alice']);
+    // Stat columns are derived from the data, so tank_damage appears even
+    // though only one player has it. Scoped to thead: the summary tiles above
+    // the table carry the same label.
+    const head = container.querySelector('thead') as HTMLElement;
+    expect(within(head).getByText('Tank damage')).toBeTruthy();
+  });
+
+  it('re-sorts when a column header is clicked', async () => {
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+
+    // Commons descending puts bob first (99 vs 10); clicking again reverses.
+    const head = container.querySelector('thead') as HTMLElement;
+    (within(head).getByText('Commons') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent),
+    ).toEqual(['bob', 'alice']));
+
+    (within(head).getByText('Commons') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent),
+    ).toEqual(['alice', 'bob']));
+  });
+
+  it('sorts a player with the stat absent LAST, not as a zero', async () => {
+    // alice has no tank_damage at all. Ascending by tank_damage must not put
+    // her first as though she had scored 0.
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+
+    const head = container.querySelector('thead') as HTMLElement;
+    (within(head).getByText('Tank damage') as HTMLElement).click(); // desc
+    (within(head).getByText('Tank damage') as HTMLElement).click(); // asc
+    await waitFor(() => expect(
+      [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent),
+    ).toEqual(['alice', 'bob']));
+  });
+});
+
+describe('MapDetail', () => {
+  const mapData = {
+    map: 'l4d_vs_airport01_greenhouse',
+    played: 3,
+    avgTeamA: 200,
+    avgTeamB: 180,
+    players: [
+      { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0, stats: { ck: 30, tank_damage: 900 } },
+      { steamid: '2', name: 'bob', games: 3, wins: 0, losses: 3, stats: { ck: 10 } },
+    ],
+  };
+
+  it('shows the map summary and a win-rate bar per player', async () => {
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+
+    expect(screen.getByText('200 - 180')).toBeTruthy();
+    // One bar per player, and the 100% winner is toned as good.
+    expect(container.querySelectorAll('.bar').length).toBe(2);
+    expect(container.querySelector('.bar__value--good')).toBeTruthy();
+    expect(container.querySelector('.bar__value--bad')).toBeTruthy();
+  });
+
+  it('switches the bars to a stat when its tab is picked', async () => {
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+
+    // Scoped to the tab strip: the table below carries the same column label.
+    const strip = container.querySelector('.tabs') as HTMLElement;
+    (within(strip).getByText('Tank damage') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
+    ).toEqual(['900', 'n/a']));
+  });
+
+  it('says so rather than erroring for a map nobody has played', async () => {
+    mockApi.map.mockRejectedValue(new Error('404'));
+    render(<MapDetail map="nope" />);
+    await waitFor(() => expect(screen.getByText('Nobody has played that map yet.')).toBeTruthy());
   });
 });
