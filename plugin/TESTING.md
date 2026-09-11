@@ -330,8 +330,8 @@ a full map is either a hook that did not fire or an event name mismatched to thi
 engine, both of which need investigation before future work builds on the timeline.
 
 Note that `tank_take` and `tank_give` legitimately show zero if tank control never
-changed hands during the half, `skeet` shows zero on a server with no `skill_detect`
-loaded (it is the only kind that cannot be captured without it), and `car_alarm` and
+changed hands during the half, `skeet` and `dp` show zero on a server with no `skill_detect`
+loaded (both kinds cannot be captured without it), and `car_alarm` and
 the witch events (`witch_aggro`, `witch_killed`) are map-dependent and may be absent
 on maps that do not have them.
 

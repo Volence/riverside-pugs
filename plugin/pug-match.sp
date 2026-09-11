@@ -229,9 +229,9 @@ orientation threshold. Changing this changes the rules under every rating earned
 	// tank fires bot_player_replace. Verified against l4d_tank_pass.sp and
 	// l4dscores.sp; there is no bare "player_replace" event on this engine.
 	if (!HookEventEx("player_bot_replace", Event_PlayerBotReplace))
-		LogMessage("pug-match: event 'player_bot_replace' does not exist on this engine; tank_pass capture (human giving up tank) will be silently absent.");
+		LogMessage("pug-match: event 'player_bot_replace' does not exist on this engine; tank_give capture (human giving up tank) will be silently absent.");
 	if (!HookEventEx("bot_player_replace", Event_BotPlayerReplace))
-		LogMessage("pug-match: event 'bot_player_replace' does not exist on this engine; tank_pass capture (human taking tank) will be silently absent.");
+		LogMessage("pug-match: event 'bot_player_replace' does not exist on this engine; tank_take capture (human taking tank) will be silently absent.");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -332,10 +332,9 @@ int RoundMs()
  *  `surv` may be empty when the orientation mapping never settled; the
  *  parser only accepts surv=a or surv=b, so an empty side is skipped rather
  *  than emitted malformed. `half` and `surv` must be values CAPTURED at
- *  round_end time, not read fresh from g_iHalf/g_iPugSide here: this is
- *  called from a timer up to 6-8s after the round ended, and by then
- *  FinalizeMap may have reset g_iHalf to 0 for the next half, or the team
- *  lock timer may have flipped g_iPugSide. */
+ *  round_end time, not read fresh from g_iHalf/g_iPugSide here. The half is
+ *  derived from m_bInSecondHalfOfRound at the time the round goes live, and
+ *  the team lock timer may have flipped g_iPugSide by the time this is called. */
 void EmitRoundEnd(int half, const char[] surv, int score)
 {
 	if (surv[0] != '\0')
