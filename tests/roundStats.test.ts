@@ -59,6 +59,19 @@ describe('per-round side attribution', () => {
     expect(h1.reliable).toBe(false);
   });
 
+  it('marks both rounds of an ordinal unreliable when the halves do not partition the sides', () => {
+    const db = matchWithOneMap();
+    // Both halves recorded as team a holding survivor: recordRoundEnd only
+    // warns on this disagreement, it does not prevent it, so the derivation
+    // must defend against it rather than trust surv_team blindly.
+    db.prepare("UPDATE match_rounds SET surv_team = 'a' WHERE ordinal = 0").run();
+    const rounds = roundAttribution(db, 1, TEAMS);
+    const h1 = rounds.find((r) => r.half === 1)!;
+    const h2 = rounds.find((r) => r.half === 2)!;
+    expect(h1.reliable).toBe(false);
+    expect(h2.reliable).toBe(false);
+  });
+
   it('returns nothing for a match with no rounds recorded', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
