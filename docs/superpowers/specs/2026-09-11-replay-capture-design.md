@@ -178,9 +178,9 @@ Consequences, all landing in plan 6b, which is not yet written:
 - Per-entity health is needed for the witch and the tank, so the entity record carries
   health, not just position.
 
-Still to decide in 6b: whether entities sample at the full 10Hz or a lower rate with
-interpolation, and whether commons are worth individual identity or can be an anonymous
-point cloud. Measure before choosing.
+Both of these were open until 2026-09-11 and are now settled under "6b resolutions"
+below: commons are captured individually at the full player rate, and the entity rate
+stays a separate cvar so the measurement can still move it.
 
 ### Non-goals for v1
 - **Any display of this data.** Pieces 2 through 4.
@@ -353,10 +353,10 @@ the door properly, ship only the storage room.
 pug-match.sp
   OnRoundIsLive    -> ROUND_START (udp)  -> match_rounds
                    -> open pug_<token>_<ordinal>_<half>.rpl
-  Timer 0.1s       -> 132-byte frame     -> replay file (no flush)
+  Timer 0.1s       -> 8+128+12N frame    -> replay file (no flush)
   hooks            -> EVENT ... t_ms     -> match_live_events
   Event_RoundEnd   -> ROUND_END (udp)    -> match_rounds
-                   -> close file, REPLAY line -> match_replays
+                   -> close file (indexed by filename, no datagram)
 
 pug-web
   live:  tail open file -> hold to now-10s -> websocket
@@ -397,10 +397,20 @@ is the established pattern here; there is deliberately no migration framework.
 
 ### Replay file format
 
-Header, 160 bytes fixed, including reserved space: magic and version, match token, map
-ordinal, half, sample rate, map name, wall-clock start, and the slot table mapping
-roster slots 0 to 7 to SteamID64. Frames reference slot indices, which is where most of
-the size saving comes from.
+Header, 160 bytes fixed, including reserved space: magic `L4RP` and version, the 32
+character match token, map ordinal, half, player sample rate, entity sample rate, map
+name, wall-clock start, the slot table mapping roster slots 0 to 7 to SteamID64, and the
+keyframe index's own offset and count. Frames reference slot indices, which is where most
+of the size saving comes from.
+
+The index offset and count are zero until the round closes, because their values are not
+known until then. The writer seeks back to the header and fills them in as its last act,
+so a file that was never closed is self-evidently indexless rather than carrying a
+plausible but wrong offset.
+
+Everything in the file is explicit little-endian, byte by byte. Nothing is written as a
+native word, so the parser never has to agree with the game server about endianness or
+struct padding.
 
 Frame, variable length, repeated. Three parts:
 
@@ -410,10 +420,24 @@ Frame, variable length, repeated. Three parts:
    yaw as int16, pitch as int8, health as uint16 (the tank needs the range), a state
    bitfield, class, weapon and ammo. Always eight, even when a slot is empty, so this
    block alone stays fixed-stride.
-3. **Entity block, 8 bytes per entity**: entity index as uint16, kind as uint8, a state
-   bitfield as uint8, and position as three int16. Health is not carried per entity; a
-   witch or a tank is a PLAYER-slot record when a human controls it, and an AI boss
-   carries its health in the state byte's high bits.
+3. **Entity block, 12 bytes per entity**: entity reference as uint16, kind as uint8, a
+   state bitfield as uint8, position as three int16, and health as uint16.
+
+   Corrected 2026-09-11. This record was specified as 8 bytes carrying no health, which
+   was wrong twice over. The listed fields summed to 10 bytes, not 8, so every size
+   estimate built on the 8 was low. And the same revision that reinstated world entities
+   states two paragraphs earlier that "the entity record carries health, not just
+   position", which the 8-byte layout then contradicted by pushing an AI boss's health
+   into the high bits of the state byte. That hack would have given a witch roughly four
+   bits of health resolution. A uniform 12-byte record with a real uint16 health costs
+   360 bytes per frame at 30 commons, which is what the size estimate below already
+   assumed, and it removes the special case entirely.
+
+   **Entities cover every actor that is not a rostered player**, which is AI tanks,
+   survivor bots, AI special infected, the witch, the tank rock and commons. The player
+   block therefore stays exactly the eight roster slots and never has to decide whether
+   a bot has inherited a slot. This is what makes a thin game legible: with one human
+   connected, seven slots are empty and every survivor on screen is an entity record.
 
 Revised 2026-09-11 when world entities came back into scope. The earlier design was a
 flat 132-byte fixed-stride frame with "reserved space" for entities, which does not work:
@@ -428,7 +452,8 @@ exactly why the reader must also support a linear scan fallback; a truncated fil
 degrades to "playable but slow to seek" rather than "unreadable".
 
 Size, with entities: players are 1,360 bytes per second at 10Hz. Commons run roughly 20
-to 30 alive in a versus round, so the entity block adds about 2,000 bytes per second.
+to 30 alive in a versus round, and at 12 bytes each the entity block adds roughly 2,400
+to 3,600 bytes per second.
 Call it 3.4 KB/s, 12 MB per hour, 10 to 15 MB for a full match. Still small next to the
 1.7 GB/day the demo recorder was producing, and the 90 day retention still lands near
 4 GB at 30 matches a week.
@@ -436,10 +461,74 @@ Call it 3.4 KB/s, 12 MB per hour, 10 to 15 MB for a full match. Still small next
 Timestamps are explicit rather than implied by frame index, costing 4 bytes per frame,
 so a hitch or pause cannot silently desync motion from the event timeline.
 
-**Open, to be settled by measurement in 6b, not by argument:** whether entities sample at
-the full 10Hz or at a lower rate with viewer-side interpolation. Entities get their own
-cvar so the two rates move independently, and the frame-time comparison decides the
-default.
+Entities keep their own cvar so the two rates move independently, and the default is the
+full player rate. The frame-time gate under Testing is what may move it: this is a
+measurement that can still overrule the default, not an argument that has been won.
+
+## 6b resolutions
+
+Decided 2026-09-11, when 6b was scoped. 6a is deployed and has been verified in game.
+6b is the recorder and the reader; it ships no viewer, which is piece 3.
+
+### The entity set is maintained incrementally, never scanned
+
+This is the single most important cost decision in the recorder, and it is the one an
+obvious implementation gets wrong. Finding commons, the witch and the rock with
+`FindEntityByClassname` walks the entity table once per classname per frame. At three
+classnames and 10Hz that is tens of thousands of entity slots a second on a box whose
+recorded p99 is already 11.25ms against a 10ms budget at 100 tick.
+
+Instead the plugin tracks the set in `OnEntityCreated` and `OnEntityDestroyed` and holds
+entity *references*, not indices, so a recycled index cannot alias onto a dead entity.
+The per-frame cost becomes walking about 30 tracked references. Creation and destruction
+are events the engine already raises, so the work moves off the sampling path entirely.
+
+### One write call per frame, and no flush
+
+The frame is packed into a byte array in Pawn and written with a single `WriteFile` call
+at `size = 1`. The alternative, a `WriteFileCell` per field, is roughly 190 native calls
+per frame. Packing is a few hundred shifts, which is far cheaper than the call overhead
+it replaces.
+
+`FlushFile` is never called. The page cache serves a tailing reader on the same box
+without it, and a 10Hz flush is the most direct way to turn an estimated cost into a
+measured stall.
+
+### No REPLAY datagram; replays are discovered by filename
+
+Supersedes the `REPLAY` line in the data flow above. `match_replays` rows are built by
+listing `replayDir` for `pug_<token>_<ordinal>_<half>.rpl`, exactly as
+`discoverMatchDemos` already does for demos, with `frames` and `sample_hz` read out of
+the file header rather than taken on trust from a datagram.
+
+The filename already carries the match link by construction, which is the whole reason
+the demo naming convention exists. Discovery by listing therefore costs nothing and
+removes a lossy dependency: a dropped datagram would otherwise leave a real file
+permanently unindexed.
+
+The consequence worth stating plainly is that **6b introduces no new UDP line type**. It
+is a plugin that writes files and a backend that reads them. Nothing it does touches the
+datagram path that carries match results and ratings.
+
+### Live tailing ships, the WebSocket does not
+
+The reader and the "hold every frame until `now - delay`" logic are built and tested here
+as pure functions over parsed frames. Wiring them to a socket waits for piece 3.
+
+The delay is the anti-ghosting control, not a buffering convenience, so it should be
+proven against the viewer that will actually expose it rather than against a throwaway
+debug client. Deferring the socket moves plumbing, not judgement: nothing built in 6b is
+discarded when the viewer arrives.
+
+### Retention machinery lands here; the admin panel still waits for 6c
+
+A free-space floor in the recorder and a daily prune driven by the `settings` table ship
+in 6b. The dry-run preview, orphan classification and the admin UI stay in 6c.
+
+This splits the spec's "the admin panel ships with this piece" along the line that
+actually matters. The floor and the prune are what stop a second disk incident, and 6b
+is the piece that starts writing 10 to 15 MB a match. The panel makes that visible and
+manual, which is valuable but not load bearing, and it is the larger half of the work.
 
 ## Error handling
 
@@ -516,7 +605,9 @@ through 4, and this spec exists to serve them.
 
 - Player page organizes by survivor versus infected, not by campaign or stat family
 - Goal is finding games that went badly and diagnosing why, not pure record-keeping
-- Sample carries full player state; world entities deferred, format left extensible
+- Sample carries full player state. World entities were deferred here and then
+  reinstated the same day on evidence; see "Reinstated 2026-09-11" above, which is the
+  live decision. This bullet is kept only as the record of what it reversed
 - Storage is files on disk plus a DB index row, 90 day retention
 - Per-round stat snapshots are unnecessary given the side partition in `statKeys.ts`
 - Tank control passes in this ruleset, so it is worth capturing, but it passes THROUGH
@@ -545,6 +636,5 @@ Nothing blocking. Both remaining questions were resolved 2026-09-11 and moved ab
 
 Revisit later, not now:
 
-- Whether world entities are worth adding at a reduced sample rate (see Deferred)
 - Whether live replay visibility needs tightening. It ships visible to everyone; the
   server-side delay is what makes that safe, so the delay is not optional
