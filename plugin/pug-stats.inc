@@ -40,7 +40,8 @@ enum PugStat
 	PS_TongueCuts, PS_SelfClears, PS_RockSkeets, PS_Clears, PS_InstaClears,
 	PS_DpsLanded, PS_PounceDamageHigh, PS_BilesLanded, PS_SurvivorsBiled,
 	PS_TankRocksLanded, PS_TimesSkeeted, PS_TimesDeadstopped,
-	PS_TankDamage, PS_DamageAsSi, PS_TankPunches,
+	PS_TankDamage, PS_DamageAsSi, PS_TankPunches, PS_BoomerSpawns,
+	PS_BoomSuccesses, PS_BoomedVomit, PS_BoomedProxy,
 	PS_MAX
 };
 
@@ -54,15 +55,18 @@ static const char g_sStatKey[PS_MAX][24] = {
 	"tongue_cuts", "self_clears", "rock_skeets", "clears", "insta_clears",
 	"dps_landed", "pounce_damage_high", "biles_landed", "survivors_biled",
 	"tank_rocks_landed", "times_skeeted", "times_deadstopped",
-	"tank_damage", "damage_as_si", "tank_punches"
+	"tank_damage", "damage_as_si", "tank_punches", "boomer_spawns",
+	"boom_successes", "boomed_vomit", "boomed_proxy"
 };
 
 /** True for stats that come from skill_detect and must be omitted (not zeroed)
- *  from the dump when it was not loaded. The last three are captured by
+ *  from the dump when it was not loaded. The last four are captured by
  *  pug-match's own hooks and are always available. */
 static bool StatNeedsSkillDetect(PugStat s)
 {
-	return s != PS_TankDamage && s != PS_DamageAsSi && s != PS_TankPunches;
+	return s != PS_TankDamage && s != PS_DamageAsSi && s != PS_TankPunches
+		&& s != PS_BoomerSpawns && s != PS_BoomSuccesses
+		&& s != PS_BoomedVomit && s != PS_BoomedProxy;
 }
 
 int g_iSkill[MAX_ROSTER][PS_MAX];
@@ -201,6 +205,11 @@ public void OnTankRockEaten(int tank, int survivor)
 
 public void OnHunterHighPounce(int hunter, int victim, int actualDamage, float calculatedDamage, float height, bool bReportedHigh)
 {
+	// One feed entry per pounce, carrying who and how much, because a summed
+	// total cannot tell you whether that was one big DP or six small ones.
+	// Gated the same way AddStat is, via StatsActive inside EmitEvent's
+	// MS_Live check plus the roster lookup.
+	if (bReportedHigh && StatsActive()) EmitEvent("dp", hunter, victim, actualDamage);
 	if (bReportedHigh) AddStat(hunter, PS_DpsLanded);
 	AddStat(hunter, PS_PounceDamageHigh, actualDamage);
 }

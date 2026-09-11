@@ -218,3 +218,59 @@ Capture these three and it will almost always be diagnosable:
 2. The `grep pug` debug log around that time.
 3. What the in-game scoreboard actually said, so the plugin's numbers can be
    compared against ground truth.
+
+---
+
+## Live test: `!load_4v4p` (the in-game entry point)
+
+Added 2026-09-11. Everything below the plugin's own roster snapshot has already
+been verified end to end against the live backend using synthetic datagrams:
+match adoption, player auto-creation, team assignment, server status, and the
+`sm_pug_setid` rcon leg. **What has NOT been tested is the part that needs a
+human in the server**, because the roster snapshot reads real connected
+clients and bots are excluded by `IsFakeClient`.
+
+### Prerequisites (all already true on the box as of 2026-09-11)
+
+- `pug-match.smx` staged and loaded (`./stage.sh --solo`)
+- `logaddress_add 127.0.0.1:27500` active (`logaddress_list` to confirm; also
+  persisted in `deploy/overrides/left4dead/cfg/local.cfg`)
+- `pug-web.service` running, `servers` row host = `45.32.199.85`
+- `rotoblin_pug_4v4.cfg`, `rotoblin_pug_4v4_map.cfg`, `pug_match.cfg` on the box
+
+### Runbook
+
+1. Join the server. Get on survivors or infected, not spectator.
+2. `!load_4v4p` in chat. Expect a chat line "Match starting: N players. Ready
+   up." and the server to restart the map into the PUG config with the
+   "4v4 PUG" league notice.
+3. `sm_pug_status` over rcon. Expect `state=pending`, `selfStarted=1`,
+   `enforceRoster=0`, a 32-hex token, and a roster slot per player.
+4. **The match id is the thing to watch.** Within a second or two the backend
+   should adopt the match and rcon `sm_pug_setid` back. Re-run `sm_pug_status`:
+   `match=` must be non-zero. If it stays 0, the adopt path failed and the
+   dump will later be rejected for a match-id mismatch. Check
+   `journalctl -u pug-web -f` for `[selfStarted]`.
+5. Confirm the row: `sqlite3 /home/pug/app/data/pug.db "SELECT * FROM matches"`.
+   State `live`, campaign derived from the map, `server_id` set.
+6. Ready up and play. Scores, attribution and `MATCH_END` follow the existing
+   backend-driven path, already verified 2026-09-06.
+7. After the finale loads, the backend pulls `sm_pug_dump` automatically and
+   completes the match. It should then appear at
+   `https://riversidepug.com/matches`.
+
+### Demo check (upstream issue #49)
+
+Each map records `pug_<token>_<ordinal>_<map>.dem` in `left4dead/`. After a
+multi-map match, pull **demo #3, not demo #1**, and play it back. Upstream
+sourcetvsupport #49 reports that on L4D1 only the first demo per server restart
+is reliably good. If #3 is corrupt, the fallback is one continuous demo for the
+whole match instead of one per map.
+
+### Things that will look wrong but are not
+
+- **Spectators are not kicked.** Deliberate for self-started matches; they are
+  simply unscored. `enforceRoster=0` in status confirms it.
+- **`sm_pug_min_orient` is currently 1** from `stage.sh --solo`. `pug_match.cfg`
+  sets it back to 3 on exec, so `!load_4v4p` self-heals this. Check status
+  after loading if you care.

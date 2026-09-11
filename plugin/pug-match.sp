@@ -15,6 +15,7 @@
 #define TEAM_SPEC 1
 #define TEAM_SURVIVOR 2
 #define TEAM_INFECTED 3
+#define ZC_BOOMER 2
 #define ZC_TANK 5
 #define LOCK_ATTEMPT_CAP 6
 
@@ -35,6 +36,28 @@ char g_sCampaign[64];
 char g_sRosterId[MAX_ROSTER][32];
 int g_iRosterTeam[MAX_ROSTER];          // 1 = a, 2 = b
 int g_iRosterCount;
+
+// In-game names, captured at roster time. Only populated for self-started
+// matches (!load_4v4p): the backend needs a display name for SteamID64s the
+// site has never seen, and taking it from the game avoids depending on a Steam
+// Web API key. Backend-driven matches leave these empty; the site already knows
+// those players.
+char g_sRosterName[MAX_ROSTER][64];
+
+/** True when this match was started in-game by !load_4v4p rather than by the
+ *  backend over rcon. Two behavioural differences, both deliberate:
+ *    - the match id is 0 until the backend assigns one via sm_pug_setid
+ *    - OnClientPostAdminCheck does NOT kick non-rostered players
+ *  The kick exists to enforce a backend-issued roster for a real ranked PUG.
+ *  A match started from inside a running game has no such authority, and
+ *  kicking a friend who happened to be spectating would be a nasty surprise. */
+bool g_bSelfStarted;
+
+/** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
+ *  the same datagram twice, and an event feed that double-counts a deadly
+ *  pounce is worse than no feed, so the backend keys on (match, seq) and an
+ *  arriving duplicate is simply an upsert over itself. */
+int g_iEventSeq;
 
 // Per-player stats (parallel to roster slots). These survive reconnects and map changes.
 int g_iStatSiDmg[MAX_ROSTER];
@@ -70,6 +93,17 @@ int g_iLastHealth[MAXPLAYERS + 1];       // for SI overkill remainder
 
 bool g_bReadyUpAvailable;
 
+/** Boomer attribution, mirroring l4dcompstats.sp so the numbers on the site
+ *  match the ones already printed in console and nobody has to reconcile two
+ *  slightly different definitions of "boomer success".
+ *
+ *  g_iBoomerClient is the HUMAN who spawned the current boomer, kept even if
+ *  that boomer later goes AI, because the boom is their doing. g_bHasBoomLanded
+ *  makes a success once-per-life rather than once-per-survivor, which is what
+ *  makes successes/attempts a meaningful ratio. */
+int g_iBoomerClient;
+bool g_bHasBoomLanded;
+
 // Included here, after MAX_ROSTER and the roster globals above are declared:
 // pug-stats.inc consumes them directly (array sizes and global-variable
 // references are resolved by textual/declaration order, unlike function
@@ -80,6 +114,8 @@ bool g_bReadyUpAvailable;
 // can be exercised on a test instance without eight people in the server.
 ConVar g_cvMinOrient;                    // rostered players needed to move the orientation mapping
 ConVar g_cvDebug;                        // 1 = verbose state logging to the SourceMod log
+ConVar g_cvPugConfig;                    // config !load_4v4p execs
+ConVar g_cvRecordDemos;                  // 1 = record a named demo per map during a match
 
 public Plugin myinfo =
 {
@@ -97,6 +133,14 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token>");
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
+	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
+
+	// The in-game entry point. RegAdminCmd, not RegServerCmd: this one is meant
+	// to be typed as !load_4v4p in chat, which server commands cannot be.
+	RegAdminCmd("sm_load_4v4p", Cmd_LoadPug, ADMFLAG_CHANGEMAP,
+		"Start a PUG match from in-game: snapshot whoever is connected, load the pug ruleset, record a demo.");
+	RegAdminCmd("sm_endpug", Cmd_EndPug, ADMFLAG_CHANGEMAP,
+		"End the running match now and report it, without playing the finale.");
 
 	g_cvMinOrient = CreateConVar("sm_pug_min_orient", "3",
 		"Rostered players that must agree before the pug-team<->side mapping moves. \
@@ -104,6 +148,14 @@ Production value is 3. Set to 1 on a test instance to drive a match solo.",
 		FCVAR_NOTIFY, true, 1.0, true, 8.0);
 	g_cvDebug = CreateConVar("sm_pug_debug", "0",
 		"1 = log orientation flips, team-lock moves, score reads and state changes to the SourceMod log.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvPugConfig = CreateConVar("sm_pug_config", "pug_match.cfg",
+		"Config !load_4v4p execs. pug_match.cfg is the full ranked setup: it execs the pinned \
+ruleset (rotoblin_pug_4v4.cfg), loads skill_detect as a data source, and restores the production \
+orientation threshold. Changing this changes the rules under every rating earned from here on.",
+		FCVAR_NOTIFY);
+	g_cvRecordDemos = CreateConVar("sm_pug_record_demos", "1",
+		"1 = stop autorecord and record a named pug_<token>_<ordinal>_<map> demo for each map of a match.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 
 	HookEvent("round_start", Event_RoundStart);
@@ -113,10 +165,16 @@ Production value is 3. Set to 1 on a test instance to drive a match solo.",
 	HookEvent("infected_death", Event_InfectedDeath);
 	HookEvent("revive_success", Event_ReviveSuccess);
 	HookEvent("player_spawn", Event_PlayerSpawn);
+	HookEvent("player_now_it", Event_PlayerBoomed);
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
 	CreateTimer(2.0, Timer_TeamLock, _, TIMER_REPEAT);
+	// Faster than the heartbeat on purpose: the heartbeat is a liveness signal
+	// whose 30s period defines the backend's staleness window, while this is a
+	// spectator refresh where 30s feels dead. Separate timers so neither
+	// constrains the other.
+	CreateTimer(10.0, Timer_LiveStats, _, TIMER_REPEAT);
 
 	g_bReadyUpAvailable = LibraryExists("readyup");
 	for (int i = 0; i <= MAXPLAYERS; i++) g_iClientRoster[i] = -1;
@@ -148,9 +206,35 @@ bool InReadyUp()
 void EmitPug(const char[] fmt, any ...)
 {
 	if (g_State == MS_None) return;
-	char body[480];
+	// 768, not 480: the LIVESTAT line carries ~20 keys and grew past the old
+	// buffer's comfort margin. Truncation here is SILENT and would drop
+	// trailing stats, which is the same failure WriteSkillLines was bitten by.
+	char body[768];
 	VFormat(body, sizeof(body), fmt, 2);
 	LogToGame("PUG %s %s", g_sToken, body);
+}
+
+/** One discrete thing that happened, for the live feed.
+ *
+ *  Deliberately generic (kind/actor/target/value) rather than a line type per
+ *  event: the backend stores it opaquely and the page renders by kind, so
+ *  adding another kind later is a plugin-only change. Cosmetic like the rest
+ *  of the UDP stream; the authoritative per-player totals still come from the
+ *  dump. target may be 0 for events with no second party. */
+void EmitEvent(const char[] kind, int actor, int target, int value)
+{
+	if (g_State != MS_Live) return;
+	if (actor < 1 || actor > MaxClients || g_iClientRoster[actor] == -1) return;
+
+	char actorId[32], targetId[32];
+	strcopy(actorId, sizeof(actorId), g_sRosterId[g_iClientRoster[actor]]);
+	targetId[0] = '\0';
+	if (target >= 1 && target <= MaxClients && g_iClientRoster[target] != -1)
+		strcopy(targetId, sizeof(targetId), g_sRosterId[g_iClientRoster[target]]);
+
+	g_iEventSeq++;
+	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d",
+		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value);
 }
 
 /** Verbose diagnostic, off by default. Goes to the SourceMod log rather than
@@ -243,9 +327,225 @@ public Action Cmd_Roster(int args)
 	return Plugin_Handled;
 }
 
+// ---------- in-game entry point ----------
+
+/** !load_4v4p: start a match from inside the game.
+ *
+ *  The backend cannot do this for us. comp_loader's sm_match/sm_load bail on
+ *  `client == 0` so they are unreachable from rcon, and a match started from
+ *  the website needs eight people who have already signed up there. This is the
+ *  path for "we are all here already, let's play a ranked one".
+ *
+ *  Teams come from where people are standing right now: survivors become pug
+ *  team a, infected become pug team b, which matches the backend's convention
+ *  that team a starts as survivors on map 1. */
+public Action Cmd_LoadPug(int client, int args)
+{
+	if (g_State != MS_None)
+	{
+		ReplyToCommand(client, "[PUG] A match is already configured (state %s). Run sm_pug_abort first.",
+			StateName(g_State));
+		return Plugin_Handled;
+	}
+
+	// Count before touching any state, so an over-full server fails cleanly
+	// rather than half-rostering and then bailing.
+	int onTeams = 0, spectating = 0;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
+		int team = GetClientTeam(i);
+		if (team == TEAM_SURVIVOR || team == TEAM_INFECTED) onTeams++;
+		else spectating++;
+	}
+	if (onTeams == 0)
+	{
+		ReplyToCommand(client, "[PUG] Nobody is on a team. Join survivors or infected first.");
+		return Plugin_Handled;
+	}
+	if (onTeams > MAX_ROSTER)
+	{
+		ReplyToCommand(client, "[PUG] %d players on teams, max is %d. Move the extras to spectator.",
+			onTeams, MAX_ROSTER);
+		return Plugin_Handled;
+	}
+
+	ResetMatchState();
+	g_bSelfStarted = true;
+	g_iMatchId = 0;                  // the backend owns match ids; assigned later via sm_pug_setid
+	GenerateToken(g_sToken, sizeof(g_sToken));
+	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+	// The backend derives the campaign from the map name; the plugin has no
+	// campaign table and does not need one.
+	strcopy(g_sCampaign, sizeof(g_sCampaign), g_sCurrentMap);
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
+		int team = GetClientTeam(i);
+		if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) continue;
+		char id[32];
+		if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id)))
+		{
+			// No kick here: an unauthenticated client just goes unscored.
+			PugDebug("load: could not auth %N, leaving unrostered", i);
+			continue;
+		}
+		int slot = g_iRosterCount++;
+		strcopy(g_sRosterId[slot], 32, id);
+		g_iRosterTeam[slot] = (team == TEAM_SURVIVOR) ? 1 : 2;
+		SanitizeName(i, g_sRosterName[slot], 64);
+		g_iClientRoster[i] = slot;
+	}
+
+	g_State = MS_Pending;
+	g_iPugSide[1] = TEAM_SURVIVOR;
+	g_iPugSide[2] = TEAM_INFECTED;
+
+	// Announce before the exec: the config ends in sm_restartmap, so clients are
+	// about to cycle. The backend needs the roster in hand before that happens.
+	EmitPug("MATCH_CREATE map=%s players=%d", g_sCurrentMap, g_iRosterCount);
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		// name= is deliberately LAST on the line: in-game names contain spaces,
+		// so the backend parser takes the entire remainder as the name.
+		EmitPug("MATCH_ROSTER steamid=%s team=%s name=%s",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_sRosterName[i]);
+	}
+	EmitPug("MATCH_CREATE_END players=%d", g_iRosterCount);
+
+	StartMatchDemo();
+
+	char cfg[64];
+	g_cvPugConfig.GetString(cfg, sizeof(cfg));
+	PugDebug("self-started match token=%s roster=%d cfg=%s", g_sToken, g_iRosterCount, cfg);
+	ServerCommand("exec %s", cfg);
+
+	PrintToChatAll("[PUG] Match starting: %d players. Ready up.", g_iRosterCount);
+	if (spectating > 0)
+	{
+		ReplyToCommand(client, "[PUG] %d spectator(s) were not rostered and will not be scored.", spectating);
+	}
+	return Plugin_Handled;
+}
+
+/** !endpug: finish the match here, without loading the finale.
+ *
+ *  The normal trigger is OnMapStart seeing the finale map load, because a
+ *  match is defined as a campaign minus its finale. But in practice nobody
+ *  plays the finale: people finish the last normal map and change level, and
+ *  that path fires nothing at all, leaving the match live until the backend
+ *  reaps it as orphaned ten minutes later with no result recorded.
+ *
+ *  Mirrors the finale branch exactly, including the pending-finalize failsafe,
+ *  so a match ended this way is indistinguishable from one that ran into the
+ *  finale. */
+public Action Cmd_EndPug(int client, int args)
+{
+	if (g_State != MS_Live)
+	{
+		ReplyToCommand(client, "[PUG] No live match to end (state %s).", StateName(g_State));
+		return Plugin_Handled;
+	}
+
+	// Same failsafe as OnMapStart: a 2nd-half round_end may have set this and
+	// the delayed score read may still be in flight. Finalize first so the map
+	// being played cannot vanish from the totals.
+	if (g_bPendingFinalize) FinalizeMap();
+
+	g_State = MS_Ended;
+	int a, b;
+	TotalScores(a, b);
+	char winner[8];
+	WinnerOf(a, b, winner, sizeof(winner));
+	EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
+	PugDebug("ended by !endpug: a=%d b=%d winner=%s", a, b, winner);
+	PrintToChatAll("[PUG] Match ended: %d - %d. Reporting to the site.", a, b);
+	return Plugin_Handled;
+}
+
+/** Backend hands back the match id it allocated for a self-started match.
+ *  Keyed by token, because the id is precisely what the plugin does not know
+ *  yet and so cannot be asked for. */
+public Action Cmd_SetId(int args)
+{
+	if (args < 2)
+	{
+		PrintToServer("PUGERR usage: sm_pug_setid <token> <matchid>");
+		return Plugin_Handled;
+	}
+	char tok[65];
+	GetCmdArg(1, tok, sizeof(tok));
+	if (g_State == MS_None || !StrEqual(tok, g_sToken))
+	{
+		PrintToServer("PUGERR bad token");
+		return Plugin_Handled;
+	}
+	char buf[32];
+	GetCmdArg(2, buf, sizeof(buf));
+	int id = StringToInt(buf);
+	if (id <= 0)
+	{
+		PrintToServer("PUGERR bad matchid");
+		return Plugin_Handled;
+	}
+	g_iMatchId = id;
+	PrintToServer("PUGOK match=%d", g_iMatchId);
+	return Plugin_Handled;
+}
+
+/** 32 lowercase hex chars. The length is NOT arbitrary: the backend's parser
+ *  pins tokens to /^[0-9a-f]{32}$/ (src/logParse.ts), so a shorter token would
+ *  make every line we emit silently unparseable. Unguessability is secondary
+ *  here, since the backend also pins the source address. */
+void GenerateToken(char[] out, int maxlen)
+{
+	char hex[17] = "0123456789abcdef";
+	int n = 32;
+	if (n > maxlen - 1) n = maxlen - 1;
+	for (int i = 0; i < n; i++) out[i] = hex[GetRandomInt(0, 15)];
+	out[n] = '\0';
+}
+
+/** In-game name, with anything that would corrupt a log line removed. Names are
+ *  emitted last on their line so spaces are safe, but control characters are
+ *  not, and an over-long name would push the line past the LogToGame buffer. */
+void SanitizeName(int client, char[] out, int maxlen)
+{
+	char raw[128];
+	if (!GetClientName(client, raw, sizeof(raw)))
+	{
+		strcopy(out, maxlen, "unknown");
+		return;
+	}
+	int w = 0;
+	for (int i = 0; raw[i] != '\0' && w < maxlen - 1; i++)
+	{
+		if (raw[i] >= 32 && raw[i] != 127) out[w++] = raw[i];
+	}
+	out[w] = '\0';
+	if (w == 0) strcopy(out, maxlen, "unknown");
+}
+
+/** Record this map of the match to a demo named after the match.
+ *
+ *  tv_autorecord almost certainly already has a file open for this map, and a
+ *  second tv_record would simply be refused, so stop first. tv_stoprecord is
+ *  harmless when nothing is recording. The resulting pug_* name is what links
+ *  the demo to its match, rather than guessing from timestamps, and is also
+ *  what the prune cron keys on to retain match demos longer than autorecords. */
+void StartMatchDemo()
+{
+	if (!g_cvRecordDemos.BoolValue || g_State == MS_None) return;
+	ServerCommand("tv_stoprecord");
+	ServerCommand("tv_record pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
+	PugDebug("demo: pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
+}
+
 public Action Cmd_Abort(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
+	if (g_cvRecordDemos.BoolValue && g_State != MS_None) ServerCommand("tv_stoprecord");
 	ResetMatchState();
 	PrintToServer("PUGOK aborted");
 	return Plugin_Handled;
@@ -277,6 +577,8 @@ public Action Cmd_Status(int args)
 		g_iRound1Logical, g_iRound1SurvPug, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
 	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
+	DumpLine("STATUS selfStarted=%d enforceRoster=%d recordDemos=%d",
+		g_bSelfStarted ? 1 : 0, g_bSelfStarted ? 0 : 1, g_cvRecordDemos.BoolValue ? 1 : 0);
 
 	int straight, inverted;
 	OrientationVote(straight, inverted);
@@ -373,6 +675,10 @@ void ResetMatchState()
 	g_sToken[0] = '\0';
 	g_sCampaign[0] = '\0';
 	g_iRosterCount = 0;
+	g_bSelfStarted = false;
+	g_iEventSeq = 0;
+	g_iBoomerClient = 0;
+	g_bHasBoomLanded = false;
 	g_iMapCount = 0;
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
@@ -386,6 +692,7 @@ void ResetMatchState()
 	for (int i = 0; i < MAX_ROSTER; i++)
 	{
 		g_sRosterId[i][0] = '\0';
+		g_sRosterName[i][0] = '\0';
 		g_iRosterTeam[i] = 0;
 		g_iStatSiDmg[i] = 0;
 		g_iStatSiKill[i] = 0;
@@ -404,6 +711,72 @@ void ResetMatchState()
 public Action Timer_Heartbeat(Handle timer)
 {
 	if (g_State != MS_None) EmitPug("HEARTBEAT");
+	return Plugin_Continue;
+}
+
+/** Per-player counters for the spectator view, emitted while a match is live.
+ *
+ *  Cosmetic ONLY. These ride the lossy UDP feed and are never read back when a
+ *  result is computed: the authoritative numbers are the identical counters
+ *  pulled over rcon by sm_pug_dump at the end. A dropped datagram therefore
+ *  costs a stale web page for a few seconds and nothing else.
+ *
+ *  A curated subset, not the whole 26-key skill array. EmitPug's buffer is 480
+ *  and LogToGame has its own ceiling, so dumping every key here would risk
+ *  silent truncation of the kind that already bit WriteSkillLines (see the
+ *  1024-byte note in pug-stats.inc). The full set still goes out in the dump. */
+public Action Timer_LiveStats(Handle timer)
+{
+	if (g_State != MS_Live) return Plugin_Continue;
+
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		int client = ClientOfSlot(i);
+		// hp is live entity state rather than a counter, so it is read at emit
+		// time. -1 means "not applicable": disconnected, or not a survivor.
+		int hp = -1;
+		if (client != -1 && GetClientTeam(client) == TEAM_SURVIVOR)
+			hp = IsPlayerAlive(client) ? GetClientHealth(client) : 0;
+
+		char line[768];
+		Format(line, sizeof(line),
+			"LIVESTAT steamid=%s hp=%d ck=%d sidmg=%d sikill=%d ff=%d rev=%d",
+			g_sRosterId[i], hp,
+			g_iStatCk[i], g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatFf[i], g_iStatRev[i]);
+
+		// tank_damage / damage_as_si / tank_punches / boomer_spawns ride
+		// pug-match's own hooks,
+		// so they are present whether or not skill_detect is loaded. The rest
+		// are omitted entirely when it is absent, so "not measured" never
+		// reaches the page as a zero.
+		Format(line, sizeof(line), "%s tank_damage=%d damage_as_si=%d tank_punches=%d boomer_spawns=%d \
+boom_successes=%d boomed_vomit=%d boomed_proxy=%d",
+			line, g_iSkill[i][PS_TankDamage], g_iSkill[i][PS_DamageAsSi], g_iSkill[i][PS_TankPunches],
+			g_iSkill[i][PS_BoomerSpawns], g_iSkill[i][PS_BoomSuccesses],
+			g_iSkill[i][PS_BoomedVomit], g_iSkill[i][PS_BoomedProxy]);
+
+		if (g_bSkillDetect)
+		{
+			// PS_Skeets is already the solo-skeet total: CountSkeet credits it
+			// alongside the weapon-specific key, so summing the weapon columns
+			// here would double count.
+			// deadstops and tongue_cuts are deliberately NOT sent live: they do
+			// not occur in L4D1 play here, so they were fifteen columns of
+			// permanent zeros. They are still captured and still go out in the
+			// full dump, in case that ever changes.
+			Format(line, sizeof(line),
+				"%s skeets=%d team_skeets=%d skeets_hurt=%d skeet_assists=%d boomer_pops=%d crowns=%d \
+rock_skeets=%d dps_landed=%d biles_landed=%d survivors_biled=%d",
+				line, g_iSkill[i][PS_Skeets], g_iSkill[i][PS_TeamSkeets], g_iSkill[i][PS_SkeetsHurt],
+				g_iSkill[i][PS_SkeetAssists], g_iSkill[i][PS_BoomerPops], g_iSkill[i][PS_Crowns],
+				g_iSkill[i][PS_RockSkeets], g_iSkill[i][PS_DpsLanded],
+				g_iSkill[i][PS_BilesLanded], g_iSkill[i][PS_SurvivorsBiled]);
+		}
+
+		// Never pass a runtime-built string as a format (same reason as
+		// WriteSkillLines): a '%' in it would be read as a conversion.
+		EmitPug("%s", line);
+	}
 	return Plugin_Continue;
 }
 
@@ -432,6 +805,12 @@ public void OnClientPostAdminCheck(int client)
 	int slot = RosterIndexOfId(id);
 	if (slot == -1)
 	{
+		// Roster enforcement only applies to a backend-issued roster. A match
+		// started in-game with !load_4v4p has no authority to kick anyone, and
+		// the config's sm_restartmap cycles every client through here moments
+		// after the snapshot, so kicking would eject the spectators who were
+		// simply not on a team at snapshot time. They stay, unscored.
+		if (g_bSelfStarted) return;
 		KickClient(client, "You are not on this match's roster");
 		return;
 	}
@@ -572,6 +951,12 @@ public void OnMapStart()
 	g_iRound1SurvPug = 0;
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
+
+	// New map of a running match: autorecord has just opened its own file for
+	// this map, so replace it with a match-named one. Ordinal is g_iMapCount,
+	// which FinalizeMap has already advanced for every completed map, so the
+	// demo ordinal lines up with the map ordinal in the dump.
+	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
 
 	if (g_State == MS_Live && L4D_IsMissionFinalMap(true))
 	{
@@ -928,6 +1313,41 @@ public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 	{
 		g_iLastHealth[client] = GetClientHealth(client);
 	}
+
+	// Boomer bookkeeping, mirroring l4dcompstats.sp's Event_PlayerSpawn.
+	// An AI boomer spawning while g_iBoomerClient is set means a human's
+	// boomer went AI, and the human keeps the credit, so the pointer is only
+	// reassigned for a human spawn (or when nothing is tracked yet).
+	if (IsInfectedClient(client)
+		&& GetEntProp(client, Prop_Send, "m_zombieClass") == ZC_BOOMER)
+	{
+		if (!IsFakeClient(client) || !g_iBoomerClient)
+		{
+			g_bHasBoomLanded = false;
+			g_iBoomerClient = client;
+		}
+		// Denominator for the success rate: every boomer life a human played,
+		// including the ones that died to a shot at range having landed
+		// nothing. Deriving this from pops instead would miss those.
+		if (!IsFakeClient(client) && StatsActive()) AddStat(client, PS_BoomerSpawns);
+	}
+}
+
+/** player_now_it: a survivor just became "it". Fires once per survivor caught,
+ *  so the per-life success is latched while the per-survivor counters are not.
+ *  `exploded` distinguishes the death explosion (proxy) from a direct vomit. */
+public void Event_PlayerBoomed(Event event, const char[] name, bool dontBroadcast)
+{
+	// Only when the plugin was loaded mid-map with a boomer already alive.
+	if (!g_iBoomerClient) g_iBoomerClient = GetClientOfUserId(event.GetInt("attacker"));
+	if (g_iBoomerClient < 1 || g_iBoomerClient > MaxClients) return;
+
+	if (!g_bHasBoomLanded)
+	{
+		AddStat(g_iBoomerClient, PS_BoomSuccesses);
+		g_bHasBoomLanded = true;
+	}
+	AddStat(g_iBoomerClient, event.GetBool("exploded") ? PS_BoomedProxy : PS_BoomedVomit);
 }
 
 /** Authoritative match record over the RCON response body. Idempotent:
