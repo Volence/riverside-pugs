@@ -234,6 +234,30 @@ int RoundMs()
 	return RoundToNearest((GetGameTime() - g_fRoundLiveAt) * 1000.0);
 }
 
+/** Close out a half: emit ROUND_END (if a side was resolved) and mark the
+ *  half no longer live. This is the single exit point for all three
+ *  terminal paths of Event_RoundEnd's score read: the synchronous success,
+ *  the delayed retry's success, and the retries-exhausted branch. Missing
+ *  any one of the three used to leave that half without its authoritative
+ *  surv/score/ended_at AND leave g_fRoundLiveAt stuck, which corrupts
+ *  RoundMs() for every event of the NEXT half.
+ *
+ *  `surv` may be empty when the orientation mapping never settled; the
+ *  parser only accepts surv=a or surv=b, so an empty side is skipped rather
+ *  than emitted malformed. `half` and `surv` must be values CAPTURED at
+ *  round_end time, not read fresh from g_iHalf/g_iPugSide here: this is
+ *  called from a timer up to 6-8s after the round ended, and by then
+ *  FinalizeMap may have reset g_iHalf to 0 for the next half, or the team
+ *  lock timer may have flipped g_iPugSide. */
+void EmitRoundEnd(int half, const char[] surv, int score)
+{
+	if (surv[0] != '\0')
+	{
+		EmitPug("ROUND_END half=%d surv=%s score=%d", half, surv, score);
+	}
+	g_fRoundLiveAt = 0.0;
+}
+
 /** One discrete thing that happened, for the live feed and the timeline.
  *
  *  Deliberately generic (kind/actor/target/value) rather than a line type per
@@ -1063,21 +1087,22 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	int survPug = ObserveSurvivorPugTeam();
 	if (second) g_bPendingFinalize = true;
 
+	// Captured now, not re-derived in the timer: g_iHalf can be reset to 0 by
+	// FinalizeMap and g_iPugSide can be flipped by the team lock timer before
+	// Timer_ReadScore's retry chain (2-8s out) ever fires. See EmitRoundEnd.
+	int half = g_iHalf;
+	char survEnd[2];
+	SurvPugTeam(survEnd, sizeof(survEnd));
+
 	int score = TryReadRoundScore(second);
 	if (score >= 0)
 	{
 		AttributeScore(survPug, score, second);
 
-		char survEnd[2];
-		SurvPugTeam(survEnd, sizeof(survEnd));
-		if (survEnd[0] != '\0')
-		{
-			// The survivor team's own score for this half. g_iHalfScoreA/B are
-			// already the per-half accumulators.
-			int mine = StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB;
-			EmitPug("ROUND_END half=%d surv=%s score=%d", g_iHalf, survEnd, mine);
-		}
-		g_fRoundLiveAt = 0.0;
+		// The survivor team's own score for this half. g_iHalfScoreA/B are
+		// already the per-half accumulators.
+		int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
+		EmitRoundEnd(half, survEnd, mine);
 
 		if (second) FinalizeMap();
 		return;
@@ -1088,6 +1113,8 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	pack.WriteCell(second ? 1 : 0);
 	pack.WriteCell(survPug);
 	pack.WriteCell(0); // retry counter
+	pack.WriteCell(half);
+	pack.WriteString(survEnd);
 }
 
 /** One read attempt of the current half's survivor round score. Returns the
@@ -1177,6 +1204,9 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	bool second = pack.ReadCell() != 0;
 	int survPug = pack.ReadCell();
 	int attempt = pack.ReadCell();
+	int half = pack.ReadCell();
+	char survEnd[2];
+	pack.ReadString(survEnd, sizeof(survEnd));
 	if (g_State != MS_Live) return Plugin_Stop;
 
 	int score = TryReadRoundScore(second);
@@ -1189,6 +1219,8 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			retry.WriteCell(second ? 1 : 0);
 			retry.WriteCell(survPug);
 			retry.WriteCell(attempt + 1);
+			retry.WriteCell(half);
+			retry.WriteString(survEnd);
 		}
 		else
 		{
@@ -1198,12 +1230,20 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// runs at all. g_bPendingFinalize is still set in that case, so the
 			// OnMapStart failsafe finalizes with whatever was accumulated,
 			// guaranteeing the map is recorded either way.
+			//
+			// Emit ROUND_END anyway with whatever score accumulated before the
+			// reads gave up: a round with a wrong score is still recoverable,
+			// a round with no side recorded at all is not.
+			int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
+			EmitRoundEnd(half, survEnd, mine);
 			if (second) FinalizeMap();
 		}
 		return Plugin_Stop;
 	}
 
 	AttributeScore(survPug, score, second);
+	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
+	EmitRoundEnd(half, survEnd, mine);
 	if (second) FinalizeMap();
 	return Plugin_Stop;
 }
