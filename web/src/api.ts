@@ -154,6 +154,16 @@ export interface MatchDetail {
   /** Metadata is public; downloading the bytes needs a session. Absent or
    *  empty when the server has no demo directory configured. */
   demos?: MatchDemo[];
+  /** The stat registry, served with the match so the page reads direction and
+   *  labels from one authoritative source rather than a browser-side copy. */
+  statDefs: StatDef[];
+  /** Per-round side attribution. An empty array means this match predates
+   *  round capture, which is NOT the same as a match that had no rounds. */
+  rounds: {
+    ordinal: number; half: number; survTeam: Team;
+    score: number; endedAt: string | null; reliable: boolean;
+    byPlayer: Record<string, Record<string, number>>;
+  }[];
 }
 
 export interface MapIndexRow {
