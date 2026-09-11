@@ -16,6 +16,7 @@ import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent,
+  recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
 } from './liveView.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
@@ -145,6 +146,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
+          else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
+          else if (ev.kind === 'round_end') recordRoundEnd(deps.db, ev.token, ev);
           else if (ev.kind === 'map_result') {
             recordMapResult(deps.db, ev.token, ev.map, ev.a, ev.b);
             // A map just ended, so its demo is finished (or about to be, when
