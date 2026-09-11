@@ -81,7 +81,7 @@ valid right now" predicate. None of it is persisted today.
 |---|---|---|---|
 | `pinned` | SI, survivor, class | Clear latency, pin heatmap | new (`lunge_pounce`, `tongue_grab`) |
 | `cleared` | survivor, survivor | Clear latency, paired with `pinned` | new (`pounce_stopped`, `tongue_release`) |
-| `incap` | survivor, cause | Death heatmap, round timeline | new (`player_incapacitated`) |
+| `incap` | survivor, cause | Death heatmap, round timeline | new (`player_incapacitated_start`) |
 | `death` | survivor, killer | Death heatmap, round timeline | existing (`player_death`) |
 | `ff` | survivor, survivor, damage | FF timeline | existing (`player_hurt`) |
 | `si_spawn` | SI, class | Spawn positioning, spawn-to-engage time | existing (`player_spawn`) |
@@ -91,17 +91,21 @@ valid right now" predicate. None of it is persisted today.
 | `revive` | survivor, survivor | Round timeline | existing (`revive_success`) |
 | `witch_aggro` | witch, survivor | Round timeline, pairs with `crowns` | new (`witch_harasser_set`) |
 | `witch_killed` | survivor | Round timeline | new (`witch_killed`) |
-| `car_alarm` | player | Round timeline, blame | new, `prop_car_alarm` entity hook |
+| `car_alarm` | player | Round timeline, blame | new (`triggered_car_alarm`) |
 | `skeet`, `boom`, `dp` | as today | Killfeed timing only | existing / skill_detect |
 
 `heal` is absent because kits are disabled in this ruleset, pills only. Pill detection
 is deferred (see Deferred below).
 
-`car_alarm` attribution follows
-`Rotoblin-AZMod/SourceCode/scripting-az/l4d_car_alarm_hittable_fix.sp:67`, which hooks
-`prop_car_alarm` on `OnEntityCreated` and then tracks touch and damage. The in-game chat
-line appears to come from the map entity rather than a plugin, so we capture the event
-ourselves rather than scraping chat.
+`car_alarm` needs no entity hook after all. `triggered_car_alarm` is a real game event
+and `l4d2_skill_detect.sp` hooks it, which is proof it fires on L4D1 in this deployment.
+Corrected 2026-09-11 while writing plan 6a; the earlier `prop_car_alarm` entity-hook plan
+was more work for the same result.
+
+Every event name in the table above is taken from a plugin verified running on L4D1 here:
+`l4d2_skill_detect.sp` for the pin, witch, incap and alarm events, and Rotoblin-AZMod's
+`l4dscores.sp` and `l4d_slowdown_control.sp` for `tank_spawn` and the `player_replace` /
+`bot_player_replace` pair that tank passing goes through on this engine. None are guessed.
 
 ### Position and state frames
 
@@ -404,8 +408,9 @@ design is wrong and we learn that before it is load-bearing.
 **Live server.** Deployment requires an explicit go-ahead; players are frequently on the
 box.
 
-**Unknown hooks.** `pills` and `car_alarm` have no confirmed L4D1 game event. Both need a
-hook spike before implementation rather than an assumed event name.
+**Unknown hooks.** Resolved for v1. `car_alarm` uses `triggered_car_alarm` and every other
+event name is taken from a plugin verified on L4D1 here. Only `pills` remains without a
+confirmed hook, and it is deferred rather than in scope.
 
 **Scope.** Piece 1 ships nothing visible except the admin panel. The product is pieces 2
 through 4, and this spec exists to serve them.
