@@ -72,8 +72,18 @@ half going live, `Event_RoundEnd` already closes it, `g_iPugSide[]` already hold
 pug-team to game-team mapping, and `StatsActive()` is already exactly the "capture is
 valid right now" predicate. None of it is persisted today.
 
-- `ROUND_START map=%s half=%d surv=%s` from `OnRoundIsLive`
-- `ROUND_END half=%d surv=%s score=%d` from `Event_RoundEnd`
+- `ROUND_START map=%s half=%d surv=%s` from `OnRoundIsLive`. `surv=` is OMITTED, not
+  guessed, when the orientation mapping has not settled yet: `ROUND_END` is a single
+  datagram with no retransmit, so a guess here survives as a fabricated side whenever
+  that datagram is lost. Ingest records such a round unreliable and promotes it when
+  `ROUND_END` supplies the real side.
+- `ROUND_END map=%s half=%d surv=%s score=%d` from `Event_RoundEnd`. `map=` rides along
+  so ingest can resolve the round's map ordinal by name; the half-2 `ROUND_END` is
+  emitted immediately before `MAP_RESULT`, and those two reordering in flight would
+  otherwise file the round on the next map.
+
+`half` is read from `m_bInSecondHalfOfRound`, never counted. It was a counter, and a
+re-fire of the go-live forward walked it past 2, which ingest rejects.
 
 ### Event vocabulary
 
@@ -86,7 +96,8 @@ valid right now" predicate. None of it is persisted today.
 | `ff` | survivor, survivor, damage | FF timeline | existing (`player_hurt`) |
 | `si_spawn` | SI, class | Spawn positioning, spawn-to-engage time | existing (`player_spawn`) |
 | `tank_spawn` | player | Tank-fight segmentation | existing (`player_spawn`) |
-| `tank_pass` | from, to | Tank-fight segmentation. Tank control passes in this ruleset | new (`player_bot_replace` / `bot_player_replace`) |
+| `tank_take` | player | Tank-fight segmentation. A human takes the tank over from the AI | new (`bot_player_replace`) |
+| `tank_give` | player | Tank-fight segmentation. A human hands the tank back to the AI | new (`player_bot_replace`) |
 | `tank_death` | tank, killer | Tank-fight segmentation | existing |
 | `revive` | survivor, survivor | Round timeline | existing (`revive_success`) |
 | `witch_aggro` | witch, survivor | Round timeline, pairs with `crowns` | new (`witch_harasser_set`) |
@@ -478,7 +489,9 @@ through 4, and this spec exists to serve them.
 - Sample carries full player state; world entities deferred, format left extensible
 - Storage is files on disk plus a DB index row, 90 day retention
 - Per-round stat snapshots are unnecessary given the side partition in `statKeys.ts`
-- Tank control passes in this ruleset, so `tank_pass` is meaningful
+- Tank control passes in this ruleset, so it is worth capturing, but it passes THROUGH
+  the AI: the other party in both directions is a bot, so `tank_take` and `tank_give`
+  name one player each rather than a single `tank_pass` with a from and a to
 - Kits are disabled, so `heal` becomes `pills`
 - Admin storage panel ships in this piece
 - `skill_detect` is already loaded and silenced for ranked play; no change needed
