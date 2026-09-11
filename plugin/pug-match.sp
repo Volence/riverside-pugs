@@ -15,7 +15,9 @@
 #define TEAM_SPEC 1
 #define TEAM_SURVIVOR 2
 #define TEAM_INFECTED 3
+#define ZC_SMOKER 1
 #define ZC_BOOMER 2
+#define ZC_HUNTER 3
 #define ZC_TANK 5
 #define LOCK_ATTEMPT_CAP 6
 
@@ -135,6 +137,17 @@ float g_fPinReleasedAt[MAXPLAYERS + 1];
 // Generous against the 0-1s gap observed, but far shorter than the time needed
 // to find and kill a smoker that genuinely let go on its own.
 #define PIN_RELEASE_GRACE 2.0
+
+// Which kind of pin a survivor is in, and whether the smoker has started
+// choking them yet. Together these define a tongue clear: freeing someone from
+// a tongue BEFORE choke_start, so they never got strung up at all.
+//
+// choke_start is the right boundary rather than a time threshold because drag
+// time scales with how far away the smoker was, so a fixed "cleared within N
+// seconds" would punish handling a long-range grab well. Measured 1 to 2
+// seconds after the grab on this engine, 2026-09-11.
+bool g_bPinIsTongue[MAXPLAYERS + 1];
+bool g_bChokeStarted[MAXPLAYERS + 1];
 
 bool g_bReadyUpAvailable;
 
@@ -266,6 +279,8 @@ orientation threshold. Changing this changes the rules under every rating earned
 	// has to go through the release grace window instead.
 	if (!HookEventEx("pounce_stopped", Event_PounceStopped))
 		LogMessage("pug-match: event 'pounce_stopped' does not exist on this engine; shove clears will not be captured.");
+	if (!HookEventEx("choke_start", Event_ChokeStart))
+		LogMessage("pug-match: event 'choke_start' does not exist on this engine; tongue_clears cannot be distinguished and will not be counted.");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -1486,7 +1501,37 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (IsInfectedClient(attacker) && !IsFakeClient(attacker) && IsSurvivorClient(victim))
 	{
 		AddStat(attacker, PS_DamageAsSi, damage);
-		if (GetEntProp(attacker, Prop_Send, "m_zombieClass") == ZC_TANK)
+
+		int zc = GetEntProp(attacker, Prop_Send, "m_zombieClass");
+
+		// The same damage, split by what it actually ate. Damage to a survivor
+		// already down only drains a bleedout pool, runs into the thousands and
+		// says nothing about the play; damage to one still standing is the real
+		// output. Both are recorded rather than the first being discarded, so
+		// that the parts sum to damage_as_si exactly:
+		//
+		//   dmg_as_hunter + dmg_as_smoker + dmg_as_boomer + dmg_as_tank
+		//     + dmg_to_incapped == damage_as_si
+		//
+		// That invariant is the point of keeping boomer, whose direct damage is
+		// otherwise negligible: a drifting total means a class going
+		// unaccounted, which is checkable rather than merely hoped for.
+		if (GetEntProp(victim, Prop_Send, "m_isIncapacitated") != 0)
+		{
+			AddStat(attacker, PS_DmgToIncapped, damage);
+		}
+		else
+		{
+			switch (zc)
+			{
+				case ZC_HUNTER: AddStat(attacker, PS_DmgAsHunter, damage);
+				case ZC_SMOKER: AddStat(attacker, PS_DmgAsSmoker, damage);
+				case ZC_BOOMER: AddStat(attacker, PS_DmgAsBoomer, damage);
+				case ZC_TANK:   AddStat(attacker, PS_DmgAsTank, damage);
+			}
+		}
+
+		if (zc == ZC_TANK)
 		{
 			char wpn[32];
 			event.GetString("weapon", wpn, sizeof(wpn));
@@ -1622,6 +1667,10 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 		if (attacker == i) continue;
 		freed++;
 		EmitClientEvent("cleared", attacker, i, 0);
+		// Freed from a tongue before the choking began, so they were never
+		// dragged in. Hunters are excluded by construction: they do not choke,
+		// so g_bChokeStarted would be false for every pounce clear too.
+		if (g_bPinIsTongue[i] && !g_bChokeStarted[i]) AddStat(attacker, PS_TongueClears);
 	}
 
 	if (g_cvDebug.BoolValue && IsInfectedClient(victim))
@@ -1733,7 +1782,12 @@ public void Event_Pounce(Event event, const char[] name, bool dontBroadcast)
 {
 	int hunter = GetClientOfUserId(event.GetInt("userid"));
 	int victim = GetClientOfUserId(event.GetInt("victim"));
-	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = hunter;
+	if (victim > 0 && victim <= MaxClients)
+	{
+		g_iPinnedBy[victim] = hunter;
+		g_bPinIsTongue[victim] = false;
+		g_bChokeStarted[victim] = false;
+	}
 	PugDebug("pin set (pounce): victim=%d pinner=%d", victim, hunter);
 	EmitClientEvent("pinned", hunter, victim, 0);
 }
@@ -1743,7 +1797,12 @@ public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
 {
 	int smoker = GetClientOfUserId(event.GetInt("userid"));
 	int victim = GetClientOfUserId(event.GetInt("victim"));
-	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = smoker;
+	if (victim > 0 && victim <= MaxClients)
+	{
+		g_iPinnedBy[victim] = smoker;
+		g_bPinIsTongue[victim] = true;
+		g_bChokeStarted[victim] = false;
+	}
 	PugDebug("pin set (tongue): victim=%d pinner=%d", victim, smoker);
 	EmitClientEvent("pinned", smoker, victim, 0);
 }
@@ -1868,6 +1927,14 @@ void WriteDump()
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
 	DumpLine("END winner=%s a=%d b=%d", winner, a, b);
+}
+
+/** choke_start: the smoker has stopped dragging and started choking. The
+ *  boundary a tongue clear is measured against; see g_bChokeStarted. */
+public void Event_ChokeStart(Event event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(event.GetInt("victim"));
+	if (victim >= 1 && victim <= MaxClients) g_bChokeStarted[victim] = true;
 }
 
 /** pounce_stopped: a hunter's pounce ended and the event names who ended it.

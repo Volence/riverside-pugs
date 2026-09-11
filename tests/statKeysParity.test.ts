@@ -94,3 +94,12 @@ describe('plugin/pug-stats.inc <-> src/statKeys.ts parity', () => {
     expect(falseKeys).toEqual(expectedFalseKeys);
   });
 });
+
+describe('plugin wire-key buffer', () => {
+  it('keeps every key inside the plugin char[24]', () => {
+    // g_sStatKey is char[PS_MAX][24]. A longer key is truncated on the wire and
+    // arrives as an unknown key the backend drops, which looks exactly like a
+    // stat that was never captured.
+    for (const key of extractStatKeyArray(pluginSrc)) expect(key.length).toBeLessThan(24);
+  });
+});
