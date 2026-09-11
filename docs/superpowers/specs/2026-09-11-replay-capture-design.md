@@ -353,8 +353,9 @@ the door properly, ship only the storage room.
 pug-match.sp
   OnRoundIsLive    -> ROUND_START (udp)  -> match_rounds
                    -> open pug_<token>_<ordinal>_<half>.rpl
-  Timer 0.1s       -> 8+128+12N frame    -> replay file (no flush)
+  Timer 0.1s       -> 8+160+12N frame    -> replay file (no flush)
   hooks            -> EVENT ... t_ms     -> match_live_events
+  player_say       -> CHAT ... t_ms      -> match_chat
   Event_RoundEnd   -> ROUND_END (udp)    -> match_rounds
                    -> close file (indexed by filename, no datagram)
 
@@ -392,6 +393,24 @@ CREATE TABLE match_replays (
 );
 ```
 
+```sql
+CREATE TABLE match_chat (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  seq      INTEGER NOT NULL,
+  ordinal  INTEGER NOT NULL,
+  half     INTEGER NOT NULL,
+  t_ms     INTEGER NOT NULL,
+  steamid  TEXT    NOT NULL,
+  team     TEXT,
+  message  TEXT    NOT NULL,
+  PRIMARY KEY (match_id, seq)
+);
+```
+
+`seq` is the same counter `match_live_events` uses, so the primary key makes a duplicated
+datagram an idempotent upsert over itself, and a single ordering exists across chat and
+events together.
+
 `match_live_events` gains `half` and `t_ms` via the existing `ensureColumn` helper, which
 is the established pattern here; there is deliberately no migration framework.
 
@@ -415,11 +434,25 @@ struct padding.
 Frame, variable length, repeated. Three parts:
 
 1. **Frame header, 8 bytes**: `t_ms` as uint32, an entity count as uint16, and 2 bytes
-   reserved. The count is what makes the frame self-describing.
-2. **Player block, 128 bytes fixed**: eight 16-byte records of position as three int16,
-   yaw as int16, pitch as int8, health as uint16 (the tank needs the range), a state
-   bitfield, class, weapon and ammo. Always eight, even when a slot is empty, so this
-   block alone stays fixed-stride.
+   reserved. The count is what makes the frame self-describing. A frame is therefore
+   8 + 160 + 12N bytes.
+2. **Player block, 160 bytes fixed**: eight 20-byte records of position as three int16,
+   yaw as int16, pitch as int8, a state bitfield as uint8, permanent health as uint16,
+   temporary health as uint16, class as uint8, weapon as uint8, clip ammo as uint16 and
+   reserve ammo as uint16. Always eight, even when a slot is empty, so this block alone
+   stays fixed-stride.
+
+   Widened from 16 bytes on 2026-09-11 against suprep's viewer, which renders both of the
+   fields that were missing: its player cards read `pumpshotgun 5/125`, so clip and
+   reserve are distinct, and its health bars are two-tone, which one combined total cannot
+   drive. Neither is recoverable after the fact, because both are per-frame state rather
+   than anything a counter or an event records. The splits cost 4 bytes per player record
+   and about 320 bytes per second at 10Hz.
+
+   Splitting temporary health also leaves the deferred pills detection with the signal it
+   needs: a temp-health jump is exactly what identifies a pill, and it is the reason that
+   detection could not be hardcoded against a threshold while `temphealthfix.sp` is
+   loaded.
 3. **Entity block, 12 bytes per entity**: entity reference as uint16, kind as uint8, a
    state bitfield as uint8, position as three int16, and health as uint16.
 
@@ -451,7 +484,8 @@ seeks to the table, and binary-searches it. A crash mid-round leaves no table, w
 exactly why the reader must also support a linear scan fallback; a truncated file then
 degrades to "playable but slow to seek" rather than "unreadable".
 
-Size, with entities: players are 1,360 bytes per second at 10Hz. Commons run roughly 20
+Size, with entities: the frame header and player block are 1,680 bytes per second at
+10Hz. Commons run roughly 20
 to 30 alive in a versus round, and at 12 bytes each the entity block adds roughly 2,400
 to 3,600 bytes per second.
 Call it 3.4 KB/s, 12 MB per hour, 10 to 15 MB for a full match. Still small next to the
@@ -469,6 +503,13 @@ measurement that can still overrule the default, not an argument that has been w
 
 Decided 2026-09-11, when 6b was scoped. 6a is deployed and has been verified in game.
 6b is the recorder and the reader; it ships no viewer, which is piece 3.
+
+### 10Hz is confirmed, not estimated
+
+suprep's viewer reports 4443 frames over 444.40 seconds for one round, which is 10.0
+samples per second. The rate this spec picked independently is the rate a working viewer
+on the same game already uses, so the remaining question is only what it costs on this
+box, which the frame-time gate answers.
 
 ### The entity set is maintained incrementally, never scanned
 
@@ -506,9 +547,35 @@ the demo naming convention exists. Discovery by listing therefore costs nothing 
 removes a lossy dependency: a dropped datagram would otherwise leave a real file
 permanently unindexed.
 
-The consequence worth stating plainly is that **6b introduces no new UDP line type**. It
-is a plugin that writes files and a backend that reads them. Nothing it does touches the
-datagram path that carries match results and ratings.
+This was written up as "6b introduces no new UDP line type", which chat capture then
+gave up a few hours later. What survives is the part that actually mattered: **no line
+carrying a match result or a rating changes**. `CHAT` is purely additive, and like `EVENT`
+it is cosmetic, so losing a datagram costs one line of transcript and nothing else.
+
+### Chat is captured, on a new CHAT line
+
+Added 2026-09-11 after suprep's viewer was seen carrying a `Chat` toggle. Nothing in
+this deployment records chat today: the plugin never hooks `player_say`, and the `EVENT`
+line cannot carry it anyway, because its four fields are `kind`, `actor`, `target` and an
+integer `value`. Chat is free text.
+
+- `CHAT seq=%d half=%d t=%d steamid=%s team=%s msg=%s`, into a `match_chat` table.
+- **`msg` is always the last field on the line**, so the parser takes the remainder rather
+  than tokenizing. Any other position makes a message containing a space or an `=` able to
+  forge a field.
+- Capped at 128 bytes, with carriage returns and newlines stripped before emission. A
+  newline in a log line is a second log line, which would be parsed as an unrelated event.
+- The sequence counter is **shared with `EVENT`**, not a second one. A single monotonic
+  sequence across both streams is what lets the viewer interleave a message and a death in
+  the order they really happened, and it reuses the dedupe key that already exists.
+- Gated on a tracked match, **not** on `StatsActive()`. The gate exists to keep counters
+  from moving between rounds and during ready-up, and those are exactly the moments chat
+  is most worth having. `t_ms` is then `-1` outside a live round, the same sentinel
+  `RoundMs()` already returns.
+
+Chat is as public as the replay it sits beside, since the live page is public. That is
+the same exposure decision already made for live positions and is recorded here only so
+nobody is surprised by it later.
 
 ### Live tailing ships, the WebSocket does not
 
