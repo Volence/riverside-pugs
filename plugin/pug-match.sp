@@ -1571,12 +1571,35 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	// dying, a fake-client tank dying) that "death" and "tank_death" need to
 	// see. Nothing below this block is reordered or altered.
 	//
+	// Instrumentation for the "cleared never fires" investigation (2026-09-11).
+	// Snapshot the pin links BEFORE the loop consumes them, so the log can say
+	// whether a dying SI still held anyone. Costs nothing when debug is off.
+	char links[192];
+	if (g_cvDebug.BoolValue)
+	{
+		links[0] = '\0';
+		for (int i = 1; i <= MaxClients; i++)
+			if (g_iPinnedBy[i] != 0) Format(links, sizeof(links), "%s %d<-%d", links, i, g_iPinnedBy[i]);
+	}
+
 	// Free anyone this player was pinning, and credit whoever killed them.
+	int freed = 0;
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (g_iPinnedBy[i] != victim) continue;
 		g_iPinnedBy[i] = 0;
+		freed++;
 		EmitClientEvent("cleared", attacker, i, 0);
+	}
+
+	// The decisive line: separates "the link was already zeroed" (freed=0 with
+	// no link naming this victim) from "the killer was not rostered so the emit
+	// was dropped" (freed>0, attackerSlot=-1).
+	if (g_cvDebug.BoolValue && IsInfectedClient(victim))
+	{
+		PugDebug("SI death: victim=%d attacker=%d attackerSlot=%d freed=%d linksBefore:%s",
+			victim, attacker, (attacker <= MaxClients) ? g_iClientRoster[attacker] : -1,
+			freed, links[0] != '\0' ? links : " none");
 	}
 	if (GetClientTeam(victim) == TEAM_SURVIVOR) EmitClientEvent("death", victim, attacker, 0);
 	else if (IsTankClient(victim)) EmitClientEvent("tank_death", attacker, 0, 0);
@@ -1683,6 +1706,7 @@ public void Event_Pounce(Event event, const char[] name, bool dontBroadcast)
 	int hunter = GetClientOfUserId(event.GetInt("userid"));
 	int victim = GetClientOfUserId(event.GetInt("victim"));
 	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = hunter;
+	PugDebug("pin set (pounce): victim=%d pinner=%d", victim, hunter);
 	EmitClientEvent("pinned", hunter, victim, 0);
 }
 
@@ -1692,6 +1716,7 @@ public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
 	int smoker = GetClientOfUserId(event.GetInt("userid"));
 	int victim = GetClientOfUserId(event.GetInt("victim"));
 	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = smoker;
+	PugDebug("pin set (tongue): victim=%d pinner=%d", victim, smoker);
 	EmitClientEvent("pinned", smoker, victim, 0);
 }
 
@@ -1702,7 +1727,11 @@ public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
 public void Event_TongueRelease(Event event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(event.GetInt("victim"));
-	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = 0;
+	if (victim > 0 && victim <= MaxClients)
+	{
+		PugDebug("pin zeroed (tongue_release): victim=%d was=%d", victim, g_iPinnedBy[victim]);
+		g_iPinnedBy[victim] = 0;
+	}
 }
 
 /** player_incapacitated_start: the bare player_incapacitated does not fire on
@@ -1711,7 +1740,11 @@ public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(event.GetInt("userid"));
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
-	if (victim > 0 && victim <= MaxClients) g_iPinnedBy[victim] = 0;
+	if (victim > 0 && victim <= MaxClients)
+	{
+		PugDebug("pin zeroed (incap): victim=%d was=%d", victim, g_iPinnedBy[victim]);
+		g_iPinnedBy[victim] = 0;
+	}
 	// Actor is the survivor it happened to, so the feed reads
 	// "<name> was incapped by <attacker>".
 	EmitClientEvent("incap", victim, attacker, 0);
