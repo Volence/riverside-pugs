@@ -128,6 +128,7 @@ describe('liveView', () => {
     recordMapResult(db, TOKEN, 'map_one', 100, 50);
     recordLiveEvent(db, TOKEN, {
       kind: 'live_event', token: TOKEN, seq: 1, event: 'dp', actor: A[0], target: B[0], value: 30,
+      half: -1, tMs: -1,
     });
 
     clearLive(db, id);
@@ -249,7 +250,7 @@ describe('liveView: event feed', () => {
     over: Partial<{ event: string; actor: string; target: string | null; value: number }> = {},
   ) => ({
     kind: 'live_event' as const, token: TOKEN,
-    seq, event: 'dp', actor: A[0], target: B[0], value: 34, ...over,
+    seq, event: 'dp', actor: A[0], target: B[0], value: 34, half: -1, tMs: -1, ...over,
   });
 
   it('records an event and resolves both names from the roster', () => {
@@ -351,6 +352,7 @@ describe('reapOrphanedMatches', () => {
     recordLiveStat(db, TOKEN, A[0], { ck: 5 });
     recordLiveEvent(db, TOKEN, {
       kind: 'live_event', token: TOKEN, seq: 1, event: 'dp', actor: A[0], target: B[0], value: 20,
+      half: -1, tMs: -1,
     });
     recordMapResult(db, TOKEN, 'l4d_vs_hospital01_apartment', 100, 50);
     db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS + 60_000));
@@ -449,7 +451,7 @@ describe('liveView: per-map stat split', () => {
 describe('liveView: events know their map', () => {
   const ev = (seq: number) => ({
     kind: 'live_event' as const, token: TOKEN,
-    seq, event: 'dp', actor: A[0], target: B[0], value: 20,
+    seq, event: 'dp', actor: A[0], target: B[0], value: 20, half: -1, tMs: -1,
   });
 
   it('stamps the map in progress at write time', () => {
