@@ -497,24 +497,37 @@ describe('round persistence', () => {
   it('records a round and closes it with the score', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, half: 1, surv: 'a', score: 300 });
-    expect(roundsFor(db, 1)).toEqual([
-      { ordinal: 0, half: 1, survTeam: 'a', score: 300, reliable: true },
-    ]);
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300 });
+    const [row] = roundsFor(db, 1);
+    expect(row).toMatchObject({ ordinal: 0, half: 1, survTeam: 'a', score: 300, reliable: true });
+    expect(row.endedAt).not.toBeNull();
+  });
+
+  it('leaves endedAt null for a round that never ended', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    // score reads 0 here only because the column defaults to it. endedAt is
+    // the field that says nothing was ever reported.
+    expect(roundsFor(db, 1)[0]).toMatchObject({ score: 0, endedAt: null });
   });
 
   it('is idempotent across a duplicated datagram', () => {
     const db = liveMatchForRounds();
     const ev = { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' } as const;
     recordRoundStart(db, ROUND_TOKEN, ev);
+    const first = db.prepare('SELECT started_at FROM match_rounds').get() as { started_at: string };
     recordRoundStart(db, ROUND_TOKEN, ev);
     expect(roundsFor(db, 1)).toHaveLength(1);
+    // The point of DO NOTHING over DO UPDATE: every event's t_ms is measured
+    // from the ORIGINAL start, so a duplicate must not move the origin.
+    const second = db.prepare('SELECT started_at FROM match_rounds').get() as { started_at: string };
+    expect(second.started_at).toBe(first.started_at);
   });
 
   it('trusts the round-end side when start and end disagree', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, half: 1, surv: 'b', score: 120 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'b', score: 120 });
     expect(roundsFor(db, 1)[0].survTeam).toBe('b');
   });
 
@@ -522,6 +535,42 @@ describe('round persistence', () => {
     const db = liveMatchForRounds();
     db.prepare("INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (1, 'm0', 0, 1, 2)").run();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm1', half: 1, surv: 'a' });
+    expect(roundsFor(db, 1)[0].ordinal).toBe(1);
+  });
+
+  it('records a sideless round start as unreliable rather than inventing a side', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: null });
+    const [row] = roundsFor(db, 1);
+    // The row exists so started_at survives, which every event's t_ms is
+    // measured against, but reliable = 0 says its side is a placeholder.
+    expect(row.reliable).toBe(false);
+    expect(row.endedAt).toBeNull();
+  });
+
+  it('promotes a sideless round to reliable when round end supplies the side', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: null });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'b', score: 175 });
+    expect(roundsFor(db, 1)[0]).toMatchObject({ survTeam: 'b', score: 175, reliable: true });
+  });
+
+  it('files a round end under the map it names, not the map count', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm0', half: 2, surv: 'b' });
+    // MAP_RESULT for m0 lands first, so the naive COUNT(match_live_maps)
+    // derivation would now put m0's own round end on ordinal 1.
+    recordMapResult(db, ROUND_TOKEN, 'm0', 300, 250);
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm0', half: 2, surv: 'b', score: 250 });
+    const rows = roundsFor(db, 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ordinal: 0, half: 2, score: 250 });
+  });
+
+  it('falls back to the map count when a round end carries no map', () => {
+    const db = liveMatchForRounds();
+    db.prepare("INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (1, 'm0', 0, 1, 2)").run();
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: null, half: 1, surv: 'a', score: 50 });
     expect(roundsFor(db, 1)[0].ordinal).toBe(1);
   });
 

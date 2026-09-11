@@ -171,7 +171,16 @@ export interface RoundRow {
   ordinal: number;
   half: number;
   survTeam: 'a' | 'b';
+  /** The survivor score for this half. The column is NOT NULL DEFAULT 0, so
+   *  this is 0 both for "they scored nothing" and for "ROUND_END never
+   *  arrived". `endedAt` is what tells those two apart. */
   score: number;
+  /** When ROUND_END closed this half, or null if it never did. Exposed
+   *  alongside score precisely so a consumer can refuse to render a score that
+   *  is really just the column default: this codebase does not fabricate
+   *  zeros, and the plugin's retries-exhausted path deliberately emits a
+   *  score of 0 as well. */
+  endedAt: string | null;
   reliable: boolean;
 }
 
@@ -185,6 +194,20 @@ function currentOrdinal(db: DB, matchId: number): number {
   return done.n;
 }
 
+/** ROUND_START with no side at all.
+ *
+ *  The plugin omits `surv` when its orientation mapping has not settled, which
+ *  is honest but leaves a NOT NULL column to fill. 'a' is written as a
+ *  PLACEHOLDER and the row is marked reliable = 0 in the same statement, so
+ *  nothing downstream can mistake it for an observation: roundAttribution
+ *  refuses to attribute an unreliable round's stats, and ROUND_END promotes
+ *  the row back to reliable = 1 when it supplies the authoritative side.
+ *
+ *  Writing the row at all, rather than skipping it, is what preserves
+ *  started_at: every event's t_ms is measured from the round going live, and
+ *  without this row that origin is lost for good. */
+const PLACEHOLDER_SIDE = 'a';
+
 export function recordRoundStart(
   db: DB, token: string,
   ev: Extract<LogEvent, { kind: 'round_start' }>,
@@ -192,13 +215,35 @@ export function recordRoundStart(
   const id = liveMatchIdOf(db, token);
   if (id === null) return;
   db.prepare(
-    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, reliable, started_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT (match_id, ordinal, half) DO NOTHING`,
     // DO NOTHING, not an update: a duplicated ROUND_START must not reset the
     // started_at that t_ms values are already measured against.
-  ).run(id, currentOrdinal(db, id), ev.half, ev.surv);
+  ).run(id, currentOrdinal(db, id), ev.half, ev.surv ?? PLACEHOLDER_SIDE, ev.surv === null ? 0 : 1);
   touch(db, id);
+}
+
+/** Which map a ROUND_END belongs to.
+ *
+ *  Prefer the map name the line carries: both this and recordMapResult derive
+ *  an ordinal from COUNT(match_live_maps) at write time, and the plugin emits
+ *  the half-2 ROUND_END immediately before FinalizeMap's MAP_RESULT. Those two
+ *  datagrams reordering in flight would otherwise file the round under the
+ *  NEXT map. Resolving by name is immune to that, and is the same lookup
+ *  recordMapResult already does.
+ *
+ *  Falls back to the count when the name is absent (older plugin) or unknown
+ *  (the map row has not been written yet, which is the normal case for a
+ *  half-1 round). */
+function ordinalForRoundEnd(db: DB, matchId: number, map: string | null): number {
+  if (map !== null) {
+    const row = db
+      .prepare('SELECT ordinal FROM match_live_maps WHERE match_id = ? AND map = ?')
+      .get(matchId, map) as { ordinal: number } | undefined;
+    if (row) return row.ordinal;
+  }
+  return currentOrdinal(db, matchId);
 }
 
 export function recordRoundEnd(
@@ -207,11 +252,14 @@ export function recordRoundEnd(
 ): void {
   const id = liveMatchIdOf(db, token);
   if (id === null) return;
-  const ordinal = currentOrdinal(db, id);
+  const ordinal = ordinalForRoundEnd(db, id, ev.map);
   const existing = db.prepare(
-    'SELECT surv_team FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
-  ).get(id, ordinal, ev.half) as { surv_team: string } | undefined;
-  if (existing && existing.surv_team !== ev.surv) {
+    'SELECT surv_team, reliable FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
+  ).get(id, ordinal, ev.half) as { surv_team: string; reliable: number } | undefined;
+  // reliable = 0 on the existing row means ROUND_START never knew the side and
+  // wrote a placeholder, so there is nothing to disagree with. Only a side
+  // that was actually observed and then moved is worth logging.
+  if (existing && existing.reliable === 1 && existing.surv_team !== ev.surv) {
     // Not an error. The orientation mapping is provisional early in a round,
     // which is why pug-match reconciles it at all. Logged so a systematic
     // disagreement is visible rather than silently absorbed.
@@ -220,11 +268,15 @@ export function recordRoundEnd(
     );
   }
   db.prepare(
-    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at)
+     VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
      ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
        surv_team = excluded.surv_team,
        score = excluded.score,
+       -- Promotes a round whose START had no side: this line carries the
+       -- authoritative one, so the placeholder is now replaced by an
+       -- observation and the row is trustworthy again.
+       reliable = 1,
        ended_at = excluded.ended_at`,
   ).run(id, ordinal, ev.half, ev.surv, ev.score);
   touch(db, id);
@@ -232,12 +284,15 @@ export function recordRoundEnd(
 
 export function roundsFor(db: DB, matchId: number): RoundRow[] {
   return (db.prepare(
-    `SELECT ordinal, half, surv_team, score, reliable FROM match_rounds
+    `SELECT ordinal, half, surv_team, score, ended_at, reliable FROM match_rounds
      WHERE match_id = ? ORDER BY ordinal, half`,
-  ).all(matchId) as { ordinal: number; half: number; surv_team: 'a' | 'b'; score: number; reliable: number }[])
+  ).all(matchId) as {
+    ordinal: number; half: number; surv_team: 'a' | 'b';
+    score: number; ended_at: string | null; reliable: number;
+  }[])
     .map((r) => ({
       ordinal: r.ordinal, half: r.half, survTeam: r.surv_team,
-      score: r.score, reliable: r.reliable === 1,
+      score: r.score, endedAt: r.ended_at, reliable: r.reliable === 1,
     }));
 }
 

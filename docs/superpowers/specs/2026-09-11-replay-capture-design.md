@@ -219,9 +219,20 @@ survivor, and their infected stats from the other. The five fixed columns on
 `match_players` (`si_damage`, `si_kills`, `common_kills`, `ff_dealt`, `revives`) are all
 survivor-side, so the partition holds across the whole schema.
 
-This breaks only if a round is restarted after stats accrued, or a player changes team
-mid-match. Both are handled by marking that round's attribution unreliable rather than
-guessing, consistent with the existing refusal to render absent stats as zeros.
+This breaks if a round is restarted after stats accrued, or a player changes team
+mid-match. Neither is detected yet, and this is the honest state of the column: nothing
+in the plugin or the ingest path notices either case, so `match_rounds.reliable` cannot
+report them. The suppressions that DO exist are narrower:
+
+- `recordRoundStart` stores `reliable = 0` for a round whose `ROUND_START` carried no
+  side at all, and `ROUND_END` promotes it back to 1 when it supplies the real one.
+- `roundAttribution` forces both halves of a map unreliable in its return value when
+  they fail to partition the sides (both recorded as the same team on survivor).
+
+So `reliable = 1` means "nothing has shown this round to be wrong", not "this round has
+been verified". Detecting restarts and mid-match team changes is outstanding plugin
+work; until it lands, a consumer that treats a reliable round as guaranteed correct is
+trusting more than this column can deliver.
 
 The test named under Testing is what this decision rests on. If it fails, this section
 is wrong and a snapshot table is needed after all.

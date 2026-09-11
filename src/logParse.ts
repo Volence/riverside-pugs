@@ -22,8 +22,17 @@ export type LogEvent =
   // The END value of `surv` is authoritative: the plugin's orientation
   // mapping is unreliable early in a round, which is exactly why that
   // reconciliation logic exists at all.
-  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' }
-  | { kind: 'round_end'; token: string; half: number; surv: 'a' | 'b'; score: number }
+  //
+  // round_start's `surv` is NULL when the plugin could not yet tell which pug
+  // team holds survivor. The plugin used to guess "a" in that case on the
+  // reasoning that ROUND_END would correct it, but ROUND_END is one UDP
+  // datagram with no retransmit: losing it left a fabricated side recorded as
+  // reliable. An absent field is the honest signal, and the round is stored
+  // unreliable until ROUND_END supplies the real one.
+  | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null }
+  // `map` rides along so recordRoundEnd can resolve the round to the map it
+  // actually belongs to rather than to whatever had finished by arrival time.
+  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number }
   // One discrete thing that happened, for the live feed. Generic on purpose:
   // the plugin decides the `kind` and the page renders per kind, so a new
   // event type needs no backend change. `seq` is per-match monotonic and makes
@@ -133,19 +142,24 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       return { kind: 'live_stat', token, steamid: rest.steamid, stats };
     }
     case 'ROUND_START': {
-      const rest = kv(parts.slice(3));
       const half = halfOf(rest.half);
+      // An ABSENT surv= is accepted: the plugin omits it rather than guessing
+      // when the orientation mapping has not settled. A PRESENT but malformed
+      // one is still rejected, because that is a corrupt line, not an
+      // admission of not knowing.
+      if (rest.surv !== undefined && teamOf(rest.surv) === null) return null;
       const surv = teamOf(rest.surv);
-      if (!rest.map || half === null || surv === null) return null;
+      if (!rest.map || half === null) return null;
       return { kind: 'round_start', token, map: rest.map, half, surv };
     }
     case 'ROUND_END': {
-      const rest = kv(parts.slice(3));
       const half = halfOf(rest.half);
       const surv = teamOf(rest.surv);
       const score = intOf(rest.score);
       if (half === null || surv === null || score === null) return null;
-      return { kind: 'round_end', token, half, surv, score };
+      // Optional: a staged older plugin does not send it, and the ordinal
+      // falls back to the map count in that case.
+      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score };
     }
     case 'EVENT': {
       const seq = intOf(rest.seq);

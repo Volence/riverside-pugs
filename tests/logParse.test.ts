@@ -232,13 +232,31 @@ describe('round lines', () => {
   });
 
   it('parses ROUND_END', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=l4d_hospital01_apartment half=2 surv=b score=412`))).toEqual({
+      kind: 'round_end', token: TOKEN, map: 'l4d_hospital01_apartment', half: 2, surv: 'b', score: 412,
+    });
+  });
+
+  it('parses a ROUND_END from an older plugin that carries no map', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END half=2 surv=b score=412`))).toEqual({
-      kind: 'round_end', token: TOKEN, half: 2, surv: 'b', score: 412,
+      kind: 'round_end', token: TOKEN, map: null, half: 2, surv: 'b', score: 412,
+    });
+  });
+
+  it('accepts a ROUND_START with no side, rather than one that invents one', () => {
+    // The plugin omits surv= when its orientation mapping has not settled.
+    // Dropping the line would lose started_at, which every event's t_ms is
+    // measured from, so the absence is carried through as null instead.
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1`))).toEqual({
+      kind: 'round_start', token: TOKEN, map: 'm', half: 1, surv: null,
     });
   });
 
   it('rejects a survivor team that is not a or b', () => {
+    // Present but malformed is a corrupt line, which is not the same thing as
+    // the plugin admitting it does not know.
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_START map=m half=1 surv=c`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=1 surv=c score=1`))).toBeNull();
   });
 
   it('rejects a half that is not 1 or 2', () => {

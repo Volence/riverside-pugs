@@ -77,10 +77,23 @@ CREATE TABLE IF NOT EXISTS match_maps (
 -- the rating path reads this table: it exists so stats and events can be
 -- attributed to a side and a moment, which is presentation, not scoring.
 --
--- 'reliable' goes to 0 when the round was restarted after stats accrued, or a
--- rostered player changed team mid-match. Consumers must show an unreliable
--- round as unavailable rather than guessing, the same way absent stats are
--- never rendered as fabricated zeros.
+-- 'reliable' is 0 when this round's side attribution must not be trusted.
+-- Consumers must show an unreliable round as unavailable rather than guessing,
+-- the same way absent stats are never rendered as fabricated zeros.
+--
+-- Today exactly one thing writes a 0: recordRoundStart, when the plugin sent a
+-- ROUND_START with no side because its orientation mapping had not settled.
+-- ROUND_END promotes that row back to 1 when it supplies the real side. One
+-- further suppression exists but is NOT stored here: roundAttribution forces
+-- both halves of an ordinal unreliable in its RETURN VALUE when they fail to
+-- partition the sides, leaving the rows untouched.
+--
+-- The two cases that most want this column, a round restarted after stats
+-- accrued and a rostered player changing team mid-match, are NOT detected by
+-- anything yet. Detecting them is plugin work that has not been done. Until it
+-- is, a reliable = 1 round means "nothing has demonstrated this round wrong",
+-- not "this round has been verified correct". Do not build on the stronger
+-- reading.
 CREATE TABLE IF NOT EXISTS match_rounds (
   match_id   INTEGER NOT NULL REFERENCES matches(id),
   ordinal    INTEGER NOT NULL,
