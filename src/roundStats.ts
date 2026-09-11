@@ -35,10 +35,32 @@
  *  has no side to reason about, and filing it under the wrong half would be
  *  worse than omitting it, the same "never fabricate" discipline that keeps
  *  absent stats from ever being rendered as zeros elsewhere in this codebase.
+ *
+ *  The whole derivation rests on the two halves of an ordinal holding
+ *  opposite `surv_team` values. Nothing in the schema enforces that:
+ *  `recordRoundStart` uses `ON CONFLICT DO NOTHING`, and `recordRoundEnd`
+ *  only `console.warn`s on a side disagreement before overwriting. So a map
+ *  can end up with both its halves recorded as `surv_team = 'a'`. If that
+ *  happened and this function still trusted `surv_team`, it would compute
+ *  `side = 'survivor'` for team a in both halves and emit the same map-level
+ *  stat into both rounds, silent double counting that the per-round
+ *  `reliable` column would not reflect. So before assigning sides, every
+ *  ordinal with two recorded halves is checked for a genuine partition (one
+ *  half `a`, the other `b`); if the two halves agree instead of disagreeing,
+ *  every round of that ordinal is forced `reliable: false` in the value this
+ *  function returns, on top of whatever `match_rounds.reliable` already
+ *  said. This is a derivation-time correction only; the database rows are
+ *  never touched.
+ *
+ *  An ordinal with only one recorded half (map still in progress, or a lost
+ *  round-start/round-end datagram) is left alone. There is no second half to
+ *  disagree with, so nothing has yet shown the side mapping to be wrong; that
+ *  half's own `reliable` value is trusted as-is rather than penalised for an
+ *  absence that is expected mid-match.
  */
 
 import type { DB } from './db.js';
-import { roundsFor, mapStatsFor } from './liveView.js';
+import { roundsFor, mapStatsFor, type RoundRow } from './liveView.js';
 import { statDef } from './statKeys.js';
 
 export interface RoundAttribution {
@@ -56,6 +78,21 @@ export function roundAttribution(
   if (rounds.length === 0) return [];
   const byMap = mapStatsFor(db, matchId);
 
+  const byOrdinal = new Map<number, RoundRow[]>();
+  for (const r of rounds) {
+    const list = byOrdinal.get(r.ordinal);
+    if (list) list.push(r); else byOrdinal.set(r.ordinal, [r]);
+  }
+  // An ordinal's two halves are only a trustworthy partition of the map if
+  // they disagree on who held survivor. A lone half (map still in progress)
+  // has nothing to disagree with, so it is not flagged.
+  const unpartitioned = new Set<number>();
+  for (const [ordinal, list] of byOrdinal) {
+    if (list.length === 2 && list[0].survTeam === list[1].survTeam) {
+      unpartitioned.add(ordinal);
+    }
+  }
+
   return rounds.map((r) => {
     const mapStats = byMap.get(r.ordinal) ?? {};
     const byPlayer: Record<string, Record<string, number>> = {};
@@ -71,7 +108,7 @@ export function roundAttribution(
     }
     return {
       ordinal: r.ordinal, half: r.half, survTeam: r.survTeam,
-      reliable: r.reliable, byPlayer,
+      reliable: r.reliable && !unpartitioned.has(r.ordinal), byPlayer,
     };
   });
 }
