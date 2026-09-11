@@ -31,10 +31,25 @@
  *  implementation, this reasoning is wrong and a per-round snapshot table is
  *  needed after all.
  *
- *  Unknown keys are dropped rather than assigned a side. An unrecognised key
- *  has no side to reason about, and filing it under the wrong half would be
- *  worse than omitting it, the same "never fabricate" discipline that keeps
- *  absent stats from ever being rendered as zeros elsewhere in this codebase.
+ *  statKeys.ts is not the whole vocabulary, though. The LIVESTAT line also
+ *  carries the five core counters (`ck`, `sidmg`, `sikill`, `ff`, `rev`),
+ *  which are COLUMNS on `match_players` rather than registry entries, so
+ *  `statDef` returns undefined for every one of them. Consulting the registry
+ *  alone dropped all five from every round, which is the worst possible subset
+ *  to lose: they are the stats present in every match whether or not
+ *  skill_detect is loaded, so on a server without it a survivor half reduced
+ *  to almost nothing. WIRE_SIDE below carries their sides explicitly.
+ *
+ *  Exactly two classes of key are dropped:
+ *    - `hp`, which is a LEVEL and not a counter. "How much health did you have
+ *      when the map ended" cannot be partitioned between two halves at all:
+ *      it is one reading taken at one moment, not an accumulation, so filing
+ *      it under either half would be an invention.
+ *    - anything in neither statKeys.ts nor WIRE_SIDE. An unrecognised key has
+ *      no side to reason about, and filing it under the wrong half would be
+ *      worse than omitting it, the same "never fabricate" discipline that
+ *      keeps absent stats from ever being rendered as zeros elsewhere in this
+ *      codebase.
  *
  *  The whole derivation rests on the two halves of an ordinal holding
  *  opposite `surv_team` values. Nothing in the schema enforces that:
@@ -63,10 +78,46 @@ import type { DB } from './db.js';
 import { roundsFor, mapStatsFor, type RoundRow } from './liveView.js';
 import { statDef } from './statKeys.js';
 
+/** Sides for the wire keys that are NOT in the stat registry.
+ *
+ *  These five are the always-present core counters. They live as fixed columns
+ *  on `match_players` (si_damage, si_kills, common_kills, ff_dealt, revives)
+ *  rather than in the key/value stat table, so statKeys.ts has no entry for
+ *  them, yet the plugin's LIVESTAT line sends them by these short names and
+ *  recordLiveStat passes them straight through into the snapshot.
+ *
+ *  All five are survivor-side: common kills, SI damage, SI kills, friendly
+ *  fire dealt and revives can only accrue while their owner is a survivor.
+ *
+ *  `hp` deliberately has NO entry here. It is a level, not a counter (see the
+ *  header), so it is dropped rather than partitioned. */
+const WIRE_SIDE: Record<string, 'survivor' | 'infected'> = {
+  ck: 'survivor',
+  sidmg: 'survivor',
+  sikill: 'survivor',
+  ff: 'survivor',
+  rev: 'survivor',
+};
+
+/** The side a snapshot key belongs to, or undefined when it has none and must
+ *  therefore be dropped. Registry first, then the core counters. */
+function sideOfKey(key: string): 'survivor' | 'infected' | undefined {
+  return statDef(key)?.side ?? WIRE_SIDE[key];
+}
+
 export interface RoundAttribution {
   ordinal: number;
   half: number;
   survTeam: 'a' | 'b';
+  /** This half's survivor score, as recorded by ROUND_END. Always a number
+   *  because the column is NOT NULL DEFAULT 0, which is exactly why
+   *  `endedAt` exists: a 0 here means "they scored nothing" only when
+   *  `endedAt` is non-null. */
+  score: number;
+  /** When ROUND_END closed this half, or null if it never arrived. A consumer
+   *  must refuse to render `score` for a round with a null endedAt rather than
+   *  showing the column default as a real result. */
+  endedAt: string | null;
   reliable: boolean;
   byPlayer: Record<string, Record<string, number>>;
 }
@@ -102,12 +153,13 @@ export function roundAttribution(
       const side = team === r.survTeam ? 'survivor' : 'infected';
       const kept: Record<string, number> = {};
       for (const [key, value] of Object.entries(stats)) {
-        if (statDef(key)?.side === side) kept[key] = value;
+        if (sideOfKey(key) === side) kept[key] = value;
       }
       byPlayer[steamid] = kept;
     }
     return {
       ordinal: r.ordinal, half: r.half, survTeam: r.survTeam,
+      score: r.score, endedAt: r.endedAt,
       reliable: r.reliable && !unpartitioned.has(r.ordinal), byPlayer,
     };
   });

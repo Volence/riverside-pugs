@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
 import { makeOptionalViewer } from './guards.js';
 import { resolveDemoPath } from '../demos.js';
-import { getLiveMatches, mapStatsFor, eventsFor, roundsFor } from '../liveView.js';
+import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
 import { playerMapBreakdown, mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
@@ -266,13 +266,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // teamOf comes from match_players, which is the authoritative roster
     // written at completion, rather than from anything on the live feed.
     const teamOf = new Map(players.map((p) => [p.steamid, p.team as 'a' | 'b']));
-    // roundAttribution does not carry score (it only reasons about which
-    // side a stat belongs to); roundsFor does. Both query match_rounds with
-    // the same ORDER BY ordinal, half, so the two arrays line up by index.
-    const roundRows = roundsFor(db, id);
-    const rounds = roundAttribution(db, id, teamOf).map((r, i) => ({
-      ...r, score: roundRows[i].score,
-    }));
+    // roundAttribution carries score and endedAt through from the same
+    // roundsFor() query it already runs internally. This used to run that
+    // query a second time here and join the two results by array index; one
+    // query, no positional join.
+    const rounds = roundAttribution(db, id, teamOf);
 
     const demos = db.prepare(
       'SELECT ordinal, map, bytes FROM match_demos WHERE match_id = ? ORDER BY ordinal',
