@@ -37,6 +37,15 @@ export function deltaClass(d: number): string {
   return d > 0 ? 'delta delta--up' : d < 0 ? 'delta delta--down' : 'delta';
 }
 
+/** A clear latency, in seconds to one decimal.
+ *
+ *  Seconds, not milliseconds: the difference between a 0.9s clear and a 1.8s
+ *  one is what a player can act on, while the millisecond digits are noise from
+ *  tickrate and network jitter. */
+export function fmtLatency(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 /** `mm:ss` for the ready-check/vote countdown and the document title. */
 export function fmtClock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));

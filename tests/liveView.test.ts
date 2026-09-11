@@ -582,3 +582,27 @@ describe('round persistence', () => {
     expect(roundsFor(db, 1)).toEqual([]);
   });
 });
+
+describe('liveView: event timing reaches the API', () => {
+  const ev = (
+    seq: number,
+    over: Partial<{ event: string; actor: string; target: string | null; value: number; half: number; tMs: number }> = {},
+  ) => ({
+    kind: 'live_event' as const, token: TOKEN,
+    seq, event: 'pinned', actor: A[0], target: B[0], value: 0, half: 1, tMs: 152800, ...over,
+  });
+
+  it('serves half and tMs on each event', () => {
+    // They were stored but never selected, so nothing downstream could compute
+    // a clear latency or line events up on a timeline.
+    seedLive();
+    recordLiveEvent(db, TOKEN, ev(1));
+    expect(eventsFor(db, getLiveMatches(db)[0].id)[0]).toMatchObject({ half: 1, tMs: 152800 });
+  });
+
+  it('serves them on the live payload too', () => {
+    seedLive();
+    recordLiveEvent(db, TOKEN, ev(1, { half: 2, tMs: 4321 }));
+    expect(getLiveMatches(db)[0].events[0]).toMatchObject({ half: 2, tMs: 4321 });
+  });
+});

@@ -107,6 +107,12 @@ export interface LiveEvent {
   kind: string;
   /** Which map of the match it happened on, zero-based. */
   mapOrdinal: number;
+  /** Which half of that map, 1 or 2, or -1 when the event carried no round
+   *  timing (what a match played before round capture looks like). */
+  half: number;
+  /** Milliseconds since that round went live, or -1 for no timing. Only
+   *  comparable between events in the same map and half. */
+  tMs: number;
   actor: NamedPlayer;
   target: NamedPlayer | null;
   value: number;

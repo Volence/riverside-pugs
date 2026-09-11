@@ -30,6 +30,12 @@ export interface LiveEvent {
   kind: string;
   /** Which map of the match it happened on, zero-based. */
   mapOrdinal: number;
+  /** Which half of that map, 1 or 2. -1 when the event carried no round
+   *  timing, which is what a pre-round-capture match looks like. */
+  half: number;
+  /** Milliseconds since that round went live, or -1 for no timing. Pairs of
+   *  events are only comparable within one map and half. */
+  tMs: number;
   actor: { steamid: string; name: string };
   target: { steamid: string; name: string } | null;
   value: number;
@@ -457,19 +463,19 @@ export function mapStatsFor(db: DB, matchId: number): Map<number, Record<string,
 
 /** The event feed for any match, newest first. */
 export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
-  seq: number; kind: string; mapOrdinal: number;
+  seq: number; kind: string; mapOrdinal: number; half: number; tMs: number;
   actor: string; target: string | null; value: number;
 }[] {
   return (db
     .prepare(
-      `SELECT seq, kind, actor, target, value, map_ordinal FROM match_live_events
+      `SELECT seq, kind, actor, target, value, map_ordinal, half, t_ms FROM match_live_events
        WHERE match_id = ? ORDER BY seq DESC LIMIT ?`,
     )
     .all(matchId, limit) as {
       seq: number; kind: string; actor: string; target: string | null;
-      value: number; map_ordinal: number;
+      value: number; map_ordinal: number; half: number; t_ms: number;
     }[]).map((e) => ({
-      seq: e.seq, kind: e.kind, mapOrdinal: e.map_ordinal,
+      seq: e.seq, kind: e.kind, mapOrdinal: e.map_ordinal, half: e.half, tMs: e.t_ms,
       actor: e.actor, target: e.target, value: e.value,
     }));
 }
@@ -499,7 +505,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
     'SELECT player_id, stats_json FROM match_live_players WHERE match_id = ?',
   );
   const eventsOf = db.prepare(
-    `SELECT seq, kind, actor, target, value, map_ordinal FROM match_live_events
+    `SELECT seq, kind, actor, target, value, map_ordinal, half, t_ms FROM match_live_events
      WHERE match_id = ? ORDER BY seq DESC LIMIT ?`,
   );
   const demosOf = db.prepare(
@@ -541,11 +547,13 @@ export function getLiveMatches(db: DB): LiveMatch[] {
       demos: demosOf.all(m.id) as LiveDemo[],
       events: (eventsOf.all(m.id, LIVE_EVENT_LIMIT) as {
         seq: number; kind: string; actor: string; target: string | null;
-        value: number; map_ordinal: number;
+        value: number; map_ordinal: number; half: number; t_ms: number;
       }[]).map((e) => ({
         seq: e.seq,
         kind: e.kind,
         mapOrdinal: e.map_ordinal,
+        half: e.half,
+        tMs: e.t_ms,
         // Names resolved from the roster we already loaded, so the feed never
         // shows a bare steamid for someone in the match.
         actor: { steamid: e.actor, name: nameOf(e.actor) },

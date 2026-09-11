@@ -1,6 +1,7 @@
 import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
+import { clearLatencyByPlayer } from '../clearLatency';
 import { Empty, Panel, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { sideTotals } from '../matchTotals';
@@ -102,6 +103,15 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   // This guard, like statDefs above, is for new frontend JS running against an
   // older server that omits the field entirely; roundsMessage treats the
   // empty-array case as "never captured" regardless of which path produced it.
+  // Derived from the event feed rather than the dump: latency is a property of
+  // a pinned/cleared pair, not a counter any player accumulates.
+  // Names come from the match roster, not from the event, because the feed
+  // carries whatever name was resolved when the event was recorded while the
+  // roster is what the rest of the page calls this player.
+  const clearRows = clearLatencyByPlayer(data.events ?? []).map((r) => ({
+    ...r, name: players.find((p) => p.steamid === r.steamid)?.name ?? r.name,
+  }));
+
   const rounds = data.rounds ?? [];
   const roundsMsg = roundsMessage(rounds);
   const roundOrdinals = Array.from(new Set(rounds.map((r) => r.ordinal))).sort((a, b) => a - b);
@@ -145,6 +155,35 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
           <h3>Match totals</h3>
           <StatTable teamA={totalsA} teamB={totalsB} cols={cols} statDefs={statDefs} groupStarts={statGroupStarts} showTotals />
         </Panel>
+
+        {clearRows.length > 0 && (
+          <Panel>
+            <h3>Clear latency</h3>
+            {/* Not a column in the table above: that one is registry-driven and
+                sums, while this is an average derived from the pinned/cleared
+                event pair. No counter can express how fast someone was freed. */}
+            <p class="muted">How long a pinned teammate waited to be freed, fastest first.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Player</th><th class="num">Average</th><th class="num">Clears</th></tr>
+                </thead>
+                <tbody>
+                  {clearRows.map((r) => (
+                    <tr key={r.steamid}>
+                      <td>{r.name}</td>
+                      <td class="num">{fmtLatency(r.avgMs)}</td>
+                      {/* The count is shown, not hidden, because an average
+                          over one or two clears is noise and the reader has to
+                          be able to see that for themselves. */}
+                      <td class="num muted">{r.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        )}
 
         {maps.map((mp) => {
           const demo = data.demos?.find((d) => d.ordinal === mp.ordinal);
