@@ -524,6 +524,13 @@ entity *references*, not indices, so a recycled index cannot alias onto a dead e
 The per-frame cost becomes walking about 30 tracked references. Creation and destruction
 are events the engine already raises, so the work moves off the sampling path entirely.
 
+The precise rule, settled while planning 6b: **world entities are tracked incrementally,
+players are iterated.** Commons, the witch and the tank rock are the expensive ones and
+are tracked. AI tanks, survivor bots and AI special infected are clients, and a loop over
+`MaxClients` is under twenty iterations, so they are read directly. That loop is also the
+only way to see them at all: `OnEntityCreated` does not usefully report a bot taking a
+survivor slot.
+
 ### One write call per frame, and no flush
 
 The frame is packed into a byte array in Pawn and written with a single `WriteFile` call
