@@ -1,7 +1,8 @@
 import type { JSX } from 'preact';
-import type { LiveEvent } from '../api';
+import type { LiveEvent, StatDef } from '../api';
 import { labelFor, liveGroupStarts } from '../format';
 import { PlayerLink } from './bits';
+import { markColumn, directionOf, type Mark } from '../outliers';
 
 /** A player row for any stat table: live, per-map, or match totals. */
 export interface StatRow {
@@ -21,27 +22,77 @@ export interface FeedMap { ordinal: number; map: string }
  *  player column is sticky so it never scrolls out of view, which is what made
  *  the first version unreadable: a wall of numbers with no names attached. */
 export function StatTable(
-  { teamA, teamB, cols }: { teamA: StatRow[]; teamB: StatRow[]; cols: string[] },
+  { teamA, teamB, cols, statDefs, showTotals }: {
+    teamA: StatRow[]; teamB: StatRow[]; cols: string[];
+    /** When present, cells that stand out across all players are marked.
+     *  Absent on the live page, which is a running scoreboard rather than a
+     *  post-match comparison. */
+    statDefs?: StatDef[];
+    /** Adds a "Team total" row to the end of each team's group. Off by
+     *  default so the live page's running scoreboard is unchanged. */
+    showTotals?: boolean;
+  },
 ) {
   const starts = liveGroupStarts(cols);
   const cls = (k: string) => `num${starts.has(k) ? ' is-groupstart' : ''}`;
 
-  const rows = (label: string, players: StatRow[]) => [
-    <tr class="live__teamrow" key={`h-${label}`}>
-      <th class="live__pcol" scope="rowgroup">Team {label}</th>
-      {cols.map((k) => <td class={cls(k)} key={k} />)}
-    </tr>,
-    ...players.map((p) => (
-      <tr key={p.steamid}>
-        <td class="live__pcol"><PlayerLink steamid={p.steamid} name={p.name} /></td>
-        {cols.map((k) => {
-          const v = p.stats?.[k];
-          const dim = v === 0 || v === undefined ? ' is-dim' : '';
-          return <td class={cls(k) + dim} key={k}>{renderStat(k, v)}</td>;
-        })}
-      </tr>
-    )),
-  ];
+  const all = [...teamA, ...teamB];
+  // Marks are computed across every player in the match, not per team. The
+  // question is "was I the weak link in this game", and over a full map both
+  // teams play both sides, so all eight are comparable.
+  const marks = new Map<string, (Mark | null)[]>();
+  if (statDefs) {
+    for (const k of cols) {
+      marks.set(k, markColumn(all.map((r) => r.stats?.[k]), directionOf(k, statDefs)));
+    }
+  }
+
+  /** Column totals for one team. A column nobody recorded stays absent rather
+   *  than summing to a fabricated zero. */
+  const totalsFor = (players: StatRow[]) => {
+    const out: Record<string, number> = {};
+    for (const k of cols) {
+      const vals = players.map((p) => p.stats?.[k]).filter((v): v is number => v !== undefined);
+      if (vals.length > 0) out[k] = vals.reduce((a, b) => a + b, 0);
+    }
+    return out;
+  };
+
+  const rows = (label: string, players: StatRow[], indexOffset: number) => {
+    const totals = totalsFor(players);
+    return [
+      <tr class="live__teamrow" key={`h-${label}`}>
+        <th class="live__pcol" scope="rowgroup">Team {label}</th>
+        {cols.map((k) => <td class={cls(k)} key={k} />)}
+      </tr>,
+      ...players.map((p, i) => (
+        <tr key={p.steamid}>
+          <td class="live__pcol"><PlayerLink steamid={p.steamid} name={p.name} /></td>
+          {cols.map((k) => {
+            const v = p.stats?.[k];
+            const dim = v === 0 || v === undefined ? ' is-dim' : '';
+            const m = marks.get(k)?.[indexOffset + i] ?? null;
+            const markCls = m ? ` is-${m}` : '';
+            return <td class={cls(k) + dim + markCls} key={k}>{renderStat(k, v)}</td>;
+          })}
+        </tr>
+      )),
+      // The totals row is never marked: it is a sum, not a player competing
+      // with the others.
+      ...(showTotals
+        ? [
+          <tr key={`t-${label}`}>
+            <td class="live__pcol">Team total</td>
+            {cols.map((k) => {
+              const v = totals[k];
+              const dim = v === 0 || v === undefined ? ' is-dim' : '';
+              return <td class={cls(k) + dim} key={k}>{renderStat(k, v)}</td>;
+            })}
+          </tr>,
+        ]
+        : []),
+    ];
+  };
 
   return (
     <div class="table-wrap live__stats">
@@ -53,8 +104,8 @@ export function StatTable(
           </tr>
         </thead>
         <tbody>
-          {rows('A', teamA)}
-          {rows('B', teamB)}
+          {rows('A', teamA, 0)}
+          {rows('B', teamB, teamA.length)}
         </tbody>
       </table>
     </div>
