@@ -14,21 +14,29 @@ export function Matches() {
           list already fetched, so it costs no extra request. */}
       {data && data.matches.length > 0 && (() => {
         const n = data.matches.length;
-        const aWins = data.matches.filter((m) => m.winner === 'a').length;
-        const bWins = data.matches.filter((m) => m.winner === 'b').length;
         const campaigns = new Set(data.matches.map((m) => m.campaign));
-        const closest = data.matches.reduce((best, m) =>
-          Math.abs(m.teamAScore - m.teamBScore) < Math.abs(best.teamAScore - best.teamBScore) ? m : best);
+        // Deliberately not "Team A wins". a and b are labels reassigned every
+        // match, so a win rate under them aggregates different people each time
+        // and describes nobody. Margin is a property of the match itself, so it
+        // stays true however the sides were labelled.
+        const margin = (m: typeof data.matches[number]) => Math.abs(m.teamAScore - m.teamBScore);
+        const avgMargin = Math.round(data.matches.reduce((sum, m) => sum + margin(m), 0) / n);
+        const closest = data.matches.reduce((best, m) => (margin(m) < margin(best) ? m : best));
+        const widest = data.matches.reduce((best, m) => (margin(m) > margin(best) ? m : best));
         return (
           <Tiles>
             <Tile label="Matches" value={n} />
-            <Tile label="Team A wins" value={aWins} sub={`${Math.round((aWins / n) * 100)}%`} />
-            <Tile label="Team B wins" value={bWins} sub={`${Math.round((bWins / n) * 100)}%`} />
             <Tile label="Campaigns" value={campaigns.size} />
+            <Tile label="Avg margin" value={avgMargin} />
             <Tile
               label="Closest"
               value={`${closest.teamAScore} - ${closest.teamBScore}`}
               sub={campaignName(closest.campaign)}
+            />
+            <Tile
+              label="Widest"
+              value={`${widest.teamAScore} - ${widest.teamBScore}`}
+              sub={campaignName(widest.campaign)}
             />
           </Tiles>
         );

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
-  secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
+  secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats,
 } from './format';
 
@@ -170,8 +170,10 @@ describe('live columns: skeet variants and biles', () => {
   });
 
   it('keeps the skeet family contiguous and gives it its own divider', () => {
-    const keys = orderLiveStatKeys(['ck', 'skeets', 'team_skeets', 'skeets_hurt', 'boomer_spawns']);
-    expect(keys).toEqual(['ck', 'skeets', 'team_skeets', 'skeets_hurt', 'boomer_spawns']);
+    // skeets_hurt used to sit in this family; it is now a dead key, so the
+    // contiguity that matters is skeets beside team_skeets and skeet_assists.
+    const keys = orderLiveStatKeys(['ck', 'skeets', 'team_skeets', 'skeet_assists', 'boomer_spawns']);
+    expect(keys).toEqual(['ck', 'skeets', 'team_skeets', 'skeet_assists', 'boomer_spawns']);
     const starts = liveGroupStarts(keys);
     expect(starts.has('skeets')).toBe(true);
     expect(starts.has('team_skeets')).toBe(false);
@@ -204,5 +206,111 @@ describe('deriveLiveStats', () => {
     const input = { boomer_spawns: 2, boom_successes: 1 };
     deriveLiveStats(input);
     expect(input).toEqual({ boomer_spawns: 2, boom_successes: 1 });
+  });
+});
+
+describe('orderStatKeysBySide', () => {
+  const defs = [
+    { key: 'skeets', side: 'survivor' as const },
+    { key: 'crowns', side: 'survivor' as const },
+    { key: 'draw_crowns', side: 'survivor' as const },
+    { key: 'skeets_melee', side: 'survivor' as const },
+    { key: 'skeets_sniper', side: 'survivor' as const },
+    { key: 'deadstops', side: 'survivor' as const },
+    { key: 'tongue_cuts', side: 'survivor' as const },
+    { key: 'biles_landed', side: 'infected' as const },
+    { key: 'survivors_biled', side: 'infected' as const },
+    { key: 'damage_as_si', side: 'infected' as const },
+  ];
+
+  it('puts every survivor column before every infected column', () => {
+    const out = orderStatKeysBySide(['biles_landed', 'skeets', 'damage_as_si', 'crowns'], defs);
+    const lastSurvivor = Math.max(out.indexOf('skeets'), out.indexOf('crowns'));
+    const firstInfected = Math.min(out.indexOf('biles_landed'), out.indexOf('damage_as_si'));
+    expect(lastSurvivor).toBeLessThan(firstInfected);
+  });
+
+  it('keeps a stat beside its own side rather than in a shared alphabetical tail', () => {
+    // draw_crowns used to sort into one alphabetical heap shared by both sides,
+    // landing nowhere near crowns. Both are survivor keys, so both belong in the
+    // survivor block, ahead of anything infected.
+    const out = orderStatKeysBySide(['crowns', 'draw_crowns', 'biles_landed'], defs);
+    expect(out.indexOf('draw_crowns')).toBeLessThan(out.indexOf('biles_landed'));
+  });
+
+  it('drops stats that cannot occur in L4D1 pug play', () => {
+    const out = orderStatKeysBySide(
+      ['skeets', 'skeets_melee', 'skeets_sniper', 'deadstops', 'tongue_cuts', 'survivors_biled'],
+      defs,
+    );
+    expect(out).toEqual(['skeets']);
+  });
+
+  it('leads with core columns that the registry gives no side', () => {
+    const out = orderStatKeysBySide(['skeets', 'ck', 'biles_landed'], defs);
+    expect(out[0]).toBe('ck');
+  });
+});
+
+describe('labelFor, for stats whose short label misleads', () => {
+  it('does not call high pounces "DPs", which upper-cases into DPS', () => {
+    expect(labelFor('dps_landed')).toBe('High pounces');
+  });
+});
+
+describe('orderLiveStatKeys and the dead-key set', () => {
+  it('drops L4D1-impossible stats from the live view too', () => {
+    // survivors_biled really is present in match_live_players.stats_json, so
+    // without this the live card carries a permanently-zero column.
+    expect(orderLiveStatKeys(['skeets', 'survivors_biled'])).toEqual(['skeets']);
+  });
+});
+
+describe('stat families within a side', () => {
+  const defs = [
+    'skeets', 'team_skeets', 'skeet_assists', 'clears', 'insta_clears',
+    'crowns', 'draw_crowns', 'tank_damage', 'rock_skeets', 'boomer_pops',
+  ].map((key) => ({ key, side: 'survivor' as const })).concat(
+    ['damage_as_si', 'dps_landed', 'pounce_damage_high', 'boomer_spawns',
+      'boom_successes', 'boomed_vomit', 'biles_landed', 'tank_punches',
+    ].map((key) => ({ key, side: 'infected' as const })),
+  );
+
+  const adjacent = (out: string[], a: string, b: string) =>
+    Math.abs(out.indexOf(a) - out.indexOf(b)) === 1;
+
+  it('puts crowns next to draw crowns', () => {
+    const out = orderStatKeysBySide(['crowns', 'skeets', 'draw_crowns', 'clears'], defs);
+    expect(adjacent(out, 'crowns', 'draw_crowns')).toBe(true);
+  });
+
+  it('puts tank damage next to rocks shot', () => {
+    const out = orderStatKeysBySide(['tank_damage', 'skeets', 'rock_skeets'], defs);
+    expect(adjacent(out, 'tank_damage', 'rock_skeets')).toBe(true);
+  });
+
+  it('keeps the boomer cluster contiguous', () => {
+    const out = orderStatKeysBySide(
+      ['boomer_spawns', 'tank_punches', 'boom_successes', 'damage_as_si', 'boomed_vomit'], defs,
+    );
+    const boomer = ['boomer_spawns', 'boom_successes', 'boomed_vomit'].map((k) => out.indexOf(k));
+    expect(Math.max(...boomer) - Math.min(...boomer)).toBe(boomer.length - 1);
+  });
+
+  it('drops the two skeet columns that say nothing on L4D1', () => {
+    // Shotgun is the only weapon class skill_detect can tag here, and a chip
+    // skeet only means anything as a ratio.
+    const out = orderStatKeysBySide(['skeets', 'skeets_shotgun', 'skeets_hurt'], defs);
+    expect(out).toEqual(['skeets']);
+  });
+});
+
+describe('statGroupStarts', () => {
+  it('marks the first present column of each family, never the very first', () => {
+    const starts = statGroupStarts(['ck', 'skeets', 'team_skeets', 'crowns']);
+    expect(starts.has('ck')).toBe(false);
+    expect(starts.has('skeets')).toBe(true);
+    expect(starts.has('team_skeets')).toBe(false);
+    expect(starts.has('crowns')).toBe(true);
   });
 });

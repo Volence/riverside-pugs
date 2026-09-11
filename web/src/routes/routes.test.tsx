@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/preact';
 import { StatTable } from '../components/StatTable';
 import type { StatDef } from '../api';
+import { statGroupStarts } from '../format';
 import { roundsMessage } from './MatchDetail';
 import type { MatchDetail } from '../api';
 
@@ -76,6 +77,24 @@ describe('Matches', () => {
     expect(screen.getByText('Team A')).toBeTruthy();
     // The tile row is derived from the same fetch, so it must render too.
     expect(screen.getByText('Matches')).toBeTruthy();
+  });
+
+  it('summarises with facts that outlive a single match, not per-match team labels', async () => {
+    mockApi.matches.mockResolvedValue({
+      matches: [
+        { id: 7, campaign: 'blood_harvest', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+        { id: 8, campaign: 'dead_air', endedAt: '2026-09-07T04:00:00', teamAScore: 400, teamBScore: 100, winner: 'a' },
+      ],
+    });
+    render(<Matches />);
+    await waitFor(() => expect(screen.getByText('Matches')).toBeTruthy());
+    // "Team A" is reassigned every match, so counting wins under it aggregates
+    // different people from match to match and means nothing.
+    expect(screen.queryByText('Team A wins')).toBeNull();
+    expect(screen.queryByText('Team B wins')).toBeNull();
+    // Margins of 100 and 300 average to 200.
+    expect(screen.getByText('Avg margin')).toBeTruthy();
+    expect(screen.getByText('200')).toBeTruthy();
   });
 });
 
@@ -643,5 +662,77 @@ describe('StatTable comparison', () => {
   it('omits total rows by default', () => {
     render(<StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets']} />);
     expect(screen.queryByText('Team total')).toBeNull();
+  });
+});
+
+describe('MatchDetail column order', () => {
+  const def = (key: string, side: 'survivor' | 'infected'): StatDef =>
+    ({ key, side, visibility: 'public', label: key, needsSkillDetect: true, direction: 'high_good' });
+
+  it('groups survivor columns ahead of infected ones instead of interleaving them', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12,
+          stats: { crowns: 1, draw_crowns: 2, biles_landed: 3 } },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12,
+          stats: { crowns: 1, draw_crowns: 2, biles_landed: 3 } },
+      ],
+      demos: [],
+      events: [],
+      statDefs: [def('crowns', 'survivor'), def('draw_crowns', 'survivor'), def('biles_landed', 'infected')],
+    });
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getAllByText('Crowns').length).toBeGreaterThan(0));
+
+    // Under the old ordering anything outside the curated live list was
+    // appended alphabetically, so infected "Biles" sorted ahead of survivor
+    // "Draw crowns". Grouping by side must put both survivor columns first.
+    const headers = Array.from(container.querySelectorAll('th')).map((th) => th.textContent);
+    expect(headers.indexOf('Draw crowns')).toBeGreaterThan(-1);
+    expect(headers.indexOf('Draw crowns')).toBeLessThan(headers.indexOf('Biles'));
+  });
+
+  it('drops columns for stats that cannot happen on L4D1', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12,
+          stats: { crowns: 1, skeets_melee: 0, tongue_cuts: 0 } },
+      ],
+      demos: [],
+      events: [],
+      statDefs: [def('crowns', 'survivor'), def('skeets_melee', 'survivor'), def('tongue_cuts', 'survivor')],
+    });
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getAllByText('Crowns').length).toBeGreaterThan(0));
+
+    const headers = Array.from(container.querySelectorAll('th')).map((th) => th.textContent);
+    expect(headers).not.toContain('Melee skeets');
+    expect(headers).not.toContain('Tongue cuts');
+  });
+});
+
+describe('StatTable group dividers', () => {
+  const rows = (id: string) => [{ steamid: id, name: 'p' + id, stats: { ck: 1, boomer_pops: 2, crowns: 3 } }];
+
+  it('rules a line before each family, using the grouping the caller passes', () => {
+    // boomer_pops and crowns share the live card's single "skill" group, so
+    // liveGroupStarts rules a line before boomer_pops only. They are separate
+    // families here (a survivor odd-job versus witch work), so crowns must get
+    // its own divider. That difference is what this asserts.
+    const { container } = render(
+      <StatTable teamA={rows('1')} teamB={rows('2')}
+                 cols={['ck', 'boomer_pops', 'crowns']}
+                 groupStarts={statGroupStarts} />,
+    );
+    const headers = Array.from(container.querySelectorAll('th'));
+    const cls = (label: string) =>
+      headers.find((th) => th.textContent === label)?.className ?? '';
+    expect(cls('Commons')).not.toContain('is-groupstart');
+    expect(cls('Boomer pops')).toContain('is-groupstart');
+    expect(cls('Crowns')).toContain('is-groupstart');
   });
 });

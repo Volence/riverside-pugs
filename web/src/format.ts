@@ -57,7 +57,9 @@ export const STAT_LABELS: Record<string, string> = {
   deadstops: 'Deadstops', boomer_pops: 'Boomer pops', crowns: 'Crowns',
   draw_crowns: 'Draw crowns', tongue_cuts: 'Tongue cuts', self_clears: 'Self clears',
   rock_skeets: 'Rocks shot', clears: 'Clears', insta_clears: 'Insta clears',
-  dps_landed: 'DPs', pounce_damage_high: 'Pounce dmg',
+  // Not "DPs": the table upper-cases every header, so it rendered as DPS and
+  // read as damage per second. The stat is skill_detect's high-damage pounce.
+  dps_landed: 'High pounces', pounce_damage_high: 'Pounce dmg',
   biles_landed: 'Biles', survivors_biled: 'Survs biled',
   boomer_spawns: 'Boomers', boomer_rate: 'Boomer %',
   boom_successes: 'Landed', boomed_vomit: 'Vomit', boomed_proxy: 'Proxy',
@@ -88,6 +90,107 @@ export const LIVE_STAT_GROUPS: { key: string; keys: string[] }[] = [
 
 export const LIVE_STAT_ORDER = LIVE_STAT_GROUPS.flatMap((g) => g.keys);
 
+/** Stats that cannot occur in L4D1 pug play, so a column for them is
+ *  permanently zero and spends horizontal space saying nothing.
+ *
+ *  - `skeets_melee`: L4D1 has no melee weapons at all.
+ *  - `skeets_sniper`: the hunting rifle is L4D1's only sniper-class weapon and
+ *    `rotoblin_limit_huntingrifle 0` keeps it out of pug play.
+ *  - `deadstops`, `tongue_cuts`: already documented above as not occurring
+ *    here. They were removed from LIVE_STAT_GROUPS, but the old ordering
+ *    re-appended every unrecognised key, so that exclusion never actually held.
+ *  - `survivors_biled`: skill_detect reports it as 0 on this engine. Its
+ *    `biles_landed` sibling comes from the same forward and does fire, so the
+ *    count being zero is the vomit-hit counter never incrementing, not an
+ *    absence of biles. `boomed_vomit` measures the same thing from our own hook
+ *    and works, so nothing is lost by hiding this one.
+ *  - `skeets_shotgun`: shotgun is the ONLY weapon class skill_detect's trie can
+ *    tag on L4D1 once magnum, GL and the hunting rifle are gone, so this is
+ *    every skeet bar the rare SMG or rifle one. That remainder is still
+ *    recoverable as skeets + team_skeets - skeets_shotgun if it is ever wanted.
+ *  - `skeets_hurt`: a skeet on an already-damaged hunter. Marked neutral in the
+ *    registry because it only means anything as a ratio against clean skeets,
+ *    and a bare count of it is not something anyone acts on.
+ *
+ *  Every one of these is still captured in the end-of-match dump. Pointing this
+ *  frontend at L4D2 is a matter of emptying this set, not of recapturing data. */
+export const DEAD_STAT_KEYS: ReadonlySet<string> = new Set([
+  'skeets_melee', 'skeets_sniper', 'deadstops', 'tongue_cuts', 'survivors_biled',
+  'skeets_shotgun', 'skeets_hurt',
+]);
+
+/** Families, in reading order, that stat columns are grouped into.
+ *
+ *  Ordering by side alone still left a survivor block where crowns and draw
+ *  crowns could sit apart and the boomer counters could be split by something
+ *  unrelated. A family is the unit a reader actually compares within, so it is
+ *  also the unit the table draws a divider between.
+ *
+ *  `core` carries the fixed match_players columns, which the registry gives no
+ *  side because they are not skill-detect keys. */
+export const STAT_FAMILIES: { key: string; side: 'core' | 'survivor' | 'infected'; keys: string[] }[] = [
+  { key: 'core', side: 'core', keys: ['hp', 'ck', 'sidmg', 'sikill', 'ff', 'rev'] },
+  { key: 'skeets', side: 'survivor', keys: ['skeets', 'team_skeets', 'skeet_assists'] },
+  { key: 'pins', side: 'survivor', keys: ['clears', 'insta_clears', 'self_clears'] },
+  { key: 'witch', side: 'survivor', keys: ['crowns', 'draw_crowns'] },
+  { key: 'antitank', side: 'survivor', keys: ['tank_damage', 'rock_skeets'] },
+  { key: 'survmisc', side: 'survivor', keys: ['boomer_pops'] },
+  { key: 'sidamage', side: 'infected', keys: ['damage_as_si'] },
+  { key: 'pounce', side: 'infected', keys: ['dps_landed', 'pounce_damage_high'] },
+  {
+    key: 'boomer',
+    side: 'infected',
+    keys: ['boomer_spawns', 'boom_successes', 'boomer_rate', 'boomed_vomit', 'boomed_proxy', 'biles_landed'],
+  },
+  { key: 'tank', side: 'infected', keys: ['tank_punches', 'tank_rocks_landed'] },
+];
+
+/** True for the first present column of each family, so the match table can
+ *  rule a line to its left. Never true for the very first column, which has
+ *  nothing to be separated from. Mirrors liveGroupStarts, which does the same
+ *  job for the live card's own group list. */
+export function statGroupStarts(orderedKeys: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const family of STAT_FAMILIES) {
+    const first = orderedKeys.find((k) => family.keys.includes(k));
+    if (first && orderedKeys.indexOf(first) > 0) out.add(first);
+  }
+  return out;
+}
+
+/** Column order for the completed-match tables: first the core columns the
+ *  registry gives no side, then everything done as survivors, then everything
+ *  done as infected.
+ *
+ *  Replaces an ordering that appended every key LIVE_STAT_ORDER did not know
+ *  into a single alphabetical tail. That tail interleaved the two sides and
+ *  separated stats from their own family, which is why draw_crowns rendered
+ *  nowhere near crowns. Within a side, keys keep their curated LIVE_STAT_ORDER
+ *  position when they have one and fall back to alphabetical when they do not,
+ *  so the familiar columns stay put instead of being reshuffled. */
+export function orderStatKeysBySide(
+  keys: string[],
+  statDefs: { key: string; side: 'survivor' | 'infected' }[],
+): string[] {
+  const sideOf = new Map(statDefs.map((d) => [d.key, d.side]));
+  const live = keys.filter((k) => !DEAD_STAT_KEYS.has(k));
+  const claimed = new Set(STAT_FAMILIES.flatMap((f) => f.keys));
+
+  // Each side is its families in reading order, then whatever that side has
+  // that no family claims. A key the registry gives no side lands in core,
+  // which is where the fixed match_players columns belong anyway.
+  const block = (side: 'core' | 'survivor' | 'infected') => {
+    const grouped = STAT_FAMILIES
+      .filter((f) => f.side === side)
+      .flatMap((f) => f.keys.filter((k) => live.includes(k)));
+    const leftover = live
+      .filter((k) => !claimed.has(k) && (sideOf.get(k) ?? 'core') === side)
+      .sort();
+    return [...grouped, ...leftover];
+  };
+  return [...block('core'), ...block('survivor'), ...block('infected')];
+}
+
 /** True for the first present column of each group, so the table can put a
  *  rule to its left. Never true for the very first column. */
 export function liveGroupStarts(orderedKeys: string[]): Set<string> {
@@ -100,8 +203,14 @@ export function liveGroupStarts(orderedKeys: string[]): Set<string> {
 }
 
 export function orderLiveStatKeys(keys: string[]): string[] {
-  const known = LIVE_STAT_ORDER.filter((k) => keys.includes(k));
-  const rest = keys.filter((k) => !LIVE_STAT_ORDER.includes(k)).sort();
+  // The dead-key filter applies here as well as to the match page. Leaving the
+  // curated group list merely not mentioning a dead key was never enough: the
+  // `rest` fallback below appends anything the list does not know, so an
+  // omission silently reinstates the column. survivors_biled reaches the live
+  // payload for real, so without this the live card grows a permanent zero.
+  const live = keys.filter((k) => !DEAD_STAT_KEYS.has(k));
+  const known = LIVE_STAT_ORDER.filter((k) => live.includes(k));
+  const rest = live.filter((k) => !LIVE_STAT_ORDER.includes(k)).sort();
   return [...known, ...rest];
 }
 
