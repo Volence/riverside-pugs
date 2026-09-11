@@ -170,7 +170,9 @@ describe('skill stats display', () => {
     });
     render(<MatchDetail id="7" me="1" />);
     await waitFor(() => expect(screen.getAllByText('Skeets').length).toBeGreaterThan(0));
-    expect(screen.getByText('1699')).toBeTruthy();
+    // Appears twice: alice's own row, and the team total row (the match totals
+    // table now shows one, per task 5), since alice is the only source of it.
+    expect(screen.getAllByText('1699')).toHaveLength(2);
   });
 
   it('renders an absent stat as n/a, not a fabricated 0, while a present zero still shows 0', async () => {

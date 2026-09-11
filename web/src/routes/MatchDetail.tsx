@@ -1,8 +1,9 @@
 import { api, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, orderLiveStatKeys, winnerLabel } from '../format';
-import { Empty, Panel, SrDelta } from '../components/bits';
+import { Empty, Panel, SrDelta, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
+import { sideTotals } from '../matchTotals';
 
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
@@ -17,6 +18,40 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   if (!data) return <div class="page page--match" />;
 
   const { match, maps, players } = data;
+  // Absent on matches recorded before the registry was served with the match;
+  // sideTotals treats a missing registry as "nothing has a known side" rather
+  // than crashing on it.
+  const statDefs = data.statDefs ?? [];
+
+  // The two teams' stats, split into what each did as survivors versus as
+  // infected. This is the whole point of the headline cards below: a raw team
+  // total mixes survivor performance with infected performance, which are the
+  // two separate things that decide a versus match.
+  const sideA = sideTotals(players, 'a', statDefs);
+  const sideB = sideTotals(players, 'b', statDefs);
+  const teamPlayers = (team: Team) => players.filter((p) => p.team === team);
+  // ck (commons) and ff (friendly fire) are fixed match_players columns, not
+  // registry keys, so sideTotals never sees them; sum them directly instead.
+  // Neither needs side reasoning: commons only accrue as survivor and, like
+  // siDamage below, the column is always captured, so a team total of 0 is a
+  // real recorded fact rather than something to omit.
+  const sumFixed = (team: Team, pick: (p: MatchPlayerStats) => number) =>
+    teamPlayers(team).reduce((acc, p) => acc + pick(p), 0);
+
+  const headlineCards: { label: string; sub?: string; a: number | undefined; b: number | undefined }[] = [
+    {
+      label: 'SI damage', sub: 'as survivors',
+      a: sumFixed('a', (p) => p.siDamage), b: sumFixed('b', (p) => p.siDamage),
+    },
+    {
+      label: 'Damage as SI', sub: 'as infected',
+      a: sideA.infected.damage_as_si, b: sideB.infected.damage_as_si,
+    },
+    { label: 'Commons', a: sumFixed('a', (p) => p.commonKills), b: sumFixed('b', (p) => p.commonKills) },
+    { label: 'Friendly fire', a: sumFixed('a', (p) => p.ffDealt), b: sumFixed('b', (p) => p.ffDealt) },
+    { label: 'Tank damage', a: sideA.survivor.tank_damage, b: sideB.survivor.tank_damage },
+    // Omitted rather than shown as a fabricated 0 when neither team recorded it.
+  ].filter((c) => c.a !== undefined || c.b !== undefined);
 
   // The dump gives per-player totals as fixed columns plus a bag of skill
   // stats; fold them into one object so the match page and the live page share
@@ -57,10 +92,23 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
         </div>
       </div>
 
+      {headlineCards.length > 0 && (
+        <Tiles>
+          {headlineCards.map((c) => (
+            <Tile
+              key={c.label}
+              label={c.label}
+              value={`${c.a ?? 'n/a'} - ${c.b ?? 'n/a'}`}
+              sub={c.sub}
+            />
+          ))}
+        </Tiles>
+      )}
+
       <div class="stack">
         <Panel>
           <h3>Match totals</h3>
-          <StatTable teamA={totalsA} teamB={totalsB} cols={cols} />
+          <StatTable teamA={totalsA} teamB={totalsB} cols={cols} statDefs={statDefs} showTotals />
         </Panel>
 
         {maps.map((mp) => {
