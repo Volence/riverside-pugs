@@ -14,6 +14,35 @@ Two reporting channels, per the sub-project 2 design spec:
 - **Authoritative (reliable):** RCON response body via `PrintToServer` inside
   `RegServerCmd` handlers, parsed by `src/dumpParse.ts`.
 
+## Starting a match from in-game: `!load_4v4p`
+
+The normal flow is backend-driven: the website allocates a match and pushes it
+to the server over rcon. `!load_4v4p` is the reverse, for when everyone is
+already in the server and nobody wants to go queue on a website.
+
+    !load_4v4p          (in chat, needs ADMFLAG_CHANGEMAP)
+
+It snapshots everyone currently on a team (survivors become pug team `a`,
+infected become `b`), captures their in-game names, invents a token, announces
+the roster over the `logaddress` feed, starts a match-named demo, and execs the
+ranked config. The backend materialises the match and hands back the id it
+allocated via `sm_pug_setid`.
+
+Differences from a backend-driven match, both deliberate:
+
+- **The match id is 0 until the backend assigns one.** The plugin cannot invent
+  it, because `matches.id` is an autoincrement the backend owns.
+- **Non-rostered players are NOT kicked.** Roster enforcement exists to hold a
+  backend-issued roster to the people who signed up for it. A match started
+  from inside a running game has no such authority, and the config's
+  `sm_restartmap` cycles every client through `OnClientPostAdminCheck` moments
+  after the snapshot, so kicking would eject anyone who happened to be
+  spectating. They stay, unscored. `sm_pug_status` reports this as
+  `selfStarted=1 enforceRoster=0`.
+
+Refuses cleanly when a match is already configured, when nobody is on a team,
+or when more than `MAX_ROSTER` (8) players are on teams.
+
 ## RCON commands
 
 | Command | Arg grammar | Notes |
@@ -23,6 +52,7 @@ Two reporting channels, per the sub-project 2 design spec:
 | `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. |
 | `sm_pug_abort` | `<token>` | Clears match state. Roster enforcement stops immediately. |
 | `sm_pug_status` | none | Full current plugin state over the RCON response body. Takes no token deliberately, since the moment you most want it is when setup went wrong and you do not trust your own idea of the token. Read-only, safe at any time. |
+| `sm_pug_setid` | `<token> <matchid>` | Backend assigns the match id for a **self-started** match. Keyed by token, because the id is exactly what the plugin does not know and so cannot be asked for. |
 
 `sm_pug_dump` and `sm_pug_abort` both check `<token>` against the token set by
 the most recent `sm_pug_match` and reply `PUGERR bad token` if it doesn't
@@ -37,6 +67,8 @@ without eight people in the server.
 |---|---|---|
 | `sm_pug_min_orient` | `3` | Rostered players that must agree before the pug-team/side mapping moves. Set to `1` on a test instance to drive a match solo. |
 | `sm_pug_debug` | `0` | `1` logs orientation flips, team-lock moves, score reads and attribution to the SourceMod log. |
+| `sm_pug_config` | `pug_match.cfg` | Config `!load_4v4p` execs. `pug_match.cfg` execs the pinned ruleset (`rotoblin_pug_4v4.cfg`, a clone of hardcore 4v4), loads `skill_detect` as a data source, and restores `sm_pug_min_orient 3`. Changing this changes the rules under every rating earned from here on. |
+| `sm_pug_record_demos` | `1` | `1` stops `tv_autorecord`'s file and records `pug_<token>_<ordinal>_<map>.dem` for each map of a match, so the demo is linked to the match by name rather than guessed at by timestamp. |
 
 Debug output goes to the SourceMod log, not the `logaddress` stream, because the
 UDP grammar is parsed by `src/logParse.ts` and free-text lines there would be
@@ -79,6 +111,29 @@ PUG <token> HEARTBEAT
 PUG <token> PLAYER steamid=<id64> event=connect|disconnect
 PUG <token> MATCH_END a=<n> b=<n> winner=a|b|draw
 ```
+
+Self-started matches (`!load_4v4p`) emit one more burst, once, up front:
+
+```
+PUG <token> MATCH_CREATE map=<map> players=<n>
+PUG <token> MATCH_ROSTER steamid=<id64> team=a|b name=<rest of line>
+PUG <token> MATCH_CREATE_END players=<n>
+```
+
+Two constraints that are easy to break and silent when broken:
+
+- **`name=` must stay LAST on its line.** In-game names contain spaces and can
+  contain `=`, so the backend takes the entire remainder of the line as the
+  name rather than splitting on whitespace.
+- **The token must be exactly 32 lowercase hex characters.** `src/logParse.ts`
+  pins `/^[0-9a-f]{32}$/`, so a shorter token makes every line unparseable with
+  no error anywhere.
+
+These three are the only lines the backend will accept for a token it has never
+seen, and only from the game server's own source address: they are the ones
+that cause database writes, so `src/logListener.ts` pins the source. Everything
+else stays gated on a registered token, so a spoofed `MATCH_END` cannot invent
+a score.
 
 ### Authoritative: RCON `sm_pug_dump` response body (`src/dumpParse.ts`)
 
