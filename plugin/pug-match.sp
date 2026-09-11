@@ -78,6 +78,8 @@ int g_iHalfScoreA;
 int g_iHalfScoreB;
 int g_iRound1Logical;                    // logical team (1|2) that played survivors in half 1; 0 = unknown
 int g_iRound1SurvPug;                    // pug team (1|2) that played survivors in half 1; 0 = unknown
+int g_iHalf;                             // 1 or 2 within the current map; 0 = not live
+float g_fRoundLiveAt;                    // GetGameTime() when this half went live; 0 = not live
 bool g_bRoundEnded;                      // round_end latch (round_end can fire more than once)
 bool g_bHalfWasLive;                     // set by OnRoundIsLive; guards ready-up restarts
 bool g_bPendingFinalize;                 // set when 2nd-half round_end fires; cleared by FinalizeMap.
@@ -214,13 +216,35 @@ void EmitPug(const char[] fmt, any ...)
 	LogToGame("PUG %s %s", g_sToken, body);
 }
 
-/** One discrete thing that happened, for the live feed.
+/** Which pug team is on the survivor side right now, as "a"/"b", or "" when
+ *  the orientation mapping has not settled. g_iPugSide[1] is the GAME team of
+ *  pug team a; TEAM_SURVIVOR is 2. */
+void SurvPugTeam(char[] out, int maxlen)
+{
+	if (g_iPugSide[1] == TEAM_SURVIVOR) strcopy(out, maxlen, "a");
+	else if (g_iPugSide[2] == TEAM_SURVIVOR) strcopy(out, maxlen, "b");
+	else out[0] = '\0';
+}
+
+/** Milliseconds since this half went live. -1 before it does, which the
+ *  parser treats as "no round timing", distinct from 0. */
+int RoundMs()
+{
+	if (g_fRoundLiveAt <= 0.0) return -1;
+	return RoundToNearest((GetGameTime() - g_fRoundLiveAt) * 1000.0);
+}
+
+/** One discrete thing that happened, for the live feed and the timeline.
  *
  *  Deliberately generic (kind/actor/target/value) rather than a line type per
  *  event: the backend stores it opaquely and the page renders by kind, so
  *  adding another kind later is a plugin-only change. Cosmetic like the rest
  *  of the UDP stream; the authoritative per-player totals still come from the
- *  dump. target may be 0 for events with no second party. */
+ *  dump. target may be 0 for events with no second party. half/t ride along
+ *  so the viewer can align events against replay frames without a clock.
+ *
+ *  `kind` MUST exist in src/eventKinds.ts. tests/eventKindsParity.test.ts
+ *  enforces that. */
 void EmitEvent(const char[] kind, int actor, int target, int value)
 {
 	if (g_State != MS_Live) return;
@@ -233,8 +257,8 @@ void EmitEvent(const char[] kind, int actor, int target, int value)
 		strcopy(targetId, sizeof(targetId), g_sRosterId[g_iClientRoster[target]]);
 
 	g_iEventSeq++;
-	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d",
-		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value);
+	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d half=%d t=%d",
+		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value, g_iHalf, RoundMs());
 }
 
 /** Verbose diagnostic, off by default. Goes to the SourceMod log rather than
@@ -684,6 +708,8 @@ void ResetMatchState()
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
 	g_iRound1SurvPug = 0;
+	g_iHalf = 0;
+	g_fRoundLiveAt = 0.0;
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
 	g_bPendingFinalize = false;
@@ -982,6 +1008,22 @@ public void OnRoundIsLive()
 		SampleSkillDetect();
 		EmitPug("MATCH_START map=%s", g_sCurrentMap);
 	}
+
+	// readyup's go-live forward fires for every round on the box, PUG match or
+	// not, so gate the half counter on an actually-tracked match. Otherwise an
+	// idle server would burn through g_iHalf on ordinary rounds between matches.
+	if (g_State == MS_Live)
+	{
+		g_iHalf++;
+		g_fRoundLiveAt = GetGameTime();
+		char surv[2];
+		SurvPugTeam(surv, sizeof(surv));
+		// An empty side means the orientation mapping has not settled. Emit
+		// anyway with the best guess of "a": the backend trusts ROUND_END, and a
+		// missing ROUND_START would leave the round with no started_at at all.
+		if (surv[0] == '\0') strcopy(surv, sizeof(surv), "a");
+		EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
+	}
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
@@ -1025,6 +1067,18 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	if (score >= 0)
 	{
 		AttributeScore(survPug, score, second);
+
+		char survEnd[2];
+		SurvPugTeam(survEnd, sizeof(survEnd));
+		if (survEnd[0] != '\0')
+		{
+			// The survivor team's own score for this half. g_iHalfScoreA/B are
+			// already the per-half accumulators.
+			int mine = StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB;
+			EmitPug("ROUND_END half=%d surv=%s score=%d", g_iHalf, survEnd, mine);
+		}
+		g_fRoundLiveAt = 0.0;
+
 		if (second) FinalizeMap();
 		return;
 	}
@@ -1162,6 +1216,7 @@ void FinalizeMap()
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
 	g_iMapScoreB[g_iMapCount] = g_iHalfScoreB;
 	g_iMapCount++;
+	g_iHalf = 0;
 	EmitPug("MAP_RESULT map=%s a=%d b=%d", g_sCurrentMap, g_iHalfScoreA, g_iHalfScoreB);
 }
 
