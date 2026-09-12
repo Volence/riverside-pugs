@@ -107,7 +107,7 @@ export function Leaderboard({ me }: { me: string | null }) {
         ) : rows.length === 0 ? (
           <Empty>No rated players yet.</Empty>
         ) : (
-          <div class="table-wrap lb">
+          <div class={`table-wrap lb${sort.key === 'sr' && sort.desc ? ' lb--ranked' : ''}`}>
             <table>
               <thead>
                 <tr>
@@ -124,8 +124,8 @@ export function Leaderboard({ me }: { me: string | null }) {
                     <tr key={r.steamid} class={r.steamid === me ? 'is-me' : ''}>
                       {/* Rank follows the CURRENT sort, so it stays meaningful
                           when the table is ordered by something other than SR. */}
-                      <td class={`rank ${i < 3 ? 'rank--top' : ''}`}>{i + 1}</td>
-                      <td class="lb__pcol"><PlayerLink steamid={r.steamid} name={r.name} /></td>
+                      <td class={`rank ${i < 3 ? 'rank--top' : ''}`}>{String(i + 1).padStart(2, '0')}</td>
+                      <td class="lb__pcol pname"><PlayerLink steamid={r.steamid} name={r.name} /></td>
                       <td class="num sr">{r.sr}</td>
                       <td class="num">{r.wins}</td>
                       <td class="num">{r.losses}</td>

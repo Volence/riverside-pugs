@@ -115,7 +115,7 @@ export function MapDetail({ map }: { map: string }) {
                 const decided = p.wins + p.losses;
                 return (
                   <tr key={p.steamid}>
-                    <td class="lb__pcol"><PlayerLink steamid={p.steamid} name={p.name} /></td>
+                    <td class="lb__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
                     <td class="num">{p.games}</td>
                     <td class="num">{p.wins}</td>
                     <td class="num">{p.losses}</td>
