@@ -94,7 +94,18 @@ Add to `tests/replayFormat.test.ts`, inside the existing `describe('replay heade
 
 Run: `npx vitest run tests/replayFormat.test.ts -t "view into a larger ArrayBuffer"`
 
-Expected: PASS, because the current implementation uses Buffer methods which already honour the offset. This test is written first so that it is in place before the port, and it must still pass after. If it fails now, stop: something else is wrong.
+Expected: FAIL. `backing.subarray(64)` is a plain `Uint8Array`, and the pre-port
+`decodeHeader` calls Buffer-only prototype methods on its argument. The magic
+check goes first, and `Uint8Array.prototype.toString` ignores an encoding
+argument and stringifies as comma-joined decimals, so `readAscii` never returns
+`'L4RP'` and the function returns null.
+
+That makes this a genuine RED test rather than a regression guard, and it is
+guarding two things at once. It proves the port accepts a plain `Uint8Array`,
+which is the browser's case and the whole point of the task. It also proves the
+port honours `byteOffset`: `backing.subarray(64)` starts 64 bytes into its
+ArrayBuffer, so a port written as `new DataView(buf.buffer)` would read from the
+wrong place and fail this test even though it is a `Uint8Array`.
 
 - [ ] **Step 3: Add the DataView helper and port the ASCII helpers**
 
