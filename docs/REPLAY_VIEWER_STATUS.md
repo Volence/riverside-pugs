@@ -10,55 +10,39 @@ Full execution ledger, including every ruling made and why:
 
 ---
 
-## 1. The open bug, and it is the blocker
+## 1. The lockup, fixed 2026-09-12
 
-**The viewer page is uninteractable in a real browser.** Loading either
-`/match/9001` or a single-viewer `/replay/file/<name>` makes the page
-unresponsive enough that right click and dev tools do not open. Other sites on
-the same machine are fine.
+**The viewer page was uninteractable in a real browser.** Loading `/match/9001`
+or a single-viewer `/replay/file/<name>` spun the main thread hard enough that
+right click and dev tools would not open.
 
-**It is not reproduced and not diagnosed.** Everything below was ruled out by
-measurement, so do not spend time re-checking them:
+**Root cause: an infinite loop in `stackLabels` (`web/src/replay/draw.ts`).**
+The label de-confliction pass pushes a label to `o.ly + lineH` whenever it sits
+within `lineH` of an already placed label `o`, and relied on `ly` strictly
+increasing for termination. In floating point `(o.ly + lineH) - o.ly` can come
+out a hair under `lineH`: with three survivors at spawn the third baseline was
+`71.56827036458554`, its distance from the second (`59.56827036458555`) read as
+`11.999999999999993 < 12`, and pushing it to the second's baseline plus twelve
+rounded back to the very same number. `moved` never cleared. Any cluster of
+three or more labels in one column with fractional canvas positions could hit
+it, which is what every round's spawn looks like.
 
-| Ruled out | Evidence |
-|---|---|
-| Server, routes, data | 200s throughout; 700 frames, 250 KB, correct map, decodes clean |
-| Request storm or re-decode loop | Network log shows each replay fetched exactly once, connection closes |
-| Backdrop blit cost | 0.115 ms per scaled 2048x1271 blit, about 1% of a frame budget |
-| Two viewers being mounted at once | A single-viewer page locks up identically |
-| Machine load | Reproduced with load average 5.8 as well as 19.7 |
-| Stale Vite modules | Survives a dep-cache wipe and a hard reload |
+Found by driving headless Chrome over the DevTools protocol, waiting for
+`Runtime.evaluate` to stop answering, then `Debugger.pause` to sample the stack
+and `Debugger.evaluateOnCallFrame` to read the loop's locals. Every sample was
+inside `stackLabels`.
 
-**Why it was never caught:** the browser pane available during the build
-reports `document.hidden`, and a hidden tab never fires `requestAnimationFrame`
-and never performs layout. Those are exactly the two things that only happen in
-a visible tab, so every measurement taken during the build was blind to this
-entire class of problem. Any future attempt needs a genuinely visible browser.
+Fix: a push only counts if it actually moves the baseline down
+(`o.ly + lineH > ly`). `ly` then strictly increases through a finite set of
+values, so the loop is bounded by the number of placed labels. Regression test
+with the captured numbers is in `draw.test.ts`. After the fix the page runs at
+60 rAF/s with no long tasks and both viewers' clocks advance.
 
-**Where to look first**, in order:
-
-1. **A `ResizeObserver` feedback loop** in `web/src/replay/canvasSize.ts`. It
-   reads `el.clientWidth` inside the observer callback, which forces layout,
-   and the resulting state change resizes the very element being observed. The
-   stage carries an inline `aspectRatio` and a `maxWidth` derived from `vh`, so
-   a height change can feed back into a width measurement. This is the single
-   most likely cause and it is invisible without layout.
-   Quick test: hard-code the canvas size, bypassing the hook entirely. If the
-   page becomes interactive, this is it.
-2. **The `requestAnimationFrame` loop in `ReplayCanvas`**, which now drives
-   drawing directly. Quick test: make it draw on a 500 ms `setInterval` instead.
-   If the page frees up, the cost is per-frame, and the next question is which
-   part of `drawScene`.
-3. **Something in `drawScene`'s text path.** The name labels call `measureText`
-   per player per frame for their backing plates. That is 8 calls a frame and
-   `measureText` can force layout in some engines.
-
-The bisect that has not been run yet, and should be: comment out the
-`<ReplayCanvas>` element but leave everything else mounted. If the page is
-responsive, the problem is the canvas and its loop. If it is still locked, the
-problem is in the surrounding component tree or the sizing hook.
-
----
+Why every earlier measurement missed it: the browser pane used all session
+reported `document.hidden`, so the animation loop never ran and the paint that
+first hit the crowded spawn frame never happened there. The ResizeObserver
+theory this section used to lead with is dead: the observer fires exactly
+twice per viewer on load.
 
 ## 2. What needs a human before this ships
 

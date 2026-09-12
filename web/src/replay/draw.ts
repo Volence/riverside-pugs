@@ -389,13 +389,20 @@ export function stackLabels<T extends { px: number; py: number; w: number }>(
   const out: (T & { ly: number })[] = [];
   for (const j of sorted) {
     let ly = j.py;
-    // `ly` only ever increases and there are finitely many placed labels, so
-    // this settles.
+    // This settles because every move puts `ly` STRICTLY further down, and it
+    // can only ever land on one of the finitely many `o.ly + lineH` values.
+    // The strictness is checked rather than assumed: in floating point,
+    // `(o.ly + lineH) - o.ly` can come out a hair under `lineH` (12 became
+    // 11.999999999999993 on a real spawn cluster), so a label already sitting
+    // on `o.ly + lineH` still read as overlapping `o` and was "pushed" to the
+    // same value forever. That spun the main thread and made the whole page
+    // uninteractable. A push that would not move the label down is not a
+    // push; the rounding hair it leaves is far below a pixel.
     for (let moved = true; moved;) {
       moved = false;
       for (const o of out) {
         const overlapsX = j.px < o.px + o.w && o.px < j.px + j.w;
-        if (overlapsX && Math.abs(ly - o.ly) < lineH) {
+        if (overlapsX && Math.abs(ly - o.ly) < lineH && o.ly + lineH > ly) {
           ly = o.ly + lineH;
           moved = true;
         }
