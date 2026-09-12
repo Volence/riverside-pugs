@@ -270,6 +270,27 @@ describe('stackLabels', () => {
     for (const l of out) expect(l.ly).toBeGreaterThanOrEqual(l.py);
   });
 
+  // Captured from a locked-up page by pausing the JS engine: three survivors
+  // at spawn, fractional canvas positions, all sharing a column. The second
+  // label is pushed to the first's baseline plus a line, and the third to the
+  // second's plus a line. In floating point, that third baseline minus the
+  // second's comes out as 11.999999999999993, which is under the line height,
+  // so the third is pushed to the second's baseline plus a line again, which
+  // rounds to the very same number. `moved` never clears and the main thread
+  // never comes back, which is what made the viewer uninteractable.
+  it('settles when a pushed baseline lands a rounding error inside the line height', () => {
+    const out = stackLabels([
+      { px: 204.93382989853183, py: 47.56827036458555, w: 37.453125 },
+      { px: 201.11562472601003, py: 50.56828871442411, w: 39.6845703125 },
+      { px: 197.2974195534882, py: 53.56830706426268, w: 51.9306640625 },
+    ], 12);
+    expect(out.map((l) => l.ly)).toEqual([
+      47.56827036458555,
+      47.56827036458555 + 12,
+      47.56827036458555 + 12 + 12,
+    ]);
+  });
+
   it('does not reorder or mutate the input array', () => {
     const input = [col(30), col(10)];
     const copy = input.map((j) => ({ ...j }));
