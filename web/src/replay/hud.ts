@@ -1,13 +1,12 @@
 import { STATE, SURVIVOR_CHARACTERS } from '../../../src/replayFormat';
 
 export function healthColor(health: number, alive: boolean): string {
-  if (!alive) return '#6b6b6b';
-  if (health > 40) return '#7ec95e';
-  if (health > 20) return '#e8b04b';
-  // Not the same red as tokens.css's --loss (#e35d5d): this is the in-game
-  // HUD's danger red, unrelated to match win/loss, so it stays a literal
-  // rather than borrowing a token that means something else here.
-  return '#d9534f';
+  if (!alive) return '#958770';
+  if (health > 40) return '#45b39c';
+  if (health > 20) return '#c9a45c';
+  // The site's red. It is the infected color as well, which is fine here: a
+  // survivor this low is about to become their problem.
+  return '#de4e40';
 }
 
 export function statusFlags(state: number): string[] {
