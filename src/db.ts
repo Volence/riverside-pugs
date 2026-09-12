@@ -225,6 +225,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   map_pool: JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
+  replay_retention_days: '90',
+  replay_free_floor_gb: '10',
 };
 
 /** Add a column if the table lacks it. No-op when already present. */
