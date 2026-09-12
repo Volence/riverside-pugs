@@ -173,6 +173,27 @@ export function recordLiveEvent(
   touch(db, id);
 }
 
+/** Store one chat message. Mirrors recordLiveEvent, including the deliberate
+ *  choice NOT to re-stamp map_ordinal, half or t_ms on conflict: a duplicate
+ *  datagram can arrive after the map it belongs to has ended, and re-stamping
+ *  would move an old message onto the current map. The first write is the one
+ *  that saw the right map. */
+export function recordChat(
+  db: DB, token: string,
+  ev: Extract<LogEvent, { kind: 'chat' }>,
+): void {
+  const id = liveMatchIdOf(db, token);
+  if (id === null) return;
+  const ordinal = currentOrdinal(db, id);
+  db.prepare(
+    `INSERT INTO match_chat (match_id, seq, map_ordinal, half, t_ms, steamid, team, message)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (match_id, seq) DO UPDATE SET
+       steamid = excluded.steamid, team = excluded.team, message = excluded.message`,
+  ).run(id, ev.seq, ordinal, ev.half, ev.tMs, ev.steamid, ev.team, ev.message);
+  touch(db, id);
+}
+
 export interface RoundRow {
   ordinal: number;
   half: number;

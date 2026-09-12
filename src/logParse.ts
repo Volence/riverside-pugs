@@ -43,6 +43,22 @@ export type LogEvent =
       // -1 when the plugin predates round timing. Distinct from 0, which is
       // a real event in the first millisecond of a round.
       half: number; tMs: number;
+    }
+  // In-game chat. Its own line type rather than an EVENT because EVENT's
+  // fields are kind/actor/target/an integer value, and a message is free text.
+  //
+  // `seq` is the SAME counter EVENT uses, not a second one. One monotonic
+  // sequence across both streams is what lets a viewer interleave a message
+  // and a death in the order they really happened, and it reuses the dedupe
+  // key that already exists.
+  //
+  // Unlike an event, chat is NOT gated on stats being active: the gate exists
+  // to stop counters moving between rounds and during ready-up, which are
+  // exactly the moments chat is most worth having. `tMs` is -1 then, the same
+  // sentinel RoundMs() already returns.
+  | {
+      kind: 'chat'; token: string; seq: number; half: number; tMs: number;
+      steamid: string; team: 'a' | 'b' | null; message: string;
     };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
@@ -173,6 +189,35 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       const half = halfOf(rest.half) ?? -1;
       const tMs = intOf(rest.t) ?? -1;
       return { kind: 'live_event', token, seq, event: rest.kind, actor: rest.actor, target, value, half, tMs };
+    }
+    case 'CHAT': {
+      // The message is taken from the raw line rather than from kv(), because
+      // chat contains spaces and very often contains '='. The plugin emits
+      // msg= last on the line for exactly this reason, so everything after the
+      // first ' msg=' is the message. Same treatment as MATCH_ROSTER's name=,
+      // and for the same reason: tokenizing would let a message forge any
+      // field that followed it.
+      const at = line.indexOf(' msg=');
+      if (at < 0) return null;
+      const message = line.slice(at + ' msg='.length);
+      if (!message) return null;
+      // seq/half/t/steamid/team must NOT come from the shared `rest` above:
+      // that was built by kv()-tokenizing the WHOLE remainder of the line,
+      // including everything inside the message. A message like
+      // "gg steamid=76561198000000009 team=a" would otherwise overwrite the
+      // real steamid and team with ones forged inside the chat text. Instead,
+      // re-derive them from only the portion of the line before ' msg='.
+      const head = kv(line.slice(0, at).split(/\s+/).slice(3));
+      const seq = intOf(head.seq);
+      if (seq === null || seq < 1) return null;
+      if (!/^\d{17}$/.test(head.steamid ?? '')) return null;
+      // half and t are optional so a staged older plugin still parses.
+      const half = halfOf(head.half) ?? -1;
+      const tMs = intOf(head.t) ?? -1;
+      return {
+        kind: 'chat', token, seq, half, tMs,
+        steamid: head.steamid, team: teamOf(head.team), message,
+      };
     }
     case 'MATCH_END': {
       const a = intOf(rest.a), b = intOf(rest.b);

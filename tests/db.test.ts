@@ -10,7 +10,7 @@ describe('openDb', () => {
       .all()
       .map((r: any) => r.name);
     expect(names).toEqual([
-      'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
+      'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps',
       'match_player_stats', 'match_players', 'match_replays', 'match_rounds',
       'matches',
