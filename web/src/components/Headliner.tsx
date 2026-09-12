@@ -16,7 +16,7 @@ export function Headliner(
   },
 ) {
   return (
-    <section class="panel headliner">
+    <section class={`panel headliner${avatar ? ' headliner--avatar' : ''}`}>
       {avatar && <img class="headliner__avatar" src={avatar} alt="" />}
       <p class="eyebrow headliner__eyebrow">{eyebrow}</p>
       <h2 class="headliner__name">{name}</h2>
