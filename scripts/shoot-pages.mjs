@@ -70,8 +70,9 @@ try {
       // the actual viewport/compositor surface, and it worked: no hang, and
       // the atmosphere is visible all the way to the bottom of the tallest
       // page (see task-2-report.md "Fix round 2").
+      // Grain tile over full-page clip stalls headless compositor; drop it and keep vignette only
       await send('Runtime.evaluate', {
-        expression: `(() => { const s = document.getElementById('shoot-override') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'shoot-override' })); s.textContent = 'body{background-attachment:scroll !important}'; })()`,
+        expression: `(() => { const s = document.getElementById('shoot-override') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'shoot-override' })); s.textContent = 'body{background-attachment:scroll !important;background-image:var(--vignette) !important}'; })()`,
       });
       await sleep(300);
       const shot = await send('Page.captureScreenshot', {
