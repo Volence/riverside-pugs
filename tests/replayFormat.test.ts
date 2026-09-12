@@ -56,12 +56,23 @@ describe('replay header', () => {
 
   it('rejects a buffer with the wrong magic', () => {
     const buf = encodeHeader(header());
-    buf.write('XXXX', 0, 'ascii');
+    buf.set([0x58, 0x58, 0x58, 0x58], 0);
     expect(decodeHeader(buf)).toBeNull();
   });
 
   it('rejects a buffer shorter than the header', () => {
     expect(decodeHeader(encodeHeader(header()).subarray(0, 40))).toBeNull();
+  });
+
+  it('decodes a buffer that is a view into a larger ArrayBuffer', () => {
+    const h = header();
+    const encoded = encodeHeader(h);
+    // Deliberately not at offset 0. Buffer.alloc hands out pooled memory with
+    // a non-zero byteOffset all the time, so this is the common case in
+    // production and the rare case in tests.
+    const backing = new Uint8Array(encoded.length + 64);
+    backing.set(encoded, 64);
+    expect(decodeHeader(backing.subarray(64))).toEqual(h);
   });
 });
 

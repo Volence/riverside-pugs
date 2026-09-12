@@ -141,58 +141,80 @@ export interface Replay {
   truncatedBytes: number;
 }
 
-function writeAscii(buf: Buffer, s: string, off: number, len: number): void {
+/** Buffer's read and write helpers are Node-only, and this module is imported
+ *  by the browser too. A DataView over the same bytes is the isomorphic
+ *  equivalent.
+ *
+ *  The three-argument constructor is load-bearing. A Node Buffer is usually a
+ *  window into a shared pooled ArrayBuffer, so `new DataView(buf.buffer)`
+ *  would read from the start of the pool rather than the start of this
+ *  buffer, silently returning another allocation's bytes. */
+function dv(buf: Uint8Array): DataView {
+  return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/** Node's 'ascii' encoding masks the high bit off in both directions. The
+ *  mask here is not decoration: it is what keeps this a faithful port rather
+ *  than a subtly wider encoding. */
+function writeAscii(buf: Uint8Array, s: string, off: number, len: number): void {
   buf.fill(0, off, off + len);
-  buf.write(s.slice(0, len), off, len, 'ascii');
+  const n = Math.min(s.length, len);
+  for (let i = 0; i < n; i++) buf[off + i] = s.charCodeAt(i) & 0x7f;
 }
 
-function readAscii(buf: Buffer, off: number, len: number): string {
-  const slice = buf.subarray(off, off + len);
-  const end = slice.indexOf(0);
-  return slice.subarray(0, end === -1 ? len : end).toString('ascii');
+function readAscii(buf: Uint8Array, off: number, len: number): string {
+  let end = off + len;
+  for (let i = off; i < off + len; i++) {
+    if (buf[i] === 0) { end = i; break; }
+  }
+  let s = '';
+  for (let i = off; i < end; i++) s += String.fromCharCode(buf[i] & 0x7f);
+  return s;
 }
 
-export function encodeHeader(h: ReplayHeader): Buffer {
-  const buf = Buffer.alloc(HEADER_BYTES);
-  buf.write(MAGIC, OFF.magic, 4, 'ascii');
-  buf.writeUInt16LE(h.version, OFF.version);
-  buf.writeUInt8(h.ordinal, OFF.ordinal);
-  buf.writeUInt8(h.half, OFF.half);
-  buf.writeUInt8(h.playerHz, OFF.playerHz);
-  buf.writeUInt8(h.entityHz, OFF.entityHz);
+export function encodeHeader(h: ReplayHeader): Uint8Array {
+  const buf = new Uint8Array(HEADER_BYTES);
+  const v = dv(buf);
+  writeAscii(buf, MAGIC, OFF.magic, 4);
+  v.setUint16(OFF.version, h.version, true);
+  v.setUint8(OFF.ordinal, h.ordinal);
+  v.setUint8(OFF.half, h.half);
+  v.setUint8(OFF.playerHz, h.playerHz);
+  v.setUint8(OFF.entityHz, h.entityHz);
   writeAscii(buf, h.token, OFF.token, TOKEN_BYTES);
   writeAscii(buf, h.map, OFF.map, MAP_BYTES);
-  buf.writeUInt32LE(h.startedUnix, OFF.startedUnix);
-  buf.writeUInt32LE(h.indexOffset, OFF.indexOffset);
-  buf.writeUInt32LE(h.indexCount, OFF.indexCount);
-  buf.writeUInt32LE(h.frameCount, OFF.frameCount);
+  v.setUint32(OFF.startedUnix, h.startedUnix, true);
+  v.setUint32(OFF.indexOffset, h.indexOffset, true);
+  v.setUint32(OFF.indexCount, h.indexCount, true);
+  v.setUint32(OFF.frameCount, h.frameCount, true);
   for (let i = 0; i < PLAYER_SLOTS; i++) {
     const raw = h.slots[i] ?? '';
-    buf.writeBigUInt64LE(raw === '' ? 0n : BigInt(raw), OFF.slots + i * 8);
+    v.setBigUint64(OFF.slots + i * 8, raw === '' ? 0n : BigInt(raw), true);
   }
   return buf;
 }
 
-export function decodeHeader(buf: Buffer): ReplayHeader | null {
+export function decodeHeader(buf: Uint8Array): ReplayHeader | null {
   if (buf.length < HEADER_BYTES) return null;
   if (readAscii(buf, OFF.magic, 4) !== MAGIC) return null;
+  const v = dv(buf);
   const slots: string[] = [];
   for (let i = 0; i < PLAYER_SLOTS; i++) {
-    const raw = buf.readBigUInt64LE(OFF.slots + i * 8);
+    const raw = v.getBigUint64(OFF.slots + i * 8, true);
     slots.push(raw === 0n ? '' : raw.toString());
   }
   return {
-    version: buf.readUInt16LE(OFF.version),
+    version: v.getUint16(OFF.version, true),
     token: readAscii(buf, OFF.token, TOKEN_BYTES),
-    ordinal: buf.readUInt8(OFF.ordinal),
-    half: buf.readUInt8(OFF.half),
-    playerHz: buf.readUInt8(OFF.playerHz),
-    entityHz: buf.readUInt8(OFF.entityHz),
+    ordinal: v.getUint8(OFF.ordinal),
+    half: v.getUint8(OFF.half),
+    playerHz: v.getUint8(OFF.playerHz),
+    entityHz: v.getUint8(OFF.entityHz),
     map: readAscii(buf, OFF.map, MAP_BYTES),
-    startedUnix: buf.readUInt32LE(OFF.startedUnix),
-    indexOffset: buf.readUInt32LE(OFF.indexOffset),
-    indexCount: buf.readUInt32LE(OFF.indexCount),
-    frameCount: buf.readUInt32LE(OFF.frameCount),
+    startedUnix: v.getUint32(OFF.startedUnix, true),
+    indexOffset: v.getUint32(OFF.indexOffset, true),
+    indexCount: v.getUint32(OFF.indexCount, true),
+    frameCount: v.getUint32(OFF.frameCount, true),
     slots,
   };
 }
@@ -201,36 +223,37 @@ export function frameBytes(entityCount: number): number {
   return FRAME_HEADER_BYTES + PLAYER_BLOCK_BYTES + entityCount * ENTITY_RECORD_BYTES;
 }
 
-export function encodeFrame(f: Frame): Buffer {
-  const buf = Buffer.alloc(frameBytes(f.entities.length));
-  buf.writeUInt32LE(f.tMs, 0);
-  buf.writeUInt16LE(f.entities.length, 4);
+export function encodeFrame(f: Frame): Uint8Array {
+  const buf = new Uint8Array(frameBytes(f.entities.length));
+  const v = dv(buf);
+  v.setUint32(0, f.tMs, true);
+  v.setUint16(4, f.entities.length, true);
   for (let slot = 0; slot < PLAYER_SLOTS; slot++) {
     const p = f.players[slot];
     const o = FRAME_HEADER_BYTES + slot * PLAYER_RECORD_BYTES;
     if (!p) continue;
-    buf.writeInt16LE(p.x, o);
-    buf.writeInt16LE(p.y, o + 2);
-    buf.writeInt16LE(p.z, o + 4);
-    buf.writeInt16LE(Math.round(p.yaw * YAW_SCALE), o + 6);
-    buf.writeInt8(p.pitch, o + 8);
-    buf.writeUInt8(p.state, o + 9);
-    buf.writeUInt16LE(p.health, o + 10);
-    buf.writeUInt16LE(p.temp, o + 12);
-    buf.writeUInt8(p.cls, o + 14);
-    buf.writeUInt8(p.weapon, o + 15);
-    buf.writeUInt16LE(p.clip, o + 16);
-    buf.writeUInt16LE(p.reserve, o + 18);
+    v.setInt16(o, p.x, true);
+    v.setInt16(o + 2, p.y, true);
+    v.setInt16(o + 4, p.z, true);
+    v.setInt16(o + 6, Math.round(p.yaw * YAW_SCALE), true);
+    v.setInt8(o + 8, p.pitch);
+    v.setUint8(o + 9, p.state);
+    v.setUint16(o + 10, p.health, true);
+    v.setUint16(o + 12, p.temp, true);
+    v.setUint8(o + 14, p.cls);
+    v.setUint8(o + 15, p.weapon);
+    v.setUint16(o + 16, p.clip, true);
+    v.setUint16(o + 18, p.reserve, true);
   }
   let o = FRAME_HEADER_BYTES + PLAYER_BLOCK_BYTES;
   for (const e of f.entities) {
-    buf.writeUInt16LE(e.ref, o);
-    buf.writeUInt8(e.kind, o + 2);
-    buf.writeUInt8(e.state, o + 3);
-    buf.writeInt16LE(e.x, o + 4);
-    buf.writeInt16LE(e.y, o + 6);
-    buf.writeInt16LE(e.z, o + 8);
-    buf.writeUInt16LE(e.health, o + 10);
+    v.setUint16(o, e.ref, true);
+    v.setUint8(o + 2, e.kind);
+    v.setUint8(o + 3, e.state);
+    v.setInt16(o + 4, e.x, true);
+    v.setInt16(o + 6, e.y, true);
+    v.setInt16(o + 8, e.z, true);
+    v.setUint16(o + 10, e.health, true);
     o += ENTITY_RECORD_BYTES;
   }
   return buf;
@@ -239,13 +262,14 @@ export function encodeFrame(f: Frame): Buffer {
 /** Decode frames from `from` up to `end`. `end` excludes the keyframe index,
  *  which lives after the last frame and would otherwise be decoded as one. */
 export function decodeFrames(
-  buf: Buffer, from: number, end: number,
+  buf: Uint8Array, from: number, end: number,
 ): { frames: Frame[]; truncatedBytes: number } {
+  const v = dv(buf);
   const frames: Frame[] = [];
   let off = from;
   while (off + FRAME_HEADER_BYTES + PLAYER_BLOCK_BYTES <= end) {
-    const tMs = buf.readUInt32LE(off);
-    const count = buf.readUInt16LE(off + 4);
+    const tMs = v.getUint32(off, true);
+    const count = v.getUint16(off + 4, true);
     const size = frameBytes(count);
     // A frame whose declared entity count runs past the end is the partial
     // tail of a writer that died mid-frame. Stop; do not guess.
@@ -255,27 +279,27 @@ export function decodeFrames(
       const o = off + FRAME_HEADER_BYTES + slot * PLAYER_RECORD_BYTES;
       players.push({
         slot,
-        x: buf.readInt16LE(o), y: buf.readInt16LE(o + 2), z: buf.readInt16LE(o + 4),
-        yaw: buf.readInt16LE(o + 6) / YAW_SCALE,
-        pitch: buf.readInt8(o + 8),
-        state: buf.readUInt8(o + 9),
-        health: buf.readUInt16LE(o + 10),
-        temp: buf.readUInt16LE(o + 12),
-        cls: buf.readUInt8(o + 14),
-        weapon: buf.readUInt8(o + 15),
-        clip: buf.readUInt16LE(o + 16),
-        reserve: buf.readUInt16LE(o + 18),
+        x: v.getInt16(o, true), y: v.getInt16(o + 2, true), z: v.getInt16(o + 4, true),
+        yaw: v.getInt16(o + 6, true) / YAW_SCALE,
+        pitch: v.getInt8(o + 8),
+        state: v.getUint8(o + 9),
+        health: v.getUint16(o + 10, true),
+        temp: v.getUint16(o + 12, true),
+        cls: v.getUint8(o + 14),
+        weapon: v.getUint8(o + 15),
+        clip: v.getUint16(o + 16, true),
+        reserve: v.getUint16(o + 18, true),
       });
     }
     const entities: EntitySample[] = [];
     let eo = off + FRAME_HEADER_BYTES + PLAYER_BLOCK_BYTES;
     for (let i = 0; i < count; i++) {
       entities.push({
-        ref: buf.readUInt16LE(eo),
-        kind: buf.readUInt8(eo + 2),
-        state: buf.readUInt8(eo + 3),
-        x: buf.readInt16LE(eo + 4), y: buf.readInt16LE(eo + 6), z: buf.readInt16LE(eo + 8),
-        health: buf.readUInt16LE(eo + 10),
+        ref: v.getUint16(eo, true),
+        kind: v.getUint8(eo + 2),
+        state: v.getUint8(eo + 3),
+        x: v.getInt16(eo + 4, true), y: v.getInt16(eo + 6, true), z: v.getInt16(eo + 8, true),
+        health: v.getUint16(eo + 10, true),
       });
       eo += ENTITY_RECORD_BYTES;
     }
@@ -285,20 +309,21 @@ export function decodeFrames(
   return { frames, truncatedBytes: end - off };
 }
 
-export function decodeIndex(buf: Buffer, h: ReplayHeader): { tMs: number; offset: number }[] {
+export function decodeIndex(buf: Uint8Array, h: ReplayHeader): { tMs: number; offset: number }[] {
   if (h.indexOffset <= 0 || h.indexCount <= 0) return [];
+  const v = dv(buf);
   const out: { tMs: number; offset: number }[] = [];
   for (let i = 0; i < h.indexCount; i++) {
     const o = h.indexOffset + i * INDEX_RECORD_BYTES;
     if (o + INDEX_RECORD_BYTES > buf.length) break;
-    out.push({ tMs: buf.readUInt32LE(o), offset: buf.readUInt32LE(o + 4) });
+    out.push({ tMs: v.getUint32(o, true), offset: v.getUint32(o + 4, true) });
   }
   return out;
 }
 
 /** Parse a whole replay. Never throws: a malformed file yields null and a
  *  truncated one yields every whole frame it did contain. */
-export function parseReplay(buf: Buffer): Replay | null {
+export function parseReplay(buf: Uint8Array): Replay | null {
   const header = decodeHeader(buf);
   if (!header) return null;
   // An index means the writer closed cleanly and the frames stop where it
