@@ -233,6 +233,12 @@ ArrayList g_hRplEnts;
 ArrayList g_hRplIndexT;                  // keyframe t_ms
 ArrayList g_hRplIndexOff;                // keyframe byte offset
 int g_iRplLastKeyMs;
+/** Re-entry latch for the sampler. Set for the duration of one Timer_RplFrame
+ *  body and cleared at every exit from it, so finding it still set on entry
+ *  means the previous invocation was unwound by a native error. SourcePawn
+ *  cannot catch one, and the timer repeats, so without this a single bad
+ *  netprop read would fill the log ten times a second for the whole match. */
+bool g_bRplSampling;
 int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
 int g_iRplFrameNo;
 int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one call
@@ -651,6 +657,18 @@ int RplClampI16(int v)
 	return v;
 }
 
+/** Clamp before packing an unsigned field. GetClientHealth returns a negative
+ *  value for a dead player and m_iClip1 is -1 for a weapon with no clip; both
+ *  would wrap through RplU16 to roughly 65535 and reach the reader as a
+ *  plausible wrong number rather than as an error, which is exactly the kind
+ *  of silent divergence from src/replayFormat.ts this format guards against. */
+int RplClampU16(int v)
+{
+	if (v > 65535) return 65535;
+	if (v < 0) return 0;
+	return v;
+}
+
 int RplI16(int pos, int v)
 {
 	// Two's complement, so the byte pattern of a negative int16 is the low 16
@@ -788,19 +806,24 @@ void RplOpen()
 	p = RplU32(p, 0);                          // frameCount, patched at close
 	while (p < RPL_HEADER_BYTES) p = RplU8(p, 0);
 
+	// Reset BEFORE the write, not after: a failed header write goes straight to
+	// RplFail -> RplClose, which would otherwise append the PREVIOUS round's
+	// keyframes to this broken file and patch it with a stale indexOffset and
+	// frameCount.
+	g_iReplayFrames = 0;
+	g_iReplayBytes = RPL_HEADER_BYTES;
+	g_iRplLastKeyMs = -RPL_KEYFRAME_MS;        // forces a keyframe on frame one
+	g_iRplFrameNo = 0;
+	g_bRplSampling = false;                    // a previous round's abort is not this round's
+	g_hRplIndexT.Clear();
+	g_hRplIndexOff.Clear();
+
 	if (!WriteFile(g_hReplay, g_iRplBuf, RPL_HEADER_BYTES, 1))
 	{
 		LogError("pug: replay header write failed; recording disabled for this match");
 		RplFail();
 		return;
 	}
-
-	g_iReplayFrames = 0;
-	g_iReplayBytes = RPL_HEADER_BYTES;
-	g_iRplLastKeyMs = -RPL_KEYFRAME_MS;        // forces a keyframe on frame one
-	g_iRplFrameNo = 0;
-	g_hRplIndexT.Clear();
-	g_hRplIndexOff.Clear();
 
 	float interval = 1.0 / float(hz);
 	g_hReplayTimer = CreateTimer(interval, Timer_RplFrame, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
@@ -822,12 +845,24 @@ void RplFail()
  *  exactly the truth about it, instead of carrying a plausible wrong offset. */
 void RplClose()
 {
-	if (g_hReplayTimer != null)
+	// The handle is taken and the global nulled BEFORE anything can throw, and
+	// the kill itself is deferred to the very end of this function.
+	//
+	// SourceMod frees a TIMER_FLAG_NO_MAPCHANGE timer at level shutdown, so a
+	// KillTimer on a handle left over from a previous map raises a native error
+	// that unwinds whoever called RplClose. One of those callers is OnMapStart,
+	// whose next statement is the g_bPendingFinalize failsafe, i.e. a replay
+	// problem would cost a map its result. OnMapEnd below closes while the
+	// handle is still valid so this cannot normally arise; nulling first and
+	// killing last means that even if it somehow did, the file is already
+	// finished and the bad handle is gone after one attempt.
+	Handle timer = g_hReplayTimer;
+	g_hReplayTimer = null;
+	if (g_hReplay == null)
 	{
-		KillTimer(g_hReplayTimer);
-		g_hReplayTimer = null;
+		if (timer != null) KillTimer(timer);
+		return;
 	}
-	if (g_hReplay == null) return;
 
 	int count = g_hRplIndexT.Length;
 	int indexOffset = g_iReplayBytes;
@@ -870,6 +905,9 @@ void RplClose()
 	delete g_hReplay;
 	g_hReplay = null;
 	PugDebug("replay: closed after %d frames, %d bytes", g_iReplayFrames, g_iReplayBytes);
+
+	// Last, so that nothing above it is skipped if this handle is stale.
+	if (timer != null) KillTimer(timer);
 }
 
 // ---------- replay sampler ----------
@@ -942,8 +980,25 @@ int RplWeaponId(const char[] cls)
 
 public Action Timer_RplFrame(Handle timer)
 {
+	// Re-entry latch. Only WriteFile failures below report themselves; a native
+	// error anywhere else in this callback (a netprop absent on some entity,
+	// say) just unwinds it, and the repeating timer then retries ten times a
+	// second for the rest of the match. SourcePawn cannot catch that, but it
+	// can notice it: the flag is set at the top and cleared at every normal
+	// exit, so finding it set on entry means the last invocation did not
+	// finish. Log once, then give up on replays.
+	if (g_bRplSampling)
+	{
+		g_bRplSampling = false;
+		LogError("pug: replay sampler aborted mid-frame at frame %d; recording disabled for this match", g_iReplayFrames);
+		RplFail();
+		return Plugin_Stop;
+	}
+	g_bRplSampling = true;
+
 	if (g_hReplay == null)
 	{
+		g_bRplSampling = false;
 		g_hReplayTimer = null;
 		return Plugin_Stop;
 	}
@@ -951,7 +1006,11 @@ public Action Timer_RplFrame(Handle timer)
 	int tMs = RoundMs();
 	// -1 means the round is not live. Nothing to time a frame against, so
 	// skip rather than write a frame the viewer cannot place.
-	if (tMs < 0) return Plugin_Continue;
+	if (tMs < 0)
+	{
+		g_bRplSampling = false;
+		return Plugin_Continue;
+	}
 
 	// Keyframe BEFORE the frame is written, so the recorded offset is where
 	// this frame actually begins.
@@ -1031,12 +1090,14 @@ public Action Timer_RplFrame(Handle timer)
 		// complement representation. The mask is what makes that explicit.
 		p = RplU8(p, RoundToNearest(ang[0]) & 0xFF);
 		p = RplU8(p, RplClientState(client, RplIsGhost(client)));
-		p = RplU16(p, GetClientHealth(client));
-		p = RplU16(p, temp);
+		// Clamped, not packed raw: health is negative on a dead player and clip
+		// is -1 for a clipless weapon, and either would wrap to about 65535.
+		p = RplU16(p, RplClampU16(GetClientHealth(client)));
+		p = RplU16(p, RplClampU16(temp));
 		p = RplU8(p, survivor ? 0 : GetEntProp(client, Prop_Send, "m_zombieClass"));
 		p = RplU8(p, weaponId);
-		p = RplU16(p, clip);
-		p = RplU16(p, reserve);
+		p = RplU16(p, RplClampU16(clip));
+		p = RplU16(p, RplClampU16(reserve));
 	}
 
 	int entCount = 0;
@@ -1056,7 +1117,7 @@ public Action Timer_RplFrame(Handle timer)
 		p = RplI16(p, RoundToNearest(pos[0]));
 		p = RplI16(p, RoundToNearest(pos[1]));
 		p = RplI16(p, RoundToNearest(pos[2]));
-		p = RplU16(p, GetClientHealth(c));
+		p = RplU16(p, RplClampU16(GetClientHealth(c)));
 		entCount++;
 	}
 
@@ -1089,7 +1150,7 @@ public Action Timer_RplFrame(Handle timer)
 			p = RplI16(p, RoundToNearest(pos[2]));
 			// A rock has no meaningful health. A witch's is what makes a crown
 			// visible in the timeline, so it is worth the two bytes.
-			p = RplU16(p, kind == RPL_K_TANK_ROCK ? 0 : GetEntProp(ent, Prop_Data, "m_iHealth"));
+			p = RplU16(p, RplClampU16(kind == RPL_K_TANK_ROCK ? 0 : GetEntProp(ent, Prop_Data, "m_iHealth")));
 			entCount++;
 		}
 	}
@@ -1104,6 +1165,7 @@ public Action Timer_RplFrame(Handle timer)
 	// turn an estimated cost into a measured stall.
 	if (!WriteFile(g_hReplay, g_iRplBuf, p, 1))
 	{
+		g_bRplSampling = false;
 		LogError("pug: replay frame write failed at frame %d; recording disabled for this match", g_iReplayFrames);
 		RplFail();
 		return Plugin_Stop;
@@ -1117,11 +1179,13 @@ public Action Timer_RplFrame(Handle timer)
 	// cap is 64. Hitting it closes cleanly, keeping every frame so far.
 	if (g_iReplayBytes >= g_cvReplayMaxMb.IntValue * 1024 * 1024)
 	{
+		g_bRplSampling = false;
 		LogError("pug: replay hit the %d MB cap after %d frames; closing this round's file",
 			g_cvReplayMaxMb.IntValue, g_iReplayFrames);
 		RplClose();
 		return Plugin_Stop;
 	}
+	g_bRplSampling = false;
 	return Plugin_Continue;
 }
 
@@ -1802,10 +1866,24 @@ public Action Timer_TeamLock(Handle timer)
 
 // ---------- match flow ----------
 
+/** Close the replay at level shutdown, which is the only moment the recorder
+ *  can still shut down cleanly across a changelevel.
+ *
+ *  This forward runs before SourceMod frees the map's TIMER_FLAG_NO_MAPCHANGE
+ *  timers, so g_hReplayTimer is still a live handle here and the file still
+ *  gets its keyframe index and frame count. Doing it in OnMapStart instead
+ *  would mean killing an already-freed timer, which throws and would unwind
+ *  OnMapStart before its g_bPendingFinalize failsafe. */
+public void OnMapEnd()
+{
+	RplClose();
+}
+
 public void OnMapStart()
 {
-	// A changelevel is not a round_end: a replay left open across it (e.g. the
-	// map changed mid-round) would otherwise keep writing into a file whose
+	// Belt and braces to OnMapEnd: a changelevel is not a round_end, and a
+	// replay left open across one (e.g. the plugin was loaded mid-map, so no
+	// OnMapEnd ran for it) would otherwise keep writing into a file whose
 	// round is gone. Safe to call unconditionally; RplClose is a no-op when
 	// nothing is open.
 	RplClose();
