@@ -395,3 +395,162 @@ What a restart still costs is the round's accrued stats: the counters are not
 rewound, so damage and kills from before the restart remain in that half's totals.
 `match_rounds.reliable` does not detect this. If a restart happens during
 verification, record it in your notes and treat that half's stats as approximate.
+
+## Replay recording verification
+
+This runbook verifies that replay recording works end to end on the live server:
+that the plugin's binary writer and `src/replayFormat.ts`'s reader agree on the
+byte layout, that the frame-time cost is affordable at 100 tick, and that chat and
+indexing land alongside the file. The TypeScript tests only prove the TypeScript
+encoder and decoder agree with each other; they say nothing about the Pawn writer,
+which is a second, by-hand implementation of the same layout. This is the runbook
+that closes that loop. **WARNING: This changes the live server. Real players are
+usually connected. Before you start, run `R "status"` to see who is online and get
+the owner's explicit go-ahead before proceeding.**
+
+**The single most likely failure is a layout disagreement**, where the Pawn writer
+and `replayFormat.ts` put a field at different offsets. The symptom is not an
+error: it is plausible-looking nonsense, for example health in the thousands or
+positions that jump wildly between frames. If Step 3 below produces anything that
+looks off, do not assume a gameplay explanation before comparing the offsets in
+`RplOpen` / `Timer_RplFrame` against `OFF` and the record layouts in
+`src/replayFormat.ts` field by field.
+
+### 1. Stage the plugin
+
+    ./stage.sh --solo
+
+Expected: `Plugin PUG Match reloaded successfully.` `--solo` also sets
+`sm_pug_min_orient 1` and `sm_pug_debug 1`, which is what makes a one-person test
+produce a settled orientation mapping and verbose logging. `stage.sh` copies one
+file and calls `sm plugins load`: no restart, no map change, nobody dropped.
+
+### 2. Confirm the cvars exist and recording is on
+
+    ./stage.sh --status
+
+Expected: `sm_pug_replay_hz 10`, `sm_pug_replay_entity_hz 10`,
+`sm_pug_replay_dir replays`, `sm_pug_replay_max_mb 64`. A missing cvar means the
+staged `.smx` is the old one and nothing below is meaningful.
+
+- [ ] All four cvars present: ____
+
+### 3. Play a round solo
+
+Start a match with `!load_4v4p`, ready up, and play a few minutes of a half, then
+end the round. Move around, get bots into the shot, shoot commons, and if you can,
+get pinned once. The point is to produce variety in the recording, not to play
+well.
+
+### 4. Confirm the file exists and is growing
+
+    ls -la /home/l4d/l4d1-server/left4dead/replays/
+
+Expected: one `pug_<token>_<ordinal>_<half>.rpl` per round played, tens to hundreds
+of KB per minute. Zero bytes means `RplOpen` failed; check
+`addons/sourcemod/logs/errors_*.log`.
+
+- [ ] File(s) present and growing: ____
+
+### 5. Pull a file back and read it
+
+    scp l4d@<host>:/home/l4d/l4d1-server/left4dead/replays/pug_*.rpl /tmp/
+    npx tsx scripts/dump-replay.ts /tmp/pug_<token>_1_1.rpl
+
+Each of the following is a distinct thing that can be wrong, so check all of them
+rather than stopping at the first one that looks fine:
+
+- `header.token` matches the filename, `map` is the real map name, `ordinal` and
+  `half` are right.
+  - Result: ____
+- `effective hz` is close to 10.00. Materially below means the timer is being
+  starved and the sample rate is a lie.
+  - Result: ____
+- `truncatedBytes` is 0 and `index` is non-zero. Non-zero truncation on a cleanly
+  ended round means `RplClose` did not run.
+  - Result: ____
+- `header.slots[0]` is your SteamID64. A wrong or zero value means
+  `StringToInt64` packing is wrong and every slot mapping in the viewer will be
+  wrong.
+  - Result: ____
+- Your player record's `pos` changes between frames and is within roughly
+  +/- 16384.
+  - Result: ____
+- `hp` is 100 or below with a plausible temp value, `wep`/`clip`/`reserve` match
+  what you were holding.
+  - Result: ____
+- `entities` in the middle frame contains `SURVIVOR_BOT` entries for the bots and
+  `COMMON` entries for the commons.
+  - Result: ____
+
+Remember the warning above: if any of this looks wrong, it is far more likely to
+be a layout disagreement between the plugin and `src/replayFormat.ts` than a real
+gameplay artifact. Compare offsets field by field before chasing anything else.
+
+### 6. Run the frame-time gate
+
+This is the acceptance criterion, not a footnote. The box's recorded baseline p99
+is 11.25ms against a 10ms budget at 100 tick, so roughly 1% of frames already
+overrun and there is no headroom to spend carelessly.
+
+With `l4d_tickstats` capturing, play roughly five minutes at each setting,
+changing it live by rcon:
+
+    R "sm_pug_replay_hz 0"
+    # play ~5 minutes, capture with l4d_tickstats
+    R "sm_pug_replay_hz 10"
+    # play ~5 minutes, capture with l4d_tickstats
+
+Compare p99 and p999 between the two captures.
+
+- p99/p999 at `sm_pug_replay_hz 0`: ____
+- p99/p999 at `sm_pug_replay_hz 10`: ____
+
+Then follow the escalation ladder and record whatever it lands on:
+
+- **p99 unchanged:** ship at 10Hz.
+- **p99 moves measurably:** set `sm_pug_replay_entity_hz 5` and re-measure.
+  Entities are the larger half of the per-frame work, and halving them is visually
+  identical after viewer interpolation.
+  - p99/p999 at `sm_pug_replay_entity_hz 5`: ____
+- **Still moving with entities at 5Hz:** set `sm_pug_replay_hz 5` and re-measure.
+  - p99/p999 at `sm_pug_replay_hz 5`: ____
+- **Still moving at 5Hz/5Hz:** stop. The design's cost estimate is wrong, and that
+  is a finding worth having before anything is built on top of it. Leave
+  `sm_pug_replay_hz 0` on the box and write up what was measured.
+
+Record both numbers at every setting tested, whatever the outcome, and note here
+which rung of the ladder this landed on: ____
+
+### 7. Confirm chat landed
+
+    sqlite3 data/pug.db "SELECT seq, half, t_ms, team, message FROM match_chat ORDER BY seq DESC LIMIT 10;"
+
+Expected: what you typed, intact, including any message containing spaces. No
+rows at all means `player_say` did not hook; check the SourceMod error log for the
+`LogError` from Task 6.
+
+Also say something with an `=` in it and confirm it survives whole, since `=` is
+the kind of character a naive delimiter-based encoding would eat.
+
+- [ ] Chat rows present and intact: ____
+- [ ] Message containing `=` survived whole: ____
+
+### 8. Confirm indexing happened on its own
+
+Indexing is wired into `round_end` and into match completion, so no manual step
+should be needed. Check:
+
+    sqlite3 data/pug.db "SELECT match_id, ordinal, half, frames, sample_hz, bytes FROM match_replays;"
+
+Expected: one row per round file, `frames` matching what `dump-replay.ts` reported,
+`sample_hz` 10.
+
+- [ ] Rows present, `frames` matches `dump-replay.ts`: ____
+
+No rows at all, with files present on disk, is the likeliest configuration mistake
+in the whole piece: `REPLAY_DIR` and `sm_pug_replay_dir` disagree. Those are two
+separate settings on separate sides of the box and nothing forces them to agree.
+`sm_pug_replay_dir` is relative to the game dir, so `replays` means
+`<gamedir>/left4dead/replays`, and `REPLAY_DIR` must be the absolute path to that
+same directory.
