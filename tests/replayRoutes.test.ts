@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import { replayRoutes } from '../src/routes/replays.js';
-import { openDb } from '../src/db.js';
+import { openDb, type DB } from '../src/db.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { stubOrchestrator } from './helpers.js';
@@ -39,11 +39,13 @@ function emptyFrame(tMs: number): Frame {
 
 let dir: string;
 let app: ReturnType<typeof Fastify>;
+let db: DB;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'rplroutes-'));
+  db = openDb(':memory:');
   app = Fastify();
-  await app.register(replayRoutes, { db: openDb(':memory:'), replayDir: dir });
+  await app.register(replayRoutes, { db, replayDir: dir });
   await app.ready();
 });
 afterEach(async () => {
@@ -65,6 +67,22 @@ function writeRound(name: string, frames: number, startedSecondsAgo: number, clo
   writeFileSync(path, Buffer.concat(parts));
   const secs = Date.now() / 1000;
   utimesSync(path, secs, secs);
+}
+
+/** Insert a `matches` row and a `match_replays` row pointing at `filename`.
+ *  Returns the match id. Mirrors the pattern in tests/replayPrune.test.ts. */
+function seedMatchReplay(
+  filename: string, ordinal: number, half: number, bytes: number, frames: number,
+): number {
+  db.prepare(
+    `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
+  ).run(TOKEN);
+  const id = (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
+  db.prepare(
+    `INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz)
+     VALUES (?, ?, ?, ?, ?, ?, 10)`,
+  ).run(id, ordinal, half, filename, bytes, frames);
+  return id;
 }
 
 describe('GET /api/replays/sessions', () => {
@@ -93,6 +111,22 @@ describe('GET /api/replays/file/:name', () => {
     const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=${since}` });
     expect(res.rawPayload.length).toBe(frameBytes(0) * 3);
     expect(res.headers['x-replay-next']).toBe(String(HEADER_BYTES + frameBytes(0) * 5));
+  });
+
+  it('floors a fractional `since` instead of erroring', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const floored = HEADER_BYTES + frameBytes(0) * 2;
+    const fractional = floored + 0.5;
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=${fractional}` });
+    expect(res.statusCode).toBe(200);
+    const expected = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=${floored}` });
+    expect(res.rawPayload.equals(expected.rawPayload)).toBe(true);
+  });
+
+  it('does not 500 on a non-numeric `since`', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=abc` });
+    expect(res.statusCode).toBe(200);
   });
 
   // THE test. Everything else in this file is plumbing; this is the security
@@ -143,6 +177,66 @@ describe('GET /api/replays/live/:token', () => {
 
   it('404s an unknown token', async () => {
     const res = await app.inject({ url: `/api/replays/live/${'c'.repeat(32)}` });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /api/replays/match/:id/:ordinal/:half', () => {
+  it('serves a closed file whole via a match_replays row', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.length).toBe(HEADER_BYTES + frameBytes(0) * 5);
+    expect(res.headers['x-replay-closed']).toBe('1');
+  });
+
+  it('404s an unknown match id', async () => {
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: `/api/replays/match/${id + 999}/0/1` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s an unknown ordinal', async () => {
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: `/api/replays/match/${id}/9/1` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s an unknown half', async () => {
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/2` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s a row whose file is missing from disk', async () => {
+    // No writeRound call: the row exists but nothing was ever written for it,
+    // which is exactly what a pruned or never-flushed file looks like.
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  // The row says nothing about liveness; only re-resolving by name against
+  // the file on disk can. A match's current map is live too, so a row
+  // pointing at a file still being written must still get the cutoff.
+  it('applies the cutoff, not the whole file, when the row points at an open file', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 15, 15, false);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 0);
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-replay-closed']).toBe('0');
+    const whole = HEADER_BYTES + frameBytes(0) * 15;
+    expect(res.rawPayload.length).toBeLessThan(whole);
+  });
+});
+
+describe('non-numeric route parameters', () => {
+  it('404s, not 500s, a non-numeric match id/ordinal/half', async () => {
+    const res = await app.inject({ url: '/api/replays/match/abc/0/1' });
     expect(res.statusCode).toBe(404);
   });
 });
