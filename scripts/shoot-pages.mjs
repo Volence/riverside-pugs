@@ -55,31 +55,29 @@ try {
         expression: 'JSON.stringify({h: Math.min(document.documentElement.scrollHeight, 6000), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, empty: document.getElementById("app").children.length === 0})',
       });
       const { h, overflow, empty } = JSON.parse(probe.result.value);
-      // Resizing via a second setDeviceMetricsOverride to the full document
-      // height hangs headless Chrome's captureScreenshot on tall pages now
-      // that body paints two stacked background layers (the grain and
-      // vignette tokens). The ruling for this fix round was that
-      // background-attachment: fixed was the cause (a fixed layer repaints
-      // on every viewport resize) and that neutralising it for the capture
-      // would let this two-step resize approach work again. That is NOT
-      // borne out by testing: with this override in place the match page
-      // (h=3853) still hangs captureScreenshot indefinitely (confirmed past
-      // 240s). Isolating further: either background layer alone captures in
-      // under 1s at this height under either attachment mode; only the
-      // combination of both stacked background-image layers plus a resize
-      // to a large document height reproduces the hang, independent of
-      // background-attachment. See task-2-report.md "Fix round 1" for the
-      // full isolation. Left in place per the fix-round instruction not to
-      // revert to the clip approach; npm run shoot currently throws on the
-      // match route rather than completing.
+      // Fix round 1 found that resizing the CDP viewport to the full document
+      // height (a second setDeviceMetricsOverride to width x h) stalls
+      // headless Chrome's compositor on tall pages once body paints two
+      // stacked background layers (the grain feTurbulence filter plus the
+      // vignette radial-gradients): captureScreenshot never returns,
+      // independent of background-attachment mode. Fix round 2's approach A
+      // (this code) never resizes the viewport past its initial width x
+      // 1000. Instead it switches body to background-attachment: scroll so
+      // the backgrounds paint over the whole document rather than being
+      // pinned to the small viewport, then captures with a `clip` region
+      // sized to the full document height via captureBeyondViewport. That
+      // lets Chrome rasterize the tall backgrounds without ever inflating
+      // the actual viewport/compositor surface, and it worked: no hang, and
+      // the atmosphere is visible all the way to the bottom of the tallest
+      // page (see task-2-report.md "Fix round 2").
       await send('Runtime.evaluate', {
-        expression: `(() => { const s = document.createElement('style'); s.id = 'shoot-override'; s.textContent = 'body{background-attachment:scroll !important}'; document.head.appendChild(s); })()`,
+        expression: `(() => { const s = document.getElementById('shoot-override') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'shoot-override' })); s.textContent = 'body{background-attachment:scroll !important}'; })()`,
       });
-      await send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: width < 768 });
-      await sleep(500);
+      await sleep(300);
       const shot = await send('Page.captureScreenshot', {
         format: 'png',
         captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width, height: h, scale: 1 },
       });
       writeFileSync(`${OUT}/${name}-${width}.png`, Buffer.from(shot.data, 'base64'));
       const flags = [empty ? 'EMPTY' : '', overflow ? 'HORIZONTAL OVERFLOW' : ''].filter(Boolean).join(' ');
