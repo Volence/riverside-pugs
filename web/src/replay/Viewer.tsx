@@ -1,36 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import {
-  autoFitTransform, boundsOf, pickLayer, transformOfLayer,
-  type MapLayer, type MapTransform,
-} from '../../../src/mapTransform';
-import { overviewFor } from '../../../src/mapOverviews';
+import { useMemo, useState } from 'preact/hooks';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
-import { SPEEDS, usePlayback } from './playback';
+import { usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
-import { drawScene, isSurvivor, project, sceneCounts, type ShowFlags } from './draw';
-import { useToggles, type Toggles } from './useToggles';
+import { isSurvivor, sceneCounts, type ShowFlags } from './draw';
+import { useToggles } from './useToggles';
+import { useMapLayer } from './useMapLayer';
+import { ReplayCanvas } from './ReplayCanvas';
+import { ReplayControls } from './ReplayControls';
 import { HudStrip } from './HudStrip';
-
-// Every captured layer image is exactly 2048x1271. The view is sized to that
-// same aspect (scaled by 0.625) rather than a square, so drawScene's `s`
-// factor (canvas width over image width) stays uniform across the whole
-// image instead of squashing it into a square canvas.
-const VIEW_W = 1280;
-const VIEW_H = 794;
-
-const TOGGLE_LABELS: Record<string, string> = {
-  hp: 'HP', guns: 'Guns', events: 'Evts', chat: 'Chat', ci: 'CI', entities: 'Ents',
-};
-
-/** Round time as m:ss. The scrub bar is in milliseconds because that is what
- *  the frames carry; nobody wants to read that. */
-function formatTime(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
 
 export function Viewer(
   { spec, live = false, names = {} }:
@@ -39,8 +17,6 @@ export function Viewer(
   const { header, frames, closed, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [backdrop, setBackdrop] = useState<HTMLImageElement | null>(null);
   const [toggles, toggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities };
   const [followSlot, setFollowSlot] = useState<number | null>(null);
@@ -62,95 +38,7 @@ export function Viewer(
     return { livePlayers: players, liveEntities: entities, counts: sceneCounts(players, entities) };
   }, [frames, playback.tMs]);
 
-  /** The map's layer stack, or null when there is no art for it. Resolved once
-   *  per replay: the stack never changes mid-round. */
-  const overview = useMemo(
-    () => (header ? overviewFor(header.map) : null),
-    [header?.map],
-  );
-
-  /** Auto-fit is now the fallback rather than the main path: every shipped map
-   *  has real art. It still earns its place for a custom map, or for an asset
-   *  that failed to load. Fitted to the whole round rather than the visible
-   *  frame so the view does not reframe itself as the team moves. */
-  const fitted = useMemo(() => {
-    if (overview || !header) return null;
-    const points: { x: number; y: number }[] = [];
-    for (const f of frames) {
-      for (const p of f.players) {
-        if ((p.state & STATE.PRESENT) !== 0) points.push({ x: p.x, y: p.y });
-      }
-    }
-    const bounds = boundsOf(points);
-    return bounds ? autoFitTransform(bounds, VIEW_W, VIEW_H) : null;
-    // Deliberately keyed on the map and the frame count rather than on
-    // `frames`, so a live round refits occasionally as it extends rather than
-    // on every single poll.
-  }, [overview, header?.map, Math.floor(frames.length / 100)]);
-
-  /** The layer currently on screen, kept in a ref so `pickLayer` still gets
-   *  its hysteresis argument even though selection is now derived rather than
-   *  stateful. */
-  const layerRef = useRef<MapLayer | null>(null);
-
-  /** Layer selection follows the survivors' median height, with hysteresis, so a
-   *  team going down into a basement takes the view with them. Median rather
-   *  than mean so one player in a hole does not drag it.
-   *
-   *  Derived with `useMemo` rather than `useState` set inside an effect: state
-   *  set in an effect only lands on the render after next, so the very first
-   *  render had no layer at all and the canvas skipped a draw. A memo has a
-   *  value on the first render. */
-  const layer = useMemo(() => {
-    if (!overview) { layerRef.current = null; return null; }
-    const survivorZ = livePlayers
-      .filter((p) => isSurvivor(p) && (p.state & STATE.ALIVE) !== 0)
-      .map((p) => p.z)
-      .sort((a, b) => a - b);
-    // Survivors spawn at ground level on every L4D1 map. Before anyone is
-    // alive, zero is a far better proxy for that than the bottom of the
-    // stack: several maps' lowest layers are basements or tunnels that are
-    // otherwise empty by design, and `-Infinity` would pick exactly those.
-    const z = survivorZ.length ? survivorZ[Math.floor(survivorZ.length / 2)] : 0;
-    const picked = pickLayer(overview.layers, z, layerRef.current);
-    layerRef.current = picked;
-    return picked;
-  }, [overview, livePlayers]);
-
-  const transform: MapTransform | null = layer ? transformOfLayer(layer) : fitted;
-
-  /** Cache of decoded images by URL. A team moving up and down stairs
-   *  otherwise refetches the same images repeatedly; the browser cache makes
-   *  the refetch cheap but decoding is not free. */
-  const imageCache = useRef(new Map<string, HTMLImageElement>());
-
-  useEffect(() => {
-    if (!transform?.image) { setBackdrop(null); return; }
-    const src = transform.image;
-    const cached = imageCache.current.get(src);
-    if (cached) { setBackdrop(cached); return; }
-    // Cancellation guard: a team can move between layers fast enough that a
-    // second load starts before the first one's `onload` fires. Without this
-    // flag, the FIRST image's `onload` would still land after the second
-    // effect run has already set the correct, newer backdrop, silently
-    // overwriting it with a stale one that then sticks until the next layer
-    // change. The cleanup below sets `cancelled` when this effect is
-    // superseded, so a late callback from an abandoned load is a no-op.
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      imageCache.current.set(src, img);
-      if (cancelled) return;
-      // Keep the previous image on screen until this one is ready, so a
-      // layer change never flashes black between them.
-      setBackdrop(img);
-    };
-    // A missing overview is not an error. Falling back to the grid is exactly
-    // what a map with no art does anyway.
-    img.onerror = () => { if (!cancelled) setBackdrop(null); };
-    img.src = src;
-    return () => { cancelled = true; };
-  }, [transform?.image]);
+  const { transform, backdrop } = useMapLayer(header, frames, livePlayers);
 
   const trail = useMemo(() => {
     const out: { x: number; y: number }[] = [];
@@ -165,106 +53,32 @@ export function Viewer(
     return out;
   }, [frames.length]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !transform) return;
-
-    // Reset in device space before anything else. Without this, a follow
-    // camera's translate below would shift drawScene's own internal clear by
-    // the same offset, leaving a sliver of the previous frame uncleared at
-    // the canvas edge every time the translate is non-zero, which is nearly
-    // always while following a moving target.
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-    ctx.restore();
-
-    const target = followSlot === null ? null : (livePlayers[followSlot] ?? null);
-    ctx.save();
-    if (target) {
-      // Keep the followed player centred by moving the world under them.
-      // `project` is the same helper drawScene uses to turn a world position
-      // into a canvas position, scaled by canvas width over image width; a
-      // raw `worldToImage` result is in image space and would centre the
-      // camera off by that same scale factor.
-      const s = VIEW_W / transform.width;
-      const p = project(transform, s, target.x, target.y);
-      ctx.translate(VIEW_W / 2 - p.px, VIEW_H / 2 - p.py);
-    }
-    drawScene(ctx, {
-      transform, backdrop, trail,
-      players: livePlayers,
-      entities: liveEntities,
-      show,
-      width: VIEW_W,
-      height: VIEW_H,
-    });
-    ctx.restore();
-    // `show` is a fresh object every render, so its two flags are listed
-    // individually rather than the object itself: Task 14 wires real toggles
-    // to them, and without this the draw effect would not rerun when they
-    // change.
-  }, [livePlayers, liveEntities, transform, backdrop, trail, show.ci, show.entities, followSlot]);
-
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
   if (!header) return <div class="replay replay--empty">Loading replay...</div>;
 
   return (
     <div class="replay">
-      <canvas ref={canvasRef} width={VIEW_W} height={VIEW_H} class="replay__canvas" />
+      <ReplayCanvas
+        transform={transform}
+        backdrop={backdrop}
+        trail={trail}
+        livePlayers={livePlayers}
+        liveEntities={liveEntities}
+        show={show}
+        followSlot={followSlot}
+      />
 
-      <div class="replay__controls">
-        <button class="replay__btn" onClick={playback.toggle}>
-          {playback.playing ? 'Pause' : 'Play'}
-        </button>
-        <input
-          class="replay__scrub"
-          type="range"
-          min={0}
-          max={Math.max(endMs, 1)}
-          value={playback.tMs}
-          onInput={(e) => playback.seek(Number((e.target as HTMLInputElement).value))}
-        />
-        <span class="replay__time">{formatTime(playback.tMs)} / {formatTime(endMs)}</span>
-        {SPEEDS.map((s) => (
-          <button
-            key={s}
-            class={`replay__btn ${playback.speed === s ? 'is-on' : ''}`}
-            onClick={() => playback.setSpeed(s)}
-          >{s}x</button>
-        ))}
-        {live && (
-          <button
-            class={`replay__btn ${playback.following ? 'is-on' : ''}`}
-            onClick={playback.follow}
-          >Live</button>
-        )}
-      </div>
-
-      <div class="replay__toolbar">
-        {(['hp', 'guns', 'events', 'chat', 'ci', 'entities'] as (keyof Toggles)[]).map((k) => (
-          <button
-            key={k}
-            class={`replay__btn ${toggles[k] ? 'is-on' : ''}`}
-            onClick={() => toggle(k)}
-          >{TOGGLE_LABELS[k]}</button>
-        ))}
-      </div>
-
-      <div class="replay__toolbar">
-        <button
-          class={`replay__btn ${followSlot === null ? 'is-on' : ''}`}
-          onClick={() => setFollowSlot(null)}
-        >Free</button>
-        {header.slots.map((id, i) => (id === '' ? null : (
-          <button
-            key={i}
-            class={`replay__btn ${followSlot === i ? 'is-on' : ''}`}
-            onClick={() => setFollowSlot(i)}
-          >{names[id] ?? `Slot ${i}`}</button>
-        )))}
-      </div>
+      <ReplayControls
+        playback={playback}
+        toggles={toggles}
+        toggle={toggle}
+        endMs={endMs}
+        live={live}
+        followSlot={followSlot}
+        setFollowSlot={setFollowSlot}
+        slots={header.slots}
+        names={names}
+      />
 
       <HudStrip
         players={livePlayers}

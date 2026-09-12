@@ -110,6 +110,20 @@ export interface DrawArgs {
 }
 
 /**
+ * The one scale factor that reconciles a layer image's own pixel space
+ * (every captured overview image is 2048x1271) with the canvas, which is
+ * drawn at whatever size it is responsively given.
+ *
+ * Computed here once so `drawScene` and the follow camera in the Viewer both
+ * read it from the same formula; the two used to compute it independently,
+ * which is exactly the kind of place a future change to one and not the
+ * other silently reintroduces the drift bug `project`'s tests guard against.
+ */
+export function scaleFor(t: MapTransform, canvasWidth: number): number {
+  return canvasWidth / t.width;
+}
+
+/**
  * Project a world position onto the canvas.
  *
  * `worldToImage` returns pixel coordinates in the layer image's own space:
@@ -161,7 +175,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   // Every layer image is 2048x1271; the canvas is whatever size it is drawn
   // at. This is the one scale factor that reconciles the two, and it is what
   // `project` multiplies onto every `worldToImage` result below.
-  const s = a.width / a.transform.width;
+  const s = scaleFor(a.transform, a.width);
 
   if (a.backdrop) {
     ctx.drawImage(a.backdrop, 0, 0, a.transform.width * s, a.transform.height * s);
