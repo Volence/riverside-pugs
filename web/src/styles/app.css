@@ -401,6 +401,28 @@ button.ctile:hover { border-color: var(--text-muted); }
   .versus__side--b { text-align: center; }
 }
 
+/* ---------- headliner ---------- */
+
+.headliner { position: relative; background: color-mix(in srgb, var(--bg) 35%, var(--surface)); }
+.headliner__avatar { position: absolute; top: var(--sp-5); right: var(--sp-5); width: 56px; height: 56px; object-fit: cover; }
+.headliner__eyebrow { margin: 0; color: var(--rating); }
+.headliner__name { font-size: var(--fs-h1); margin-top: var(--sp-1); }
+.headliner__row { display: flex; align-items: baseline; gap: var(--sp-3); margin-top: var(--sp-2); }
+.headliner__rating {
+  font-family: var(--font-display);
+  font-size: var(--fs-hero);
+  line-height: 1;
+  color: var(--rating);
+  text-shadow: 0 3px 0 #2b0e0b;
+}
+.headliner__unrated { color: var(--text-muted); font-size: var(--fs-dense); }
+.headliner__delta { align-self: center; }
+.headliner__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); }
+.headliner__stats p { margin: 0; }
+.headliner__stat-value { font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.1; color: var(--text-bright); }
+.headliner__stat-value--win { color: var(--win); }
+.headliner__stat-value--loss { color: var(--loss); }
+
 /* ---------- rating + result vocabulary ---------- */
 
 .sr { font-family: var(--font-display); font-size: 1.5rem; line-height: 1; color: var(--rating); }
