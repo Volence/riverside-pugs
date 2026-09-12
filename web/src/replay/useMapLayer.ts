@@ -1,18 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  autoFitTransform, boundsOf, fitView, pickLayer, transformOfLayer,
+  autoFitTransform, boundsOf, canvasAspect, fitView, pickLayer, transformOfLayer,
   type MapLayer, type MapTransform, type View,
 } from '../../../src/mapTransform';
 import { overviewFor } from '../../../src/mapOverviews';
 import { STATE, type Frame, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
 import { isSurvivor } from './draw';
+import type { CanvasSize } from './canvasSize';
 
-// Every captured layer image is exactly 2048x1271. The view is sized to that
-// same aspect (scaled by 0.625) rather than a square, so drawScene's `s`
-// factor (canvas width over image width) stays uniform across the whole
-// image instead of squashing it into a square canvas.
-export const VIEW_W = 1280;
-export const VIEW_H = 794;
+/** The canvas shape a map with no art gets. It is the captures' own shape,
+ *  2048x1271, which is what every map got when the canvas was fixed. There is
+ *  no image to take a shape from on this path, and the round's own extent is
+ *  not known yet at the point the element has to be sized. */
+export const DEFAULT_ASPECT = 2048 / 1271;
+
+/**
+ * The canvas shape a map wants, resolved on its own.
+ *
+ * Separate from the hook below because of the order things have to happen in:
+ * the element is sized from this, the element is then measured, and only then
+ * is there a canvas size to fit the map into. Resolving the overview twice
+ * costs one record lookup per map change.
+ */
+export function mapAspect(header: ReplayHeader | null): number {
+  const overview = header ? overviewFor(header.map) : null;
+  return overview ? canvasAspect(overview.contentBox) : DEFAULT_ASPECT;
+}
 
 export interface MapLayerResult {
   transform: MapTransform | null;
@@ -32,6 +45,7 @@ export function useMapLayer(
   header: ReplayHeader | null,
   frames: Frame[],
   livePlayers: PlayerSample[],
+  size: CanvasSize,
 ): MapLayerResult {
   const [backdrop, setBackdrop] = useState<HTMLImageElement | null>(null);
 
@@ -55,11 +69,11 @@ export function useMapLayer(
       }
     }
     const bounds = boundsOf(points);
-    return bounds ? autoFitTransform(bounds, VIEW_W, VIEW_H) : null;
+    return bounds ? autoFitTransform(bounds, size.cssW, size.cssH) : null;
     // Deliberately keyed on the map and the frame count rather than on
     // `frames`, so a live round refits occasionally as it extends rather than
     // on every single poll.
-  }, [overview, header?.map, Math.floor(frames.length / 100)]);
+  }, [overview, header?.map, Math.floor(frames.length / 100), size.cssW, size.cssH]);
 
   /** The layer currently on screen, kept in a ref so `pickLayer` still gets
    *  its hysteresis argument even though selection is now derived rather than
@@ -96,13 +110,17 @@ export function useMapLayer(
    *  `fitView` so there is one code path: a map with an overview crops to
    *  its `contentBox`, and the auto-fit fallback (no image, `transform` is
    *  already sized to the canvas) passes the full canvas rect with no
-   *  padding, which fits at scale 1 with no offset, i.e. the identity. */
+   *  padding, which fits at scale 1 with no offset, i.e. the identity.
+   *
+   *  The canvas is in CSS pixels, not backing-store pixels: the draw code
+   *  works in CSS pixels and the draw effect scales the context once for the
+   *  device ratio. */
   const view = useMemo<View>(() => {
     const box = overview
       ? overview.contentBox
-      : { x0: 0, y0: 0, x1: VIEW_W, y1: VIEW_H };
-    return fitView(box, VIEW_W, VIEW_H, overview ? undefined : 0);
-  }, [overview]);
+      : { x0: 0, y0: 0, x1: size.cssW, y1: size.cssH };
+    return fitView(box, size.cssW, size.cssH, overview ? undefined : 0);
+  }, [overview, size.cssW, size.cssH]);
 
   /** Cache of decoded images by URL. A team moving up and down stairs
    *  otherwise refetches the same images repeatedly; the browser cache makes

@@ -1,4 +1,4 @@
-import { projectView, type MapTransform, type View } from '../../../src/mapTransform';
+import { boxSpan, projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import { ENTITY_KIND, STATE, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
 import { healthColor } from './hud';
 
@@ -196,13 +196,17 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   if (a.backdrop) {
     // Only the cropped region (the map's content box) is drawn, scaled and
     // offset by the view, so the void the capture wastes never reaches the
-    // canvas.
+    // canvas. The span comes from `boxSpan`, the same helper the view's scale
+    // was computed from: reading `b.x1 - b.x0` here instead would hand
+    // `drawImage` a zero-width source rect on a degenerate box, which throws
+    // IndexSizeError, while the scale beside it had silently used one pixel.
     const b = a.view.box;
+    const span = boxSpan(b);
     ctx.drawImage(
       a.backdrop,
-      b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0,
+      b.x0, b.y0, span.w, span.h,
       a.view.offsetX, a.view.offsetY,
-      (b.x1 - b.x0) * a.view.scale, (b.y1 - b.y0) * a.view.scale,
+      span.w * a.view.scale, span.h * a.view.scale,
     );
   } else {
     // No art for this map. The grid gives the eye a scale reference and the

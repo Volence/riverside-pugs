@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   autoFitTransform, worldToImage, boundsOf, pickLayer, transformOfLayer,
-  fitView, projectView,
+  fitView, projectView, boxSpan, canvasAspect, canvasForAspect, canvasForBox,
+  CANVAS_PIXEL_BUDGET, MAX_CANVAS_ASPECT, MIN_CANVAS_ASPECT,
 } from '../src/mapTransform.js';
 
 describe('pickLayer', () => {
@@ -182,5 +183,77 @@ describe('projectView', () => {
     expect(v.scale).toBe(2);
     const got = projectView(t, v, -1000 + 10 * 8, 2000);
     expect(got.px).toBeCloseTo(20, 5);
+  });
+});
+
+
+describe('boxSpan', () => {
+  it('measures a normal box', () => {
+    expect(boxSpan({ x0: 100, y0: 50, x1: 400, y1: 250 })).toEqual({ w: 300, h: 200 });
+  });
+
+  // `fitView` clamped a degenerate box to one pixel for its scale while the
+  // draw code passed the raw zero straight to `drawImage`, which throws
+  // IndexSizeError on a zero-width source rect. One helper is what keeps the
+  // two from disagreeing again.
+  it('widens a degenerate box to one pixel, which is what fitView scales by', () => {
+    expect(boxSpan({ x0: 10, y0: 10, x1: 10, y1: 10 })).toEqual({ w: 1, h: 1 });
+  });
+});
+
+describe('canvasForBox', () => {
+  const budgetOf = (c: { width: number; height: number }) => c.width * c.height;
+
+  it('takes the shape of the box it is given', () => {
+    const tall = canvasForBox({ x0: 0, y0: 0, x1: 936, y1: 1271 });
+    expect(tall.height).toBeGreaterThan(tall.width);
+    const wide = canvasForBox({ x0: 0, y0: 0, x1: 1535, y1: 743 });
+    expect(wide.width).toBeGreaterThan(wide.height);
+  });
+
+  it('matches the box aspect closely enough that nothing letterboxes', () => {
+    const box = { x0: 321, y0: 0, x1: 1257, y1: 1271 };   // farm04_barn
+    const c = canvasForBox(box);
+    expect(c.width / c.height).toBeCloseTo(936 / 1271, 3);
+  });
+
+  // The shape may move, the cost may not: the canvas is a backing store and
+  // its area is what memory and per-frame fill are paid out of.
+  it('spends the same pixel budget whatever the shape', () => {
+    for (const box of [
+      { x0: 0, y0: 0, x1: 2048, y1: 1271 },
+      { x0: 0, y0: 0, x1: 936, y1: 1271 },
+      { x0: 0, y0: 0, x1: 1535, y1: 743 },
+      { x0: 0, y0: 0, x1: 754, y1: 1268 },
+    ]) {
+      // Rounding to whole pixels is the only slack.
+      expect(budgetOf(canvasForBox(box)) / CANVAS_PIXEL_BUDGET).toBeCloseTo(1, 2);
+    }
+  });
+
+  it('reproduces the old fixed canvas for a box the shape of the captures', () => {
+    const c = canvasForBox({ x0: 0, y0: 0, x1: 2048, y1: 1271 });
+    expect(c.width).toBeCloseTo(1280, -1);
+    expect(c.height).toBeCloseTo(794, -1);
+  });
+
+  // A pathologically thin map would otherwise produce a canvas the page
+  // cannot lay out. Clamping letterboxes it instead, which is what every map
+  // did before this rule existed, so the fallback is the old behaviour.
+  it('clamps a ribbon of a box to something the page can lay out', () => {
+    expect(canvasAspect({ x0: 0, y0: 0, x1: 4000, y1: 100 })).toBe(MAX_CANVAS_ASPECT);
+    expect(canvasAspect({ x0: 0, y0: 0, x1: 100, y1: 4000 })).toBe(MIN_CANVAS_ASPECT);
+  });
+
+  it('builds a canvas at exactly the aspect it is handed', () => {
+    const c = canvasForAspect(MIN_CANVAS_ASPECT);
+    expect(c.width / c.height).toBeCloseTo(MIN_CANVAS_ASPECT, 2);
+  });
+
+  it('survives a degenerate box', () => {
+    const c = canvasForBox({ x0: 5, y0: 5, x1: 5, y1: 5 });
+    expect(Number.isFinite(c.width)).toBe(true);
+    expect(c.width).toBeGreaterThan(0);
+    expect(c.height).toBeGreaterThan(0);
   });
 });

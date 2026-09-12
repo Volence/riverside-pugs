@@ -1,16 +1,29 @@
 import { useMemo, useState } from 'preact/hooks';
+import { canvasForAspect } from '../../../src/mapTransform';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
 import { usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
 import { isSurvivor, sceneCounts, type ShowFlags } from './draw';
 import { useToggles } from './useToggles';
-import { useMapLayer } from './useMapLayer';
+import { mapAspect, useMapLayer } from './useMapLayer';
+import { useCanvasSize } from './canvasSize';
 import { ReplayCanvas } from './ReplayCanvas';
 import { ReplayControls } from './ReplayControls';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
 import type { TimelineEntry } from './timeline';
+
+/**
+ * How much of the viewport height the map may take.
+ *
+ * The canvas now follows the map's shape, and a portrait map at the pixel
+ * budget is over 1300px tall, which would push the scrub bar and the health
+ * panels off the bottom of every screen. Capping the WIDTH by the height the
+ * viewport can spare keeps the aspect exact, where a `max-height` would clamp
+ * one axis only and stretch the bitmap.
+ */
+const STAGE_MAX_VH = 78;
 
 export function Viewer(
   { spec, live = false, names = {}, timeline }:
@@ -40,7 +53,27 @@ export function Viewer(
     return { livePlayers: players, liveEntities: entities, counts: sceneCounts(players, entities) };
   }, [frames, playback.tMs]);
 
-  const { transform, view, backdrop } = useMapLayer(header, frames, livePlayers);
+  /**
+   * The canvas takes the map's own shape instead of one fixed rectangle, and
+   * its backing store follows the element's real width.
+   *
+   * The captures and the old fixed canvas were both 1.61 landscape, so
+   * cropping a map's horizontal void only moved that void into the canvas as
+   * black bars and left the height governing the fit: eighteen of the
+   * twenty-two maps came out SMALLER than before the crop existed. The shape
+   * has to follow the content box for the crop to buy anything at all.
+   */
+  const aspect = useMemo(() => mapAspect(header), [header?.map]);
+  const { size, ref: stageRef } = useCanvasSize(aspect);
+  const stageStyle = useMemo(() => ({
+    // A single number, not a `w / h` pair, so the layout box and the backing
+    // store are computed from the identical value and the browser has nothing
+    // left to letterbox.
+    aspectRatio: String(aspect),
+    maxWidth: `min(${canvasForAspect(aspect).width}px, calc(${STAGE_MAX_VH}vh * ${aspect}))`,
+  }), [aspect]);
+
+  const { transform, view, backdrop } = useMapLayer(header, frames, livePlayers, size);
 
   const trail = useMemo(() => {
     const out: { x: number; y: number }[] = [];
@@ -67,18 +100,21 @@ export function Viewer(
 
   return (
     <div class="replay">
-      <ReplayCanvas
-        transform={transform}
-        view={view}
-        backdrop={backdrop}
-        trail={trail}
-        livePlayers={livePlayers}
-        liveEntities={liveEntities}
-        show={show}
-        followSlot={followSlot}
-        names={names}
-        slots={header.slots}
-      />
+      <div class="replay__stage" ref={stageRef} style={stageStyle}>
+        <ReplayCanvas
+          transform={transform}
+          view={view}
+          size={size}
+          backdrop={backdrop}
+          trail={trail}
+          livePlayers={livePlayers}
+          liveEntities={liveEntities}
+          show={show}
+          followSlot={followSlot}
+          names={names}
+          slots={header.slots}
+        />
+      </div>
 
       {timeline && (toggles.events || toggles.chat) && (
         <TimelineRail

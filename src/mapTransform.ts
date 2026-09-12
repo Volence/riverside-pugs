@@ -87,14 +87,81 @@ export interface View {
   box: ViewBox;
 }
 
+/**
+ * The span of a view box, with a degenerate box widened to one pixel.
+ *
+ * A degenerate box would divide by zero in `fitView`. One pixel is arbitrary
+ * and harmless: there is nothing to see either way, and the alternative is
+ * Infinity propagating into every drawn position.
+ *
+ * Exported because the draw code needs exactly the numbers `fitView` scaled,
+ * not its own reading of the same box: a zero-width source rect makes
+ * `drawImage` throw IndexSizeError, where `fitView` would quietly have used
+ * the clamped one. The generator falls back to the full frame rather than
+ * emitting a degenerate box, so the two disagreeing is latent rather than
+ * live, which is exactly the kind of disagreement that surfaces years later
+ * on a new map.
+ */
+export function boxSpan(box: ViewBox): { w: number; h: number } {
+  return {
+    w: Math.max(box.x1 - box.x0, 1),
+    h: Math.max(box.y1 - box.y0, 1),
+  };
+}
+
+/**
+ * Backing-store pixels one replay canvas may spend, whatever shape it takes.
+ *
+ * 1280 x 794 is the single fixed canvas every map used to get, so holding the
+ * product constant leaves memory and fill cost exactly where they were while
+ * the shape is free to follow the map.
+ */
+export const CANVAS_PIXEL_BUDGET = 1280 * 794;
+
+/** The widest and the tallest canvas the page can lay out. A box outside this
+ *  range letterboxes inside the clamped canvas, which is what every map does
+ *  today, so the clamp is a fallback rather than a new failure mode. */
+export const MIN_CANVAS_ASPECT = 0.55;
+export const MAX_CANVAS_ASPECT = 2.2;
+
+/** The canvas shape a box wants, clamped to what the page can lay out. */
+export function canvasAspect(box: ViewBox): number {
+  const { w, h } = boxSpan(box);
+  return Math.min(MAX_CANVAS_ASPECT, Math.max(MIN_CANVAS_ASPECT, w / h));
+}
+
+/**
+ * The canvas a given aspect gets at a fixed pixel budget.
+ *
+ * Solving `width * height = budget` and `width / height = aspect` at once, so
+ * a portrait map and a landscape map cost the same to draw.
+ */
+export function canvasForAspect(
+  aspect: number, budget = CANVAS_PIXEL_BUDGET,
+): { width: number; height: number } {
+  const height = Math.round(Math.sqrt(budget / aspect));
+  return { width: Math.round(height * aspect), height };
+}
+
+/**
+ * The canvas a cropped map wants.
+ *
+ * The captures are 2048x1271 and the canvas used to be 1280x794: the same
+ * shape. Cropping horizontal void out of a same-shape landscape frame cannot
+ * draw a map any bigger, because the height still governs the fit; it only
+ * moves the void out of the image and into the canvas as black bars. Letting
+ * the canvas take the box's own shape is what turns the crop into pixels.
+ */
+export function canvasForBox(
+  box: ViewBox, budget = CANVAS_PIXEL_BUDGET,
+): { width: number; height: number } {
+  return canvasForAspect(canvasAspect(box), budget);
+}
+
 export function fitView(
   box: ViewBox, canvasW: number, canvasH: number, padFraction = 0.03,
 ): View {
-  // A degenerate box would divide by zero. One pixel is arbitrary and
-  // harmless: there is nothing to see either way, and the alternative is
-  // Infinity propagating into every drawn position.
-  const w = Math.max(box.x1 - box.x0, 1);
-  const h = Math.max(box.y1 - box.y0, 1);
+  const { w, h } = boxSpan(box);
   const pad = 1 - padFraction * 2;
   const scale = Math.min(canvasW / w, canvasH / h) * pad;
   return {

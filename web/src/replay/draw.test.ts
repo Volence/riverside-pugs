@@ -255,6 +255,40 @@ describe('drawScene', () => {
     expect(r).toBeCloseTo(7, 5);
   });
 
+  // Finding 17: `fitView` widens a degenerate box to one pixel before taking
+  // its scale, but `drawScene` used to hand `drawImage` the raw `x1 - x0`,
+  // and a zero-width source rect throws IndexSizeError. The generator falls
+  // back to the full frame rather than emitting a degenerate box, so this is
+  // latent rather than live: the point is that the two now read the same box
+  // through the same helper and cannot drift apart again.
+  it('draws a degenerate box at the same one pixel the view scaled it by', () => {
+    const transform: MapTransform = {
+      originX: 0, originY: 0, unitsPerPixel: 1, image: 'test.png', width: 2048, height: 1271,
+    };
+    const box = { x0: 400, y0: 400, x1: 400, y1: 400 };
+    const view = fitView(box, 800, 400, 0);
+    const { calls, ctx } = stubCtx();
+    expect(() => drawScene(ctx, {
+      transform, view,
+      backdrop: {} as HTMLImageElement,
+      trail: [],
+      players: [], entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 800, height: 400,
+      names: {}, slots: [], followSlot: null,
+    })).not.toThrow();
+
+    const img = calls.find((c) => c.fn === 'drawImage')!;
+    const [sx, sy, sw, sh, , , dw, dh] = img.args;
+    expect([sx, sy]).toEqual([400, 400]);
+    // One source pixel, never zero, and the destination is that same pixel
+    // through the very scale `fitView` returned.
+    expect(sw).toBe(1);
+    expect(sh).toBe(1);
+    expect(dw).toBeCloseTo(view.scale, 5);
+    expect(dh).toBeCloseTo(view.scale, 5);
+  });
+
   const identityScene = () => {
     const transform: MapTransform = {
       originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
