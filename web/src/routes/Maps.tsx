@@ -1,7 +1,9 @@
 import { api, type MapIndexRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName } from '../format';
-import { Empty, Panel, Tile, Tiles } from '../components/bits';
+import { Empty, Panel } from '../components/bits';
+import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { CampaignTiles } from '../components/CampaignTiles';
 
 export function Maps() {
   const { data, error } = useFetch((s) => api.maps(s), []);
@@ -29,21 +31,38 @@ export function Maps() {
 
   return (
     <div class="page page--list">
-      <div class="page__head"><h2>Maps</h2></div>
+      <PageHeader title="Campaigns">
+        {maps.length > 0 && (
+          <Figures>
+            <Figure label="Maps played" value={maps.length} />
+            <Figure label="Campaigns" value={[...groups.keys()].filter((k) => k !== 'other').length} />
+            <Figure
+              label="Most played"
+              value={maps.reduce((a, b) => (b.played > a.played ? b : a)).played}
+              sub={maps.reduce((a, b) => (b.played > a.played ? b : a)).map}
+            />
+          </Figures>
+        )}
+      </PageHeader>
 
       {maps.length === 0 ? (
         <Panel><Empty>No maps played yet.</Empty></Panel>
       ) : (
         <>
-          <Tiles>
-            <Tile label="Maps played" value={maps.length} />
-            <Tile label="Campaigns" value={groups.size} />
-            <Tile
-              label="Most played"
-              value={maps.reduce((a, b) => (b.played > a.played ? b : a)).played}
-              sub={maps.reduce((a, b) => (b.played > a.played ? b : a)).map}
+          {maps.length > 0 && (
+            <CampaignTiles
+              items={[...groups.entries()]
+                .filter(([slug]) => slug !== 'other')
+                .map(([slug, rows]) => {
+                  const played = rows.reduce((n, m) => n + m.played, 0);
+                  return {
+                    slug,
+                    sub: played === 0 ? 'Unplayed' : `${rows.length} map${rows.length === 1 ? '' : 's'} · ${played} played`,
+                    muted: played === 0,
+                  };
+                })}
             />
-          </Tiles>
+          )}
 
           <div class="stack">
             {[...groups.entries()].map(([campaign, rows]) => (

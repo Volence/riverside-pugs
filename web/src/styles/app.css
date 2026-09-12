@@ -358,6 +358,7 @@ button.ctile:hover { border-color: var(--text-muted); }
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+.ctiles + .stack { margin-top: var(--sp-5); }
 
 /* ---------- versus scoreboard ---------- */
 
