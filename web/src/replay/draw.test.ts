@@ -345,7 +345,7 @@ describe('drawScene', () => {
   // green while the exact original bug came back. Testing `drawScene`
   // itself is what closes that gap.
   function stubCtx() {
-    const calls: { fn: string; args: number[]; stroke: string; fill: string }[] = [];
+    const calls: { fn: string; args: number[]; stroke: string; fill: string; width: number }[] = [];
     const texts: { fn: string; text: string; x: number; y: number }[] = [];
     // The paint styles are recorded alongside each call, because "which
     // colour was this stroked in" is a real assertion (the ghost outline has
@@ -353,12 +353,14 @@ describe('drawScene', () => {
     // setter cannot answer it.
     let strokeStyle = '';
     let fillStyle = '';
+    let lineWidth = 0;
     const rec = (fn: string) => (...args: unknown[]) => {
       calls.push({
         fn,
         args: args.filter((a) => typeof a === 'number') as number[],
         stroke: strokeStyle,
         fill: fillStyle,
+        width: lineWidth,
       });
     };
     // fillText/strokeText carry the label or glyph string as their first
@@ -381,7 +383,7 @@ describe('drawScene', () => {
         // makes the expected plate width arithmetic below exact.
         measureText: (t: string) => ({ width: t.length * 6 }),
         set fillStyle(v: string) { fillStyle = v; }, set strokeStyle(v: string) { strokeStyle = v; },
-        set lineWidth(_v: number) {}, set globalAlpha(_v: number) {},
+        set lineWidth(v: number) { lineWidth = v; }, set globalAlpha(_v: number) {},
         set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
       } as unknown as CanvasRenderingContext2D,
     };
@@ -940,6 +942,140 @@ describe('drawScene', () => {
     // Both follow-ring passes share the same radius; only the stroke width
     // and colour differ.
     expect(arcs[3].args[2]).toBeCloseTo(followRingR, 5);
+  });
+});
+
+describe('chrome layout', () => {
+  // Nobody can look at this page, so the clearances between the avatar and
+  // every ring around it are MEASURED from real draw calls rather than
+  // asserted in a comment. Each ring is recovered as the radius its arc was
+  // drawn at plus or minus half the line width in force when it was stroked,
+  // which is where canvas actually puts the ink.
+  function stubCtx2() {
+    const calls: { fn: string; args: number[]; width: number }[] = [];
+    let lineWidth = 0;
+    const rec = (fn: string) => (...args: unknown[]) => {
+      calls.push({ fn, args: args.filter((a) => typeof a === 'number') as number[], width: lineWidth });
+    };
+    const noop = () => {};
+    return {
+      calls,
+      ctx: {
+        save: noop, restore: noop, beginPath: noop, moveTo: noop, lineTo: noop,
+        stroke: rec('stroke'), fill: rec('fill'), arc: rec('arc'), fillRect: noop,
+        clearRect: noop, drawImage: noop, fillText: noop, strokeText: noop,
+        measureText: (t: string) => ({ width: t.length * 6 }),
+        set fillStyle(_v: string) {}, set strokeStyle(_v: string) {},
+        set lineWidth(v: number) { lineWidth = v; }, set globalAlpha(_v: number) {},
+        set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
+      } as unknown as CanvasRenderingContext2D,
+    };
+  }
+
+  /** Every stroked ring as [inner edge, outer edge], in draw order. */
+  function rings(state: number, followSlot: number | null) {
+    const transform: MapTransform = {
+      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
+    };
+    const view = fitView({ x0: 0, y0: 0, x1: 1280, y1: 794 }, 1280, 794, 0);
+    const { calls, ctx } = stubCtx2();
+    drawScene(ctx, {
+      transform, view, backdrop: {} as HTMLImageElement, trail: [],
+      players: [player({ slot: 0, x: 640, y: -300, health: 100, state })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot,
+    });
+    const out: { r: number; inner: number; outer: number }[] = [];
+    for (let i = 0; i < calls.length; i++) {
+      if (calls[i].fn !== 'arc') continue;
+      const r = calls[i].args[2];
+      // An arc followed by a fill is the avatar's own dot, not a ring around
+      // it. Only an arc that is stroked lays down a ring of ink.
+      const next = calls.slice(i + 1).find((c) => c.fn === 'stroke' || c.fn === 'fill' || c.fn === 'arc');
+      if (!next || next.fn !== 'stroke') continue;
+      out.push({ r, inner: r - next.width / 2, outer: r + next.width / 2 });
+    }
+    return out;
+  }
+
+  const UP = STATE.PRESENT | STATE.ALIVE;
+  const AVATAR_R = 7;
+
+  it('puts the health ring outside the avatar with no overlap', () => {
+    const [health] = rings(UP, null);
+    expect(health.r).toBeCloseTo(AVATAR_R + 3, 5);
+    // 10 - 2/2 = 9, against an avatar that ends at 7. Two pixels of gap.
+    expect(health.inner).toBeCloseTo(9, 5);
+    expect(health.inner - AVATAR_R).toBeGreaterThanOrEqual(1);
+  });
+
+  it('nests the alert ring, the health ring and the follow ring without a collision', () => {
+    // Pinned and followed: every ring an avatar can draw, at once.
+    const all = rings(UP | STATE.PINNED, 0);
+    // Alert (full circle, width 4), health arc (width 2) on the same radius,
+    // then the follow ring's dark halo (width 4) and its bright pass (2).
+    expect(all).toHaveLength(4);
+    const [alert, health, halo, follow] = all;
+
+    // Alert: 10 +/- 2, so 8 to 12, around an avatar that ends at 7.
+    expect(alert.inner).toBeCloseTo(8, 5);
+    expect(alert.outer).toBeCloseTo(12, 5);
+    expect(alert.inner).toBeGreaterThan(AVATAR_R);
+    // The health arc rides inside the alert ring rather than beside it, which
+    // is what makes the alert signal cost no extra footprint.
+    expect(health.r).toBeCloseTo(alert.r, 5);
+    expect(health.inner).toBeGreaterThanOrEqual(alert.inner);
+    expect(health.outer).toBeLessThanOrEqual(alert.outer);
+
+    // Follow halo: 15 +/- 2, so 13 to 17. One clear pixel past the alert
+    // ring's 12, and the bright pass sits inside the halo.
+    expect(halo.r).toBeCloseTo(AVATAR_R + 8, 5);
+    expect(halo.inner).toBeCloseTo(13, 5);
+    expect(halo.outer).toBeCloseTo(17, 5);
+    expect(halo.inner - alert.outer).toBeCloseTo(1, 5);
+    expect(follow.r).toBeCloseTo(halo.r, 5);
+    expect(follow.inner).toBeGreaterThanOrEqual(halo.inner);
+    expect(follow.outer).toBeLessThanOrEqual(halo.outer);
+  });
+
+  // The clearance has to survive the avatar growing and shrinking with
+  // height, not just hold at the base radius, so it is checked at both ends
+  // of avatarRadius's plus or minus twenty percent.
+  it('holds every clearance at the largest and smallest avatar', () => {
+    for (const base of [avatarRadius(99_999, 0), avatarRadius(-99_999, 0)]) {
+      const r = base;
+      const alertOuter = r + 3 + 2;
+      const haloInner = r + 8 - 2;
+      expect(alertOuter).toBeLessThan(haloInner);
+      // Glyph and label both clear the outermost edge, r + 10.
+      expect(r + 11).toBeGreaterThan(r + 8 + 2);
+      expect(r + 14 - LABEL_PAD_X).toBeGreaterThan(r + 8 + 2);
+    }
+  });
+
+  // Nothing here may be multiplied by the view's scale: these are icons over
+  // a map that softens as it scales, not scale models that soften with it.
+  it('keeps every ring the same size however far the view is zoomed', () => {
+    const transform: MapTransform = {
+      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 2048, height: 1271,
+    };
+    const sizes = [0.25, 1, 4].map((zoom) => {
+      const span = 1280 / zoom;
+      const view = fitView({ x0: 0, y0: 0, x1: span, y1: span / 1.61 }, 1280, 794, 0);
+      const { calls, ctx } = stubCtx2();
+      drawScene(ctx, {
+        transform, view, backdrop: null, trail: [],
+        players: [player({ slot: 0, x: 100, y: -100, state: UP | STATE.PINNED })],
+        entities: [],
+        show: { ci: true, entities: true, names: false },
+        width: 1280, height: 794, names: {}, slots: [], followSlot: 0,
+      });
+      return calls.filter((c) => c.fn === 'arc').map((c) => c.args[2]);
+    });
+    expect(sizes[0]).toEqual(sizes[1]);
+    expect(sizes[1]).toEqual(sizes[2]);
+    expect(sizes[1][0]).toBeCloseTo(AVATAR_R, 5);
   });
 });
 
