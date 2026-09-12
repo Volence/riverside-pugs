@@ -6,8 +6,9 @@ const TOGGLE_LABELS: Record<string, string> = {
 };
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
- *  the frames carry; nobody wants to read that. */
-function formatTime(ms: number): string {
+ *  the frames carry; nobody wants to read that. Exported because the
+ *  timeline rail needs the same formatting for its own timestamps. */
+export function formatTime(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const m = Math.floor(total / 60);
   const s = total % 60;
