@@ -83,7 +83,17 @@ export function sceneCounts(players: PlayerSample[], entities: EntitySample[]): 
     else if (
       e.kind === ENTITY_KIND.SMOKER_AI || e.kind === ENTITY_KIND.BOOMER_AI ||
       e.kind === ENTITY_KIND.HUNTER_AI || e.kind === ENTITY_KIND.TANK_AI
-    ) specials++;
+    ) {
+      // Same ghost exclusion as the player branch above, and for the same
+      // reason: an AI special can be in GHOST state exactly like a rostered
+      // one can (the recorder derives both from the same RplIsGhost call),
+      // and a ghost has not spawned yet. This narrows only the count. The
+      // draw loop below is untouched and keeps painting a ghost solid,
+      // because undercounting is safe in every world but a wrongly-hollow
+      // tank marker is not, if the ghost bit ever turns out to be a stale
+      // read rather than a true pre-spawn phase.
+      if ((e.state & STATE.GHOST) === 0) specials++;
+    }
   }
   return { survivors, commons, specials };
 }
