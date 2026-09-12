@@ -2,7 +2,7 @@ import { SPEEDS, type usePlayback } from './playback';
 import type { Toggles } from './useToggles';
 
 const TOGGLE_LABELS: Record<string, string> = {
-  hp: 'HP', guns: 'Guns', events: 'Evts', chat: 'Chat', ci: 'CI', entities: 'Ents',
+  hp: 'HP', names: 'Names', guns: 'Guns', events: 'Evts', chat: 'Chat', ci: 'CI', entities: 'Ents',
 };
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
@@ -66,7 +66,7 @@ export function ReplayControls(
       </div>
 
       <div class="replay__toolbar">
-        {(['hp', 'guns', 'events', 'chat', 'ci', 'entities'] as (keyof Toggles)[]).map((k) => (
+        {(['hp', 'names', 'guns', 'events', 'chat', 'ci', 'entities'] as (keyof Toggles)[]).map((k) => (
           <button
             key={k}
             class={`replay__btn ${toggles[k] ? 'is-on' : ''}`}

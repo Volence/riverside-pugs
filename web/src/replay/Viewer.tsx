@@ -20,7 +20,7 @@ export function Viewer(
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
   const [toggles, toggle] = useToggles();
-  const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities };
+  const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
   const [followSlot, setFollowSlot] = useState<number | null>(null);
 
   /**
@@ -76,6 +76,8 @@ export function Viewer(
         liveEntities={liveEntities}
         show={show}
         followSlot={followSlot}
+        names={names}
+        slots={header.slots}
       />
 
       {timeline && (toggles.events || toggles.chat) && (

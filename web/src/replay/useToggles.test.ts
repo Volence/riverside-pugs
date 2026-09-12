@@ -24,6 +24,13 @@ describe('readToggles', () => {
     expect(got.hp).toBe(false);
     expect(got.guns).toBe(DEFAULT_TOGGLES.guns);
     expect(got.entities).toBe(DEFAULT_TOGGLES.entities);
+    // names is the newest key: a value stored before it existed has no key
+    // for it at all, so this is the exact case the merge exists to cover.
+    expect(got.names).toBe(DEFAULT_TOGGLES.names);
+  });
+
+  it('defaults names to true', () => {
+    expect(DEFAULT_TOGGLES.names).toBe(true);
   });
 
   it('ignores a stored value that is not an object', () => {
