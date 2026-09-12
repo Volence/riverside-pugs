@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
-import { replayRoutes } from '../src/routes/replays.js';
+import { replayRoutes, concatHeadAndStream, readRange } from '../src/routes/replays.js';
 import { openDb, type DB } from '../src/db.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
@@ -353,6 +353,67 @@ describe('GET /api/replays/file/:name', () => {
   it('404s an unknown file', async () => {
     const res = await app.inject({ url: `/api/replays/file/pug_${'b'.repeat(32)}_0_1.rpl` });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// The file descriptor leak this guards against: sendSlice used to hand
+// Fastify a bare PassThrough fed by `rest.pipe(out)`. Fastify destroys the
+// stream it was given when a client aborts the response, which destroyed the
+// PassThrough but not `rest`: `pipe` unpipes on destination close, it never
+// destroys the source, and an fs.ReadStream only closes its descriptor on
+// end, error or destroy. The result was a paused, unconsumed fs.ReadStream,
+// and a leaked descriptor, for every reload or closed tab mid-download.
+//
+// Exercising this through app.inject and Fastify's own abort handling would
+// leave the assertion on an internal stream Fastify does not expose, so this
+// tests the extracted composition helper directly: it is the same object
+// sendSlice hands to `reply.send`, and asserting on its source is exactly
+// what the bug was about.
+describe('concatHeadAndStream (file descriptor leak on abort)', () => {
+  it('destroys the source stream when the returned stream is destroyed', async () => {
+    const path = join(dir, 'leak-test.rpl');
+    writeFileSync(path, Buffer.alloc(4096));
+    const source = createReadStream(path);
+    const out = concatHeadAndStream(Buffer.alloc(HEADER_BYTES), source);
+
+    const sourceClosed = new Promise<void>((resolve) => source.on('close', resolve));
+    // This is what Fastify does to the stream it was handed when a client
+    // aborts mid-response.
+    out.destroy();
+    await sourceClosed;
+
+    expect(source.destroyed).toBe(true);
+  });
+
+  it('still streams the remainder to completion when nothing aborts', async () => {
+    const path = join(dir, 'whole-test.rpl');
+    const body = Buffer.from('the rest of the file');
+    writeFileSync(path, body);
+    const head = Buffer.from('HEAD');
+    const out = concatHeadAndStream(head, createReadStream(path));
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of out) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks).equals(Buffer.concat([head, body]))).toBe(true);
+  });
+});
+
+// sendSlice sets Content-Length from `cutoff - start` before this ever runs.
+// A short read here means the file shrank under the request, so the body
+// would come in shorter than the length already promised: a client left
+// hanging on bytes that will never arrive is worse than a failed request, so
+// this must throw rather than hand back a truncated buffer.
+describe('readRange (short read fails instead of truncating)', () => {
+  it('returns the exact bytes when the range is fully present', () => {
+    const path = join(dir, 'full.rpl');
+    writeFileSync(path, Buffer.from('0123456789'));
+    expect(readRange(path, 2, 6)).toEqual(Buffer.from('2345'));
+  });
+
+  it('throws instead of returning a short buffer when the file is shorter than requested', () => {
+    const path = join(dir, 'short.rpl');
+    writeFileSync(path, Buffer.from('abc'));
+    expect(() => readRange(path, 0, 10)).toThrow();
   });
 });
 

@@ -1,5 +1,5 @@
 import { readFileSync, createReadStream, openSync, readSync, closeSync } from 'node:fs';
-import { PassThrough } from 'node:stream';
+import { PassThrough, pipeline, type Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import { listSessions, currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
@@ -74,17 +74,51 @@ const TOKEN_END = TOKEN_OFFSET + TOKEN_BYTES;
 
 /** Read `[from, to)` of a file into a Buffer. Used only for the first 44
  *  bytes of a response, so the synchronous read is bounded and tiny. */
-function readRange(path: string, from: number, to: number): Buffer {
+export function readRange(path: string, from: number, to: number): Buffer {
   const buf = Buffer.alloc(to - from);
   const fd = openSync(path, 'r');
   try {
     const got = readSync(fd, buf, 0, buf.length, from);
-    // A short read means the file shrank under us. Return what there is
-    // rather than a buffer of trailing zeroes claiming to be data.
-    return got === buf.length ? buf : buf.subarray(0, got);
+    // By the time this runs, sendSlice has already set Content-Length for the
+    // whole slice. A short read means the file shrank under us, and returning
+    // fewer bytes than that promise now would leave the client hanging
+    // forever waiting on bytes that will never arrive: worse than failing the
+    // request outright, which at least ends it. Throw instead, and let the
+    // error handler turn it into a 500.
+    if (got !== buf.length) {
+      throw new Error(`short read on ${path}: wanted ${buf.length} bytes at ${from}, got ${got}`);
+    }
+    return buf;
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Concatenate an in-memory head buffer with the streamed remainder of a file,
+ * as one Readable.
+ *
+ * Used when the head has to be buffered, to redact bytes in it, but the rest
+ * of a possibly multi-megabyte file must not be. `pipeline` ties the two
+ * streams' lifetimes together in both directions: an error on `rest` reaches
+ * the returned stream, and destroying the returned stream (which is what
+ * Fastify does when a client aborts the response) destroys `rest` too. A
+ * plain `pipe` does not do that second half, which is what let an aborted
+ * download leak an open file descriptor before this existed.
+ */
+export function concatHeadAndStream(head: Buffer, rest: Readable): Readable {
+  const out = new PassThrough();
+  out.write(head);
+  pipeline(rest, out, (err) => {
+    // pipeline already destroyed both streams; this is only for the log.
+    // ERR_STREAM_PREMATURE_CLOSE is the expected shape of a client abort, not
+    // a real failure, and is noisy enough on an ordinary closed tab that it
+    // is not worth logging.
+    if (err && (err as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+      console.error('[replays] streaming remainder failed:', err);
+    }
+  });
+  return out;
 }
 
 function sendSlice(
@@ -123,14 +157,8 @@ function sendSlice(
 
     // Header first, then the rest of the slice as a stream, so a closed file
     // is still not buffered whole. `end` is inclusive for createReadStream.
-    const out = new PassThrough();
-    out.write(head);
     const rest = createReadStream(path, { start: headEnd, end: cutoff - 1 });
-    // `pipe` does not forward errors, and an unhandled one on the source
-    // would leave the response hanging open forever instead of failing.
-    rest.on('error', (e) => out.destroy(e));
-    rest.pipe(out);
-    return reply.send(out);
+    return reply.send(concatHeadAndStream(head, rest));
   }
 
   // `end` is inclusive for createReadStream, so subtract one. Streaming

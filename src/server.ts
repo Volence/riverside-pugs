@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { STATUS_CODES } from 'node:http';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
@@ -76,6 +77,35 @@ async function finishWithRetry(
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+
+  // logger: false above means Fastify's own default error handler is the only
+  // thing that would otherwise put err.message on the wire in a 500 body. For
+  // a route error that carries an explicit statusCode, that message is a
+  // deliberate, deliberately-worded HTTP error and is fine to show. Anything
+  // else is a bug, not a chosen response, and its message can carry things
+  // that must never reach an anonymous caller: an ENOENT raised while reading
+  // a ranked replay carries the absolute path, and that filename contains the
+  // match token that seeds the game server's sv_password. Log the real error
+  // here, the same way the rest of this codebase reports errors, and send
+  // back nothing but a fixed, generic message.
+  app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
+    const statusCode = err.statusCode;
+    if (typeof statusCode === 'number') {
+      reply.code(statusCode).send({
+        statusCode,
+        error: STATUS_CODES[statusCode] ?? 'Error',
+        message: err.message,
+      });
+      return;
+    }
+    console.error('[server] unhandled error:', err);
+    reply.code(500).send({
+      statusCode: 500,
+      error: 'Internal Server Error',
+      message: 'internal server error',
+    });
+  });
+
   await app.register(cookie, { secret: deps.config.cookieSecret });
   await app.register(websocket);
   // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
