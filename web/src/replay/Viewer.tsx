@@ -10,7 +10,12 @@ import { usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
 import { drawScene, isSurvivor, type ShowFlags } from './draw';
 
-const SIZE = 720;
+// Every captured layer image is exactly 2048x1271. The view is sized to that
+// same aspect (scaled by 0.625) rather than a square, so drawScene's `s`
+// factor (canvas width over image width) stays uniform across the whole
+// image instead of squashing it into a square canvas.
+const VIEW_W = 1280;
+const VIEW_H = 794;
 
 export function Viewer(
   { spec, live = false }:
@@ -59,26 +64,39 @@ export function Viewer(
       }
     }
     const bounds = boundsOf(points);
-    return bounds ? autoFitTransform(bounds, SIZE, SIZE) : null;
+    return bounds ? autoFitTransform(bounds, VIEW_W, VIEW_H) : null;
     // Deliberately keyed on the map and the frame count rather than on
     // `frames`, so a live round refits occasionally as it extends rather than
     // on every single poll.
   }, [overview, header?.map, Math.floor(frames.length / 100)]);
 
-  const [layer, setLayer] = useState<MapLayer | null>(null);
+  /** The layer currently on screen, kept in a ref so `pickLayer` still gets
+   *  its hysteresis argument even though selection is now derived rather than
+   *  stateful. */
+  const layerRef = useRef<MapLayer | null>(null);
 
   /** Layer selection follows the survivors' median height, with hysteresis, so a
    *  team going down into a basement takes the view with them. Median rather
-   *  than mean so one player in a hole does not drag it. */
-  useEffect(() => {
-    if (!overview) { setLayer(null); return; }
+   *  than mean so one player in a hole does not drag it.
+   *
+   *  Derived with `useMemo` rather than `useState` set inside an effect: state
+   *  set in an effect only lands on the render after next, so the very first
+   *  render had no layer at all and the canvas skipped a draw. A memo has a
+   *  value on the first render. */
+  const layer = useMemo(() => {
+    if (!overview) { layerRef.current = null; return null; }
     const survivorZ = livePlayers
       .filter((p) => isSurvivor(p) && (p.state & STATE.ALIVE) !== 0)
       .map((p) => p.z)
       .sort((a, b) => a - b);
-    // Before anyone is alive, show the ground floor rather than nothing.
-    const z = survivorZ.length ? survivorZ[Math.floor(survivorZ.length / 2)] : -Infinity;
-    setLayer((cur) => pickLayer(overview.layers, z, cur));
+    // Survivors spawn at ground level on every L4D1 map. Before anyone is
+    // alive, zero is a far better proxy for that than the bottom of the
+    // stack: several maps' lowest layers are basements or tunnels that are
+    // otherwise empty by design, and `-Infinity` would pick exactly those.
+    const z = survivorZ.length ? survivorZ[Math.floor(survivorZ.length / 2)] : 0;
+    const picked = pickLayer(overview.layers, z, layerRef.current);
+    layerRef.current = picked;
+    return picked;
   }, [overview, livePlayers]);
 
   const transform: MapTransform | null = layer ? transformOfLayer(layer) : fitted;
@@ -128,17 +146,21 @@ export function Viewer(
       players: livePlayers,
       entities: liveEntities,
       show,
-      width: SIZE,
-      height: SIZE,
+      width: VIEW_W,
+      height: VIEW_H,
     });
-  }, [livePlayers, liveEntities, transform, backdrop, trail]);
+    // `show` is a fresh object every render, so its two flags are listed
+    // individually rather than the object itself: Task 14 wires real toggles
+    // to them, and without this the draw effect would not rerun when they
+    // change.
+  }, [livePlayers, liveEntities, transform, backdrop, trail, show.ci, show.entities]);
 
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
   if (!header) return <div class="replay replay--empty">Loading replay...</div>;
 
   return (
     <div class="replay">
-      <canvas ref={canvasRef} width={SIZE} height={SIZE} class="replay__canvas" />
+      <canvas ref={canvasRef} width={VIEW_W} height={VIEW_H} class="replay__canvas" />
       <div class="replay__status">
         {header.map}
         {!closed && <span class="replay__live"> LIVE, 10s delayed</span>}
