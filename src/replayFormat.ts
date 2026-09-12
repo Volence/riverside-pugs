@@ -49,8 +49,18 @@ const OFF = {
   frameCount: 152,
 } as const;
 
-const TOKEN_BYTES = 32;
+export const TOKEN_BYTES = 32;
 const MAP_BYTES = 32;
+
+/** Where the session token starts in the header, exported so the byte-serving
+ *  route can blank it without restating the offset.
+ *
+ *  A ranked match's token seeds the game server's `sv_password` in
+ *  orchestrator.ts, and the header goes out to anyone who opens the public
+ *  live page, so those 32 bytes are zeroed on the wire. Nothing downstream of
+ *  the wire reads `header.token`: the one server-side consumer,
+ *  `discoverMatchReplays`, reads the file on disk directly. */
+export const TOKEN_OFFSET: number = OFF.token;
 
 /** Player and entity state bits. A slot with state 0 is not occupied at all,
  *  which is distinct from a dead player: dead is PRESENT set and ALIVE clear. */

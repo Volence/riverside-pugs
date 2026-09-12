@@ -138,4 +138,41 @@ describe('useReplaySource cursor across a live round change', () => {
     expect(nameBFetch).toBeDefined();
     expect(nameBFetch).toContain('since=0');
   });
+
+  // The same round change for a ranked match, where the server reports an
+  // (ordinal, half) pair instead of a filename because the filename carries
+  // the match token. The cursor must reset on a change of that pair exactly
+  // as it does on a change of filename, and the bytes must come from the
+  // by-id route, never from a name.
+  it('resets the cursor when a live match reports a new (ordinal, half)', async () => {
+    const chunkA = concat([encodeHeader(header()), encodeFrame(emptyFrame(0))]);
+
+    let liveCalls = 0;
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.startsWith('/api/replays/live/match/')) {
+        liveCalls += 1;
+        // Round 0 half 1 on the first poll, then half 2: a round change.
+        return jsonResponse({ ordinal: 0, half: liveCalls === 1 ? 1 : 2, closed: false });
+      }
+      if (url.startsWith('/api/replays/match/7/0/1')) return fileResponse(chunkA, false);
+      return fileResponse(new Uint8Array(0), false);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // The first round's bytes moved the cursor well past 0.
+    expect(urls).toContain('/api/replays/match/7/0/1?since=0');
+    const halfTwo = urls.find((u) => u.startsWith('/api/replays/match/7/0/2'));
+    expect(halfTwo).toBeDefined();
+    expect(halfTwo).toContain('since=0');
+    // No filename, and therefore no token, was ever asked for.
+    expect(urls.some((u) => u.includes('/api/replays/file/'))).toBe(false);
+    expect(urls.some((u) => u.includes(TOKEN))).toBe(false);
+  });
 });

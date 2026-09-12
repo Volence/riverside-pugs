@@ -10,12 +10,20 @@ export type ReplaySpec =
   | { kind: 'live'; token: string }
   | { kind: 'live-match'; matchId: number };
 
-/** Both live variants name a session rather than a file: one by a standalone
- *  token, one by a match id whose token the server keeps to itself. They are
- *  handled identically from here on, so the distinction lives only in the URL
- *  that resolves the current filename. */
+/** Both live variants name a session rather than a round: one by a standalone
+ *  token, one by a match id whose token the server keeps to itself. Each poll
+ *  re-resolves the session to whichever round is being recorded now, and a
+ *  change of round is what resets the cursor. */
 function isLive(spec: ReplaySpec): boolean {
   return spec.kind === 'live' || spec.kind === 'live-match';
+}
+
+/** A spec that addresses bytes directly, as opposed to a session that has to
+ *  be resolved to one first. */
+type RoundSpec = Extract<ReplaySpec, { kind: 'file' } | { kind: 'match' }>;
+
+function isRound(spec: ReplaySpec): spec is RoundSpec {
+  return spec.kind === 'file' || spec.kind === 'match';
 }
 
 export interface ReplayState {
@@ -44,7 +52,7 @@ export function replayUrl(spec: ReplaySpec, since: number): string {
     case 'match':
       return `/api/replays/match/${spec.matchId}/${spec.ordinal}/${spec.half}?since=${since}`;
     case 'live':
-      // Live resolves to a filename first, so this is never fetched directly.
+      // Live resolves to a round first, so this is never fetched for bytes.
       return `/api/replays/live/${encodeURIComponent(spec.token)}`;
     case 'live-match':
       return `/api/replays/live/match/${spec.matchId}`;
@@ -127,7 +135,11 @@ export function useReplaySource(spec: ReplaySpec | null): {
     if (!spec) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let name: string | null = spec.kind === 'file' ? spec.name : null;
+    // The round whose bytes are being read. Fixed for a 'file' or 'match'
+    // spec; re-resolved every poll for a live one, which is how a round
+    // change is noticed at all.
+    let round: RoundSpec | null = isRound(spec) ? spec : null;
+    let roundKey = round ? JSON.stringify(round) : '';
 
     cursorRef.current = 0;
     setState({ header: null, frames: [], cursor: 0 });
@@ -136,27 +148,41 @@ export function useReplaySource(spec: ReplaySpec | null): {
 
     async function tick(): Promise<void> {
       try {
-        // A live spec names a session, not a file. Resolving it every poll is
-        // what makes a round change appear on its own: the filename moves on,
+        // A live spec names a session, not a round. Resolving it every poll
+        // is what makes a round change appear on its own: the round moves on,
         // and the cursor resets with it.
         if (isLive(spec!)) {
           const res = await fetch(replayUrl(spec!, 0));
           if (!res.ok) throw new Error('no live replay');
-          const body = (await res.json()) as { filename: string; closed: boolean };
-          if (cancelled) return;
-          if (body.filename !== name) {
-            name = body.filename;
+          const live = spec!;
+          // A standalone session answers with a filename, because its token
+          // is in the URL already and is nobody's password. A ranked match
+          // answers with an (ordinal, half) pair instead: its filename
+          // contains the match token, which seeds the game server's
+          // sv_password, so it never crosses the wire.
+          let next: RoundSpec;
+          if (live.kind === 'live-match') {
+            const body = (await res.json()) as { ordinal: number; half: number; closed: boolean };
+            if (cancelled) return;
+            next = { kind: 'match', matchId: live.matchId, ordinal: body.ordinal, half: body.half };
+          } else {
+            const body = (await res.json()) as { filename: string; closed: boolean };
+            if (cancelled) return;
+            next = { kind: 'file', name: body.filename };
+          }
+          const nextKey = JSON.stringify(next);
+          if (nextKey !== roundKey) {
+            round = next;
+            roundKey = nextKey;
             cursorRef.current = 0;
             setState({ header: null, frames: [], cursor: 0 });
           }
         }
 
-        const cursor = cursorRef.current;
-        const url = isLive(spec!)
-          ? `/api/replays/file/${encodeURIComponent(name!)}?since=${cursor}`
-          : replayUrl(spec!, cursor);
+        if (!round) throw new Error('no live replay');
 
-        const res = await fetch(url);
+        const cursor = cursorRef.current;
+        const res = await fetch(replayUrl(round, cursor));
         if (!res.ok) throw new Error(`replay fetch failed: ${res.status}`);
         const chunk = new Uint8Array(await res.arrayBuffer());
         if (cancelled) return;

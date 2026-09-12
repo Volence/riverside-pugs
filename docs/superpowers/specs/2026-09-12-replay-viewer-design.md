@@ -155,8 +155,15 @@ positions. A browse page that served raw open files would be a ghosting hole.
 
 The server hands out raw replay bytes truncated at the last releasable frame.
 The client keeps a byte cursor and polls about once a second. If the server
-reports a different current filename, the cursor resets and a new round has
-begun.
+reports a different current round, the cursor resets and a new round has begun.
+
+What names that round differs by session kind, and the difference is a security
+boundary rather than a detail. A standalone `!mix` session is identified by a
+filename, because its token is already in the URL and is nobody's password. A
+ranked match is identified by an `(ordinal, half)` pair, because its filename is
+`pug_<token>_<ordinal>_<half>.rpl` and that token seeds the game server's
+`sv_password` in `orchestrator.ts`. No ranked filename crosses the wire, and the
+token bytes in every served header are blanked for the same reason.
 
 Saved and live therefore share one decoder, because live is literally a prefix
 of the same file. The 10 second delay becomes structural rather than a rule
