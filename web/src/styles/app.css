@@ -310,10 +310,52 @@ tbody tr:hover { background: var(--surface-2); }
  * because on the profile table the first cell is the W/L/D chip and a colored
  * rule there reads as a second, contradictory result color. */
 td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
-[data-campaign='no_mercy'] { --campaign: var(--c-no-mercy); }
-[data-campaign='death_toll'] { --campaign: var(--c-death-toll); }
-[data-campaign='dead_air'] { --campaign: var(--c-dead-air); }
-[data-campaign='blood_harvest'] { --campaign: var(--c-blood-harvest); }
+
+/* ---------- campaign poster tiles ---------- */
+
+.ctiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--sp-4);
+}
+.ctile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  min-height: 150px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--campaign) 55%, var(--bg)) 0%, var(--bg) 100%);
+  color: var(--text-bright);
+  text-align: left;
+  overflow: hidden;
+  cursor: default;
+  font: inherit;
+}
+.ctile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.ctile > * { position: relative; z-index: 1; }
+button.ctile { cursor: pointer; }
+button.ctile:hover { border-color: var(--text-muted); }
+.ctile.is-active { border-color: var(--rule); box-shadow: 0 0 0 1px var(--rule); }
+.ctile.is-muted { opacity: 0.55; }
+.ctile__sub { color: var(--rating); }
+.ctile__name {
+  font-family: var(--font-display);
+  font-size: 1.875rem;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 
 /* ---------- rating + result vocabulary ---------- */
 

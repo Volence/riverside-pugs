@@ -327,3 +327,26 @@ describe('fmtLatency', () => {
     expect(fmtLatency(0)).toBe('0.0s');
   });
 });
+
+import { campaignTint } from './format';
+
+describe('campaignTint', () => {
+  it('returns the hand-picked token for the four L4D1 campaigns', () => {
+    expect(campaignTint('no_mercy')).toBe('var(--c-no-mercy)');
+    expect(campaignTint('death_toll')).toBe('var(--c-death-toll)');
+    expect(campaignTint('dead_air')).toBe('var(--c-dead-air)');
+    expect(campaignTint('blood_harvest')).toBe('var(--c-blood-harvest)');
+  });
+
+  it('gives an unknown campaign a stable oklch tint at the shared weight', () => {
+    const a = campaignTint('crash_course');
+    expect(a).toBe(campaignTint('crash_course'));
+    expect(a).toMatch(/^oklch\(0\.42 0\.06 \d+(\.\d+)?\)$/);
+  });
+
+  it('spreads different unknown campaigns across different hues', () => {
+    const hues = new Set(['crash_course', 'the_passing', 'suicide_blitz', 'dead_before_dawn']
+      .map((s) => campaignTint(s).match(/ (\d+(\.\d+)?)\)$/)![1]));
+    expect(hues.size).toBe(4);
+  });
+});
