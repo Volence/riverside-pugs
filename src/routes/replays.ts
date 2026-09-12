@@ -168,7 +168,19 @@ export async function replayRoutes(
   });
 
   /**
-   * Events and chat for one round, on the same clock as the replay frames.
+   * Events and chat for one round of a COMPLETED match.
+   *
+   * The completed gate is the whole point of the route reading the match row
+   * first. `match_chat` is fed from `player_say`, which does not distinguish
+   * team chat from all chat, so serving this for a match in progress would
+   * hand a survivor the infected team's chat verbatim and in real time, while
+   * the frames on the same page are deliberately held ten seconds back. This
+   * matches what /api/matches/:id already does, so the viewer cannot mount on
+   * a live match anyway; the gate is here because the endpoint is public and
+   * trivially discoverable regardless of what the UI does.
+   *
+   * There is no live timeline. If one is ever wanted it needs the same
+   * cutoff the frames get, not this route with the gate removed.
    *
    * `t_ms` defaults to -1 for rows written before that column existed, and a
    * row that cannot be placed in time cannot be placed on a timeline, so it
@@ -177,12 +189,17 @@ export async function replayRoutes(
    * and that is what puts a message and the death it was about in the order
    * they actually happened.
    */
-  app.get('/api/replays/timeline/:matchId/:ordinal/:half', async (req) => {
+  app.get('/api/replays/timeline/:matchId/:ordinal/:half', async (req, reply) => {
     const { matchId, ordinal, half } = req.params as
       { matchId: string; ordinal: string; half: string };
     const id = Number(matchId);
     const ord = Number(ordinal);
     const hf = Number(half);
+
+    const match = db
+      .prepare("SELECT id FROM matches WHERE id = ? AND state = 'completed'")
+      .get(id) as { id: number } | undefined;
+    if (!match) return reply.code(404).send({ error: 'no such match' });
 
     const events = db.prepare(
       `SELECT seq, t_ms AS tMs, kind, actor, target, value FROM match_live_events
