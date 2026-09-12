@@ -1,10 +1,28 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../src/db.js';
 import { encodeHeader, encodeFrame, HEADER_BYTES, PLAYER_SLOTS, type Frame, type ReplayHeader, VERSION } from '../src/replayFormat.js';
 import { discoverMatchReplays, recordMatchReplays, resolveReplayPath } from '../src/replays.js';
+
+/** Whole-file reads seen by src/replays.ts, recorded so a test can assert that
+ *  the recovery parse did NOT happen. readFileSync is a precise probe: the
+ *  header read uses openSync and readSync, so the only caller of readFileSync
+ *  in that module is the parse. A real spy is not possible here because an ESM
+ *  namespace object is not configurable, hence the module mock. */
+const probe = vi.hoisted(() => ({ wholeFileReads: [] as string[] }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    default: actual,
+    readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+      probe.wholeFileReads.push(String(args[0]));
+      return actual.readFileSync(...args);
+    },
+  };
+});
 
 const TOKEN = 'b'.repeat(32);
 let dir: string;
@@ -41,7 +59,7 @@ function writeReplay(name: string, over: Partial<ReplayHeader>, frameCount: numb
   writeFileSync(join(dir, name), Buffer.concat([encodeHeader(h), body, index]));
 }
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'rpl-')); });
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'rpl-')); probe.wholeFileReads.length = 0; });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe('discoverMatchReplays', () => {
@@ -83,6 +101,31 @@ describe('discoverMatchReplays', () => {
     expect(found).toHaveLength(1);
     expect(found[0].frames).toBe(2);
     expect(found[0].closed).toBe(false);
+  });
+
+  it('skips an unclosed file without parsing it when excludeOpen is set', () => {
+    // The recovery parse is the whole cost of this path: a finished round is
+    // 10 to 15 MB, readFileSync plus parseReplay blocks the event loop, and
+    // the round_end caller runs on the request path with this flag set. A
+    // caller that is going to discard the row must not pay for it.
+    writeReplay(`pug_${TOKEN}_4_1.rpl`, { ordinal: 4, half: 1 }, 3);
+    const body = Buffer.concat([encodeFrame(emptyFrame(0)), encodeFrame(emptyFrame(100))]);
+    writeFileSync(
+      join(dir, `pug_${TOKEN}_4_2.rpl`),
+      Buffer.concat([encodeHeader(head({ ordinal: 4, half: 2 })), body]),
+    );
+
+    const found = discoverMatchReplays(dir, TOKEN, { excludeOpen: true });
+    // Absent, not present with a recovered count of 2.
+    expect(found.map((f) => [f.half, f.frames, f.closed])).toEqual([[1, 3, true]]);
+    expect(probe.wholeFileReads).toEqual([]);
+
+    // Same directory with the flag off, which is the completion path: the
+    // unclosed file is a crashed round worth recording, so it still gets its
+    // frames recovered by parsing.
+    const all = discoverMatchReplays(dir, TOKEN);
+    expect(all.map((f) => [f.half, f.frames, f.closed])).toEqual([[1, 3, true], [2, 2, false]]);
+    expect(probe.wholeFileReads).toEqual([join(dir, `pug_${TOKEN}_4_2.rpl`)]);
   });
 
   it('returns nothing for an unreadable directory rather than throwing', () => {
