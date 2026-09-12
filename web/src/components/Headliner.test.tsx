@@ -22,4 +22,11 @@ describe('Headliner', () => {
     render(<Headliner eyebrow="Rating" name="bob" rating={null} stats={[]} />);
     expect(screen.getByText(/unrated/i)).toBeTruthy();
   });
+
+  it('reserves a gutter for the avatar only when one is given', () => {
+    const { container, rerender } = render(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} avatar="/a.png" />);
+    expect(container.querySelector('.headliner')?.classList.contains('headliner--avatar')).toBe(true);
+    rerender(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} />);
+    expect(container.querySelector('.headliner')?.classList.contains('headliner--avatar')).toBe(false);
+  });
 });
