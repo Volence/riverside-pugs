@@ -218,6 +218,7 @@ ConVar g_cvReplayEntityHz;               // world entity sample rate; <= player 
 ConVar g_cvReplayDir;                    // directory, relative to the game dir
 ConVar g_cvReplayMaxMb;                  // per-round byte cap, a runaway bound
 ConVar g_cvReplayAfterEnd;               // 1 = keep recording after the finale ends the match
+ConVar g_cvReplayStandalone;             // 1 = record rounds with no tracked match at all (!mix nights)
 
 File g_hReplay;                          // null when not recording
 Handle g_hReplayTimer;
@@ -308,6 +309,9 @@ orientation threshold. Changing this changes the rules under every rating earned
 	g_cvReplayDir = CreateConVar("sm_pug_replay_dir", "replays",
 		"Directory for replay files, relative to the game dir. Empty disables recording.",
 		FCVAR_NOTIFY);
+	g_cvReplayStandalone = CreateConVar("sm_pug_replay_standalone", "1",
+		"1 = record any round that goes live even with no tracked PUG match, e.g. a !mix night. Recording only; emits nothing to the backend.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvReplayAfterEnd = CreateConVar("sm_pug_replay_after_end", "1",
 		"1 = keep recording replays after the finale has ended the match. Recording only; no ROUND_START, no scoring.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
@@ -765,7 +769,8 @@ void RplOpen()
 	// finale has closed the match. Nothing else about MS_Ended changes: the
 	// result was already reported and no further ROUND_START is ever emitted.
 	if (g_State != MS_Live
-		&& !(g_State == MS_Ended && g_cvReplayAfterEnd.BoolValue)) return;
+		&& !(g_State == MS_Ended && g_cvReplayAfterEnd.BoolValue)
+		&& !(g_State == MS_None && g_cvReplayStandalone.BoolValue)) return;
 
 	int hz = g_cvReplayHz.IntValue;
 	if (hz <= 0) return;
@@ -1928,7 +1933,12 @@ public void OnMapStart()
 	// the map before it. Advance it here instead. Deliberately MS_Ended only:
 	// during a live match FinalizeMap owns this counter, and incrementing it
 	// in both places would skip an ordinal on every map.
-	if (g_State == MS_Ended && g_sToken[0] != '\0') g_iRplMapSeq++;
+	// MS_None (standalone) and MS_Ended (past a finale) only. NOT MS_Pending:
+	// a self-started match sits in Pending across the config's sm_restartmap,
+	// and incrementing there would put the first map at ordinal 1 while
+	// FinalizeMap still counts it as 0, so every replay would be off by one
+	// against the map the backend recorded.
+	if ((g_State == MS_None || g_State == MS_Ended) && g_sToken[0] != '\0') g_iRplMapSeq++;
 
 	// Failsafe for the score-read/changelevel race: a 2nd-half round_end set
 	// g_bPendingFinalize, but the map changed before FinalizeMap ran (e.g. the
@@ -1977,6 +1987,38 @@ public void OnMapStart()
 	}
 }
 
+/** Fill the roster arrays from whoever is on a team right now, WITHOUT starting
+ *  a match.
+ *
+ *  This is what lets standalone recording reuse the sampler unchanged: the frame
+ *  writer already resolves players through g_iClientRoster and names the header's
+ *  slot table from g_sRosterId, so populating those is the whole job.
+ *
+ *  Safe to do at MS_None because nothing else in this plugin acts on a roster
+ *  while there is no tracked match. Roster kick enforcement, the team lock, the
+ *  stat counters, EmitEvent and chat are each gated on match state, so none of
+ *  them can observe what this writes. A real match overwrites all of it:
+ *  Cmd_LoadPug calls ResetMatchState first, and Cmd_Match rebuilds the roster. */
+void RplFillStandaloneRoster()
+{
+	for (int i = 0; i <= MAXPLAYERS; i++) g_iClientRoster[i] = -1;
+	g_iRosterCount = 0;
+	for (int i = 1; i <= MaxClients && g_iRosterCount < MAX_ROSTER; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
+		int team = GetClientTeam(i);
+		if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) continue;
+		char id[32];
+		// Unauthenticated clients simply go unrecorded, exactly as they go
+		// unscored in a real match. Never a kick, never an error.
+		if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id))) continue;
+		int slot = g_iRosterCount++;
+		strcopy(g_sRosterId[slot], 32, id);
+		g_iRosterTeam[slot] = (team == TEAM_SURVIVOR) ? 1 : 2;
+		g_iClientRoster[i] = slot;
+	}
+}
+
 /** Rotoblin ready-up go-live signal (global forward; fires even if we never call
  *  the readyup natives). First live round flips Pending -> Live. */
 public void OnRoundIsLive()
@@ -2017,6 +2059,23 @@ public void OnRoundIsLive()
 		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
 
+		RplOpen();
+	}
+	else if (g_State == MS_None && g_cvReplayStandalone.BoolValue)
+	{
+		// A round went live with no tracked match: a !mix night, a scrim,
+		// anything that readyup drives without this plugin being told about
+		// it. Record it anyway. Nothing here emits to the backend, creates a
+		// match, or changes g_State, so the plugin stays exactly as inert as
+		// it was; the only product is a file on disk.
+		//
+		// One token for the whole standalone session, so every map of the
+		// night files under it and g_iRplMapSeq keeps the maps apart.
+		if (g_sToken[0] == '\0') GenerateToken(g_sToken, sizeof(g_sToken));
+		GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+		RplFillStandaloneRoster();
+		g_iHalf = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")) ? 2 : 1;
+		g_fRoundLiveAt = GetGameTime();
 		RplOpen();
 	}
 	else if (g_State == MS_Ended && g_cvReplayAfterEnd.BoolValue)
@@ -2076,7 +2135,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		// Recording past the finale: no scoring happens here, but the file
 		// still has to be closed so it gets its keyframe index and frame
 		// count rather than being left in the never-closed state.
-		if (g_State == MS_Ended && g_hReplay != null)
+		if (g_State != MS_Live && g_hReplay != null)
 		{
 			g_fRoundLiveAt = 0.0;
 			RplClose();
