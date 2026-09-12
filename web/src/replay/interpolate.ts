@@ -1,4 +1,4 @@
-import type { EntitySample, Frame, PlayerSample } from '../../../src/replayFormat';
+import { STATE, type EntitySample, type Frame, type PlayerSample } from '../../../src/replayFormat';
 
 /** How far an entity may move between two samples and still be believed to be
  *  the same entity. At 10Hz a sprinting common covers roughly 25 units, and a
@@ -57,16 +57,24 @@ export function bracket(
  * that slides from 100 to 0 over a tenth of a second reads as a slow death
  * rather than an instant one. Discrete fields come from the earlier frame,
  * so they change exactly when the recording says they changed.
+ *
+ * An empty slot in the later frame is the one case where taking position from
+ * both would be wrong. A disconnect or a substitution writes an all-zero
+ * record, and because the state byte comes from the earlier frame the avatar
+ * keeps its PRESENT bit for the interval: lerping towards zero would streak
+ * it across the map to the world origin before it vanished. It holds still
+ * instead.
  */
 export function interpolatePlayers(a: Frame, b: Frame, f: number): PlayerSample[] {
   return a.players.map((pa, i) => {
     const pb = b.players[i] ?? pa;
+    const to = (pb.state & STATE.PRESENT) !== 0 ? pb : pa;
     return {
       ...pa,
-      x: lerp(pa.x, pb.x, f),
-      y: lerp(pa.y, pb.y, f),
-      z: lerp(pa.z, pb.z, f),
-      yaw: lerpAngle(pa.yaw, pb.yaw, f),
+      x: lerp(pa.x, to.x, f),
+      y: lerp(pa.y, to.y, f),
+      z: lerp(pa.z, to.z, f),
+      yaw: lerpAngle(pa.yaw, to.yaw, f),
     };
   });
 }

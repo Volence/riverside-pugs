@@ -64,10 +64,12 @@ describe('bracket', () => {
     expect(bracket([], 0)).toBeNull();
   });
 
-  it('does not scan linearly', () => {
-    // A round is 4000-plus frames and this runs 60 times a second, so a
-    // linear scan would be the slowest thing in the viewer. Binary search
-    // over a large array must still land on the right pair.
+  // Named for what it checks. The implementation is a binary search, which is
+  // why it can afford to run 60 times a second over a 4000-plus frame round,
+  // but no assertion here can tell a binary search from a linear one: both
+  // return the same pair. Claiming otherwise in the name would be a trap for
+  // whoever changes this next.
+  it('lands on the right pair in a large array', () => {
     const many = Array.from({ length: 5000 }, (_, i) => frameAt(i * 100));
     const got = bracket(many, 4999 * 100 - 50)!;
     expect(got.a.tMs).toBe(4998 * 100);
@@ -77,8 +79,11 @@ describe('bracket', () => {
 
 describe('interpolatePlayers', () => {
   it('moves a player between frames', () => {
-    const a = frameAt(0, { players: players([{ x: 0, y: 0 }]) });
-    const b = frameAt(100, { players: players([{ x: 100, y: -50 }]) });
+    // PRESENT on both frames, which is what a player who is moving looks like
+    // in a real recording. The slot's occupancy is now load-bearing: see the
+    // empty-slot case below.
+    const a = frameAt(0, { players: players([{ x: 0, y: 0, state: STATE.PRESENT }]) });
+    const b = frameAt(100, { players: players([{ x: 100, y: -50, state: STATE.PRESENT }]) });
     const got = interpolatePlayers(a, b, 0.5);
     expect(got[0].x).toBe(50);
     expect(got[0].y).toBe(-25);
@@ -93,6 +98,22 @@ describe('interpolatePlayers', () => {
     const got = interpolatePlayers(a, b, 0.9);
     expect(got[0].state).toBe(STATE.PRESENT | STATE.ALIVE);
     expect(got[0].health).toBe(100);
+  });
+
+  // A slot occupied in `a` and empty in `b` is a disconnect or a
+  // substitution. The discrete fields come from `a`, so the avatar keeps its
+  // PRESENT bit for the interval, and lerping towards an all-zero record
+  // dragged it across the map to the world origin on the way out.
+  it('holds position when the slot is empty in the later frame', () => {
+    const a = frameAt(0, {
+      players: players([{ x: 4000, y: -2500, z: 120, yaw: 90, state: STATE.PRESENT | STATE.ALIVE }]),
+    });
+    const b = frameAt(100, { players: players([{ x: 0, y: 0, z: 0, yaw: 0, state: 0 }]) });
+    const got = interpolatePlayers(a, b, 0.5);
+    expect(got[0].x).toBe(4000);
+    expect(got[0].y).toBe(-2500);
+    expect(got[0].z).toBe(120);
+    expect(got[0].yaw).toBe(90);
   });
 });
 
