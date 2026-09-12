@@ -3,9 +3,11 @@ import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
   alertColor, healthRingFraction, INCAP_ARC_MAX, INCAP_POOL,
+  slotLabel, slotNumber, numberInk, SLOT_COLORS,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
+import { contrastRatio, distance, type Vision } from './colorDistance';
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {
   return {
@@ -77,6 +79,108 @@ describe('slotColor', () => {
   it('never reuses a survivor colour for an infected slot', () => {
     const surv = new Set([0, 1, 2, 3].map(slotColor));
     for (const s of [4, 5, 6, 7]) expect(surv.has(slotColor(s))).toBe(false);
+  });
+});
+
+describe('slotLabel and slotNumber', () => {
+  // Finding 12: on the by-filename viewer route `Viewer` defaults `names` to
+  // an empty object, so nothing ever resolved and the Names toggle was a
+  // silent no-op. Standalone `!mix` sessions are the common case for that
+  // route. A short slot label is useful and leaks no SteamID64.
+  it('names every slot without printing a SteamID64', () => {
+    expect([0, 1, 2, 3].map(slotLabel)).toEqual(['S1', 'S2', 'S3', 'S4']);
+    expect([4, 5, 6, 7].map(slotLabel)).toEqual(['I1', 'I2', 'I3', 'I4']);
+    for (let i = 0; i < 8; i++) expect(slotLabel(i)).not.toMatch(/\d{5}/);
+  });
+
+  // Finding 4: hue alone cannot carry slot identity on a five pixel dot, and
+  // the team is already carried by warm versus cool, so the number is the
+  // second channel. It counts within a team, because within a team is where
+  // the colours failed.
+  it('numbers each slot within its own team, one through four', () => {
+    expect([0, 1, 2, 3].map(slotNumber)).toEqual(['1', '2', '3', '4']);
+    expect([4, 5, 6, 7].map(slotNumber)).toEqual(['1', '2', '3', '4']);
+  });
+});
+
+describe('numberInk', () => {
+  // A digit sitting inside the dot has to be legible against every one of
+  // the eight colours, and those run a wide range of lightness, so the ink
+  // is chosen per colour rather than fixed.
+  it('inks dark on a light dot and light on a dark one', () => {
+    expect(numberInk('#ffffff')).not.toBe(numberInk('#101010'));
+  });
+
+  it('reaches at least 4.5:1 against every slot colour', () => {
+    for (const c of SLOT_COLORS) {
+      expect(contrastRatio(c, numberInk(c))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+describe('SLOT_COLORS under dichromacy', () => {
+  const SURVIVORS = [0, 1, 2, 3];
+  const INFECTED = [4, 5, 6, 7];
+  const VISIONS: Vision[] = ['normal', 'protanopia', 'deuteranopia'];
+  const pairs = (g: number[]) => g.flatMap((a, i) => g.slice(i + 1).map((b) => [a, b] as const));
+  const worst = (g: number[], v: Vision) =>
+    Math.min(...pairs(g).map(([a, b]) => distance(SLOT_COLORS[a], SLOT_COLORS[b], v)));
+
+  // Finding 4, measured rather than asserted. The palette this replaced put
+  // slot 2 indigo and slot 3 violet 2.8 dE apart under protanopia and 8.2
+  // under deuteranopia, which is to say identical, and flattened slots 4, 5
+  // and 6 to about 13 under deuteranopia. That is roughly 6 to 8 percent of
+  // male viewers getting nothing at all from per-slot colour WITHIN a team.
+  //
+  // 16 is not a comfortable distance, it is a floor: four cool hues and four
+  // warm ones cannot be spread much further than this without breaking the
+  // team split, which is the constraint that matters more. The slot number
+  // drawn on the dot is what actually carries slot identity; this test exists
+  // so the colour channel cannot silently rot back to useless underneath it.
+  it('keeps every within-team pair apart for a dichromat', () => {
+    for (const v of VISIONS) {
+      expect(worst(SURVIVORS, v)).toBeGreaterThanOrEqual(16);
+      expect(worst(INFECTED, v)).toBeGreaterThanOrEqual(16);
+    }
+  });
+
+  // The team split is the one thing the old palette got right and the one
+  // thing that may not regress: warm versus cool is how a viewer tells a
+  // teammate from an enemy, and it has to survive both dichromacies.
+  it('keeps the two teams much further apart than any two slots within one', () => {
+    for (const v of VISIONS) {
+      let cross = Infinity;
+      for (const a of SURVIVORS) {
+        for (const b of INFECTED) cross = Math.min(cross, distance(SLOT_COLORS[a], SLOT_COLORS[b], v));
+      }
+      expect(cross).toBeGreaterThanOrEqual(28);
+      expect(cross).toBeGreaterThan(Math.min(worst(SURVIVORS, v), worst(INFECTED, v)));
+    }
+  });
+
+  // Finding 7. Giving each slot its own colour introduced confusions the
+  // single-colour scheme did not have: survivor slot 2 sat 21.4 from the AI
+  // hunter and slot 3 sat 25.8 from it, so a SURVIVOR read as a hunter on a
+  // mix night with entities shown. Slot 5 sat near the AI tank and the tank
+  // rock, and slot 6 near the AI boomer. The old team red was worse still at
+  // 13.8 from the AI tank, which predates the slot colours entirely.
+  it('keeps every slot clear of every world entity colour', () => {
+    for (let slot = 0; slot < 8; slot++) {
+      for (const kind of Object.values(ENTITY_KIND)) {
+        const style = entityStyle(kind)!;
+        expect(distance(SLOT_COLORS[slot], style.color)).toBeGreaterThanOrEqual(24);
+      }
+    }
+  });
+
+  // A survivor reading as a hunter is the specific failure Finding 7 names,
+  // so it gets its own assertion at its own threshold rather than hiding
+  // inside the sweep above.
+  it('never lets a survivor read as the AI hunter', () => {
+    const hunter = entityStyle(ENTITY_KIND.HUNTER_AI)!.color;
+    for (const slot of SURVIVORS) {
+      expect(distance(SLOT_COLORS[slot], hunter)).toBeGreaterThan(25.8);
+    }
   });
 });
 
@@ -481,11 +585,18 @@ describe('drawScene', () => {
     // This is an update to the new behaviour, not a weakened assertion: it
     // still pins the exact text drawn and still proves the raw id is never
     // one of them.
-    expect(known.texts.map((t) => t.fn)).toEqual(['fillText']);
-    expect(known.texts[0].text).toBe('Zoey');
+    // The only text calls are the avatar's slot number and the label itself,
+    // both filled, neither stroked.
+    expect(known.texts.every((t) => t.fn === 'fillText')).toBe(true);
+    expect(known.texts.map((t) => t.text)).toEqual(['1', 'Zoey']);
 
-    // No roster entry for this slot: draw nothing, never the seventeen-digit
-    // SteamID64 itself.
+    // No roster entry for this slot. Finding 12: this used to draw nothing at
+    // all, which made the Names toggle a silent no-op on the by-filename
+    // viewer route, where `Viewer` defaults `names` to an empty object and
+    // standalone `!mix` sessions are the common case. It now falls back to a
+    // short slot label. That is an update to the new behaviour, and the half
+    // of the old assertion that mattered is STRENGTHENED, not weakened: the
+    // seventeen-digit SteamID64 must still never reach the canvas.
     const unknown = stubCtx();
     drawScene(unknown.ctx, {
       transform, view, backdrop: null, trail: [],
@@ -495,7 +606,53 @@ describe('drawScene', () => {
       width: 1280, height: 794,
       names: {}, slots, followSlot: null,
     });
-    expect(unknown.texts).toHaveLength(0);
+    expect(unknown.texts.map((t) => t.text)).toContain('S1');
+    for (const t of unknown.texts) expect(t.text).not.toContain('76561198000000001');
+    for (const t of unknown.texts) expect(t.text).not.toMatch(/\d{5}/);
+  });
+
+  it('draws a slot number inside every avatar, as the channel colour cannot carry', () => {
+    const { transform, view } = identityScene();
+    const { texts, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [
+        player({ slot: 0, x: 200, y: -200 }),
+        player({ slot: 3, x: 400, y: -200 }),
+        player({ slot: 4, x: 600, y: -200 }),
+        player({ slot: 7, x: 800, y: -200 }),
+      ],
+      entities: [],
+      // Names OFF: the number is not a label, it is part of the avatar, and
+      // it must be there whether or not anyone asked for names.
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+
+    expect(texts.map((t) => t.text).sort()).toEqual(['1', '1', '4', '4']);
+    // Centred on the avatar, not offset beside it: at r = 7 a 14px dot has a
+    // 9.9px inscribed square, which a 9px digit fits inside.
+    const drawn = new Map(texts.map((t) => [t.x, t.y]));
+    for (const px of [200, 400, 600, 800]) expect(drawn.get(px)).toBe(200);
+  });
+
+  it('does not number or ring a dead player, but still says who it was', () => {
+    const { transform, view } = identityScene();
+    const { calls, texts, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, state: STATE.PRESENT })],
+      entities: [],
+      show: { ci: true, entities: true, names: true },
+      width: 1280, height: 794,
+      names: { s0: 'Zoey' }, slots: ['s0', '', '', '', '', '', '', ''], followSlot: null,
+    });
+    // A body is drawn at 0.3 alpha, where a nine pixel digit is illegible and
+    // would only add to the pile the label pass is there to thin out. The
+    // label stays, because who died where is worth knowing; the number and
+    // the health ring go, because neither means anything on a corpse.
+    expect(texts.map((t) => t.text)).toEqual(['Zoey']);
+    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
   });
 
   it('draws a downed survivor a small danger arc, not the closed green ring the raw pool gave', () => {
