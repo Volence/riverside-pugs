@@ -3,7 +3,9 @@ import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData } from '../api';
 import { campaignName, campaignTint, deriveLiveStats, fmtDate, labelFor, orderLiveStatKeys } from '../format';
 import { useState } from 'preact/hooks';
-import { Bars, BarRow, Empty, Panel, ResultChip, Sparkline, SrDelta, Tabs, Tile, Tiles } from '../components/bits';
+import { Bars, BarRow, Empty, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
+import { Headliner } from '../components/Headliner';
+import { Figures, Figure } from '../components/PageHeader';
 
 export function Profile({ steamid }: { steamid: string }) {
   const { data, error } = useFetch((s) => api.profile(steamid, s), [steamid]);
@@ -31,39 +33,28 @@ export function Profile({ steamid }: { steamid: string }) {
   return (
     <div class="page page--profile">
       <div class="stack">
-        <Panel class="profile-head">
-          {player.avatar
-            ? <img class="avatar" src={player.avatar} alt="" />
-            : <div class="avatar avatar--blank" aria-hidden="true" />}
-          <div class="profile-head__id">
-            <h2>{player.name}</h2>
-            <p class="muted">Joined {fmtDate(player.createdAt)}</p>
-          </div>
-          <div class="profile-head__rating">
-            <p class="eyebrow">Rating</p>
-            {rating ? (
-              <>
-                <div class="rating-line">
-                  <span class="hero hero--rating">{rating.sr}</span>
-                  {lastDelta !== null && <SrDelta value={lastDelta} />}
-                </div>
-                <p class="muted">
-                  {rating.wins}W - {rating.losses}L
-                  {peak !== null && <> · peak {peak}</>}
-                </p>
-              </>
-            ) : (
-              <Empty>Unrated this season.</Empty>
-            )}
-          </div>
-        </Panel>
+        <Headliner
+          eyebrow={`Joined ${fmtDate(player.createdAt)}`}
+          name={player.name}
+          avatar={player.avatar}
+          rating={rating ? rating.sr : null}
+          delta={lastDelta}
+          stats={rating ? [
+            { label: 'Record', value: `${rating.wins}W ${rating.losses}L` },
+            // Omitted when the peak IS the current rating: showing "1200"
+            // twice right next to each other (once as the hero, once as
+            // "at their peak") is redundant rather than informative.
+            ...(peak !== null && peak === rating.sr ? [] : [{ label: 'Peak', value: peak ?? 'n/a' }]),
+            { label: 'Matches', value: totals.games },
+          ] : []}
+        />
 
         <Panel>
           <h3>Rating over time</h3>
           <Sparkline values={history.map((h) => h.sr)} />
         </Panel>
 
-        <ProfileTiles totals={totals} statTotals={statTotals} rating={rating} />
+        <ProfileFigures totals={totals} statTotals={statTotals} rating={rating} />
 
         <div class="profile-grid">
           <Panel>
@@ -195,14 +186,14 @@ export function Profile({ steamid }: { steamid: string }) {
 }
 
 /**
- * Headline numbers as tiles.
+ * Headline numbers as figures.
  *
  * Rates rather than raw totals wherever one exists: a raw count flatters
  * whoever has played the most games, which makes it useless for comparing
- * players. A tile is omitted entirely when its denominator is zero, so
+ * players. A figure is omitted entirely when its denominator is zero, so
  * "never played boomer" reads as absent rather than as 0%.
  */
-function ProfileTiles(
+function ProfileFigures(
   { totals, statTotals, rating }: {
     totals: ProfileData['totals'];
     statTotals: ProfileData['statTotals'];
@@ -241,8 +232,10 @@ function ProfileTiles(
   if (st.skeets) tiles.push({ label: 'Skeets', value: st.skeets });
 
   return (
-    <Tiles>
-      {tiles.map((t) => <Tile key={t.label} label={t.label} value={t.value} sub={t.sub} />)}
-    </Tiles>
+    <Panel>
+      <Figures>
+        {tiles.map((t) => <Figure key={t.label} label={t.label} value={t.value} sub={t.sub} />)}
+      </Figures>
+    </Panel>
   );
 }
