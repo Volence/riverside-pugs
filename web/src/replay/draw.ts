@@ -108,6 +108,25 @@ export function slotColor(slot: number): string {
 }
 
 /**
+ * The one colour every ghost is drawn in, whatever slot it belongs to.
+ *
+ * A ghost is an infected that has not spawned, and its position is exactly
+ * what the ten second server-side delay exists to blunt on the public live
+ * page. Drawing it in its own slot colour made it individually identifiable
+ * by slot, where before it was not, and it varied how visible one was: at the
+ * same 0.35 alpha a gold ghost is over three times as luminous as the single
+ * red every ghost used to be. That is inside the letter of the anti-ghosting
+ * rule, which is about rings, labels and highlights, but it is movement in
+ * the wrong direction and nobody decided it.
+ *
+ * A muted brick, below the old red's own luminance, so no ghost is now more
+ * visible than any ghost was before, and far enough from all eight slot
+ * colours that it cannot be read as a spawned one. Per-slot identity is for
+ * spawned infected only.
+ */
+export const GHOST_COLOR = '#9c5f5a';
+
+/**
  * The slot's number within its own team, drawn inside the avatar.
  *
  * This is the second channel Finding 4 asked for, and it is the one that
@@ -514,11 +533,15 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     // read, which is the opposite of the point.
     const ghost = (pl.state & STATE.GHOST) !== 0;
     ctx.globalAlpha = alive ? (ghost ? 0.35 : 1) : 0.3;
+    // Every mark a ghost makes is in one fixed colour, the outline and the
+    // facing arrow alike: see GHOST_COLOR. `color` reaches only the branch
+    // below, which a ghost never enters.
+    const ink = ghost ? GHOST_COLOR : color;
 
     ctx.beginPath();
     ctx.arc(p.px, p.py, r, 0, Math.PI * 2);
     if (ghost) {
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = ink;
       ctx.lineWidth = 2;
       ctx.stroke();
     } else {
@@ -538,7 +561,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // strike straight through the digit at four yaws out of every turn.
       ctx.moveTo(p.px + dx * r, p.py + dy * r);
       ctx.lineTo(p.px + dx * r * 2.2, p.py + dy * r * 2.2);
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = ink;
       ctx.lineWidth = 2;
       ctx.stroke();
     }

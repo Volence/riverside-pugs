@@ -3,11 +3,11 @@ import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
   alertColor,
-  slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget,
+  slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget, GHOST_COLOR,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
-import { contrastRatio, distance, type Vision } from './colorDistance';
+import { contrastRatio, distance, relativeLuminance, type Vision } from './colorDistance';
 import { barSegments, INCAP_ARC_MAX } from './hud';
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {
@@ -345,10 +345,21 @@ describe('drawScene', () => {
   // green while the exact original bug came back. Testing `drawScene`
   // itself is what closes that gap.
   function stubCtx() {
-    const calls: { fn: string; args: number[] }[] = [];
+    const calls: { fn: string; args: number[]; stroke: string; fill: string }[] = [];
     const texts: { fn: string; text: string; x: number; y: number }[] = [];
+    // The paint styles are recorded alongside each call, because "which
+    // colour was this stroked in" is a real assertion (the ghost outline has
+    // to be one fixed colour whatever slot it belongs to) and a write-only
+    // setter cannot answer it.
+    let strokeStyle = '';
+    let fillStyle = '';
     const rec = (fn: string) => (...args: unknown[]) => {
-      calls.push({ fn, args: args.filter((a) => typeof a === 'number') as number[] });
+      calls.push({
+        fn,
+        args: args.filter((a) => typeof a === 'number') as number[],
+        stroke: strokeStyle,
+        fill: fillStyle,
+      });
     };
     // fillText/strokeText carry the label or glyph string as their first
     // argument, which the numeric-only `rec` above would silently drop, so
@@ -369,7 +380,7 @@ describe('drawScene', () => {
         // pixels per character at a 10px font is close enough for a stub and
         // makes the expected plate width arithmetic below exact.
         measureText: (t: string) => ({ width: t.length * 6 }),
-        set fillStyle(_v: string) {}, set strokeStyle(_v: string) {},
+        set fillStyle(v: string) { fillStyle = v; }, set strokeStyle(v: string) { strokeStyle = v; },
         set lineWidth(_v: number) {}, set globalAlpha(_v: number) {},
         set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
       } as unknown as CanvasRenderingContext2D,
@@ -496,6 +507,12 @@ describe('drawScene', () => {
     expect(dh).toBeCloseTo(view.scale, 5);
   });
 
+  /** Everything drawn from the first arc onward. With no backdrop the grid
+   *  strokes dozens of lines first, and those are not what these tests are
+   *  about; the first arc in a player-only scene is the avatar. */
+  const fromAvatar = <T extends { fn: string }>(calls: T[]): T[] =>
+    calls.slice(calls.findIndex((c) => c.fn === 'arc'));
+
   const identityScene = () => {
     const transform: MapTransform = {
       originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
@@ -573,7 +590,7 @@ describe('drawScene', () => {
     expect(ringR).toBeGreaterThan(avatarR);
   });
 
-  it('keeps a ghost hollow: no health ring, glyph, label or follow highlight', () => {
+  it('keeps a ghost hollow: no health ring, glyph, label, number or follow highlight', () => {
     const { transform, view } = identityScene();
     const { calls, texts, ctx } = stubCtx();
     const slots = ['', '', '', '', 'steam1', '', '', ''];
@@ -595,6 +612,59 @@ describe('drawScene', () => {
     // Only the ghost's own hollow outline arc, nothing else.
     expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
     expect(texts).toHaveLength(0);
+    // Finding 15: this test was titled "keeps a ghost hollow" and asserted
+    // one arc, which a regression that FILLED that arc would have passed
+    // unchanged, since a filled circle records exactly one arc too. The
+    // background uses fillRect, so `fill` is safe to assert absent: nothing
+    // in a ghost-only scene has any business filling a path.
+    expect(calls.filter((c) => c.fn === 'fill')).toHaveLength(0);
+    // Every mark a ghost makes is its own hollow outline and its facing
+    // arrow, both in the one ghost colour. A ring, a highlight or a plate
+    // would show up here as a stroke or a fill in some other colour.
+    const marks = fromAvatar(calls).filter((c) => c.fn === 'stroke');
+    expect(marks).toHaveLength(2);
+    for (const m of marks) expect(m.stroke).toBe(GHOST_COLOR);
+  });
+
+  it('draws every ghost in one muted colour, never its own slot colour', () => {
+    const { transform, view } = identityScene();
+    const seen = new Set<string>();
+    for (const slot of [4, 5, 6, 7]) {
+      const { calls, ctx } = stubCtx();
+      drawScene(ctx, {
+        transform, view, backdrop: null, trail: [],
+        players: [player({
+          slot, x: 640, y: -300,
+          state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST,
+        })],
+        entities: [],
+        show: { ci: true, entities: true, names: false },
+        width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      });
+      // The hollow outline and the facing arrow. Both used to take the
+      // slot's colour, so both have to be clamped.
+      const strokes = fromAvatar(calls).filter((c) => c.fn === 'stroke');
+      expect(strokes).toHaveLength(2);
+      for (const st of strokes) {
+        seen.add(st.stroke);
+        expect(st.stroke).not.toBe(slotColor(slot));
+      }
+    }
+    // Finding 14: a ghost drawn in its own slot colour is individually
+    // identifiable by slot, where before it was not, and slot 6 gold is over
+    // three times as luminous as the red every ghost used to be, so at the
+    // same 0.35 alpha a slot 6 ghost was far more visible than any ghost had
+    // ever been. Per-slot identity is for SPAWNED infected only.
+    expect(seen).toEqual(new Set([GHOST_COLOR]));
+  });
+
+  it('keeps the ghost colour no brighter than the single colour ghosts used to use', () => {
+    // The old team red. Nothing about the ghost treatment may drift upward in
+    // visibility: the live page is public and a ghost's position is exactly
+    // what the ten second delay exists to protect.
+    expect(relativeLuminance(GHOST_COLOR)).toBeLessThanOrEqual(relativeLuminance('#d9534f'));
+    // And it must not read as any spawned slot either.
+    for (const c of SLOT_COLORS) expect(distance(GHOST_COLOR, c)).toBeGreaterThan(15);
   });
 
   it('resolves a name label through names[slots[slot]], never falling back to the raw id', () => {
