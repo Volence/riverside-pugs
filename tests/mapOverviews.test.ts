@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { OVERVIEWS, overviewFor } from '../src/mapOverviews.js';
+import {
+  boxSpan, canvasAspect, canvasForBox, fitView, type ViewBox,
+} from '../src/mapTransform.js';
 
 describe('OVERVIEWS', () => {
   it('covers all 22 maps', () => {
@@ -89,14 +92,60 @@ describe('content boxes', () => {
     }
   });
 
-  // The whole point of the task. If a box covers the whole frame, cropping to
-  // it buys nothing, and that means the generator found something in the void.
-  it('crops a meaningful amount off at least most maps', () => {
-    const fractions = Object.values(OVERVIEWS).map((m) => {
-      const b = m.contentBox;
-      return ((b.x1 - b.x0) * (b.y1 - b.y0)) / (m.layers[0].width * m.layers[0].height);
-    });
-    const median = [...fractions].sort((a, b) => a - b)[Math.floor(fractions.length / 2)];
-    expect(median).toBeLessThan(0.75);
+});
+
+/**
+ * The acceptance test for the crop.
+ *
+ * This used to assert that the median content box covered less than 0.75 of
+ * its image BY AREA. Area fraction has no relationship to how big a map is
+ * drawn, which is why the crop shipped believing it had worked while making
+ * eighteen of twenty-two maps smaller on screen: the captures and the canvas
+ * were the same shape, so cropping horizontal void out of a landscape frame
+ * left the height governing the fit and merely moved the void from the image
+ * into the canvas as black bars.
+ *
+ * What is asserted instead is the quantity that was supposed to improve: the
+ * scale `fitView` draws at, in canvas pixels per image pixel. Both sides of
+ * the comparison get a canvas of the same backing-store budget and the same
+ * padding, so the only difference between them is whether the box was
+ * cropped.
+ */
+describe('cropping to the content box', () => {
+  const scaleOf = (box: ViewBox): number => {
+    const canvas = canvasForBox(box);
+    return fitView(box, canvas.width, canvas.height).scale;
+  };
+
+  const gains = Object.values(OVERVIEWS).map((m) => ({
+    map: m.map,
+    gain: scaleOf(m.contentBox)
+      / scaleOf({ x0: 0, y0: 0, x1: m.layers[0].width, y1: m.layers[0].height }),
+  }));
+
+  it('never draws a map smaller than it would uncropped', () => {
+    const worse = gains
+      .filter((g) => g.gain < 1 - 1e-6)
+      .map((g) => `${g.map} ${g.gain.toFixed(3)}x`);
+    expect(worse).toEqual([]);
+  });
+
+  // The clamp is the fallback for a map shaped like a ribbon, and it costs
+  // scale when it bites: a clamped canvas letterboxes exactly as the old
+  // fixed one did. Nothing shipped is close to it, and a future map that is
+  // should be a deliberate decision rather than a silent loss of scale.
+  it('needs the aspect clamp for none of the shipped maps', () => {
+    const clamped = Object.values(OVERVIEWS)
+      .filter((m) => {
+        const { w, h } = boxSpan(m.contentBox);
+        return w / h !== canvasAspect(m.contentBox);
+      })
+      .map((m) => m.map);
+    expect(clamped).toEqual([]);
+  });
+
+  it('draws the median map meaningfully bigger than uncropped', () => {
+    const sorted = gains.map((g) => g.gain).sort((a, b) => a - b);
+    expect(sorted[Math.floor(sorted.length / 2)]).toBeGreaterThan(1.15);
   });
 });
