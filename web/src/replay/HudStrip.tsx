@@ -1,5 +1,5 @@
 import { STATE, ZOMBIE_CLASSES, weaponName, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
-import { isSurvivor } from './draw';
+import { isSurvivor, slotColor, slotLabel, slotNumber } from './draw';
 import { healthBar, portraitFor, statusFlags } from './hud';
 
 /** A tank carries 8000 health and everything else carries 100, so the bar
@@ -26,10 +26,19 @@ function Panel(
   if (!present) return <div class="hudp hudp--empty" />;
 
   return (
-    <div class={`hudp ${alive ? '' : 'hudp--dead'}`}>
+    <div
+      class={`hudp ${alive ? '' : 'hudp--dead'}`}
+      // The same palette the map draws, on the panel's left edge, so a dot on
+      // the map can be matched to a panel without reading anything.
+      style={{ borderLeftColor: slotColor(p.slot) }}
+    >
       <img class="hudp__face" src={portraitFor(p.cls, header.version, survivor)} alt="" />
       <div class="hudp__body">
         <div class="hudp__top">
+          {/* The number the map draws inside the dot. Map, panel and follow
+              button are then three views of one slot rather than three
+              things a viewer has to correlate by colour alone. */}
+          <span class="hudp__slot" style={{ color: slotColor(p.slot) }}>{slotNumber(p.slot)}</span>
           <span class="hudp__name">{name}</span>
           {showHp && (
             <span class="hudp__hp" style={{ color: bar.color }}>
@@ -74,7 +83,10 @@ export function HudStrip(
           // The header's slot roster is SteamID64 per slot. The name lookup
           // comes from the match page when there is one; a standalone session
           // has no roster to look names up in, so the id is the name.
-          name={names[header.slots[p.slot]] ?? header.slots[p.slot] ?? `Slot ${p.slot}`}
+          // Finding 12's rule, here too: a standalone session has no roster,
+          // and the seventeen-digit id is a worse answer than the slot's own
+          // short label.
+          name={names[header.slots[p.slot]] || slotLabel(p.slot)}
           showHp={showHp}
           showGuns={showGuns}
         />

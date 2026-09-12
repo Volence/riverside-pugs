@@ -83,6 +83,26 @@ export const SLOT_COLORS: readonly string[] = [
   '#ea8d92', // infected 7: rose,       L* 68.5, hue 19
 ];
 
+/**
+ * The player the follow camera should centre on, or null to stay free.
+ *
+ * A slot index alone is not enough. `players` is indexed by slot and always
+ * carries eight records, and an unoccupied slot is an ALL-ZERO record rather
+ * than a missing one, so following it would centre the camera on world
+ * (0, 0), which on most maps is somewhere off in the void. That was latent
+ * while the follow row skipped slots with no roster entry; it stops being
+ * latent the moment every slot gets a button, which is what the standalone
+ * route needed.
+ */
+export function followTarget(
+  players: PlayerSample[], slot: number | null,
+): PlayerSample | null {
+  if (slot === null) return null;
+  const p = players[slot];
+  if (!p || (p.state & STATE.PRESENT) === 0) return null;
+  return p;
+}
+
 export function slotColor(slot: number): string {
   return SLOT_COLORS[slot] ?? '#ffffff';
 }

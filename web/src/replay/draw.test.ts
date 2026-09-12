@@ -3,7 +3,7 @@ import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
   alertColor,
-  slotLabel, slotNumber, numberInk, SLOT_COLORS,
+  slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
@@ -101,6 +101,38 @@ describe('slotLabel and slotNumber', () => {
   it('numbers each slot within its own team, one through four', () => {
     expect([0, 1, 2, 3].map(slotNumber)).toEqual(['1', '2', '3', '4']);
     expect([4, 5, 6, 7].map(slotNumber)).toEqual(['1', '2', '3', '4']);
+  });
+});
+
+describe('followTarget', () => {
+  const roster = (states: number[]) => states.map((state, slot) => player({ slot, state }));
+
+  it('follows nobody when the camera is free', () => {
+    expect(followTarget(roster([3, 3, 3, 3, 3, 3, 3, 3]), null)).toBeNull();
+  });
+
+  it('follows the player in that slot', () => {
+    const ps = roster([3, 3, 3, 3, 3, 3, 3, 3]);
+    expect(followTarget(ps, 5)).toBe(ps[5]);
+  });
+
+  // `players` always carries eight records and an unoccupied slot is an
+  // ALL-ZERO record, not a missing one, so following it used to centre the
+  // camera on world (0, 0), which on most maps is off in the void. That was
+  // latent only because the follow row skipped slots with no roster entry; it
+  // stops being latent the moment every slot gets a button.
+  it('follows nobody rather than the world origin for an empty slot', () => {
+    expect(followTarget(roster([3, 3, 3, 3, 0, 0, 0, 0]), 6)).toBeNull();
+  });
+
+  it('follows nobody when the slot is past the end of the roster', () => {
+    expect(followTarget(roster([3, 3]), 5)).toBeNull();
+  });
+
+  // A dead player is still PRESENT, and where the body is is worth watching.
+  it('keeps following a player who has died', () => {
+    const ps = roster([STATE.PRESENT, 3, 3, 3, 3, 3, 3, 3]);
+    expect(followTarget(ps, 0)).toBe(ps[0]);
   });
 });
 

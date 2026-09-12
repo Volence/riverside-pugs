@@ -721,8 +721,25 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__controls, .replay__toolbar, .replay__rounds { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 .replay__scrub { flex: 1 1 200px; }
 .replay__time { font-variant-numeric: tabular-nums; font-size: 0.85rem; opacity: 0.8; }
-.replay__btn { padding: 0.2rem 0.55rem; font-size: 0.8rem; border-radius: 3px; cursor: pointer; }
+.replay__btn {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.8rem;
+  border-radius: 3px;
+  cursor: pointer;
+  /* Explicit, rather than the user agent's own dark form control, because the
+     follow buttons below set their own `color` and the contrast that colour
+     has to clear is only knowable against a background this file owns. */
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
 .replay__btn.is-on { outline: 1px solid currentColor; font-weight: 600; }
+.replay__btn--slot { display: inline-flex; align-items: center; gap: 0.35rem; }
+/* Inherits the button's inline slot colour. A 0.6rem dot is a graphical
+   object, so the 3:1 floor applies to it and the darkest slot clears it at
+   3.5:1; the label beside it is text and goes back to --text at 14.8:1. */
+.replay__swatch { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: currentColor; flex: none; }
+.replay__slot-name { color: var(--text); }
 .replay__rail { display: flex; flex-direction: column; gap: 0.15rem; max-height: 18rem; overflow-y: auto; }
 .replay__entry { display: flex; gap: 0.4rem; text-align: left; font-size: 0.75rem; padding: 0.15rem 0.3rem; background: none; border: 0; cursor: pointer; border-radius: 2px; }
 .replay__entry:hover { background: #23261e; }
@@ -734,7 +751,12 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .hud-strip { display: flex; flex-direction: column; gap: 0.4rem; }
 .hud-row { display: flex; gap: 0.35rem; align-items: stretch; flex-wrap: wrap; }
 .hud-row__label { font-size: 0.7rem; opacity: 0.6; align-self: center; min-width: 4.5rem; }
-.hudp { display: flex; gap: 0.4rem; background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0.25rem; min-width: 9rem; }
+/* The left edge carries the slot colour, set inline from the same palette the
+   map draws, so a panel can be matched to a dot without reading anything. A
+   3px rule is a graphical object at a 3:1 floor, where tinting the name text
+   would put the darkest slot at 3.7:1 and under AA. */
+.hudp { display: flex; gap: 0.4rem; background: var(--surface); border: 1px solid var(--border); border-left-width: 3px; border-radius: 3px; padding: 0.25rem; min-width: 9rem; }
+.hudp__slot { font-size: 0.65rem; font-weight: 700; opacity: 0.75; font-variant-numeric: tabular-nums; }
 .hudp--empty { visibility: hidden; }
 .hudp--dead { filter: grayscale(1); opacity: 0.55; }
 .hudp__face { width: 34px; height: 34px; object-fit: cover; border-radius: 2px; }

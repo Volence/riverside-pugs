@@ -1,3 +1,4 @@
+import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
 import type { Toggles } from './useToggles';
 
@@ -80,13 +81,31 @@ export function ReplayControls(
           class={`replay__btn ${followSlot === null ? 'is-on' : ''}`}
           onClick={() => setFollowSlot(null)}
         >Free</button>
-        {slots.map((id, i) => (id === '' ? null : (
+        {/* One button per slot, in the slot's own colour. This is the only
+            legend the map's eight colours have: without it nothing on the
+            page ties a colour to a person, and a viewer has to guess which
+            blue dot is which. The colour rides on the button's `color`, so
+            `is-on`'s `outline: 1px solid currentColor` picks it up and the
+            swatch inherits it; the label itself is pinned back to --text,
+            because the darkest slot only reaches 3.5:1 on this surface and
+            that is a fine contrast for a dot or a rule and a poor one for
+            text.
+
+            Every slot gets a button, including one with no roster entry.
+            The old `id === ''` skip meant the whole follow row was empty on
+            the by-filename route, which is the same root cause as Finding
+            12 and the same route it mattered on. */}
+        {slots.map((id, i) => (
           <button
             key={i}
-            class={`replay__btn ${followSlot === i ? 'is-on' : ''}`}
+            class={`replay__btn replay__btn--slot ${followSlot === i ? 'is-on' : ''}`}
+            style={{ color: slotColor(i) }}
             onClick={() => setFollowSlot(i)}
-          >{names[id] ?? `Slot ${i}`}</button>
-        )))}
+          >
+            <span class="replay__swatch" />
+            <span class="replay__slot-name">{names[id] ?? slotLabel(i)}</span>
+          </button>
+        ))}
       </div>
     </>
   );
