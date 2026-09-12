@@ -706,3 +706,10 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   background: var(--surface-2);
   font-size: 0.85em;
 }
+
+/* Replay viewer. */
+.replay { display: flex; flex-direction: column; gap: 0.5rem; }
+.replay__canvas { width: 100%; max-width: 720px; aspect-ratio: 1; background: #11130f; border-radius: 4px; }
+.replay__status { font-size: 0.85rem; opacity: 0.8; }
+.replay__live { color: #d9534f; font-weight: 600; }
+.replay--empty { padding: 2rem; text-align: center; opacity: 0.7; }
