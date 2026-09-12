@@ -4270,3 +4270,570 @@ Commit it:
 git add docs/superpowers/specs/2026-09-12-replay-viewer-design.md
 git commit -m "docs(replay): record the survivor character order as unverified"
 ```
+
+---
+
+# Plan revision, 2026-09-12: real map overviews
+
+The map overviews were finished while this plan was executing, and they supersede
+part of it. See `/home/volence/l4d/overviews/MAP_OVERVIEWS.md` for the data spec.
+
+What they are: all 22 L4D1 versus and Crash Course maps, captured from the game
+with `cl_leveloverview`, each as a stack of horizontal slices at different camera
+heights, every slice carrying an exact world-to-pixel transform read back from the
+engine rather than assumed. 182 layers, all 2048x1271.
+
+**What this supersedes:**
+
+- Task 7's ten-entry `VALVE` table, transcribed from `mapinfo.res`. Replaced by a
+  22-map layer manifest. Task 7's `MapTransform`, `worldToImage`, `autoFitTransform`
+  and `boundsOf` all survive unchanged.
+- Task 8's overview conversion, the ten BMPs. Task 8's portrait half survives.
+- Task 13's single-image backdrop, which gains layer selection.
+
+**What it fixes:** the design spec parked No Mercy 4's hospital interior as the one
+map where flattening to a single top-down image genuinely hurt, with avatar height
+scaling as a mitigation that might not be enough. That map now ships 14 layers, so
+an elevator ride through floors is a layer change rather than a pile of overlapping
+dots. Height scaling stays, because it still separates a rooftop from the alley
+beneath it within a single layer.
+
+**What does not change:** positions are still raw world units in the replay, so
+nothing has to be re-recorded. Auto-fit survives and is still the fallback, but it
+stops being the main path for twelve maps and becomes what it should have been: the
+answer for a custom map or a missing asset.
+
+---
+
+## Task 19: Convert the overviews and generate the layer manifest
+
+**Files:**
+- Create: `tools/convert-overviews.sh`
+- Create: `src/mapOverviews.ts` (generated)
+- Create: `web/public/overviews/*.webp` (186 files, about 27 MB)
+- Delete: `web/public/overviews/*.png` (the ten superseded Valve conversions)
+- Modify: `tools/convert-art.sh` (drop its overview half, keep portraits)
+- Modify: `src/mapTransform.ts`
+- Test: `tests/mapTransform.test.ts`, `tests/mapOverviews.test.ts`
+
+**Interfaces:**
+- Consumes: nothing at runtime. The generator reads `/home/volence/l4d/overviews/out/`.
+- Produces, in `src/mapOverviews.ts` (no imports):
+  - `OVERVIEWS: Record<string, { map: string; layers: { image: string; cutHeight: number; unitsPerPixel: number; originX: number; originY: number; width: number; height: number }[] }>`
+  - `overviewFor(map: string): (typeof OVERVIEWS)[string] | null`
+- Produces, in `src/mapTransform.ts` (still no imports):
+  - `MapLayer` and `MapOverview` interfaces, hand-written, structurally matching the generated data
+  - `LAYER_BIAS: number`
+  - `pickLayer(layers: MapLayer[], z: number, current: MapLayer | null): MapLayer | null`
+  - `transformOfLayer(layer: MapLayer): MapTransform`
+  - `transformFor` is REMOVED. Nothing consumes it yet.
+
+**Why two files that do not import each other:** both are loaded by the browser and
+by the server. A relative `./x.js` specifier inside one breaks Vite's resolution, and
+omitting the extension breaks NodeNext. So the generated data declares its shape
+structurally and the hand-written module declares the matching named types, and
+TypeScript's structural typing makes them compatible with no import in either
+direction. Consumers import both.
+
+- [ ] **Step 1: Confirm the source data**
+
+Run:
+
+```bash
+ls /home/volence/l4d/overviews/out/*.layers.json | wc -l
+ls /home/volence/l4d/overviews/out/*.png | wc -l
+cat /home/volence/l4d/overviews/out/l4d_vs_farm01_hilltop.layers.json
+```
+
+Expected: 22 manifests, 186 images, and a manifest whose `layers` array is ascending
+by `cut_height`, each entry carrying `image`, `cut_height`, `units_per_pixel` and
+`world_upper_left`. If the counts differ, report rather than adapting.
+
+- [ ] **Step 2: Write the conversion and generation script**
+
+Create `tools/convert-overviews.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Convert the generated map overviews into web assets and emit the layer manifest.
+#
+# The source PNGs are 2048x1271 and total about 256 MB, which is far too heavy to
+# serve. WebP at quality 82 takes the set to roughly 27 MB with no visible loss:
+# these are flat-lit top-down renders that are mostly void black, which is exactly
+# what WebP is good at. Verified by eye on a round-tripped layer before choosing it.
+#
+# Both the images and the generated manifest are committed, so nothing here runs at
+# build or deploy time. This script exists to document where they came from.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SRC=/home/volence/l4d/overviews/out
+OUT="$REPO/web/public/overviews"
+
+mkdir -p "$OUT"
+# The ten single-layer Valve BMP conversions are superseded by these.
+rm -f "$OUT"/*.png
+
+for f in "$SRC"/*.png; do
+  base="$(basename "${f%.png}")"
+  magick "$f" -quality 82 "$OUT/$base.webp"
+done
+
+python3 "$REPO/tools/gen-overviews.py" "$SRC" "$REPO/src/mapOverviews.ts"
+```
+
+Create `tools/gen-overviews.py`:
+
+```python
+"""Emit src/mapOverviews.ts from the capture manifests.
+
+Generated rather than hand-written because it is 182 layers across 22 maps, and
+because the numbers are read back from the engine at capture time: retyping them
+is exactly the kind of transcription error that puts every avatar on a map in the
+wrong place while nothing reports an error.
+
+The emitted module has NO imports, deliberately. It is loaded by the browser as
+well as the server, and its types are written out structurally so that
+src/mapTransform.ts can declare matching named types without either file
+importing the other.
+"""
+import json
+import os
+import sys
+
+src, out = sys.argv[1], sys.argv[2]
+
+maps = []
+for name in sorted(os.listdir(src)):
+    if not name.endswith('.layers.json'):
+        continue
+    with open(os.path.join(src, name)) as fh:
+        m = json.load(fh)
+    layers = sorted(m['layers'], key=lambda l: l['cut_height'])
+    maps.append((m['map'], layers))
+
+lines = [
+    '/**',
+    ' * Map overview layers, generated by tools/gen-overviews.py.',
+    ' *',
+    ' * Do not edit by hand. Every number here is read back from the engine at',
+    ' * capture time, so a typo puts every avatar on that map in the wrong place',
+    ' * and nothing reports an error.',
+    ' *',
+    ' * Each map is a stack of horizontal slices cut at different camera heights,',
+    ' * ascending. A layer shows everything below its cut height and nothing above,',
+    ' * so the right one to draw is the lowest whose cut is still above the players.',
+    ' * All layers of a map share one transform, so switching between them needs no',
+    ' * repositioning.',
+    ' *',
+    ' * This module has no imports, deliberately: it is loaded by the browser as',
+    ' * well as the server. See src/mapTransform.ts for the matching named types.',
+    ' */',
+    '',
+    'export const OVERVIEWS: Record<string, {',
+    '  map: string;',
+    '  layers: {',
+    '    image: string;',
+    '    cutHeight: number;',
+    '    unitsPerPixel: number;',
+    '    originX: number;',
+    '    originY: number;',
+    '    width: number;',
+    '    height: number;',
+    '  }[];',
+    '}> = {',
+]
+
+for map_name, layers in maps:
+    lines.append(f"  '{map_name}': {{")
+    lines.append(f"    map: '{map_name}',")
+    lines.append('    layers: [')
+    for l in layers:
+        ulx, uly = l['world_upper_left']
+        img = l['image'].replace('.png', '.webp')
+        lines.append(
+            '      { '
+            f"image: '/overviews/{img}', "
+            f"cutHeight: {l['cut_height']:g}, "
+            f"unitsPerPixel: {l['units_per_pixel']:.6f}, "
+            f"originX: {ulx:g}, originY: {uly:g}, "
+            'width: 2048, height: 1271 },'
+        )
+    lines.append('    ],')
+    lines.append('  },')
+
+lines += [
+    '};',
+    '',
+    '/** The overview stack for a map, or null when there is no art for it.',
+    ' *',
+    ' *  Keys are the names the server reports, including the `vs_` infix for versus',
+    ' *  maps and the co-op names for Crash Course, which ships no versus variant. The',
+    ' *  second-chance lookup exists because a miss here is silent: the viewer falls',
+    ' *  back to auto-fit and simply looks worse, with nothing logged. */',
+    'export function overviewFor(map: string): (typeof OVERVIEWS)[string] | null {',
+    '  const key = map.toLowerCase();',
+    '  if (OVERVIEWS[key]) return OVERVIEWS[key];',
+    "  const swapped = key.startsWith('l4d_vs_')",
+    "    ? key.replace('l4d_vs_', 'l4d_')",
+    "    : key.replace('l4d_', 'l4d_vs_');",
+    '  return OVERVIEWS[swapped] ?? null;',
+    '}',
+    '',
+]
+
+with open(out, 'w') as fh:
+    fh.write('\n'.join(lines))
+print(f'wrote {out}: {len(maps)} maps, {sum(len(l) for _, l in maps)} layers')
+```
+
+Make both executable where relevant: `chmod +x tools/convert-overviews.sh`
+
+- [ ] **Step 3: Run it**
+
+Run: `./tools/convert-overviews.sh`
+
+Expected: the final line reports 22 maps and 182 layers. Then check:
+
+```bash
+du -sh web/public/overviews
+ls web/public/overviews/*.webp | wc -l
+ls web/public/overviews/*.png 2>/dev/null | wc -l
+```
+
+Expected: comfortably under 40 MB, 186 webp files, and zero png files left.
+
+- [ ] **Step 4: Look at one**
+
+Read `web/public/overviews/l4d_vs_smalltown01_caves_z+0198.webp` with the Read tool,
+which renders images. It must be a recognisable top-down of a road running through a
+cave-mouth valley, with vehicles and rock detail visible, on a black background. A
+blank or uniformly grey image means the conversion failed silently.
+
+- [ ] **Step 5: Drop the overview half of the old conversion script**
+
+In `tools/convert-art.sh`, delete the `OVERVIEW_SRC` variable and the `for f in
+"$OVERVIEW_SRC"/*.bmp` loop, and the `mkdir -p` of the overviews directory. Keep
+everything to do with portraits. Update its header comment to say that overviews now
+come from `tools/convert-overviews.sh`.
+
+- [ ] **Step 6: Write the failing tests**
+
+Create `tests/mapOverviews.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { OVERVIEWS, overviewFor } from '../src/mapOverviews.js';
+
+describe('OVERVIEWS', () => {
+  it('covers all 22 maps', () => {
+    expect(Object.keys(OVERVIEWS)).toHaveLength(22);
+  });
+
+  it('has 182 layers in total', () => {
+    const n = Object.values(OVERVIEWS).reduce((t, m) => t + m.layers.length, 0);
+    expect(n).toBe(182);
+  });
+
+  // The selection rule walks the array assuming ascending order. A manifest out
+  // of order would pick a layer that hides the players rather than showing them,
+  // and would do it silently.
+  it('orders every map ascending by cut height', () => {
+    for (const m of Object.values(OVERVIEWS)) {
+      const heights = m.layers.map((l) => l.cutHeight);
+      expect(heights).toEqual([...heights].sort((a, b) => a - b));
+    }
+  });
+
+  // The spec states this, and layer switching relies on it: if two layers of one
+  // map disagreed on the transform, swapping between them would shift the map
+  // under the players.
+  it('shares one transform across every layer of a map', () => {
+    for (const m of Object.values(OVERVIEWS)) {
+      const first = m.layers[0];
+      for (const l of m.layers) {
+        expect(l.unitsPerPixel).toBe(first.unitsPerPixel);
+        expect(l.originX).toBe(first.originX);
+        expect(l.originY).toBe(first.originY);
+      }
+    }
+  });
+
+  it('points every layer at a webp under /overviews/', () => {
+    for (const m of Object.values(OVERVIEWS)) {
+      for (const l of m.layers) {
+        expect(l.image).toMatch(/^\/overviews\/[a-z0-9_+-]+\.webp$/);
+      }
+    }
+  });
+
+  it('carries the spec values for a known map', () => {
+    const m = overviewFor('l4d_vs_farm01_hilltop')!;
+    expect(m.layers).toHaveLength(5);
+    expect(m.layers[0].unitsPerPixel).toBeCloseTo(7.250983, 5);
+    expect(m.layers[0].originX).toBe(-16547);
+    expect(m.layers[0].originY).toBe(-6299);
+  });
+});
+
+describe('overviewFor', () => {
+  it('finds a versus map by the name the server reports', () => {
+    expect(overviewFor('l4d_vs_hospital01_apartment')?.map).toBe('l4d_vs_hospital01_apartment');
+  });
+
+  it('finds Crash Course by its co-op name, which is what the server reports', () => {
+    expect(overviewFor('l4d_garage01_alleys')?.map).toBe('l4d_garage01_alleys');
+  });
+
+  // Second chance, because a miss is silent: the viewer just falls back to
+  // auto-fit and looks worse, with nothing logged.
+  it('tries the other spelling of the versus infix', () => {
+    expect(overviewFor('l4d_farm01_hilltop')?.map).toBe('l4d_vs_farm01_hilltop');
+  });
+
+  it('is case insensitive', () => {
+    expect(overviewFor('L4D_VS_Farm01_Hilltop')?.map).toBe('l4d_vs_farm01_hilltop');
+  });
+
+  it('returns null for a map with no art', () => {
+    expect(overviewFor('l4d_vs_nonsense99_nowhere')).toBeNull();
+  });
+});
+```
+
+Replace the `transformFor` describe block in `tests/mapTransform.test.ts` with:
+
+```ts
+describe('pickLayer', () => {
+  const layers = [
+    { image: '/a.webp', cutHeight: 0, unitsPerPixel: 8, originX: 0, originY: 0, width: 2048, height: 1271 },
+    { image: '/b.webp', cutHeight: 500, unitsPerPixel: 8, originX: 0, originY: 0, width: 2048, height: 1271 },
+    { image: '/c.webp', cutHeight: 1000, unitsPerPixel: 8, originX: 0, originY: 0, width: 2048, height: 1271 },
+  ];
+
+  it('picks the lowest layer cut above the players', () => {
+    expect(pickLayer(layers, 300, null)?.image).toBe('/b.webp');
+  });
+
+  it('picks the bottom layer for someone below every cut', () => {
+    expect(pickLayer(layers, -800, null)?.image).toBe('/a.webp');
+  });
+
+  // A layer shows everything BELOW its cut, so someone above the highest cut is
+  // not visible on any layer. The top one is the least wrong answer and is what
+  // the spec's own rule falls back to.
+  it('falls back to the top layer for someone above every cut', () => {
+    expect(pickLayer(layers, 9000, null)?.image).toBe('/c.webp');
+  });
+
+  // Hysteresis. Without it a player standing on a boundary flips the whole map
+  // back and forth several times a second, which is unwatchable.
+  it('holds the current layer through small excursions past its boundary', () => {
+    const current = layers[1];
+    // 470 would select /b.webp anyway. 510 is past b's cut, but only just, so
+    // the bias holds it rather than jumping to /c.webp.
+    expect(pickLayer(layers, 510, current)?.image).toBe('/b.webp');
+  });
+
+  it('still switches once the excursion is decisive', () => {
+    expect(pickLayer(layers, 700, layers[1])?.image).toBe('/c.webp');
+  });
+
+  it('returns null for an empty stack', () => {
+    expect(pickLayer([], 0, null)).toBeNull();
+  });
+});
+
+describe('transformOfLayer', () => {
+  const layer = {
+    image: '/a.webp', cutHeight: 0, unitsPerPixel: 8,
+    originX: -1000, originY: 2000, width: 2048, height: 1271,
+  };
+
+  it('projects the layer origin to pixel 0,0', () => {
+    expect(worldToImage(transformOfLayer(layer), -1000, 2000)).toEqual({ px: 0, py: 0 });
+  });
+
+  // World +Y is up, pixel +Y is down.
+  it('flips the y axis', () => {
+    expect(worldToImage(transformOfLayer(layer), -1000, 2000 - 800).py).toBe(100);
+  });
+
+  it('carries the image and its dimensions through', () => {
+    const t = transformOfLayer(layer);
+    expect(t.image).toBe('/a.webp');
+    expect(t.width).toBe(2048);
+    expect(t.height).toBe(1271);
+  });
+});
+```
+
+Also delete the `normalizeMapName` describe block's assertions about `transformFor`,
+but keep the block itself: the function stays, it is just no longer the lookup path.
+
+- [ ] **Step 7: Run the tests to verify they fail**
+
+Run: `npx vitest run tests/mapOverviews.test.ts tests/mapTransform.test.ts`
+
+Expected: FAIL. `src/mapOverviews.ts` exists by now from Step 3, so the first file
+may partly pass; `pickLayer` and `transformOfLayer` do not exist yet.
+
+- [ ] **Step 8: Rework `src/mapTransform.ts`**
+
+Delete the `VALVE` table, `VALVE_SCALE_HEIGHT`, `VALVE_IMAGE_SIZE` and `transformFor`.
+Keep `MapTransform`, `WorldBounds`, `normalizeMapName`, `boundsOf`, `autoFitTransform`
+and `worldToImage` exactly as they are. Add:
+
+```ts
+/** One horizontal slice of a map, matching the generated entries in
+ *  src/mapOverviews.ts structurally. Declared here rather than imported from
+ *  there because both modules are loaded by the browser and neither may carry a
+ *  relative import: a `.js` specifier breaks Vite's resolution and omitting the
+ *  extension breaks NodeNext. Structural typing makes them compatible anyway. */
+export interface MapLayer {
+  image: string;
+  /** Camera eye height this slice was cut at. The slice shows everything below
+   *  it and nothing above. */
+  cutHeight: number;
+  unitsPerPixel: number;
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+}
+
+export interface MapOverview {
+  map: string;
+  layers: MapLayer[];
+}
+
+/** How far a player must move past a boundary before the layer changes.
+ *
+ *  Without this, someone standing on a cut height flips the entire map back and
+ *  forth several times a second, which is unwatchable. Sixty units is a little
+ *  under half a player's height. */
+export const LAYER_BIAS = 60;
+
+/**
+ * Which slice to draw for a team at height `z`.
+ *
+ * A layer shows everything below its cut, so the right one is the lowest whose
+ * cut is still above the players. Pass the layer currently being shown as
+ * `current` to get hysteresis; pass null when there is none yet.
+ *
+ * Callers should use the MEDIAN survivor height rather than the mean, so one
+ * player who fell in a hole or climbed a roof does not drag the view away from
+ * the other three.
+ */
+export function pickLayer(
+  layers: MapLayer[], z: number, current: MapLayer | null,
+): MapLayer | null {
+  if (layers.length === 0) return null;
+  const found = layers.find(
+    (l) => l.cutHeight > z + (l === current ? -LAYER_BIAS : LAYER_BIAS),
+  );
+  // Above every cut there is no slice that contains the player at all. The top
+  // one is the least wrong answer.
+  return found ?? layers[layers.length - 1];
+}
+
+export function transformOfLayer(layer: MapLayer): MapTransform {
+  return {
+    originX: layer.originX,
+    originY: layer.originY,
+    unitsPerPixel: layer.unitsPerPixel,
+    image: layer.image,
+    width: layer.width,
+    height: layer.height,
+  };
+}
+```
+
+- [ ] **Step 9: Run the tests to verify they pass**
+
+Run: `npx vitest run tests/mapOverviews.test.ts tests/mapTransform.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 10: Run the full suite and typecheck**
+
+Run: `npm test && npm run typecheck`
+
+Expected: both clean. Nothing consumes `transformFor` yet, so removing it breaks
+nothing.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add tools/convert-overviews.sh tools/gen-overviews.py tools/convert-art.sh \
+        src/mapOverviews.ts src/mapTransform.ts \
+        tests/mapOverviews.test.ts tests/mapTransform.test.ts \
+        web/public/overviews
+git commit -m "feat(replay): use the real height-sliced map overviews for all 22 maps"
+```
+
+## Amendment to Task 13
+
+Task 13's Viewer resolves a single `MapTransform` once per replay from
+`transformFor(header.map)`, which no longer exists. It instead resolves a layer
+STACK once per replay and picks a layer per frame.
+
+Replace the `transform` memo with:
+
+```tsx
+  /** The map's layer stack, or null when there is no art for it. Resolved once
+   *  per replay: the stack never changes mid-round. */
+  const overview = useMemo(
+    () => (header ? overviewFor(header.map) : null),
+    [header?.map],
+  );
+
+  /** Auto-fit is now the fallback rather than the main path: every shipped map
+   *  has real art. It still earns its place for a custom map, or for an asset
+   *  that failed to load. Fitted to the whole round rather than the visible
+   *  frame so the view does not reframe itself as the team moves. */
+  const fitted = useMemo(() => {
+    if (overview || !header) return null;
+    const points: { x: number; y: number }[] = [];
+    for (const f of frames) {
+      for (const p of f.players) {
+        if ((p.state & STATE.PRESENT) !== 0) points.push({ x: p.x, y: p.y });
+      }
+    }
+    const bounds = boundsOf(points);
+    return bounds ? autoFitTransform(bounds, SIZE, SIZE) : null;
+  }, [overview, header?.map, Math.floor(frames.length / 100)]);
+
+  const [layer, setLayer] = useState<MapLayer | null>(null);
+
+  /** Layer selection follows the survivors' median height, with hysteresis, so a
+   *  team going down into a basement takes the view with them. Median rather
+   *  than mean so one player in a hole does not drag it. */
+  useEffect(() => {
+    if (!overview) { setLayer(null); return; }
+    const survivorZ = livePlayers
+      .filter((p) => isSurvivor(p) && (p.state & STATE.ALIVE) !== 0)
+      .map((p) => p.z)
+      .sort((a, b) => a - b);
+    // Before anyone is alive, show the ground floor rather than nothing.
+    const z = survivorZ.length ? survivorZ[Math.floor(survivorZ.length / 2)] : -Infinity;
+    setLayer((cur) => pickLayer(overview.layers, z, cur));
+  }, [overview, livePlayers]);
+
+  const transform = layer ? transformOfLayer(layer) : fitted;
+```
+
+The backdrop effect keys on `transform?.image` as before, so a layer change loads
+the new image and swaps it. Because every layer of a map shares one transform,
+nothing repositions.
+
+Two additions to the backdrop handling:
+
+- **Keep the previous image on screen while the next loads.** Clearing it first
+  makes every layer change flash black. Only replace `backdrop` in the image's
+  `onload`.
+- **Cache loaded layers.** A team moving up and down stairs otherwise refetches the
+  same two images repeatedly. A `Map<string, HTMLImageElement>` held in a ref is
+  enough; the browser cache makes the refetch cheap but decoding is not free.
+
+Everything else in Task 13 stands.
