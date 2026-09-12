@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
+  alertColor, healthRingFraction, INCAP_ARC_MAX, INCAP_POOL,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
@@ -134,6 +135,80 @@ describe('stackLabels', () => {
     const copy = [...input];
     stackLabels(input, 12);
     expect(input).toEqual(copy);
+  });
+});
+
+describe('healthRingFraction', () => {
+  // The bug this exists to close. `GetClientHealth` on a downed L4D survivor
+  // returns the INCAPACITATION POOL, which starts at 300 and bleeds down, not
+  // a 0-100 health value. The old ring computed health/100, clamped it to 1
+  // and coloured it with healthColor(300, true), so the state that most needs
+  // to shout drew a CLOSED BRIGHT GREEN ring: the colour that means "fine".
+  it('does not draw a downed survivor a full ring off the 300 point incap pool', () => {
+    const naive = Math.min(1, INCAP_POOL / 100);
+    expect(naive).toBe(1);
+    const frac = healthRingFraction(INCAP_POOL, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
+    expect(frac).toBeLessThanOrEqual(INCAP_ARC_MAX);
+  });
+
+  it('treats hanging off a ledge the same way, because it is the same pool', () => {
+    const ledged = healthRingFraction(INCAP_POOL, STATE.PRESENT | STATE.ALIVE | STATE.LEDGED);
+    expect(ledged).toBeLessThanOrEqual(INCAP_ARC_MAX);
+  });
+
+  // The arc stays small throughout, but it still ticks down as the pool
+  // bleeds out, so it carries the bleed-out clock rather than nothing.
+  it('shrinks as the incap pool bleeds out, without ever growing large', () => {
+    const full = healthRingFraction(300, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
+    const half = healthRingFraction(150, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
+    const empty = healthRingFraction(0, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
+    expect(full).toBeGreaterThan(half);
+    expect(half).toBeGreaterThan(empty);
+    expect(full).toBeLessThanOrEqual(INCAP_ARC_MAX);
+    expect(empty).toBeGreaterThan(0);
+  });
+
+  it('is still plain health over 100 for a survivor who is on their feet', () => {
+    const up = STATE.PRESENT | STATE.ALIVE;
+    expect(healthRingFraction(100, up)).toBeCloseTo(1, 5);
+    expect(healthRingFraction(50, up)).toBeCloseTo(0.5, 5);
+    expect(healthRingFraction(0, up)).toBeCloseTo(0, 5);
+  });
+
+  // A downed survivor's arc must read as smaller than any healthy one, or
+  // the whole point of the change is lost.
+  it('always draws a smaller arc downed than a survivor on one point of health', () => {
+    const down = healthRingFraction(300, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
+    const barely = healthRingFraction(25, STATE.PRESENT | STATE.ALIVE);
+    expect(down).toBeLessThan(barely);
+  });
+});
+
+describe('alertColor', () => {
+  // Finding 9: the code this replaced drew a large amber ring around an
+  // incapacitated or pinned player, and that was swapped for a letter about
+  // seven CSS pixels tall. A large coloured ring is findable in peripheral
+  // vision while scanning a map; a seven pixel letter is not, and these are
+  // the two states someone watching needs to see soonest. The ring is back
+  // and the glyph is the refinement on top of it.
+  it('rings the two states worth seeing from the corner of an eye', () => {
+    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.PINNED)).not.toBeNull();
+    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.INCAP)).not.toBeNull();
+    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.LEDGED)).not.toBeNull();
+  });
+
+  it('rings nothing for a healthy player, or for the lesser states', () => {
+    expect(alertColor(STATE.PRESENT | STATE.ALIVE)).toBeNull();
+    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.BURNING)).toBeNull();
+    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.BILED)).toBeNull();
+  });
+
+  // The ring and the letter have to agree about which state won, or the two
+  // signals contradict each other on a player who is both pinned and down.
+  it('picks the same winner the glyph does when several states are set', () => {
+    const both = STATE.PRESENT | STATE.ALIVE | STATE.PINNED | STATE.INCAP;
+    expect(statusGlyph(both)).toBe(statusGlyph(STATE.PRESENT | STATE.ALIVE | STATE.PINNED));
+    expect(alertColor(both)).toBe(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.PINNED));
   });
 });
 
@@ -421,6 +496,78 @@ describe('drawScene', () => {
       names: {}, slots, followSlot: null,
     });
     expect(unknown.texts).toHaveLength(0);
+  });
+
+  it('draws a downed survivor a small danger arc, not the closed green ring the raw pool gave', () => {
+    const { transform, view } = identityScene();
+
+    const up = stubCtx();
+    drawScene(up.ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, health: 100 })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+    // Healthy: avatar plus a closed health ring, and no alert ring.
+    const upArcs = up.calls.filter((c) => c.fn === 'arc');
+    expect(upArcs).toHaveLength(2);
+    expect(upArcs[1].args[4] - upArcs[1].args[3]).toBeCloseTo(Math.PI * 2, 5);
+
+    const down = stubCtx();
+    drawScene(down.ctx, {
+      transform, view, backdrop: null, trail: [],
+      // Exactly the state the bug produced: incapacitated, and health is the
+      // 300 point incap pool at its starting value.
+      players: [player({ slot: 0, health: 300, state: STATE.PRESENT | STATE.ALIVE | STATE.INCAP })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+    // Avatar, the alert ring from Finding 9, then the health arc on top.
+    const downArcs = down.calls.filter((c) => c.fn === 'arc');
+    expect(downArcs).toHaveLength(3);
+    const sweep = downArcs[2].args[4] - downArcs[2].args[3];
+    expect(sweep).toBeLessThanOrEqual(INCAP_ARC_MAX * Math.PI * 2);
+    // The old code drew this at a full circle. Anything close to one would
+    // be the bug back.
+    expect(sweep).toBeLessThan(Math.PI / 2);
+  });
+
+  it('rings a pinned or incapacitated player with a full circle wide enough to find', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, health: 60, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+
+    const arcs = calls.filter((c) => c.fn === 'arc');
+    expect(arcs).toHaveLength(3);
+    const [, , alertR, aStart, aEnd] = arcs[1].args;
+    // A closed circle, not an arc: that is what makes it findable in
+    // peripheral vision rather than needing to be read.
+    expect(aEnd - aStart).toBeCloseTo(Math.PI * 2, 5);
+    // It shares the health ring's radius and is drawn under it, so the alert
+    // signal costs the avatar no extra footprint at all.
+    expect(alertR).toBeCloseTo(arcs[2].args[2], 5);
+    expect(alertR).toBeGreaterThan(arcs[0].args[2]);
+  });
+
+  it('does not ring a healthy player, whose ring count is unchanged', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, state: STATE.PRESENT | STATE.ALIVE | STATE.BURNING })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(2);
   });
 
   it('de-conflicts four crowded survivor labels instead of piling them up', () => {

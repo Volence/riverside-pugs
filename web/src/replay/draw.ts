@@ -71,6 +71,63 @@ export function statusGlyph(state: number): string {
   return '';
 }
 
+/**
+ * A large coloured ring for the two states someone watching needs to see
+ * soonest, or null for everything else.
+ *
+ * This is the ring the slot-colour change removed. It was replaced by a
+ * letter roughly seven CSS pixels tall, and a seven pixel letter is not
+ * findable in peripheral vision while scanning a map, where a large coloured
+ * ring is. `statusGlyph` is now the refinement that says WHICH of the two it
+ * is, on top of a signal that gets the eye there in the first place.
+ *
+ * The priority order is deliberately identical to `statusGlyph`'s, so on a
+ * player who is both pinned and down the ring's colour and the letter can
+ * never disagree about which state won.
+ */
+export function alertColor(state: number): string | null {
+  // The amber the ring that was removed used, and the same amber the HUD
+  // panel sets its status flags in.
+  if ((state & STATE.PINNED) !== 0) return '#e8b04b';
+  if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) return '#d9534f';
+  return null;
+}
+
+/** The incapacitation pool a downed L4D survivor's health reads out of. It
+ *  starts here and bleeds towards zero; it is not a 0-100 health value, which
+ *  is the whole trap this file used to fall into. */
+export const INCAP_POOL = 300;
+/** The arc a downed survivor's ring is allowed to sweep, as a fraction of a
+ *  circle. Small at every point, so it can never be mistaken for a healthy
+ *  ring, but not fixed: it still shrinks as the pool bleeds out, so it
+ *  carries the bleed-out clock instead of carrying nothing. */
+export const INCAP_ARC_MIN = 0.06;
+export const INCAP_ARC_MAX = 0.18;
+
+/**
+ * How much of a circle the health ring sweeps.
+ *
+ * `GetClientHealth` on a downed survivor returns the incapacitation pool,
+ * which STARTS at 300. The ring used to compute `health / 100`, clamp it to
+ * 1, and colour it with `healthColor(300, true)`, which returns green. So the
+ * state that most needs to shout drew a closed bright ring in the colour that
+ * means "fine", and it did it at the exact moment the player went down.
+ *
+ * Forcing a small danger arc rather than suppressing the ring entirely:
+ * suppressing it would give the most urgent state the LEAST chrome on screen,
+ * and an avatar with no ring at all is what a dead player and an infected
+ * already look like, so the urgent case would have been drawn as the absence
+ * of information. A short red arc still reads as a health ring, and reads as
+ * a nearly empty one, which is the true state of a survivor on the floor.
+ */
+export function healthRingFraction(health: number, state: number): number {
+  if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) {
+    const pool = Math.max(0, Math.min(1, health / INCAP_POOL));
+    return INCAP_ARC_MIN + (INCAP_ARC_MAX - INCAP_ARC_MIN) * pool;
+  }
+  return Math.max(0, Math.min(1, health / 100));
+}
+
 const ENTITY_STYLES: Record<number, { color: string; radius: number }> = {
   [ENTITY_KIND.COMMON]: { color: '#6b6f57', radius: 2 },
   [ENTITY_KIND.WITCH]: { color: '#e8e8e8', radius: 5 },
@@ -160,6 +217,12 @@ export interface DrawArgs {
  */
 const HEALTH_RING_GAP = 3;
 const HEALTH_RING_WIDTH = 2;
+/** The alert ring shares the health ring's radius and is drawn under it, so a
+ *  four pixel width puts two pixels of colour proud on each side of the two
+ *  pixel health arc and the alert signal costs the avatar no extra footprint
+ *  at all. At the base radius of 7 that is a ring spanning r + 1 to r + 5,
+ *  that is 8 to 12 pixels from the centre, around a 14 pixel dot. */
+const ALERT_RING_WIDTH = 4;
 const FOLLOW_RING_GAP = 8;
 export const FOLLOW_RING_WIDTH = 2;
 /** How far the glyph's baseline sits above the avatar's top edge.
@@ -418,12 +481,29 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // is not a 0-100 scale and an infected player record has no bar to
       // echo in the first place.
       if (alive && isSurvivor(pl)) {
-        const frac = Math.max(0, Math.min(1, pl.health / 100));
         const ringR = r + HEALTH_RING_GAP;
+        const down = (pl.state & (STATE.INCAP | STATE.LEDGED)) !== 0;
+
+        // The alert ring, under the health arc and sharing its radius: a
+        // closed circle of colour wide enough to catch the eye from across
+        // the map. Drawn first so the health arc rides on top of it.
+        const alert = alertColor(pl.state);
+        if (alert) {
+          ctx.beginPath();
+          ctx.arc(p.px, p.py, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = alert;
+          ctx.lineWidth = ALERT_RING_WIDTH;
+          ctx.stroke();
+        }
+
+        const frac = healthRingFraction(pl.health, pl.state);
         const start = -Math.PI / 2;
         ctx.beginPath();
         ctx.arc(p.px, p.py, ringR, start, start + frac * Math.PI * 2);
-        ctx.strokeStyle = healthColor(pl.health, alive);
+        // A downed survivor's `health` is the incap pool, so handing it to
+        // `healthColor` would ask "is 300 more than 40?" and get green back.
+        // The danger colour is the honest answer for the state itself.
+        ctx.strokeStyle = down ? healthColor(0, alive) : healthColor(pl.health, alive);
         ctx.lineWidth = HEALTH_RING_WIDTH;
         ctx.stroke();
       }
