@@ -55,9 +55,17 @@ try {
         expression: 'JSON.stringify({h: Math.min(document.documentElement.scrollHeight, 6000), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, empty: document.getElementById("app").children.length === 0})',
       });
       const { h, overflow, empty } = JSON.parse(probe.result.value);
-      await send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: width < 768 });
+      // Note: resizing via a second setDeviceMetricsOverride to the full
+      // document height hangs headless Chrome's captureScreenshot forever on
+      // tall pages now that body paints two stacked background layers (the
+      // grain and vignette tokens). Clipping to the measured height instead
+      // of resizing the viewport avoids that repaint entirely.
       await sleep(500);
-      const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+      const shot = await send('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width, height: h, scale: 1 },
+      });
       writeFileSync(`${OUT}/${name}-${width}.png`, Buffer.from(shot.data, 'base64'));
       const flags = [empty ? 'EMPTY' : '', overflow ? 'HORIZONTAL OVERFLOW' : ''].filter(Boolean).join(' ');
       if (flags) failed++;
