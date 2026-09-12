@@ -47,10 +47,19 @@ function readHeader(path: string): ReturnType<typeof decodeHeader> {
  * is no datagram announcing the file at all, so this listing is the only way a
  * replay is ever noticed.
  *
+ * `excludeOpen` drops files the writer has not closed. It is applied HERE
+ * rather than by the caller because dropping one costs nothing while keeping
+ * one costs a full parse: see the recovery branch below. The round_end path
+ * runs on the request path and sets this flag, and the file it would have
+ * parsed is the 10 to 15 MB one that just finished, which the plugin has not
+ * closed yet at the moment the datagram arrives.
+ *
  * Never throws: a missing or unreadable directory yields no replays, because a
  * match result must never fail to record over a replay link.
  */
-export function discoverMatchReplays(dir: string, token: string): ReplayFile[] {
+export function discoverMatchReplays(
+  dir: string, token: string, opts: { excludeOpen?: boolean } = {},
+): ReplayFile[] {
   if (!dir || !TOKEN_RE.test(token)) return [];
   let names: string[];
   try {
@@ -81,6 +90,10 @@ export function discoverMatchReplays(dir: string, token: string): ReplayFile[] {
 
     let frames = header.frameCount;
     const closed = frames > 0;
+    // Before the recovery parse, never after. A caller that is going to
+    // discard this row must not pay for the parse that fills it in, and the
+    // in-progress file is precisely the one the parse is most expensive on.
+    if (!closed && opts.excludeOpen) continue;
     if (!closed) {
       // Never closed, so the count was never patched in. Recovering it means
       // parsing, which is why the header carries the count at all: this branch
@@ -108,13 +121,17 @@ export function discoverMatchReplays(dir: string, token: string): ReplayFile[] {
  * match is the round in progress. At match completion the flag is off, because
  * by then every round has ended and a file still showing no frame count is a
  * crash worth recording rather than an unfinished write.
+ *
+ * The flag is handed to discovery rather than applied to its result, so an
+ * excluded file is skipped before it is parsed rather than parsed and then
+ * thrown away. That parse is a multi-megabyte synchronous read on the event
+ * loop, and the round_end caller is on the request path.
  */
 export function recordMatchReplays(
   db: DB, matchId: number, token: string, dir: string,
   opts: { excludeOpen?: boolean } = {},
 ): number {
-  let found = discoverMatchReplays(dir, token);
-  if (opts.excludeOpen) found = found.filter((r) => r.closed);
+  const found = discoverMatchReplays(dir, token, opts);
   if (found.length === 0) return 0;
   const ins = db.prepare(
     `INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz)
