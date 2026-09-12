@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, project, drawScene, sceneCounts,
 } from './draw';
-import { STATE, ENTITY_KIND, PLAYER_SLOTS, type PlayerSample } from '../../../src/replayFormat';
+import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import type { MapTransform } from '../../../src/mapTransform';
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {

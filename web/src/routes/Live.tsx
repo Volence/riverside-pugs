@@ -103,9 +103,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
 
   return (
     <Panel>
-      <Panel>
-        <Viewer spec={{ kind: 'live', token: m.token }} live names={namesFor(m)} />
-      </Panel>
+      <Viewer spec={{ kind: 'live', token: m.token }} live names={namesFor(m)} />
 
       <Tiles>
         <Tile label="Score" value={`${m.teamAScore} - ${m.teamBScore}`} sub={campaignName(m.campaign)} />

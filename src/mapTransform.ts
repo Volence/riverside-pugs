@@ -52,10 +52,10 @@ export function boundsOf(points: { x: number; y: number }[]): WorldBounds | null
 /**
  * Fit a world extent into a canvas with no art at all.
  *
- * This is what makes the viewer usable on the twelve maps with no overview:
- * the replay knows where people went, so the view can be derived from the
- * replay itself. One scale governs both axes so pixels stay square, and the
- * short axis is centred.
+ * A fallback for a map with no entry in the overview manifest, such as a custom
+ * map, or when an overview image failed to load. The replay knows where people
+ * went, so the view can be derived from the replay itself. One scale governs both
+ * axes so pixels stay square, and the short axis is centred.
  */
 export function autoFitTransform(
   bounds: WorldBounds, width: number, height: number, padFraction = 0.05,

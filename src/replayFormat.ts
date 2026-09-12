@@ -113,8 +113,12 @@ export function weaponName(id: number): string {
  *  version 2 onward. Version 1 files always wrote 0 for a survivor, which is
  *  why a viewer must check the header version before believing this.
  *
- *  The order is the engine's `m_survivorCharacter` order, which is verified
- *  in game rather than assumed: see the replay viewer plan's final task. */
+ *  The order is assumed to be the engine's `m_survivorCharacter` order, but is
+ *  NOT yet verified in game. A wrong order fails silently by putting the wrong
+ *  survivor face on the right player, which reads as a viewer bug rather than a
+ *  bad constant. Before deploying the version 2 plugin, record a round with known
+ *  characters, check each survivor slot's cls byte, and correct this array if it
+ *  disagrees. See "Verification still owed" in docs/superpowers/specs/2026-09-12-replay-viewer-design.md. */
 export const SURVIVOR_CHARACTERS = ['bill', 'zoey', 'francis', 'louis'] as const;
 
 /** Zombie class by `m_zombieClass`, which the plugin records in `cls` for

@@ -13,7 +13,9 @@ export interface ReplayState {
   header: ReplayHeader | null;
   frames: Frame[];
   /** Absolute byte offset to ask for next. Always a frame boundary, which is
-   *  what lets a later chunk be decoded on its own. */
+   *  what lets a later chunk be decoded on its own. The hook tracks its live
+   *  cursor in a ref (cursorRef) instead; this is the pure function's own
+   *  return value, which the tests assert on. */
   cursor: number;
 }
 
