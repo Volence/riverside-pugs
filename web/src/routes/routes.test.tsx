@@ -357,7 +357,7 @@ describe('Profile', () => {
     mockApi.profile.mockResolvedValue(profile);
     render(<Profile steamid="1" />);
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
-    expect(screen.getByText('1200')).toBeTruthy();
+    expect(screen.getAllByText('1200').length).toBeGreaterThan(0);
     expect(screen.getByText('Dead Air')).toBeTruthy();
     // Shown twice by design: beside the rating hero, and in the match row.
     expect(screen.getAllByText('+12')).toHaveLength(2);
