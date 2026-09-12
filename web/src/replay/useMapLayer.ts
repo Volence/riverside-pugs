@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  autoFitTransform, boundsOf, pickLayer, transformOfLayer,
-  type MapLayer, type MapTransform,
+  autoFitTransform, boundsOf, fitView, pickLayer, transformOfLayer,
+  type MapLayer, type MapTransform, type View,
 } from '../../../src/mapTransform';
 import { overviewFor } from '../../../src/mapOverviews';
 import { STATE, type Frame, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
@@ -16,6 +16,7 @@ export const VIEW_H = 794;
 
 export interface MapLayerResult {
   transform: MapTransform | null;
+  view: View;
   backdrop: HTMLImageElement | null;
 }
 
@@ -91,6 +92,18 @@ export function useMapLayer(
 
   const transform: MapTransform | null = layer ? transformOfLayer(layer) : fitted;
 
+  /** The map's content box, fitted to the canvas. Both branches go through
+   *  `fitView` so there is one code path: a map with an overview crops to
+   *  its `contentBox`, and the auto-fit fallback (no image, `transform` is
+   *  already sized to the canvas) passes the full canvas rect with no
+   *  padding, which fits at scale 1 with no offset, i.e. the identity. */
+  const view = useMemo<View>(() => {
+    const box = overview
+      ? overview.contentBox
+      : { x0: 0, y0: 0, x1: VIEW_W, y1: VIEW_H };
+    return fitView(box, VIEW_W, VIEW_H, overview ? undefined : 0);
+  }, [overview]);
+
   /** Cache of decoded images by URL. A team moving up and down stairs
    *  otherwise refetches the same images repeatedly; the browser cache makes
    *  the refetch cheap but decoding is not free. */
@@ -124,5 +137,5 @@ export function useMapLayer(
     return () => { cancelled = true; };
   }, [transform?.image]);
 
-  return { transform, backdrop };
+  return { transform, view, backdrop };
 }

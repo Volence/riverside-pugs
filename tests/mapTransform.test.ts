@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   autoFitTransform, worldToImage, boundsOf, pickLayer, transformOfLayer,
+  fitView, projectView,
 } from '../src/mapTransform.js';
 
 describe('pickLayer', () => {
@@ -132,5 +133,54 @@ describe('autoFitTransform', () => {
     const t = autoFitTransform({ minX: 10, maxX: 10, minY: 10, maxY: 10 }, 500, 500);
     expect(Number.isFinite(t.unitsPerPixel)).toBe(true);
     expect(t.unitsPerPixel).toBeGreaterThan(0);
+  });
+});
+
+describe('fitView', () => {
+  const box = { x0: 500, y0: 100, x1: 1000, y1: 600 };   // 500 x 500
+
+  it('centres a square box in a wide canvas and scales it to fit the short axis', () => {
+    const v = fitView(box, 1000, 500, 0);
+    expect(v.scale).toBe(1);          // 500 tall into 500 tall
+    expect(v.offsetY).toBe(0);
+    expect(v.offsetX).toBe(250);      // (1000 - 500) / 2
+  });
+
+  it('scales up a small box to fill the canvas', () => {
+    const v = fitView({ x0: 0, y0: 0, x1: 250, y1: 250 }, 1000, 500, 0);
+    expect(v.scale).toBe(2);
+  });
+
+  it('leaves padding when asked', () => {
+    const v = fitView(box, 1000, 500, 0.1);
+    expect(v.scale).toBeLessThan(1);
+  });
+
+  it('never divides by zero on a degenerate box', () => {
+    const v = fitView({ x0: 10, y0: 10, x1: 10, y1: 10 }, 1000, 500, 0);
+    expect(Number.isFinite(v.scale)).toBe(true);
+    expect(v.scale).toBeGreaterThan(0);
+  });
+});
+
+describe('projectView', () => {
+  const t = {
+    originX: -1000, originY: 2000, unitsPerPixel: 8,
+    image: '/a.webp', width: 2048, height: 1271,
+  };
+
+  it('puts the box origin at the view offset', () => {
+    const v = fitView({ x0: 100, y0: 50, x1: 1100, y1: 1050 }, 1000, 1000, 0);
+    // World position that projects to image pixel (100, 50), the box corner.
+    const got = projectView(t, v, -1000 + 100 * 8, 2000 - 50 * 8);
+    expect(got.px).toBeCloseTo(v.offsetX, 5);
+    expect(got.py).toBeCloseTo(v.offsetY, 5);
+  });
+
+  it('scales a position inside the box by the view scale', () => {
+    const v = fitView({ x0: 0, y0: 0, x1: 1024, y1: 1024 }, 2048, 2048, 0);
+    expect(v.scale).toBe(2);
+    const got = projectView(t, v, -1000 + 10 * 8, 2000);
+    expect(got.px).toBeCloseTo(20, 5);
   });
 });

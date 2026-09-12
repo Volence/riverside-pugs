@@ -26,6 +26,7 @@ export const OVERVIEWS: Record<string, {
     width: number;
     height: number;
   }[];
+  contentBox: { x0: number; y0: number; x1: number; y1: number };
 }> = {
   'l4d_garage01_alleys': {
     map: 'l4d_garage01_alleys',
@@ -36,6 +37,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_garage01_alleys_z+0894.webp', cutHeight: 894, unitsPerPixel: 11.279308, originX: -16747, originY: 1246, width: 2048, height: 1271 },
       { image: '/overviews/l4d_garage01_alleys_z+0990.webp', cutHeight: 990, unitsPerPixel: 11.279308, originX: -16747, originY: 1246, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 363, y0: 86, x1: 1739, y1: 1189 },
   },
   'l4d_garage02_lots': {
     map: 'l4d_garage02_lots',
@@ -46,6 +48,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_garage02_lots_z+1086.webp', cutHeight: 1086, unitsPerPixel: 8.056648, originX: -4243, originY: 8128, width: 2048, height: 1271 },
       { image: '/overviews/l4d_garage02_lots_z+1214.webp', cutHeight: 1214, unitsPerPixel: 8.056648, originX: -4243, originY: 8128, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 305, y0: 0, x1: 1747, y1: 1271 },
   },
   'l4d_vs_airport01_greenhouse': {
     map: 'l4d_vs_airport01_greenhouse',
@@ -58,6 +61,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_airport01_greenhouse_z+1598.webp', cutHeight: 1598, unitsPerPixel: 6.445319, originX: -1973, originY: 5791, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_airport01_greenhouse_z+1806.webp', cutHeight: 1806, unitsPerPixel: 6.445319, originX: -1973, originY: 5791, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 316, y0: 0, x1: 1985, y1: 1271 },
   },
   'l4d_vs_airport02_offices': {
     map: 'l4d_vs_airport02_offices',
@@ -74,6 +78,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_airport02_offices_z+1534.webp', cutHeight: 1534, unitsPerPixel: 5.639654, originX: 1328, originY: 7842, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_airport02_offices_z+2030.webp', cutHeight: 2030, unitsPerPixel: 5.639654, originX: 1328, originY: 7842, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 219, y0: 0, x1: 1791, y1: 1271 },
   },
   'l4d_vs_airport03_garage': {
     map: 'l4d_vs_airport03_garage',
@@ -84,6 +89,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_airport03_garage_z+1150.webp', cutHeight: 1150, unitsPerPixel: 9.265146, originX: -13116, originY: 6425, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_airport03_garage_z+1934.webp', cutHeight: 1934, unitsPerPixel: 9.265146, originX: -13116, originY: 6425, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 535, y0: 3, x1: 1472, y1: 1260 },
   },
   'l4d_vs_airport04_terminal': {
     map: 'l4d_vs_airport04_terminal',
@@ -97,6 +103,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_airport04_terminal_z+1150.webp', cutHeight: 1150, unitsPerPixel: 5.236821, originX: -3491, originY: 6467, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_airport04_terminal_z+4030.webp', cutHeight: 4030, unitsPerPixel: 5.236821, originX: -3491, originY: 6467, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 263, y0: 0, x1: 2048, y1: 1271 },
   },
   'l4d_vs_airport05_runway': {
     map: 'l4d_vs_airport05_runway',
@@ -108,6 +115,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_airport05_runway_z+0958.webp', cutHeight: 958, unitsPerPixel: 12.487805, originX: -13298, originY: 17864, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_airport05_runway_z+8158.webp', cutHeight: 8158, unitsPerPixel: 12.487805, originX: -13298, originY: 17864, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 428, y0: 2, x1: 2048, y1: 1251 },
   },
   'l4d_vs_farm01_hilltop': {
     map: 'l4d_vs_farm01_hilltop',
@@ -118,6 +126,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_farm01_hilltop_z+1406.webp', cutHeight: 1406, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_farm01_hilltop_z+2270.webp', cutHeight: 2270, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 390, y0: 0, x1: 1684, y1: 1271 },
   },
   'l4d_vs_farm02_traintunnel': {
     map: 'l4d_vs_farm02_traintunnel',
@@ -132,6 +141,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_farm02_traintunnel_z+1214.webp', cutHeight: 1214, unitsPerPixel: 6.848151, originX: -11939, originY: -4779, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_farm02_traintunnel_z+2270.webp', cutHeight: 2270, unitsPerPixel: 6.848151, originX: -11939, originY: -4779, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 95, y0: 0, x1: 1730, y1: 1256 },
   },
   'l4d_vs_farm03_bridge': {
     map: 'l4d_vs_farm03_bridge',
@@ -142,6 +152,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_farm03_bridge_z+1214.webp', cutHeight: 1214, unitsPerPixel: 8.056648, originX: -3483, originY: -8921, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_farm03_bridge_z+1806.webp', cutHeight: 1806, unitsPerPixel: 8.056648, originX: -3483, originY: -8921, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 268, y0: 0, x1: 1803, y1: 743 },
   },
   'l4d_vs_farm04_barn': {
     map: 'l4d_vs_farm04_barn',
@@ -157,6 +168,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_farm04_barn_z+1278.webp', cutHeight: 1278, unitsPerPixel: 8.862313, originX: 3250, originY: -241, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_farm04_barn_z+2286.webp', cutHeight: 2286, unitsPerPixel: 8.862313, originX: 3250, originY: -241, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 321, y0: 0, x1: 1257, y1: 1271 },
   },
   'l4d_vs_farm05_cornfield': {
     map: 'l4d_vs_farm05_cornfield',
@@ -167,6 +179,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_farm05_cornfield_z+1278.webp', cutHeight: 1278, unitsPerPixel: 4.833989, originX: 3891, originY: 4893, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_farm05_cornfield_z+1934.webp', cutHeight: 1934, unitsPerPixel: 4.833989, originX: 3891, originY: 4893, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 42, y0: 0, x1: 2048, y1: 1271 },
   },
   'l4d_vs_hospital01_apartment': {
     map: 'l4d_vs_hospital01_apartment',
@@ -186,6 +199,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_hospital01_apartment_z+1294.webp', cutHeight: 1294, unitsPerPixel: 5.639654, originX: -2067, originY: 6609, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_hospital01_apartment_z+4558.webp', cutHeight: 4558, unitsPerPixel: 5.639654, originX: -2067, originY: 6609, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 321, y0: 0, x1: 1661, y1: 1271 },
   },
   'l4d_vs_hospital02_subway': {
     map: 'l4d_vs_hospital02_subway',
@@ -204,6 +218,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_hospital02_subway_z+0894.webp', cutHeight: 894, unitsPerPixel: 7.653816, originX: -977, originY: 9796, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_hospital02_subway_z+1886.webp', cutHeight: 1886, unitsPerPixel: 7.653816, originX: -977, originY: 9796, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 323, y0: 9, x1: 1788, y1: 976 },
   },
   'l4d_vs_hospital03_sewers': {
     map: 'l4d_vs_hospital03_sewers',
@@ -224,6 +239,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_hospital03_sewers_z+1172.webp', cutHeight: 1172, unitsPerPixel: 8.056648, originX: 3924, originY: 14137, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_hospital03_sewers_z+6062.webp', cutHeight: 6062, unitsPerPixel: 8.056648, originX: 3924, originY: 14137, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 249, y0: 0, x1: 1420, y1: 1271 },
   },
   'l4d_vs_hospital04_interior': {
     map: 'l4d_vs_hospital04_interior',
@@ -243,6 +259,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_hospital04_interior_z+6398.webp', cutHeight: 6398, unitsPerPixel: 3.222659, originX: 9285, originY: 15693, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_hospital04_interior_z+7646.webp', cutHeight: 7646, unitsPerPixel: 3.222659, originX: 9285, originY: 15693, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 0, y0: 0, x1: 2048, y1: 1271 },
   },
   'l4d_vs_hospital05_rooftop': {
     map: 'l4d_vs_hospital05_rooftop',
@@ -261,6 +278,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_hospital05_rooftop_z+6910.webp', cutHeight: 6910, unitsPerPixel: 2.819827, originX: 3648, originY: 9768, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_hospital05_rooftop_z+8158.webp', cutHeight: 8158, unitsPerPixel: 2.819827, originX: 3648, originY: 9768, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 441, y0: 43, x1: 1560, y1: 1267 },
   },
   'l4d_vs_smalltown01_caves': {
     map: 'l4d_vs_smalltown01_caves',
@@ -273,6 +291,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_smalltown01_caves_z+1278.webp', cutHeight: 1278, unitsPerPixel: 9.667978, originX: -21215, originY: -3809, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_smalltown01_caves_z+1566.webp', cutHeight: 1566, unitsPerPixel: 9.667978, originX: -21215, originY: -3809, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 546, y0: 3, x1: 1300, y1: 1271 },
   },
   'l4d_vs_smalltown02_drainage': {
     map: 'l4d_vs_smalltown02_drainage',
@@ -289,6 +308,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_smalltown02_drainage_z+0830.webp', cutHeight: 830, unitsPerPixel: 4.833989, originX: -13662, originY: -3090, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_smalltown02_drainage_z+1380.webp', cutHeight: 1380, unitsPerPixel: 4.833989, originX: -13662, originY: -3090, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 357, y0: 0, x1: 2048, y1: 1255 },
   },
   'l4d_vs_smalltown03_ranchhouse': {
     map: 'l4d_vs_smalltown03_ranchhouse',
@@ -299,6 +319,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_smalltown03_ranchhouse_z+1214.webp', cutHeight: 1214, unitsPerPixel: 8.459481, originX: -16206, originY: 2506, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_smalltown03_ranchhouse_z+1902.webp', cutHeight: 1902, unitsPerPixel: 8.459481, originX: -16206, originY: 2506, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 180, y0: 37, x1: 1819, y1: 1271 },
   },
   'l4d_vs_smalltown04_mainstreet': {
     map: 'l4d_vs_smalltown04_mainstreet',
@@ -309,6 +330,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_smalltown04_mainstreet_z+1150.webp', cutHeight: 1150, unitsPerPixel: 8.056648, originX: -9030, originY: 1620, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_smalltown04_mainstreet_z+1806.webp', cutHeight: 1806, unitsPerPixel: 8.056648, originX: -9030, originY: 1620, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 117, y0: 0, x1: 1932, y1: 1051 },
   },
   'l4d_vs_smalltown05_houseboat': {
     map: 'l4d_vs_smalltown05_houseboat',
@@ -318,6 +340,7 @@ export const OVERVIEWS: Record<string, {
       { image: '/overviews/l4d_vs_smalltown05_houseboat_z+0830.webp', cutHeight: 830, unitsPerPixel: 8.056648, originX: -6530, originY: 4820, width: 2048, height: 1271 },
       { image: '/overviews/l4d_vs_smalltown05_houseboat_z+1774.webp', cutHeight: 1774, unitsPerPixel: 8.056648, originX: -6530, originY: 4820, width: 2048, height: 1271 },
     ],
+    contentBox: { x0: 367, y0: 0, x1: 1865, y1: 1271 },
   },
 };
 

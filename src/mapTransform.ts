@@ -72,12 +72,56 @@ export function autoFitTransform(
   };
 }
 
+export interface ViewBox { x0: number; y0: number; x1: number; y1: number }
+
+/** How a region of the layer image is placed on the canvas.
+ *
+ *  The captures frame each map inside a 2048x1271 image and the map itself
+ *  is often a tall narrow ribbon covering a small part of it, so drawing the
+ *  whole image wastes most of the canvas. This maps a chosen region of the
+ *  image onto the canvas instead, preserving aspect. */
+export interface View {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  box: ViewBox;
+}
+
+export function fitView(
+  box: ViewBox, canvasW: number, canvasH: number, padFraction = 0.03,
+): View {
+  // A degenerate box would divide by zero. One pixel is arbitrary and
+  // harmless: there is nothing to see either way, and the alternative is
+  // Infinity propagating into every drawn position.
+  const w = Math.max(box.x1 - box.x0, 1);
+  const h = Math.max(box.y1 - box.y0, 1);
+  const pad = 1 - padFraction * 2;
+  const scale = Math.min(canvasW / w, canvasH / h) * pad;
+  return {
+    scale,
+    offsetX: (canvasW - w * scale) / 2,
+    offsetY: (canvasH - h * scale) / 2,
+    box,
+  };
+}
+
 export function worldToImage(
   t: MapTransform, x: number, y: number,
 ): { px: number; py: number } {
   return {
     px: (x - t.originX) / t.unitsPerPixel,
     py: (t.originY - y) / t.unitsPerPixel,
+  };
+}
+
+/** World position to canvas pixel, through the layer image and the view. */
+export function projectView(
+  t: MapTransform, v: View, x: number, y: number,
+): { px: number; py: number } {
+  const img = worldToImage(t, x, y);
+  return {
+    px: (img.px - v.box.x0) * v.scale + v.offsetX,
+    py: (img.py - v.box.y0) * v.scale + v.offsetY,
   };
 }
 

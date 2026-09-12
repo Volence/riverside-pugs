@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'preact/hooks';
-import type { MapTransform } from '../../../src/mapTransform';
+import { projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import type { EntitySample, PlayerSample } from '../../../src/replayFormat';
-import { drawScene, project, scaleFor, type ShowFlags } from './draw';
+import { drawScene, type ShowFlags } from './draw';
 import { VIEW_W, VIEW_H } from './useMapLayer';
 
 export interface ReplayCanvasProps {
   transform: MapTransform | null;
+  view: View;
   backdrop: HTMLImageElement | null;
   trail: { x: number; y: number }[];
   livePlayers: PlayerSample[];
@@ -23,13 +24,13 @@ export interface ReplayCanvasProps {
  * - The untransformed `clearRect` happens BEFORE `ctx.translate`. Clearing
  *   inside the translated space would leave a sliver of the previous frame
  *   at the canvas edge on every panning frame.
- * - The follow camera centres a SCALED canvas position (`project`, the same
- *   helper `drawScene` uses), not a raw `worldToImage` image-space pixel. An
- *   unscaled translate drifts worse the further the followed player is from
- *   the origin.
+ * - The follow camera centres a SCALED canvas position (`projectView`, the
+ *   same helper `drawScene` uses), not a raw `worldToImage` image-space
+ *   pixel. An unscaled translate drifts worse the further the followed
+ *   player is from the origin.
  */
 export function ReplayCanvas(
-  { transform, backdrop, trail, livePlayers, liveEntities, show, followSlot }: ReplayCanvasProps,
+  { transform, view, backdrop, trail, livePlayers, liveEntities, show, followSlot }: ReplayCanvasProps,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -52,16 +53,15 @@ export function ReplayCanvas(
     ctx.save();
     if (target) {
       // Keep the followed player centred by moving the world under them.
-      // `project` is the same helper drawScene uses to turn a world position
-      // into a canvas position, scaled by canvas width over image width; a
-      // raw `worldToImage` result is in image space and would centre the
+      // `projectView` is the same helper drawScene uses to turn a world
+      // position into a canvas position, through the view's crop and scale;
+      // a raw `worldToImage` result is in image space and would centre the
       // camera off by that same scale factor.
-      const s = scaleFor(transform, VIEW_W);
-      const p = project(transform, s, target.x, target.y);
+      const p = projectView(transform, view, target.x, target.y);
       ctx.translate(VIEW_W / 2 - p.px, VIEW_H / 2 - p.py);
     }
     drawScene(ctx, {
-      transform, backdrop, trail,
+      transform, view, backdrop, trail,
       players: livePlayers,
       entities: liveEntities,
       show,
@@ -73,7 +73,7 @@ export function ReplayCanvas(
     // individually rather than the object itself: Task 14 wires real toggles
     // to them, and without this the draw effect would not rerun when they
     // change.
-  }, [livePlayers, liveEntities, transform, backdrop, trail, show.ci, show.entities, followSlot]);
+  }, [livePlayers, liveEntities, transform, view, backdrop, trail, show.ci, show.entities, followSlot]);
 
   return <canvas ref={canvasRef} width={VIEW_W} height={VIEW_H} class="replay__canvas" />;
 }
