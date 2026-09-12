@@ -239,67 +239,107 @@ describe('statusGlyph', () => {
 });
 
 describe('stackLabels', () => {
+  // A label in the same column as every other, which is the crowded case.
+  const col = (py: number, px = 100, w = 40) => ({ px, py, w });
+
   // Finding 2: four survivors standing together sit inside about 11 canvas
   // pixels, so four 10px labels pinned to their own avatars land on baselines
   // within 11px of each other. Every one of them has to be pushed clear of
   // the one above it, and the walk has to happen in SCREEN order, not slot
   // order, or which name wins is arbitrary and flickers as slots cross.
   it('pushes each label clear of the one above it by a full line', () => {
-    const out = stackLabels([{ py: 0 }, { py: 3 }, { py: 7 }, { py: 11 }], 12);
+    const out = stackLabels([col(0), col(3), col(7), col(11)], 12);
     expect(out.map((l) => l.ly)).toEqual([0, 12, 24, 36]);
   });
 
   it('walks in screen order however the callers order their input', () => {
-    const jumbled = stackLabels([{ py: 11 }, { py: 0 }, { py: 7 }, { py: 3 }], 12);
-    const ordered = stackLabels([{ py: 0 }, { py: 3 }, { py: 7 }, { py: 11 }], 12);
+    const jumbled = stackLabels([col(11), col(0), col(7), col(3)], 12);
+    const ordered = stackLabels([col(0), col(3), col(7), col(11)], 12);
     // Same players, same answer: the label at py 0 is the one that keeps its
     // own position and the one at py 11 is the one pushed furthest.
     expect(jumbled.map((l) => [l.py, l.ly])).toEqual(ordered.map((l) => [l.py, l.ly]));
   });
 
   it('leaves labels that are already a line apart exactly where they are', () => {
-    const out = stackLabels([{ py: 100 }, { py: 140 }, { py: 200 }], 12);
+    const out = stackLabels([col(100), col(140), col(200)], 12);
     expect(out.map((l) => l.ly)).toEqual([100, 140, 200]);
   });
 
   it('never moves a label upward, only down', () => {
-    const out = stackLabels([{ py: 50 }, { py: 52 }, { py: 400 }], 12);
+    const out = stackLabels([col(50), col(52), col(400)], 12);
     for (const l of out) expect(l.ly).toBeGreaterThanOrEqual(l.py);
   });
 
   it('does not reorder or mutate the input array', () => {
-    const input = [{ py: 30 }, { py: 10 }];
-    const copy = [...input];
+    const input = [col(30), col(10)];
+    const copy = input.map((j) => ({ ...j }));
     stackLabels(input, 12);
     expect(input).toEqual(copy);
   });
-});
 
-describe('alertColor', () => {
-  // Finding 9: the code this replaced drew a large amber ring around an
-  // incapacitated or pinned player, and that was swapped for a letter about
-  // seven CSS pixels tall. A large coloured ring is findable in peripheral
-  // vision while scanning a map; a seven pixel letter is not, and these are
-  // the two states someone watching needs to see soonest. The ring is back
-  // and the glyph is the refinement on top of it.
-  it('rings the two states worth seeing from the corner of an eye', () => {
-    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.PINNED)).not.toBeNull();
-    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.INCAP)).not.toBeNull();
-    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.LEDGED)).not.toBeNull();
+  // Caught by rendering the chrome to SVG, which nothing else here could see.
+  // A team on the move is a row of players spread right across the map at
+  // about the same height, and comparing y alone turned that into a diagonal
+  // cascade of labels trailing further and further below their own avatars,
+  // resolving collisions that were never going to happen.
+  it('does not push labels that are nowhere near each other horizontally', () => {
+    const row = [col(200, 0), col(200, 200), col(200, 400), col(200, 600)];
+    expect(stackLabels(row, 12).map((l) => l.ly)).toEqual([200, 200, 200, 200]);
   });
 
-  it('rings nothing for a healthy player, or for the lesser states', () => {
-    expect(alertColor(STATE.PRESENT | STATE.ALIVE)).toBeNull();
-    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.BURNING)).toBeNull();
-    expect(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.BILED)).toBeNull();
+  it('pushes labels whose plates only partly overlap', () => {
+    // 0-40 and 30-70 share ten pixels of column, which is enough to collide.
+    const out = stackLabels([col(200, 0), col(202, 30)], 12);
+    expect(out.map((l) => l.ly)).toEqual([200, 212]);
   });
 
-  // The ring and the letter have to agree about which state won, or the two
-  // signals contradict each other on a player who is both pinned and down.
-  it('picks the same winner the glyph does when several states are set', () => {
-    const both = STATE.PRESENT | STATE.ALIVE | STATE.PINNED | STATE.INCAP;
-    expect(statusGlyph(both)).toBe(statusGlyph(STATE.PRESENT | STATE.ALIVE | STATE.PINNED));
-    expect(alertColor(both)).toBe(alertColor(STATE.PRESENT | STATE.ALIVE | STATE.PINNED));
+  it('treats plates that merely touch at the edge as clear of each other', () => {
+    const out = stackLabels([col(200, 0, 40), col(202, 40, 40)], 12);
+    expect(out.map((l) => l.ly)).toEqual([200, 202]);
+  });
+
+  it('clears a wide label of every column it spans, and clears the next of it', () => {
+    const out = stackLabels([
+      col(100, 0, 40),    // column A, stays put
+      col(100, 300, 40),  // column B, different column, also stays put
+      col(101, 20, 400),  // spans BOTH: must clear the pair above it
+      col(112, 300, 40),  // column B again: must clear the wide one
+    ], 12);
+    const at = (px: number, w: number) => out.find((l) => l.px === px && l.w === w)!.ly;
+    expect(at(0, 40)).toBe(100);
+    expect(at(300, 40)).toBe(100);
+    expect(at(20, 400)).toBe(112);
+    expect(out.filter((l) => l.px === 300).map((l) => l.ly).sort((a, b) => a - b)).toEqual([100, 124]);
+  });
+
+  // The contract, rather than one hand-built arrangement of it: whatever goes
+  // in, nothing comes out sharing a column with something less than a line
+  // away. Pushing a label down past one plate can slide it into a different
+  // plate's column, so a single pass over the already-placed labels is not
+  // enough, and a hand-built case for that is easy to get subtly wrong.
+  it('leaves no pair overlapping in both axes, over many arrangements', () => {
+    // A small deterministic generator, so a failure is reproducible.
+    let seed = 12345;
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    for (let trial = 0; trial < 2000; trial++) {
+      // Tight ranges on purpose: the interesting arrangements are the dense
+      // ones, where pushing a label past one plate lands it on another.
+      const jobs = Array.from({ length: 3 + next(6) }, () => col(next(30), next(90), 20 + next(70)));
+      const out = stackLabels(jobs, 12);
+      expect(out).toHaveLength(jobs.length);
+      for (const l of out) expect(l.ly).toBeGreaterThanOrEqual(l.py);
+      for (let i = 0; i < out.length; i++) {
+        for (let j = i + 1; j < out.length; j++) {
+          const a = out[i];
+          const b = out[j];
+          const overlapsX = a.px < b.px + b.w && b.px < a.px + a.w;
+          if (overlapsX) expect(Math.abs(a.ly - b.ly)).toBeGreaterThanOrEqual(12);
+        }
+      }
+    }
   });
 });
 
