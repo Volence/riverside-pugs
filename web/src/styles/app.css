@@ -112,6 +112,7 @@ body[data-urgent='true'] .nav { border-bottom-color: var(--loss); }
 .stack { display: flex; flex-direction: column; gap: var(--sp-5); }
 
 .muted { color: var(--text-muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8em; }
 .empty { color: var(--text-muted); font-size: var(--fs-dense); margin: 0; }
 .error { color: var(--loss); font-size: var(--fs-dense); }
 

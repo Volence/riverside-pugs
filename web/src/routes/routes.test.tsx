@@ -18,6 +18,7 @@ const { mockApi } = vi.hoisted(() => ({
     match: vi.fn(),
     map: vi.fn(),
     profile: vi.fn(),
+    replaySessions: vi.fn(),
   },
 }));
 
@@ -32,6 +33,7 @@ const { MatchDetail } = await import('./MatchDetail');
 const { MapDetail } = await import('./MapDetail');
 const { Profile } = await import('./Profile');
 const { Play } = await import('./Play');
+const { Replays } = await import('./Replays');
 
 // Auto-cleanup only runs when vitest exposes globals, which this config does
 // not; without it each render stacks another copy in document.body and every
@@ -616,6 +618,36 @@ describe('MapDetail', () => {
     mockApi.map.mockRejectedValue(new Error('404'));
     render(<MapDetail map="nope" />);
     await waitFor(() => expect(screen.getByText('Nobody has played that map yet.')).toBeTruthy());
+  });
+});
+
+describe('Replays', () => {
+  it('lists sessions grouped by token with real map names', async () => {
+    mockApi.replaySessions.mockResolvedValue({
+      sessions: [
+        {
+          token: 'abc123',
+          startedUnix: 1757000000,
+          files: [
+            {
+              filename: 'abc123_0_1.rpl', token: 'abc123', ordinal: 0, half: 1,
+              bytes: 2_097_152, mtimeMs: 1757000000000, map: 'l4d_hospital01_apartment',
+              startedUnix: 1757000000, frameCount: 100, playerHz: 20, version: 1, closed: true,
+            },
+          ],
+        },
+      ],
+    });
+    render(<Replays />);
+    await waitFor(() => expect(screen.getByText('l4d_hospital01_apartment')).toBeTruthy());
+    expect(screen.getByText('abc123')).toBeTruthy();
+    expect(screen.getByText('finished')).toBeTruthy();
+  });
+
+  it('says so when there are no replays on disk', async () => {
+    mockApi.replaySessions.mockResolvedValue({ sessions: [] });
+    render(<Replays />);
+    await waitFor(() => expect(screen.getByText(/no replays on disk/i)).toBeTruthy());
   });
 });
 
