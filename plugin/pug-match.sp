@@ -29,7 +29,7 @@
 // Changing one without changing the other produces a file that parses into
 // plausible nonsense rather than an error, which is why the in-game
 // verification at the end of this plan reads a real file back.
-#define RPL_VERSION        1
+#define RPL_VERSION        2
 #define RPL_HEADER_BYTES   160
 #define RPL_SLOTS          8
 #define RPL_PLAYER_RECORD  20
@@ -1136,7 +1136,13 @@ public Action Timer_RplFrame(Handle timer)
 		// is -1 for a clipless weapon, and either would wrap to about 65535.
 		p = RplU16(p, RplClampU16(GetClientHealth(client)));
 		p = RplU16(p, RplClampU16(temp));
-		p = RplU8(p, survivor ? 0 : GetEntProp(client, Prop_Send, "m_zombieClass"));
+		// Version 2: this byte is the survivor character for a survivor and
+		// the zombie class for an infected. It was always 0 for survivors
+		// before, so this fills a field rather than growing the record, which
+		// is why no offset below this line moves.
+		p = RplU8(p, survivor
+			? GetEntProp(client, Prop_Send, "m_survivorCharacter")
+			: GetEntProp(client, Prop_Send, "m_zombieClass"));
 		p = RplU8(p, weaponId);
 		p = RplU16(p, RplClampU16(clip));
 		p = RplU16(p, RplClampU16(reserve));
