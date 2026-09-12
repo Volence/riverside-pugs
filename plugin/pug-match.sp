@@ -21,6 +21,10 @@
 #define ZC_TANK 5
 #define LOCK_ATTEMPT_CAP 6
 
+/** Longest chat message emitted. Long enough for anything anyone types in a
+ *  PUG, short enough that a message cannot push a log line into truncation. */
+#define CHAT_MAX_BYTES 128
+
 enum MatchState
 {
 	MS_None = 0,   // no match configured
@@ -281,6 +285,8 @@ orientation threshold. Changing this changes the rules under every rating earned
 		LogMessage("pug-match: event 'pounce_stopped' does not exist on this engine; shove clears will not be captured.");
 	if (!HookEventEx("choke_start", Event_ChokeStart))
 		LogMessage("pug-match: event 'choke_start' does not exist on this engine; tongue_clears cannot be distinguished and will not be counted.");
+	if (!HookEventEx("player_say", Event_PlayerSay))
+		LogError("pug: player_say not hooked; chat will not be captured");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -425,6 +431,56 @@ void EmitEvent(const char[] kind, int actor, int target, int value)
 	g_iEventSeq++;
 	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d half=%d t=%d",
 		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value, g_iHalf, RoundMs());
+}
+
+/** Strip anything that would break the log line, and cap the length.
+ *
+ *  A newline inside a log line IS a second log line as far as the reader is
+ *  concerned, so an unstripped one lets a player inject a whole datagram.
+ *  Everything else is left alone: the parser takes the remainder of the line
+ *  after ' msg=', so spaces and '=' are already safe. */
+void SanitizeChat(char[] text, int maxlen)
+{
+	int w = 0;
+	int limit = maxlen - 1 < CHAT_MAX_BYTES ? maxlen - 1 : CHAT_MAX_BYTES;
+	for (int r = 0; text[r] != '\0' && w < limit; r++)
+	{
+		if (text[r] == '\n' || text[r] == '\r') continue;
+		text[w++] = text[r];
+	}
+	text[w] = '\0';
+}
+
+/** Chat is captured for any tracked match, NOT gated on StatsActive().
+ *
+ *  That gate exists to keep counters from moving between rounds and during
+ *  ready-up. Chat has no counter to protect and those moments are exactly when
+ *  the talking happens, so gating it there would throw away most of the value.
+ *  RoundMs() returns -1 outside a live round, which the parser already treats
+ *  as "no round timing".
+ *
+ *  Unrostered speakers are dropped, the same discipline EmitEvent follows: a
+ *  spectator or admin must never appear in the match record. */
+public void Event_PlayerSay(Event event, const char[] name, bool dontBroadcast)
+{
+	if (g_State == MS_None) return;
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	if (client < 1 || client > MaxClients) return;
+	int slot = g_iClientRoster[client];
+	if (slot < 0) return;
+
+	char text[256];
+	event.GetString("text", text, sizeof(text));
+	SanitizeChat(text, sizeof(text));
+	if (text[0] == '\0') return;
+
+	g_iEventSeq++;
+	// msg= is LAST on the line, deliberately. The parser takes everything
+	// after the first ' msg=' as the message, so any field emitted after it
+	// could be forged by typing it into chat.
+	EmitPug("CHAT seq=%d half=%d t=%d steamid=%s team=%s msg=%s",
+		g_iEventSeq, g_iHalf, RoundMs(), g_sRosterId[slot],
+		g_iRosterTeam[slot] == 1 ? "a" : "b", text);
 }
 
 /** Emit with actor/target as client indices, gated on StatsActive() so
