@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData } from '../api';
-import { campaignName, deriveLiveStats, fmtDate, labelFor, orderLiveStatKeys } from '../format';
+import { campaignName, campaignTint, deriveLiveStats, fmtDate, labelFor, orderLiveStatKeys } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, Panel, ResultChip, Sparkline, SrDelta, Tabs, Tile, Tiles } from '../components/bits';
 
@@ -96,7 +96,7 @@ export function Profile({ steamid }: { steamid: string }) {
                   </thead>
                   <tbody>
                     {matches.map((m) => (
-                      <tr key={m.id} data-campaign={m.campaign}>
+                      <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
                         <td><ResultChip result={m.result} /></td>
                         <td class="campaign-cell"><a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a></td>
                         <td class="num">{m.teamAScore} - {m.teamBScore}</td>

@@ -1,6 +1,6 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, fmtDate, winnerLabel } from '../format';
+import { campaignName, campaignTint, fmtDate, winnerLabel } from '../format';
 import { Empty, Panel, Tile, Tiles } from '../components/bits';
 
 export function Matches() {
@@ -62,7 +62,7 @@ export function Matches() {
               </thead>
               <tbody>
                 {data.matches.map((m) => (
-                  <tr key={m.id} data-campaign={m.campaign}>
+                  <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
                     <td class="campaign-cell">
                       <a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a>
                       <span class="muted match-id"> #{m.id}</span>

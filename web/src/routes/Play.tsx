@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { api, ApiError, type LobbySnapshot, type StateSnapshot } from '../api';
-import { campaignName } from '../format';
+import { campaignName, campaignTint } from '../format';
 import { Countdown, useCountdownChrome, useSecondsLeft } from '../components/Countdown';
 import { Empty, Panel } from '../components/bits';
 import type { Session } from '../hooks/useLiveState';
@@ -205,7 +205,7 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
             <button
               key={c}
               class={`vote ${mine ? 'vote--mine' : ''} ${n > 0 && n === leader ? 'vote--leading' : ''}`}
-              data-campaign={c}
+              style={{ '--campaign': campaignTint(c) } as Record<string, string>}
               onClick={() => api.vote(c).catch(() => {}).then(refresh)}
             >
               <span class="vote__name">{campaignName(c)}</span>

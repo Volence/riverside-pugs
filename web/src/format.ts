@@ -11,6 +11,29 @@ export function campaignName(slug: string): string {
   return CAMPAIGN_NAMES[slug] ?? slug;
 }
 
+/**
+ * The color a campaign is tinted with, as a CSS color string.
+ *
+ * The four L4D1 campaigns keep their hand-picked tokens. Any other slug, and
+ * custom campaigns are coming, hashes to a hue at a fixed chroma and
+ * lightness, so a campaign the site has never seen still gets a tint at the
+ * same visual weight as the originals, with no stylesheet edit. Deterministic
+ * so the same campaign is the same color on every page and every visit.
+ */
+export function campaignTint(slug: string): string {
+  if (slug in CAMPAIGN_NAMES) return `var(--c-${slug.replace(/_/g, '-')})`;
+  // FNV-1a over the slug, then spread across the hue circle. Multiplying by
+  // the golden angle keeps neighbouring hashes from landing on neighbouring
+  // hues, so two custom campaigns added together still look distinct.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < slug.length; i++) {
+    h ^= slug.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const hue = Math.round(((h % 360) * 137.508) % 360);
+  return `oklch(0.42 0.06 ${hue})`;
+}
+
 export const RESULT_LABEL: Record<MatchResult, string> = { win: 'W', loss: 'L', draw: 'D' };
 
 export function winnerLabel(winner: Winner): string {
