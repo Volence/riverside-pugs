@@ -1,4 +1,4 @@
-import type { Frame } from './replayFormat.js';
+import { frameBytes, type Frame } from './replayFormat.js';
 
 /** How far behind live a viewer is held. This is an anti-ghosting control,
  *  not a buffering convenience: the live page is public, the frames carry
@@ -31,4 +31,28 @@ export function releasableFrames(
   const cutoffTMs = nowMs - delayMs - roundStartedUnixMs;
   if (cutoffTMs < 0) return [];
   return frames.filter((f) => f.tMs <= cutoffTMs);
+}
+
+/**
+ * The same decision as `releasableFrames`, expressed in bytes.
+ *
+ * The HTTP layer serves a prefix of the file rather than re-encoding frames,
+ * so it needs the cutoff as an offset. Deriving it here from the frames
+ * `releasableFrames` already approved is what keeps the delay rule in one
+ * place: there is no second condition that could drift from the first.
+ *
+ * Returns 0, not the header size, when nothing is releasable. The caller
+ * knows what floor it scanned from and 0 lets it say so; returning
+ * HEADER_BYTES would be wrong for a caller that started mid-file.
+ */
+export function releasableBytes(
+  frames: Frame[],
+  roundStartedUnixMs: number,
+  nowMs: number,
+  delayMs: number = DEFAULT_DELAY_MS,
+): number {
+  const ok = releasableFrames(frames, roundStartedUnixMs, nowMs, delayMs);
+  if (ok.length === 0) return 0;
+  const last = ok[ok.length - 1];
+  return last.offset + frameBytes(last.entities.length);
 }
