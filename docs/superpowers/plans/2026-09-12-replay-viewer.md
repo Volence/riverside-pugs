@@ -15,7 +15,8 @@
 - Branch is `feat/skill-stats-5`. Do not create a new branch.
 - **No em dashes** anywhere: code, comments, docs, commit messages. Replace by meaning, not by swapping the character.
 - **Shared modules stay self-contained with no relative imports.** `src/replayFormat.ts` and `src/mapTransform.ts` are imported by the server as `./x.js` and by the browser as `../../src/x`. A relative `.js` specifier inside either one breaks the browser build.
-- **Never adjust an existing test to make the isomorphic swap pass.** The existing suite is the gate on that change. If a test fails, the port is wrong.
+- **Never weaken an existing test to make a change pass.** The existing suite is the gate. If a test's assertion fails, the code is wrong, and the assertion does not move.
+  This bars weakening, deleting or loosening an assertion. It does not bar updating how a test *constructs* its inputs when a signature's type legitimately changes, provided the bytes handed to the code under test are identical and the assertion is untouched. Task 1 contains the one instance of this.
 - **Anti-ghosting is load-bearing.** For a file that is still being written, no byte past the releasable cutoff may appear in any HTTP response, ever. The live page is public and frames carry ghost infected positions.
 - **Do not deploy to the Dallas box.** No `deploy.sh`, no `deploy-web.sh`, no rcon, no plugin upload. Players are often on it. Task 14 changes the plugin source only.
 - Run the full suite with `npm test`. Typecheck both projects with `npm run typecheck`.
@@ -243,19 +244,52 @@ In `decodeIndex`, change the signature to `buf: Uint8Array`, add `const v = dv(b
 
 In `parseReplay`, change the signature to `buf: Uint8Array`. The body needs no other change.
 
-- [ ] **Step 7: Run the full suite**
+- [ ] **Step 7: Fix the one test that constructs its input with a Buffer method**
+
+`tests/replayFormat.test.ts:57` reads:
+
+```ts
+  it('rejects a buffer with the wrong magic', () => {
+    const buf = encodeHeader(header());
+    buf.write('XXXX', 0, 'ascii');
+    expect(decodeHeader(buf)).toBeNull();
+  });
+```
+
+`encodeHeader` now returns a `Uint8Array`, which has no `.write()`. This is the
+one place in the suite where a test builds its input with a Buffer-only method
+rather than asserting with one, so it is the one permitted test edit in this
+task. Replace the middle line with:
+
+```ts
+    buf.set([0x58, 0x58, 0x58, 0x58], 0);
+```
+
+Those are the same four `'X'` bytes at the same offset, so the input to
+`decodeHeader` is byte for byte what it was, and the assertion is untouched.
+That is the line between this edit and weakening a test: the bytes under test
+and the expectation both stay exactly as they were, and only the way the bytes
+are written changes.
+
+Nothing else in the suite needs touching. `tests/replayFormat.test.ts:152` also
+calls `writeUInt32LE`, but on a `Buffer.alloc(16)` it creates itself, which is a
+real Buffer and keeps every Buffer method.
+
+- [ ] **Step 8: Run the full suite**
 
 Run: `npm test`
 
-Expected: PASS, every test, with no test file edited. If anything fails, the port is wrong. Do not change a test to accommodate it.
+Expected: PASS, every test. The only test file changes in this task are the
+Step 1 addition and the Step 7 input construction. If anything else fails, the
+port is wrong, and the fix is in `src/replayFormat.ts`, never in an assertion.
 
-- [ ] **Step 8: Typecheck**
+- [ ] **Step 9: Typecheck**
 
 Run: `npm run typecheck`
 
 Expected: clean. `Buffer.concat` accepts `readonly Uint8Array[]`, so the existing test helpers still compile.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/replayFormat.ts tests/replayFormat.test.ts
