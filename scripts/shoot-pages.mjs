@@ -55,16 +55,31 @@ try {
         expression: 'JSON.stringify({h: Math.min(document.documentElement.scrollHeight, 6000), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, empty: document.getElementById("app").children.length === 0})',
       });
       const { h, overflow, empty } = JSON.parse(probe.result.value);
-      // Note: resizing via a second setDeviceMetricsOverride to the full
-      // document height hangs headless Chrome's captureScreenshot forever on
-      // tall pages now that body paints two stacked background layers (the
-      // grain and vignette tokens). Clipping to the measured height instead
-      // of resizing the viewport avoids that repaint entirely.
+      // Resizing via a second setDeviceMetricsOverride to the full document
+      // height hangs headless Chrome's captureScreenshot on tall pages now
+      // that body paints two stacked background layers (the grain and
+      // vignette tokens). The ruling for this fix round was that
+      // background-attachment: fixed was the cause (a fixed layer repaints
+      // on every viewport resize) and that neutralising it for the capture
+      // would let this two-step resize approach work again. That is NOT
+      // borne out by testing: with this override in place the match page
+      // (h=3853) still hangs captureScreenshot indefinitely (confirmed past
+      // 240s). Isolating further: either background layer alone captures in
+      // under 1s at this height under either attachment mode; only the
+      // combination of both stacked background-image layers plus a resize
+      // to a large document height reproduces the hang, independent of
+      // background-attachment. See task-2-report.md "Fix round 1" for the
+      // full isolation. Left in place per the fix-round instruction not to
+      // revert to the clip approach; npm run shoot currently throws on the
+      // match route rather than completing.
+      await send('Runtime.evaluate', {
+        expression: `(() => { const s = document.createElement('style'); s.id = 'shoot-override'; s.textContent = 'body{background-attachment:scroll !important}'; document.head.appendChild(s); })()`,
+      });
+      await send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: width < 768 });
       await sleep(500);
       const shot = await send('Page.captureScreenshot', {
         format: 'png',
         captureBeyondViewport: true,
-        clip: { x: 0, y: 0, width, height: h, scale: 1 },
       });
       writeFileSync(`${OUT}/${name}-${width}.png`, Buffer.from(shot.data, 'base64'));
       const flags = [empty ? 'EMPTY' : '', overflow ? 'HORIZONTAL OVERFLOW' : ''].filter(Boolean).join(' ');
