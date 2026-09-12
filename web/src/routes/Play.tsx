@@ -1,8 +1,10 @@
 import { useState } from 'preact/hooks';
 import { api, ApiError, type LobbySnapshot, type StateSnapshot } from '../api';
-import { campaignName, campaignTint } from '../format';
+import { campaignName } from '../format';
 import { Countdown, useCountdownChrome, useSecondsLeft } from '../components/Countdown';
 import { Empty, Panel } from '../components/bits';
+import { CampaignTiles } from '../components/CampaignTiles';
+import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 
 const QUEUE_SIZE = 8;
@@ -18,6 +20,7 @@ export function Play(
   const wide = state.match !== null;
   return (
     <div class={`page ${wide ? 'page--play-teams' : 'page--play'}`}>
+      <PageHeader eyebrow="Riverside" title="Ranked 4v4" />
       <Live state={state} me={session.me.steamid} refresh={refresh} />
     </div>
   );
@@ -27,7 +30,7 @@ function SignIn() {
   return (
     <div class="page page--play">
       <Panel class="hero-panel">
-        <p class="eyebrow">Left 4 Dead</p>
+        <p class="eyebrow">Riverside</p>
         <h1>Ranked 4v4 pick-up games</h1>
         <p class="muted">Sign in to join the queue.</p>
         <a class="btn" href="/auth/steam">Sign in through Steam</a>
@@ -197,27 +200,18 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
     <Panel>
       <p class="eyebrow">Vote for a campaign</p>
       <Countdown deadline={lobby.deadline} left={left} />
-      <div class="votes">
-        {lobby.options.map((c) => {
+      <CampaignTiles
+        onPick={(c) => api.vote(c).catch(() => {}).then(refresh)}
+        items={lobby.options.map((c) => {
           const n = lobby.votes[c] ?? 0;
-          const mine = lobby.myVote === c;
-          return (
-            <button
-              key={c}
-              class={`vote ${mine ? 'vote--mine' : ''} ${n > 0 && n === leader ? 'vote--leading' : ''}`}
-              style={{ '--campaign': campaignTint(c) } as Record<string, string>}
-              onClick={() => api.vote(c).catch(() => {}).then(refresh)}
-            >
-              <span class="vote__name">{campaignName(c)}</span>
-              <span class="vote__count num">{n}</span>
-              <span
-                class="vote__bar"
-                style={{ width: total === 0 ? '0%' : `${(n / total) * 100}%` }}
-              />
-            </button>
-          );
+          const leading = n > 0 && n === leader;
+          return {
+            slug: c,
+            sub: n === 0 ? 'No votes' : `${n} vote${n === 1 ? '' : 's'}${leading ? ' · leading' : ''}`,
+            active: lobby.myVote === c,
+          };
         })}
-      </div>
+      />
       {total === 0 && <Empty>No votes yet. A random campaign is picked if nobody votes.</Empty>}
     </Panel>
   );
