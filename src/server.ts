@@ -263,9 +263,26 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const pruneTimer = setInterval(() => pruneReplays(deps.db, deps.config.replayDir), 24 * 60 * 60 * 1000);
   pruneTimer.unref();
 
+  // Plus one run shortly after boot. The interval alone means a box that is
+  // redeployed or restarted more often than once a day never prunes at all,
+  // which is exactly the disk-fill this code exists to prevent. Delayed so it
+  // does not compete with startup, and unref'd for the same reason as above.
+  // pruneReplays catches everything internally; the try is belt and braces,
+  // because an escaping throw inside a timer callback would take the process
+  // down rather than merely skip a prune.
+  const pruneOnBoot = setTimeout(() => {
+    try {
+      pruneReplays(deps.db, deps.config.replayDir);
+    } catch (err) {
+      console.error('[replay] startup prune failed:', err);
+    }
+  }, 30_000);
+  pruneOnBoot.unref();
+
   app.addHook('onClose', async () => {
     clearInterval(reaper);
     clearInterval(pruneTimer);
+    clearTimeout(pruneOnBoot);
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
