@@ -347,6 +347,9 @@ interface LabelJob {
   /** Where the avatar is, so the leader line knows what to point back at. */
   ax: number;
   ay: number;
+  /** Where the text starts. The plate's own width is not known until
+   *  `drawLabels` has set the font and measured, and the layout needs it,
+   *  because two labels only collide if their plates overlap horizontally. */
   px: number;
   py: number;
   text: string;
@@ -366,20 +369,39 @@ interface LabelJob {
  *
  * Sorting by `py` first fixes both: the walk is deterministic in the only
  * ordering a viewer can see, and each label is pushed down only as far as it
- * takes to clear the one above it. A label never moves up, so the topmost of
- * a cluster always keeps its true position and the stack grows downward from
- * a correct anchor.
+ * takes to clear the ones already placed. A label never moves up, so the
+ * topmost of a cluster always keeps its true position and the stack grows
+ * downward from a correct anchor.
+ *
+ * A label is only pushed by another whose PLATE IT WOULD ACTUALLY TOUCH, so
+ * the horizontal extent matters as much as the vertical one. Comparing y
+ * alone turns a row of players spread right across the map, which is what a
+ * team on the move looks like, into a diagonal cascade of labels trailing
+ * further and further below their own avatars, all to resolve collisions that
+ * were never going to happen. Each label is compared against every one
+ * already placed rather than only the last, because pushing down past one
+ * plate can slide it into a different plate's column.
  */
-export function stackLabels<T extends { py: number }>(
+export function stackLabels<T extends { px: number; py: number; w: number }>(
   jobs: readonly T[], lineH: number = LABEL_LINE_H,
 ): (T & { ly: number })[] {
   const sorted = [...jobs].sort((a, b) => a.py - b.py);
   const out: (T & { ly: number })[] = [];
-  let prev = -Infinity;
   for (const j of sorted) {
-    const ly = Math.max(j.py, prev + lineH);
+    let ly = j.py;
+    // `ly` only ever increases and there are finitely many placed labels, so
+    // this settles.
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const o of out) {
+        const overlapsX = j.px < o.px + o.w && o.px < j.px + j.w;
+        if (overlapsX && Math.abs(ly - o.ly) < lineH) {
+          ly = o.ly + lineH;
+          moved = true;
+        }
+      }
+    }
     out.push({ ...j, ly });
-    prev = ly;
   }
   return out;
 }
@@ -403,11 +425,17 @@ function drawLabels(ctx: CanvasRenderingContext2D, jobs: readonly LabelJob[]): v
   ctx.font = `${LABEL_FONT_PX}px sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  for (const j of stackLabels(jobs)) {
-    const w = ctx.measureText(j.text).width;
+  // Measured before the layout, because the layout needs to know which plates
+  // could touch. The font is set above, so every measurement is in the font
+  // the text is actually drawn in.
+  const measured = jobs.map((j) => ({
+    ...j,
+    w: ctx.measureText(j.text).width + LABEL_PAD_X * 2 + LABEL_TICK_W,
+  }));
+  for (const j of stackLabels(measured)) {
     const plateX = j.px - LABEL_PAD_X;
     const plateY = j.ly - LABEL_PLATE_H / 2;
-    const plateW = w + LABEL_PAD_X * 2 + LABEL_TICK_W;
+    const plateW = j.w;
 
     // A label pushed clear of a crowd can end up well below its own avatar,
     // so a hairline leads back to it. Skipped when the label did not move,
@@ -527,10 +555,11 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     // A ghost is an infected that has not spawned. It is drawn hollow so it
     // reads as "not really there yet". The ten second server-side delay is
     // what makes showing it safe at all; nothing here may be relaxed into
-    // showing a ghost sooner, and none of the new chrome below (health ring,
-    // status glyph, name label, follow highlight) may be given to one
-    // either: every one of those would make an unspawned infected easier to
-    // read, which is the opposite of the point.
+    // showing a ghost sooner, and none of the chrome below (health ring,
+    // alert ring, status glyph, name label, slot number, follow highlight)
+    // may be given to one either: every one of those would make an unspawned
+    // infected easier to read, which is the opposite of the point. The
+    // colour it is drawn in is fixed for the same reason.
     const ghost = (pl.state & STATE.GHOST) !== 0;
     ctx.globalAlpha = alive ? (ghost ? 0.35 : 1) : 0.3;
     // Every mark a ghost makes is in one fixed colour, the outline and the
