@@ -67,6 +67,29 @@ export interface DrawArgs {
   height: number;
 }
 
+/**
+ * Project a world position onto the canvas.
+ *
+ * `worldToImage` returns pixel coordinates in the layer image's own space:
+ * every captured overview image is 2048x1271. The canvas is drawn at a
+ * different, responsive size, so the image-space pixel must be scaled by
+ * `s`, the ratio of canvas width to image width, on top of the projection.
+ * Every caller that places something in world space (trail, entities,
+ * players) goes through this one helper so none of them can drift out of
+ * sync with the backdrop.
+ *
+ * Radii, arrow lengths and line widths are deliberately NOT run through this
+ * scale: they stay in screen units so avatars read as icons rather than
+ * scale models and stay sharp regardless of how much the map image itself is
+ * scaled up or down.
+ */
+export function project(
+  t: MapTransform, s: number, x: number, y: number,
+): { px: number; py: number } {
+  const p = worldToImage(t, x, y);
+  return { px: p.px * s, py: p.py * s };
+}
+
 function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.05)';
@@ -93,8 +116,13 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   ctx.fillStyle = '#11130f';
   ctx.fillRect(0, 0, a.width, a.height);
 
+  // Every layer image is 2048x1271; the canvas is whatever size it is drawn
+  // at. This is the one scale factor that reconciles the two, and it is what
+  // `project` multiplies onto every `worldToImage` result below.
+  const s = a.width / a.transform.width;
+
   if (a.backdrop) {
-    ctx.drawImage(a.backdrop, 0, 0, a.width, a.height);
+    ctx.drawImage(a.backdrop, 0, 0, a.transform.width * s, a.transform.height * s);
   } else {
     // No art for this map. The grid gives the eye a scale reference and the
     // trail below turns the route itself into the map.
@@ -106,10 +134,10 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     ctx.strokeStyle = 'rgba(111,177,224,0.35)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    const first = worldToImage(a.transform, a.trail[0].x, a.trail[0].y);
+    const first = project(a.transform, s, a.trail[0].x, a.trail[0].y);
     ctx.moveTo(first.px, first.py);
     for (let i = 1; i < a.trail.length; i++) {
-      const p = worldToImage(a.transform, a.trail[i].x, a.trail[i].y);
+      const p = project(a.transform, s, a.trail[i].x, a.trail[i].y);
       ctx.lineTo(p.px, p.py);
     }
     ctx.stroke();
@@ -122,7 +150,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const isCommon = e.kind === ENTITY_KIND.COMMON;
     if (isCommon && !a.show.ci) continue;
     if (!isCommon && !a.show.entities) continue;
-    const p = worldToImage(a.transform, e.x, e.y);
+    const p = project(a.transform, s, e.x, e.y);
     ctx.fillStyle = style.color;
     ctx.beginPath();
     ctx.arc(p.px, p.py, style.radius, 0, Math.PI * 2);
@@ -133,7 +161,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   for (const pl of a.players) {
     if ((pl.state & STATE.PRESENT) === 0) continue;
     const alive = (pl.state & STATE.ALIVE) !== 0;
-    const p = worldToImage(a.transform, pl.x, pl.y);
+    const p = project(a.transform, s, pl.x, pl.y);
     const r = avatarRadius(pl.z, median);
 
     ctx.save();

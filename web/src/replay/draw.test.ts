@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { avatarRadius, medianHeight, isSurvivor, entityStyle } from './draw';
+import {
+  avatarRadius, medianHeight, isSurvivor, entityStyle, project,
+} from './draw';
 import { STATE, ENTITY_KIND, PLAYER_SLOTS, type PlayerSample } from '../../../src/replayFormat';
+import type { MapTransform } from '../../../src/mapTransform';
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {
   return {
@@ -53,6 +56,33 @@ describe('avatarRadius', () => {
   it('clamps to plus or minus 20 percent however extreme the height', () => {
     expect(avatarRadius(99_999, 0, 10)).toBeCloseTo(12, 5);
     expect(avatarRadius(-99_999, 0, 10)).toBeCloseTo(8, 5);
+  });
+});
+
+describe('project', () => {
+  // Every captured layer image is 2048x1271, but the canvas is drawn at a
+  // different, responsive size. Regression for the bug where drawScene used
+  // worldToImage's image-space pixels directly as canvas coordinates: image
+  // pixel 2048 must land on canvas 1280 when the canvas is 1280 wide and the
+  // image behind it is 2048 wide, and image pixel 0 must stay at canvas 0.
+  it('scales image-space pixels into canvas space by canvas width over image width', () => {
+    const transform: MapTransform = {
+      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 2048, height: 1271,
+    };
+    const canvasWidth = 1280;
+    const s = canvasWidth / transform.width;
+
+    expect(project(transform, s, 0, 0).px).toBeCloseTo(0, 5);
+    expect(project(transform, s, 2048, 0).px).toBeCloseTo(1280, 5);
+  });
+
+  it('is the identity when the transform already matches the canvas (auto-fit)', () => {
+    const transform: MapTransform = {
+      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
+    };
+    const s = 1280 / transform.width;
+    expect(s).toBe(1);
+    expect(project(transform, s, 640, 0).px).toBeCloseTo(640, 5);
   });
 });
 
