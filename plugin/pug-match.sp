@@ -219,6 +219,10 @@ ConVar g_cvReplayDir;                    // directory, relative to the game dir
 ConVar g_cvReplayMaxMb;                  // per-round byte cap, a runaway bound
 ConVar g_cvReplayAfterEnd;               // 1 = keep recording after the finale ends the match
 ConVar g_cvReplayStandalone;             // 1 = record rounds with no tracked match at all (!mix nights)
+/** Whether the last standalone round we recorded was on a campaign's first map.
+ *  Used to notice the transition INTO a new campaign exactly once, rather than
+ *  on both halves of that campaign's opening map. */
+bool g_bRplFirstMapSeen;
 
 File g_hReplay;                          // null when not recording
 Handle g_hReplayTimer;
@@ -1636,6 +1640,7 @@ void ResetMatchState()
 {
 	g_bReplayFailed = false;
 	g_iRplMapSeq = 0;
+	g_bRplFirstMapSeen = false;
 	g_State = MS_None;
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
@@ -2069,10 +2074,26 @@ public void OnRoundIsLive()
 		// match, or changes g_State, so the plugin stays exactly as inert as
 		// it was; the only product is a file on disk.
 		//
-		// One token for the whole standalone session, so every map of the
-		// night files under it and g_iRplMapSeq keeps the maps apart.
-		if (g_sToken[0] == '\0') GenerateToken(g_sToken, sizeof(g_sToken));
+		// A fresh session token per CAMPAIGN, so a night's files group into
+		// campaign-sized units instead of accumulating under one token for
+		// thirty maps. g_iRplMapSeq restarts with it, so ordinals read as
+		// chapter numbers within the campaign.
+		//
+		// L4D_IsFirstMapInScenario is registered optional by left4dhooks, and
+		// calling an unbound native throws. A throw here would unwind the
+		// go-live forward, which is the one place in this plugin that must
+		// never fail, so it is feature-checked rather than trusted. Absent, the
+		// session simply keeps its existing token, which is the old behaviour.
 		GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+		bool firstMap = GetFeatureStatus(FeatureType_Native, "L4D_IsFirstMapInScenario") == FeatureStatus_Available
+			&& L4D_IsFirstMapInScenario();
+		if (g_sToken[0] == '\0' || (firstMap && !g_bRplFirstMapSeen))
+		{
+			GenerateToken(g_sToken, sizeof(g_sToken));
+			g_iRplMapSeq = 0;
+			PugDebug("replay: new standalone session %s on %s", g_sToken, g_sCurrentMap);
+		}
+		g_bRplFirstMapSeen = firstMap;
 		RplFillStandaloneRoster();
 		g_iHalf = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")) ? 2 : 1;
 		g_fRoundLiveAt = GetGameTime();
