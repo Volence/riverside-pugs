@@ -69,7 +69,7 @@ a component that still names amber cannot slip through.
 
 The urgent state (`[data-urgent='true']`) keeps its mechanism: it reassigns
 `--accent` locally. Because the accent is already red, urgency instead
-brightens it to `#e8503f` and raises the nav rule to 3px so the state is still
+brightens it to `#f0655a` and raises the nav rule to 3px so the state is still
 distinguishable from calm red.
 
 ### 3.3 Campaign tints
