@@ -1,0 +1,88 @@
+{
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Blend B + C"
+    },
+    {
+      "id": "page-2",
+      "name": "Directions"
+    }
+  ],
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "title": "Riverside PUG · B + C blend",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 1860,
+      "page": "page-1"
+    },
+    {
+      "file": "DirectionA.dc.html",
+      "title": "Direction A · Safe room wall",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 1520,
+      "page": "page-2"
+    },
+    {
+      "file": "DirectionB.dc.html",
+      "title": "Direction B · Versus HUD",
+      "x": 1400,
+      "y": 0,
+      "w": 1280,
+      "h": 1580,
+      "page": "page-2"
+    },
+    {
+      "file": "DirectionC.dc.html",
+      "title": "Direction C · Campaign poster",
+      "x": 2800,
+      "y": 0,
+      "w": 1280,
+      "h": 2040,
+      "page": "page-2"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-blend",
+      "x": 1400,
+      "y": 0,
+      "w": 520,
+      "page": "page-1",
+      "text": "B + C blend\nStructure from B: versus scoreboard header, dense leaderboard, HUD readout inside the viewer, event ticks on the scrub, portrait tiles with health bars.\nVoice from C: bone-on-black with blood red, Anton titles and hero numbers, Oswald labels, campaign poster tiles, film sprockets around the viewer.\nRoles: red is interactive and infected, gold is rating only, teal is survivor health only. Amber is retired.\nOpen questions for the spec: does the campaign tile row belong on every page or only Home and Campaigns; how much sepia the map art can take before infected dots lose contrast."
+    },
+    {
+      "id": "note-a",
+      "x": 0,
+      "y": -260,
+      "w": 560,
+      "page": "page-2",
+      "text": "A · Safe room wall\nGraffiti headers, typewritten sheets taped to concrete, polaroid rosters.\nWhy: the most instantly L4D thing there is, and it gives every page a reason to look handmade.\nTradeoff: loud. Rotated paper and marker type fight dense stat tables, so the leaderboard has to stay small or go plain."
+    },
+    {
+      "id": "note-b",
+      "x": 1400,
+      "y": -260,
+      "w": 560,
+      "page": "page-2",
+      "text": "B · Versus HUD\nKeeps the original tokens (warm black, sodium amber, Barlow Condensed) and borrows the game's HUD grammar: a versus scoreboard header, portrait tiles with health bars, event ticks on the scrub bar, grain and vignette instead of flat panels.\nWhy: reads as competitive and lets the numbers stay the content. Smallest rebuild.\nTradeoff: the least theatrical of the three; the identity comes from details, not a big gesture."
+    },
+    {
+      "id": "note-c",
+      "x": 2800,
+      "y": -260,
+      "w": 560,
+      "page": "page-2",
+      "text": "C · Campaign poster\nMovie-poster type (Anton), bone-on-black, blood-red rules, credits blocks, film sprockets around the viewer, each campaign as a poster tile.\nWhy: the strongest single gesture, and campaigns become the organizing idea of the site.\nTradeoff: the heavy vignette and sepia darken the map art, and Roman-numeral ranks stop working past a dozen rows."
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  }
+}

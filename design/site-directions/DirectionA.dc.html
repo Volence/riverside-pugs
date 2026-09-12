@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Stardos+Stencil:wght@400;700&family=Special+Elite&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; background: #3a3631; color: #e9e2d3; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    a { color: #f0d9a8; } a:hover { color: #ffffff; }
+    .wall {
+      background-color: #4a453e;
+      background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+        radial-gradient(ellipse at 20% 10%, rgba(255,240,210,0.10), transparent 55%),
+        radial-gradient(ellipse at 85% 90%, rgba(0,0,0,0.45), transparent 60%),
+        linear-gradient(180deg, #514b43 0%, #443f38 45%, #3a3530 100%);
+    }
+    .type { font-family: "Special Elite", "Courier New", monospace; }
+    .marker { font-family: "Permanent Marker", "Comic Sans MS", cursive; }
+    .stencil { font-family: "Stardos Stencil", Impact, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+    .tape { position: absolute; width: 92px; height: 26px; background: rgba(230, 215, 170, 0.55); box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+    .paper { background: #e8dfc7; color: #2a241c; box-shadow: 0 10px 24px rgba(0,0,0,0.45), inset 0 0 60px rgba(120, 90, 40, 0.12); }
+    .row { display: grid; grid-template-columns: 44px 1fr 72px 56px 72px 88px 88px 64px; gap: 8px; align-items: center; padding: 9px 12px; border-bottom: 1px dashed rgba(60, 45, 25, 0.35); font-size: 15px; }
+    .cell-r { text-align: right; }
+    .pin { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff7d6e, #b8241a 70%); box-shadow: 0 2px 3px rgba(0,0,0,0.6); }
+    .dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.6); }
+    .bar { height: 10px; background: repeating-linear-gradient(90deg, #c2352a 0 6px, #a82a20 6px 8px); border-radius: 2px; transform: rotate(-0.6deg); }
+  </style>
+</helmet>
+
+<div class="wall" style="width: 1280px; min-height: 1520px; padding: 0 0 48px 0; position: relative; overflow: hidden;">
+
+  <!-- nav: stencil sprayed on the wall -->
+  <div style="display: flex; align-items: baseline; gap: 36px; padding: 22px 44px 18px 44px; border-bottom: 3px solid rgba(20, 16, 12, 0.55);">
+    <div class="stencil" style="font-size: 30px; color: #f2c14e; text-shadow: 0 0 12px rgba(242,193,78,0.35), 2px 2px 0 rgba(0,0,0,0.5);">Riverside PUG</div>
+    <div class="stencil" style="display: flex; gap: 26px; font-size: 15px; color: #d8cfbc; letter-spacing: 0.14em;">
+      <span style="color: #ffffff; border-bottom: 3px solid #c2352a; padding-bottom: 2px;">Play</span>
+      <span>Live</span><span>Leaderboard</span><span>Matches</span><span>Maps</span><span>Replays</span>
+    </div>
+    <div class="type" style="margin-left: auto; font-size: 13px; color: #cbbfa6;">safe room · 4 inside</div>
+  </div>
+
+  <!-- graffiti headline -->
+  <div style="padding: 40px 44px 8px 44px; display: flex; align-items: flex-end; gap: 24px;">
+    <div class="marker" style="font-size: 74px; line-height: 0.95; color: #f4efe2; transform: rotate(-2deg); text-shadow: 3px 3px 0 rgba(0,0,0,0.45);">RANKED<br>4v4</div>
+    <div class="marker" style="font-size: 26px; color: #e0473a; transform: rotate(1.5deg); margin-bottom: 10px; text-shadow: 2px 2px 0 rgba(0,0,0,0.4);">season 1 · 24 players · 3 rated</div>
+  </div>
+  <div class="marker" style="position: absolute; right: 60px; top: 118px; font-size: 20px; color: rgba(255,255,255,0.55); transform: rotate(6deg);">"they're coming back"</div>
+  <div class="marker" style="position: absolute; left: 720px; top: 210px; font-size: 16px; color: rgba(240,217,168,0.6); transform: rotate(-4deg);">tank on 37% nice</div>
+
+  <!-- leaderboard: taped-up paper -->
+  <div style="position: relative; margin: 36px 44px 0 44px; width: 760px; transform: rotate(-0.8deg);">
+    <div class="tape" style="left: -30px; top: -12px; transform: rotate(-38deg);"></div>
+    <div class="tape" style="right: -30px; top: -10px; transform: rotate(33deg);"></div>
+    <div class="paper" style="padding: 22px 18px 10px 18px;">
+      <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px;">
+        <div class="type" style="font-size: 28px; text-transform: uppercase; letter-spacing: 0.06em;">Leaderboard</div>
+        <div class="marker" style="font-size: 18px; color: #c2352a; transform: rotate(-3deg);">who's actually good</div>
+      </div>
+      <div class="row type" style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #6b5c43; border-bottom: 2px solid rgba(60,45,25,0.6);">
+        <div>#</div><div>Player</div><div class="cell-r">SR</div><div class="cell-r">W-L</div><div class="cell-r">Win %</div><div class="cell-r">SI dmg</div><div class="cell-r">Commons</div><div class="cell-r">FF</div>
+      </div>
+      <div class="row type">
+        <div class="marker" style="color: #c2352a; font-size: 20px;">1</div><div>fake_11</div><div class="cell-r" style="font-weight: 700;">1151</div><div class="cell-r">2-0</div><div class="cell-r">100%</div><div class="cell-r">4499</div><div class="cell-r">472</div><div class="cell-r">153</div>
+      </div>
+      <div class="row type">
+        <div class="marker" style="color: #c2352a; font-size: 20px;">2</div><div>fake_12</div><div class="cell-r" style="font-weight: 700;">1151</div><div class="cell-r">2-0</div><div class="cell-r">100%</div><div class="cell-r">4028</div><div class="cell-r">117</div><div class="cell-r">34</div>
+      </div>
+      <div class="row type">
+        <div class="marker" style="color: #c2352a; font-size: 20px;">3</div><div>fake_21</div><div class="cell-r" style="font-weight: 700;">1151</div><div class="cell-r">2-0</div><div class="cell-r">100%</div><div class="cell-r">3455</div><div class="cell-r">72</div><div class="cell-r">181</div>
+      </div>
+      <div class="row type">
+        <div class="marker" style="color: #6b5c43; font-size: 20px;">4</div><div>fake_3</div><div class="cell-r" style="font-weight: 700;">1028</div><div class="cell-r">2-1</div><div class="cell-r">67%</div><div class="cell-r">5438</div><div class="cell-r">1179</div><div class="cell-r">148</div>
+      </div>
+      <div class="row type">
+        <div class="marker" style="color: #6b5c43; font-size: 20px;">5</div><div>fake_4</div><div class="cell-r" style="font-weight: 700;">1028</div><div class="cell-r">2-1</div><div class="cell-r">67%</div><div class="cell-r">5210</div><div class="cell-r">849</div><div class="cell-r">212</div>
+      </div>
+      <div class="row type" style="border-bottom: none;">
+        <div class="marker" style="color: #6b5c43; font-size: 20px;">6</div><div>fake_1</div><div class="cell-r" style="font-weight: 700;">1025</div><div class="cell-r">2-1</div><div class="cell-r">67%</div><div class="cell-r">2363</div><div class="cell-r">1002</div><div class="cell-r">150</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- pinned photo: closest match -->
+  <div style="position: absolute; left: 860px; top: 330px; width: 300px; transform: rotate(3deg);">
+    <div class="pin" style="left: 140px; top: -6px;"></div>
+    <div class="paper" style="padding: 12px 12px 14px 12px; background: #f1ebdd;">
+      <div style="height: 130px; background: linear-gradient(160deg, #2b2a26, #0f0e0c); display: flex; align-items: center; justify-content: center;">
+        <div class="stencil" style="font-size: 44px; color: #f2c14e; letter-spacing: 0.1em;">1018 · 901</div>
+      </div>
+      <div class="marker" style="margin-top: 10px; font-size: 17px; color: #2a241c; text-align: center;">No Mercy #7 · Team A took it</div>
+    </div>
+  </div>
+
+  <!-- replay: map pinned to the wall -->
+  <div style="margin: 64px 44px 0 44px; display: flex; gap: 28px; align-items: flex-start;">
+    <div style="position: relative; width: 760px;">
+      <div class="marker" style="font-size: 30px; color: #f4efe2; transform: rotate(-1.2deg); margin-bottom: 10px; text-shadow: 2px 2px 0 rgba(0,0,0,0.45);">Death Toll · map 1 · round 1</div>
+      <div class="pin" style="left: 14px; top: 44px; z-index: 2;"></div>
+      <div class="pin" style="right: 18px; top: 48px; z-index: 2;"></div>
+      <div style="position: relative; height: 470px; background: #101010; border: 8px solid #e8dfc7; box-shadow: 0 12px 28px rgba(0,0,0,0.5); transform: rotate(0.6deg); overflow: hidden;">
+        <img src="overview.jpg" style="width: 100%; height: 100%; object-fit: cover; object-position: center; filter: sepia(0.35) contrast(1.05); display: block;">
+        <div class="dot" style="left: 388px; top: 104px; background: #2cb2d5;"></div>
+        <div class="dot" style="left: 396px; top: 116px; background: #29f2ef;"></div>
+        <div class="dot" style="left: 380px; top: 120px; background: #3073d0;"></div>
+        <div class="dot" style="left: 392px; top: 132px; background: #5aa8ff;"></div>
+        <div style="position: absolute; left: 430px; top: 150px; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #e0473a; opacity: 0.8;"></div>
+        <div class="marker" style="position: absolute; left: 414px; top: 96px; color: #fff; font-size: 15px; line-height: 1.15; text-shadow: 0 0 4px #000, 0 0 4px #000;">volence<br>dev_0001<br>sputnik<br>raczyn</div>
+        <div class="type" style="position: absolute; left: 12px; bottom: 10px; font-size: 13px; color: #f4efe2; background: rgba(20,16,12,0.75); padding: 4px 8px;">0:06 / 1:09</div>
+      </div>
+      <!-- scrub as a marker line -->
+      <div style="margin-top: 22px; display: flex; align-items: center; gap: 16px;">
+        <div class="stencil" style="font-size: 13px; color: #e9e2d3; border: 2px solid #e9e2d3; padding: 6px 12px;">Pause</div>
+        <div style="flex: 1; position: relative; height: 6px; background: rgba(0,0,0,0.5); border-radius: 3px;">
+          <div style="position: absolute; left: 0; top: 0; height: 6px; width: 9%; background: #e0473a;"></div>
+          <div style="position: absolute; left: calc(9% - 8px); top: -6px; width: 18px; height: 18px; border-radius: 50%; background: #f4efe2; box-shadow: 0 2px 4px rgba(0,0,0,0.6);"></div>
+        </div>
+        <div class="stencil" style="display: flex; gap: 8px; font-size: 13px; color: #cbbfa6;"><span>0.5x</span><span style="color: #fff; border-bottom: 2px solid #e0473a;">1x</span><span>2x</span><span>4x</span></div>
+      </div>
+    </div>
+
+    <!-- roster as polaroids -->
+    <div style="display: flex; flex-direction: column; gap: 14px; width: 380px; margin-top: 48px;">
+      <div class="marker" style="font-size: 22px; color: #f4efe2; transform: rotate(-2deg);">survivors</div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+        <div class="paper" style="padding: 8px 8px 10px 8px; transform: rotate(-1.5deg);"><div style="height: 62px; background: #4a4640;"></div><div class="marker" style="margin-top: 6px; font-size: 15px;">volence <span style="float: right; color: #2f7a3a;">94</span></div><div class="bar" style="width: 94%; background: repeating-linear-gradient(90deg, #3a9a48 0 6px, #2f7a3a 6px 8px);"></div></div>
+        <div class="paper" style="padding: 8px 8px 10px 8px; transform: rotate(1deg);"><div style="height: 62px; background: #4a4640;"></div><div class="marker" style="margin-top: 6px; font-size: 15px;">dev_0001 <span style="float: right; color: #2f7a3a;">94</span></div><div class="bar" style="width: 94%; background: repeating-linear-gradient(90deg, #3a9a48 0 6px, #2f7a3a 6px 8px);"></div></div>
+        <div class="paper" style="padding: 8px 8px 10px 8px; transform: rotate(0.8deg);"><div style="height: 62px; background: #4a4640;"></div><div class="marker" style="margin-top: 6px; font-size: 15px;">sputnik <span style="float: right; color: #b8862a;">61</span></div><div class="bar" style="width: 61%; background: repeating-linear-gradient(90deg, #d9a441 0 6px, #b8862a 6px 8px);"></div></div>
+        <div class="paper" style="padding: 8px 8px 10px 8px; transform: rotate(-1deg);"><div style="height: 62px; background: #4a4640;"></div><div class="marker" style="margin-top: 6px; font-size: 15px;">raczyn <span style="float: right; color: #c2352a;">23</span></div><div class="bar" style="width: 23%;"></div></div>
+      </div>
+      <div class="marker" style="font-size: 22px; color: #e0473a; transform: rotate(1.5deg); margin-top: 6px;">infected</div>
+      <div class="type" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; font-size: 15px; color: #e9e2d3;">
+        <div>Vodka <span style="color: #cbbfa6;">boomer</span></div><div>zeppelin <span style="color: #cbbfa6;">hunter</span></div>
+        <div>Tunnel <span style="color: #cbbfa6;">smoker</span></div><div>hoss <span style="color: #cbbfa6;">boomer</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

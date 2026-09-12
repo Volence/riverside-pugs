@@ -8,3 +8,6 @@ dist/
 # Scratch: worktrees and SDD ledgers/briefs. Never part of the source tree.
 .claude/worktrees/
 .superpowers/
+
+# Seeded design canvas (2 MB editor payload); regenerate from the .dc.html working files
+design/**/riverside-pug-redesign.html
