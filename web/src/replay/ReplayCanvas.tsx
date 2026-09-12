@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import type { EntitySample, PlayerSample } from '../../../src/replayFormat';
-import { drawScene, type ShowFlags } from './draw';
+import { drawScene, followTarget, type ShowFlags } from './draw';
 import type { CanvasSize } from './canvasSize';
 
 export interface ReplayCanvasProps {
@@ -62,7 +62,7 @@ export function ReplayCanvas(
     ctx.clearRect(0, 0, size.pixelW, size.pixelH);
     ctx.restore();
 
-    const target = followSlot === null ? null : (livePlayers[followSlot] ?? null);
+    const target = followTarget(livePlayers, followSlot);
     ctx.save();
     // Everything below this line is in CSS pixels. One scale here is what
     // lets an avatar radius or a line width in the draw code mean the same
