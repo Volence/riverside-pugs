@@ -3,7 +3,9 @@ import { api, type LiveEvent, type LiveMatch, type LivePlayer } from '../api';
 import {
   campaignName, deriveLiveStats, fmtBytes, labelFor, liveGroupStarts, orderLiveStatKeys,
 } from '../format';
-import { Empty, Panel, PlayerLink, Tile, Tiles } from '../components/bits';
+import { Empty, Panel, PlayerLink } from '../components/bits';
+import { PageHeader } from '../components/PageHeader';
+import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed } from '../components/StatTable';
 import { Viewer } from '../replay/Viewer';
 
@@ -47,12 +49,7 @@ export function Live({ me }: { me: string | null }) {
 
   return (
     <div class="page page--list">
-      <div class="page__head">
-        <div>
-          <p class="eyebrow">Right now</p>
-          <h2>Live</h2>
-        </div>
-      </div>
+      <PageHeader eyebrow="Right now" title="Live" />
 
       {matches.length === 0 ? (
         <Panel><Empty>Nothing being played right now.</Empty></Panel>
@@ -103,29 +100,20 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
 
   return (
     <Panel>
-      <Viewer spec={{ kind: 'live-match', matchId: m.id }} live names={namesFor(m)} />
-
-      <Tiles>
-        <Tile label="Score" value={`${m.teamAScore} - ${m.teamBScore}`} sub={campaignName(m.campaign)} />
-        <Tile label="Map" value={m.maps.length + 1} sub={m.currentMap ?? 'starting up'} />
-        <Tile label="Maps done" value={m.maps.length} />
-        <Tile label="Players" value={m.teamA.length + m.teamB.length} />
-        <Tile label="Feed" value={m.events.length} sub="events" />
-      </Tiles>
-
-      <div class="live__head">
-        <div>
-          <h3>{campaignName(m.campaign)}</h3>
-          <p class="muted">
-            {m.currentMap ?? 'starting up'}
+      <VersusHeader
+        teamA={m.teamA.map((p) => p.name)}
+        teamB={m.teamB.map((p) => p.name)}
+        scoreA={m.teamAScore}
+        scoreB={m.teamBScore}
+        subline={
+          <>
+            {campaignName(m.campaign)} · {m.currentMap ?? 'starting up'} · map {m.maps.length + 1}
             {m.stale && <span class="live__stale"> · no signal</span>}
-          </p>
-        </div>
-        <div class="scoreline">
-          <span class="scoreline__score num">{m.teamAScore} - {m.teamBScore}</span>
-          <a class="muted" href={`/match/${m.id}`}>#{m.id}</a>
-        </div>
-      </div>
+            {' · '}<a href={`/match/${m.id}`}>#{m.id}</a>
+          </>
+        }
+      />
+      <Viewer spec={{ kind: 'live-match', matchId: m.id }} live names={namesFor(m)} />
 
       {cols.length === 0 ? (
         <div class="live__teams">
