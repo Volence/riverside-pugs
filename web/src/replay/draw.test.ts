@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  avatarRadius, medianHeight, isSurvivor, entityStyle, project, drawScene, sceneCounts,
+  avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
-import type { MapTransform } from '../../../src/mapTransform';
+import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {
   return {
@@ -59,7 +59,7 @@ describe('avatarRadius', () => {
   });
 });
 
-describe('project', () => {
+describe('projectView', () => {
   // Every captured layer image is 2048x1271, but the canvas is drawn at a
   // different, responsive size. Regression for the bug where drawScene used
   // worldToImage's image-space pixels directly as canvas coordinates: image
@@ -69,20 +69,22 @@ describe('project', () => {
     const transform: MapTransform = {
       originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 2048, height: 1271,
     };
-    const canvasWidth = 1280;
-    const s = canvasWidth / transform.width;
+    // The full image as the view's box, with no padding, reproduces the old
+    // canvas-width-over-image-width scale (0.625) that this test used to
+    // pass in directly.
+    const view = fitView({ x0: 0, y0: 0, x1: 2048, y1: 1280 }, 1280, 800, 0);
 
-    expect(project(transform, s, 0, 0).px).toBeCloseTo(0, 5);
-    expect(project(transform, s, 2048, 0).px).toBeCloseTo(1280, 5);
+    expect(projectView(transform, view, 0, 0).px).toBeCloseTo(0, 5);
+    expect(projectView(transform, view, 2048, 0).px).toBeCloseTo(1280, 5);
   });
 
-  it('is the identity when the transform already matches the canvas (auto-fit)', () => {
+  it('is the identity when the box already matches the canvas (auto-fit)', () => {
     const transform: MapTransform = {
       originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
     };
-    const s = 1280 / transform.width;
-    expect(s).toBe(1);
-    expect(project(transform, s, 640, 0).px).toBeCloseTo(640, 5);
+    const view = fitView({ x0: 0, y0: 0, x1: 1280, y1: 794 }, 1280, 794, 0);
+    expect(view.scale).toBe(1);
+    expect(projectView(transform, view, 640, 0).px).toBeCloseTo(640, 5);
   });
 });
 
@@ -116,45 +118,59 @@ describe('drawScene', () => {
     };
   }
 
-  it('scales a player through a real transform into canvas space, not raw image pixels', () => {
-    // Layer images are 2048 wide; the canvas here is 1280 wide, so the scale
-    // factor is 0.625 and must be applied.
+  it('scales a player through a real transform and view into canvas space, not raw image pixels', () => {
+    // The view crops to a 1000x400 region of the image starting at image
+    // pixel (1000, 500), fit into an 800x400 canvas: scale 0.8, and because
+    // the box is wider (relative to the canvas) than it is tall, the short
+    // axis is padded, giving a non-zero y offset of 40. A future change that
+    // reverted `drawScene` to project against the raw image, or dropped the
+    // view's offset, would move this well off (400, 200).
     const transform: MapTransform = {
       originX: 0, originY: 0, unitsPerPixel: 1, image: 'test.png', width: 2048, height: 1271,
     };
+    const view = fitView({ x0: 1000, y0: 500, x1: 2000, y1: 900 }, 800, 400, 0);
+    expect(view.scale).toBeCloseTo(0.8, 5);
+    expect(view.offsetY).toBeCloseTo(40, 5);
+
     const { calls, ctx } = stubCtx();
     drawScene(ctx, {
       transform,
+      view,
       backdrop: null,
       trail: [],
-      players: [player({ x: 1600, y: -800, z: 0 })],
+      // World (1500, -700) is image-space (1500, 700): inside the box, 500px
+      // right of and 200px below its corner.
+      players: [player({ x: 1500, y: -700, z: 0 })],
       entities: [],
       show: { ci: true, entities: true },
-      width: 1280,
-      height: 794,
+      width: 800,
+      height: 400,
     });
 
     const arcs = calls.filter((c) => c.fn === 'arc');
     expect(arcs).toHaveLength(1);
     const [px, py, r] = arcs[0].args;
-    // Raw worldToImage places this at image-space (1600, 800). Scaled by
-    // 1280/2048 that is (1000, 500). The two differ by 600 and 300 pixels,
-    // far too much to pass by coincidence if the scaling were dropped.
-    expect(px).toBeCloseTo(1000, 5);
-    expect(py).toBeCloseTo(500, 5);
+    // (1500 - 1000) * 0.8 + 0 = 400; (700 - 500) * 0.8 + 40 = 200.
+    expect(px).toBeCloseTo(400, 5);
+    expect(py).toBeCloseTo(200, 5);
     // The avatar radius stays in screen units and must NOT be scaled by the
     // same factor: at 5-8 world units per pixel a survivor is 4-6 pixels, so
     // markers are meant to be icons, not scale models.
     expect(r).toBeCloseTo(7, 5);
   });
 
-  it('is the identity through the auto-fit path, where the transform width already equals the canvas width', () => {
+  it('is the identity through the auto-fit path, where the view box already matches the canvas', () => {
     const transform: MapTransform = {
       originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
     };
+    const view = fitView({ x0: 0, y0: 0, x1: 1280, y1: 794 }, 1280, 794, 0);
+    expect(view.scale).toBe(1);
+    expect(view.offsetX).toBe(0);
+    expect(view.offsetY).toBe(0);
     const { calls, ctx } = stubCtx();
     drawScene(ctx, {
       transform,
+      view,
       backdrop: null,
       trail: [],
       players: [player({ x: 640, y: -300, z: 0 })],
@@ -167,10 +183,10 @@ describe('drawScene', () => {
     const arcs = calls.filter((c) => c.fn === 'arc');
     expect(arcs).toHaveLength(1);
     const [px, py, r] = arcs[0].args;
-    // The scale factor is exactly 1 here (canvas width equals transform
-    // width), so the canvas coordinate equals the raw worldToImage pixel. A
-    // future change that hardcoded the 0.625 ratio from the 2048-wide layer
-    // images would scale this down to (400, 187.5) and fail here.
+    // The view is the identity here (auto-fit's box is the whole canvas), so
+    // the canvas coordinate equals the raw worldToImage pixel. A future
+    // change that hardcoded a scale or offset from the cropped-map path
+    // would move this off (640, 300).
     expect(px).toBeCloseTo(640, 5);
     expect(py).toBeCloseTo(300, 5);
     expect(r).toBeCloseTo(7, 5);

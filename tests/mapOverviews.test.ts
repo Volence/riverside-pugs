@@ -75,3 +75,28 @@ describe('overviewFor', () => {
     expect(overviewFor('l4d_vs_nonsense99_nowhere')).toBeNull();
   });
 });
+
+describe('content boxes', () => {
+  it('gives every map a content box inside its image', () => {
+    for (const m of Object.values(OVERVIEWS)) {
+      const b = m.contentBox;
+      expect(b.x0).toBeGreaterThanOrEqual(0);
+      expect(b.y0).toBeGreaterThanOrEqual(0);
+      expect(b.x1).toBeLessThanOrEqual(m.layers[0].width);
+      expect(b.y1).toBeLessThanOrEqual(m.layers[0].height);
+      expect(b.x1).toBeGreaterThan(b.x0);
+      expect(b.y1).toBeGreaterThan(b.y0);
+    }
+  });
+
+  // The whole point of the task. If a box covers the whole frame, cropping to
+  // it buys nothing, and that means the generator found something in the void.
+  it('crops a meaningful amount off at least most maps', () => {
+    const fractions = Object.values(OVERVIEWS).map((m) => {
+      const b = m.contentBox;
+      return ((b.x1 - b.x0) * (b.y1 - b.y0)) / (m.layers[0].width * m.layers[0].height);
+    });
+    const median = [...fractions].sort((a, b) => a - b)[Math.floor(fractions.length / 2)];
+    expect(median).toBeLessThan(0.75);
+  });
+});

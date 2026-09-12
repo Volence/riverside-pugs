@@ -40,7 +40,7 @@ export function Viewer(
     return { livePlayers: players, liveEntities: entities, counts: sceneCounts(players, entities) };
   }, [frames, playback.tMs]);
 
-  const { transform, backdrop } = useMapLayer(header, frames, livePlayers);
+  const { transform, view, backdrop } = useMapLayer(header, frames, livePlayers);
 
   const trail = useMemo(() => {
     const out: { x: number; y: number }[] = [];
@@ -69,6 +69,7 @@ export function Viewer(
     <div class="replay">
       <ReplayCanvas
         transform={transform}
+        view={view}
         backdrop={backdrop}
         trail={trail}
         livePlayers={livePlayers}
