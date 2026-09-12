@@ -25,8 +25,8 @@ export function useCountdownChrome(label: string | null, left: number): void {
   const urgent = label !== null && left <= URGENT_AT;
 
   useEffect(() => {
-    document.title = label === null ? 'L4D1 PUG' : `(${fmtClock(left)}) ${label}`;
-    return () => { document.title = 'L4D1 PUG'; };
+    document.title = label === null ? 'Riverside' : `(${fmtClock(left)}) ${label}`;
+    return () => { document.title = 'Riverside'; };
   }, [label, left]);
 
   useEffect(() => {

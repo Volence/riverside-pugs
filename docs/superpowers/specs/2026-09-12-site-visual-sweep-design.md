@@ -43,7 +43,7 @@ plus per-component restyling, never a grep for hex values in components.
 | `--border-strong` | `rgba(217,203,176,0.28)` | focused or active edges |
 | `--text` | `#d9cbb0` | body |
 | `--text-bright` | `#efe2c4` | titles, names, primary numbers |
-| `--text-muted` | `#8d7f66` | labels, secondary columns |
+| `--text-muted` | `#958770` | labels, secondary columns |
 
 Contrast is recomputed with WCAG relative luminance and recorded in the token
 comments the way the current file does. Body text on every surface it is used
@@ -54,14 +54,15 @@ must be checked, not assumed.
 
 | Token | Value | Only ever used for |
 |---|---|---|
-| `--accent` | `#c93a2e` | interactive: links, active chips, scrub progress, focus rings, the live dot |
+| `--accent` | `#de4e40` | interactive: links, active chips, scrub progress, focus rings, the live dot |
 | `--rule` | `#9b2a22` | the one red rule under a page header or panel header |
 | `--rating` | `#c9a45c` | SR and rating numbers, and the rank numerals of the top three |
 | `--win` | `#45b39c` | wins, survivor health, survivor team marks |
-| `--loss` | `#c93a2e` | losses, infected team marks (same hue as accent by design) |
+| `--loss` | `#de4e40` | losses, infected team marks (same hue as accent by design) |
 | `--draw` | `#8d7f66` | draws |
 
-`--accent-ink` becomes `#efe2c4` (text on a red fill). The amber tokens
+`--accent-ink` becomes `#0b0908`, the page black: bone on this red is only
+3.1:1, so a filled button carries dark ink. The amber tokens
 (`#e3892b`, `--accent-ink #1a1206`) are deleted. Nothing aliases them, and the
 tokens test (section 8) fails if either hex survives anywhere in `web/src`, so
 a component that still names amber cannot slip through.
@@ -385,3 +386,5 @@ Verification at every step:
 - Theater mode is a toggle on the one viewer, not a separate page. Follow is
   on by default in theater and off in the embedded viewer. No map opacity
   slider. Modeled on the l4dpug.com visualizer's close camera and edge HUD.
+- Accent brightened to #de4e40 and ink darkened after measuring contrast;
+  recorded in tokens.test.ts.
