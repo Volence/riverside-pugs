@@ -7,7 +7,16 @@ import {
 export type ReplaySpec =
   | { kind: 'file'; name: string }
   | { kind: 'match'; matchId: number; ordinal: number; half: number }
-  | { kind: 'live'; token: string };
+  | { kind: 'live'; token: string }
+  | { kind: 'live-match'; matchId: number };
+
+/** Both live variants name a session rather than a file: one by a standalone
+ *  token, one by a match id whose token the server keeps to itself. They are
+ *  handled identically from here on, so the distinction lives only in the URL
+ *  that resolves the current filename. */
+function isLive(spec: ReplaySpec): boolean {
+  return spec.kind === 'live' || spec.kind === 'live-match';
+}
 
 export interface ReplayState {
   header: ReplayHeader | null;
@@ -33,6 +42,8 @@ export function replayUrl(spec: ReplaySpec, since: number): string {
     case 'live':
       // Live resolves to a filename first, so this is never fetched directly.
       return `/api/replays/live/${encodeURIComponent(spec.token)}`;
+    case 'live-match':
+      return `/api/replays/live/match/${spec.matchId}`;
   }
 }
 
@@ -113,10 +124,10 @@ export function useReplaySource(spec: ReplaySpec | null): {
 
     async function tick(): Promise<void> {
       try {
-        // A live spec names a token, not a file. Resolving it every poll is
+        // A live spec names a session, not a file. Resolving it every poll is
         // what makes a round change appear on its own: the filename moves on,
         // and the cursor resets with it.
-        if (spec!.kind === 'live') {
+        if (isLive(spec!)) {
           const res = await fetch(replayUrl(spec!, 0));
           if (!res.ok) throw new Error('no live replay');
           const body = (await res.json()) as { filename: string; closed: boolean };
@@ -129,7 +140,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
         }
 
         const cursor = cursorRef.current;
-        const url = spec!.kind === 'live'
+        const url = isLive(spec!)
           ? `/api/replays/file/${encodeURIComponent(name!)}?since=${cursor}`
           : replayUrl(spec!, cursor);
 
@@ -149,13 +160,13 @@ export function useReplaySource(spec: ReplaySpec | null): {
 
         // A closed FILE has nothing more to say, which is the end of the
         // story for a 'file' or 'match' spec: stopping here is what keeps a
-        // finished replay from polling forever on somebody's open tab. A
-        // 'live' spec names a session token, not a file, though: this round's
-        // file closing just means the next round is about to write a new one
-        // under the same token, and only re-resolving the token (at the top
-        // of the next tick) can discover it. So a live spec keeps polling
+        // finished replay from polling forever on somebody's open tab.
+        // A live spec names a session, not a file, though: this round's file
+        // closing just means the next round is about to write a new one under
+        // the same session, and only re-resolving the session (at the top of
+        // the next tick) can discover it. So a live spec keeps polling
         // regardless of this file's closed state.
-        if ((spec!.kind === 'live' || !isClosed) && !cancelled) timer = setTimeout(tick, POLL_MS);
+        if ((isLive(spec!) || !isClosed) && !cancelled) timer = setTimeout(tick, POLL_MS);
       } catch (e) {
         if (cancelled) return;
         setError(e as Error);

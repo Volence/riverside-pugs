@@ -44,6 +44,15 @@ describe('liveView', () => {
     expect(live[0].teamB.map((p) => p.steamid)).toEqual(B);
   });
 
+  it('never carries the match token', () => {
+    // The token seeds sv_password in orchestrator.ts and /api/live is public,
+    // so anyone reading this payload would be reading their way into a
+    // private ranked match. The replay viewer addresses a live match by id.
+    seedLive();
+    const m = getLiveMatches(db)[0];
+    expect(JSON.stringify(m)).not.toContain(TOKEN);
+  });
+
   it('records the current map from MATCH_START', () => {
     const id = seedLive();
     recordMatchStart(db, TOKEN, 'l4d_vs_hospital01_apartment');
