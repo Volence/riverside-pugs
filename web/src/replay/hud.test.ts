@@ -4,6 +4,8 @@ import {
   INCAP_ARC_MAX, INCAP_POOL, TEMP_HEALTH_COLOR,
 } from './hud';
 import { STATE, VERSION } from '../../../src/replayFormat';
+import { distance } from './colorDistance';
+import { GHOST_COLOR } from './draw';
 
 describe('healthColor', () => {
   it('ramps green to red', () => {
@@ -187,7 +189,22 @@ describe('healthBar', () => {
     expect(dead.color).toBe(healthColor(0, false));
   });
 
-  it('has a temporary colour distinct from every colour in the health ramp', () => {
-    for (const h of [100, 40, 20, 0]) expect(healthColor(h, true)).not.toBe(TEMP_HEALTH_COLOR);
+  // Finding: the previous TEMP_HEALTH_COLOR (#5f9d78) sat only about 15 dE
+  // from healthColor's teal under normal vision, and 12 to 14 dE under
+  // protanopia and deuteranopia, so the permanent and temporary bar segments
+  // nearly merged. `!==` alone would pass at 1 dE, so this asserts the
+  // measured separation instead, following the idiom in draw.test.ts's
+  // SLOT_COLORS-under-dichromacy checks.
+  it('keeps the temporary colour far from every health-ramp colour and the ghost tint', () => {
+    const refs = [
+      healthColor(100, true),
+      healthColor(40, true),
+      healthColor(20, true),
+      healthColor(0, false),
+      GHOST_COLOR,
+    ];
+    for (const ref of refs) {
+      expect(distance(TEMP_HEALTH_COLOR, ref)).toBeGreaterThanOrEqual(30);
+    }
   });
 });

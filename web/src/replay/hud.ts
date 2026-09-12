@@ -52,13 +52,16 @@ export function barSegments(
 /** The temporary health colour, shared by the map ring and the panel bar.
  *
  *  Kept in step with `.hudp__bar-temp` in app.css by hand, because CSS cannot
- *  import this and the map cannot read a stylesheet. The panel's old value was
- *  a much darker green, which was fine as a five pixel bar on the panel's own
- *  dark background and invisible as a two pixel arc over bright map art. This
- *  is light enough for the map and still reads as "not real health" against
- *  the permanent green beside it: 38 dE from it, and 61 or more from every
- *  colour in `healthColor`'s ramp. */
-export const TEMP_HEALTH_COLOR = '#5f9d78';
+ *  import this and the map cannot read a stylesheet. The previous value,
+ *  #5f9d78, sat only about 15 dE from the site's teal (healthColor's
+ *  above-40 colour), 12 to 14 dE under protanopia and deuteranopia, so the
+ *  two segments nearly merged. This pale sage green instead measures at
+ *  least 32.6 dE under normal vision, 22.7 dE under protanopia and 26.5 dE
+ *  under deuteranopia from every colour in `healthColor`'s ramp, from the
+ *  dead/muted-text colour, and from GHOST_COLOR (see hud.test.ts for the
+ *  full table). Re-measure before changing this value, and keep
+ *  `.hudp__bar-temp` in app.css matching it by hand. */
+export const TEMP_HEALTH_COLOR = '#c2d9a7';
 
 /** The incapacitation pool a downed L4D survivor's health reads out of.
  *
