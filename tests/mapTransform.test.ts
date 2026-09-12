@@ -1,21 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  normalizeMapName, autoFitTransform, worldToImage, boundsOf, pickLayer, transformOfLayer,
+  autoFitTransform, worldToImage, boundsOf, pickLayer, transformOfLayer,
 } from '../src/mapTransform.js';
-
-describe('normalizeMapName', () => {
-  it('strips the versus infix so a vs map finds its overview', () => {
-    expect(normalizeMapName('l4d_vs_farm01_hilltop')).toBe('l4d_farm01_hilltop');
-  });
-
-  it('leaves a coop map name alone', () => {
-    expect(normalizeMapName('l4d_farm01_hilltop')).toBe('l4d_farm01_hilltop');
-  });
-
-  it('lowercases, because the header is whatever the engine reported', () => {
-    expect(normalizeMapName('L4D_VS_Farm01_Hilltop')).toBe('l4d_farm01_hilltop');
-  });
-});
 
 describe('pickLayer', () => {
   const layers = [

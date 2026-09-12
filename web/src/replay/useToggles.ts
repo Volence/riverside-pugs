@@ -7,12 +7,11 @@ export interface Toggles {
   chat: boolean;
   ci: boolean;
   entities: boolean;
-  follow: boolean;
 }
 
 export const DEFAULT_TOGGLES: Toggles = {
   hp: true, guns: false, events: true, chat: true,
-  ci: true, entities: true, follow: false,
+  ci: true, entities: true,
 };
 
 const KEY = 'replay.toggles';
