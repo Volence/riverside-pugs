@@ -245,6 +245,17 @@ int g_iRplLastKeyMs;
  *  cannot catch one, and the timer repeats, so without this a single bad
  *  netprop read would fill the log ten times a second for the whole match. */
 bool g_bRplSampling;
+/** Whether m_survivorCharacter exists on this build's send table, resolved
+ *  once against a real client rather than assumed.
+ *
+ *  Netprop names are runtime strings, so compiling proves nothing about them.
+ *  An absent prop makes GetEntProp throw, which unwinds the sampler, trips
+ *  the latch above and calls RplFail, and replay recording is then off for
+ *  the whole match. A wrong guess about this prop should cost one wrong
+ *  portrait, not a match's recording, so it is checked with HasEntProp and
+ *  falls back to writing 0, which is exactly what version 1 files carry. */
+bool g_bRplHasSurvChar;
+bool g_bRplSurvCharChecked;              // false until a valid client was available to ask
 int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
 int g_iRplFrameNo;
 /** Map counter used ONLY for replay filenames. g_iMapCount stops at MAX_MAPS,
@@ -853,9 +864,30 @@ void RplOpen()
 		return;
 	}
 
+	RplResolveSurvivorCharProp();
+
 	float interval = 1.0 / float(hz);
 	g_hReplayTimer = CreateTimer(interval, Timer_RplFrame, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 	PugDebug("replay: recording %s at %dHz (entities %dHz)", path, hz, entHz);
+}
+
+/** Resolve m_survivorCharacter against any valid client, once.
+ *
+ *  Needs a client in the server to ask, so it stays unresolved (and the
+ *  sampler writes 0) until there is one, and RplOpen retries every round
+ *  until the question can be answered. */
+void RplResolveSurvivorCharProp()
+{
+	if (g_bRplSurvCharChecked) return;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i)) continue;
+		g_bRplHasSurvChar = HasEntProp(i, Prop_Send, "m_survivorCharacter");
+		g_bRplSurvCharChecked = true;
+		if (!g_bRplHasSurvChar)
+			LogError("pug: m_survivorCharacter is absent; replays will record survivor character 0");
+		return;
+	}
 }
 
 /** Give up on replays for the rest of the match. */
@@ -1140,8 +1172,12 @@ public Action Timer_RplFrame(Handle timer)
 		// the zombie class for an infected. It was always 0 for survivors
 		// before, so this fills a field rather than growing the record, which
 		// is why no offset below this line moves.
+		//
+		// Guarded, not read blind: an absent netprop throws, and a throw here
+		// takes the whole match's recording down through the latch and
+		// RplFail. Falling back to 0 costs a neutral portrait for the round.
 		p = RplU8(p, survivor
-			? GetEntProp(client, Prop_Send, "m_survivorCharacter")
+			? (g_bRplHasSurvChar ? GetEntProp(client, Prop_Send, "m_survivorCharacter") : 0)
 			: GetEntProp(client, Prop_Send, "m_zombieClass"));
 		p = RplU8(p, weaponId);
 		p = RplU16(p, RplClampU16(clip));
