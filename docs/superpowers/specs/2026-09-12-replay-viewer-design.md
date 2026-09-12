@@ -283,3 +283,19 @@ Revisit later, not now:
 - No Mercy 4's hospital interior, per the resolved item above. Height scaling
   is the mitigation and may not be enough; it is revisited with the overhead
   capture work, where there will be real art to judge it against
+
+## Verification still owed
+
+The order of `SURVIVOR_CHARACTERS` in `src/replayFormat.ts` is
+`['bill', 'zoey', 'francis', 'louis']`, which is an assumption about
+`m_survivorCharacter` on L4D1 and not a verified fact. It is the one thing in
+this piece that fails silently: a wrong order puts the wrong face on the right
+player, which looks like a viewer bug rather than a bad constant.
+
+Verifying it takes one round on the local test server at
+`/home/volence/l4d1-ds`: record a round with known characters, run
+`scripts/dump-replay.ts` over the file, and read the `cls` byte for each
+survivor slot. Correct the array if it disagrees.
+
+Deploying the plugin to the Dallas box is a separate decision and has not been
+made.
