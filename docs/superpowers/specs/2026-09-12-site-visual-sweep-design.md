@@ -1,7 +1,6 @@
 # Site visual sweep: design
 
-Written 2026-09-12. Status: approved in conversation, awaiting review of this
-document before planning.
+Written 2026-09-12. Status: steps 1 to 5 implemented on feat/skill-stats-5 (plan docs/superpowers/plans/2026-09-12-site-visual-sweep.md); step 6, theater mode, has its own plan still to be written.
 
 Reference canvas (the approved look, plus the three directions it was chosen
 from on a second page): https://claude.ai/code/artifact/7f1d586e-6bfd-4382-bf39-0f41f59f758e

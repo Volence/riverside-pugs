@@ -81,6 +81,11 @@ twice per viewer on load.
   is a game-time difference plus pure wall time, which no pause can distort.
 - The match token no longer reaches any public response: not in a payload, not
   in a filename, not in the replay header bytes, which are zeroed on the wire.
+- The viewer carries the site's poster chrome since 2026-09-12: a film-frame stage with
+  the clock, counts and toggles overlaid inside it, a filmstrip scrub bar with timeline
+  ticks, portrait HUD tiles, and canvas chrome in the site palette. The eight slot colours,
+  the ghost colour and the entity colours are unchanged; the temporary-health tint moved to
+  #c2d9a7 so it stays at least 30 dE from every health band.
 
 ## 4. Local development
 
