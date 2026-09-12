@@ -326,6 +326,11 @@ export function decodeIndex(buf: Uint8Array, h: ReplayHeader): { tMs: number; of
 export function parseReplay(buf: Uint8Array): Replay | null {
   const header = decodeHeader(buf);
   if (!header) return null;
+  // A newer writer may have changed a record's size or the meaning of a
+  // field. Either way the bytes after this header decode into something that
+  // looks fine and is wrong, so refusing is the only safe answer. Older
+  // versions stay readable: this is a ceiling, not an equality check.
+  if (header.version > VERSION) return null;
   // An index means the writer closed cleanly and the frames stop where it
   // begins. No index means the file was never closed, so frames run to EOF
   // and the last one may be a fragment.

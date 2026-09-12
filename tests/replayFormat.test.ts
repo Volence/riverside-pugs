@@ -165,3 +165,27 @@ describe('keyframe index', () => {
     ]);
   });
 });
+
+describe('format version', () => {
+  it('refuses to parse a file from a newer writer', () => {
+    const buf = Buffer.concat([
+      encodeHeader(header({ version: VERSION + 1 })),
+      encodeFrame(frame({ tMs: 1 })),
+    ]);
+    expect(parseReplay(buf)).toBeNull();
+  });
+
+  it('still parses the current version', () => {
+    const buf = Buffer.concat([encodeHeader(header()), encodeFrame(frame({ tMs: 1 }))]);
+    expect(parseReplay(buf)?.frames).toHaveLength(1);
+  });
+
+  // decodeHeader deliberately does NOT gate on version. Something has to be
+  // able to read a newer file's header in order to say "this file is newer
+  // than I am" instead of "this file is corrupt", and the browse listing does
+  // exactly that.
+  it('still reports the version of a newer file through decodeHeader', () => {
+    const got = decodeHeader(encodeHeader(header({ version: VERSION + 1 })));
+    expect(got?.version).toBe(VERSION + 1);
+  });
+});
