@@ -1832,7 +1832,9 @@ Expected: `built: .../pug-match.smx`, no errors. Warnings about unused variables
 - [ ] **Step 4: Commit**
 
 ```bash
-git add plugin/pug-match.sp plugin/pug-match.smx
+# pug-match.smx is a build artifact and is gitignored (.gitignore:5). Commit the
+# source only; build.sh regenerates the binary.
+git add plugin/pug-match.sp
 git commit -m "feat(plugin): emit in-game chat on the CHAT line"
 ```
 
@@ -2521,7 +2523,8 @@ Expected: `built: .../pug-match.smx`, no errors and no warnings.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add plugin/pug-match.sp plugin/pug-match.smx
+# Source only. pug-match.smx is gitignored (.gitignore:5) as a build artifact.
+git add plugin/pug-match.sp
 git commit -m "feat(plugin): record 10Hz replay frames to a per-round binary file"
 ```
 
