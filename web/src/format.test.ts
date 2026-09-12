@@ -349,4 +349,10 @@ describe('campaignTint', () => {
       .map((s) => campaignTint(s).match(/ (\d+(\.\d+)?)\)$/)![1]));
     expect(hues.size).toBe(4);
   });
+
+  it('treats prototype keys as unknown campaigns', () => {
+    for (const slug of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(campaignTint(slug)).toMatch(/^oklch\(/);
+    }
+  });
 });
