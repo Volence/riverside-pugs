@@ -56,6 +56,38 @@ export interface ShowFlags {
   entities: boolean;
 }
 
+export interface SceneCounts { survivors: number; commons: number; specials: number }
+
+/**
+ * What the status line reports.
+ *
+ * Specials counts both halves of the picture: rostered infected players who
+ * are alive, and AI specials, which arrive as entities rather than player
+ * records because the player block is the roster and a bot never joins it.
+ * Counting only one of the two would read as zero on a mix night and as
+ * nearly zero in a ranked match with an AI tank on the field.
+ */
+export function sceneCounts(players: PlayerSample[], entities: EntitySample[]): SceneCounts {
+  let survivors = 0;
+  let specials = 0;
+  for (const p of players) {
+    if ((p.state & STATE.ALIVE) === 0) continue;
+    if (isSurvivor(p)) survivors++;
+    // A ghost has not spawned, so it is not on the field to be counted.
+    else if ((p.state & STATE.GHOST) === 0) specials++;
+  }
+
+  let commons = 0;
+  for (const e of entities) {
+    if (e.kind === ENTITY_KIND.COMMON) commons++;
+    else if (
+      e.kind === ENTITY_KIND.SMOKER_AI || e.kind === ENTITY_KIND.BOOMER_AI ||
+      e.kind === ENTITY_KIND.HUNTER_AI || e.kind === ENTITY_KIND.TANK_AI
+    ) specials++;
+  }
+  return { survivors, commons, specials };
+}
+
 export interface DrawArgs {
   transform: MapTransform;
   backdrop: HTMLImageElement | null;

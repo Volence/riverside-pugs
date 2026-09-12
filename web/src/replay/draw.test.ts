@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  avatarRadius, medianHeight, isSurvivor, entityStyle, project, drawScene,
+  avatarRadius, medianHeight, isSurvivor, entityStyle, project, drawScene, sceneCounts,
 } from './draw';
 import { STATE, ENTITY_KIND, PLAYER_SLOTS, type PlayerSample } from '../../../src/replayFormat';
 import type { MapTransform } from '../../../src/mapTransform';
@@ -186,5 +186,30 @@ describe('entityStyle', () => {
 
   it('returns null for a kind it does not know', () => {
     expect(entityStyle(99)).toBeNull();
+  });
+});
+
+describe('sceneCounts', () => {
+  it('counts living survivors', () => {
+    const ps = [player({ slot: 0 }), player({ slot: 1, state: STATE.PRESENT }), player({ slot: 2 })];
+    expect(sceneCounts(ps, []).survivors).toBe(2);
+  });
+
+  it('counts rostered infected and AI specials together', () => {
+    const ps = [player({ slot: 4 }), player({ slot: 5 })];
+    const es = [
+      { ref: 1, kind: ENTITY_KIND.HUNTER_AI, state: 0, x: 0, y: 0, z: 0, health: 250 },
+      { ref: 2, kind: ENTITY_KIND.COMMON, state: 0, x: 0, y: 0, z: 0, health: 50 },
+    ];
+    expect(sceneCounts(ps, es).specials).toBe(3);
+    expect(sceneCounts(ps, es).commons).toBe(1);
+  });
+
+  // A ghost is queued to spawn, not on the field. Counting it would tell a
+  // survivor watching the live page how many are already up, which is part
+  // of what the delay exists to blunt.
+  it('does not count a ghost as a special on the field', () => {
+    const ps = [player({ slot: 4, state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST })];
+    expect(sceneCounts(ps, []).specials).toBe(0);
   });
 });
