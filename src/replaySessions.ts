@@ -1,6 +1,13 @@
 import { readdirSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { decodeHeader, HEADER_BYTES } from './replayFormat.js';
+import type { ReplayFileInfo, ReplaySession } from './replaySessionTypes.js';
+
+// Re-exported so every existing importer of these two types from this module
+// keeps working unchanged; the definitions themselves live in
+// replaySessionTypes.ts, which has no imports and is what the browser project
+// includes instead of this file.
+export type { ReplayFileInfo, ReplaySession };
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
@@ -17,31 +24,6 @@ const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
  * magnitude past normal.
  */
 export const CLOSED_AFTER_IDLE_MS = 60_000;
-
-export interface ReplayFileInfo {
-  filename: string;
-  token: string;
-  ordinal: number;
-  half: number;
-  bytes: number;
-  mtimeMs: number;
-  map: string;
-  startedUnix: number;
-  frameCount: number;
-  playerHz: number;
-  version: number;
-  /** True when this file is history and may be served whole. False means it
-   *  is still being written, and every byte handed out must go through the
-   *  anti-ghosting cutoff. */
-  closed: boolean;
-}
-
-export interface ReplaySession {
-  token: string;
-  /** Earliest `startedUnix` across the session's files, in seconds. */
-  startedUnix: number;
-  files: ReplayFileInfo[];
-}
 
 /** Read just the header. A replay runs to 15 MB and a listing shows dozens,
  *  so parsing one to learn its map name is not an option. */

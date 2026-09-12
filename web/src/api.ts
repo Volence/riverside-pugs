@@ -2,7 +2,7 @@
  *  src/routes/{api,stats,auth}.ts actually return. If a shape changes there,
  *  it changes here. 4a introduces no new endpoints and alters no existing one. */
 
-import type { ReplaySession } from '../../src/replaySessions';
+import type { ReplaySession } from '../../src/replaySessionTypes';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
