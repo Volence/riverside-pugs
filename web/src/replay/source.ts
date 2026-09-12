@@ -88,8 +88,13 @@ export function useReplaySource(spec: ReplaySpec | null): {
   const [state, setState] = useState<ReplayState>({ header: null, frames: [], cursor: 0 });
   const [closed, setClosed] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  // The cursor used to build the next request. Updated synchronously the
+  // moment it changes (a fresh chunk, or a live round change resetting it to
+  // 0), unlike `state`, which only reflects a `setState` call once Preact
+  // gets around to applying it. Reading `state.cursor` back out here would
+  // reuse whatever value was current at the START of this render pass, not
+  // the one this same tick just decided on.
+  const cursorRef = useRef(0);
 
   const key = spec ? JSON.stringify(spec) : '';
 
@@ -99,6 +104,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let name: string | null = spec.kind === 'file' ? spec.name : null;
 
+    cursorRef.current = 0;
     setState({ header: null, frames: [], cursor: 0 });
     setClosed(false);
     setError(null);
@@ -115,11 +121,12 @@ export function useReplaySource(spec: ReplaySpec | null): {
           if (cancelled) return;
           if (body.filename !== name) {
             name = body.filename;
+            cursorRef.current = 0;
             setState({ header: null, frames: [], cursor: 0 });
           }
         }
 
-        const cursor = stateRef.current.cursor;
+        const cursor = cursorRef.current;
         const url = spec!.kind === 'live'
           ? `/api/replays/file/${encodeURIComponent(name!)}?since=${cursor}`
           : replayUrl(spec!, cursor);
@@ -130,13 +137,23 @@ export function useReplaySource(spec: ReplaySpec | null): {
         if (cancelled) return;
 
         const isClosed = res.headers.get('X-Replay-Closed') === '1';
-        setState((s) => appendChunk(s, chunk, s.cursor));
+        setState((s) => {
+          const next = appendChunk(s, chunk, cursor);
+          cursorRef.current = next.cursor;
+          return next;
+        });
         setClosed(isClosed);
         setError(null);
 
-        // A closed file has nothing more to say. Stopping here is what keeps a
-        // finished replay from polling forever on somebody's open tab.
-        if (!isClosed && !cancelled) timer = setTimeout(tick, POLL_MS);
+        // A closed FILE has nothing more to say, which is the end of the
+        // story for a 'file' or 'match' spec: stopping here is what keeps a
+        // finished replay from polling forever on somebody's open tab. A
+        // 'live' spec names a session token, not a file, though: this round's
+        // file closing just means the next round is about to write a new one
+        // under the same token, and only re-resolving the token (at the top
+        // of the next tick) can discover it. So a live spec keeps polling
+        // regardless of this file's closed state.
+        if ((spec!.kind === 'live' || !isClosed) && !cancelled) timer = setTimeout(tick, POLL_MS);
       } catch (e) {
         if (cancelled) return;
         setError(e as Error);

@@ -9,7 +9,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
-    "types": ["vite/client", "node"]
+    "types": ["vite/client"]
   },
-  "include": ["src", "../src/replayFormat.ts", "../src/mapTransform.ts", "../src/replaySessions.ts"]
+  "include": ["src", "../src/replayFormat.ts", "../src/mapTransform.ts", "../src/replaySessionTypes.ts"]
 }
