@@ -267,13 +267,18 @@ describe('orderLiveStatKeys and the dead-key set', () => {
 });
 
 describe('stat families within a side', () => {
-  const defs = [
+  // The callbacks are annotated rather than using `as const`. With `as const`
+  // the first map() fixes the element type at side: 'survivor', and concat
+  // then rejects the infected half, because a variable annotation does not
+  // flow backwards into map's inference. The values are unchanged.
+  type Def = { key: string; side: 'survivor' | 'infected' };
+  const defs: Def[] = [
     'skeets', 'team_skeets', 'skeet_assists', 'clears', 'insta_clears',
     'crowns', 'draw_crowns', 'tank_damage', 'rock_skeets', 'boomer_pops',
-  ].map((key) => ({ key, side: 'survivor' as const })).concat(
+  ].map((key): Def => ({ key, side: 'survivor' })).concat(
     ['damage_as_si', 'dps_landed', 'pounce_damage_high', 'boomer_spawns',
       'boom_successes', 'boomed_vomit', 'biles_landed', 'tank_punches',
-    ].map((key) => ({ key, side: 'infected' as const })),
+    ].map((key): Def => ({ key, side: 'infected' })),
   );
 
   const adjacent = (out: string[], a: string, b: string) =>
