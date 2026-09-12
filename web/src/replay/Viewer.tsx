@@ -25,8 +25,14 @@ import type { TimelineEntry } from './timeline';
  */
 const STAGE_MAX_VH = 78;
 
+/** The default roster lookup, as one shared object rather than a fresh `{}`
+ *  per render. The canvas repaints when its props change, and a route that
+ *  passes no names (the by-filename replay page) would otherwise hand it a
+ *  new object every render and make a paused viewer repaint for nothing. */
+const NO_NAMES: Record<string, string> = {};
+
 export function Viewer(
-  { spec, live = false, names = {}, timeline }:
+  { spec, live = false, names = NO_NAMES, timeline }:
   { spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[] },
 ) {
   const { header, frames, closed, tooNew, error } = useReplaySource(spec);
@@ -37,20 +43,29 @@ export function Viewer(
   const [followSlot, setFollowSlot] = useState<number | null>(null);
 
   /**
-   * One interpolated frame per tick, shared by everything that reads it.
+   * One interpolated frame per DOM tick, shared by everything made of DOM.
    *
-   * The canvas, the status counts and the health panels must agree. Letting
-   * each call `bracket` itself would drift them a frame apart, which shows up
-   * as a health number sitting next to an avatar that has already moved.
+   * The status counts, the health panels and the map layer must agree, so
+   * they all read this one memo rather than bracketing for themselves. It
+   * runs at `playback.tMs`, which publishes about ten times a second, because
+   * that is the rate the recording changes at: nothing below can show a value
+   * the frames did not have.
+   *
+   * The canvas is deliberately NOT on this. It interpolates from
+   * `playback.tRef` inside its own animation loop, because it is the one
+   * thing on the page whose output changes between two recorded frames.
+   * Worst case it is drawing a moment up to one publish ahead of these
+   * numbers, which is the same tenth of a second the recording rounds away
+   * anyway.
    */
-  const { livePlayers, liveEntities, counts } = useMemo(() => {
+  const { livePlayers, counts } = useMemo(() => {
     const pair = bracket(frames, playback.tMs);
     if (!pair) {
-      return { livePlayers: [], liveEntities: [], counts: { survivors: 0, commons: 0, specials: 0 } };
+      return { livePlayers: [], counts: { survivors: 0, commons: 0, specials: 0 } };
     }
     const players = interpolatePlayers(pair.a, pair.b, pair.f);
     const entities = interpolateEntities(pair.a, pair.b, pair.f);
-    return { livePlayers: players, liveEntities: entities, counts: sceneCounts(players, entities) };
+    return { livePlayers: players, counts: sceneCounts(players, entities) };
   }, [frames, playback.tMs]);
 
   /**
@@ -107,8 +122,8 @@ export function Viewer(
           size={size}
           backdrop={backdrop}
           trail={trail}
-          livePlayers={livePlayers}
-          liveEntities={liveEntities}
+          frames={frames}
+          timeRef={playback.tRef}
           show={show}
           followSlot={followSlot}
           names={names}
