@@ -217,6 +217,7 @@ ConVar g_cvReplayHz;                     // 0 = off. Instant rcon kill switch, n
 ConVar g_cvReplayEntityHz;               // world entity sample rate; <= player rate
 ConVar g_cvReplayDir;                    // directory, relative to the game dir
 ConVar g_cvReplayMaxMb;                  // per-round byte cap, a runaway bound
+ConVar g_cvReplayAfterEnd;               // 1 = keep recording after the finale ends the match
 
 File g_hReplay;                          // null when not recording
 Handle g_hReplayTimer;
@@ -241,6 +242,13 @@ int g_iRplLastKeyMs;
 bool g_bRplSampling;
 int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
 int g_iRplFrameNo;
+/** Map counter used ONLY for replay filenames. g_iMapCount stops at MAX_MAPS,
+ *  which is correct for the score table but would make every map after the 8th
+ *  reuse ordinal 8 and silently overwrite that map's replay files. This one
+ *  never stops, so an all-night session keeps every file. Below the cap it
+ *  tracks g_iMapCount exactly, so a replay still lines up with the map the
+ *  backend recorded. */
+int g_iRplMapSeq;
 int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one call
 
 // Staging knobs. Both default to production behaviour; they exist so the plugin
@@ -300,6 +308,9 @@ orientation threshold. Changing this changes the rules under every rating earned
 	g_cvReplayDir = CreateConVar("sm_pug_replay_dir", "replays",
 		"Directory for replay files, relative to the game dir. Empty disables recording.",
 		FCVAR_NOTIFY);
+	g_cvReplayAfterEnd = CreateConVar("sm_pug_replay_after_end", "1",
+		"1 = keep recording replays after the finale has ended the match. Recording only; no ROUND_START, no scoring.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvReplayMaxMb = CreateConVar("sm_pug_replay_max_mb", "64",
 		"Per-round replay size cap in MB. A runaway bound, not a budget: a full round is 10 to 15 MB.",
 		FCVAR_NOTIFY, true, 1.0, true, 512.0);
@@ -750,7 +761,11 @@ void RplOpen()
 {
 	RplClose();               // paranoia: a previous round that never closed
 	if (g_bReplayFailed) return;
-	if (g_State != MS_Live) return;
+	// MS_Ended is allowed so an all-night session keeps recording after a
+	// finale has closed the match. Nothing else about MS_Ended changes: the
+	// result was already reported and no further ROUND_START is ever emitted.
+	if (g_State != MS_Live
+		&& !(g_State == MS_Ended && g_cvReplayAfterEnd.BoolValue)) return;
 
 	int hz = g_cvReplayHz.IntValue;
 	if (hz <= 0) return;
@@ -769,7 +784,7 @@ void RplOpen()
 	// Same naming convention as the demos, and for the same reason: the link
 	// between a file and its match is a property of the filename, so it
 	// survives a backend restart. There is no datagram announcing this file.
-	Format(path, sizeof(path), "%s/pug_%s_%d_%d.rpl", dir, g_sToken, g_iMapCount, g_iHalf);
+	Format(path, sizeof(path), "%s/pug_%s_%d_%d.rpl", dir, g_sToken, g_iRplMapSeq, g_iHalf);
 	g_hReplay = OpenFile(path, "wb");
 	if (g_hReplay == null)
 	{
@@ -1615,6 +1630,7 @@ bool TokenArgOk(int args)
 void ResetMatchState()
 {
 	g_bReplayFailed = false;
+	g_iRplMapSeq = 0;
 	g_State = MS_None;
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
@@ -1906,6 +1922,14 @@ public void OnMapEnd()
 
 public void OnMapStart()
 {
+	// Past the finale, FinalizeMap never runs (it lives behind the MS_Live
+	// guard in Event_RoundEnd), so nothing else would advance the replay map
+	// sequence and every post-finale map would reuse one ordinal and overwrite
+	// the map before it. Advance it here instead. Deliberately MS_Ended only:
+	// during a live match FinalizeMap owns this counter, and incrementing it
+	// in both places would skip an ordinal on every map.
+	if (g_State == MS_Ended && g_sToken[0] != '\0') g_iRplMapSeq++;
+
 	// Failsafe for the score-read/changelevel race: a 2nd-half round_end set
 	// g_bPendingFinalize, but the map changed before FinalizeMap ran (e.g. the
 	// delayed score-read retry chain (up to ~8s) was still in flight and got
@@ -1995,6 +2019,18 @@ public void OnRoundIsLive()
 
 		RplOpen();
 	}
+	else if (g_State == MS_Ended && g_cvReplayAfterEnd.BoolValue)
+	{
+		// Recording only, past the finale. Deliberately emits NO ROUND_START
+		// and touches no score, side or roster state: the match result has
+		// already been reported and a late round row would corrupt a record
+		// the backend considers final. The only things set are the two values
+		// the recorder itself needs, the half and the round's time origin that
+		// every frame's t_ms is measured from.
+		g_iHalf = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")) ? 2 : 1;
+		g_fRoundLiveAt = GetGameTime();
+		RplOpen();
+	}
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
@@ -2035,7 +2071,18 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
  *  that index IS the half-1 survivor team. Half 2's survivors are the other. */
 public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
-	if (g_State != MS_Live || g_bRoundEnded || !g_bHalfWasLive) return;
+	if (g_State != MS_Live || g_bRoundEnded || !g_bHalfWasLive)
+	{
+		// Recording past the finale: no scoring happens here, but the file
+		// still has to be closed so it gets its keyframe index and frame
+		// count rather than being left in the never-closed state.
+		if (g_State == MS_Ended && g_hReplay != null)
+		{
+			g_fRoundLiveAt = 0.0;
+			RplClose();
+		}
+		return;
+	}
 	g_bRoundEnded = true;
 	bool second = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 	int survPug = ObserveSurvivorPugTeam();
@@ -2210,6 +2257,10 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 void FinalizeMap()
 {
 	g_bPendingFinalize = false;
+	// Advanced BEFORE the MAX_MAPS guard below, and never capped, so replay
+	// filenames keep getting fresh ordinals after the score table stops
+	// growing. Below the cap this stays equal to g_iMapCount.
+	g_iRplMapSeq++;
 	if (g_iMapCount >= MAX_MAPS) return;
 	strcopy(g_sMapName[g_iMapCount], 64, g_sCurrentMap);
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
