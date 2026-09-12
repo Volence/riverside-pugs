@@ -12,6 +12,7 @@ import { MapDetail } from './routes/MapDetail';
 import { Maps } from './routes/Maps';
 import { Profile } from './routes/Profile';
 import { Replays } from './routes/Replays';
+import { ReplayPage } from './routes/ReplayPage';
 import { Empty, Panel } from './components/bits';
 import './styles/app.css';
 
@@ -43,6 +44,7 @@ function App() {
           <Route path="/match/:id" component={MatchDetail} me={me} />
           <Route path="/maps" component={Maps} />
           <Route path="/replays" component={Replays} />
+          <Route path="/replay/file/:name" component={ReplayPage} />
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} />
           <Route default component={NotFound} />
