@@ -25,6 +25,46 @@
  *  PUG, short enough that a message cannot push a log line into truncation. */
 #define CHAT_MAX_BYTES 128
 
+// Replay file layout. Every number here also exists in src/replayFormat.ts.
+// Changing one without changing the other produces a file that parses into
+// plausible nonsense rather than an error, which is why the in-game
+// verification at the end of this plan reads a real file back.
+#define RPL_VERSION        1
+#define RPL_HEADER_BYTES   160
+#define RPL_SLOTS          8
+#define RPL_PLAYER_RECORD  20
+#define RPL_PLAYER_BLOCK   160
+#define RPL_FRAME_HEADER   8
+#define RPL_ENTITY_RECORD  12
+#define RPL_INDEX_RECORD   8
+// A keyframe every 10 seconds, so a 6 minute round indexes in 36 entries.
+#define RPL_KEYFRAME_MS    10000
+// Hard ceiling on entities in one frame. Commons run 20 to 30 in a versus
+// round; this is headroom, and overflow drops the excess rather than writing
+// past the buffer.
+#define RPL_MAX_ENTITIES   128
+#define RPL_FRAME_MAX      (RPL_FRAME_HEADER + RPL_PLAYER_BLOCK + RPL_MAX_ENTITIES * RPL_ENTITY_RECORD)
+
+// Entity kinds. Everything that is not one of the eight rostered players.
+#define RPL_K_COMMON       1
+#define RPL_K_WITCH        2
+#define RPL_K_TANK_ROCK    3
+#define RPL_K_TANK_AI      4
+#define RPL_K_SURVIVOR_BOT 5
+#define RPL_K_SMOKER_AI    6
+#define RPL_K_BOOMER_AI    7
+#define RPL_K_HUNTER_AI    8
+
+// State bits, shared by player and entity records.
+#define RPL_S_PRESENT      (1 << 0)
+#define RPL_S_ALIVE        (1 << 1)
+#define RPL_S_INCAP        (1 << 2)
+#define RPL_S_LEDGED       (1 << 3)
+#define RPL_S_PINNED       (1 << 4)
+#define RPL_S_BILED        (1 << 5)
+#define RPL_S_BURNING      (1 << 6)
+#define RPL_S_GHOST        (1 << 7)
+
 enum MatchState
 {
 	MS_None = 0,   // no match configured
@@ -172,6 +212,31 @@ bool g_bHasBoomLanded;
 // calls), so the include must sit below them.
 #include "pug-stats.inc"
 
+// ---------- replay recording ----------
+ConVar g_cvReplayHz;                     // 0 = off. Instant rcon kill switch, no reload.
+ConVar g_cvReplayEntityHz;               // world entity sample rate; <= player rate
+ConVar g_cvReplayDir;                    // directory, relative to the game dir
+ConVar g_cvReplayMaxMb;                  // per-round byte cap, a runaway bound
+
+File g_hReplay;                          // null when not recording
+Handle g_hReplayTimer;
+int g_iReplayFrames;
+int g_iReplayBytes;
+/** Latched for the rest of the MATCH on any write failure. A replay problem
+ *  must never turn into a match problem, so the recorder gives up completely
+ *  rather than retrying every round. */
+bool g_bReplayFailed;
+/** Entity refs for world entities only: commons, the witch, the rock. Players
+ *  are iterated instead, because MaxClients is small and because bots and AI
+ *  specials are not visible any other way. */
+ArrayList g_hRplEnts;
+ArrayList g_hRplIndexT;                  // keyframe t_ms
+ArrayList g_hRplIndexOff;                // keyframe byte offset
+int g_iRplLastKeyMs;
+int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
+int g_iRplFrameNo;
+int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one call
+
 // Staging knobs. Both default to production behaviour; they exist so the plugin
 // can be exercised on a test instance without eight people in the server.
 ConVar g_cvMinOrient;                    // rostered players needed to move the orientation mapping
@@ -219,6 +284,23 @@ orientation threshold. Changing this changes the rules under every rating earned
 	g_cvRecordDemos = CreateConVar("sm_pug_record_demos", "1",
 		"1 = stop autorecord and record a named pug_<token>_<ordinal>_<map> demo for each map of a match.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+
+	g_cvReplayHz = CreateConVar("sm_pug_replay_hz", "10",
+		"Replay sample rate in Hz. 0 disables recording. Takes effect at the next round.",
+		FCVAR_NOTIFY, true, 0.0, true, 20.0);
+	g_cvReplayEntityHz = CreateConVar("sm_pug_replay_entity_hz", "10",
+		"World entity sample rate in Hz. Clamped to the player rate.",
+		FCVAR_NOTIFY, true, 0.0, true, 20.0);
+	g_cvReplayDir = CreateConVar("sm_pug_replay_dir", "replays",
+		"Directory for replay files, relative to the game dir. Empty disables recording.",
+		FCVAR_NOTIFY);
+	g_cvReplayMaxMb = CreateConVar("sm_pug_replay_max_mb", "64",
+		"Per-round replay size cap in MB. A runaway bound, not a budget: a full round is 10 to 15 MB.",
+		FCVAR_NOTIFY, true, 1.0, true, 512.0);
+
+	g_hRplEnts = new ArrayList();
+	g_hRplIndexT = new ArrayList();
+	g_hRplIndexOff = new ArrayList();
 
 	HookEvent("round_start", Event_RoundStart);
 	HookEvent("round_end", Event_RoundEnd);
@@ -317,6 +399,13 @@ public void OnLibraryRemoved(const char[] name)
 	if (StrEqual(name, "readyup")) g_bReadyUpAvailable = false;
 }
 
+/** Plugin unload/reload: close whatever replay is open rather than leaving it
+ *  headerless-index and orphaned mid-round. */
+public void OnPluginEnd()
+{
+	RplClose();
+}
+
 bool InReadyUp()
 {
 	return g_bReadyUpAvailable && IsInReady();
@@ -403,6 +492,9 @@ void EmitRoundEnd(int half, const char[] surv, int score)
 		// chain is TIMER_FLAG_NO_MAPCHANGE, so it cannot outlive this map.
 		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d", g_sCurrentMap, half, surv, score);
 	}
+	// Close before the round timing is cleared: RplClose logs the frame count
+	// and nothing after this point can produce another frame.
+	RplClose();
 	g_fRoundLiveAt = 0.0;
 }
 
@@ -519,6 +611,518 @@ void DumpLine(const char[] fmt, any ...)
 	char line[1024];
 	VFormat(line, sizeof(line), fmt, 2);
 	PrintToServer("%s", line);
+}
+
+// ---------- replay byte packing ----------
+// Explicit little-endian, one byte per cell, so the file never depends on how
+// this machine lays out a native word. The whole buffer goes out in a single
+// WriteFile at size = 1.
+
+int RplU8(int pos, int v)
+{
+	g_iRplBuf[pos] = v & 0xFF;
+	return pos + 1;
+}
+
+int RplU16(int pos, int v)
+{
+	g_iRplBuf[pos]     = v & 0xFF;
+	g_iRplBuf[pos + 1] = (v >> 8) & 0xFF;
+	return pos + 2;
+}
+
+int RplU32(int pos, int v)
+{
+	g_iRplBuf[pos]     = v & 0xFF;
+	g_iRplBuf[pos + 1] = (v >> 8) & 0xFF;
+	g_iRplBuf[pos + 2] = (v >> 16) & 0xFF;
+	g_iRplBuf[pos + 3] = (v >> 24) & 0xFF;
+	return pos + 4;
+}
+
+/** Clamp before packing. Source world bounds are +/- 16384 so a real position
+ *  always fits an int16, but a detached or uninitialised entity can report
+ *  something absurd, and wrapping it would draw a player on the far side of
+ *  the map rather than at the edge. */
+int RplClampI16(int v)
+{
+	if (v >  32767) return  32767;
+	if (v < -32768) return -32768;
+	return v;
+}
+
+int RplI16(int pos, int v)
+{
+	// Two's complement, so the byte pattern of a negative int16 is the low 16
+	// bits of the negative int32. No separate path needed.
+	return RplU16(pos, RplClampI16(v));
+}
+
+/** Fixed-width ASCII, nul padded. */
+int RplStr(int pos, const char[] s, int len)
+{
+	// strlen hoisted out of the loop: inside it, this is quadratic.
+	int n = strlen(s);
+	if (n > len) n = len;
+	// A ternary mixing a char branch with an int branch does not typecheck
+	// under newdecls (error 450, even between two char-typed values), so this
+	// is spelled as if/else instead. Same bytes either way.
+	for (int i = 0; i < len; i++)
+	{
+		if (i < n) g_iRplBuf[pos + i] = s[i];
+		else g_iRplBuf[pos + i] = 0;
+	}
+	return pos + len;
+}
+
+// ---------- replay world entity tracking ----------
+
+/** Which replay entity kind a world entity classname maps to, or 0 for one we
+ *  do not record.
+ *
+ *  These three classnames are all in use by this deployment's own plugins:
+ *  "infected" in l4dready.sp, "witch" in l4d1_random_witch_model.sp,
+ *  "tank_rock" in l4d_ssi_teleport_fix.sp. Anything else is ignored. */
+int RplWorldKind(const char[] classname)
+{
+	if (StrEqual(classname, "infected"))  return RPL_K_COMMON;
+	if (StrEqual(classname, "witch"))     return RPL_K_WITCH;
+	if (StrEqual(classname, "tank_rock")) return RPL_K_TANK_ROCK;
+	return 0;
+}
+
+/** The whole reason the recorder is affordable.
+ *
+ *  The obvious implementation finds these with FindEntityByClassname on every
+ *  frame, which walks the entity table once per classname, ten times a second,
+ *  on a box that already overruns about 1% of its frames. Creation and
+ *  destruction are events the engine raises anyway, so the work moves off the
+ *  sampling path entirely and the per-frame cost becomes walking about thirty
+ *  tracked references.
+ *
+ *  References, not indices: the engine recycles indices, and a stale index
+ *  would silently start reporting a different entity's position. */
+public void OnEntityCreated(int entity, const char[] classname)
+{
+	if (g_hRplEnts == null) return;
+	if (RplWorldKind(classname) == 0) return;
+	g_hRplEnts.Push(EntIndexToEntRef(entity));
+}
+
+public void OnEntityDestroyed(int entity)
+{
+	if (g_hRplEnts == null || entity < 0) return;
+	int ref = EntIndexToEntRef(entity);
+	int at = g_hRplEnts.FindValue(ref);
+	if (at != -1) g_hRplEnts.Erase(at);
+}
+
+// ---------- replay file lifecycle ----------
+
+/** Open this round's replay file and write its header.
+ *
+ *  Every failure path here is silent to the match: replay recording simply
+ *  does not happen. Nothing in this function may throw into the round going
+ *  live. */
+void RplOpen()
+{
+	RplClose();               // paranoia: a previous round that never closed
+	if (g_bReplayFailed) return;
+	if (g_State != MS_Live) return;
+
+	int hz = g_cvReplayHz.IntValue;
+	if (hz <= 0) return;
+
+	char dir[PLATFORM_MAX_PATH];
+	g_cvReplayDir.GetString(dir, sizeof(dir));
+	if (dir[0] == '\0') return;
+	if (!DirExists(dir) && !CreateDirectory(dir, 511))
+	{
+		LogError("pug: cannot create replay dir '%s'; recording disabled for this match", dir);
+		g_bReplayFailed = true;
+		return;
+	}
+
+	char path[PLATFORM_MAX_PATH];
+	// Same naming convention as the demos, and for the same reason: the link
+	// between a file and its match is a property of the filename, so it
+	// survives a backend restart. There is no datagram announcing this file.
+	Format(path, sizeof(path), "%s/pug_%s_%d_%d.rpl", dir, g_sToken, g_iMapCount, g_iHalf);
+	g_hReplay = OpenFile(path, "wb");
+	if (g_hReplay == null)
+	{
+		LogError("pug: cannot open '%s'; replay recording disabled for this match", path);
+		g_bReplayFailed = true;
+		return;
+	}
+
+	int entHz = g_cvReplayEntityHz.IntValue;
+	if (entHz > hz) entHz = hz;
+	g_iRplEntityEveryN = (entHz <= 0) ? 0 : (hz / entHz);
+	if (g_iRplEntityEveryN < 1 && entHz > 0) g_iRplEntityEveryN = 1;
+
+	int p = 0;
+	p = RplStr(p, "L4RP", 4);
+	p = RplU16(p, RPL_VERSION);
+	p = RplU8(p, g_iMapCount);
+	p = RplU8(p, g_iHalf);
+	p = RplU8(p, hz);
+	p = RplU8(p, entHz);
+	p = RplU16(p, 0);                          // reserved, pads token to 12
+	p = RplStr(p, g_sToken, 32);
+	p = RplStr(p, g_sCurrentMap, 32);
+	p = RplU32(p, GetTime());
+	p = RplU32(p, 0);                          // indexOffset, patched at close
+	p = RplU32(p, 0);                          // indexCount, patched at close
+	for (int slot = 0; slot < RPL_SLOTS; slot++)
+	{
+		int id64[2];
+		// An empty slot writes 0, which the reader decodes as "nobody", never
+		// as a SteamID that happens to be small.
+		if (slot < g_iRosterCount && g_sRosterId[slot][0] != '\0') StringToInt64(g_sRosterId[slot], id64);
+		else { id64[0] = 0; id64[1] = 0; }
+		p = RplU32(p, id64[0]);
+		p = RplU32(p, id64[1]);
+	}
+	while (p < 152) p = RplU8(p, 0);
+	p = RplU32(p, 0);                          // frameCount, patched at close
+	while (p < RPL_HEADER_BYTES) p = RplU8(p, 0);
+
+	if (!WriteFile(g_hReplay, g_iRplBuf, RPL_HEADER_BYTES, 1))
+	{
+		LogError("pug: replay header write failed; recording disabled for this match");
+		RplFail();
+		return;
+	}
+
+	g_iReplayFrames = 0;
+	g_iReplayBytes = RPL_HEADER_BYTES;
+	g_iRplLastKeyMs = -RPL_KEYFRAME_MS;        // forces a keyframe on frame one
+	g_iRplFrameNo = 0;
+	g_hRplIndexT.Clear();
+	g_hRplIndexOff.Clear();
+
+	float interval = 1.0 / float(hz);
+	g_hReplayTimer = CreateTimer(interval, Timer_RplFrame, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+	PugDebug("replay: recording %s at %dHz (entities %dHz)", path, hz, entHz);
+}
+
+/** Give up on replays for the rest of the match. */
+void RplFail()
+{
+	g_bReplayFailed = true;
+	RplClose();
+}
+
+/** Close the file, appending the keyframe index and patching the header.
+ *
+ *  The index and the frame count cannot be known until now, which is why the
+ *  header reserves space for them rather than carrying them up front. A file
+ *  that was never closed therefore reads as indexless and frameless, which is
+ *  exactly the truth about it, instead of carrying a plausible wrong offset. */
+void RplClose()
+{
+	if (g_hReplayTimer != null)
+	{
+		KillTimer(g_hReplayTimer);
+		g_hReplayTimer = null;
+	}
+	if (g_hReplay == null) return;
+
+	int count = g_hRplIndexT.Length;
+	int indexOffset = g_iReplayBytes;
+	bool ok = true;
+
+	if (count > 0)
+	{
+		int p = 0;
+		for (int i = 0; i < count; i++)
+		{
+			// The buffer holds RPL_FRAME_MAX bytes, far more than any index
+			// this loop writes for a round of sane length, but flush in
+			// chunks anyway so a very long round cannot overrun it.
+			if (p + RPL_INDEX_RECORD > RPL_FRAME_MAX)
+			{
+				if (!WriteFile(g_hReplay, g_iRplBuf, p, 1)) { ok = false; break; }
+				p = 0;
+			}
+			p = RplU32(p, g_hRplIndexT.Get(i));
+			p = RplU32(p, g_hRplIndexOff.Get(i));
+		}
+		if (ok && p > 0 && !WriteFile(g_hReplay, g_iRplBuf, p, 1)) ok = false;
+	}
+
+	if (ok)
+	{
+		// Patch indexOffset and indexCount at byte 80, then frameCount at 152.
+		int p = 0;
+		p = RplU32(p, count > 0 ? indexOffset : 0);
+		p = RplU32(p, count);
+		if (!FileSeek(g_hReplay, 80, SEEK_SET) || !WriteFile(g_hReplay, g_iRplBuf, 8, 1)) ok = false;
+		if (ok)
+		{
+			RplU32(0, g_iReplayFrames);
+			if (!FileSeek(g_hReplay, 152, SEEK_SET) || !WriteFile(g_hReplay, g_iRplBuf, 4, 1)) ok = false;
+		}
+	}
+	if (!ok) LogError("pug: replay close incomplete; the file is still playable, seeking will be slow");
+
+	delete g_hReplay;
+	g_hReplay = null;
+	PugDebug("replay: closed after %d frames, %d bytes", g_iReplayFrames, g_iReplayBytes);
+}
+
+// ---------- replay sampler ----------
+
+/** How long a boomer biling keeps a survivor marked.
+ *
+ *  m_vomitStart is the game time the biling started, not a boolean, so the
+ *  bit is derived from how long ago it was. This duration is the one number
+ *  in the sampler that was not read off a netprop dump, so confirm it in game:
+ *  a wrong value here shows the bile overlay for the wrong length of time and
+ *  nothing else. */
+#define RPL_BILE_SECONDS 20.0
+
+/** State bits for one in-game client. */
+int RplClientState(int client, bool ghost)
+{
+	int state = RPL_S_PRESENT;
+	if (IsPlayerAlive(client)) state |= RPL_S_ALIVE;
+	if (GetEntPropFloat(client, Prop_Send, "m_burnPercent") > 0.0) state |= RPL_S_BURNING;
+	float vomit = GetEntPropFloat(client, Prop_Send, "m_vomitStart");
+	if (vomit > 0.0 && GetGameTime() - vomit < RPL_BILE_SECONDS) state |= RPL_S_BILED;
+	if (GetClientTeam(client) == TEAM_SURVIVOR)
+	{
+		if (GetEntProp(client, Prop_Send, "m_isIncapacitated")) state |= RPL_S_INCAP;
+		if (GetEntProp(client, Prop_Send, "m_isHangingFromLedge")) state |= RPL_S_LEDGED;
+		if (g_iPinnedBy[client] > 0) state |= RPL_S_PINNED;
+	}
+	else if (ghost) state |= RPL_S_GHOST;
+	return state;
+}
+
+bool RplIsGhost(int client)
+{
+	return GetClientTeam(client) == TEAM_INFECTED
+		&& GetEntProp(client, Prop_Send, "m_isGhost") != 0;
+}
+
+/** Which entity kind a non-rostered in-game client is. */
+int RplBotKind(int client)
+{
+	if (GetClientTeam(client) == TEAM_SURVIVOR) return RPL_K_SURVIVOR_BOT;
+	if (GetClientTeam(client) != TEAM_INFECTED) return 0;
+	switch (GetEntProp(client, Prop_Send, "m_zombieClass"))
+	{
+		case ZC_SMOKER: return RPL_K_SMOKER_AI;
+		case ZC_BOOMER: return RPL_K_BOOMER_AI;
+		case ZC_HUNTER: return RPL_K_HUNTER_AI;
+		case ZC_TANK:   return RPL_K_TANK_AI;
+	}
+	return 0;
+}
+
+/** Weapon classname to a small id. The viewer renders a label per id, so the
+ *  numbers only have to be stable, not meaningful. 0 is "none or unknown",
+ *  which is also what an infected player records. */
+int RplWeaponId(const char[] cls)
+{
+	if (StrEqual(cls, "weapon_pistol"))          return 1;
+	if (StrEqual(cls, "weapon_smg"))             return 2;
+	if (StrEqual(cls, "weapon_pumpshotgun"))     return 3;
+	if (StrEqual(cls, "weapon_autoshotgun"))     return 4;
+	if (StrEqual(cls, "weapon_rifle"))           return 5;
+	if (StrEqual(cls, "weapon_hunting_rifle"))   return 6;
+	if (StrEqual(cls, "weapon_pipe_bomb"))       return 7;
+	if (StrEqual(cls, "weapon_molotov"))         return 8;
+	if (StrEqual(cls, "weapon_first_aid_kit"))   return 9;
+	if (StrEqual(cls, "weapon_pain_pills"))      return 10;
+	return 0;
+}
+
+public Action Timer_RplFrame(Handle timer)
+{
+	if (g_hReplay == null)
+	{
+		g_hReplayTimer = null;
+		return Plugin_Stop;
+	}
+
+	int tMs = RoundMs();
+	// -1 means the round is not live. Nothing to time a frame against, so
+	// skip rather than write a frame the viewer cannot place.
+	if (tMs < 0) return Plugin_Continue;
+
+	// Keyframe BEFORE the frame is written, so the recorded offset is where
+	// this frame actually begins.
+	if (tMs - g_iRplLastKeyMs >= RPL_KEYFRAME_MS)
+	{
+		g_hRplIndexT.Push(tMs);
+		g_hRplIndexOff.Push(g_iReplayBytes);
+		g_iRplLastKeyMs = tMs;
+	}
+
+	bool sampleEntities = g_iRplEntityEveryN > 0 && (g_iRplFrameNo % g_iRplEntityEveryN) == 0;
+	g_iRplFrameNo++;
+
+	// One pass over clients, building both the slot lookup and the list of
+	// non-rostered clients. The naive version loops MaxClients once per slot,
+	// which is eight times the work for no benefit.
+	int slotClient[RPL_SLOTS];
+	int bots[MAXPLAYERS + 1];
+	int botCount = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c)) continue;
+		int slot = g_iClientRoster[c];
+		if (slot >= 0 && slot < RPL_SLOTS) slotClient[slot] = c;
+		else if (IsPlayerAlive(c)) bots[botCount++] = c;
+	}
+
+	// Player block first, at a fixed offset, then entities appended after it.
+	// The entity count is not known until they are gathered, so the frame
+	// header is patched once the whole frame is packed.
+	int p = RPL_FRAME_HEADER;
+	float pos[3], ang[3];
+
+	for (int slot = 0; slot < RPL_SLOTS; slot++)
+	{
+		int client = slotClient[slot];
+		if (client == 0)
+		{
+			// Empty slot: an all-zero record, which decodes as state 0, which
+			// is "not present". Distinct from a dead player, who is PRESENT
+			// with ALIVE clear.
+			for (int i = 0; i < RPL_PLAYER_RECORD; i++) p = RplU8(p, 0);
+			continue;
+		}
+		GetClientAbsOrigin(client, pos);
+		GetClientEyeAngles(client, ang);
+
+		bool survivor = GetClientTeam(client) == TEAM_SURVIVOR;
+		int temp = 0, weaponId = 0, clip = 0, reserve = 0;
+		if (survivor)
+		{
+			// Temporary health decays continuously, so it is a float on the
+			// entity and has to be floored rather than read as an int. It is
+			// carried separately from permanent health because the viewer
+			// draws a two-tone bar, and because a temp health jump is the
+			// signal the deferred pills detection will need.
+			float tempF = GetEntPropFloat(client, Prop_Send, "m_healthBuffer");
+			if (tempF > 0.0) temp = RoundToFloor(tempF);
+
+			int wep = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+			if (wep > 0 && IsValidEntity(wep))
+			{
+				char wcls[64];
+				GetEntityClassname(wep, wcls, sizeof(wcls));
+				weaponId = RplWeaponId(wcls);
+				clip = GetEntProp(wep, Prop_Send, "m_iClip1");
+				int ammoType = GetEntProp(wep, Prop_Send, "m_iPrimaryAmmoType");
+				if (ammoType >= 0) reserve = GetEntProp(client, Prop_Send, "m_iAmmo", _, ammoType);
+			}
+		}
+
+		p = RplI16(p, RoundToNearest(pos[0]));
+		p = RplI16(p, RoundToNearest(pos[1]));
+		p = RplI16(p, RoundToNearest(pos[2]));
+		p = RplI16(p, RoundToNearest(ang[1] * 100.0));    // yaw, 0.01 degree
+		// Pitch is -89..89 degrees, so its low byte IS its int8 two's
+		// complement representation. The mask is what makes that explicit.
+		p = RplU8(p, RoundToNearest(ang[0]) & 0xFF);
+		p = RplU8(p, RplClientState(client, RplIsGhost(client)));
+		p = RplU16(p, GetClientHealth(client));
+		p = RplU16(p, temp);
+		p = RplU8(p, survivor ? 0 : GetEntProp(client, Prop_Send, "m_zombieClass"));
+		p = RplU8(p, weaponId);
+		p = RplU16(p, clip);
+		p = RplU16(p, reserve);
+	}
+
+	int entCount = 0;
+
+	// Non-rostered clients: survivor bots, AI specials, the AI tank. Iterated
+	// rather than tracked, because MaxClients is under twenty and because
+	// OnEntityCreated does not usefully report a bot taking a slot.
+	for (int i = 0; i < botCount && entCount < RPL_MAX_ENTITIES; i++)
+	{
+		int c = bots[i];
+		int kind = RplBotKind(c);
+		if (kind == 0) continue;
+		GetClientAbsOrigin(c, pos);
+		p = RplU16(p, c);
+		p = RplU8(p, kind);
+		p = RplU8(p, RplClientState(c, RplIsGhost(c)));
+		p = RplI16(p, RoundToNearest(pos[0]));
+		p = RplI16(p, RoundToNearest(pos[1]));
+		p = RplI16(p, RoundToNearest(pos[2]));
+		p = RplU16(p, GetClientHealth(c));
+		entCount++;
+	}
+
+	// World entities, from the incrementally maintained set. Walked backwards
+	// so erasing a stale ref does not skip the next element.
+	if (sampleEntities)
+	{
+		for (int i = g_hRplEnts.Length - 1; i >= 0; i--)
+		{
+			int ref = g_hRplEnts.Get(i);
+			int ent = EntRefToEntIndex(ref);
+			if (ent == INVALID_ENT_REFERENCE || !IsValidEntity(ent))
+			{
+				// OnEntityDestroyed is the normal removal path; this catches
+				// anything that slipped past it, e.g. across a map change.
+				g_hRplEnts.Erase(i);
+				continue;
+			}
+			if (entCount >= RPL_MAX_ENTITIES) break;
+			char cls[64];
+			GetEntityClassname(ent, cls, sizeof(cls));
+			int kind = RplWorldKind(cls);
+			if (kind == 0) continue;
+			GetEntPropVector(ent, Prop_Send, "m_vecOrigin", pos);
+			p = RplU16(p, ent);
+			p = RplU8(p, kind);
+			p = RplU8(p, RPL_S_ALIVE);
+			p = RplI16(p, RoundToNearest(pos[0]));
+			p = RplI16(p, RoundToNearest(pos[1]));
+			p = RplI16(p, RoundToNearest(pos[2]));
+			// A rock has no meaningful health. A witch's is what makes a crown
+			// visible in the timeline, so it is worth the two bytes.
+			p = RplU16(p, kind == RPL_K_TANK_ROCK ? 0 : GetEntProp(ent, Prop_Data, "m_iHealth"));
+			entCount++;
+		}
+	}
+
+	// Patch the frame header now that the count is known.
+	RplU32(0, tMs);
+	RplU16(4, entCount);
+	RplU16(6, 0);
+
+	// One call for the whole frame. No FlushFile, ever: the page cache serves
+	// a tailing reader on this box, and a 10Hz flush is the most direct way to
+	// turn an estimated cost into a measured stall.
+	if (!WriteFile(g_hReplay, g_iRplBuf, p, 1))
+	{
+		LogError("pug: replay frame write failed at frame %d; recording disabled for this match", g_iReplayFrames);
+		RplFail();
+		return Plugin_Stop;
+	}
+	g_iReplayFrames++;
+	g_iReplayBytes += p;
+
+	// The plugin's half of the disk protection. SourceMod exposes no
+	// disk-free-space native, so the backend owns the real free-space floor
+	// and this is a runaway bound: a full round is 10 to 15 MB, the default
+	// cap is 64. Hitting it closes cleanly, keeping every frame so far.
+	if (g_iReplayBytes >= g_cvReplayMaxMb.IntValue * 1024 * 1024)
+	{
+		LogError("pug: replay hit the %d MB cap after %d frames; closing this round's file",
+			g_cvReplayMaxMb.IntValue, g_iReplayFrames);
+		RplClose();
+		return Plugin_Stop;
+	}
+	return Plugin_Continue;
 }
 
 // ---------- RCON command intake ----------
@@ -928,6 +1532,8 @@ bool TokenArgOk(int args)
 
 void ResetMatchState()
 {
+	RplClose();
+	g_bReplayFailed = false;
 	g_State = MS_None;
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
@@ -1198,6 +1804,12 @@ public Action Timer_TeamLock(Handle timer)
 
 public void OnMapStart()
 {
+	// A changelevel is not a round_end: a replay left open across it (e.g. the
+	// map changed mid-round) would otherwise keep writing into a file whose
+	// round is gone. Safe to call unconditionally; RplClose is a no-op when
+	// nothing is open.
+	RplClose();
+
 	// Failsafe for the score-read/changelevel race: a 2nd-half round_end set
 	// g_bPendingFinalize, but the map changed before FinalizeMap ran (e.g. the
 	// delayed score-read retry chain (up to ~8s) was still in flight and got
@@ -1273,6 +1885,8 @@ public void OnRoundIsLive()
 		// measured against.
 		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
+
+		RplOpen();
 	}
 }
 
