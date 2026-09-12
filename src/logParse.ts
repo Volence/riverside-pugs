@@ -201,22 +201,25 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (at < 0) return null;
       const message = line.slice(at + ' msg='.length);
       if (!message) return null;
-      // seq/half/t/steamid/team must NOT come from the shared `rest` above:
-      // that was built by kv()-tokenizing the WHOLE remainder of the line,
-      // including everything inside the message. A message like
-      // "gg steamid=76561198000000009 team=a" would otherwise overwrite the
-      // real steamid and team with ones forged inside the chat text. Instead,
-      // re-derive them from only the portion of the line before ' msg='.
-      const head = kv(line.slice(0, at).split(/\s+/).slice(3));
-      const seq = intOf(head.seq);
+      // Deliberately SHADOWS the outer `rest`, which was built by
+      // kv()-tokenizing the WHOLE remainder of the line, including everything
+      // inside the message. A message like "gg steamid=76561198000000009
+      // team=a" would otherwise overwrite the real steamid and team with ones
+      // forged inside the chat text. Naming this `rest` rather than something
+      // like `head` makes the contaminated outer binding unreachable by name
+      // for the rest of this block, so a later edit cannot accidentally read
+      // a field off it: the compiler always resolves `rest` here to the safe,
+      // pre-`msg=` one.
+      const rest = kv(line.slice(0, at).split(/\s+/).slice(3));
+      const seq = intOf(rest.seq);
       if (seq === null || seq < 1) return null;
-      if (!/^\d{17}$/.test(head.steamid ?? '')) return null;
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       // half and t are optional so a staged older plugin still parses.
-      const half = halfOf(head.half) ?? -1;
-      const tMs = intOf(head.t) ?? -1;
+      const half = halfOf(rest.half) ?? -1;
+      const tMs = intOf(rest.t) ?? -1;
       return {
         kind: 'chat', token, seq, half, tMs,
-        steamid: head.steamid, team: teamOf(head.team), message,
+        steamid: rest.steamid, team: teamOf(rest.team), message,
       };
     }
     case 'MATCH_END': {
