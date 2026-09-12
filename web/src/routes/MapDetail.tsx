@@ -2,7 +2,8 @@ import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { deriveLiveStats, labelFor, orderLiveStatKeys } from '../format';
 import { useState } from 'preact/hooks';
-import { Bars, BarRow, Empty, Panel, PlayerLink, Tabs, Tile, Tiles } from '../components/bits';
+import { Bars, BarRow, Empty, Panel, PlayerLink, Tabs } from '../components/bits';
+import { PageHeader, Figures, Figure } from '../components/PageHeader';
 
 export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
@@ -27,18 +28,13 @@ export function MapDetail({ map }: { map: string }) {
 
   return (
     <div class="page page--list">
-      <div class="page__head">
-        <div>
-          <p class="eyebrow">Map</p>
-          <h2>{data.map}</h2>
-        </div>
-      </div>
-
-      <Tiles>
-        <Tile label="Played" value={data.played} />
-        <Tile label="Avg score" value={`${data.avgTeamA} - ${data.avgTeamB}`} sub="A vs B" />
-        <Tile label="Players" value={players.length} />
-      </Tiles>
+      <PageHeader eyebrow="Map" title={data.map}>
+        <Figures>
+          <Figure label="Played" value={data.played} />
+          <Figure label="Avg score" value={`${data.avgTeamA} - ${data.avgTeamB}`} sub="A vs B" />
+          <Figure label="Players" value={players.length} />
+        </Figures>
+      </PageHeader>
 
       <Panel>
         <h3>Compare</h3>
