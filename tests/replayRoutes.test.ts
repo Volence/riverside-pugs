@@ -239,6 +239,29 @@ describe('GET /api/replays/file/:name', () => {
     expect(res.headers['x-replay-next']).toBe('0');
   });
 
+  // The adversarial half of the cutoff test above. A client that asks for a
+  // `since` past the whole file must not be handed anything, and the offset
+  // it is told to come back with must be the cutoff, never the file size: a
+  // `since` of the file size would otherwise walk it straight past the delay
+  // on its next poll.
+  it('answers a `since` beyond the file with nothing, and the cutoff as next', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 15, 15, false);
+    const whole = HEADER_BYTES + frameBytes(0) * 15;
+    const res = await app.inject({
+      url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=${whole + 10_000}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.length).toBe(0);
+
+    const next = Number(res.headers['x-replay-next']);
+    expect(next).toBeLessThan(whole);
+    const cutoff = Number(
+      (await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` }))
+        .headers['x-replay-next'],
+    );
+    expect(next).toBe(cutoff);
+  });
+
   it('serves the header alone when no frame is old enough yet', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 3, 2, false);
     const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });

@@ -12,18 +12,25 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PORTRAIT_SRC=/home/volence/Games/L4D-June-2008/L4D_June2008/left4dead/materials/vgui
+PORTRAIT_OUT="$REPO/web/public/portraits"
 VENV_PY=/home/volence/l4d/hud/.venv/bin/python
 
-mkdir -p "$REPO/web/public/portraits"
+mkdir -p "$PORTRAIT_OUT"
 
 # Portraits, straight out of the VTFs.
-"$VENV_PY" - <<'PY'
-import io, os
+#
+# The source and destination are passed in rather than repeated inside the
+# heredoc. They used to be spelled twice, and the Python copy resolved its
+# output from os.getcwd() while the bash half resolved everything from the
+# script's own location, so running this from anywhere but the repo root wrote
+# the portraits into a web/public/portraits under whatever directory you
+# happened to be in.
+"$VENV_PY" - "$PORTRAIT_SRC" "$PORTRAIT_OUT" <<'PY'
+import io, os, sys
 from srctools.vtf import VTF
 from PIL import Image
 
-SRC = '/home/volence/Games/L4D-June-2008/L4D_June2008/left4dead/materials/vgui'
-OUT = os.path.abspath(os.path.join(os.getcwd(), 'web', 'public', 'portraits'))
+SRC, OUT = sys.argv[1], sys.argv[2]
 NAMES = {
     's_panel_namvet': 'bill',
     's_panel_biker': 'francis',
