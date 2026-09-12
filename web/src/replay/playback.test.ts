@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { advance, SPEEDS } from './playback';
+import { advance, MAX_STEP_MS, SPEEDS } from './playback';
 
 describe('SPEEDS', () => {
   it('offers the four rates the toolbar shows', () => {
@@ -29,5 +29,21 @@ describe('advance', () => {
 
   it('never goes backwards past zero', () => {
     expect(advance(0, 16, 1, 0, false)).toBe(0);
+  });
+
+  // requestAnimationFrame stops while a tab is backgrounded, so the first
+  // frame back reports the whole stall as elapsed. Without a cap, forty
+  // seconds away moved a saved replay forty seconds on in one step.
+  it('caps one step so a backgrounded tab does not jump the clock', () => {
+    expect(advance(1000, 40_000, 1, 600_000, false)).toBe(1000 + MAX_STEP_MS);
+  });
+
+  it('caps before applying speed, so 4x cannot multiply a stall back in', () => {
+    expect(advance(1000, 40_000, 4, 600_000, false)).toBe(1000 + MAX_STEP_MS * 4);
+  });
+
+  it('leaves a normal frame time alone', () => {
+    expect(advance(1000, MAX_STEP_MS, 1, 600_000, false)).toBe(1000 + MAX_STEP_MS);
+    expect(advance(1000, 16, 1, 600_000, false)).toBe(1016);
   });
 });

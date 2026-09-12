@@ -2,6 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 export const SPEEDS = [0.5, 1, 2, 4] as const;
 
+/** Longest real-time step the clock will take in one go.
+ *
+ *  requestAnimationFrame stops firing while a tab is backgrounded, so the
+ *  next frame after coming back reports the whole stall as elapsed. Uncapped,
+ *  that advances a saved replay by the entire time you were away in a single
+ *  step: tab out for forty seconds and you lose your place. Capping means the
+ *  clock pauses in effect rather than skipping, which is what someone who
+ *  tabbed away expects to find when they come back. A live viewer is
+ *  unaffected either way, because following pins to the newest frame. */
+export const MAX_STEP_MS = 100;
+
 /**
  * Where the clock lands after `elapsedMs` of real time.
  *
@@ -15,7 +26,8 @@ export function advance(
   tMs: number, elapsedMs: number, speed: number, endMs: number, following: boolean,
 ): number {
   if (following) return endMs;
-  const next = tMs + elapsedMs * speed;
+  const step = elapsedMs > MAX_STEP_MS ? MAX_STEP_MS : elapsedMs;
+  const next = tMs + step * speed;
   if (next >= endMs) return endMs;
   return next < 0 ? 0 : next;
 }
