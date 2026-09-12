@@ -10,6 +10,7 @@ import { mapAspect, useMapLayer } from './useMapLayer';
 import { useCanvasSize } from './canvasSize';
 import { ReplayCanvas } from './ReplayCanvas';
 import { ReplayControls } from './ReplayControls';
+import { ReplayHud } from './ReplayHud';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
 import type { TimelineEntry } from './timeline';
@@ -115,20 +116,34 @@ export function Viewer(
 
   return (
     <div class="replay">
-      <div class="replay__stage" ref={stageRef} style={stageStyle}>
-        <ReplayCanvas
-          transform={transform}
-          view={view}
-          size={size}
-          backdrop={backdrop}
-          trail={trail}
-          frames={frames}
-          timeRef={playback.tRef}
-          show={show}
-          followSlot={followSlot}
-          names={names}
-          slots={header.slots}
-        />
+      <div class="replay__frame">
+        <div class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
+        <div class="replay__stage" ref={stageRef} style={stageStyle}>
+          <ReplayCanvas
+            transform={transform}
+            view={view}
+            size={size}
+            backdrop={backdrop}
+            trail={trail}
+            frames={frames}
+            timeRef={playback.tRef}
+            show={show}
+            followSlot={followSlot}
+            names={names}
+            slots={header.slots}
+          />
+          <div class="replay__vignette" aria-hidden="true" />
+          <ReplayHud
+            tMs={playback.tMs}
+            endMs={endMs}
+            counts={counts}
+            live={live}
+            closed={closed}
+            toggles={toggles}
+            toggle={toggle}
+          />
+        </div>
+        <div class="replay__sprocket replay__sprocket--r" aria-hidden="true" />
       </div>
 
       {timeline && (toggles.events || toggles.chat) && (
@@ -143,8 +158,6 @@ export function Viewer(
 
       <ReplayControls
         playback={playback}
-        toggles={toggles}
-        toggle={toggle}
         endMs={endMs}
         live={live}
         followSlot={followSlot}
@@ -160,14 +173,6 @@ export function Viewer(
         showHp={toggles.hp}
         showGuns={toggles.guns}
       />
-
-      <div class="replay__status">
-        <span>{header.map}</span>
-        <span>{counts.survivors} alive</span>
-        <span>{counts.commons} common</span>
-        <span>{counts.specials} special</span>
-        {!closed && <span class="replay__live">LIVE, 10s delayed</span>}
-      </div>
     </div>
   );
 }
