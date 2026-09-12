@@ -1,14 +1,8 @@
 /**
  * Where a world position lands on a map image.
  *
- * This is a data table on purpose. Adding No Mercy later is a row and a PNG,
- * not a code change, and no replay ever needs re-recording because positions
- * are stored as raw world units rather than pixels.
- *
- * It also replaces the manual calibration panel suprep's viewer carries.
- * `cl_leveloverview` prints the origin and the scale on the console, and
- * Valve's own mapinfo.res stores exactly those numbers, so there is nothing
- * to eyeball.
+ * Positions are stored as raw world units rather than pixels, so no replay
+ * ever needs re-recording when the art backing a map changes.
  *
  * This module has no imports, deliberately. It is loaded by the browser as
  * well as the server, and a relative `.js` specifier would break the bundler.
@@ -32,54 +26,15 @@ export interface WorldBounds {
   minX: number; maxX: number; minY: number; maxY: number;
 }
 
-/** Valve's shipped overviews. `x` and `y` are the upper-left world corner and
- *  `scale` is world units per pixel at the 1024 pixel height their BMPs use.
- *  Straight out of `left4dead/resource/overviews/mapinfo.res`. */
-const VALVE: Record<string, { x: number; y: number; scale: number }> = {
-  l4d_farm01_hilltop: { x: -13730, y: -6299, scale: 9.0 },
-  l4d_farm02_traintunnel: { x: -9279, y: -4779, scale: 8.5 },
-  l4d_farm03_bridge: { x: -353, y: -8921, scale: 10.0 },
-  l4d_farm04_barn: { x: 6693, y: -241, scale: 11.0 },
-  l4d_farm05_cornfield: { x: 5769, y: 4893, scale: 6.0 },
-  l4d_smalltown01_caves: { x: -17459, y: -3809, scale: 12.0 },
-  l4d_smalltown02_drainage: { x: -11784, y: -3090, scale: 6.0 },
-  l4d_smalltown03_ranchhouse: { x: -12920, y: 2506, scale: 10.5 },
-  l4d_smalltown04_mainstreet: { x: -5900, y: 1620, scale: 10.0 },
-  l4d_smalltown05_houseboat: { x: -3400, y: 4820, scale: 10.0 },
-};
-
-/** The pixel height Valve's `scale` assumes. Their BMPs are 1024x1024, so for
- *  those the correction below is a no-op. It is written out anyway because a
- *  `cl_leveloverview` capture at any other height is the expected way new maps
- *  arrive, and at that point units per pixel is `1024 * scale / height` on
- *  both axes. Pixels stay square either way: a non-square capture is a wider
- *  field of view, not a distorted one. */
-const VALVE_SCALE_HEIGHT = 1024;
-const VALVE_IMAGE_SIZE = 1024;
-
 /**
  * A versus map and its coop twin share one overview.
  *
- * The engine reports `l4d_vs_farm01_hilltop` in a versus match and mapinfo.res
- * is keyed on `l4d_farm01_hilltop`. Without this every ranked replay would
- * fall through to auto-fit despite the art being right there.
+ * The engine reports `l4d_vs_farm01_hilltop` in a versus match. Without this
+ * every ranked replay would fall through to auto-fit despite the art being
+ * right there.
  */
 export function normalizeMapName(map: string): string {
   return map.toLowerCase().replace(/^l4d_vs_/, 'l4d_');
-}
-
-export function transformFor(map: string): MapTransform | null {
-  const key = normalizeMapName(map);
-  const v = VALVE[key];
-  if (!v) return null;
-  return {
-    originX: v.x,
-    originY: v.y,
-    unitsPerPixel: (VALVE_SCALE_HEIGHT * v.scale) / VALVE_IMAGE_SIZE,
-    image: `/overviews/${key}.png`,
-    width: VALVE_IMAGE_SIZE,
-    height: VALVE_IMAGE_SIZE,
-  };
 }
 
 export function boundsOf(points: { x: number; y: number }[]): WorldBounds | null {
@@ -134,5 +89,68 @@ export function worldToImage(
   return {
     px: (x - t.originX) / t.unitsPerPixel,
     py: (t.originY - y) / t.unitsPerPixel,
+  };
+}
+
+/** One horizontal slice of a map, matching the generated entries in
+ *  src/mapOverviews.ts structurally. Declared here rather than imported from
+ *  there because both modules are loaded by the browser and neither may carry a
+ *  relative import: a `.js` specifier breaks Vite's resolution and omitting the
+ *  extension breaks NodeNext. Structural typing makes them compatible anyway. */
+export interface MapLayer {
+  image: string;
+  /** Camera eye height this slice was cut at. The slice shows everything below
+   *  it and nothing above. */
+  cutHeight: number;
+  unitsPerPixel: number;
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+}
+
+export interface MapOverview {
+  map: string;
+  layers: MapLayer[];
+}
+
+/** How far a player must move past a boundary before the layer changes.
+ *
+ *  Without this, someone standing on a cut height flips the entire map back and
+ *  forth several times a second, which is unwatchable. Sixty units is a little
+ *  under half a player's height. */
+export const LAYER_BIAS = 60;
+
+/**
+ * Which slice to draw for a team at height `z`.
+ *
+ * A layer shows everything below its cut, so the right one is the lowest whose
+ * cut is still above the players. Pass the layer currently being shown as
+ * `current` to get hysteresis; pass null when there is none yet.
+ *
+ * Callers should use the MEDIAN survivor height rather than the mean, so one
+ * player who fell in a hole or climbed a roof does not drag the view away from
+ * the other three.
+ */
+export function pickLayer(
+  layers: MapLayer[], z: number, current: MapLayer | null,
+): MapLayer | null {
+  if (layers.length === 0) return null;
+  const found = layers.find(
+    (l) => l.cutHeight > z + (l === current ? -LAYER_BIAS : LAYER_BIAS),
+  );
+  // Above every cut there is no slice that contains the player at all. The top
+  // one is the least wrong answer.
+  return found ?? layers[layers.length - 1];
+}
+
+export function transformOfLayer(layer: MapLayer): MapTransform {
+  return {
+    originX: layer.originX,
+    originY: layer.originY,
+    unitsPerPixel: layer.unitsPerPixel,
+    image: layer.image,
+    width: layer.width,
+    height: layer.height,
   };
 }

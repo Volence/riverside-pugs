@@ -1,25 +1,20 @@
 #!/usr/bin/env bash
 # One-off conversion of shipped game art into web assets.
 #
-# Both sources are outside this repo and neither is redistributable game data
-# we want to regenerate on every build, so the PNGs are committed and this
-# script exists to document exactly where they came from.
+# The source is outside this repo and not redistributable game data we want to
+# regenerate on every build, so the PNGs are committed and this script exists
+# to document exactly where they came from.
+#
+# Map overviews used to be converted here too, from the ten Valve-shipped BMPs.
+# They are superseded by real height-sliced captures from the game; see
+# tools/convert-overviews.sh.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OVERVIEW_SRC=/home/volence/l4d1-ds/server/left4dead/resource/overviews
 PORTRAIT_SRC=/home/volence/Games/L4D-June-2008/L4D_June2008/left4dead/materials/vgui
 VENV_PY=/home/volence/l4d/hud/.venv/bin/python
 
-mkdir -p "$REPO/web/public/overviews" "$REPO/web/public/portraits"
-
-# Overviews. PNG8 with 256 colours because these are desaturated top-down
-# renders: the quality loss is invisible and it is the difference between
-# roughly 1.5 MB and roughly 400 KB per map, ten times over, in git.
-for f in "$OVERVIEW_SRC"/*.bmp; do
-  base="$(basename "${f%.bmp}")"
-  magick "$f" -colors 256 "PNG8:$REPO/web/public/overviews/$base.png"
-done
+mkdir -p "$REPO/web/public/portraits"
 
 # Portraits, straight out of the VTFs.
 "$VENV_PY" - <<'PY'
