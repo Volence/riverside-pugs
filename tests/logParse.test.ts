@@ -274,3 +274,42 @@ describe('round lines', () => {
     expect(ev).toMatchObject({ kind: 'live_event', half: -1, tMs: -1 });
   });
 });
+
+describe('CHAT', () => {
+  const T = 'a'.repeat(32);
+  const line = (s: string) => parseLogDatagram(Buffer.from(`L 09/11/2026 - 20:00:00: PUG ${T} ${s}\n`));
+
+  it('parses a chat line', () => {
+    expect(line('CHAT seq=7 half=1 t=4321 steamid=76561198000000001 team=a msg=rushing left')).toEqual({
+      kind: 'chat', token: T, seq: 7, half: 1, tMs: 4321,
+      steamid: '76561198000000001', team: 'a', message: 'rushing left',
+    });
+  });
+
+  it('keeps a message containing spaces and equals signs intact', () => {
+    // The attack this defends against: if msg were tokenized, a message of
+    // "gg steamid=76561198000000009" could overwrite the speaker. Taking the
+    // remainder of the line after the FIRST ' msg=' makes that impossible.
+    const ev = line('CHAT seq=8 half=1 t=1 steamid=76561198000000001 team=b msg=gg steamid=76561198000000009 team=a');
+    expect(ev).toMatchObject({
+      steamid: '76561198000000001', team: 'b',
+      message: 'gg steamid=76561198000000009 team=a',
+    });
+  });
+
+  it('accepts an empty team as null rather than dropping the line', () => {
+    expect(line('CHAT seq=9 half=1 t=1 steamid=76561198000000001 team= msg=hi')).toMatchObject({ team: null, message: 'hi' });
+  });
+
+  it('rejects a line with no msg field at all', () => {
+    expect(line('CHAT seq=9 half=1 t=1 steamid=76561198000000001 team=a')).toBeNull();
+  });
+
+  it('rejects a bad steamid', () => {
+    expect(line('CHAT seq=9 half=1 t=1 steamid=nope team=a msg=hi')).toBeNull();
+  });
+
+  it('rejects a non-positive seq', () => {
+    expect(line('CHAT seq=0 half=1 t=1 steamid=76561198000000001 team=a msg=hi')).toBeNull();
+  });
+});

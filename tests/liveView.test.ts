@@ -4,7 +4,7 @@ import { upsertPlayer } from '../src/players.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, clearLive, getLiveMatches,
   STALE_AFTER_MS, LIVE_EVENT_LIMIT, reapOrphanedMatches, ORPHAN_AFTER_MS, mapStatsFor, eventsFor,
-  recordRoundStart, recordRoundEnd, roundsFor,
+  recordRoundStart, recordRoundEnd, roundsFor, recordChat,
 } from '../src/liveView.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -604,5 +604,47 @@ describe('liveView: event timing reaches the API', () => {
     seedLive();
     recordLiveEvent(db, TOKEN, ev(1, { half: 2, tMs: 4321 }));
     expect(getLiveMatches(db)[0].events[0]).toMatchObject({ half: 2, tMs: 4321 });
+  });
+});
+
+describe('recordChat', () => {
+  const chat = (over: Record<string, unknown> = {}) => ({
+    kind: 'chat' as const, token: TOKEN, seq: 3, half: 1, tMs: 5000,
+    steamid: '76561198000000001', team: 'a' as const, message: 'rushing left',
+    ...over,
+  });
+
+  it('stores a message against the map in progress', () => {
+    seedLive();
+    recordChat(db, TOKEN, chat());
+    const row = db.prepare('SELECT seq, half, t_ms, steamid, team, message, map_ordinal FROM match_chat').get();
+    expect(row).toEqual({
+      seq: 3, half: 1, t_ms: 5000, steamid: '76561198000000001',
+      team: 'a', message: 'rushing left', map_ordinal: 0,
+    });
+  });
+
+  it('upserts a duplicated datagram instead of storing it twice', () => {
+    seedLive();
+    recordChat(db, TOKEN, chat());
+    recordChat(db, TOKEN, chat());
+    const n = db.prepare('SELECT COUNT(*) AS n FROM match_chat').get() as { n: number };
+    expect(n.n).toBe(1);
+  });
+
+  it('stores a message sent outside a live round, which carries half and t of -1', () => {
+    // Chat is deliberately not gated on StatsActive, so this is the common
+    // case between rounds and during ready-up, not an error.
+    seedLive();
+    recordChat(db, TOKEN, chat({ half: -1, tMs: -1 }));
+    const row = db.prepare('SELECT half, t_ms FROM match_chat').get();
+    expect(row).toEqual({ half: -1, t_ms: -1 });
+  });
+
+  it('ignores a token that is not a live match', () => {
+    seedLive();
+    recordChat(db, 'f'.repeat(32), chat({ token: 'f'.repeat(32), seq: 99 }));
+    const n = db.prepare('SELECT COUNT(*) AS n FROM match_chat').get() as { n: number };
+    expect(n.n).toBe(0);
   });
 });

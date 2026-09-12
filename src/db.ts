@@ -183,6 +183,26 @@ CREATE TABLE IF NOT EXISTS match_live_events (
   value    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, seq)
 );
+-- In-game chat, from the same lossy UDP feed as match_live_events and with
+-- the same discipline: cosmetic, never counted, never read when a result is
+-- computed.
+--
+-- seq is the SAME counter match_live_events uses, so one monotonic sequence
+-- orders chat and events together and a duplicated datagram upserts over
+-- itself rather than producing a second copy of a message.
+CREATE TABLE IF NOT EXISTS match_chat (
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  seq         INTEGER NOT NULL,
+  map_ordinal INTEGER NOT NULL DEFAULT 0,
+  -- -1 when the message was sent outside a live round, which is common and
+  -- not an error: chat is deliberately not gated on stats being active.
+  half        INTEGER NOT NULL DEFAULT -1,
+  t_ms        INTEGER NOT NULL DEFAULT -1,
+  steamid     TEXT    NOT NULL,
+  team        TEXT,
+  message     TEXT    NOT NULL,
+  PRIMARY KEY (match_id, seq)
+);
 CREATE TABLE IF NOT EXISTS match_demos (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   ordinal  INTEGER NOT NULL,

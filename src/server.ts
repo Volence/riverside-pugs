@@ -15,7 +15,7 @@ import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestr
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import {
-  recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent,
+  recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
 } from './liveView.js';
@@ -148,6 +148,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
+          else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
           else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);
