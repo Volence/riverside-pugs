@@ -55,9 +55,13 @@ afterEach(async () => {
 
 /** Write a file whose frames run from t=0 at `startedSecondsAgo` seconds ago,
  *  one frame per second, so the delay cutoff is easy to reason about. */
-function writeRound(name: string, frames: number, startedSecondsAgo: number, closed: boolean): void {
+function writeRound(
+  name: string, frames: number, startedSecondsAgo: number, closed: boolean,
+  version = VERSION,
+): void {
   const parts: Uint8Array[] = [
     encodeHeader(header({
+      version,
       startedUnix: Math.floor(Date.now() / 1000) - startedSecondsAgo,
       frameCount: closed ? frames : 0,
     })),
@@ -221,6 +225,18 @@ describe('GET /api/replays/file/:name', () => {
     // at most one for a second ticking over mid-test.
     expect(frames).toBeGreaterThanOrEqual(19);
     expect(frames).toBeLessThanOrEqual(21);
+  });
+
+  // The ceiling parseReplay already applies, on the path that actually
+  // serves bytes. A newer writer may change a record's size, and the cutoff
+  // is computed from the tMs this decoder reads, so a version this reader
+  // does not understand could release bytes it should not.
+  it('releases nothing from an open file written by a newer version', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 15, 600, false, VERSION + 1);
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.length).toBe(0);
+    expect(res.headers['x-replay-next']).toBe('0');
   });
 
   it('serves the header alone when no frame is old enough yet', async () => {

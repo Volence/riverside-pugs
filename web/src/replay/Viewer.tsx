@@ -16,7 +16,7 @@ export function Viewer(
   { spec, live = false, names = {}, timeline }:
   { spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[] },
 ) {
-  const { header, frames, closed, error } = useReplaySource(spec);
+  const { header, frames, closed, tooNew, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
   const [toggles, toggle] = useToggles();
@@ -55,6 +55,13 @@ export function Viewer(
     return out;
   }, [frames.length]);
 
+  if (tooNew) {
+    return (
+      <div class="replay replay--empty">
+        This replay was recorded in a newer format than this page can read.
+      </div>
+    );
+  }
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
   if (!header) return <div class="replay replay--empty">Loading replay...</div>;
 

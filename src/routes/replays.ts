@@ -4,7 +4,7 @@ import type { DB } from '../db.js';
 import { listSessions, currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
-import { decodeFrames, decodeHeader, HEADER_BYTES } from '../replayFormat.js';
+import { decodeFrames, decodeHeader, HEADER_BYTES, VERSION } from '../replayFormat.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -42,6 +42,13 @@ function cutoffFor(path: string, info: ReplayFileInfo, nowMs: number): number {
   // An unreadable header means we cannot know when the round started, and
   // without that the delay cannot be computed. Release nothing.
   if (!header) return 0;
+  // A file written by a newer version may have changed the record size or
+  // the meaning of a field, so `decodeFrames` below would produce plausible
+  // nonsense rather than an error. The cutoff is computed from the `tMs` it
+  // reads, which means a version this reader does not understand could
+  // release bytes it should not. Release nothing instead. This is the same
+  // ceiling `parseReplay` applies, for a stronger reason.
+  if (header.version > VERSION) return 0;
 
   const { frames } = decodeFrames(buf, HEADER_BYTES, buf.length);
   // The file's mtime is what anchors the delay to a clock a game pause
