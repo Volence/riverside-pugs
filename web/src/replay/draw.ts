@@ -1,7 +1,7 @@
 import { boxSpan, projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import { ENTITY_KIND, STATE, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
 import { relativeLuminance } from './colorDistance';
-import { healthColor } from './hud';
+import { healthBar, TEMP_HEALTH_COLOR } from './hud';
 
 /** Roster slots 0-3 are the survivor team for this half and 4-7 are the
  *  infected. The player record carries no team field because the slot already
@@ -172,41 +172,6 @@ export function alertColor(state: number): string | null {
   if ((state & STATE.PINNED) !== 0) return '#e8b04b';
   if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) return '#d9534f';
   return null;
-}
-
-/** The incapacitation pool a downed L4D survivor's health reads out of. It
- *  starts here and bleeds towards zero; it is not a 0-100 health value, which
- *  is the whole trap this file used to fall into. */
-export const INCAP_POOL = 300;
-/** The arc a downed survivor's ring is allowed to sweep, as a fraction of a
- *  circle. Small at every point, so it can never be mistaken for a healthy
- *  ring, but not fixed: it still shrinks as the pool bleeds out, so it
- *  carries the bleed-out clock instead of carrying nothing. */
-export const INCAP_ARC_MIN = 0.06;
-export const INCAP_ARC_MAX = 0.18;
-
-/**
- * How much of a circle the health ring sweeps.
- *
- * `GetClientHealth` on a downed survivor returns the incapacitation pool,
- * which STARTS at 300. The ring used to compute `health / 100`, clamp it to
- * 1, and colour it with `healthColor(300, true)`, which returns green. So the
- * state that most needs to shout drew a closed bright ring in the colour that
- * means "fine", and it did it at the exact moment the player went down.
- *
- * Forcing a small danger arc rather than suppressing the ring entirely:
- * suppressing it would give the most urgent state the LEAST chrome on screen,
- * and an avatar with no ring at all is what a dead player and an infected
- * already look like, so the urgent case would have been drawn as the absence
- * of information. A short red arc still reads as a health ring, and reads as
- * a nearly empty one, which is the true state of a survivor on the floor.
- */
-export function healthRingFraction(health: number, state: number): number {
-  if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) {
-    const pool = Math.max(0, Math.min(1, health / INCAP_POOL));
-    return INCAP_ARC_MIN + (INCAP_ARC_MAX - INCAP_ARC_MIN) * pool;
-  }
-  return Math.max(0, Math.min(1, health / 100));
 }
 
 const ENTITY_STYLES: Record<number, { color: string; radius: number }> = {
@@ -578,7 +543,6 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // echo in the first place.
       if (alive && isSurvivor(pl)) {
         const ringR = r + HEALTH_RING_GAP;
-        const down = (pl.state & (STATE.INCAP | STATE.LEDGED)) !== 0;
 
         // The alert ring, under the health arc and sharing its radius: a
         // closed circle of colour wide enough to catch the eye from across
@@ -592,16 +556,26 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
           ctx.stroke();
         }
 
-        const frac = healthRingFraction(pl.health, pl.state);
+        // The same reading the panel's bar draws, from the same function, so
+        // the map and the panel cannot disagree. Permanent health first from
+        // 12 o'clock, then temporary health continuing from where it ends:
+        // the two-part treatment the panel has always used, which the ring
+        // used to leave out entirely. A survivor on 20 permanent and 70
+        // temporary drew a red sliver here and a nearly full bar down there.
+        const bar = healthBar(pl.health, pl.temp, 100, pl.state);
         const start = -Math.PI / 2;
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, ringR, start, start + frac * Math.PI * 2);
-        // A downed survivor's `health` is the incap pool, so handing it to
-        // `healthColor` would ask "is 300 more than 40?" and get green back.
-        // The danger colour is the honest answer for the state itself.
-        ctx.strokeStyle = down ? healthColor(0, alive) : healthColor(pl.health, alive);
+        const mid = start + bar.perm * Math.PI * 2;
         ctx.lineWidth = HEALTH_RING_WIDTH;
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, ringR, start, mid);
+        ctx.strokeStyle = bar.color;
         ctx.stroke();
+        if (bar.temp > 0) {
+          ctx.beginPath();
+          ctx.arc(p.px, p.py, ringR, mid, mid + bar.temp * Math.PI * 2);
+          ctx.strokeStyle = TEMP_HEALTH_COLOR;
+          ctx.stroke();
+        }
       }
 
       // Status glyph: one marker, not a stack, drawn above the avatar with a
