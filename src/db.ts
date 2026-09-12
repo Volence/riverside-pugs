@@ -191,6 +191,27 @@ CREATE TABLE IF NOT EXISTS match_demos (
   bytes    INTEGER NOT NULL,
   PRIMARY KEY (match_id, ordinal)
 );
+-- One row per replay file on disk. Mirrors match_demos: the bytes live on
+-- disk, this is the index. The row deliberately OUTLIVES the file, so a
+-- pruned replay can be reported as expired rather than 404ing: pruned_at is
+-- set, the row stays.
+--
+-- frames and sample_hz are read from the file's own header rather than sent
+-- over UDP. There is no REPLAY datagram: discovery is by filename, exactly
+-- as discoverMatchDemos works, because the filename already carries the
+-- match link by construction and a lost datagram would otherwise leave a
+-- real file permanently unindexed.
+CREATE TABLE IF NOT EXISTS match_replays (
+  match_id  INTEGER NOT NULL REFERENCES matches(id),
+  ordinal   INTEGER NOT NULL,
+  half      INTEGER NOT NULL,
+  filename  TEXT    NOT NULL,
+  bytes     INTEGER NOT NULL,
+  frames    INTEGER NOT NULL,
+  sample_hz INTEGER NOT NULL,
+  pruned_at TEXT,
+  PRIMARY KEY (match_id, ordinal, half)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

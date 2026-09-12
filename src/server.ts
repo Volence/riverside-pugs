@@ -20,6 +20,7 @@ import {
   reapOrphanedMatches,
 } from './liveView.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
+import { recordMatchReplays } from './replays.js';
 import { apiRoutes } from './routes/api.js';
 import { statsRoutes } from './routes/stats.js';
 import { devRoutes } from './routes/dev.js';
@@ -147,7 +148,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
-          else if (ev.kind === 'round_end') recordRoundEnd(deps.db, ev.token, ev);
+          else if (ev.kind === 'round_end') {
+            recordRoundEnd(deps.db, ev.token, ev);
+            // A round just closed, so the plugin has finished its replay file.
+            // Rounds are the unit here, unlike demos which are per map, so this
+            // is the earliest honest moment to index one. excludeOpen skips the
+            // half that is already recording. Upserts, so an early scan is
+            // corrected by the next one.
+            const rr = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (rr) {
+              recordMatchReplays(deps.db, rr.id, ev.token, deps.config.replayDir,
+                { excludeOpen: true });
+            }
+          }
           else if (ev.kind === 'map_result') {
             recordMapResult(deps.db, ev.token, ev.map, ev.a, ev.b);
             // A map just ended, so its demo is finished (or about to be, when
@@ -177,6 +191,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         logPublicAddress: deps.config.logPublicAddress,
         notify,
         demoDir: deps.config.demoDir,
+        replayDir: deps.config.replayDir,
       });
 
       // Re-arm the listener for matches that were already running when this
