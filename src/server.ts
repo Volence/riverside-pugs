@@ -24,6 +24,7 @@ import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
 import { apiRoutes } from './routes/api.js';
 import { statsRoutes } from './routes/stats.js';
+import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
 import { notifyDiscord } from './discord.js';
 
@@ -287,6 +288,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir });
+  await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
 
   if (deps.config.devMode) {
     await app.register(devRoutes, { config: deps.config, db: deps.db, matchmaker, hub });
