@@ -21,6 +21,7 @@ import {
 } from './liveView.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
+import { pruneReplays } from './replayPrune.js';
 import { apiRoutes } from './routes/api.js';
 import { statsRoutes } from './routes/stats.js';
 import { devRoutes } from './routes/dev.js';
@@ -255,8 +256,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 60_000);
   reaper.unref();
 
+  // Daily replay prune. Interval rather than cron because there is no
+  // scheduler here and the exact hour does not matter: the window is 90 days.
+  // unref so the timer never holds the process open in tests.
+  const pruneTimer = setInterval(() => pruneReplays(deps.db, deps.config.replayDir), 24 * 60 * 60 * 1000);
+  pruneTimer.unref();
+
   app.addHook('onClose', async () => {
     clearInterval(reaper);
+    clearInterval(pruneTimer);
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
