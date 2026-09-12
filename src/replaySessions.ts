@@ -1,0 +1,172 @@
+import { readdirSync, openSync, readSync, closeSync, statSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { decodeHeader, HEADER_BYTES } from './replayFormat.js';
+
+const TOKEN_RE = /^[0-9a-f]{32}$/;
+const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
+
+/**
+ * How long a file with no patched frame count may sit untouched before it is
+ * treated as finished.
+ *
+ * `frameCount` is patched into the header when the writer closes, so 0 means
+ * "never closed", which is true both of a round in progress and of a
+ * recording the game server died in the middle of. Without this, a crashed
+ * file would be treated as live forever and held behind the delay forever.
+ * The recorder writes at 10Hz, so a minute of silence is four orders of
+ * magnitude past normal.
+ */
+export const CLOSED_AFTER_IDLE_MS = 60_000;
+
+export interface ReplayFileInfo {
+  filename: string;
+  token: string;
+  ordinal: number;
+  half: number;
+  bytes: number;
+  mtimeMs: number;
+  map: string;
+  startedUnix: number;
+  frameCount: number;
+  playerHz: number;
+  version: number;
+  /** True when this file is history and may be served whole. False means it
+   *  is still being written, and every byte handed out must go through the
+   *  anti-ghosting cutoff. */
+  closed: boolean;
+}
+
+export interface ReplaySession {
+  token: string;
+  /** Earliest `startedUnix` across the session's files, in seconds. */
+  startedUnix: number;
+  files: ReplayFileInfo[];
+}
+
+/** Read just the header. A replay runs to 15 MB and a listing shows dozens,
+ *  so parsing one to learn its map name is not an option. */
+function readInfo(dir: string, filename: string, nowMs: number): ReplayFileInfo | null {
+  const m = NAME_RE.exec(filename);
+  if (!m) return null;
+  const path = join(dir, filename);
+
+  let st;
+  try {
+    st = statSync(path);
+  } catch {
+    return null;
+  }
+  if (!st.isFile()) return null;
+
+  const buf = new Uint8Array(HEADER_BYTES);
+  let fd: number;
+  try {
+    fd = openSync(path, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const read = readSync(fd, buf, 0, HEADER_BYTES, 0);
+    if (read < HEADER_BYTES) return null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+
+  const h = decodeHeader(buf);
+  if (!h) return null;
+
+  return {
+    filename,
+    token: m[1],
+    ordinal: Number(m[2]),
+    half: Number(m[3]),
+    bytes: st.size,
+    mtimeMs: st.mtimeMs,
+    map: h.map,
+    startedUnix: h.startedUnix,
+    frameCount: h.frameCount,
+    playerHz: h.playerHz,
+    version: h.version,
+    closed: h.frameCount !== 0 || nowMs - st.mtimeMs > CLOSED_AFTER_IDLE_MS,
+  };
+}
+
+/** Every replay on disk, grouped by the session token in its filename.
+ *
+ *  Never throws. A missing or unreadable directory yields no sessions,
+ *  because a browse page returning empty is a far better failure than a
+ *  browse page returning 500. */
+export function listSessions(dir: string, nowMs: number): ReplaySession[] {
+  if (!dir) return [];
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+
+  const byToken = new Map<string, ReplayFileInfo[]>();
+  for (const name of names) {
+    const info = readInfo(dir, name, nowMs);
+    if (!info) continue;
+    const list = byToken.get(info.token);
+    if (list) list.push(info);
+    else byToken.set(info.token, [info]);
+  }
+
+  const out: ReplaySession[] = [];
+  for (const [token, files] of byToken) {
+    files.sort((a, b) => a.ordinal - b.ordinal || a.half - b.half);
+    out.push({
+      token,
+      startedUnix: Math.min(...files.map((f) => f.startedUnix)),
+      files,
+    });
+  }
+  // Newest session first, which is what someone opening the page wants.
+  out.sort((a, b) => b.startedUnix - a.startedUnix);
+  return out;
+}
+
+/** The file a live viewer should be reading for this token: the newest round.
+ *
+ *  Ordinal then half, not mtime. A map change writes a new file while the old
+ *  one may still be flushing, and ordering by modification time would flip
+ *  back to the previous round for as long as that takes. */
+export function currentFileFor(
+  dir: string, token: string, nowMs: number,
+): ReplayFileInfo | null {
+  if (!dir || !TOKEN_RE.test(token)) return null;
+  const session = listSessions(dir, nowMs).find((s) => s.token === token);
+  if (!session || session.files.length === 0) return null;
+  return session.files[session.files.length - 1];
+}
+
+/**
+ * Resolve an untrusted filename to a path inside the replay directory.
+ *
+ * This mirrors `resolveReplayPath`'s hardening in `src/replays.ts` and for a
+ * stronger reason: that function's name comes from a database row this
+ * process wrote, and this one's comes from a URL. A name that goes into a
+ * file read is exactly the shape of bug that turns a crafted request into
+ * arbitrary file disclosure, so the pattern, the basename check and the
+ * resolved-prefix check are all load-bearing rather than belt and braces.
+ */
+export function resolveByName(
+  dir: string, filename: string, nowMs: number,
+): { path: string; info: ReplayFileInfo } | null {
+  if (!dir) return null;
+  if (filename !== basename(filename)) return null;
+  if (!NAME_RE.test(filename)) return null;
+
+  const root = resolve(dir);
+  const path = resolve(root, filename);
+  if (path !== join(root, filename)) return null;
+  if (!path.startsWith(root + '/')) return null;
+
+  const info = readInfo(dir, filename, nowMs);
+  if (!info) return null;
+  return { path, info };
+}
