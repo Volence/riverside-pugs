@@ -149,6 +149,24 @@ describe('GET /api/replays/file/:name', () => {
     expect(frames).toBeLessThanOrEqual(6);
   });
 
+  // The same model under a tech pause, which is routine in ranked play. A
+  // genuine engine pause stops game time while wall time runs on, so a round
+  // that went live 60 seconds ago can hold only 30 seconds of frames. The
+  // delay has to be measured against the game clock the frames are stamped
+  // on, or every frame in the file looks 30 seconds older than it is and the
+  // newest one, carrying live ghost positions, goes straight out.
+  it('holds back the newest frames when the round has been paused', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 30, 60, false);
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
+    expect(res.statusCode).toBe(200);
+
+    const frames = (res.rawPayload.length - HEADER_BYTES) / frameBytes(0);
+    // Newest is t=29000, so nothing past t=19000 may go out: 20 frames, plus
+    // at most one for a second ticking over mid-test.
+    expect(frames).toBeGreaterThanOrEqual(19);
+    expect(frames).toBeLessThanOrEqual(21);
+  });
+
   it('serves the header alone when no frame is old enough yet', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 3, 2, false);
     const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });

@@ -44,7 +44,12 @@ function cutoffFor(path: string, info: ReplayFileInfo, nowMs: number): number {
   if (!header) return 0;
 
   const { frames } = decodeFrames(buf, HEADER_BYTES, buf.length);
-  const released = releasableBytes(frames, header.startedUnix * 1000, nowMs);
+  // The file's mtime is what anchors the delay to a clock a game pause
+  // cannot stop. Without it the cutoff is computed against `startedUnix`
+  // alone, which drifts against the game time the frames carry.
+  const released = releasableBytes(
+    frames, header.startedUnix * 1000, nowMs, undefined, info.mtimeMs,
+  );
   // Zero releasable frames still means the header may go out: the client
   // needs the map name and the slot roster before it can render anything,
   // and the header carries no positions.

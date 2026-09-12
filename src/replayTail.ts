@@ -10,10 +10,33 @@ export const DEFAULT_DELAY_MS = 10_000;
 /**
  * Which of these frames may be sent to a viewer right now.
  *
- * Frames carry `tMs` relative to the round going live, and the round's
- * wall-clock start comes from `match_rounds.started_at`, so a frame's real
- * time is arithmetic with no clock synchronisation between the game server
- * and this process.
+ * Two independent rules, and a frame must satisfy both. Keeping them together
+ * in one function is deliberate: the delay is meant to be defined in exactly
+ * one place, and a second condition living anywhere else could drift from
+ * this one.
+ *
+ * The wall-clock rule. Frames carry `tMs` relative to the round going live,
+ * and the round's wall-clock start comes from the header's `startedUnix`, so
+ * a frame's age is arithmetic with no clock synchronisation between the game
+ * server and this process.
+ *
+ * The game-clock rule, applied when the file's mtime is supplied. `tMs` is
+ * GAME time and `startedUnix` is WALL time, and those two agree only at the
+ * moment the round goes live. An engine pause stops `GetGameTime()` while the
+ * wall clock keeps running, and tech pauses are routine in ranked play, so
+ * after a pause of P every later frame's `tMs` understates its true age by P
+ * forever. At P of ten seconds the wall-clock rule alone would release the
+ * frame being written this instant. The file's mtime is a fresh wall-clock
+ * stamp for its newest frame, so
+ *
+ *   age(f) >= (newest.tMs - f.tMs) + (nowMs - mtimeMs)
+ *
+ * where the first term is a difference of two game times, which a pause
+ * cancels out of, and the second is pure wall time. Every pause between `f`
+ * and the newest frame only makes the real gap larger than the game-time
+ * gap, so this errs towards holding a frame back rather than releasing it
+ * early. Rearranged, `f` is old enough when
+ * `f.tMs <= newest.tMs - (delayMs - idleMs)`.
  *
  * Every failure mode returns fewer frames, never more. An unknown round start
  * or a nonsensical delay releases nothing at all, because the cost of holding
@@ -25,12 +48,26 @@ export function releasableFrames(
   roundStartedUnixMs: number,
   nowMs: number,
   delayMs: number = DEFAULT_DELAY_MS,
+  mtimeMs?: number,
 ): Frame[] {
   if (delayMs <= 0) return [];
   if (!roundStartedUnixMs || roundStartedUnixMs <= 0) return [];
   const cutoffTMs = nowMs - delayMs - roundStartedUnixMs;
   if (cutoffTMs < 0) return [];
-  return frames.filter((f) => f.tMs <= cutoffTMs);
+
+  let limitTMs = cutoffTMs;
+  if (mtimeMs !== undefined && mtimeMs > 0) {
+    if (frames.length === 0) return [];
+    // A future mtime is clock skew, not idleness, so clamp rather than let it
+    // widen the window. Clamping the subtraction too is what lets a crashed
+    // recording, idle for longer than the delay, release its whole file.
+    const idleMs = Math.max(0, nowMs - mtimeMs);
+    const newest = frames[frames.length - 1].tMs;
+    const gameCutoffTMs = newest - Math.max(0, delayMs - idleMs);
+    limitTMs = Math.min(limitTMs, gameCutoffTMs);
+  }
+
+  return frames.filter((f) => f.tMs <= limitTMs);
 }
 
 /**
@@ -50,8 +87,9 @@ export function releasableBytes(
   roundStartedUnixMs: number,
   nowMs: number,
   delayMs: number = DEFAULT_DELAY_MS,
+  mtimeMs?: number,
 ): number {
-  const ok = releasableFrames(frames, roundStartedUnixMs, nowMs, delayMs);
+  const ok = releasableFrames(frames, roundStartedUnixMs, nowMs, delayMs, mtimeMs);
   if (ok.length === 0) return 0;
   const last = ok[ok.length - 1];
   return last.offset + frameBytes(last.entities.length);
