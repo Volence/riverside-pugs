@@ -255,7 +255,7 @@ bool g_bRplSampling;
  *  portrait, not a match's recording, so it is checked with HasEntProp and
  *  falls back to writing 0, which is exactly what version 1 files carry. */
 bool g_bRplHasSurvChar;
-bool g_bRplSurvCharChecked;              // false until a valid client was available to ask
+bool g_bRplSurvCharChecked;              // false until a REAL client was available to ask
 int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
 int g_iRplFrameNo;
 /** Map counter used ONLY for replay filenames. g_iMapCount stops at MAX_MAPS,
@@ -871,17 +871,29 @@ void RplOpen()
 	PugDebug("replay: recording %s at %dHz (entities %dHz)", path, hz, entHz);
 }
 
-/** Resolve m_survivorCharacter against any valid client, once.
+/** Resolve m_survivorCharacter against a real client, once.
  *
- *  Needs a client in the server to ask, so it stays unresolved (and the
- *  sampler writes 0) until there is one, and RplOpen retries every round
- *  until the question can be answered. */
+ *  FAKE CLIENTS ARE SKIPPED, and that is the whole point of this loop rather
+ *  than a bare IsClientInGame check. SourceTV is a fake client, it is live on
+ *  this server, it connects at server start so it usually holds a low index,
+ *  and its edict is not a CTerrorPlayer. Asking it would answer "absent",
+ *  latch that answer for the lifetime of the plugin load, log an error
+ *  blaming the game build, and make every survivor in every replay record
+ *  character 0. Survivor bots would answer correctly, being CTerrorPlayer,
+ *  but they are fake clients too, so skipping all of them is the rule with no
+ *  exceptions to get wrong.
+ *
+ *  An unresolved state is NOT cached: the checked flag is set only when a real
+ *  client actually answered. Caching "nobody had joined yet" as a permanent
+ *  miss would be the same bug in a different coat, so RplOpen retries every
+ *  round until the question can be answered, and the sampler writes 0 in the
+ *  meantime. */
 void RplResolveSurvivorCharProp()
 {
 	if (g_bRplSurvCharChecked) return;
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (!IsClientInGame(i)) continue;
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
 		g_bRplHasSurvChar = HasEntProp(i, Prop_Send, "m_survivorCharacter");
 		g_bRplSurvCharChecked = true;
 		if (!g_bRplHasSurvChar)
@@ -1176,6 +1188,13 @@ public Action Timer_RplFrame(Handle timer)
 		// Guarded, not read blind: an absent netprop throws, and a throw here
 		// takes the whole match's recording down through the latch and
 		// RplFail. Falling back to 0 costs a neutral portrait for the round.
+		//
+		// Only m_survivorCharacter is guarded. m_zombieClass beside it is read
+		// blind on purpose: it has shipped in production on this exact engine
+		// build since long before version 2 (see the reads in the tank and
+		// boomer paths below), so its presence is established by the plugin
+		// having run, not assumed. m_survivorCharacter arrived with this
+		// change and has never run anywhere.
 		p = RplU8(p, survivor
 			? (g_bRplHasSurvChar ? GetEntProp(client, Prop_Send, "m_survivorCharacter") : 0)
 			: GetEntProp(client, Prop_Send, "m_zombieClass"));
