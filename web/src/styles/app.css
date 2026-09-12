@@ -402,6 +402,7 @@ button.ctile:hover { border-color: var(--text-muted); }
   .versus { grid-template-columns: 1fr; text-align: center; }
   .versus__side--b { text-align: center; }
 }
+.versus + .stack { margin-top: var(--sp-5); }
 
 /* ---------- headliner ---------- */
 
@@ -563,8 +564,6 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 
 /* ---------- match detail ---------- */
 
-.scoreline { text-align: right; display: flex; flex-direction: column; gap: var(--sp-1); }
-.scoreline__score { font-family: var(--font-display); font-size: var(--fs-h2); font-weight: 700; }
 .match-id { font-size: var(--fs-label); }
 .panel--table { padding: var(--sp-4) var(--sp-5) var(--sp-2); }
 .panel--table h3 { margin-bottom: var(--sp-3); }
