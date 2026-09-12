@@ -43,24 +43,6 @@ export function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-/** One headline figure. The single tile implementation used by every page, so
- *  the profile, the match list and the live page cannot drift apart. */
-export function Tile(
-  { label, value, sub }: { label: string; value: string | number; sub?: string },
-) {
-  return (
-    <div class="tile">
-      <p class="tile__label">{label}</p>
-      <p class="tile__value num">{value}</p>
-      {sub && <p class="tile__sub muted num">{sub}</p>}
-    </div>
-  );
-}
-
-export function Tiles({ children }: { children: ComponentChildren }) {
-  return <div class="tiles">{children}</div>;
-}
-
 /**
  * One horizontal comparison bar.
  *

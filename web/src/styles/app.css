@@ -771,36 +771,6 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   white-space: pre;
 }
 
-/* Headline stat tiles. Auto-fit so the row reflows rather than needing a
-   breakpoint per count, since how many tiles exist depends on what the player
-   has actually done. */
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: var(--sp-3);
-  /* No margin: .stack already supplies the gap between sections, and adding
-     one here double-spaced the tile row against everything around it. */
-}
-.tile {
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  /* A hairline of accent on the leading edge: enough to make the row read as a
-     group of figures rather than as plain boxes, without colouring the number
-     itself and implying good/bad. */
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-.tile__label {
-  margin: 0 0 var(--sp-1);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.tile__value { margin: 0; font-size: 1.5rem; line-height: 1.1; color: var(--text); }
-.tile__sub { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); }
-
 /* Sortable leaderboard. Many numeric columns, so the same treatment as the
    live table: pinned player column, dimmed zeros, clear sort affordance. */
 .lb table { border-collapse: separate; border-spacing: 0; }
