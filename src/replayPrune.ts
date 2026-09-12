@@ -20,6 +20,9 @@ export interface PruneResult {
   missing: number;
   /** Rows whose filename failed the path check and were left entirely alone. */
   refused: number;
+  /** Rows whose file is STILL on disk because the unlink failed, typically a
+   *  permission problem. Deliberately left unmarked so the next pass retries. */
+  failed: number;
 }
 
 /**
@@ -97,7 +100,7 @@ export function planPrune(
 /** Apply a plan. The row is marked rather than deleted, so a pruned replay can
  *  be reported as expired instead of 404ing. */
 export function prunePlan(db: DB, dir: string, plan: PruneCandidate[]): PruneResult {
-  const result: PruneResult = { deleted: 0, bytes: 0, missing: 0, refused: 0 };
+  const result: PruneResult = { deleted: 0, bytes: 0, missing: 0, refused: 0, failed: 0 };
   const root = resolve(dir);
   const mark = db.prepare(
     `UPDATE match_replays SET pruned_at = datetime('now')
@@ -121,10 +124,24 @@ export function prunePlan(db: DB, dir: string, plan: PruneCandidate[]): PruneRes
     try {
       rmSync(path);
       removed = true;
-    } catch {
-      // Already gone. The row still needs marking, or it is reconsidered
-      // every single day forever.
-      result.missing++;
+    } catch (err) {
+      // ENOENT is the benign case: the file is already gone, so the row still
+      // needs marking or it is reconsidered every single day forever.
+      //
+      // Anything else, above all EACCES, means the file is STILL THERE and we
+      // could not remove it. Marking that row pruned would retire it from every
+      // future pass while the bytes stay on disk, which is exactly how a disk
+      // fills up while the database insists it was cleaned. This is not
+      // hypothetical: the replay directory is written by the game server's user
+      // and read by the web app's, so a directory mode that forgets group write
+      // produces precisely this. Leave the row alone and complain.
+      if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+        result.missing++;
+      } else {
+        result.failed++;
+        console.error(`[replay] cannot remove ${c.filename}, leaving the row unmarked:`, err);
+        continue;
+      }
     }
     if (removed) {
       result.deleted++;
@@ -138,7 +155,7 @@ export function prunePlan(db: DB, dir: string, plan: PruneCandidate[]): PruneRes
 /** The daily job. Never throws: a prune failure must not take down the
  *  process that is recording ranked results. */
 export function pruneReplays(db: DB, dir: string): PruneResult {
-  const empty: PruneResult = { deleted: 0, bytes: 0, missing: 0, refused: 0 };
+  const empty: PruneResult = { deleted: 0, bytes: 0, missing: 0, refused: 0, failed: 0 };
   if (!dir) return empty;
   try {
     const days = Number(getSetting(db, 'replay_retention_days') ?? '90');
@@ -148,10 +165,12 @@ export function pruneReplays(db: DB, dir: string): PruneResult {
     const plan = planPrune(db, dir, new Date(), days, freeBytes, floorGb * 1e9);
     if (plan.length === 0) return empty;
     const result = prunePlan(db, dir, plan);
-    console.log(
-      `[replay] pruned ${result.deleted} files, ${(result.bytes / 1e6).toFixed(1)} MB`
-      + `, ${result.missing} already gone, ${result.refused} refused`,
-    );
+    const line = `[replay] pruned ${result.deleted} files, ${(result.bytes / 1e6).toFixed(1)} MB`
+      + `, ${result.missing} already gone, ${result.refused} refused, ${result.failed} failed`;
+    // A non-zero failed count means bytes are still on disk that we believe we
+    // should have removed, so it is an error-level event, not a status line.
+    if (result.failed > 0) console.error(line);
+    else console.log(line);
     return result;
   } catch (err) {
     console.error('[replay] prune failed', err);

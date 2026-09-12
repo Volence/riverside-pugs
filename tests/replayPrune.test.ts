@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
@@ -189,6 +189,30 @@ describe('prunePlan', () => {
     expect(row.pruned_at).not.toBeNull();
   });
 
+  it('does NOT mark a row pruned when the file could not be removed', () => {
+    // The failure this guards: the replay dir is written by the game server's
+    // user and read by the web app's. If the directory mode forgets group
+    // write, rmSync throws EACCES. Treating that as "already gone" would mark
+    // the row pruned, retire it from every future pass, and leave the bytes on
+    // disk forever, which is a disk filling up while the database insists it
+    // was cleaned.
+    const name = seedReplay(120, 1);
+    const plan = planPrune(db, dir, new Date(), 90, 500e9, 10e9);
+    chmodSync(dir, 0o555);
+    let result;
+    try {
+      result = prunePlan(db, dir, plan);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    expect(result.failed).toBe(1);
+    expect(result.deleted).toBe(0);
+    expect(result.missing).toBe(0);
+    expect(existsSync(join(dir, name))).toBe(true);
+    const row = db.prepare('SELECT pruned_at FROM match_replays').get() as { pruned_at: string | null };
+    expect(row.pruned_at).toBeNull();
+  });
+
   it('refuses a filename that escapes the replay directory', () => {
     seedReplay(120, 1);
     const plan = planPrune(db, dir, new Date(), 90, 500e9, 10e9);
@@ -201,13 +225,13 @@ describe('prunePlan', () => {
 describe('pruneReplays', () => {
   it('returns a zeroed result and does not throw when dir is empty', () => {
     expect(() => pruneReplays(db, '')).not.toThrow();
-    expect(pruneReplays(db, '')).toEqual({ deleted: 0, bytes: 0, missing: 0, refused: 0 });
+    expect(pruneReplays(db, '')).toEqual({ deleted: 0, bytes: 0, missing: 0, refused: 0, failed: 0 });
   });
 
   it('does not throw when the directory does not exist', () => {
     const missingDir = join(dir, 'does-not-exist');
     expect(() => pruneReplays(db, missingDir)).not.toThrow();
-    expect(pruneReplays(db, missingDir)).toEqual({ deleted: 0, bytes: 0, missing: 0, refused: 0 });
+    expect(pruneReplays(db, missingDir)).toEqual({ deleted: 0, bytes: 0, missing: 0, refused: 0, failed: 0 });
   });
 
   it('reads the retention window from settings and actually prunes', () => {
