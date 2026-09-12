@@ -104,7 +104,16 @@ export function useMapLayer(
     return picked;
   }, [overview, livePlayers]);
 
-  const transform: MapTransform | null = layer ? transformOfLayer(layer) : fitted;
+  /** Memoised for its IDENTITY, not for the arithmetic, which is six field
+   *  copies. The canvas now draws from its own animation loop and repaints
+   *  whenever a prop changes, so a fresh object on every render would repaint
+   *  a paused viewer ten times a second for a scene that had not moved.
+   *  `layer` and `fitted` are both stable while the view holds still, so this
+   *  is too. */
+  const transform = useMemo<MapTransform | null>(
+    () => (layer ? transformOfLayer(layer) : fitted),
+    [layer, fitted],
+  );
 
   /** The map's content box, fitted to the canvas. Both branches go through
    *  `fitView` so there is one code path: a map with an overview crops to
