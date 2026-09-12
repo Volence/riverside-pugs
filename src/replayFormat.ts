@@ -102,6 +102,18 @@ export function weaponName(id: number): string {
   return WEAPON_NAMES[id] ?? '';
 }
 
+/** Survivor character by the index the plugin records in `cls`, from format
+ *  version 2 onward. Version 1 files always wrote 0 for a survivor, which is
+ *  why a viewer must check the header version before believing this.
+ *
+ *  The order is the engine's `m_survivorCharacter` order, which is verified
+ *  in game rather than assumed: see the replay viewer plan's final task. */
+export const SURVIVOR_CHARACTERS = ['bill', 'zoey', 'francis', 'louis'] as const;
+
+/** Zombie class by `m_zombieClass`, which the plugin records in `cls` for
+ *  infected players in every format version. */
+export const ZOMBIE_CLASSES = ['', 'smoker', 'boomer', 'hunter', 'witch', 'tank'] as const;
+
 export interface ReplayHeader {
   version: number;
   token: string;

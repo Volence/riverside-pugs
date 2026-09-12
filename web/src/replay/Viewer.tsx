@@ -10,6 +10,7 @@ import { SPEEDS, usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
 import { drawScene, isSurvivor, project, sceneCounts, type ShowFlags } from './draw';
 import { useToggles, type Toggles } from './useToggles';
+import { HudStrip } from './HudStrip';
 
 // Every captured layer image is exactly 2048x1271. The view is sized to that
 // same aspect (scaled by 0.625) rather than a square, so drawScene's `s`
@@ -264,6 +265,14 @@ export function Viewer(
           >{names[id] ?? `Slot ${i}`}</button>
         )))}
       </div>
+
+      <HudStrip
+        players={livePlayers}
+        header={header}
+        names={names}
+        showHp={toggles.hp}
+        showGuns={toggles.guns}
+      />
 
       <div class="replay__status">
         <span>{header.map}</span>
