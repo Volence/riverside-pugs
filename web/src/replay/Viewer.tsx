@@ -6,9 +6,10 @@ import {
 import { overviewFor } from '../../../src/mapOverviews';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
-import { usePlayback } from './playback';
+import { SPEEDS, usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
-import { drawScene, isSurvivor, type ShowFlags } from './draw';
+import { drawScene, isSurvivor, project, sceneCounts, type ShowFlags } from './draw';
+import { useToggles, type Toggles } from './useToggles';
 
 // Every captured layer image is exactly 2048x1271. The view is sized to that
 // same aspect (scaled by 0.625) rather than a square, so drawScene's `s`
@@ -17,16 +18,31 @@ import { drawScene, isSurvivor, type ShowFlags } from './draw';
 const VIEW_W = 1280;
 const VIEW_H = 794;
 
+const TOGGLE_LABELS: Record<string, string> = {
+  hp: 'HP', guns: 'Guns', events: 'Evts', chat: 'Chat', ci: 'CI', entities: 'Ents',
+};
+
+/** Round time as m:ss. The scrub bar is in milliseconds because that is what
+ *  the frames carry; nobody wants to read that. */
+function formatTime(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export function Viewer(
-  { spec, live = false }:
-  { spec: ReplaySpec; live?: boolean },
+  { spec, live = false, names = {} }:
+  { spec: ReplaySpec; live?: boolean; names?: Record<string, string> },
 ) {
   const { header, frames, closed, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [backdrop, setBackdrop] = useState<HTMLImageElement | null>(null);
-  const show: ShowFlags = { ci: true, entities: true };
+  const [toggles, toggle] = useToggles();
+  const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities };
+  const [followSlot, setFollowSlot] = useState<number | null>(null);
 
   /**
    * One interpolated frame per tick, shared by everything that reads it.
@@ -35,13 +51,14 @@ export function Viewer(
    * each call `bracket` itself would drift them a frame apart, which shows up
    * as a health number sitting next to an avatar that has already moved.
    */
-  const { livePlayers, liveEntities } = useMemo(() => {
+  const { livePlayers, liveEntities, counts } = useMemo(() => {
     const pair = bracket(frames, playback.tMs);
-    if (!pair) return { livePlayers: [], liveEntities: [] };
-    return {
-      livePlayers: interpolatePlayers(pair.a, pair.b, pair.f),
-      liveEntities: interpolateEntities(pair.a, pair.b, pair.f),
-    };
+    if (!pair) {
+      return { livePlayers: [], liveEntities: [], counts: { survivors: 0, commons: 0, specials: 0 } };
+    }
+    const players = interpolatePlayers(pair.a, pair.b, pair.f);
+    const entities = interpolateEntities(pair.a, pair.b, pair.f);
+    return { livePlayers: players, liveEntities: entities, counts: sceneCounts(players, entities) };
   }, [frames, playback.tMs]);
 
   /** The map's layer stack, or null when there is no art for it. Resolved once
@@ -151,6 +168,29 @@ export function Viewer(
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx || !transform) return;
+
+    // Reset in device space before anything else. Without this, a follow
+    // camera's translate below would shift drawScene's own internal clear by
+    // the same offset, leaving a sliver of the previous frame uncleared at
+    // the canvas edge every time the translate is non-zero, which is nearly
+    // always while following a moving target.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+    ctx.restore();
+
+    const target = followSlot === null ? null : (livePlayers[followSlot] ?? null);
+    ctx.save();
+    if (target) {
+      // Keep the followed player centred by moving the world under them.
+      // `project` is the same helper drawScene uses to turn a world position
+      // into a canvas position, scaled by canvas width over image width; a
+      // raw `worldToImage` result is in image space and would centre the
+      // camera off by that same scale factor.
+      const s = VIEW_W / transform.width;
+      const p = project(transform, s, target.x, target.y);
+      ctx.translate(VIEW_W / 2 - p.px, VIEW_H / 2 - p.py);
+    }
     drawScene(ctx, {
       transform, backdrop, trail,
       players: livePlayers,
@@ -159,11 +199,12 @@ export function Viewer(
       width: VIEW_W,
       height: VIEW_H,
     });
+    ctx.restore();
     // `show` is a fresh object every render, so its two flags are listed
     // individually rather than the object itself: Task 14 wires real toggles
     // to them, and without this the draw effect would not rerun when they
     // change.
-  }, [livePlayers, liveEntities, transform, backdrop, trail, show.ci, show.entities]);
+  }, [livePlayers, liveEntities, transform, backdrop, trail, show.ci, show.entities, followSlot]);
 
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
   if (!header) return <div class="replay replay--empty">Loading replay...</div>;
@@ -171,9 +212,65 @@ export function Viewer(
   return (
     <div class="replay">
       <canvas ref={canvasRef} width={VIEW_W} height={VIEW_H} class="replay__canvas" />
+
+      <div class="replay__controls">
+        <button class="replay__btn" onClick={playback.toggle}>
+          {playback.playing ? 'Pause' : 'Play'}
+        </button>
+        <input
+          class="replay__scrub"
+          type="range"
+          min={0}
+          max={Math.max(endMs, 1)}
+          value={playback.tMs}
+          onInput={(e) => playback.seek(Number((e.target as HTMLInputElement).value))}
+        />
+        <span class="replay__time">{formatTime(playback.tMs)} / {formatTime(endMs)}</span>
+        {SPEEDS.map((s) => (
+          <button
+            key={s}
+            class={`replay__btn ${playback.speed === s ? 'is-on' : ''}`}
+            onClick={() => playback.setSpeed(s)}
+          >{s}x</button>
+        ))}
+        {live && (
+          <button
+            class={`replay__btn ${playback.following ? 'is-on' : ''}`}
+            onClick={playback.follow}
+          >Live</button>
+        )}
+      </div>
+
+      <div class="replay__toolbar">
+        {(['hp', 'guns', 'events', 'chat', 'ci', 'entities'] as (keyof Toggles)[]).map((k) => (
+          <button
+            key={k}
+            class={`replay__btn ${toggles[k] ? 'is-on' : ''}`}
+            onClick={() => toggle(k)}
+          >{TOGGLE_LABELS[k]}</button>
+        ))}
+      </div>
+
+      <div class="replay__toolbar">
+        <button
+          class={`replay__btn ${followSlot === null ? 'is-on' : ''}`}
+          onClick={() => setFollowSlot(null)}
+        >Free</button>
+        {header.slots.map((id, i) => (id === '' ? null : (
+          <button
+            key={i}
+            class={`replay__btn ${followSlot === i ? 'is-on' : ''}`}
+            onClick={() => setFollowSlot(i)}
+          >{names[id] ?? `Slot ${i}`}</button>
+        )))}
+      </div>
+
       <div class="replay__status">
-        {header.map}
-        {!closed && <span class="replay__live"> LIVE, 10s delayed</span>}
+        <span>{header.map}</span>
+        <span>{counts.survivors} alive</span>
+        <span>{counts.commons} common</span>
+        <span>{counts.specials} special</span>
+        {!closed && <span class="replay__live">LIVE, 10s delayed</span>}
       </div>
     </div>
   );
