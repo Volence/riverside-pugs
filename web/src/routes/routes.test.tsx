@@ -290,6 +290,33 @@ describe('MatchDetail', () => {
     expect(within(heading as HTMLElement).getByText('n/a')).toBeTruthy();
     expect(within(heading as HTMLElement).queryByText('0')).toBeNull();
   });
+
+  it('still renders its stats when the replay endpoints 404, a map with no replay row', async () => {
+    // A map played before recording existed has no match_replays row. The
+    // viewer renders its own error state for that; the page must not add a
+    // second one, and must not throw getting there.
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+      ],
+      demos: [], events: [],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 404, json: async () => ({ error: 'no such replay' }),
+      headers: new Headers(), arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+    try {
+      render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(screen.getByText('Match totals')).toBeTruthy());
+      // The round switch is the page's own markup, not the viewer's, so it
+      // renders regardless of whether the viewer itself could load anything.
+      expect(screen.getByText('Round 1')).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 const round = (over: Partial<MatchDetail['rounds'][number]> = {}) => ({

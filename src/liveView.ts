@@ -42,6 +42,8 @@ export interface LiveEvent {
 }
 export interface LiveMatch {
   id: number;
+  /** The session token the live replay viewer is addressed by. */
+  token: string;
   campaign: string;
   currentMap: string | null;
   teamA: LivePlayer[];
@@ -508,13 +510,14 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
 export function getLiveMatches(db: DB): LiveMatch[] {
   const matches = db
     .prepare(
-      `SELECT m.id, m.campaign, l.current_map AS currentMap, l.last_seen AS lastSeen
+      `SELECT m.id, m.token, m.campaign, l.current_map AS currentMap, l.last_seen AS lastSeen
        FROM matches m
        LEFT JOIN match_live l ON l.match_id = m.id
        WHERE m.state = 'live'
        ORDER BY m.id DESC`,
     )
-    .all() as { id: number; campaign: string; currentMap: string | null; lastSeen: string | null }[];
+    .all() as
+    { id: number; token: string; campaign: string; currentMap: string | null; lastSeen: string | null }[];
   if (matches.length === 0) return [];
 
   const playersOf = db.prepare(
@@ -558,6 +561,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
     });
     return {
       id: m.id,
+      token: m.token,
       campaign: m.campaign,
       currentMap: m.currentMap ?? null,
       teamA: ps.filter((p) => p.team === 'a').map(named),

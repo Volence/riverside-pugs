@@ -5,6 +5,15 @@ import {
 } from '../format';
 import { Empty, Panel, PlayerLink, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed } from '../components/StatTable';
+import { Viewer } from '../replay/Viewer';
+
+/** Name lookup for the viewer's follow row and timeline rail, from the
+ *  rosters this card already has. */
+function namesFor(m: LiveMatch): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of [...m.teamA, ...m.teamB]) out[p.steamid] = p.name;
+  return out;
+}
 
 /** How often to re-fetch. Polled rather than driven by the websocket nudge:
  *  `stale` is computed from elapsed time, so this page has to re-render on a
@@ -94,6 +103,10 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
 
   return (
     <Panel>
+      <Panel>
+        <Viewer spec={{ kind: 'live', token: m.token }} live names={namesFor(m)} />
+      </Panel>
+
       <Tiles>
         <Tile label="Score" value={`${m.teamAScore} - ${m.teamBScore}`} sub={campaignName(m.campaign)} />
         <Tile label="Map" value={m.maps.length + 1} sub={m.currentMap ?? 'starting up'} />
