@@ -13,6 +13,8 @@ export interface ReplayCanvasProps {
   liveEntities: EntitySample[];
   show: ShowFlags;
   followSlot: number | null;
+  names: Record<string, string>;
+  slots: string[];
 }
 
 /**
@@ -30,7 +32,9 @@ export interface ReplayCanvasProps {
  *   player is from the origin.
  */
 export function ReplayCanvas(
-  { transform, view, backdrop, trail, livePlayers, liveEntities, show, followSlot }: ReplayCanvasProps,
+  {
+    transform, view, backdrop, trail, livePlayers, liveEntities, show, followSlot, names, slots,
+  }: ReplayCanvasProps,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -67,13 +71,19 @@ export function ReplayCanvas(
       show,
       width: VIEW_W,
       height: VIEW_H,
+      names,
+      slots,
+      followSlot,
     });
     ctx.restore();
-    // `show` is a fresh object every render, so its two flags are listed
+    // `show` is a fresh object every render, so its flags are listed
     // individually rather than the object itself: Task 14 wires real toggles
     // to them, and without this the draw effect would not rerun when they
     // change.
-  }, [livePlayers, liveEntities, transform, view, backdrop, trail, show.ci, show.entities, followSlot]);
+  }, [
+    livePlayers, liveEntities, transform, view, backdrop, trail,
+    show.ci, show.entities, show.names, followSlot, names, slots,
+  ]);
 
   return <canvas ref={canvasRef} width={VIEW_W} height={VIEW_H} class="replay__canvas" />;
 }
