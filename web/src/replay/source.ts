@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-  decodeFrames, decodeHeader, frameBytes, HEADER_BYTES,
+  decodeFrames, decodeHeader, frameBytes, HEADER_BYTES, VERSION,
   type Frame, type ReplayHeader,
 } from '../../../src/replayFormat';
 
@@ -26,6 +26,10 @@ export interface ReplayState {
    *  cursor in a ref (cursorRef) instead; this is the pure function's own
    *  return value, which the tests assert on. */
   cursor: number;
+  /** The file was written by a format version newer than this page can read.
+   *  Nothing was decoded and nothing will be: the viewer says so rather than
+   *  showing an empty map that looks like a broken recording. */
+  tooNew?: boolean;
 }
 
 /** How often a round still being recorded is polled. The server holds frames
@@ -65,6 +69,12 @@ export function appendChunk(state: ReplayState, chunk: Uint8Array, base: number)
   if (!header) {
     header = decodeHeader(chunk);
     if (!header) return state;
+    // A newer writer may have changed a record's size or the meaning of a
+    // field, and the bytes after the header would then decode into something
+    // that looks fine and is wrong. Refusing is the only safe answer, and it
+    // is the same ceiling `parseReplay` applies on the server. Older versions
+    // stay readable: this is a ceiling, not an equality check.
+    if (header.version > VERSION) return { ...state, tooNew: true };
     from = HEADER_BYTES;
   }
 
@@ -96,6 +106,8 @@ export function useReplaySource(spec: ReplaySpec | null): {
   header: ReplayHeader | null;
   frames: Frame[];
   closed: boolean;
+  /** The file's format version is newer than this page understands. */
+  tooNew: boolean;
   error: Error | null;
 } {
   const [state, setState] = useState<ReplayState>({ header: null, frames: [], cursor: 0 });
@@ -183,5 +195,5 @@ export function useReplaySource(spec: ReplaySpec | null): {
     };
   }, [key]);
 
-  return { header: state.header, frames: state.frames, closed, error };
+  return { header: state.header, frames: state.frames, closed, tooNew: state.tooNew === true, error };
 }

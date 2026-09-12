@@ -87,6 +87,33 @@ describe('appendChunk', () => {
   });
 });
 
+describe('appendChunk version ceiling', () => {
+  // A newer writer may change a record's size or the meaning of a field, and
+  // the frames after the header would then decode into plausible nonsense
+  // rather than erroring. That is why the design made this check a
+  // prerequisite for the version 2 bump.
+  it('decodes nothing from a file written by a newer version', () => {
+    const chunk = concat([
+      encodeHeader(header({ version: VERSION + 1 })),
+      encodeFrame(emptyFrame(0)),
+    ]);
+    const got = appendChunk(EMPTY, chunk, 0);
+    expect(got.header).toBeNull();
+    expect(got.frames).toEqual([]);
+    expect(got.cursor).toBe(0);
+    expect(got.tooNew).toBe(true);
+  });
+
+  it('still reads a file written by an older version', () => {
+    // A ceiling, not an equality check: version 1 files keep playing.
+    const chunk = concat([encodeHeader(header({ version: 1 })), encodeFrame(emptyFrame(0))]);
+    const got = appendChunk(EMPTY, chunk, 0);
+    expect(got.header?.version).toBe(1);
+    expect(got.frames).toHaveLength(1);
+    expect(got.tooNew).toBeFalsy();
+  });
+});
+
 describe('replayUrl', () => {
   it('builds a file url', () => {
     expect(replayUrl({ kind: 'file', name: `pug_${TOKEN}_0_1.rpl` }, 0))
@@ -96,5 +123,10 @@ describe('replayUrl', () => {
   it('builds a match url', () => {
     expect(replayUrl({ kind: 'match', matchId: 8, ordinal: 1, half: 2 }, 320))
       .toBe('/api/replays/match/8/1/2?since=320');
+  });
+
+  it('builds a live-match url, which carries an id and never a token', () => {
+    expect(replayUrl({ kind: 'live-match', matchId: 8 }, 0))
+      .toBe('/api/replays/live/match/8');
   });
 });
