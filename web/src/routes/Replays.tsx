@@ -1,6 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { Empty, Panel, Tile, Tiles } from '../components/bits';
+import { Empty, Panel } from '../components/bits';
+import { PageHeader, Figures, Figure } from '../components/PageHeader';
 
 function when(startedUnix: number): string {
   return new Date(startedUnix * 1000).toLocaleString();
@@ -23,7 +24,14 @@ export function Replays() {
 
   return (
     <div class="page page--list">
-      <div class="page__head"><h2>Replays</h2></div>
+      <PageHeader title="Replays">
+        {sessions.length > 0 && (
+          <Figures>
+            <Figure label="Sessions" value={sessions.length} />
+            <Figure label="Rounds" value={files} />
+          </Figures>
+        )}
+      </PageHeader>
 
       {sessions.length === 0 ? (
         <Panel>
@@ -34,11 +42,6 @@ export function Replays() {
         </Panel>
       ) : (
         <>
-          <Tiles>
-            <Tile label="Sessions" value={sessions.length} />
-            <Tile label="Rounds" value={files} />
-          </Tiles>
-
           <div class="stack">
             {sessions.map((s) => (
               <Panel class="panel--table" key={s.token}>
