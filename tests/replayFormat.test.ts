@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   HEADER_BYTES, PLAYER_SLOTS, ENTITY_KIND, STATE, VERSION,
+  WEAPON_NAMES, weaponName,
   encodeHeader, decodeHeader, encodeFrame, parseReplay, decodeIndex,
   type ReplayHeader, type Frame,
 } from '../src/replayFormat.js';
@@ -187,5 +188,21 @@ describe('format version', () => {
   it('still reports the version of a newer file through decodeHeader', () => {
     const got = decodeHeader(encodeHeader(header({ version: VERSION + 1 })));
     expect(got?.version).toBe(VERSION + 1);
+  });
+});
+
+describe('weapon names', () => {
+  it('names every id the plugin can write', () => {
+    expect(weaponName(1)).toBe('Pistol');
+    expect(weaponName(5)).toBe('Assault Rifle');
+    expect(weaponName(10)).toBe('Pain Pills');
+  });
+
+  // 0 is what the plugin writes for an infected player, for a survivor with
+  // no active weapon, and for any classname it does not recognise. All three
+  // mean "nothing to show" rather than an error.
+  it('gives an empty name for id 0 and for an unknown id', () => {
+    expect(weaponName(0)).toBe('');
+    expect(weaponName(200)).toBe('');
   });
 });
