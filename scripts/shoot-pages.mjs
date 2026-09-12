@@ -1,0 +1,70 @@
+// scripts/shoot-pages.mjs
+// Screenshot every route at desktop and phone widths with headless Chrome
+// over the DevTools protocol. Needs `npm run dev` running on :5173 and the
+// seeded local match 9001. Output: shots/<name>-<width>.png.
+import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+
+const PORT = 9340;
+const BASE = process.env.SHOOT_BASE ?? 'http://localhost:5173';
+const OUT = 'shots';
+const ROUTES = [
+  ['home', '/'], ['live', '/live'], ['leaderboard', '/leaderboard'],
+  ['matches', '/matches'], ['match-9001', '/match/9001'], ['campaigns', '/maps'],
+  ['map-caves', '/map/l4d_vs_smalltown01_caves'], ['replays', '/replays'],
+  ['profile', '/player/76561198000000001'],
+];
+const WIDTHS = [1400, 390];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chrome = spawn('google-chrome-stable', [
+  '--headless=new', `--remote-debugging-port=${PORT}`,
+  `--user-data-dir=/tmp/shoot-pages-profile`, '--no-first-run', 'about:blank',
+], { stdio: 'ignore' });
+
+let ws; let id = 0; const pending = new Map();
+function send(method, params = {}) {
+  const i = ++id;
+  ws.send(JSON.stringify({ id: i, method, params }));
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error(`timeout ${method}`)), 20000);
+    pending.set(i, (m) => { clearTimeout(t); m.error ? rej(new Error(JSON.stringify(m.error))) : res(m.result); });
+  });
+}
+
+try {
+  for (let i = 0; i < 40; i++) {
+    try { await fetch(`http://localhost:${PORT}/json/version`); break; } catch { await sleep(250); }
+  }
+  const page = (await (await fetch(`http://localhost:${PORT}/json`)).json()).find((t) => t.type === 'page');
+  ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((r) => { ws.onopen = r; });
+  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && pending.has(m.id)) pending.get(m.id)(m); };
+  await send('Page.enable');
+  await send('Runtime.enable');
+  mkdirSync(OUT, { recursive: true });
+
+  let failed = 0;
+  for (const [name, path] of ROUTES) {
+    for (const width of WIDTHS) {
+      await send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: width < 768 });
+      await send('Page.navigate', { url: BASE + path });
+      await sleep(path.startsWith('/match/') ? 4000 : 2000);
+      const probe = await send('Runtime.evaluate', {
+        returnByValue: true,
+        expression: 'JSON.stringify({h: Math.min(document.documentElement.scrollHeight, 6000), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, empty: document.getElementById("app").children.length === 0})',
+      });
+      const { h, overflow, empty } = JSON.parse(probe.result.value);
+      await send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: width < 768 });
+      await sleep(500);
+      const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+      writeFileSync(`${OUT}/${name}-${width}.png`, Buffer.from(shot.data, 'base64'));
+      const flags = [empty ? 'EMPTY' : '', overflow ? 'HORIZONTAL OVERFLOW' : ''].filter(Boolean).join(' ');
+      if (flags) failed++;
+      console.log(`${name}-${width}.png ${h}px ${flags}`);
+    }
+  }
+  process.exitCode = failed ? 1 : 0;
+} finally {
+  chrome.kill();
+}
