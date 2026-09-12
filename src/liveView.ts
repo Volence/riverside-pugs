@@ -506,11 +506,17 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
  *  anyway), and the per-player stats are public-visibility only, enforced at
  *  write time by recordLiveStat rather than filtered here.
  *
- *  The match token is deliberately not in this payload. It seeds the server
- *  password in orchestrator.ts, so publishing it here would hand anyone
- *  reading the live page a way into a private ranked match. The replay viewer
- *  addresses a live match by id instead, and the server resolves the token
- *  behind /api/replays/live/match/:id. */
+ *  The match token is deliberately not in this payload, and neither is
+ *  anything it can be recovered from. It seeds the server password in
+ *  orchestrator.ts, so publishing it here would hand anyone reading the live
+ *  page a way into a private ranked match. The replay viewer addresses a live
+ *  match by id throughout: /api/replays/live/match/:id answers with an
+ *  (ordinal, half) pair rather than a filename, because a ranked filename is
+ *  `pug_<token>_<ordinal>_<half>.rpl` and would carry the token as surely as
+ *  a token field would, and /api/replays/match/:id/:ordinal/:half resolves
+ *  that pair to a file server-side. The token bytes in the replay header are
+ *  zeroed on the way out by routes/replays.ts, so the file contents do not
+ *  leak it either. */
 export function getLiveMatches(db: DB): LiveMatch[] {
   const matches = db
     .prepare(

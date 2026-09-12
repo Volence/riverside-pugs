@@ -1,10 +1,13 @@
-import { readFileSync, createReadStream } from 'node:fs';
+import { readFileSync, createReadStream, openSync, readSync, closeSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import { listSessions, currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
-import { decodeFrames, decodeHeader, HEADER_BYTES, VERSION } from '../replayFormat.js';
+import {
+  decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET,
+} from '../replayFormat.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -66,6 +69,24 @@ function cutoffFor(path: string, info: ReplayFileInfo, nowMs: number): number {
   return cutoff;
 }
 
+/** One past the last token byte in the header. */
+const TOKEN_END = TOKEN_OFFSET + TOKEN_BYTES;
+
+/** Read `[from, to)` of a file into a Buffer. Used only for the first 44
+ *  bytes of a response, so the synchronous read is bounded and tiny. */
+function readRange(path: string, from: number, to: number): Buffer {
+  const buf = Buffer.alloc(to - from);
+  const fd = openSync(path, 'r');
+  try {
+    const got = readSync(fd, buf, 0, buf.length, from);
+    // A short read means the file shrank under us. Return what there is
+    // rather than a buffer of trailing zeroes claiming to be data.
+    return got === buf.length ? buf : buf.subarray(0, got);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function sendSlice(
   reply: FastifyReply, path: string, info: ReplayFileInfo, since: number, nowMs: number,
 ): FastifyReply {
@@ -83,6 +104,35 @@ function sendSlice(
   reply.header('Content-Length', String(Math.max(0, cutoff - start)));
 
   if (cutoff <= start) return reply.send(Buffer.alloc(0));
+
+  // The header carries the session token, and for a ranked match that token
+  // seeds the game server's sv_password in orchestrator.ts. This route is
+  // public and `cutoffFor` deliberately releases the header from the first
+  // second of a round, so those 32 bytes would otherwise be the easiest way
+  // into a private match. Blank them here, on the wire, rather than trusting
+  // every future caller to address files by something other than a name.
+  // No consumer reads `header.token` off a response: the one reader of that
+  // field, `discoverMatchReplays`, opens the file on disk itself.
+  if (start < TOKEN_END) {
+    const headEnd = Math.min(cutoff, TOKEN_END);
+    const head = readRange(path, start, headEnd);
+    const zeroFrom = Math.max(start, TOKEN_OFFSET) - start;
+    const zeroTo = Math.min(headEnd, TOKEN_END) - start;
+    if (zeroTo > zeroFrom) head.fill(0, zeroFrom, Math.min(zeroTo, head.length));
+    if (headEnd >= cutoff) return reply.send(head);
+
+    // Header first, then the rest of the slice as a stream, so a closed file
+    // is still not buffered whole. `end` is inclusive for createReadStream.
+    const out = new PassThrough();
+    out.write(head);
+    const rest = createReadStream(path, { start: headEnd, end: cutoff - 1 });
+    // `pipe` does not forward errors, and an unhandled one on the source
+    // would leave the response hanging open forever instead of failing.
+    rest.on('error', (e) => out.destroy(e));
+    rest.pipe(out);
+    return reply.send(out);
+  }
+
   // `end` is inclusive for createReadStream, so subtract one. Streaming
   // rather than buffering matters for the closed case, where this is a
   // multi-megabyte download.
@@ -102,31 +152,42 @@ export async function replayRoutes(
    * plugin generated for a mix, have no other route to them, and that is what
    * this page is for.
    *
-   * Filtering by "has no match_replays row" also keeps ranked tokens off a
-   * public page. A match token seeds the game server's sv_password in
-   * orchestrator.ts, and every token in this listing is rendered in the
-   * browser.
+   * Filtering ranked sessions out also keeps their tokens off a public page.
+   * A match token seeds the game server's sv_password in orchestrator.ts, and
+   * every token in this listing is rendered in the browser.
+   *
+   * The filter is on `matches.token`, NOT on the presence of a match_replays
+   * row. Those rows are written at round_end, so filtering on them left the
+   * whole of a ranked match's first round unclaimed and published its token
+   * on this page, which is exactly the window in which the password matters.
+   * The orchestrator writes the token the moment it takes a server, so
+   * matching on it has no window at all. A standalone `!mix` session has no
+   * matches row and stays listed.
    */
   app.get('/api/replays/sessions', async () => {
     const rows = db
-      .prepare('SELECT DISTINCT filename FROM match_replays')
-      .all() as { filename: string }[];
-    const claimed = new Set(rows.map((r) => r.filename));
+      .prepare('SELECT token FROM matches WHERE token IS NOT NULL')
+      .all() as { token: string }[];
+    const ranked = new Set(rows.map((r) => r.token));
     const sessions = listSessions(replayDir, Date.now())
-      // A session is standalone when NONE of its files belongs to a match.
-      // Testing every file rather than the first means a match that recorded
-      // only its later maps still counts as claimed.
-      .filter((s) => !s.files.some((f) => claimed.has(f.filename)));
+      .filter((s) => !ranked.has(s.token));
     return { sessions };
   });
 
   /**
-   * The current round of a match, addressed by match id.
+   * Which round of a match is being recorded right now, addressed by match id.
    *
-   * The token stays on this side of the wire. It seeds the game server's
-   * `sv_password` in orchestrator.ts, so a live page carrying it would hand
-   * anyone reading it a way into a private ranked match. A match id is
-   * already public: it is in the URL of every match page.
+   * Answers with the (ordinal, half) pair and nothing else. The filename is
+   * NOT in the payload, because the filename IS the token: every ranked
+   * replay is named `pug_<token>_<ordinal>_<half>.rpl`, and that token seeds
+   * the game server's `sv_password` in orchestrator.ts. Returning a name here
+   * and letting the client put it in a URL would publish a way into a private
+   * match just as surely as a `token` field would.
+   *
+   * A client turns this answer into bytes through
+   * `/api/replays/match/:id/:ordinal/:half`, which resolves the filename
+   * server-side. A match id is already public: it is in the URL of every
+   * match page.
    */
   app.get('/api/replays/live/match/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -136,7 +197,7 @@ export async function replayRoutes(
     if (!row?.token) return reply.code(404).send({ error: 'no replay for that match' });
     const info = currentFileFor(replayDir, row.token, Date.now());
     if (!info) return reply.code(404).send({ error: 'no replay for that match' });
-    return { filename: info.filename, closed: info.closed };
+    return { ordinal: info.ordinal, half: info.half, closed: info.closed };
   });
 
   /** The same answer for a standalone session, addressed by its own token.
@@ -160,19 +221,54 @@ export async function replayRoutes(
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now);
   });
 
+  /**
+   * The bytes of one round of a match, addressed by match id.
+   *
+   * This is the only route a ranked replay is fetched through, live or
+   * finished, because it is the only one that takes an id instead of a name.
+   * Since the name of a ranked file contains the match token, keeping the
+   * client on this route is what keeps the token off the wire entirely.
+   */
   app.get('/api/replays/match/:id/:ordinal/:half', async (req, reply) => {
     const { id, ordinal, half } = req.params as { id: string; ordinal: string; half: string };
     const { since } = req.query as { since?: string };
     const now = Date.now();
     const row = resolveReplayPath(db, Number(id), Number(ordinal), Number(half), replayDir);
-    if (!row) return reply.code(404).send({ error: 'no such replay' });
     // Go back through the by-name resolver rather than trusting the row's
     // path directly, because that is what knows whether the file is still
     // being written. A match's current map is live too.
-    const found = resolveByName(replayDir, row.filename, now);
+    const found = row
+      ? resolveByName(replayDir, row.filename, now)
+      : liveRoundFor(Number(id), ordinal, half, now);
     if (!found) return reply.code(404).send({ error: 'no such replay' });
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now);
   });
+
+  /**
+   * The round in progress, which has no `match_replays` row yet.
+   *
+   * Those rows are written at round_end, so for the whole of a round there is
+   * nothing for `resolveReplayPath` to find. The live viewer needs exactly
+   * that round, so the name is rebuilt from the match's own token instead.
+   * The token comes from this process's database and the ordinal and half are
+   * checked to be plain non-negative integers before they go anywhere near a
+   * filename; `resolveByName` then applies the same pattern, basename and
+   * resolved-prefix checks every other path gets.
+   */
+  function liveRoundFor(
+    matchId: number, ordinal: string, half: string, nowMs: number,
+  ): ReturnType<typeof resolveByName> {
+    const ord = Number(ordinal);
+    const hf = Number(half);
+    if (!Number.isInteger(matchId)) return null;
+    if (!Number.isInteger(ord) || ord < 0) return null;
+    if (hf !== 1 && hf !== 2) return null;
+    const row = db
+      .prepare('SELECT token FROM matches WHERE id = ?')
+      .get(matchId) as { token: string | null } | undefined;
+    if (!row?.token) return null;
+    return resolveByName(replayDir, `pug_${row.token}_${ord}_${hf}.rpl`, nowMs);
+  }
 
   /**
    * Events and chat for one round of a COMPLETED match.

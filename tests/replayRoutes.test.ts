@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -74,13 +74,20 @@ function writeRound(
 }
 
 /** Insert a `matches` row and a `match_replays` row pointing at `filename`.
- *  Returns the match id. Mirrors the pattern in tests/replayPrune.test.ts. */
+ *  Returns the match id. Mirrors the pattern in tests/replayPrune.test.ts.
+ *
+ *  The match's token is taken from the filename rather than hardcoded to
+ *  TOKEN, because in production the two are always the same thing: the plugin
+ *  names every file `pug_<token>_<ordinal>_<half>.rpl` under the token the
+ *  orchestrator handed it. A fixture that pairs one match token with another
+ *  session's file describes a state that cannot occur. */
 function seedMatchReplay(
   filename: string, ordinal: number, half: number, bytes: number, frames: number,
 ): number {
+  const token = /^pug_([0-9a-f]{32})_/.exec(filename)?.[1] ?? TOKEN;
   db.prepare(
     `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
-  ).run(TOKEN);
+  ).run(token);
   const id = (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
   db.prepare(
     `INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz)
@@ -103,7 +110,7 @@ describe('GET /api/replays/sessions', () => {
   // page to be reached through. A ranked session is reachable through its
   // match page and its token is the seed for the game server's sv_password,
   // so listing it here would publish a way into a private match.
-  it('omits a session whose files belong to a match', async () => {
+  it('omits a session whose token belongs to a match', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
     seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: '/api/replays/sessions' });
@@ -127,15 +134,41 @@ describe('GET /api/replays/sessions', () => {
       .json() as { sessions: { token: string }[] };
     expect(body.sessions.map((s) => s.token)).toEqual([TOKEN]);
   });
+
+  // The round-one window. match_replays rows are only written at round_end,
+  // so for the whole of a ranked match's first round there is no row to
+  // filter on, and a listing keyed on those rows published the token of a
+  // match that was in progress: precisely when the sv_password it seeds
+  // matters most. The matches row exists from the moment the orchestrator
+  // takes a server, so filtering on matches.token has no window.
+  it('omits a ranked session in its first round, before any match_replays row', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 30, false);
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
+    ).run(TOKEN);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_replays').get())
+      .toEqual({ n: 0 });
+    const res = await app.inject({ url: '/api/replays/sessions' });
+    expect((res.json() as { sessions: unknown[] }).sessions).toEqual([]);
+    expect(res.payload).not.toContain(TOKEN);
+  });
 });
 
 describe('GET /api/replays/live/match/:id', () => {
-  it('names the newest file for the match, without disclosing its token', async () => {
+  // BEHAVIOUR REVERSAL. This route used to answer with the filename, which is
+  // `pug_<token>_<ordinal>_<half>.rpl`: the token was therefore in the
+  // response, and the client then put it in a public URL. It now answers with
+  // the (ordinal, half) pair, which the client turns into bytes through
+  // /api/replays/match/:id/:ordinal/:half. Nothing derived from the token
+  // crosses the wire.
+  it('identifies the newest round by ordinal and half, never by filename', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
     writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 60, false);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
-    expect(res.json()).toEqual({ filename: `pug_${TOKEN}_1_1.rpl`, closed: false });
+    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false });
+    expect(res.payload).not.toContain(TOKEN);
+    expect(res.payload).not.toContain('.rpl');
   });
 
   it('404s an unknown match id', async () => {
@@ -262,11 +295,54 @@ describe('GET /api/replays/file/:name', () => {
     expect(next).toBe(cutoff);
   });
 
-  it('serves the header alone when no frame is old enough yet', async () => {
+  // BEHAVIOUR REVERSAL. This used to assert the served header carries the
+  // token. It does not any more: the header goes out from the first second of
+  // a round on a public route, and for a ranked match those 32 bytes seed the
+  // game server's sv_password. The header is still served whole and still
+  // decodes; only the token field is blanked. Everything else the client
+  // actually reads (map, slots, hz, version) is untouched.
+  it('serves the header alone when no frame is old enough yet, with the token blanked', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 3, 2, false);
     const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
     expect(res.rawPayload.length).toBe(HEADER_BYTES);
-    expect(decodeHeader(res.rawPayload)?.token).toBe(TOKEN);
+    const h = decodeHeader(res.rawPayload);
+    expect(h?.token).toBe('');
+    expect(h?.map).toBe('l4d_vs_farm01_hilltop');
+    expect(h?.version).toBe(VERSION);
+    expect(res.rawPayload.includes(TOKEN)).toBe(false);
+  });
+
+  it('blanks the token in a whole closed file too, without moving any other byte', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
+    expect(res.rawPayload.length).toBe(HEADER_BYTES + frameBytes(0) * 5);
+    expect(res.headers['content-length']).toBe(String(HEADER_BYTES + frameBytes(0) * 5));
+    expect(res.rawPayload.includes(TOKEN)).toBe(false);
+    const h = decodeHeader(res.rawPayload);
+    expect(h?.token).toBe('');
+    expect(h?.frameCount).toBe(5);
+    // The frames after the header must be byte-identical to what is on disk,
+    // which is what proves the token was overwritten in place rather than
+    // removed.
+    const onDisk = readFileSync(join(dir, `pug_${TOKEN}_0_1.rpl`));
+    expect(res.rawPayload.subarray(HEADER_BYTES).equals(onDisk.subarray(HEADER_BYTES))).toBe(true);
+  });
+
+  it('blanks the token on a partial slice that starts inside the token field', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    // A `since` this server would never hand out, but the route must not
+    // leak the tail of the token to a client that asks for it by hand.
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=20` });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.includes('a'.repeat(8))).toBe(false);
+  });
+
+  it('serves nothing but the token blanked when the slice stops short of the frames', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl?since=0` });
+    // The head buffer is 44 bytes and the rest is streamed; the join must not
+    // duplicate or drop a byte.
+    expect(res.rawPayload.length).toBe(HEADER_BYTES + frameBytes(0) * 5);
   });
 
   it('404s a traversal attempt', async () => {
@@ -329,6 +405,36 @@ describe('GET /api/replays/match/:id/:ordinal/:half', () => {
     // No writeRound call: the row exists but nothing was ever written for it,
     // which is exactly what a pruned or never-flushed file looks like.
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  // The live viewer's only route to bytes now that it is given an
+  // (ordinal, half) pair instead of a filename. match_replays rows are
+  // written at round_end, so the round the live page actually wants has no
+  // row at all: without the fallback to the match's own token this 404s for
+  // the entire round, which would be the live viewer broken outright.
+  it('serves the round in progress, which has no match_replays row yet', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 15, 15, false);
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
+    ).run(TOKEN);
+    const id = (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-replay-closed']).toBe('0');
+    expect(res.rawPayload.length).toBeGreaterThanOrEqual(HEADER_BYTES);
+    // Still the cutoff, not the whole file, and still no token.
+    expect(res.rawPayload.length).toBeLessThan(HEADER_BYTES + frameBytes(0) * 15);
+    expect(res.rawPayload.includes(TOKEN)).toBe(false);
+  });
+
+  it('404s a rowless round whose match has no token', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign) VALUES (1, 'configuring', 'no_mercy')`,
+    ).run();
+    const id = (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
     const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
     expect(res.statusCode).toBe(404);
   });
