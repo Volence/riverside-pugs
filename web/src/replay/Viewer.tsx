@@ -164,6 +164,7 @@ export function Viewer(
         setFollowSlot={setFollowSlot}
         slots={header.slots}
         names={names}
+        timeline={timeline}
       />
 
       <HudStrip

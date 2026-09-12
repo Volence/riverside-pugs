@@ -1,5 +1,6 @@
 import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
+import type { TimelineEntry } from './timeline';
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
  *  the frames carry; nobody wants to read that. Exported because the
@@ -19,6 +20,7 @@ export interface ReplayControlsProps {
   setFollowSlot: (slot: number | null) => void;
   slots: string[];
   names: Record<string, string>;
+  timeline?: TimelineEntry[];
 }
 
 /** The toolbar, scrub bar, speed and follow rows. Purely presentational:
@@ -26,7 +28,7 @@ export interface ReplayControlsProps {
  *  one of the callback props. */
 export function ReplayControls(
   {
-    playback, endMs, live, followSlot, setFollowSlot, slots, names,
+    playback, endMs, live, followSlot, setFollowSlot, slots, names, timeline,
   }: ReplayControlsProps,
 ) {
   return (
@@ -35,14 +37,28 @@ export function ReplayControls(
         <button class="chip" onClick={playback.toggle}>
           {playback.playing ? 'Pause' : 'Play'}
         </button>
-        <input
-          class="replay__scrub"
-          type="range"
-          min={0}
-          max={Math.max(endMs, 1)}
-          value={playback.tMs}
-          onInput={(e) => playback.seek(Number((e.target as HTMLInputElement).value))}
-        />
+        <div class="scrub">
+          <input
+            class="scrub__range"
+            type="range"
+            min={0}
+            max={Math.max(endMs, 1)}
+            value={playback.tMs}
+            aria-label="Round position"
+            onInput={(e) => playback.seek(Number((e.target as HTMLInputElement).value))}
+          />
+          {timeline && endMs > 0 && (
+            <div class="scrub__ticks" aria-hidden="true">
+              {timeline.map((e) => (
+                <span
+                  key={e.seq}
+                  class={`scrub__tick scrub__tick--${e.kind}`}
+                  style={{ left: `${Math.min(100, Math.max(0, (e.tMs / endMs) * 100))}%` }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         <span class="replay__time">{formatTime(playback.tMs)} / {formatTime(endMs)}</span>
         {SPEEDS.map((s) => (
           <button
