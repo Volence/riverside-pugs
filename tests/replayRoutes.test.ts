@@ -241,6 +241,49 @@ describe('non-numeric route parameters', () => {
   });
 });
 
+describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
+  it('returns events and chat for that map and half, in sequence order', async () => {
+    // Build an app with a db you can seed. Follow the same buildApp pattern
+    // the rest of this file uses, keeping a handle on the db.
+    const db = openDb(':memory:');
+    // season_id and campaign are NOT NULL and state is CHECK-constrained, none
+    // of which the brief's original one-liner satisfied; season_id 1 comes
+    // from openDb's own seed(), and 'completed' is a real state a finished
+    // match's timeline would be read back under.
+    db.prepare(
+      'INSERT INTO matches (id, season_id, campaign, token, state) VALUES (1, 1, ?, ?, ?)',
+    ).run('no_mercy', 't'.repeat(32), 'completed');
+    db.prepare(
+      `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms)
+       VALUES (1, 1, 'pounce', 'A', 'B', 20, 0, 1, 5000)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO match_chat (match_id, seq, map_ordinal, half, t_ms, steamid, team, message)
+       VALUES (1, 2, 0, 1, 6000, 'A', 'survivor', 'nice')`,
+    ).run();
+    // Another map: must not appear.
+    db.prepare(
+      `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms)
+       VALUES (1, 3, 'pounce', 'A', 'B', 20, 1, 1, 7000)`,
+    ).run();
+    // Untimed, from before the t_ms column existed: must not appear, because
+    // it cannot be placed on the timeline at all.
+    db.prepare(
+      `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms)
+       VALUES (1, 4, 'pounce', 'A', 'B', 20, 0, 1, -1)`,
+    ).run();
+
+    const app2 = Fastify();
+    await app2.register(replayRoutes, { db, replayDir: dir });
+    await app2.ready();
+
+    const res = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
+    const body = res.json() as { entries: { seq: number; kind: string }[] };
+    expect(body.entries.map((e) => [e.seq, e.kind])).toEqual([[1, 'event'], [2, 'chat']]);
+    await app2.close();
+  });
+});
+
 describe('replayRoutes registration on the real server', () => {
   it('is registered on the real server', async () => {
     // Every other test in this file registers replayRoutes directly onto a bare

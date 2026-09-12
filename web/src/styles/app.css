@@ -718,6 +718,12 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__time { font-variant-numeric: tabular-nums; font-size: 0.85rem; opacity: 0.8; }
 .replay__btn { padding: 0.2rem 0.55rem; font-size: 0.8rem; border-radius: 3px; cursor: pointer; }
 .replay__btn.is-on { outline: 1px solid currentColor; font-weight: 600; }
+.replay__rail { display: flex; flex-direction: column; gap: 0.15rem; max-height: 18rem; overflow-y: auto; }
+.replay__entry { display: flex; gap: 0.4rem; text-align: left; font-size: 0.75rem; padding: 0.15rem 0.3rem; background: none; border: 0; cursor: pointer; border-radius: 2px; }
+.replay__entry:hover { background: #23261e; }
+.replay__entry--chat .replay__entry-text { opacity: 0.85; font-style: italic; }
+.replay__entry-t { font-variant-numeric: tabular-nums; opacity: 0.55; }
+.replay__entry-who { font-weight: 600; }
 
 /* HUD panel strip. */
 .hud-strip { display: flex; flex-direction: column; gap: 0.4rem; }

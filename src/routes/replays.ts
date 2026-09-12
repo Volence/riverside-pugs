@@ -115,4 +115,48 @@ export async function replayRoutes(
     if (!found) return reply.code(404).send({ error: 'no such replay' });
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now);
   });
+
+  /**
+   * Events and chat for one round, on the same clock as the replay frames.
+   *
+   * `t_ms` defaults to -1 for rows written before that column existed, and a
+   * row that cannot be placed in time cannot be placed on a timeline, so it
+   * is filtered out here rather than rendered at zero. Ordering is by `seq`
+   * rather than by `t_ms` because events and chat share one monotonic counter
+   * and that is what puts a message and the death it was about in the order
+   * they actually happened.
+   */
+  app.get('/api/replays/timeline/:matchId/:ordinal/:half', async (req) => {
+    const { matchId, ordinal, half } = req.params as
+      { matchId: string; ordinal: string; half: string };
+    const id = Number(matchId);
+    const ord = Number(ordinal);
+    const hf = Number(half);
+
+    const events = db.prepare(
+      `SELECT seq, t_ms AS tMs, kind, actor, target, value FROM match_live_events
+       WHERE match_id = ? AND map_ordinal = ? AND half = ? AND t_ms >= 0`,
+    ).all(id, ord, hf) as
+      { seq: number; tMs: number; kind: string; actor: string; target: string | null; value: number }[];
+
+    const chat = db.prepare(
+      `SELECT seq, t_ms AS tMs, steamid, team, message FROM match_chat
+       WHERE match_id = ? AND map_ordinal = ? AND half = ? AND t_ms >= 0`,
+    ).all(id, ord, hf) as
+      { seq: number; tMs: number; steamid: string; team: string | null; message: string }[];
+
+    const entries = [
+      ...events.map((e) => ({
+        seq: e.seq, tMs: e.tMs, kind: 'event' as const,
+        text: e.target ? `${e.kind} ${e.target} ${e.value}` : `${e.kind} ${e.value}`,
+        actor: e.actor, team: null as string | null,
+      })),
+      ...chat.map((c) => ({
+        seq: c.seq, tMs: c.tMs, kind: 'chat' as const,
+        text: c.message, actor: c.steamid, team: c.team,
+      })),
+    ].sort((a, b) => a.seq - b.seq);
+
+    return { entries };
+  });
 }

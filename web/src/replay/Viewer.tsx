@@ -9,10 +9,12 @@ import { useMapLayer } from './useMapLayer';
 import { ReplayCanvas } from './ReplayCanvas';
 import { ReplayControls } from './ReplayControls';
 import { HudStrip } from './HudStrip';
+import { TimelineRail } from './TimelineRail';
+import type { TimelineEntry } from './timeline';
 
 export function Viewer(
-  { spec, live = false, names = {} }:
-  { spec: ReplaySpec; live?: boolean; names?: Record<string, string> },
+  { spec, live = false, names = {}, timeline }:
+  { spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[] },
 ) {
   const { header, frames, closed, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
@@ -67,6 +69,16 @@ export function Viewer(
         show={show}
         followSlot={followSlot}
       />
+
+      {timeline && (toggles.events || toggles.chat) && (
+        <TimelineRail
+          timeline={timeline}
+          tMs={playback.tMs}
+          toggles={toggles}
+          seek={playback.seek}
+          names={names}
+        />
+      )}
 
       <ReplayControls
         playback={playback}
