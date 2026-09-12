@@ -445,7 +445,8 @@ describe('skill stats display', () => {
       ],
     });
     render(<MatchDetail id="8" me="1" />);
-    await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
+    // Appears twice now: in the versus header roster and in the totals table.
+    await waitFor(() => expect(screen.getAllByText('alice').length).toBeGreaterThan(0));
     expect(screen.queryByText('Skeets')).toBeNull();
   });
 

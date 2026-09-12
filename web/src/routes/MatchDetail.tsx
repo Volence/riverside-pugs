@@ -3,7 +3,9 @@ import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type T
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
-import { Empty, Panel, Tile, Tiles } from '../components/bits';
+import { Empty, Panel } from '../components/bits';
+import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
@@ -27,8 +29,8 @@ function MapReplay(
   return (
     <>
       <div class="replay__rounds">
-        <button class={`replay__btn ${half === 1 ? 'is-on' : ''}`} onClick={() => setHalf(1)}>Round 1</button>
-        <button class={`replay__btn ${half === 2 ? 'is-on' : ''}`} onClick={() => setHalf(2)}>Round 2</button>
+        <button class={`chip ${half === 1 ? 'is-on' : ''}`} onClick={() => setHalf(1)}>Round 1</button>
+        <button class={`chip ${half === 2 ? 'is-on' : ''}`} onClick={() => setHalf(2)}>Round 2</button>
       </div>
       {/* A map played before recording existed has no match_replays row.
           Viewer renders its own "couldn't load" state for that, which is the
@@ -166,29 +168,25 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
 
   return (
     <div class="page page--match">
-      <div class="page__head">
-        <div>
-          <p class="eyebrow">Match #{match.id}</p>
-          <h2>{campaignName(match.campaign)}</h2>
-        </div>
-        <div class="scoreline">
-          <span class="scoreline__score num">{match.teamAScore} - {match.teamBScore}</span>
-          <span class="muted">{winnerLabel(match.winner)} · {fmtDate(match.endedAt)}</span>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow={`Match #${match.id} · ${winnerLabel(match.winner)} · ${fmtDate(match.endedAt)}`}
+        title={campaignName(match.campaign)}
+      >
+        {headlineCards.length > 0 && (
+          <Figures>
+            {headlineCards.map((c) => (
+              <Figure key={c.label} label={c.label} value={`${c.a ?? 'n/a'} - ${c.b ?? 'n/a'}`} sub={c.sub} />
+            ))}
+          </Figures>
+        )}
+      </PageHeader>
 
-      {headlineCards.length > 0 && (
-        <Tiles>
-          {headlineCards.map((c) => (
-            <Tile
-              key={c.label}
-              label={c.label}
-              value={`${c.a ?? 'n/a'} - ${c.b ?? 'n/a'}`}
-              sub={c.sub}
-            />
-          ))}
-        </Tiles>
-      )}
+      <VersusHeader
+        teamA={teamPlayers('a').map((p) => p.name)}
+        teamB={teamPlayers('b').map((p) => p.name)}
+        scoreA={match.teamAScore}
+        scoreB={match.teamBScore}
+      />
 
       <div class="stack">
         <Panel>
