@@ -54,9 +54,9 @@ describe('Leaderboard', () => {
       ],
     });
     render(<Leaderboard me="2" />);
-    await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('alice').length).toBeGreaterThan(0));
     expect(screen.getByText('Season 1')).toBeTruthy();
-    expect(screen.getByText('1200')).toBeTruthy();
+    expect(screen.getAllByText('1200').length).toBeGreaterThan(0);
   });
 
   it('says so when nobody is rated yet', async () => {
@@ -559,7 +559,8 @@ describe('Leaderboard sorting', () => {
   it('defaults to SR descending and renders every stat column', async () => {
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+    // bob is also the top-rated headliner now, so this appears twice.
+    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
 
     const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
     expect(names).toEqual(['bob', 'alice']);
@@ -573,7 +574,7 @@ describe('Leaderboard sorting', () => {
   it('re-sorts when a column header is clicked', async () => {
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
 
     // Commons descending puts bob first (99 vs 10); clicking again reverses.
     const head = container.querySelector('thead') as HTMLElement;
@@ -593,7 +594,7 @@ describe('Leaderboard sorting', () => {
     // her first as though she had scored 0.
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getByText('bob')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
 
     const head = container.querySelector('thead') as HTMLElement;
     (within(head).getByText('Tank damage') as HTMLElement).click(); // desc

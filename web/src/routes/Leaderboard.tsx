@@ -2,7 +2,9 @@ import { useMemo, useState } from 'preact/hooks';
 import { api, type LeaderboardRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { deriveLiveStats, labelFor, orderLiveStatKeys } from '../format';
-import { Empty, Panel, PlayerLink, Tile, Tiles } from '../components/bits';
+import { Empty, Panel, PlayerLink } from '../components/bits';
+import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { Headliner } from '../components/Headliner';
 
 /** Columns that are not stats and so are not part of the stat bag. */
 const BASE_COLS = [
@@ -82,75 +84,90 @@ export function Leaderboard({ me }: { me: string | null }) {
 
   return (
     <div class="page page--list">
-      <div class="page__head">
-        <h2>Leaderboard</h2>
-        {data && <span class="eyebrow">{data.season.name}</span>}
-      </div>
-
-      {rows.length > 0 && (
-        <Tiles>
-          <Tile label="Players" value={rows.length} />
-          <Tile label="Matches rated" value={Math.max(...rows.map((r) => r.games))} />
-          {totals.tank_damage ? <Tile label="Tank damage" value={totals.tank_damage} /> : null}
-          {totals.skeets ? <Tile label="Skeets" value={totals.skeets} /> : null}
-          {totals.boomer_rate !== undefined
-            ? <Tile label="Boomer %" value={`${totals.boomer_rate}%`} sub="everyone" />
-            : null}
-        </Tiles>
-      )}
-
-      <Panel class="panel--table">
-        {error ? (
-          <Empty>Couldn't load the leaderboard.</Empty>
-        ) : !data ? (
-          <Empty>Loading…</Empty>
-        ) : rows.length === 0 ? (
-          <Empty>No rated players yet.</Empty>
-        ) : (
-          <div class={`table-wrap lb${sort.key === 'sr' && sort.desc ? ' lb--ranked' : ''}`}>
-            <table>
-              <thead>
-                <tr>
-                  <th class="rank">#</th>
-                  <th class="lb__pcol">Player</th>
-                  {BASE_COLS.map((c) => th(c.key, c.label))}
-                  {statCols.map((k) => th(k, labelFor(k)))}
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((r, i) => {
-                  const decided = r.wins + r.losses;
-                  return (
-                    <tr key={r.steamid} class={r.steamid === me ? 'is-me' : ''}>
-                      {/* Rank follows the CURRENT sort, so it stays meaningful
-                          when the table is ordered by something other than SR. */}
-                      <td class={`rank ${i < 3 ? 'rank--top' : ''}`}>{String(i + 1).padStart(2, '0')}</td>
-                      <td class="lb__pcol pname"><PlayerLink steamid={r.steamid} name={r.name} /></td>
-                      <td class="num sr">{r.sr}</td>
-                      <td class="num">{r.wins}</td>
-                      <td class="num">{r.losses}</td>
-                      <td class="num muted">{r.games}</td>
-                      <td class="num">
-                        {decided > 0
-                          ? `${Math.round((r.wins / decided) * 100)}%`
-                          : <span class="muted">n/a</span>}
-                      </td>
-                      {statCols.map((k) => {
-                        const v = r.stats?.[k];
-                        return (
-                          <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                            {v === undefined ? <span class="muted">n/a</span> : v}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      <PageHeader title="Leaderboard" aside={data ? data.season.name : undefined}>
+        {rows.length > 0 && (
+          <Figures>
+            <Figure label="Players" value={rows.length} />
+            <Figure label="Matches rated" value={Math.max(...rows.map((r) => r.games))} />
+            {totals.tank_damage ? <Figure label="Tank damage" value={totals.tank_damage} /> : null}
+            {totals.skeets ? <Figure label="Skeets" value={totals.skeets} /> : null}
+            {totals.boomer_rate !== undefined
+              ? <Figure label="Boomer %" value={`${totals.boomer_rate}%`} sub="everyone" />
+              : null}
+          </Figures>
         )}
-      </Panel>
+      </PageHeader>
+
+      <div class="lb-layout">
+        <Panel class="panel--table">
+          {error ? (
+            <Empty>Couldn't load the leaderboard.</Empty>
+          ) : !data ? (
+            <Empty>Loading…</Empty>
+          ) : rows.length === 0 ? (
+            <Empty>No rated players yet.</Empty>
+          ) : (
+            <div class={`table-wrap lb${sort.key === 'sr' && sort.desc ? ' lb--ranked' : ''}`}>
+              <table>
+                <thead>
+                  <tr>
+                    <th class="rank">#</th>
+                    <th class="lb__pcol">Player</th>
+                    {BASE_COLS.map((c) => th(c.key, c.label))}
+                    {statCols.map((k) => th(k, labelFor(k)))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((r, i) => {
+                    const decided = r.wins + r.losses;
+                    return (
+                      <tr key={r.steamid} class={r.steamid === me ? 'is-me' : ''}>
+                        {/* Rank follows the CURRENT sort, so it stays meaningful
+                            when the table is ordered by something other than SR. */}
+                        <td class={`rank ${i < 3 ? 'rank--top' : ''}`}>{String(i + 1).padStart(2, '0')}</td>
+                        <td class="lb__pcol pname"><PlayerLink steamid={r.steamid} name={r.name} /></td>
+                        <td class="num sr">{r.sr}</td>
+                        <td class="num">{r.wins}</td>
+                        <td class="num">{r.losses}</td>
+                        <td class="num muted">{r.games}</td>
+                        <td class="num">
+                          {decided > 0
+                            ? `${Math.round((r.wins / decided) * 100)}%`
+                            : <span class="muted">n/a</span>}
+                        </td>
+                        {statCols.map((k) => {
+                          const v = r.stats?.[k];
+                          return (
+                            <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                              {v === undefined ? <span class="muted">n/a</span> : v}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+        {rows.length > 0 && (() => {
+          const top = [...rows].sort((a, b) => b.sr - a.sr)[0];
+          const decided = top.wins + top.losses;
+          return (
+            <Headliner
+              eyebrow="Top rated"
+              name={top.name}
+              rating={top.sr}
+              stats={[
+                { label: 'Record', value: `${top.wins}W ${top.losses}L` },
+                { label: 'Win %', value: decided > 0 ? `${Math.round((top.wins / decided) * 100)}%` : 'n/a' },
+                { label: 'Games', value: top.games },
+              ]}
+            />
+          );
+        })()}
+      </div>
     </div>
   );
 }

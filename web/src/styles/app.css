@@ -111,9 +111,11 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .page { margin: var(--sp-6) auto var(--sp-7); padding-inline: var(--sp-5); }
 .page--play { max-width: 720px; }
 .page--play-teams { max-width: 880px; }
-.page--list { max-width: 880px; }
+.page--list { max-width: 1120px; }
 .page--profile { max-width: 960px; }
 .page--match { max-width: 1120px; }
+.lb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-5); align-items: start; }
+@media (max-width: 960px) { .lb-layout { grid-template-columns: minmax(0, 1fr); } }
 /* Same reason: panels hold wide scrolling tables. */
 .stack > * { min-width: 0; }
 .stack { min-width: 0; }
