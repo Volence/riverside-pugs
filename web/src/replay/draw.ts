@@ -206,10 +206,10 @@ export function statusGlyph(state: number): string {
  * never disagree about which state won.
  */
 export function alertColor(state: number): string | null {
-  // The amber the ring that was removed used, and the same amber the HUD
-  // panel sets its status flags in.
-  if ((state & STATE.PINNED) !== 0) return '#e8b04b';
-  if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) return '#d9534f';
+  // The rating gold and the site red, so the ring reads with the rest of the
+  // page.
+  if ((state & STATE.PINNED) !== 0) return '#c9a45c';
+  if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) return '#de4e40';
   return null;
 }
 
@@ -458,7 +458,7 @@ function drawLabels(ctx: CanvasRenderingContext2D, jobs: readonly LabelJob[]): v
       ctx.globalAlpha = 1;
     }
 
-    ctx.fillStyle = 'rgba(8,10,7,0.78)';
+    ctx.fillStyle = 'rgba(5,4,3,0.78)';
     ctx.fillRect(plateX, plateY, plateW, LABEL_PLATE_H);
     ctx.fillStyle = j.color;
     ctx.fillRect(plateX, plateY, LABEL_TICK_W, LABEL_PLATE_H);
@@ -470,7 +470,7 @@ function drawLabels(ctx: CanvasRenderingContext2D, jobs: readonly LabelJob[]): v
 
 function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.strokeStyle = 'rgba(217,203,176,0.06)';
   ctx.lineWidth = 1;
   const step = 64;
   for (let x = 0; x <= w; x += step) {
@@ -491,7 +491,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
  */
 export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   ctx.clearRect(0, 0, a.width, a.height);
-  ctx.fillStyle = '#11130f';
+  ctx.fillStyle = '#0b0908';
   ctx.fillRect(0, 0, a.width, a.height);
 
   if (a.backdrop) {
@@ -668,7 +668,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         ctx.lineWidth = 3;
         ctx.strokeStyle = 'rgba(0,0,0,0.85)';
         ctx.strokeText(glyph, p.px, gy);
-        ctx.fillStyle = '#e8b04b';
+        ctx.fillStyle = '#c9a45c';
         ctx.fillText(glyph, p.px, gy);
       }
 
