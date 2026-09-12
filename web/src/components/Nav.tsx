@@ -1,4 +1,6 @@
 import { useLocation } from 'preact-iso';
+import type { StateSnapshot } from '../api';
+import { campaignName } from '../format';
 import type { Session } from '../hooks/useLiveState';
 
 /** [href, label, target?].
@@ -7,24 +9,28 @@ import type { Session } from '../hooks/useLiveState';
  *  intercepts same-origin clicks whose target is absent or _self (router.js:45).
  *  The crosshair maker is a standalone static page with its own document, not a
  *  route, so without the target the router would swallow the click and show the
- *  SPA's not-found instead of the page. */
+ *  SPA's not-found instead of the page.
+ *
+ *  The maps route is labelled Campaigns: that is how players refer to what it
+ *  lists. The path stays /maps so nothing bookmarked breaks. */
 export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/', 'Play'],
   ['/live', 'Live'],
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
-  ['/maps', 'Maps'],
+  ['/maps', 'Campaigns'],
   ['/replays', 'Replays'],
   ['/crosshair.html', 'Crosshair', '_blank'],
 ];
 
-export function Nav({ session }: { session: Session }) {
+export function Nav({ session, state }: { session: Session; state: StateSnapshot | null }) {
   const { path } = useLocation();
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
+  const live = state?.match && state.match.state === 'live' ? state.match : null;
 
   return (
     <header class="nav">
-      <a class="nav__brand" href="/">L4D1 PUG</a>
+      <a class="nav__brand" href="/">Riverside</a>
       <nav class="nav__links">
         {NAV_LINKS.map(([href, label, target]) => (
           <a key={href} href={href} target={target}
@@ -32,6 +38,12 @@ export function Nav({ session }: { session: Session }) {
              aria-current={path === href ? 'page' : undefined}>{label}</a>
         ))}
       </nav>
+      {live && (
+        <a class="nav__live" href="/live">
+          <span class="nav__live-dot" aria-hidden="true" />
+          Live · {campaignName(live.campaign)}
+        </a>
+      )}
       {me && (
         <div class="nav__me">
           {me.avatar && <img src={me.avatar} alt="" />}

@@ -19,7 +19,7 @@ h1, h2, h3 {
   font-family: var(--font-display);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   line-height: 1.1;
   margin: 0;
 }
@@ -37,11 +37,11 @@ table, .num { font-variant-numeric: tabular-nums; }
 /* An uppercase tracked label. Used above hero numerals and as a section
  * eyebrow, the one piece of chrome that carries the HUD voice. */
 .eyebrow {
-  font-family: var(--font-display);
+  font-family: var(--font-label);
   font-size: var(--fs-label);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
   color: var(--text-muted);
 }
 
@@ -51,34 +51,56 @@ table, .num { font-variant-numeric: tabular-nums; }
   display: flex;
   align-items: center;
   gap: var(--sp-5);
-  padding: var(--sp-3) var(--sp-5);
+  height: 62px;
+  padding: 0 var(--sp-5);
   background: var(--surface);
-  /* Turns red with body[data-urgent], which is how a running ready check stays
-   * visible while you are reading the leaderboard. */
-  border-bottom: 2px solid var(--border);
-  transition: border-color 200ms linear;
+  /* Thickens and brightens with body[data-urgent], which is how a running
+   * ready check stays visible while you are reading the leaderboard. */
+  border-bottom: 1px solid var(--border);
+  transition: border-color 200ms linear, border-width 200ms linear;
 }
-body[data-urgent='true'] .nav { border-bottom-color: var(--loss); }
+body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 .nav__brand {
   font-family: var(--font-display);
-  font-size: var(--fs-h3);
-  font-weight: 700;
+  font-size: 1.625rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text);
+  color: var(--text-bright);
 }
 .nav__brand:hover { text-decoration: none; }
-.nav__links { display: flex; gap: var(--sp-4); flex: 1; }
+.nav__links { display: flex; gap: var(--sp-5); flex: 1; }
 .nav__links a {
-  color: var(--text-muted);
-  font-size: var(--fs-dense);
+  font-family: var(--font-label);
+  font-size: 0.8125rem;
   font-weight: 500;
-  padding-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-muted);
+  padding-bottom: 3px;
   border-bottom: 2px solid transparent;
 }
-.nav__links a:hover { color: var(--text); text-decoration: none; }
-.nav__links a[aria-current='page'] { color: var(--text); border-bottom-color: var(--accent); }
+.nav__links a:hover { color: var(--text-bright); text-decoration: none; }
+.nav__links a[aria-current='page'] { color: var(--text-bright); border-bottom-color: var(--accent); }
+
+.nav__live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+.nav__live:hover { color: var(--text-bright); text-decoration: none; }
+.nav__live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
 
 .nav__me { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-dense); }
 .nav__me a { color: var(--text); }
@@ -96,13 +118,21 @@ body[data-urgent='true'] .nav { border-bottom-color: var(--loss); }
 .stack > * { min-width: 0; }
 .stack { min-width: 0; }
 
-.page__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
-}
+/* The poster page header. One red rule under everything, figures in a row. */
+.page-head { margin-bottom: var(--sp-5); border-bottom: 2px solid var(--rule); padding-bottom: var(--sp-4); }
+.page-head__row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
+.page-head__eyebrow { margin: 0 0 var(--sp-1); }
+.page-head__title { font-size: var(--fs-title); }
+.page-head__aside { color: var(--text-muted); font-family: var(--font-label); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.16em; text-align: right; }
+
+.figures { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-6); margin-top: var(--sp-4); }
+.figure { min-width: 0; }
+.figure__label { margin: 0 0 2px; }
+.figure__value { margin: 0; font-family: var(--font-display); font-size: var(--fs-h2); line-height: 1; color: var(--text-bright); }
+.figure__value--rating { color: var(--rating); }
+.figure__value--win { color: var(--win); }
+.figure__value--loss { color: var(--loss); }
+.figure__sub { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); color: var(--text-muted); }
 
 .panel {
   background: var(--surface);
@@ -282,7 +312,14 @@ td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
 .roster li.is-me { box-shadow: inset 3px 0 0 var(--accent); background: var(--surface-2); }
 
 @media (max-width: 640px) {
-  .nav { flex-wrap: wrap; gap: var(--sp-3); }
+  .nav {
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    height: auto;
+    min-height: 62px;
+    padding: var(--sp-3) var(--sp-5);
+  }
+  .nav__links { flex-wrap: wrap; overflow-x: auto; flex-basis: 100%; }
   .page { padding-inline: var(--sp-4); }
 }
 

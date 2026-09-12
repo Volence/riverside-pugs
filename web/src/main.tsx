@@ -34,7 +34,7 @@ function App() {
 
   return (
     <>
-      <Nav session={session} />
+      <Nav session={session} state={state} />
       <main>
         <Router>
           <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
