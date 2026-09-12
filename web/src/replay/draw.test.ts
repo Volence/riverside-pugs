@@ -2,12 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
-  alertColor, healthRingFraction, INCAP_ARC_MAX, INCAP_POOL,
+  alertColor,
   slotLabel, slotNumber, numberInk, SLOT_COLORS,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
 import { contrastRatio, distance, type Vision } from './colorDistance';
+import { barSegments, INCAP_ARC_MAX } from './hud';
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {
   return {
@@ -242,52 +243,6 @@ describe('stackLabels', () => {
   });
 });
 
-describe('healthRingFraction', () => {
-  // The bug this exists to close. `GetClientHealth` on a downed L4D survivor
-  // returns the INCAPACITATION POOL, which starts at 300 and bleeds down, not
-  // a 0-100 health value. The old ring computed health/100, clamped it to 1
-  // and coloured it with healthColor(300, true), so the state that most needs
-  // to shout drew a CLOSED BRIGHT GREEN ring: the colour that means "fine".
-  it('does not draw a downed survivor a full ring off the 300 point incap pool', () => {
-    const naive = Math.min(1, INCAP_POOL / 100);
-    expect(naive).toBe(1);
-    const frac = healthRingFraction(INCAP_POOL, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
-    expect(frac).toBeLessThanOrEqual(INCAP_ARC_MAX);
-  });
-
-  it('treats hanging off a ledge the same way, because it is the same pool', () => {
-    const ledged = healthRingFraction(INCAP_POOL, STATE.PRESENT | STATE.ALIVE | STATE.LEDGED);
-    expect(ledged).toBeLessThanOrEqual(INCAP_ARC_MAX);
-  });
-
-  // The arc stays small throughout, but it still ticks down as the pool
-  // bleeds out, so it carries the bleed-out clock rather than nothing.
-  it('shrinks as the incap pool bleeds out, without ever growing large', () => {
-    const full = healthRingFraction(300, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
-    const half = healthRingFraction(150, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
-    const empty = healthRingFraction(0, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
-    expect(full).toBeGreaterThan(half);
-    expect(half).toBeGreaterThan(empty);
-    expect(full).toBeLessThanOrEqual(INCAP_ARC_MAX);
-    expect(empty).toBeGreaterThan(0);
-  });
-
-  it('is still plain health over 100 for a survivor who is on their feet', () => {
-    const up = STATE.PRESENT | STATE.ALIVE;
-    expect(healthRingFraction(100, up)).toBeCloseTo(1, 5);
-    expect(healthRingFraction(50, up)).toBeCloseTo(0.5, 5);
-    expect(healthRingFraction(0, up)).toBeCloseTo(0, 5);
-  });
-
-  // A downed survivor's arc must read as smaller than any healthy one, or
-  // the whole point of the change is lost.
-  it('always draws a smaller arc downed than a survivor on one point of health', () => {
-    const down = healthRingFraction(300, STATE.PRESENT | STATE.ALIVE | STATE.INCAP);
-    const barely = healthRingFraction(25, STATE.PRESENT | STATE.ALIVE);
-    expect(down).toBeLessThan(barely);
-  });
-});
-
 describe('alertColor', () => {
   // Finding 9: the code this replaced drew a large amber ring around an
   // incapacitated or pinned player, and that was swapped for a letter about
@@ -515,6 +470,53 @@ describe('drawScene', () => {
     };
     return { transform, view: fitView({ x0: 0, y0: 0, x1: 1280, y1: 794 }, 1280, 794, 0) };
   };
+
+  it('draws the same total sweep the panel bar draws, temporary health included', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    // The exact case Finding 6 names: a red sliver on the map against a
+    // nearly full bar in the panel.
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, health: 20, temp: 70 })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+
+    // Avatar, the permanent arc, and the temporary arc continuing from it.
+    const arcs = calls.filter((c) => c.fn === 'arc');
+    expect(arcs).toHaveLength(3);
+    const [, , permR, permStart, permEnd] = arcs[1].args;
+    const [, , tempR, tempStart, tempEnd] = arcs[2].args;
+
+    // Temporary picks up exactly where permanent leaves off, on the same
+    // circle, so the two read as one ring rather than as two.
+    expect(tempStart).toBeCloseTo(permEnd, 10);
+    expect(tempR).toBeCloseTo(permR, 10);
+
+    // And the total is the panel's own arithmetic, not a second opinion.
+    const seg = barSegments(20, 70, 100);
+    expect(permEnd - permStart).toBeCloseTo(seg.perm * Math.PI * 2, 10);
+    expect(tempEnd - tempStart).toBeCloseTo(seg.temp * Math.PI * 2, 10);
+    expect(tempEnd - permStart).toBeCloseTo((seg.perm + seg.temp) * Math.PI * 2, 10);
+  });
+
+  it('draws no temporary arc at all when there is no temporary health', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, health: 70, temp: 0 })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+    });
+    // A zero-length arc would still be an arc call, and a stray stroke with
+    // the temp colour set would show as a dot at 12 o'clock on every
+    // unbuffed survivor.
+    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(2);
+  });
 
   it('draws the health ring as an arc spanning health/100 of a circle for a living survivor', () => {
     const { transform, view } = identityScene();
