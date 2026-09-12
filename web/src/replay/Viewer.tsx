@@ -111,17 +111,27 @@ export function Viewer(
     const src = transform.image;
     const cached = imageCache.current.get(src);
     if (cached) { setBackdrop(cached); return; }
+    // Cancellation guard: a team can move between layers fast enough that a
+    // second load starts before the first one's `onload` fires. Without this
+    // flag, the FIRST image's `onload` would still land after the second
+    // effect run has already set the correct, newer backdrop, silently
+    // overwriting it with a stale one that then sticks until the next layer
+    // change. The cleanup below sets `cancelled` when this effect is
+    // superseded, so a late callback from an abandoned load is a no-op.
+    let cancelled = false;
     const img = new Image();
     img.onload = () => {
       imageCache.current.set(src, img);
+      if (cancelled) return;
       // Keep the previous image on screen until this one is ready, so a
       // layer change never flashes black between them.
       setBackdrop(img);
     };
     // A missing overview is not an error. Falling back to the grid is exactly
     // what a map with no art does anyway.
-    img.onerror = () => setBackdrop(null);
+    img.onerror = () => { if (!cancelled) setBackdrop(null); };
     img.src = src;
+    return () => { cancelled = true; };
   }, [transform?.image]);
 
   const trail = useMemo(() => {
