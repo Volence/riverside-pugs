@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   HEADER_BYTES, PLAYER_SLOTS, ENTITY_KIND, STATE, VERSION,
   WEAPON_NAMES, weaponName,
+  SURVIVOR_CHARACTERS, PLAYER_RECORD_BYTES,
   encodeHeader, decodeHeader, encodeFrame, parseReplay, decodeIndex,
   type ReplayHeader, type Frame,
 } from '../src/replayFormat.js';
@@ -188,6 +189,23 @@ describe('format version', () => {
   it('still reports the version of a newer file through decodeHeader', () => {
     const got = decodeHeader(encodeHeader(header({ version: VERSION + 1 })));
     expect(got?.version).toBe(VERSION + 1);
+  });
+});
+
+describe('format version 2', () => {
+  it('is the current version', () => {
+    expect(VERSION).toBe(2);
+  });
+
+  it('names a survivor character for every index the engine can report', () => {
+    expect(SURVIVOR_CHARACTERS).toHaveLength(4);
+    expect(new Set(SURVIVOR_CHARACTERS).size).toBe(4);
+  });
+
+  // The record did not grow. This is the whole reason this change is cheap:
+  // `cls` was already there and was always 0 for a survivor.
+  it('does not change the player record size', () => {
+    expect(PLAYER_RECORD_BYTES).toBe(20);
   });
 });
 

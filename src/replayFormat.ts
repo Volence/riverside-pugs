@@ -15,7 +15,14 @@
  */
 
 export const MAGIC = 'L4RP';
-export const VERSION = 1;
+/** Format version.
+ *
+ *  2: `cls` carries `m_survivorCharacter` for a survivor, where version 1
+ *  always wrote 0. No record grew and no offset moved, so a version 1 file
+ *  still decodes correctly; only the meaning of one byte for one team
+ *  changed, which is exactly why the version check in `parseReplay` had to
+ *  land first. */
+export const VERSION = 2;
 
 export const HEADER_BYTES = 160;
 export const PLAYER_SLOTS = 8;
