@@ -21,7 +21,7 @@ export function campaignName(slug: string): string {
  * so the same campaign is the same color on every page and every visit.
  */
 export function campaignTint(slug: string): string {
-  if (slug in CAMPAIGN_NAMES) return `var(--c-${slug.replace(/_/g, '-')})`;
+  if (Object.hasOwn(CAMPAIGN_NAMES, slug)) return `var(--c-${slug.replace(/_/g, '-')})`;
   // FNV-1a over the slug, then spread across the hue circle. Multiplying by
   // the golden angle keeps neighbouring hashes from landing on neighbouring
   // hues, so two custom campaigns added together still look distinct.
