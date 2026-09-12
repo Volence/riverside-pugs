@@ -123,8 +123,6 @@ export interface LiveEvent {
 
 export interface LiveMatch {
   id: number;
-  /** The session token the live replay viewer is addressed by. */
-  token: string;
   campaign: string;
   currentMap: string | null;
   teamA: LivePlayer[];

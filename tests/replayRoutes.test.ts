@@ -94,6 +94,62 @@ describe('GET /api/replays/sessions', () => {
     expect(body.sessions).toHaveLength(1);
     expect(body.sessions[0].token).toBe(TOKEN);
   });
+
+  // This page exists for the standalone `!mix` files, which have no match
+  // page to be reached through. A ranked session is reachable through its
+  // match page and its token is the seed for the game server's sv_password,
+  // so listing it here would publish a way into a private match.
+  it('omits a session whose files belong to a match', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: '/api/replays/sessions' });
+    expect((res.json() as { sessions: unknown[] }).sessions).toEqual([]);
+    expect(res.payload).not.toContain(TOKEN);
+  });
+
+  it('omits a match session even when only a later map was claimed', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 600, true);
+    seedMatchReplay(`pug_${TOKEN}_1_1.rpl`, 1, 1, 0, 5);
+    const res = await app.inject({ url: '/api/replays/sessions' });
+    expect((res.json() as { sessions: unknown[] }).sessions).toEqual([]);
+  });
+
+  it('keeps a standalone session when an unrelated match has replays', async () => {
+    const other = 'd'.repeat(32);
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    seedMatchReplay(`pug_${other}_0_1.rpl`, 0, 1, 0, 5);
+    const body = (await app.inject({ url: '/api/replays/sessions' }))
+      .json() as { sessions: { token: string }[] };
+    expect(body.sessions.map((s) => s.token)).toEqual([TOKEN]);
+  });
+});
+
+describe('GET /api/replays/live/match/:id', () => {
+  it('names the newest file for the match, without disclosing its token', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 60, false);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.json()).toEqual({ filename: `pug_${TOKEN}_1_1.rpl`, closed: false });
+  });
+
+  it('404s an unknown match id', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const res = await app.inject({ url: '/api/replays/live/match/9999' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s a non-numeric match id rather than 500ing', async () => {
+    const res = await app.inject({ url: '/api/replays/live/match/abc' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s a match with no replay on disk', async () => {
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 describe('GET /api/replays/file/:name', () => {
