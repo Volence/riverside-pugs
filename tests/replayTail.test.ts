@@ -97,3 +97,97 @@ describe('releasableBytes', () => {
     expect(releasableBytes([a], 0, started + 20_000)).toBe(0);
   });
 });
+
+describe('releasableFrames anchored to the file mtime', () => {
+  // The wall-clock rule alone trusts `tMs` to keep pace with `startedUnix`,
+  // and it does not: `tMs` is game time, which an engine pause stops, while
+  // `startedUnix` is wall time, which keeps running. After a pause of P every
+  // later frame looks P milliseconds older than it is, permanently. The mtime
+  // rule measures a frame's age as a game-time gap back from the newest frame
+  // plus pure wall time since that frame was written, and neither half of
+  // that can be stretched by a pause.
+  it('holds back frames written after a pause longer than the delay', () => {
+    // A round that has been live for 60s of wall time but only 30s of game
+    // time, because it was paused for 30s. The newest frame was written this
+    // instant, so nothing recorded in the last 10s of game time may go out.
+    const now = START + 60_000;
+    const frames = [f(0), f(10_000), f(20_000), f(25_000), f(30_000)];
+    const got = releasableFrames(frames, START, now, DEFAULT_DELAY_MS, now);
+    expect(got.map((x) => x.tMs)).toEqual([0, 10_000, 20_000]);
+  });
+
+  it('would have released every one of those under the wall-clock rule alone', () => {
+    // The bug this guards, stated as an assertion so the guard cannot be
+    // removed without the reason going with it.
+    const now = START + 60_000;
+    const frames = [f(0), f(10_000), f(20_000), f(25_000), f(30_000)];
+    expect(releasableFrames(frames, START, now)).toHaveLength(5);
+  });
+
+  it('releases what it always did when the clocks have not drifted', () => {
+    // 20s into an unpaused round: the file's newest frame is at t=20000 and
+    // was written now, so the cutoff is t=10000 either way.
+    const now = START + 20_000;
+    const frames = [f(0), f(5_000), f(10_000), f(15_000), f(20_000)];
+    const got = releasableFrames(frames, START, now, DEFAULT_DELAY_MS, now);
+    expect(got.map((x) => x.tMs)).toEqual([0, 5_000, 10_000]);
+  });
+
+  it('releases everything in a file nobody has written to in a long time', () => {
+    // A crashed recording. Idle time past the delay means even the newest
+    // frame is old, so the whole file goes out rather than being held back
+    // forever.
+    const now = START + 600_000;
+    const frames = [f(0), f(5_000), f(10_000)];
+    const got = releasableFrames(frames, START, now, DEFAULT_DELAY_MS, now - 300_000);
+    expect(got.map((x) => x.tMs)).toEqual([0, 5_000, 10_000]);
+  });
+
+  it('takes the lower of the two cutoffs, not the mtime one alone', () => {
+    // Fresh mtime, but the round only went live 12s ago, so the wall rule is
+    // the binding one: only t<=2000 is old enough.
+    const now = START + 12_000;
+    const frames = [f(0), f(2_000), f(6_000), f(12_000)];
+    const got = releasableFrames(frames, START, now, DEFAULT_DELAY_MS, now);
+    expect(got.map((x) => x.tMs)).toEqual([0, 2_000]);
+  });
+
+  it('releases nothing from an empty frame list', () => {
+    expect(releasableFrames([], START, START + 600_000, DEFAULT_DELAY_MS, START)).toEqual([]);
+  });
+
+  it('ignores a nonsensical mtime rather than trusting it', () => {
+    // A clock skew that puts mtime in the future must not widen the window.
+    // idleMs clamps at 0, so the cutoff is the same as a mtime of now.
+    const now = START + 60_000;
+    const frames = [f(0), f(20_000), f(30_000)];
+    const got = releasableFrames(frames, START, now, DEFAULT_DELAY_MS, now + 100_000);
+    expect(got.map((x) => x.tMs)).toEqual([0, 20_000]);
+  });
+});
+
+describe('releasableBytes anchored to the file mtime', () => {
+  const started = 1_800_000_000_000;
+
+  it('stops at the game-time cutoff when a pause has skewed the clocks', () => {
+    const a = f(0, HEADER_BYTES);
+    const b = f(20_000, HEADER_BYTES + frameBytes(0));
+    const c = f(30_000, HEADER_BYTES + frameBytes(0) * 2);
+    const now = started + 60_000;
+    // Newest is t=30000 and was written this instant, so the cutoff is
+    // t=20000: `b` goes out and `c` is held. The wall rule alone would have
+    // released all three, since the round started 60s of wall time ago.
+    expect(releasableBytes([a, b, c], started, now, DEFAULT_DELAY_MS, now))
+      .toBe(HEADER_BYTES + frameBytes(0) * 2);
+    expect(releasableBytes([a, b, c], started, now))
+      .toBe(HEADER_BYTES + frameBytes(0) * 3);
+  });
+
+  it('releases the whole of a stale file', () => {
+    const a = f(0, HEADER_BYTES);
+    const b = f(1_000, HEADER_BYTES + frameBytes(0));
+    const now = started + 600_000;
+    expect(releasableBytes([a, b], started, now, DEFAULT_DELAY_MS, now - 300_000))
+      .toBe(HEADER_BYTES + frameBytes(0) * 2);
+  });
+});
