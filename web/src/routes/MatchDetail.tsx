@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
@@ -5,6 +6,41 @@ import { clearLatencyByPlayer } from '../clearLatency';
 import { Empty, Panel, Tile, Tiles } from '../components/bits';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { sideTotals } from '../matchTotals';
+import { Viewer } from '../replay/Viewer';
+
+/**
+ * One map's round switch and replay viewer.
+ *
+ * Its own component, not inline in the `maps.map` callback, because the
+ * round switch and the timeline fetch both need state and a hook cannot be
+ * called from inside a plain array-map callback.
+ */
+function MapReplay(
+  { matchId, ordinal, names }: { matchId: number; ordinal: number; names: Record<string, string> },
+) {
+  const [half, setHalf] = useState(1);
+  const timeline = useFetch(
+    (s) => api.replayTimeline(matchId, ordinal, half, s),
+    [matchId, ordinal, half],
+  );
+
+  return (
+    <>
+      <div class="replay__rounds">
+        <button class={`replay__btn ${half === 1 ? 'is-on' : ''}`} onClick={() => setHalf(1)}>Round 1</button>
+        <button class={`replay__btn ${half === 2 ? 'is-on' : ''}`} onClick={() => setHalf(2)}>Round 2</button>
+      </div>
+      {/* A map played before recording existed has no match_replays row.
+          Viewer renders its own "couldn't load" state for that, which is the
+          right outcome; there is deliberately no second empty state here. */}
+      <Viewer
+        spec={{ kind: 'match', matchId, ordinal, half }}
+        names={names}
+        timeline={timeline.data?.entries}
+      />
+    </>
+  );
+}
 
 /** Why the round section has nothing to show, or null when it does.
  *
@@ -29,6 +65,10 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   if (!data) return <div class="page page--match" />;
 
   const { match, maps, players } = data;
+  // Roster names for the viewer's follow row and timeline rail, keyed by
+  // steamid the same way the replay frames' slots and the timeline's actors
+  // are.
+  const playerNames = Object.fromEntries(players.map((p) => [p.steamid, p.name]));
   // statDefs is a property of the server build, not of the match: a current
   // server always returns it. This guard is for new frontend JS running
   // against an older, not-yet-upgraded server that has no such field; sideTotals
@@ -196,6 +236,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                   demo {fmtBytes(demo.bytes)}
                 </a></>}
               </h3>
+              <MapReplay matchId={match.id} ordinal={mp.ordinal} names={playerNames} />
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (
                   <StatTable
