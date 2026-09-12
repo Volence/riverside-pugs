@@ -212,4 +212,28 @@ describe('sceneCounts', () => {
     const ps = [player({ slot: 4, state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST })];
     expect(sceneCounts(ps, []).specials).toBe(0);
   });
+
+  // Every existing entity test above uses state: 0, so none of them exercise
+  // the ghost bit on an AI special. The recorder sets it via the same
+  // RplIsGhost derivation it uses for player records (plugin/pug-match.sp
+  // :1134 and :1158), and IsPlayerAlive does not exclude ghosts, so an AI
+  // tank, smoker, boomer or hunter can sit in GHOST state exactly like a
+  // rostered infected player can. Drawing stays solid either way (that
+  // asymmetry is deliberate); only the count must exclude it.
+  it('does not count a ghosted AI special as on the field', () => {
+    const es = [
+      { ref: 1, kind: ENTITY_KIND.TANK_AI, state: STATE.GHOST, x: 0, y: 0, z: 0, health: 8000 },
+    ];
+    expect(sceneCounts([], es).specials).toBe(0);
+  });
+
+  it('still counts a non-ghosted AI special of every kind', () => {
+    const es = [
+      { ref: 1, kind: ENTITY_KIND.SMOKER_AI, state: 0, x: 0, y: 0, z: 0, health: 250 },
+      { ref: 2, kind: ENTITY_KIND.BOOMER_AI, state: 0, x: 0, y: 0, z: 0, health: 250 },
+      { ref: 3, kind: ENTITY_KIND.HUNTER_AI, state: 0, x: 0, y: 0, z: 0, health: 250 },
+      { ref: 4, kind: ENTITY_KIND.TANK_AI, state: 0, x: 0, y: 0, z: 0, health: 8000 },
+    ];
+    expect(sceneCounts([], es).specials).toBe(4);
+  });
 });
