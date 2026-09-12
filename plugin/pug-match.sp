@@ -498,10 +498,14 @@ void EmitRoundEnd(int half, const char[] surv, int score)
 		// chain is TIMER_FLAG_NO_MAPCHANGE, so it cannot outlive this map.
 		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d", g_sCurrentMap, half, surv, score);
 	}
-	// Close before the round timing is cleared: RplClose logs the frame count
-	// and nothing after this point can produce another frame.
-	RplClose();
+	// Match-critical work first, replay second. RplClose can in principle
+	// throw (see the stale-handle note on it), and an unwind here would skip
+	// the zeroing below, which corrupts RoundMs() for every event of the next
+	// half, and would also skip the caller's FinalizeMap. Nothing between the
+	// zeroing and the close can produce another frame, so the close loses
+	// nothing by going last.
 	g_fRoundLiveAt = 0.0;
+	RplClose();
 }
 
 /** One discrete thing that happened, for the live feed and the timeline.
@@ -845,6 +849,20 @@ void RplFail()
  *  exactly the truth about it, instead of carrying a plausible wrong offset. */
 void RplClose()
 {
+	// Diagnostic for a sampler invocation that was unwound by a native error.
+	// Timer_RplFrame clears this flag at every normal exit, so finding it set
+	// here means the last invocation never finished, and without this line
+	// that failure is swallowed entirely: Timer_RplFrame's own latch only
+	// notices on its NEXT tick, which never comes once the timer is killed.
+	// Nothing is corrupted when it happens, because the single WriteFile is
+	// the last step of a frame, so a partial frame is never written. Cleared
+	// as it is logged, so one unwind reports once.
+	if (g_bRplSampling)
+	{
+		g_bRplSampling = false;
+		LogError("pug: replay sampler was unwound during frame %d; the failure is diagnostic only, no frame was partially written", g_iReplayFrames);
+	}
+
 	// The handle is taken and the global nulled BEFORE anything can throw, and
 	// the kill itself is deferred to the very end of this function.
 	//
@@ -1596,7 +1614,6 @@ bool TokenArgOk(int args)
 
 void ResetMatchState()
 {
-	RplClose();
 	g_bReplayFailed = false;
 	g_State = MS_None;
 	g_iMatchId = 0;
@@ -1639,6 +1656,13 @@ void ResetMatchState()
 	}
 	ClearFriendlyFire();
 	ResetSkillStats();
+
+	// Last, after every field above has been cleared. RplClose can in
+	// principle throw, and an unwind partway through this function would
+	// leave g_State, g_sToken and g_bPendingFinalize describing a match that
+	// no longer exists. Closing a leftover file matters far less than that,
+	// so it goes at the end where a throw can only cost the caller its reply.
+	RplClose();
 }
 
 public Action Timer_Heartbeat(Handle timer)
@@ -1872,8 +1896,9 @@ public Action Timer_TeamLock(Handle timer)
  *  This forward runs before SourceMod frees the map's TIMER_FLAG_NO_MAPCHANGE
  *  timers, so g_hReplayTimer is still a live handle here and the file still
  *  gets its keyframe index and frame count. Doing it in OnMapStart instead
- *  would mean killing an already-freed timer, which throws and would unwind
- *  OnMapStart before its g_bPendingFinalize failsafe. */
+ *  would mean killing an already-freed timer, which throws; that is why
+ *  OnMapStart's own belt-and-braces RplClose is ordered AFTER its
+ *  g_bPendingFinalize failsafe rather than before it. */
 public void OnMapEnd()
 {
 	RplClose();
@@ -1881,13 +1906,6 @@ public void OnMapEnd()
 
 public void OnMapStart()
 {
-	// Belt and braces to OnMapEnd: a changelevel is not a round_end, and a
-	// replay left open across one (e.g. the plugin was loaded mid-map, so no
-	// OnMapEnd ran for it) would otherwise keep writing into a file whose
-	// round is gone. Safe to call unconditionally; RplClose is a no-op when
-	// nothing is open.
-	RplClose();
-
 	// Failsafe for the score-read/changelevel race: a 2nd-half round_end set
 	// g_bPendingFinalize, but the map changed before FinalizeMap ran (e.g. the
 	// delayed score-read retry chain (up to ~8s) was still in flight and got
@@ -1895,7 +1913,18 @@ public void OnMapStart()
 	// half scores were accumulated so this map can never vanish from the record.
 	// Must run before the per-map resets below and before the finale check, so
 	// a finale-triggering MATCH_END totals include this map.
+	//
+	// This is the FIRST statement of the forward on purpose. RplClose below
+	// can in principle throw, and an unwind before this line costs a map its
+	// result: no replay problem is ever allowed to do that.
 	if (g_bPendingFinalize) FinalizeMap();
+
+	// Belt and braces to OnMapEnd: a changelevel is not a round_end, and a
+	// replay left open across one (e.g. the plugin was loaded mid-map, so no
+	// OnMapEnd ran for it) would otherwise keep writing into a file whose
+	// round is gone. Safe to call unconditionally; RplClose is a no-op when
+	// nothing is open.
+	RplClose();
 
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
 	g_iHalfScoreA = 0;
