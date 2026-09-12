@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "DEV_MODE=1 concurrently -n api,web -c cyan,magenta \"tsx watch src/index.ts\" \"vite\"",
-    "dev:api": "DEV_MODE=1 tsx watch src/index.ts",
+    "dev": "DEV_MODE=1 REPLAY_DIR=\"${REPLAY_DIR:-$PWD/data/replays-test}\" concurrently -n api,web -c cyan,magenta \"tsx watch src/index.ts\" \"vite\"",
+    "dev:api": "DEV_MODE=1 REPLAY_DIR=\"${REPLAY_DIR:-$PWD/data/replays-test}\" tsx watch src/index.ts",
     "dev:web": "vite",
     "build": "vite build",
     "prestart": "npm run build",
