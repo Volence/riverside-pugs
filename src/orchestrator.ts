@@ -7,6 +7,7 @@ import { parseDump, type Dump } from './dumpParse.js';
 import { claimIdle, release, markLive, getServer, type ServerRow } from './serverPool.js';
 import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
+import { recordMatchReplays } from './replays.js';
 import { clearLive } from './liveView.js';
 import { CAMPAIGNS } from './campaigns.js';
 
@@ -35,6 +36,9 @@ export interface RealOrchestratorDeps {
   notify?: (msg: string) => void;
   /** Where srcds writes demos. Empty disables demo recording on the site. */
   demoDir?: string;
+  /** Where the plugin writes replay files. Empty disables replay recording on
+   *  the site, the same convention as demoDir. */
+  replayDir?: string;
 }
 
 interface MatchRow {
@@ -52,6 +56,7 @@ export class RealOrchestrator implements Orchestrator {
   private makeRcon: (opts: RconOpts) => RconOpts;
   private notify: (msg: string) => void;
   private demoDir: string;
+  private replayDir: string;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -60,6 +65,7 @@ export class RealOrchestrator implements Orchestrator {
     this.makeRcon = deps.makeRcon ?? ((o) => o);
     this.notify = deps.notify ?? (() => {});
     this.demoDir = deps.demoDir ?? '';
+    this.replayDir = deps.replayDir ?? '';
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
@@ -187,6 +193,17 @@ export class RealOrchestrator implements Orchestrator {
         if (n > 0) console.log(`[orchestrator] recorded ${n} demo(s) for match ${matchId}`);
       } catch (err) {
         console.error(`[orchestrator] demo scan failed for match ${matchId} (non-fatal):`, err);
+      }
+      // Same discipline as the demo scan above: after completion, never
+      // before, and wrapped because a match result is not allowed to fail over
+      // a replay link. excludeOpen is off here: every round has ended, so a
+      // file still showing no frame count is a crash worth recording rather
+      // than an unfinished write.
+      try {
+        const rn = recordMatchReplays(this.db, matchId, match.token, this.replayDir);
+        if (rn > 0) console.log(`[orchestrator] recorded ${rn} replay(s) for match ${matchId}`);
+      } catch (err) {
+        console.error(`[orchestrator] replay scan failed for match ${matchId} (non-fatal):`, err);
       }
       // The match is no longer live, so the spectator scratch rows are done.
       // The authoritative match_maps rows were just written by completeMatch.
