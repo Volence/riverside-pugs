@@ -40,41 +40,58 @@ export function planPrune(
   freeBytes: number, floorBytes: number,
 ): PruneCandidate[] {
   if (!dir) return [];
+  // 'live' and 'configuring' stay excluded: those files are being written
+  // right now. 'completed' and 'aborted' are both terminal states whose
+  // replay files are done and safe to reason about for pruning.
   const rows = db.prepare(
     `SELECT r.match_id AS matchId, r.ordinal, r.half, r.filename, r.bytes,
-            m.ended_at AS endedAt
+            COALESCE(m.ended_at, m.created_at) AS ageBasis
        FROM match_replays r
        JOIN matches m ON m.id = r.match_id
       WHERE r.pruned_at IS NULL
-        AND m.state = 'completed'
-      ORDER BY m.ended_at ASC, r.ordinal ASC, r.half ASC`,
-  ).all() as (PruneCandidate & { endedAt: string | null })[];
+        AND m.state IN ('completed', 'aborted')
+      ORDER BY ageBasis ASC, r.ordinal ASC, r.half ASC`,
+  ).all() as (PruneCandidate & { ageBasis: string })[];
 
   const cutoff = new Date(now.getTime() - retentionDays * 86400_000);
-  const out: PruneCandidate[] = [];
+  const windowSelected: PruneCandidate[] = [];
   const taken = new Set<string>();
 
   for (const r of rows) {
-    if (!r.endedAt) continue;
     // SQLite's datetime('now') is 'YYYY-MM-DD HH:MM:SS', which is not ISO
     // and is not reliably parsed. Make it ISO and stamp it UTC, which is what
-    // SQLite wrote.
-    if (new Date(r.endedAt.replace(' ', 'T') + 'Z') < cutoff) {
-      out.push({ matchId: r.matchId, ordinal: r.ordinal, half: r.half, filename: r.filename, bytes: r.bytes });
+    // SQLite wrote. ageBasis is always present: matches.created_at is
+    // NOT NULL DEFAULT (datetime('now')), so an aborted match with no
+    // ended_at still has an age basis to compare against the cutoff.
+    if (new Date(r.ageBasis.replace(' ', 'T') + 'Z') < cutoff) {
+      windowSelected.push({ matchId: r.matchId, ordinal: r.ordinal, half: r.half, filename: r.filename, bytes: r.bytes });
       taken.add(r.filename);
     }
   }
 
-  // Rows are already ordered oldest first, so the floor sweep just walks them.
-  let projectedFree = freeBytes + out.reduce((n, c) => n + c.bytes, 0);
-  for (const r of rows) {
+  // Floor sweep: figure out what it would take to clear the floor using every
+  // remaining candidate, oldest first. If even all of them together cannot
+  // clear it, select none of them: deleting the entire replay history and
+  // still being out of disk is pure loss, and the retention-window selections
+  // above still stand regardless.
+  const remaining = rows.filter((r) => !taken.has(r.filename));
+  let projectedFree = freeBytes + windowSelected.reduce((n, c) => n + c.bytes, 0);
+  const sweepSelected: PruneCandidate[] = [];
+  for (const r of remaining) {
     if (projectedFree >= floorBytes) break;
-    if (taken.has(r.filename)) continue;
-    out.push({ matchId: r.matchId, ordinal: r.ordinal, half: r.half, filename: r.filename, bytes: r.bytes });
-    taken.add(r.filename);
+    sweepSelected.push({ matchId: r.matchId, ordinal: r.ordinal, half: r.half, filename: r.filename, bytes: r.bytes });
     projectedFree += r.bytes;
   }
-  return out;
+  if (projectedFree < floorBytes) {
+    const totalCandidateBytes = remaining.reduce((n, c) => n + c.bytes, 0);
+    console.warn(
+      `[replay] free space floor unreachable from replays alone: `
+      + `${freeBytes} bytes free, ${floorBytes} byte floor, `
+      + `${totalCandidateBytes} bytes of candidates available`,
+    );
+    return windowSelected;
+  }
+  return windowSelected.concat(sweepSelected);
 }
 
 /** Apply a plan. The row is marked rather than deleted, so a pruned replay can
