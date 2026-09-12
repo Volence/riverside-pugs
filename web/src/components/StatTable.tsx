@@ -76,7 +76,7 @@ export function StatTable(
       </tr>,
       ...players.map((p, i) => (
         <tr key={p.steamid}>
-          <td class="live__pcol"><PlayerLink steamid={p.steamid} name={p.name} /></td>
+          <td class="live__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
           {cols.map((k) => {
             const v = p.stats?.[k];
             const dim = v === 0 || v === undefined ? ' is-dim' : '';

@@ -285,6 +285,26 @@ tbody tr.is-me { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--a
 }
 .rank--top { color: var(--rating); }
 
+/* Player names in tables are Oswald caps, bright; links keep the accent on
+ * hover only, so a table is not a wall of red. */
+.pname, .pname a {
+  font-family: var(--font-label);
+  font-size: var(--fs-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-bright);
+}
+.pname a:hover { color: var(--accent); }
+td, th { height: 46px; }
+tbody tr:hover { background: var(--surface-2); }
+/* The leader's row on a ranked table carries a gold wash from the left. */
+.lb--ranked tbody tr:first-child {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--rating) 10%, transparent), transparent 45%);
+}
+.lb--ranked tbody tr:first-child:hover {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--rating) 14%, transparent), var(--surface-2) 45%);
+}
+
 /* Campaign tint as a left rule: four hex values instead of artwork. It is
  * attached to the cell that names the campaign rather than to the first cell,
  * because on the profile table the first cell is the W/L/D chip and a colored
@@ -607,12 +627,15 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .live__teamrow th,
 .live__teamrow td {
   background: var(--surface-2);
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding-top: var(--sp-2);
-  padding-bottom: var(--sp-2);
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* Live event feed. Deliberately a list rather than a table: entries are short,

@@ -155,7 +155,7 @@ export function Profile({ steamid }: { steamid: string }) {
                 <tbody>
                   {byMap.map((r) => (
                     <tr key={r.map}>
-                      <td class="lb__pcol">
+                      <td class="lb__pcol pname">
                         <a href={`/map/${encodeURIComponent(r.map)}`}>{r.map}</a>
                       </td>
                       <td class="num">{r.games}</td>
