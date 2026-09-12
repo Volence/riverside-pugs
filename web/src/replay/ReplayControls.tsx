@@ -1,10 +1,5 @@
 import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
-import type { Toggles } from './useToggles';
-
-const TOGGLE_LABELS: Record<string, string> = {
-  hp: 'HP', names: 'Names', guns: 'Guns', events: 'Evts', chat: 'Chat', ci: 'CI', entities: 'Ents',
-};
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
  *  the frames carry; nobody wants to read that. Exported because the
@@ -18,8 +13,6 @@ export function formatTime(ms: number): string {
 
 export interface ReplayControlsProps {
   playback: ReturnType<typeof usePlayback>;
-  toggles: Toggles;
-  toggle: (k: keyof Toggles) => void;
   endMs: number;
   live: boolean;
   followSlot: number | null;
@@ -28,18 +21,18 @@ export interface ReplayControlsProps {
   names: Record<string, string>;
 }
 
-/** The toolbar, scrub bar, speed, toggle and follow rows. Purely
- *  presentational: every value it reads is passed in, and every interaction
- *  it triggers is one of the callback props. */
+/** The toolbar, scrub bar, speed and follow rows. Purely presentational:
+ *  every value it reads is passed in, and every interaction it triggers is
+ *  one of the callback props. */
 export function ReplayControls(
   {
-    playback, toggles, toggle, endMs, live, followSlot, setFollowSlot, slots, names,
+    playback, endMs, live, followSlot, setFollowSlot, slots, names,
   }: ReplayControlsProps,
 ) {
   return (
     <>
       <div class="replay__controls">
-        <button class="replay__btn" onClick={playback.toggle}>
+        <button class="chip" onClick={playback.toggle}>
           {playback.playing ? 'Pause' : 'Play'}
         </button>
         <input
@@ -54,31 +47,21 @@ export function ReplayControls(
         {SPEEDS.map((s) => (
           <button
             key={s}
-            class={`replay__btn ${playback.speed === s ? 'is-on' : ''}`}
+            class={`chip ${playback.speed === s ? 'is-on' : ''}`}
             onClick={() => playback.setSpeed(s)}
           >{s}x</button>
         ))}
         {live && (
           <button
-            class={`replay__btn ${playback.following ? 'is-on' : ''}`}
+            class={`chip ${playback.following ? 'is-on' : ''}`}
             onClick={playback.follow}
           >Live</button>
         )}
       </div>
 
       <div class="replay__toolbar">
-        {(['hp', 'names', 'guns', 'events', 'chat', 'ci', 'entities'] as (keyof Toggles)[]).map((k) => (
-          <button
-            key={k}
-            class={`replay__btn ${toggles[k] ? 'is-on' : ''}`}
-            onClick={() => toggle(k)}
-          >{TOGGLE_LABELS[k]}</button>
-        ))}
-      </div>
-
-      <div class="replay__toolbar">
         <button
-          class={`replay__btn ${followSlot === null ? 'is-on' : ''}`}
+          class={`chip ${followSlot === null ? 'is-on' : ''}`}
           onClick={() => setFollowSlot(null)}
         >Free</button>
         {/* One button per slot, in the slot's own colour. This is the only
@@ -98,7 +81,7 @@ export function ReplayControls(
         {slots.map((id, i) => (
           <button
             key={i}
-            class={`replay__btn replay__btn--slot ${followSlot === i ? 'is-on' : ''}`}
+            class={`chip chip--slot ${followSlot === i ? 'is-on' : ''}`}
             style={{ color: slotColor(i) }}
             onClick={() => setFollowSlot(i)}
           >
