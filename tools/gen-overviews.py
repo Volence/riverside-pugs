@@ -14,7 +14,16 @@ import json
 import os
 import sys
 
+from PIL import Image
+
 src, out = sys.argv[1], sys.argv[2]
+
+# Every capture so far is this size, and the emitted table says so for each
+# layer. Asserting it against the real file rather than taking it on trust is
+# the point: an off-size capture would otherwise be written out as 2048x1271
+# and silently put every avatar on that map in the wrong place, which is the
+# exact failure class this generated file exists to prevent.
+EXPECTED_SIZE = (2048, 1271)
 
 maps = []
 for name in sorted(os.listdir(src)):
@@ -23,6 +32,17 @@ for name in sorted(os.listdir(src)):
     with open(os.path.join(src, name)) as fh:
         m = json.load(fh)
     layers = sorted(m['layers'], key=lambda l: l['cut_height'])
+    for layer in layers:
+        path = os.path.join(src, layer['image'])
+        with Image.open(path) as im:
+            size = im.size
+        if size != EXPECTED_SIZE:
+            raise SystemExit(
+                f"{layer['image']} is {size[0]}x{size[1]}, expected "
+                f'{EXPECTED_SIZE[0]}x{EXPECTED_SIZE[1]}. Either the capture is '
+                'wrong or this generator needs to emit per-layer dimensions.'
+            )
+        layer['width'], layer['height'] = size
     maps.append((m['map'], layers))
 
 lines = [
@@ -70,7 +90,7 @@ for map_name, layers in maps:
             f"cutHeight: {l['cut_height']:g}, "
             f"unitsPerPixel: {l['units_per_pixel']:.6f}, "
             f"originX: {ulx:g}, originY: {uly:g}, "
-            'width: 2048, height: 1271 },'
+            f"width: {l['width']}, height: {l['height']} }},"
         )
     lines.append('    ],')
     lines.append('  },')
