@@ -1,5 +1,6 @@
 import { boxSpan, projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import { ENTITY_KIND, STATE, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
+import { relativeLuminance } from './colorDistance';
 import { healthColor } from './hud';
 
 /** Roster slots 0-3 are the survivor team for this half and 4-7 are the
@@ -33,26 +34,106 @@ export function avatarRadius(z: number, medianZ: number, base = 7): number {
 }
 
 /**
- * Eight per-slot colours: cool for the four survivor slots, warm for the
- * four infected slots, so team identity survives at a glance even though
- * every slot within a team is individually distinguishable. The first entry
- * of each set is the colour the map already used for the whole team, so
- * nothing on screen changes hue wholesale.
+ * Eight per-slot colours: cool for the four survivor slots, warm for the four
+ * infected slots, so team identity survives at a glance even though every
+ * slot within a team is individually distinguishable.
+ *
+ * Retuned against measured CIELAB distance, under normal vision and under
+ * simulated protanopia and deuteranopia, because the first cut of this
+ * palette failed three ways at once (`colorDistance.ts` is the arithmetic,
+ * and the palette tests are where the numbers below are actually enforced).
+ *
+ * Within a team it was useless to a dichromat: indigo and violet measured 2.8
+ * dE apart under protanopia and 8.2 under deuteranopia, and three of the four
+ * infected flattened to about 13 under deuteranopia. The worst within-team
+ * pair is now 18.1, and it is 18.4 for survivors.
+ *
+ * It also collided with the world entities, which the single-colour scheme
+ * never did: a survivor sat 21.4 from the AI hunter, so a SURVIVOR read as a
+ * hunter with entities shown. Every slot is now at least 24 from every entity
+ * colour, and no survivor is within 27 of the hunter. The old team red was
+ * the worst offender of all at 13.8 from the AI tank, which predates the
+ * slot colours entirely; it is now 26.
+ *
+ * What did NOT change is the split itself, which is the one thing the old
+ * palette got right: the nearest cross-team pair is 29.2 under protanopia and
+ * 37.0 under deuteranopia, comfortably further than any two slots inside a
+ * team, so warm versus cool still reads as friend versus enemy first.
+ *
+ * Hue alone still cannot carry slot identity on a dot this small, under any
+ * vision. That is `slotNumber`'s job; this palette is the redundant channel,
+ * not the load-bearing one.
+ *
+ * The four survivors deliberately sit in cyan through blue with no violet at
+ * all. Violet is where the AI hunter lives, and the collision is structural
+ * rather than a matter of tuning: keeping survivors out of that arc is what
+ * removes it for good. Slots 0 and 3 end up within a point of each other in
+ * lightness and are separated by hue instead (267 against 230); under
+ * deuteranopia they simulate to two blues of visibly different saturation,
+ * which is 18.4 apart and is the pair the survivor floor above is measuring.
  */
 export const SLOT_COLORS: readonly string[] = [
-  '#6fb1e0', // survivor 0: sky blue (the previous team colour)
-  '#6fe0c9', // survivor 1: teal
-  '#6f7fe0', // survivor 2: indigo
-  '#b06fe0', // survivor 3: violet
-  '#d9534f', // infected 4: red (the previous team colour)
-  '#e0824f', // infected 5: orange
-  '#d9b14f', // infected 6: gold
-  '#c94f7a', // infected 7: rose
+  '#57a7f1', // survivor 0: sky blue,   L* 66.5, hue 267
+  '#29f2ef', // survivor 1: cyan,       L* 87.1, hue 194
+  '#3073d0', // survivor 2: royal blue, L* 48.8, hue 282
+  '#2cb2d5', // survivor 3: azure,      L* 67.4, hue 230
+  '#cc4760', // infected 4: crimson,    L* 49.7, hue 15
+  '#f19776', // infected 5: salmon,     L* 71.0, hue 46
+  '#eed06a', // infected 6: gold,       L* 84.1, hue 92
+  '#ea8d92', // infected 7: rose,       L* 68.5, hue 19
 ];
 
 export function slotColor(slot: number): string {
   return SLOT_COLORS[slot] ?? '#ffffff';
 }
+
+/**
+ * The slot's number within its own team, drawn inside the avatar.
+ *
+ * This is the second channel Finding 4 asked for, and it is the one that
+ * actually carries slot identity. Hue on a five pixel dot cannot: within a
+ * team the old palette measured 2.8 dE apart under protanopia, which is
+ * roughly 6 to 8 percent of male viewers getting nothing from per-slot colour
+ * at all. A digit is robust to every colour vision deficiency there is, and
+ * it doubles as the answer to Finding 12, since a viewer who can read "3" off
+ * the dot can match it to the third follow button whether or not a name ever
+ * resolved.
+ *
+ * It counts within a team rather than across all eight because within a team
+ * is where the colours failed; warm against cool already answers which team,
+ * and a two character label would not fit inside the dot.
+ */
+export function slotNumber(slot: number): string {
+  return String((slot % 4) + 1);
+}
+
+/** The short, roster-free name for a slot: S1 to S4 and I1 to I4.
+ *
+ *  On the by-filename viewer route `Viewer` defaults `names` to an empty
+ *  object, so nothing ever resolved and the Names toggle was a silent no-op.
+ *  Standalone `!mix` sessions are the common case for that route. This is
+ *  useful and leaks no SteamID64, which is the one thing that may never be
+ *  printed on the map. */
+export function slotLabel(slot: number): string {
+  return `${slot < 4 ? 'S' : 'I'}${slotNumber(slot)}`;
+}
+
+/**
+ * Which ink the slot number is drawn in, chosen per colour.
+ *
+ * The eight dots run from L* 48.8 to L* 87.1, so no single ink clears 4.5:1
+ * against all of them. The crossover between the page's near-black and white
+ * sits at a relative luminance of about 0.19; every slot is tested against
+ * its own ink rather than trusting that threshold.
+ */
+export function numberInk(color: string): string {
+  return relativeLuminance(color) > 0.19 ? '#11130f' : '#ffffff';
+}
+
+/** Font size for the digit inside the avatar. At the base radius of 7 the dot
+ *  is 14px across and its inscribed square is 9.9px, which a 9px digit (about
+ *  6.4px of cap height and 5px wide) fits inside with room to spare. */
+const SLOT_NUMBER_PX = 9;
 
 /**
  * The one status marker worth showing on the map, checked in priority order.
@@ -464,12 +545,27 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // Yaw is degrees with 0 along +x, and canvas y grows downward, so the
       // sine is negated to keep the arrow pointing where the player looks.
       const rad = (pl.yaw * Math.PI) / 180;
+      const dx = Math.cos(rad);
+      const dy = -Math.sin(rad);
       ctx.beginPath();
-      ctx.moveTo(p.px, p.py);
-      ctx.lineTo(p.px + Math.cos(rad) * r * 2.2, p.py - Math.sin(rad) * r * 2.2);
+      // Starts at the avatar's EDGE, not its centre. The slot number lives
+      // inside the dot now, and an arrow drawn from the centre outward would
+      // strike straight through the digit at four yaws out of every turn.
+      ctx.moveTo(p.px + dx * r, p.py + dy * r);
+      ctx.lineTo(p.px + dx * r * 2.2, p.py + dy * r * 2.2);
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.stroke();
+    }
+
+    // The slot number, inside the dot, on top of the arrow's root. This is
+    // what actually tells two teammates apart: see `slotNumber`.
+    if (!ghost && alive) {
+      ctx.font = `bold ${SLOT_NUMBER_PX}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = numberInk(color);
+      ctx.fillText(slotNumber(pl.slot), p.px, p.py);
     }
 
     if (!ghost) {
@@ -524,9 +620,11 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       }
 
       // Name label: resolved through the roster, never the raw SteamID64.
-      // A standalone `!mix` session has no roster at all, so an unresolved
-      // name draws nothing rather than a seventeen-digit number next to the
-      // dot, which would be worse than no label.
+      // A standalone `!mix` session has no roster at all, and that is the
+      // common case on the by-filename route, so an unresolved name falls
+      // back to the slot's own short label rather than to the seventeen-digit
+      // id, which would be worse than no label, or to nothing, which is what
+      // made the Names toggle a silent no-op on that route.
       //
       // Queued rather than drawn. Labels cannot be laid out one avatar at a
       // time: whether this one has to move depends on every other label on
@@ -534,14 +632,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // Drawing them last also puts every label above every avatar, instead
       // of leaving the ones drawn early to be painted over.
       if (a.show.names) {
-        const name = a.names[a.slots[pl.slot]];
-        if (name) {
-          labels.push({
-            ax: p.px + r, ay: p.py,
-            px: p.px + r + LABEL_GAP, py: p.py,
-            text: name, color,
-          });
-        }
+        const name = a.names[a.slots[pl.slot]] || slotLabel(pl.slot);
+        labels.push({
+          ax: p.px + r, ay: p.py,
+          px: p.px + r + LABEL_GAP, py: p.py,
+          text: name, color,
+        });
       }
 
       // Follow highlight: a wider ring outside the health ring so the
