@@ -58,7 +58,11 @@ function sendSlice(
   reply: FastifyReply, path: string, info: ReplayFileInfo, since: number, nowMs: number,
 ): FastifyReply {
   const cutoff = cutoffFor(path, info, nowMs);
-  const start = Number.isFinite(since) && since > 0 ? Math.min(since, cutoff) : 0;
+  // Every legitimate `since` is a byte offset this server itself handed out
+  // in X-Replay-Next, and those are always whole. A fractional value can only
+  // come from a malformed request, and Math.floor keeps that harmless rather
+  // than handing a non-integer straight to createReadStream, which throws.
+  const start = Number.isFinite(since) && since > 0 ? Math.min(Math.floor(since), cutoff) : 0;
 
   reply.header('Content-Type', 'application/octet-stream');
   reply.header('Cache-Control', 'no-store');
