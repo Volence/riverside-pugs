@@ -1,0 +1,204 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; background: #141210; color: #ebe4d6; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    a { color: #e3892b; } a:hover { color: #f2cd6a; }
+    .grain {
+      background-color: #141210;
+      background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.10 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+        radial-gradient(ellipse at 50% 0%, rgba(227,137,43,0.10), transparent 50%),
+        radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.6), transparent 60%);
+    }
+    .disp { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase; }
+    .eyebrow { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em; color: #9a9082; }
+    .row { display: grid; grid-template-columns: 56px 1fr 90px 64px 72px 96px 96px 72px; gap: 8px; align-items: center; height: 44px; padding: 0 14px; border-bottom: 1px solid #2f2a24; font-size: 15px; font-variant-numeric: tabular-nums; }
+    .r { text-align: right; }
+    .tile { position: relative; background: #1c1916; border: 1px solid #2f2a24; padding: 10px 12px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--stripe, #45b39c); }
+    .hp { height: 8px; background: #0d0c0a; border: 1px solid #2f2a24; position: relative; }
+    .hp > div { position: absolute; left: 0; top: 0; bottom: 0; background: #45b39c; }
+    .dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.6); }
+    .scan { position: absolute; inset: 0; background: repeating-linear-gradient(180deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 3px); pointer-events: none; }
+    .vig { position: absolute; inset: 0; box-shadow: inset 0 0 120px rgba(0,0,0,0.85); pointer-events: none; }
+  </style>
+</helmet>
+
+<div class="grain" style="width: 1280px; min-height: 1580px; position: relative; padding-bottom: 48px;">
+
+  <!-- nav -->
+  <div style="display: flex; align-items: center; gap: 32px; padding: 0 44px; height: 60px; background: #1c1916; border-bottom: 2px solid #2f2a24;">
+    <div class="disp" style="font-size: 24px; font-weight: 800; letter-spacing: 0.06em; color: #ebe4d6;">Riverside PUG</div>
+    <div class="disp" style="display: flex; gap: 24px; font-size: 15px; font-weight: 600; letter-spacing: 0.08em; color: #9a9082;">
+      <span style="color: #ebe4d6; border-bottom: 2px solid #e3892b; padding-bottom: 2px;">Play</span>
+      <span>Live</span><span>Leaderboard</span><span>Matches</span><span>Maps</span><span>Replays</span>
+    </div>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #9a9082;">
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #e35d5d; box-shadow: 0 0 8px #e35d5d;"></span>
+      LIVE · No Mercy 2 · 0 - 214
+    </div>
+  </div>
+
+  <!-- versus scoreboard header -->
+  <div style="margin: 36px 44px 0 44px; display: grid; grid-template-columns: 1fr 200px 1fr; align-items: center; background: linear-gradient(90deg, rgba(69,179,156,0.10), transparent 40%, transparent 60%, rgba(227,93,93,0.10)); border-top: 1px solid #2f2a24; border-bottom: 1px solid #2f2a24; padding: 18px 24px;">
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div class="eyebrow" style="color: #45b39c;">Team A · survivors first</div>
+      <div class="disp" style="font-size: 30px; font-weight: 700; letter-spacing: 0.02em;">volence · dev_0001 · sputnik · raczyn</div>
+    </div>
+    <div style="display: flex; align-items: baseline; justify-content: center; gap: 14px;">
+      <div class="disp" style="font-size: 72px; font-weight: 800; line-height: 1; color: #f2cd6a;">412</div>
+      <div class="disp" style="font-size: 26px; color: #9a9082;">/</div>
+      <div class="disp" style="font-size: 72px; font-weight: 800; line-height: 1; color: #ebe4d6;">289</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 4px; text-align: right;">
+      <div class="eyebrow" style="color: #e35d5d;">Team B · infected first</div>
+      <div class="disp" style="font-size: 30px; font-weight: 700; letter-spacing: 0.02em;">Vodka · zeppelin · Tunnel · hoss</div>
+    </div>
+  </div>
+
+  <!-- leaderboard -->
+  <div style="margin: 40px 44px 0 44px; display: flex; gap: 28px; align-items: flex-start;">
+    <div style="flex: 1; background: #1c1916; border: 1px solid #2f2a24;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; padding: 16px 14px 10px 14px; border-bottom: 2px solid #e3892b;">
+        <div class="disp" style="font-size: 30px; font-weight: 800; letter-spacing: 0.04em;">Leaderboard</div>
+        <div class="eyebrow">Season 1 · 24 players · 3 matches rated</div>
+      </div>
+      <div class="row eyebrow" style="height: 34px; border-bottom: 1px solid #2f2a24;">
+        <div>#</div><div>Player</div><div class="r" style="color: #f2cd6a;">SR ▾</div><div class="r">W-L</div><div class="r">Win %</div><div class="r">SI dmg</div><div class="r">Commons</div><div class="r">FF</div>
+      </div>
+      <div class="row" style="background: linear-gradient(90deg, rgba(242,205,106,0.08), transparent 45%);">
+        <div class="disp" style="font-size: 20px; font-weight: 800; color: #f2cd6a;">01</div><div style="font-weight: 600;">fake_11</div><div class="r disp" style="font-size: 20px; font-weight: 700; color: #f2cd6a;">1151</div><div class="r">2-0</div><div class="r">100%</div><div class="r">4499</div><div class="r">472</div><div class="r" style="color: #9a9082;">153</div>
+      </div>
+      <div class="row">
+        <div class="disp" style="font-size: 20px; font-weight: 800; color: #f2cd6a;">02</div><div style="font-weight: 600;">fake_12</div><div class="r disp" style="font-size: 20px; font-weight: 700; color: #f2cd6a;">1151</div><div class="r">2-0</div><div class="r">100%</div><div class="r">4028</div><div class="r">117</div><div class="r" style="color: #9a9082;">34</div>
+      </div>
+      <div class="row">
+        <div class="disp" style="font-size: 20px; font-weight: 800; color: #f2cd6a;">03</div><div style="font-weight: 600;">fake_21</div><div class="r disp" style="font-size: 20px; font-weight: 700; color: #f2cd6a;">1151</div><div class="r">2-0</div><div class="r">100%</div><div class="r">3455</div><div class="r">72</div><div class="r" style="color: #9a9082;">181</div>
+      </div>
+      <div class="row">
+        <div class="disp" style="font-size: 20px; font-weight: 800; color: #9a9082;">04</div><div>fake_3</div><div class="r disp" style="font-size: 20px; font-weight: 700; color: #f2cd6a;">1028</div><div class="r">2-1</div><div class="r">67%</div><div class="r">5438</div><div class="r">1179</div><div class="r" style="color: #9a9082;">148</div>
+      </div>
+      <div class="row">
+        <div class="disp" style="font-size: 20px; font-weight: 800; color: #9a9082;">05</div><div>fake_4</div><div class="r disp" style="font-size: 20px; font-weight: 700; color: #f2cd6a;">1028</div><div class="r">2-1</div><div class="r">67%</div><div class="r">5210</div><div class="r">849</div><div class="r" style="color: #9a9082;">212</div>
+      </div>
+      <div class="row" style="border-bottom: none;">
+        <div class="disp" style="font-size: 20px; font-weight: 800; color: #9a9082;">06</div><div>fake_1</div><div class="r disp" style="font-size: 20px; font-weight: 700; color: #f2cd6a;">1025</div><div class="r">2-1</div><div class="r">67%</div><div class="r">2363</div><div class="r">1002</div><div class="r" style="color: #9a9082;">150</div>
+      </div>
+    </div>
+
+    <!-- side: the top player's card, HUD style -->
+    <div style="width: 320px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="background: #1c1916; border: 1px solid #2f2a24; padding: 16px;">
+        <div class="eyebrow">Top rated</div>
+        <div class="disp" style="font-size: 34px; font-weight: 800; margin-top: 2px;">fake_11</div>
+        <div style="display: flex; align-items: baseline; gap: 10px; margin-top: 6px;">
+          <div class="disp" style="font-size: 56px; font-weight: 800; line-height: 1; color: #f2cd6a;">1151</div>
+          <div class="eyebrow" style="color: #45b39c;">▲ 151 this season</div>
+        </div>
+        <div style="margin-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+          <div><div class="eyebrow">SI dmg / rd</div><div class="disp" style="font-size: 22px; font-weight: 700;">1125</div></div>
+          <div><div class="eyebrow">Commons / rd</div><div class="disp" style="font-size: 22px; font-weight: 700;">118</div></div>
+          <div><div class="eyebrow">FF dealt</div><div class="disp" style="font-size: 22px; font-weight: 700; color: #e35d5d;">153</div></div>
+        </div>
+      </div>
+      <div style="background: #1c1916; border: 1px solid #2f2a24; padding: 16px;">
+        <div class="eyebrow">Last match</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+          <div class="disp" style="font-size: 22px; font-weight: 700;">No Mercy <span style="color: #9a9082;">#7</span></div>
+          <div class="disp" style="font-size: 26px; font-weight: 800;"><span style="color: #45b39c;">1018</span> <span style="color: #9a9082;">·</span> 901</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- replay viewer -->
+  <div style="margin: 44px 44px 0 44px;">
+    <div style="display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px;">
+      <div class="disp" style="font-size: 30px; font-weight: 800; letter-spacing: 0.04em;">Death Toll · <span style="color: #e3892b;">The Turnpike</span></div>
+      <div class="eyebrow">Map 1 · Round 1 · Team A survivors</div>
+      <div style="margin-left: auto; display: flex; gap: 6px;">
+        <span class="disp" style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; padding: 5px 10px; border: 1px solid #e3892b; color: #e3892b;">Round 1</span>
+        <span class="disp" style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; padding: 5px 10px; border: 1px solid #2f2a24; color: #9a9082;">Round 2</span>
+      </div>
+    </div>
+
+    <div style="position: relative; height: 520px; background: #0b0a09; border: 1px solid #2f2a24; overflow: hidden;">
+      <img src="overview.jpg" style="width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; filter: saturate(0.85) contrast(1.05);">
+      <div class="scan"></div>
+      <div class="vig"></div>
+      <div class="dot" style="left: 600px; top: 128px; background: #2cb2d5;"></div>
+      <div class="dot" style="left: 610px; top: 140px; background: #29f2ef;"></div>
+      <div class="dot" style="left: 592px; top: 146px; background: #3073d0;"></div>
+      <div class="dot" style="left: 604px; top: 158px; background: #5aa8ff;"></div>
+      <div style="position: absolute; left: 668px; top: 204px; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #e35d5d; box-shadow: 0 0 10px rgba(227,93,93,0.6);"></div>
+      <div class="disp" style="position: absolute; left: 626px; top: 120px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; line-height: 1.2; color: #fff; background: rgba(8,10,7,0.78); padding: 4px 8px; border-left: 2px solid #2cb2d5;">volence<br>dev_0001<br>sputnik<br>raczyn</div>
+      <!-- in-canvas HUD readout -->
+      <div style="position: absolute; left: 16px; top: 14px; display: flex; gap: 18px; align-items: baseline;">
+        <div class="disp" style="font-size: 34px; font-weight: 800; color: #ebe4d6; text-shadow: 0 2px 0 #000;">0:06</div>
+        <div class="eyebrow" style="color: #ebe4d6;">of 1:09</div>
+        <div class="eyebrow" style="color: #45b39c;">4 alive · 14 common · 3 special</div>
+      </div>
+      <div style="position: absolute; right: 16px; top: 14px; display: flex; gap: 8px;">
+        <span class="disp" style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; padding: 4px 9px; background: rgba(28,25,22,0.85); border: 1px solid #e3892b; color: #e3892b;">HP</span>
+        <span class="disp" style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; padding: 4px 9px; background: rgba(28,25,22,0.85); border: 1px solid #e3892b; color: #e3892b;">Names</span>
+        <span class="disp" style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; padding: 4px 9px; background: rgba(28,25,22,0.85); border: 1px solid #2f2a24; color: #9a9082;">Guns</span>
+        <span class="disp" style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; padding: 4px 9px; background: rgba(28,25,22,0.85); border: 1px solid #2f2a24; color: #9a9082;">Events</span>
+        <span class="disp" style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; padding: 4px 9px; background: rgba(28,25,22,0.85); border: 1px solid #2f2a24; color: #9a9082;">Chat</span>
+      </div>
+    </div>
+
+    <!-- scrub with event ticks -->
+    <div style="display: flex; align-items: center; gap: 14px; margin-top: 12px;">
+      <div class="disp" style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; padding: 7px 14px; border: 1px solid #e3892b; color: #e3892b;">Pause</div>
+      <div style="flex: 1; position: relative; height: 22px;">
+        <div style="position: absolute; left: 0; right: 0; top: 9px; height: 4px; background: #2f2a24;"></div>
+        <div style="position: absolute; left: 0; top: 9px; height: 4px; width: 9%; background: #e3892b;"></div>
+        <div style="position: absolute; left: 22%; top: 4px; width: 2px; height: 14px; background: #e35d5d;"></div>
+        <div style="position: absolute; left: 41%; top: 4px; width: 2px; height: 14px; background: #e35d5d;"></div>
+        <div style="position: absolute; left: 63%; top: 4px; width: 2px; height: 14px; background: #f2cd6a;"></div>
+        <div style="position: absolute; left: 88%; top: 4px; width: 2px; height: 14px; background: #45b39c;"></div>
+        <div style="position: absolute; left: calc(9% - 7px); top: 4px; width: 14px; height: 14px; background: #ebe4d6; transform: rotate(45deg);"></div>
+      </div>
+      <div class="disp" style="font-size: 15px; font-weight: 600; color: #9a9082; font-variant-numeric: tabular-nums;">0:06 / 1:09</div>
+      <div class="disp" style="display: flex; gap: 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.08em;">
+        <span style="padding: 5px 9px; border: 1px solid #2f2a24; color: #9a9082;">0.5x</span>
+        <span style="padding: 5px 9px; border: 1px solid #e3892b; color: #e3892b;">1x</span>
+        <span style="padding: 5px 9px; border: 1px solid #2f2a24; color: #9a9082;">2x</span>
+        <span style="padding: 5px 9px; border: 1px solid #2f2a24; color: #9a9082;">4x</span>
+      </div>
+    </div>
+
+    <!-- HUD strip: portraits with health bars -->
+    <div style="margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px;">
+      <div>
+        <div class="eyebrow" style="color: #45b39c; margin-bottom: 8px;">Survivors</div>
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
+          <div class="tile"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #45b39c;">1</span> volence</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #45b39c;">94</span></div><div class="hp"><div style="width: 94%;"></div></div><div class="eyebrow" style="font-size: 11px;">M16 · pills</div></div>
+          <div class="tile"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #45b39c;">2</span> dev_0001</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #45b39c;">94</span></div><div class="hp"><div style="width: 94%;"></div></div><div class="eyebrow" style="font-size: 11px;">Auto shotgun</div></div>
+          <div class="tile"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #45b39c;">3</span> sputnik</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #f2cd6a;">61</span></div><div class="hp"><div style="width: 61%; background: #f2cd6a;"></div></div><div class="eyebrow" style="font-size: 11px;">Hunting rifle</div></div>
+          <div class="tile"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #45b39c;">4</span> raczyn</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #e35d5d;">23</span></div><div class="hp"><div style="width: 23%; background: #e35d5d;"></div></div><div class="eyebrow" style="font-size: 11px; color: #e35d5d;">Limping · M16</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="eyebrow" style="color: #e35d5d; margin-bottom: 8px;">Infected</div>
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
+          <div class="tile" style="border-color: #3a2420; --stripe: #e35d5d;"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #e35d5d;">1</span> Vodka</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #e35d5d;">50</span></div><div class="hp"><div style="width: 100%; background: #e35d5d;"></div></div><div class="eyebrow" style="font-size: 11px;">Boomer</div></div>
+          <div class="tile" style="border-color: #3a2420; --stripe: #e35d5d;"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #e35d5d;">2</span> zeppelin</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #e35d5d;">250</span></div><div class="hp"><div style="width: 100%; background: #e35d5d;"></div></div><div class="eyebrow" style="font-size: 11px;">Hunter</div></div>
+          <div class="tile" style="border-color: #3a2420; --stripe: #e35d5d;"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #e35d5d;">3</span> Tunnel</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #e35d5d;">250</span></div><div class="hp"><div style="width: 100%; background: #e35d5d;"></div></div><div class="eyebrow" style="font-size: 11px;">Smoker</div></div>
+          <div class="tile" style="border-color: #3a2420; --stripe: #e35d5d;"><div style="display: flex; justify-content: space-between; align-items: baseline;"><span class="disp" style="font-size: 16px; font-weight: 700;"><span style="color: #e35d5d;">4</span> hoss</span><span class="disp" style="font-size: 18px; font-weight: 800; color: #9a9082;">ghost</span></div><div class="hp"><div style="width: 0%;"></div></div><div class="eyebrow" style="font-size: 11px;">Boomer · spawning</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

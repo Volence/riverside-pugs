@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0b0908; color: #d9cbb0; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    a { color: #c9a45c; } a:hover { color: #efe2c4; }
+    .poster {
+      background-color: #0b0908;
+      background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.6  0 0 0 0 0.45  0 0 0 0 0.3  0 0 0 0.16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+        radial-gradient(ellipse at 50% 20%, rgba(120, 40, 30, 0.35), transparent 55%),
+        radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.85) 100%);
+    }
+    .title { font-family: "Anton", Impact, "Arial Narrow", sans-serif; text-transform: uppercase; letter-spacing: 0.02em; }
+    .sub { font-family: "Oswald", "Arial Narrow", sans-serif; text-transform: uppercase; letter-spacing: 0.18em; }
+    .credits { font-family: "Oswald", "Arial Narrow", sans-serif; text-transform: uppercase; letter-spacing: 0.06em; font-size: 12px; color: #8d7f66; line-height: 1.5; }
+    .row { display: grid; grid-template-columns: 70px 1fr 90px 64px 72px 96px 96px 72px; gap: 8px; align-items: center; height: 50px; padding: 0 12px; border-bottom: 1px solid rgba(217,203,176,0.14); font-size: 15px; font-variant-numeric: tabular-nums; }
+    .r { text-align: right; }
+    .dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.6); }
+    .sprocket { position: absolute; top: 0; bottom: 0; width: 26px; background: repeating-linear-gradient(180deg, transparent 0 10px, #0b0908 10px 22px, transparent 22px 34px), #1a1512; }
+    .sprocket::before { content: ""; position: absolute; left: 7px; right: 7px; top: 0; bottom: 0; background: repeating-linear-gradient(180deg, #2b241f 0 10px, transparent 10px 22px, #2b241f 22px 34px); }
+    .card { position: relative; height: 210px; overflow: hidden; border: 1px solid rgba(217,203,176,0.18); display: flex; flex-direction: column; justify-content: flex-end; padding: 14px; }
+    .card::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 70px rgba(0,0,0,0.9); pointer-events: none; }
+  </style>
+</helmet>
+
+<div class="poster" style="width: 1280px; min-height: 2040px; position: relative; padding-bottom: 56px;">
+
+  <!-- nav -->
+  <div style="display: flex; align-items: center; gap: 34px; padding: 0 44px; height: 62px; border-bottom: 1px solid rgba(217,203,176,0.18);">
+    <div class="title" style="font-size: 26px; color: #efe2c4; letter-spacing: 0.06em;">Riverside</div>
+    <div class="sub" style="display: flex; gap: 26px; font-size: 13px; color: #8d7f66;">
+      <span style="color: #efe2c4; border-bottom: 2px solid #9b2a22; padding-bottom: 3px;">Play</span>
+      <span>Live</span><span>Leaderboard</span><span>Matches</span><span>Campaigns</span><span>Replays</span>
+    </div>
+    <div class="sub" style="margin-left: auto; font-size: 12px; color: #c9a45c;">Now showing · No Mercy</div>
+  </div>
+
+  <!-- poster hero -->
+  <div style="padding: 56px 44px 0 44px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+    <div class="sub" style="font-size: 14px; color: #c9a45c;">Riverside presents · Season one</div>
+    <div class="title" style="font-size: 132px; line-height: 0.9; color: #efe2c4; text-shadow: 0 0 40px rgba(155,42,34,0.45), 0 4px 0 #2b0e0b;">Ranked 4v4</div>
+    <div class="sub" style="font-size: 18px; color: #d9cbb0;">Twenty-four players · Three matches rated · No one left behind</div>
+    <div class="credits" style="max-width: 760px; margin-top: 16px;">
+      Starring VOLENCE · DEV_0001 · SPUTNIK · RACZYN &nbsp;with&nbsp; VODKA · ZEPPELIN · TUNNEL · HOSS &nbsp;·&nbsp; Rated on Rotoblin AZ at 100 tick · Recorded by SourceTV · A Dallas production
+    </div>
+  </div>
+
+  <!-- campaign posters -->
+  <div style="margin: 44px 44px 0 44px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px;">
+    <div class="card" style="background: linear-gradient(180deg, #2d3a2f 0%, #0d110e 100%);"><div class="sub" style="font-size: 11px; color: #c9a45c;">7 matches · last 1018 - 901</div><div class="title" style="font-size: 34px; line-height: 1; color: #efe2c4;">No Mercy</div></div>
+    <div class="card" style="background: linear-gradient(180deg, #2a3446 0%, #0c0f14 100%); border-color: #9b2a22;"><div class="sub" style="font-size: 11px; color: #c9a45c;">1 match · 412 - 289</div><div class="title" style="font-size: 34px; line-height: 1; color: #efe2c4;">Death Toll</div></div>
+    <div class="card" style="background: linear-gradient(180deg, #4a3a1c 0%, #140f08 100%); opacity: 0.55;"><div class="sub" style="font-size: 11px; color: #c9a45c;">Unplayed</div><div class="title" style="font-size: 34px; line-height: 1; color: #efe2c4;">Dead Air</div></div>
+    <div class="card" style="background: linear-gradient(180deg, #4a2620 0%, #140908 100%); opacity: 0.55;"><div class="sub" style="font-size: 11px; color: #c9a45c;">Unplayed</div><div class="title" style="font-size: 34px; line-height: 1; color: #efe2c4;">Blood Harvest</div></div>
+  </div>
+
+  <!-- leaderboard as billing block -->
+  <div style="margin: 48px 44px 0 44px; display: grid; grid-template-columns: 1fr 300px; gap: 28px; align-items: start;">
+    <div>
+      <div style="display: flex; align-items: baseline; justify-content: space-between; border-bottom: 2px solid #9b2a22; padding-bottom: 8px;">
+        <div class="title" style="font-size: 40px; color: #efe2c4;">Top billing</div>
+        <div class="sub" style="font-size: 12px; color: #8d7f66;">Season 1 · sorted by rating</div>
+      </div>
+      <div class="row sub" style="height: 36px; font-size: 11px; color: #8d7f66; letter-spacing: 0.14em;">
+        <div>Rank</div><div>Player</div><div class="r" style="color: #c9a45c;">Rating</div><div class="r">W-L</div><div class="r">Win %</div><div class="r">SI dmg</div><div class="r">Commons</div><div class="r">FF</div>
+      </div>
+      <div class="row"><div class="title" style="font-size: 30px; color: #c9a45c;">I</div><div class="sub" style="font-size: 17px; letter-spacing: 0.1em; color: #efe2c4;">fake_11</div><div class="r title" style="font-size: 24px; color: #c9a45c;">1151</div><div class="r">2-0</div><div class="r">100%</div><div class="r">4499</div><div class="r">472</div><div class="r" style="color: #8d7f66;">153</div></div>
+      <div class="row"><div class="title" style="font-size: 30px; color: #c9a45c;">II</div><div class="sub" style="font-size: 17px; letter-spacing: 0.1em; color: #efe2c4;">fake_12</div><div class="r title" style="font-size: 24px; color: #c9a45c;">1151</div><div class="r">2-0</div><div class="r">100%</div><div class="r">4028</div><div class="r">117</div><div class="r" style="color: #8d7f66;">34</div></div>
+      <div class="row"><div class="title" style="font-size: 30px; color: #c9a45c;">III</div><div class="sub" style="font-size: 17px; letter-spacing: 0.1em; color: #efe2c4;">fake_21</div><div class="r title" style="font-size: 24px; color: #c9a45c;">1151</div><div class="r">2-0</div><div class="r">100%</div><div class="r">3455</div><div class="r">72</div><div class="r" style="color: #8d7f66;">181</div></div>
+      <div class="row"><div class="title" style="font-size: 24px; color: #8d7f66;">IV</div><div class="sub" style="font-size: 17px; letter-spacing: 0.1em;">fake_3</div><div class="r title" style="font-size: 24px; color: #c9a45c;">1028</div><div class="r">2-1</div><div class="r">67%</div><div class="r">5438</div><div class="r">1179</div><div class="r" style="color: #8d7f66;">148</div></div>
+      <div class="row"><div class="title" style="font-size: 24px; color: #8d7f66;">V</div><div class="sub" style="font-size: 17px; letter-spacing: 0.1em;">fake_4</div><div class="r title" style="font-size: 24px; color: #c9a45c;">1028</div><div class="r">2-1</div><div class="r">67%</div><div class="r">5210</div><div class="r">849</div><div class="r" style="color: #8d7f66;">212</div></div>
+      <div class="row" style="border-bottom: none;"><div class="title" style="font-size: 24px; color: #8d7f66;">VI</div><div class="sub" style="font-size: 17px; letter-spacing: 0.1em;">fake_1</div><div class="r title" style="font-size: 24px; color: #c9a45c;">1025</div><div class="r">2-1</div><div class="r">67%</div><div class="r">2363</div><div class="r">1002</div><div class="r" style="color: #8d7f66;">150</div></div>
+    </div>
+    <div style="border: 1px solid rgba(217,203,176,0.18); padding: 20px; background: rgba(0,0,0,0.35);">
+      <div class="sub" style="font-size: 12px; color: #c9a45c;">Headliner</div>
+      <div class="title" style="font-size: 44px; line-height: 1; color: #efe2c4; margin-top: 6px;">fake_11</div>
+      <div class="title" style="font-size: 84px; line-height: 1; color: #c9a45c; margin-top: 10px; text-shadow: 0 3px 0 #2b0e0b;">1151</div>
+      <div class="credits" style="margin-top: 14px;">Two wins · No losses · 4499 special infected damage · 153 friendly fire, which the cast has noted</div>
+    </div>
+  </div>
+
+  <!-- replay as a film frame -->
+  <div style="margin: 52px 44px 0 44px;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px;">
+      <div class="title" style="font-size: 40px; color: #efe2c4;">Death Toll <span style="color: #9b2a22;">·</span> Reel one</div>
+      <div class="sub" style="font-size: 12px; color: #8d7f66;">Round 1 · Team A survivors · 0:06 of 1:09</div>
+    </div>
+    <div style="position: relative; height: 520px; background: #050403; overflow: hidden; border-top: 3px solid #1a1512; border-bottom: 3px solid #1a1512;">
+      <div class="sprocket" style="left: 0;"></div>
+      <div class="sprocket" style="right: 0;"></div>
+      <div style="position: absolute; left: 26px; right: 26px; top: 0; bottom: 0; overflow: hidden;">
+        <img src="overview.jpg" style="width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; filter: sepia(0.55) contrast(1.15) brightness(0.85);">
+        <div style="position: absolute; inset: 0; box-shadow: inset 0 0 160px rgba(0,0,0,0.95); pointer-events: none;"></div>
+        <div class="dot" style="left: 574px; top: 128px; background: #2cb2d5;"></div>
+        <div class="dot" style="left: 584px; top: 140px; background: #29f2ef;"></div>
+        <div class="dot" style="left: 566px; top: 146px; background: #3073d0;"></div>
+        <div class="dot" style="left: 578px; top: 158px; background: #5aa8ff;"></div>
+        <div style="position: absolute; left: 642px; top: 204px; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #c93a2e;"></div>
+        <div class="sub" style="position: absolute; left: 600px; top: 118px; font-size: 12px; letter-spacing: 0.08em; line-height: 1.25; color: #efe2c4; text-shadow: 0 0 4px #000, 0 0 6px #000;">volence<br>dev_0001<br>sputnik<br>raczyn</div>
+        <div class="title" style="position: absolute; left: 20px; bottom: 14px; font-size: 44px; color: #efe2c4; text-shadow: 0 3px 0 #000;">0:06</div>
+        <div class="sub" style="position: absolute; right: 20px; bottom: 20px; font-size: 12px; color: #d9cbb0;">4 alive · 14 common · 3 special</div>
+      </div>
+    </div>
+    <!-- filmstrip scrub -->
+    <div style="display: flex; align-items: center; gap: 14px; margin-top: 14px;">
+      <div class="sub" style="font-size: 12px; padding: 8px 14px; border: 1px solid #c9a45c; color: #c9a45c;">Pause</div>
+      <div style="flex: 1; position: relative; height: 18px; background: repeating-linear-gradient(90deg, #1a1512 0 26px, #2b241f 26px 28px);">
+        <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 9%; background: rgba(155,42,34,0.75);"></div>
+        <div style="position: absolute; left: calc(9% - 1px); top: -4px; width: 2px; height: 26px; background: #efe2c4;"></div>
+      </div>
+      <div class="sub" style="font-size: 12px; color: #8d7f66;">1x</div>
+    </div>
+    <!-- cast strip -->
+    <div style="margin-top: 20px; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px;">
+      <div style="border-top: 3px solid #45b39c; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #efe2c4;">volence</div><div class="title" style="font-size: 26px; color: #45b39c;">94</div></div>
+      <div style="border-top: 3px solid #45b39c; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #efe2c4;">dev_0001</div><div class="title" style="font-size: 26px; color: #45b39c;">94</div></div>
+      <div style="border-top: 3px solid #c9a45c; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #efe2c4;">sputnik</div><div class="title" style="font-size: 26px; color: #c9a45c;">61</div></div>
+      <div style="border-top: 3px solid #c93a2e; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #efe2c4;">raczyn</div><div class="title" style="font-size: 26px; color: #c93a2e;">23</div></div>
+      <div style="border-top: 3px solid #9b2a22; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #d9cbb0;">Vodka</div><div class="sub" style="font-size: 11px; color: #8d7f66;">Boomer</div></div>
+      <div style="border-top: 3px solid #9b2a22; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #d9cbb0;">zeppelin</div><div class="sub" style="font-size: 11px; color: #8d7f66;">Hunter</div></div>
+      <div style="border-top: 3px solid #9b2a22; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #d9cbb0;">Tunnel</div><div class="sub" style="font-size: 11px; color: #8d7f66;">Smoker</div></div>
+      <div style="border-top: 3px solid #9b2a22; padding-top: 8px;"><div class="sub" style="font-size: 13px; color: #d9cbb0;">hoss</div><div class="sub" style="font-size: 11px; color: #8d7f66;">Boomer · ghost</div></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
