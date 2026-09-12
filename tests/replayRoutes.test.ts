@@ -356,6 +356,35 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     expect(body.entries.map((e) => [e.seq, e.kind])).toEqual([[1, 'event'], [2, 'chat']]);
     await app2.close();
   });
+
+  // match_chat is fed from player_say, which does not distinguish team chat
+  // from all chat. Serving it for a match in progress would let a survivor
+  // poll the infected team's chat verbatim and in real time, on a public
+  // endpoint, while the frames on the same page are held ten seconds back.
+  it('404s a match that is not completed, so live chat is never served', async () => {
+    const db = openDb(':memory:');
+    db.prepare(
+      'INSERT INTO matches (id, season_id, campaign, token, state) VALUES (1, 1, ?, ?, ?)',
+    ).run('no_mercy', 't'.repeat(32), 'live');
+    db.prepare(
+      `INSERT INTO match_chat (match_id, seq, map_ordinal, half, t_ms, steamid, team, message)
+       VALUES (1, 1, 0, 1, 6000, 'A', 'infected', 'rushing left')`,
+    ).run();
+
+    const app2 = Fastify();
+    await app2.register(replayRoutes, { db, replayDir: dir });
+    await app2.ready();
+
+    const res = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
+    expect(res.statusCode).toBe(404);
+    expect(res.payload).not.toContain('rushing left');
+    await app2.close();
+  });
+
+  it('404s an unknown match id', async () => {
+    const res = await app.inject({ url: '/api/replays/timeline/9999/0/1' });
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 describe('replayRoutes registration on the real server', () => {
