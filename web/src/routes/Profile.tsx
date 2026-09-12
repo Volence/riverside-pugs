@@ -41,10 +41,7 @@ export function Profile({ steamid }: { steamid: string }) {
           delta={lastDelta}
           stats={rating ? [
             { label: 'Record', value: `${rating.wins}W ${rating.losses}L` },
-            // Omitted when the peak IS the current rating: showing "1200"
-            // twice right next to each other (once as the hero, once as
-            // "at their peak") is redundant rather than informative.
-            ...(peak !== null && peak === rating.sr ? [] : [{ label: 'Peak', value: peak ?? 'n/a' }]),
+            { label: 'Peak', value: peak ?? 'n/a' },
             { label: 'Matches', value: totals.games },
           ] : []}
         />
