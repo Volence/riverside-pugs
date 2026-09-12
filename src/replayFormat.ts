@@ -79,6 +79,29 @@ export const ENTITY_KIND = {
   HUNTER_AI: 8,
 } as const;
 
+/** Weapon ids as the plugin assigns them in `RplWeaponId`
+ *  (`plugin/pug-match.sp:1010`). This is a second copy of that mapping, which
+ *  is a cost worth paying here and nowhere else in this format: a wrong
+ *  weapon name is visibly wrong on screen, whereas a wrong byte offset
+ *  decodes into plausible nonsense. Keep it adjacent to ENTITY_KIND so a
+ *  change to one is made in sight of the other. */
+export const WEAPON_NAMES: Record<number, string> = {
+  1: 'Pistol',
+  2: 'SMG',
+  3: 'Pump Shotgun',
+  4: 'Auto Shotgun',
+  5: 'Assault Rifle',
+  6: 'Hunting Rifle',
+  7: 'Pipe Bomb',
+  8: 'Molotov',
+  9: 'First Aid Kit',
+  10: 'Pain Pills',
+};
+
+export function weaponName(id: number): string {
+  return WEAPON_NAMES[id] ?? '';
+}
+
 export interface ReplayHeader {
   version: number;
   token: string;
