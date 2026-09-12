@@ -10,7 +10,8 @@
     "prestart": "npm run build",
     "start": "tsx src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
+    "shoot": "node scripts/shoot-pages.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

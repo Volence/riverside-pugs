@@ -11,3 +11,6 @@ dist/
 
 # Seeded design canvas (2 MB editor payload); regenerate from the .dc.html working files
 design/**/riverside-pug-redesign.html
+
+# Screenshot passes from scripts/shoot-pages.mjs
+shots/
