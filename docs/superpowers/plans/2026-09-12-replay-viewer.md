@@ -1789,7 +1789,7 @@ Create `web/src/replay/source.ts`:
 ```ts
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-  decodeFrames, decodeHeader, HEADER_BYTES,
+  decodeFrames, decodeHeader, frameBytes, HEADER_BYTES,
   type Frame, type ReplayHeader,
 } from '../../../src/replayFormat';
 
@@ -1853,16 +1853,10 @@ export function appendChunk(state: ReplayState, chunk: Uint8Array, base: number)
   // would otherwise leave the cursor pointing into the middle of a record and
   // desynchronise every later poll.
   const end = shifted.length
-    ? shifted[shifted.length - 1].offset + frameBytesOf(shifted[shifted.length - 1])
+    ? shifted[shifted.length - 1].offset + frameBytes(shifted[shifted.length - 1].entities.length)
     : base + chunk.length;
 
   return { header, frames: state.frames.concat(shifted), cursor: end };
-}
-
-function frameBytesOf(f: Frame): number {
-  // Recomputed rather than imported as `frameBytes(n)` purely to keep this
-  // readable next to the offset arithmetic it supports.
-  return 8 + 160 + f.entities.length * 12;
 }
 
 /**
@@ -2883,13 +2877,32 @@ import { drawScene, isSurvivor, type ShowFlags } from './draw';
 
 const SIZE = 720;
 
-export function Viewer({ spec, live = false }: { spec: ReplaySpec; live?: boolean }) {
+export function Viewer(
+  { spec, live = false, names = {} }:
+  { spec: ReplaySpec; live?: boolean; names?: Record<string, string> },
+) {
   const { header, frames, closed, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [backdrop, setBackdrop] = useState<HTMLImageElement | null>(null);
   const show: ShowFlags = { ci: true, entities: true };
+
+  /**
+   * One interpolated frame per tick, shared by everything that reads it.
+   *
+   * The canvas, the status counts and the health panels must agree. Letting
+   * each call `bracket` itself would drift them a frame apart, which shows up
+   * as a health number sitting next to an avatar that has already moved.
+   */
+  const { livePlayers, liveEntities } = useMemo(() => {
+    const pair = bracket(frames, playback.tMs);
+    if (!pair) return { livePlayers: [], liveEntities: [] };
+    return {
+      livePlayers: interpolatePlayers(pair.a, pair.b, pair.f),
+      liveEntities: interpolateEntities(pair.a, pair.b, pair.f),
+    };
+  }, [frames, playback.tMs]);
 
   /**
    * The transform is derived once per replay, not per frame.
@@ -2945,19 +2958,15 @@ export function Viewer({ spec, live = false }: { spec: ReplaySpec; live?: boolea
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx || !transform) return;
-    const pair = bracket(frames, playback.tMs);
-    if (!pair) return;
     drawScene(ctx, {
-      transform,
-      backdrop,
-      trail,
-      players: interpolatePlayers(pair.a, pair.b, pair.f),
-      entities: interpolateEntities(pair.a, pair.b, pair.f),
+      transform, backdrop, trail,
+      players: livePlayers,
+      entities: liveEntities,
       show,
       width: SIZE,
       height: SIZE,
     });
-  }, [playback.tMs, transform, backdrop, trail, frames.length]);
+  }, [livePlayers, liveEntities, transform, backdrop, trail]);
 
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
   if (!header) return <div class="replay replay--empty">Loading replay...</div>;
@@ -3272,8 +3281,9 @@ following a slot nobody occupied would centre the camera on the world origin:
       </div>
 ```
 
-`names` is the prop added in Task 15; until then this renders slot numbers,
-which is enough to test that following works.
+`names` is the prop Task 13 added. A standalone session has no name lookup, so
+this renders SteamID64s there, which is correct and still distinguishes the
+slots.
 
 - [ ] **Step 6: Add the status line counts**
 
@@ -3672,25 +3682,8 @@ export function HudStrip(
 
 In `web/src/replay/Viewer.tsx`:
 
-- Add `names?: Record<string, string>` to the props, defaulting to `{}`.
-- Hoist the interpolated frame out of the draw effect so the canvas, the
-  status counts and the strip all read the same values. Drawing from one set
-  and labelling from another would put a health number next to an avatar that
-  is a frame away from it:
-
-```tsx
-  const { livePlayers, liveEntities } = useMemo(() => {
-    const pair = bracket(frames, playback.tMs);
-    if (!pair) return { livePlayers: [], liveEntities: [] };
-    return {
-      livePlayers: interpolatePlayers(pair.a, pair.b, pair.f),
-      liveEntities: interpolateEntities(pair.a, pair.b, pair.f),
-    };
-  }, [frames, playback.tMs]);
-```
-
-  The draw effect then uses `livePlayers` and `liveEntities` instead of calling
-  `bracket` itself. Render the strip below the toolbar:
+The `names` prop and the `livePlayers` / `liveEntities` memo already exist from
+Task 13. Render the strip below the toolbar:
 
 ```tsx
       {header && <HudStrip
