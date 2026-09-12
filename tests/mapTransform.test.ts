@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  normalizeMapName, transformFor, autoFitTransform, worldToImage, boundsOf,
+  normalizeMapName, autoFitTransform, worldToImage, boundsOf, pickLayer, transformOfLayer,
 } from '../src/mapTransform.js';
 
 describe('normalizeMapName', () => {
@@ -17,37 +17,92 @@ describe('normalizeMapName', () => {
   });
 });
 
-describe('transformFor', () => {
-  it('finds the Valve numbers for a versus map', () => {
-    const t = transformFor('l4d_vs_farm01_hilltop')!;
-    expect(t.originX).toBe(-13730);
-    expect(t.originY).toBe(-6299);
-    expect(t.unitsPerPixel).toBe(9);
-    expect(t.image).toBe('/overviews/l4d_farm01_hilltop.png');
+describe('pickLayer', () => {
+  const layers = [
+    { image: '/a.webp', cutHeight: 0, unitsPerPixel: 8, originX: 0, originY: 0, width: 2048, height: 1271 },
+    { image: '/b.webp', cutHeight: 500, unitsPerPixel: 8, originX: 0, originY: 0, width: 2048, height: 1271 },
+    { image: '/c.webp', cutHeight: 1000, unitsPerPixel: 8, originX: 0, originY: 0, width: 2048, height: 1271 },
+  ];
+
+  it('picks the lowest layer cut above the players', () => {
+    expect(pickLayer(layers, 300, null)?.image).toBe('/b.webp');
   });
 
-  it('returns null for a map with no overview', () => {
-    expect(transformFor('l4d_vs_hospital01_apartment')).toBeNull();
+  it('picks the bottom layer for someone below every cut', () => {
+    expect(pickLayer(layers, -800, null)?.image).toBe('/a.webp');
+  });
+
+  // A layer shows everything BELOW its cut, so someone above the highest cut is
+  // not visible on any layer. The top one is the least wrong answer and is what
+  // the spec's own rule falls back to.
+  it('falls back to the top layer for someone above every cut', () => {
+    expect(pickLayer(layers, 9000, null)?.image).toBe('/c.webp');
+  });
+
+  // Hysteresis. Without it a player standing on a boundary flips the whole map
+  // back and forth several times a second, which is unwatchable.
+  it('holds the current layer through small excursions past its boundary', () => {
+    const current = layers[1];
+    // 470 would select /b.webp anyway. 510 is past b's cut, but only just, so
+    // the bias holds it rather than jumping to /c.webp.
+    expect(pickLayer(layers, 510, current)?.image).toBe('/b.webp');
+  });
+
+  it('still switches once the excursion is decisive', () => {
+    expect(pickLayer(layers, 700, layers[1])?.image).toBe('/c.webp');
+  });
+
+  it('returns null for an empty stack', () => {
+    expect(pickLayer([], 0, null)).toBeNull();
+  });
+});
+
+describe('transformOfLayer', () => {
+  const layer = {
+    image: '/a.webp', cutHeight: 0, unitsPerPixel: 8,
+    originX: -1000, originY: 2000, width: 2048, height: 1271,
+  };
+
+  it('projects the layer origin to pixel 0,0', () => {
+    expect(worldToImage(transformOfLayer(layer), -1000, 2000)).toEqual({ px: 0, py: 0 });
+  });
+
+  // World +Y is up, pixel +Y is down.
+  it('flips the y axis', () => {
+    expect(worldToImage(transformOfLayer(layer), -1000, 2000 - 800).py).toBe(100);
+  });
+
+  it('carries the image and its dimensions through', () => {
+    const t = transformOfLayer(layer);
+    expect(t.image).toBe('/a.webp');
+    expect(t.width).toBe(2048);
+    expect(t.height).toBe(1271);
   });
 });
 
 describe('worldToImage', () => {
+  // transformFor is gone (Task 19 removed the Valve table), so these use a
+  // literal transform carrying the same numbers the table used to produce for
+  // l4d_farm01_hilltop. worldToImage itself is what is under test here, not
+  // where the transform came from.
+  const t = {
+    originX: -13730, originY: -6299, unitsPerPixel: 9,
+    image: '/overviews/l4d_farm01_hilltop.png', width: 1024, height: 1024,
+  };
+
   it('puts the origin corner at pixel 0,0', () => {
-    const t = transformFor('l4d_farm01_hilltop')!;
     expect(worldToImage(t, -13730, -6299)).toEqual({ px: 0, py: 0 });
   });
 
   // y is flipped: mapinfo's y is the UPPER-left corner, and world y grows
   // north while image y grows down.
   it('flips the y axis', () => {
-    const t = transformFor('l4d_farm01_hilltop')!;
     const got = worldToImage(t, -13730, -6299 - 900);
     expect(got.px).toBe(0);
     expect(got.py).toBe(100);
   });
 
   it('scales x by units per pixel', () => {
-    const t = transformFor('l4d_farm01_hilltop')!;
     expect(worldToImage(t, -13730 + 900, -6299).px).toBe(100);
   });
 });
