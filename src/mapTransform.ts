@@ -26,17 +26,6 @@ export interface WorldBounds {
   minX: number; maxX: number; minY: number; maxY: number;
 }
 
-/**
- * A versus map and its coop twin share one overview.
- *
- * The engine reports `l4d_vs_farm01_hilltop` in a versus match. Without this
- * every ranked replay would fall through to auto-fit despite the art being
- * right there.
- */
-export function normalizeMapName(map: string): string {
-  return map.toLowerCase().replace(/^l4d_vs_/, 'l4d_');
-}
-
 export function boundsOf(points: { x: number; y: number }[]): WorldBounds | null {
   if (points.length === 0) return null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
