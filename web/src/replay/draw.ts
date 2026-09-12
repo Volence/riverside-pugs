@@ -160,12 +160,130 @@ export interface DrawArgs {
  */
 const HEALTH_RING_GAP = 3;
 const HEALTH_RING_WIDTH = 2;
-const FOLLOW_RING_GAP = 6;
-const FOLLOW_RING_WIDTH = 2;
-/** How far the glyph sits above, and the label to the right of, the avatar.
- *  Large enough to clear the follow ring's outer edge (r + FOLLOW_RING_GAP +
- *  half its width) so neither piece of text sits on top of a ring. */
-const CHROME_TEXT_GAP = 9;
+const FOLLOW_RING_GAP = 8;
+export const FOLLOW_RING_WIDTH = 2;
+/** How far the glyph's baseline sits above the avatar's top edge.
+ *
+ *  The outermost thing an avatar ever draws is the follow ring's dark halo
+ *  pass, whose outer edge is r + FOLLOW_RING_GAP + FOLLOW_RING_WIDTH, that is
+ *  r + 10. The glyph is drawn on an alphabetic baseline, so its ink grows
+ *  UPWARD from the y it is given and that y is its lowest point: a gap of 11
+ *  puts the bottom of the glyph one pixel clear of the halo. Both terms carry
+ *  the same r, so the clearance holds at every avatar size. */
+const GLYPH_GAP = 11;
+
+/** Label chrome, all in the same screen units (CSS pixels, since wave one
+ *  made the backing store follow `clientWidth * devicePixelRatio`). */
+const LABEL_FONT_PX = 10;
+/** One line height for the de-confliction walk. Ten point text needs about
+ *  1.2 line height to stop consecutive rows touching. */
+export const LABEL_LINE_H = 12;
+/** The plate is a pixel taller than the line height it reserves, so two
+ *  plates pushed to exactly one line apart still show a seam between them. */
+const LABEL_PLATE_H = 13;
+export const LABEL_PAD_X = 3;
+/** A bar of the slot's own colour down the plate's left edge. The text itself
+ *  stays white, because the slot colours run from L* 51 to L* 82 and the
+ *  darkest of them on a near-black plate is only about 3.9:1, which is not a
+ *  contrast to set 10px text at. The bar carries the colour instead, at a
+ *  size where colour is all it has to carry. */
+export const LABEL_TICK_W = 2;
+/** How far the plate's LEFT EDGE sits right of the avatar's right edge.
+ *  The text starts at r + LABEL_GAP and the plate begins LABEL_PAD_X before
+ *  it, so the plate's left edge is at r + LABEL_GAP - LABEL_PAD_X = r + 11,
+ *  one pixel clear of the follow halo's r + 10. */
+const LABEL_GAP = 14;
+
+/** A label queued for the de-confliction pass. */
+interface LabelJob {
+  /** Where the avatar is, so the leader line knows what to point back at. */
+  ax: number;
+  ay: number;
+  px: number;
+  py: number;
+  text: string;
+  color: string;
+}
+
+/**
+ * Push overlapping labels apart, in screen order.
+ *
+ * Every label used to be drawn at a fixed offset from its own avatar and
+ * vertically centred on it, with no de-confliction at all. Four survivors
+ * standing together, which is their normal state, sit inside about eleven
+ * canvas pixels, so four names roughly ten pixels tall landed on baselines
+ * eleven pixels apart: mush. Worse, the survivor group was walked in slot
+ * order rather than screen order, so which name ended up on top was arbitrary
+ * and flickered as slots crossed each other.
+ *
+ * Sorting by `py` first fixes both: the walk is deterministic in the only
+ * ordering a viewer can see, and each label is pushed down only as far as it
+ * takes to clear the one above it. A label never moves up, so the topmost of
+ * a cluster always keeps its true position and the stack grows downward from
+ * a correct anchor.
+ */
+export function stackLabels<T extends { py: number }>(
+  jobs: readonly T[], lineH: number = LABEL_LINE_H,
+): (T & { ly: number })[] {
+  const sorted = [...jobs].sort((a, b) => a.py - b.py);
+  const out: (T & { ly: number })[] = [];
+  let prev = -Infinity;
+  for (const j of sorted) {
+    const ly = Math.max(j.py, prev + lineH);
+    out.push({ ...j, ly });
+    prev = ly;
+  }
+  return out;
+}
+
+/**
+ * Draw the de-conflicted labels.
+ *
+ * A filled plate rather than only a stroke, for two reasons. Where two labels
+ * do still overlap, two opaque plates read as two labels; two stroked strings
+ * read as noise. And `strokeText` centres its stroke on the glyph outline, so
+ * the old three pixel stroke put one and a half pixels INWARD, which at a ten
+ * pixel font closes the counters of e, a and o entirely. The fill cannot
+ * reopen them, because a counter is not part of the glyph's ink, so over a
+ * light patch of map those letters came out as black blobs. The plate does
+ * the stroke's job properly, so there is no stroke here at all.
+ */
+function drawLabels(ctx: CanvasRenderingContext2D, jobs: readonly LabelJob[]): void {
+  if (jobs.length === 0) return;
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.font = `${LABEL_FONT_PX}px sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (const j of stackLabels(jobs)) {
+    const w = ctx.measureText(j.text).width;
+    const plateX = j.px - LABEL_PAD_X;
+    const plateY = j.ly - LABEL_PLATE_H / 2;
+    const plateW = w + LABEL_PAD_X * 2 + LABEL_TICK_W;
+
+    // A label pushed clear of a crowd can end up well below its own avatar,
+    // so a hairline leads back to it. Skipped when the label did not move,
+    // where it would just be a dash hanging off the dot.
+    if (j.ly - j.py > 1) {
+      ctx.beginPath();
+      ctx.moveTo(j.ax, j.ay);
+      ctx.lineTo(plateX, j.ly);
+      ctx.strokeStyle = j.color;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.55;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.fillStyle = 'rgba(8,10,7,0.78)';
+    ctx.fillRect(plateX, plateY, plateW, LABEL_PLATE_H);
+    ctx.fillStyle = j.color;
+    ctx.fillRect(plateX, plateY, LABEL_TICK_W, LABEL_PLATE_H);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(j.text, j.px + LABEL_TICK_W, j.ly);
+  }
+  ctx.restore();
+}
 
 function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.save();
@@ -249,6 +367,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   // sitting underneath an enemy dot.
   const infected = a.players.filter((pl) => !isSurvivor(pl));
   const survivors = a.players.filter(isSurvivor);
+  const labels: LabelJob[] = [];
   for (const pl of [...infected, ...survivors]) {
     if ((pl.state & STATE.PRESENT) === 0) continue;
     const alive = (pl.state & STATE.ALIVE) !== 0;
@@ -313,7 +432,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // dark outline so it reads over both bright and dark map art.
       const glyph = statusGlyph(pl.state);
       if (glyph) {
-        const gy = p.py - r - CHROME_TEXT_GAP;
+        const gy = p.py - r - GLYPH_GAP;
         ctx.font = '9px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'alphabetic';
@@ -328,18 +447,20 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       // A standalone `!mix` session has no roster at all, so an unresolved
       // name draws nothing rather than a seventeen-digit number next to the
       // dot, which would be worse than no label.
+      //
+      // Queued rather than drawn. Labels cannot be laid out one avatar at a
+      // time: whether this one has to move depends on every other label on
+      // screen, so the whole set is de-conflicted in one pass after the loop.
+      // Drawing them last also puts every label above every avatar, instead
+      // of leaving the ones drawn early to be painted over.
       if (a.show.names) {
         const name = a.names[a.slots[pl.slot]];
         if (name) {
-          const lx = p.px + r + CHROME_TEXT_GAP;
-          ctx.font = '10px sans-serif';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-          ctx.strokeText(name, lx, p.py);
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(name, lx, p.py);
+          labels.push({
+            ax: p.px + r, ay: p.py,
+            px: p.px + r + LABEL_GAP, py: p.py,
+            text: name, color,
+          });
         }
       }
 
@@ -364,4 +485,6 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     }
     ctx.restore();
   }
+
+  drawLabels(ctx, labels);
 }

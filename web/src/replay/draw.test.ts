@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
-  slotColor, statusGlyph,
+  slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
@@ -100,6 +100,43 @@ describe('statusGlyph', () => {
   });
 });
 
+describe('stackLabels', () => {
+  // Finding 2: four survivors standing together sit inside about 11 canvas
+  // pixels, so four 10px labels pinned to their own avatars land on baselines
+  // within 11px of each other. Every one of them has to be pushed clear of
+  // the one above it, and the walk has to happen in SCREEN order, not slot
+  // order, or which name wins is arbitrary and flickers as slots cross.
+  it('pushes each label clear of the one above it by a full line', () => {
+    const out = stackLabels([{ py: 0 }, { py: 3 }, { py: 7 }, { py: 11 }], 12);
+    expect(out.map((l) => l.ly)).toEqual([0, 12, 24, 36]);
+  });
+
+  it('walks in screen order however the callers order their input', () => {
+    const jumbled = stackLabels([{ py: 11 }, { py: 0 }, { py: 7 }, { py: 3 }], 12);
+    const ordered = stackLabels([{ py: 0 }, { py: 3 }, { py: 7 }, { py: 11 }], 12);
+    // Same players, same answer: the label at py 0 is the one that keeps its
+    // own position and the one at py 11 is the one pushed furthest.
+    expect(jumbled.map((l) => [l.py, l.ly])).toEqual(ordered.map((l) => [l.py, l.ly]));
+  });
+
+  it('leaves labels that are already a line apart exactly where they are', () => {
+    const out = stackLabels([{ py: 100 }, { py: 140 }, { py: 200 }], 12);
+    expect(out.map((l) => l.ly)).toEqual([100, 140, 200]);
+  });
+
+  it('never moves a label upward, only down', () => {
+    const out = stackLabels([{ py: 50 }, { py: 52 }, { py: 400 }], 12);
+    for (const l of out) expect(l.ly).toBeGreaterThanOrEqual(l.py);
+  });
+
+  it('does not reorder or mutate the input array', () => {
+    const input = [{ py: 30 }, { py: 10 }];
+    const copy = [...input];
+    stackLabels(input, 12);
+    expect(input).toEqual(copy);
+  });
+});
+
 describe('projectView', () => {
   // Every captured layer image is 2048x1271, but the canvas is drawn at a
   // different, responsive size. Regression for the bug where drawScene used
@@ -143,15 +180,15 @@ describe('drawScene', () => {
   // itself is what closes that gap.
   function stubCtx() {
     const calls: { fn: string; args: number[] }[] = [];
-    const texts: { fn: string; text: string }[] = [];
+    const texts: { fn: string; text: string; x: number; y: number }[] = [];
     const rec = (fn: string) => (...args: unknown[]) => {
       calls.push({ fn, args: args.filter((a) => typeof a === 'number') as number[] });
     };
     // fillText/strokeText carry the label or glyph string as their first
     // argument, which the numeric-only `rec` above would silently drop, so
     // the name-resolution tests below need their own recorder that keeps it.
-    const recText = (fn: string) => (text: string) => {
-      texts.push({ fn, text });
+    const recText = (fn: string) => (text: string, x: number, y: number) => {
+      texts.push({ fn, text, x, y });
     };
     return {
       calls,
@@ -162,6 +199,10 @@ describe('drawScene', () => {
         fill: rec('fill'), arc: rec('arc'), fillRect: rec('fillRect'),
         clearRect: rec('clearRect'), drawImage: rec('drawImage'),
         fillText: recText('fillText'), strokeText: recText('strokeText'),
+        // Real 2D contexts measure text; the label plates need a width. Six
+        // pixels per character at a 10px font is close enough for a stub and
+        // makes the expected plate width arithmetic below exact.
+        measureText: (t: string) => ({ width: t.length * 6 }),
         set fillStyle(_v: string) {}, set strokeStyle(_v: string) {},
         set lineWidth(_v: number) {}, set globalAlpha(_v: number) {},
         set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
@@ -356,12 +397,17 @@ describe('drawScene', () => {
       width: 1280, height: 794,
       names: { '76561198000000001': 'Zoey' }, slots, followSlot: null,
     });
-    // Stroked before filled, so the outline sits under the fill rather than
-    // over it.
-    expect(known.texts).toEqual([
-      { fn: 'strokeText', text: 'Zoey' },
-      { fn: 'fillText', text: 'Zoey' },
-    ]);
+    // Finding 10: the label used to be stroked and then filled. `strokeText`
+    // centres its stroke on the glyph outline, so a 3px stroke put 1.5px
+    // INWARD, which at a 10px font closes the counters of e, a and o outright
+    // (the fill cannot reopen them, because a counter is not part of the
+    // glyph's ink). The backing plate from Finding 2 does the job the stroke
+    // was there for, so the stroke is gone and exactly one text call remains.
+    // This is an update to the new behaviour, not a weakened assertion: it
+    // still pins the exact text drawn and still proves the raw id is never
+    // one of them.
+    expect(known.texts.map((t) => t.fn)).toEqual(['fillText']);
+    expect(known.texts[0].text).toBe('Zoey');
 
     // No roster entry for this slot: draw nothing, never the seventeen-digit
     // SteamID64 itself.
@@ -375,6 +421,90 @@ describe('drawScene', () => {
       names: {}, slots, followSlot: null,
     });
     expect(unknown.texts).toHaveLength(0);
+  });
+
+  it('de-conflicts four crowded survivor labels instead of piling them up', () => {
+    const { transform, view } = identityScene();
+    const slots = ['s0', 's1', 's2', 's3', '', '', '', ''];
+    const { texts, ctx } = stubCtx();
+    // Four survivors within eleven canvas pixels of each other vertically,
+    // which is where four survivors normally are. World y is negated into
+    // image space, so the LARGEST world y is the smallest canvas y: slot 3
+    // is the topmost on screen and slot 0 the lowest. The labels must come
+    // out in that screen order, not in slot order.
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [
+        player({ slot: 0, x: 600, y: -300 }),
+        player({ slot: 1, x: 604, y: -297 }),
+        player({ slot: 2, x: 608, y: -293 }),
+        player({ slot: 3, x: 612, y: -289 }),
+      ],
+      entities: [],
+      show: { ci: true, entities: true, names: true },
+      width: 1280, height: 794,
+      names: { s0: 'Aaa', s1: 'Bbb', s2: 'Ccc', s3: 'Ddd' }, slots, followSlot: null,
+    });
+
+    const labels = texts.filter((t) => t.fn === 'fillText' && t.text.length === 3);
+    expect(labels).toHaveLength(4);
+    // Screen order: slot 3 sits at canvas y 289 and slot 0 at 300.
+    expect(labels.map((l) => l.text)).toEqual(['Ddd', 'Ccc', 'Bbb', 'Aaa']);
+    // And nothing lands within a line height of its neighbour, which is the
+    // whole point: before this, four baselines shared eleven pixels.
+    const ys = labels.map((l) => l.y);
+    for (let i = 1; i < ys.length; i++) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(12);
+  });
+
+  it('gives every label a filled backing plate wide enough for its text', () => {
+    const { transform, view } = identityScene();
+    const slots = ['s0', '', '', '', '', '', '', ''];
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, x: 640, y: -300 })],
+      entities: [],
+      show: { ci: true, entities: true, names: true },
+      width: 1280, height: 794,
+      names: { s0: 'Zoey' }, slots, followSlot: null,
+    });
+
+    // The background is the first fillRect; the plate and its slot-colour
+    // tick are the ones after it.
+    const rects = calls.filter((c) => c.fn === 'fillRect');
+    expect(rects).toHaveLength(3);
+    const plate = rects[1];
+    const [, , pw] = plate.args;
+    // The stub measures 6px per character, so 'Zoey' is 24px wide, and the
+    // plate carries the tick plus a pad on each side of the text.
+    expect(pw).toBeCloseTo(24 + LABEL_PAD_X * 2 + LABEL_TICK_W, 5);
+  });
+
+  it('keeps the label clear of the follow ring it would otherwise sit on', () => {
+    const { transform, view } = identityScene();
+    const slots = ['s0', '', '', '', '', '', '', ''];
+    const { calls, texts, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, x: 640, y: -300 })],
+      entities: [],
+      show: { ci: true, entities: true, names: true },
+      width: 1280, height: 794,
+      names: { s0: 'Zoey' }, slots, followSlot: 0,
+    });
+
+    const arcs = calls.filter((c) => c.fn === 'arc');
+    const avatarR = arcs[0].args[2];
+    // The follow ring is the outermost thing an avatar draws, and its dark
+    // halo pass shares that radius with two extra pixels of width, so the
+    // halo's outer edge is followR + FOLLOW_RING_WIDTH.
+    const followR = arcs[arcs.length - 1].args[2];
+    const outer = 640 + followR + FOLLOW_RING_WIDTH;
+    const plate = calls.filter((c) => c.fn === 'fillRect')[1];
+    expect(avatarR).toBeCloseTo(7, 5);
+    // The plate's left edge, not just the text's, has to clear the ring.
+    expect(plate.args[0]).toBeGreaterThan(outer);
+    expect(texts.some((t) => t.text === 'Zoey')).toBe(true);
   });
 
   it('draws a follow highlight ring, wider than the health ring, for the followed slot', () => {
