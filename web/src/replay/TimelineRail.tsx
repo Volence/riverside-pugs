@@ -1,4 +1,4 @@
-import { activeEntries, type TimelineEntry } from './timeline';
+import { activeEntries, entryText, type TimelineEntry } from './timeline';
 import { formatTime } from './ReplayControls';
 import type { Toggles } from './useToggles';
 
@@ -19,6 +19,7 @@ export interface TimelineRailProps {
  * replay.
  */
 export function TimelineRail({ timeline, tMs, toggles, seek, names }: TimelineRailProps) {
+  const nameOf = (id: string) => names[id] ?? id;
   return (
     <div class="replay__rail">
       {activeEntries(timeline, tMs)
@@ -30,8 +31,8 @@ export function TimelineRail({ timeline, tMs, toggles, seek, names }: TimelineRa
             onClick={() => seek(e.tMs)}
           >
             <span class="replay__entry-t">{formatTime(e.tMs)}</span>
-            <span class="replay__entry-who">{names[e.actor] ?? e.actor}</span>
-            <span class="replay__entry-text">{e.text}</span>
+            <span class="replay__entry-who">{nameOf(e.actor)}</span>
+            <span class="replay__entry-text">{entryText(e, nameOf)}</span>
           </button>
         ))}
     </div>

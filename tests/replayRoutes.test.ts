@@ -558,8 +558,15 @@ describe('GET /api/replays/timeline/:matchId/:ordinal/:half', () => {
     await app2.ready();
 
     const res = await app2.inject({ url: '/api/replays/timeline/1/0/1' });
-    const body = res.json() as { entries: { seq: number; kind: string }[] };
-    expect(body.entries.map((e) => [e.seq, e.kind])).toEqual([[1, 'event'], [2, 'chat']]);
+    const body = res.json() as { entries: Record<string, unknown>[] };
+    expect(body.entries).toEqual([
+      { seq: 1, tMs: 5000, kind: 'event', event: 'pounce', actor: 'A', target: 'B', value: 20 },
+      { seq: 2, tMs: 6000, kind: 'chat', actor: 'A', team: 'survivor', text: 'nice' },
+    ]);
+    // The old payload composed a `text` of kind, raw target id and value; a
+    // seventeen-digit id is not a name and the client now composes the
+    // sentence itself.
+    expect(body.entries[0]).not.toHaveProperty('text');
     await app2.close();
   });
 

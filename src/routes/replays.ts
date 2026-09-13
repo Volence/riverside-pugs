@@ -344,15 +344,19 @@ export async function replayRoutes(
     ).all(id, ord, hf) as
       { seq: number; tMs: number; steamid: string; team: string | null; message: string }[];
 
+    // Two shapes, discriminated on `kind`, mirroring TimelineEntry in
+    // web/src/replay/timeline.ts. An event carries the plugin's own kind
+    // slug and its operands and the client composes the sentence, so every
+    // id in it can be resolved through the roster; the old pre-joined `text`
+    // put a raw target SteamID on screen.
     const entries = [
       ...events.map((e) => ({
         seq: e.seq, tMs: e.tMs, kind: 'event' as const,
-        text: e.target ? `${e.kind} ${e.target} ${e.value}` : `${e.kind} ${e.value}`,
-        actor: e.actor, team: null as string | null,
+        event: e.kind, actor: e.actor, target: e.target, value: e.value,
       })),
       ...chat.map((c) => ({
         seq: c.seq, tMs: c.tMs, kind: 'chat' as const,
-        text: c.message, actor: c.steamid, team: c.team,
+        actor: c.steamid, team: c.team, text: c.message,
       })),
     ].sort((a, b) => a.seq - b.seq);
 

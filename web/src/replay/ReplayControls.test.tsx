@@ -16,8 +16,8 @@ describe('ReplayControls ticks', () => {
         playback={playback} endMs={100000} live={false}
         followSlot={null} setFollowSlot={() => {}} slots={[]} names={{}}
         timeline={[
-          { seq: 1, tMs: 25000, kind: 'event', text: 'pounced', actor: 'x', team: null },
-          { seq: 2, tMs: 50000, kind: 'chat', text: 'gg', actor: 'y', team: 'survivor' },
+          { seq: 1, tMs: 25000, kind: 'event', event: 'dp', actor: 'x', target: 'y', value: 12 },
+          { seq: 2, tMs: 50000, kind: 'chat', actor: 'y', team: 'survivor', text: 'gg' },
         ]}
       />,
     );
