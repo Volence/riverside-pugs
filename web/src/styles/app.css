@@ -196,7 +196,6 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .chip.is-on, .tabs__tab.is-active {
   border-color: var(--accent);
   color: var(--text-bright);
-  outline: none;
   font-weight: 500;
 }
 .chip:disabled { opacity: 0.5; cursor: default; }
@@ -889,9 +888,9 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .rhud__of { color: var(--text); }
 .rhud__counts { color: var(--win); }
 .rhud__live { color: var(--accent); flex-basis: 100%; }
-.rhud__right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); pointer-events: auto; }
-.rhud .chip { min-height: 28px; padding: 2px var(--sp-2); background: rgba(21, 17, 14, 0.85); }
-@media (max-width: 640px) { .rhud__time { font-size: 1.75rem; } .rhud .chip { min-height: 32px; } }
+.rhud__right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); }
+.rhud .chip { min-height: 36px; padding: 2px var(--sp-2); background: rgba(21, 17, 14, 0.85); pointer-events: auto; }
+@media (max-width: 640px) { .rhud__time { font-size: 1.75rem; } .rhud .chip { min-height: 44px; } }
 
 .replay--empty { padding: 2rem; text-align: center; color: var(--text-muted); }
 .replay__controls, .replay__toolbar, .replay__rounds { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
