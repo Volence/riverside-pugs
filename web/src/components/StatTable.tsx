@@ -4,6 +4,7 @@ import { fmtLatency, labelFor, liveGroupStarts } from '../format';
 import { clearLatencies } from '../clearLatency';
 import { PlayerLink } from './bits';
 import { markColumn, directionOf, type Mark } from '../outliers';
+import { EVENT_KINDS } from '../replay/eventText';
 
 /** A player row for any stat table: live, per-map, or match totals. */
 export interface StatRow {
@@ -158,13 +159,13 @@ export function EventFeed(
         </li>,
       );
     }
-    const verb = KIND_VERBS[e.kind];
+    const verb = EVENT_KINDS[e.kind];
     rows.push(
       <li key={e.seq}>
         <span class="feed__line">
           <strong>{e.actor.name}</strong>
           {' '}
-          <span class="muted">{verb?.verb ?? e.kind}</span>
+          <span class="muted">{verb?.verb ?? e.kind}{verb?.link && e.target ? ` ${verb.link}` : ''}</span>
           {e.target && <> <strong>{e.target.name}</strong></>}
           {latencyOf.has(e.seq) && (
             <> <span class="feed__val num">{fmtLatency(latencyOf.get(e.seq)!)}</span></>
@@ -189,13 +190,6 @@ export function EventFeed(
     </div>
   );
 }
-
-/** How each event kind reads. `verb` sits between actor and target, `unit`
- *  between target and value. Adding a kind here is the only frontend change
- *  needed when the plugin starts emitting a new one. */
-const KIND_VERBS: Record<string, { verb: string; unit?: string }> = {
-  dp: { verb: 'pounced', unit: 'for' },
-};
 
 /** Absent must read as "not measured", never as a fabricated 0. hp carries -1
  *  from the plugin to mean "not applicable" (infected, or disconnected), which
