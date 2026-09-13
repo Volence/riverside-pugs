@@ -3,6 +3,8 @@ import { render, cleanup, screen, fireEvent, act } from '@testing-library/preact
 import { Viewer, isDefaultCamera } from './Viewer';
 import { FREE, TEAM } from './camera';
 import { STATE, type Frame, type ReplayHeader } from '../../../src/replayFormat';
+import type { HitItem } from './hitTest';
+import { bookmarkSeekMs, type TimelineEntry } from './timeline';
 
 const HEADER: ReplayHeader = {
   version: 2, token: '', ordinal: 0, half: 1, playerHz: 10, entityHz: 2, map: 'not_a_real_map',
@@ -13,8 +15,11 @@ const HEADER: ReplayHeader = {
 };
 const NAMES = { A: 'bill', B: 'zoey', C: 'francis', D: 'louis', E: 'smk', F: 'boom', G: 'hunt', H: 'tank' };
 
+// 8000/10000 give the hover/click tests below an endMs far past
+// BOOKMARK_LEAD_MS (3000), so a seek's lead-in is never clamped to the round
+// start by coincidence the way it would be with only the original 0/100/200.
 function frames(): Frame[] {
-  return [0, 100, 200].map((tMs) => ({
+  return [0, 100, 200, 8000, 10000].map((tMs) => ({
     tMs, offset: 0,
     players: Array.from({ length: 8 }, (_, slot) => ({
       slot, x: slot * 10, y: 0, z: 0, yaw: 0, pitch: 0,
@@ -33,22 +38,61 @@ vi.mock('./source', async (importOriginal) => {
   };
 });
 
+/**
+ * `hitsRef`/`shiftRef` are written by the canvas's own paint, which never
+ * runs in happy-dom (no 2D context). Hover/click tests set these before
+ * mounting instead, and this stub writes them into the refs Viewer hands
+ * down, standing in for a real paint. `tooltipRenders` counts invocations of
+ * the mocked ReplayTooltip, which Preact calls exactly when Viewer's own
+ * render runs (a plain function component with no memoization): that makes
+ * it a direct probe for "did Viewer re-render", used by the render-storm
+ * test below.
+ */
+let mockHits: HitItem[] = [];
+let mockShift = { x: 0, y: 0 };
+let tooltipRenders = 0;
+
+vi.mock('./ReplayCanvas', () => ({
+  ReplayCanvas: (props: { hitsRef: { current: HitItem[] }; shiftRef: { current: { x: number; y: number } } }) => {
+    props.hitsRef.current = mockHits;
+    props.shiftRef.current = mockShift;
+    return <canvas class="replay__canvas" />;
+  },
+}));
+
+vi.mock('./ReplayTooltip', () => ({
+  ReplayTooltip: (props: { text: string | null }) => {
+    tooltipRenders += 1;
+    return props.text ? <div class="replay__tip" role="tooltip">{props.text}</div> : null;
+  },
+}));
+
+const DEFAULT_TIMELINE: TimelineEntry[] = [
+  { seq: 1, tMs: 100, kind: 'event', event: 'boom', actor: 'F', target: 'A', value: 0 },
+];
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   document.body.classList.remove('is-theater');
   // useToggles persists to localStorage; the second test turns two toggles off.
   localStorage.clear();
+  mockHits = [];
+  mockShift = { x: 0, y: 0 };
+  tooltipRenders = 0;
 });
 
-function mount() {
-  // happy-dom has no 2D context. paint() returns early on a null context,
-  // which is all this test needs of the canvas.
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null as never);
-  return render(
-    <Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES}
-      timeline={[{ seq: 1, tMs: 100, kind: 'event', event: 'boom', actor: 'F', target: 'A', value: 0 }]} />,
+function mount(timeline: TimelineEntry[] = DEFAULT_TIMELINE) {
+  const r = render(
+    <Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={timeline} />,
   );
+  const stage = r.container.querySelector('.replay__stage') as HTMLElement;
+  // happy-dom lays nothing out; give the stage a rect so clientX/Y map to
+  // stage-relative coordinates the same way the brief's math assumes.
+  stage.getBoundingClientRect = () => (
+    { left: 0, top: 0, width: 800, height: 500, right: 800, bottom: 500, x: 0, y: 0, toJSON() {} } as DOMRect
+  );
+  return { ...r, stage };
 }
 
 describe('Viewer theater', () => {
@@ -108,6 +152,97 @@ describe('Viewer theater', () => {
     for (const edge of edges) {
       expect(edge.querySelector('button, a, input')).toBeNull();
     }
+  });
+});
+
+describe('Viewer hover and click-to-seek', () => {
+  it('renders once for a new hover and not again for a second pointermove over the same hit', () => {
+    mockHits = [{ kind: 'player', px: 40, py: 30, r: 17, slot: 0 }];
+    mockShift = { x: 0, y: 0 };
+    const { stage } = mount();
+
+    const before = tooltipRenders;
+    fireEvent.pointerMove(stage, { clientX: 40, clientY: 30 });
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+    const afterFirst = tooltipRenders;
+    expect(afterFirst).toBeGreaterThan(before);
+
+    // Same hit, same coordinates: sameHit says nothing changed, so setHover's
+    // updater hands back the identical object and Preact bails out of the
+    // render entirely. A regression back to `setHover({...})` unconditionally
+    // would make this assertion fail.
+    fireEvent.pointerMove(stage, { clientX: 40, clientY: 30 });
+    expect(tooltipRenders).toBe(afterFirst);
+  });
+
+  it('shows a tooltip naming the hovered player, at the hit position plus the follow shift', () => {
+    mockHits = [{ kind: 'player', px: 50, py: 60, r: 17, slot: 0 }];
+    mockShift = { x: 20, y: 15 };
+    const { stage } = mount();
+
+    // The scene was drawn shifted by (20, 15), so the on-screen point for a
+    // hit recorded at (50, 60) is (70, 75); stageHit must subtract the same
+    // shift back out to find it.
+    fireEvent.pointerMove(stage, { clientX: 70, clientY: 75 });
+    expect(screen.getByRole('tooltip').textContent).toContain('bill');
+  });
+
+  it('shows nothing off a miss, even with hits recorded', () => {
+    mockHits = [{ kind: 'player', px: 50, py: 60, r: 17, slot: 0 }];
+    mockShift = { x: 0, y: 0 };
+    const { stage } = mount();
+    fireEvent.pointerMove(stage, { clientX: 500, clientY: 400 });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('seeks to BOOKMARK_LEAD_MS before the event when a hovered marker tag is clicked', () => {
+    mockHits = [{ kind: 'marker', px: 50, py: 60, r: 8, seq: 9 }];
+    mockShift = { x: 0, y: 0 };
+    const tl: TimelineEntry[] = [
+      { seq: 9, tMs: 8000, kind: 'event', event: 'boom', actor: 'F', target: 'A', value: 0 },
+    ];
+    const { stage, container } = mount(tl);
+
+    fireEvent.pointerMove(stage, { clientX: 50, clientY: 60 });
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+    fireEvent.click(stage);
+
+    const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
+    expect(scrub.value).toBe(String(bookmarkSeekMs(8000)));
+    expect(scrub.value).not.toBe('8000');
+  });
+
+  it('clears the tooltip during a drag and does not seek on the click that ends it', () => {
+    mockHits = [{ kind: 'marker', px: 50, py: 60, r: 8, seq: 9 }];
+    mockShift = { x: 0, y: 0 };
+    const tl: TimelineEntry[] = [
+      { seq: 9, tMs: 8000, kind: 'event', event: 'boom', actor: 'F', target: 'A', value: 0 },
+    ];
+    const { stage, container } = mount(tl);
+
+    fireEvent.pointerMove(stage, { clientX: 50, clientY: 60 });
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+
+    // A drag: press on the stage, then a big enough window pointermove for
+    // useCamera's own listener to cross DRAG_THRESHOLD_PX and flip `dragging`.
+    fireEvent.pointerDown(stage, { clientX: 50, clientY: 60, button: 0 });
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 65, clientY: 75, bubbles: true }));
+    });
+
+    // The pointer is back over the same marker, but camera.dragging is true:
+    // stageHit must refuse the hit outright rather than merely leaving the
+    // stale hover in place.
+    fireEvent.pointerMove(stage, { clientX: 50, clientY: 60 });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+
+    fireEvent.click(stage);
+    const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
+    expect(scrub.value).toBe('0');
+
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointerup', { clientX: 65, clientY: 75, bubbles: true }));
+    });
   });
 });
 

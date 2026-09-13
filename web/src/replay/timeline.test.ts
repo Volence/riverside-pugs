@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { activeEntries, entryText, type TimelineEntry } from './timeline';
+import {
+  activeEntries, bookmarkSeekMs, BOOKMARK_LEAD_MS, entryText, type TimelineEntry,
+} from './timeline';
 
 const entries: TimelineEntry[] = [
   { seq: 1, tMs: 1000, kind: 'event', event: 'dp', actor: 'A', target: 'B', value: 20 },
@@ -30,5 +32,17 @@ describe('entryText', () => {
   it('is the message for chat and the resolved phrase for an event', () => {
     expect(entryText(entries[1], nameOf)).toBe('nice');
     expect(entryText(entries[0], nameOf)).toBe('pounced tino for 20');
+  });
+});
+
+describe('bookmarkSeekMs', () => {
+  it('lands BOOKMARK_LEAD_MS before the event', () => {
+    expect(bookmarkSeekMs(10000)).toBe(10000 - BOOKMARK_LEAD_MS);
+    expect(bookmarkSeekMs(10000)).toBe(7000);
+  });
+
+  it('clamps at the start of the round rather than going negative', () => {
+    expect(bookmarkSeekMs(1000)).toBe(0);
+    expect(bookmarkSeekMs(0)).toBe(0);
   });
 });

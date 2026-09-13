@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, fireEvent } from '@testing-library/preact';
 import { ReplayControls } from './ReplayControls';
 import { FREE, TEAM } from './camera';
-import type { TimelineEntry } from './timeline';
+import { bookmarkSeekMs, type TimelineEntry } from './timeline';
 
 afterEach(cleanup);
 
@@ -54,7 +54,7 @@ describe('ReplayControls ticks', () => {
     expect(tick.tagName).toBe('BUTTON');
     expect(tick.getAttribute('aria-label')).toBe('0:25 hunter pounced volence for 12');
     fireEvent.click(tick);
-    expect(seek).toHaveBeenCalledWith(25000);
+    expect(seek).toHaveBeenCalledWith(bookmarkSeekMs(25000));
   });
 
   // Spec 7.2: the follow row is the selector. Slot 0 is 'A'.

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, fireEvent, screen } from '@testing-library/preact';
 import { TimelineRail } from './TimelineRail';
 import { DEFAULT_TOGGLES } from './useToggles';
-import type { TimelineEntry } from './timeline';
+import { bookmarkSeekMs, type TimelineEntry } from './timeline';
 
 afterEach(cleanup);
 
@@ -50,7 +50,7 @@ describe('TimelineRail, a player selected', () => {
     // Everything after 1.5s: the second boom, the skeet, the chat at 2s.
     expect(ahead).toHaveLength(3);
     fireEvent.click(rows[1]);
-    expect(seek).toHaveBeenCalledWith(40000);
+    expect(seek).toHaveBeenCalledWith(bookmarkSeekMs(40000));
   });
 
   // Q is rostered but in no event and no chat line. (B would not do: B is

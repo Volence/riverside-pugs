@@ -1,7 +1,7 @@
 import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
 import { tickEntries } from './bookmarks';
-import { entryText, type TimelineEntry } from './timeline';
+import { bookmarkSeekMs, entryText, type TimelineEntry } from './timeline';
 import {
   FREE, TEAM, ZOOM_LEVELS, followSlotOf, type Follow,
 } from './camera';
@@ -76,7 +76,7 @@ export function ReplayControls(
                   class={`scrub__tick scrub__tick--${role ?? e.kind}`}
                   style={{ left: pct(e.tMs) }}
                   aria-label={`${formatTime(e.tMs)} ${nameOf(e.actor)} ${entryText(e, nameOf)}`}
-                  onClick={() => playback.seek(e.tMs)}
+                  onClick={() => playback.seek(bookmarkSeekMs(e.tMs))}
                 />
               ))}
             </div>

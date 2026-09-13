@@ -21,10 +21,10 @@ import { useCamera, type CameraState } from './useCamera';
 import { useTheater } from './useTheater';
 import { useIdle } from './useIdle';
 import { eventPosition, markerEntries, markerKind, witchStartledAt } from './markers';
-import { hitTest, type HitItem } from './hitTest';
+import { sameHit, stageHit, type HitItem } from './hitTest';
 import { tooltipText } from './tooltipText';
 import { ReplayTooltip } from './ReplayTooltip';
-import type { TimelineEntry } from './timeline';
+import { bookmarkSeekMs, type TimelineEntry } from './timeline';
 
 /**
  * How much of the viewport height the map may take.
@@ -200,12 +200,20 @@ export function Viewer(
    *  below to hit-test the map. See ReplayCanvasProps.hitsRef. */
   const hitsRef = useRef<HitItem[]>([]);
 
-  /** What the pointer is over right now, in stage-relative CSS pixels, or
-   *  null when nothing is hit or the pointer has left. Plain state: it
-   *  drives only the tooltip, a sibling DOM node the canvas never reads, so
-   *  a hover changing on every pointermove never touches ReplayCanvas's
-   *  props and never triggers its repaint effect. */
-  const [hover, setHover] = useState<{ x: number; y: number; hit: HitItem } | null>(null);
+  /** What the pointer is over right now, or null when nothing is hit or the
+   *  pointer has left. Plain state: it drives only the tooltip, a sibling
+   *  DOM node the canvas never reads, so a hover changing never touches
+   *  ReplayCanvas's props and never triggers its repaint effect.
+   *
+   *  Holds only the hit item, not the pointer position: the tooltip's screen
+   *  position is derived from the hit's own recorded `px,py` plus the
+   *  current follow shift (see the stage div below), so two pointermoves
+   *  that land on the SAME hit never need a new object here. `setHover`
+   *  below only ever commits a value when `sameHit` says the identity
+   *  actually changed, so moving the pointer around inside one medallion
+   *  costs comparisons, not renders: without that guard every pixel of
+   *  pointer travel re-rendered the whole Viewer subtree. */
+  const [hover, setHover] = useState<HitItem | null>(null);
 
   if (tooNew) {
     return (
@@ -230,19 +238,21 @@ export function Viewer(
       onWheel={camera.onWheel}
       onPointerDown={camera.onPointerDown}
       onPointerMove={(e) => {
-        if (camera.dragging) { setHover(null); return; }
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const x = e.clientX - rect.left; const y = e.clientY - rect.top;
-        const s = shiftRef.current;
-        const hit = hitTest(hitsRef.current, x - s.x, y - s.y);
-        setHover(hit ? { x, y, hit } : null);
+        const hit = stageHit(hitsRef.current, x, y, shiftRef.current, camera.dragging);
+        // Committing only on a real identity change is the whole point: see
+        // the doc comment on `hover` above.
+        setHover((prev) => (sameHit(prev, hit) ? prev : hit));
       }}
-      onPointerLeave={() => setHover(null)}
+      onPointerLeave={() => setHover((prev) => (prev === null ? prev : null))}
       onClick={() => {
-        if (!hover || hover.hit.kind !== 'marker') return;
-        const seq = hover.hit.seq;
-        const entry = tl.find((t) => t.kind === 'event' && t.seq === seq);
-        if (entry) playback.seek(entry.tMs);
+        if (!hover || hover.kind !== 'marker') return;
+        const entry = tl.find((t) => t.kind === 'event' && t.seq === hover.seq);
+        // Owner feedback: landing exactly on the tag's own moment shows the
+        // aftermath rather than the setup, e.g. a death already on the
+        // ground instead of the pounce that put them there.
+        if (entry) playback.seek(bookmarkSeekMs(entry.tMs));
       }}
     >
       <ReplayCanvas
@@ -267,11 +277,16 @@ export function Viewer(
       />
       <div class="replay__vignette" aria-hidden="true" />
       <ReplayTooltip
-        text={hover ? tooltipText(hover.hit, {
+        text={hover ? tooltipText(hover, {
           players: livePlayers, slots: header.slots, names, version: header.version, timeline: tl, witchStartled,
         }) : null}
-        x={hover?.x ?? 0}
-        y={hover?.y ?? 0}
+        // `hover.px/py` were recorded before the follow camera's translate
+        // (see ReplayCanvasProps.hitsRef); `shiftRef.current` is that same
+        // translate, so adding it back is the inverse of the subtraction
+        // `stageHit` does on the way in, and lands the tooltip on the hit's
+        // actual on-screen position rather than wherever the pointer was.
+        x={hover ? hover.px + shiftRef.current.x : 0}
+        y={hover ? hover.py + shiftRef.current.y : 0}
         stageW={size.cssW}
         stageH={size.cssH}
       />
