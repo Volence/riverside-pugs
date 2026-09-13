@@ -1574,19 +1574,26 @@ void EndMatchNow(const char[] why)
 /** Two map names belong to the same campaign when they share the prefix
  *  before the first digit: l4d_vs_farm01_hilltop and l4d_vs_farm04_barn are
  *  both "l4d_vs_farm". Good enough for every stock campaign; a custom
- *  campaign whose maps are not named that way ends a match at each map. */
+ *  campaign whose maps are not named that way ends a match at each map.
+ *
+ *  The leading "l4d_" is skipped first. Its '4' is a digit that sits before
+ *  the campaign word, and until 2026-09-13 the first-digit rule stopped there
+ *  and called every stock map one campaign: auto-track never ended a match on
+ *  !cm, and Dead Air was recorded as maps 3 to 6 of a No Mercy match. */
 bool SameCampaign(const char[] mapA, const char[] mapB)
 {
+	int a = (StrContains(mapA, "l4d_", false) == 0) ? 4 : 0;
+	int b = (StrContains(mapB, "l4d_", false) == 0) ? 4 : 0;
 	int i = 0;
-	while (mapA[i] != '\0' && mapB[i] != '\0')
+	while (mapA[a + i] != '\0' && mapB[b + i] != '\0')
 	{
-		bool digitA = (mapA[i] >= '0' && mapA[i] <= '9');
-		bool digitB = (mapB[i] >= '0' && mapB[i] <= '9');
+		bool digitA = (mapA[a + i] >= '0' && mapA[a + i] <= '9');
+		bool digitB = (mapB[b + i] >= '0' && mapB[b + i] <= '9');
 		if (digitA || digitB) return digitA && digitB && i > 0;
-		if (mapA[i] != mapB[i]) return false;
+		if (mapA[a + i] != mapB[b + i]) return false;
 		i++;
 	}
-	return mapA[i] == mapB[i];
+	return mapA[a + i] == mapB[b + i];
 }
 
 /** Humans on survivor or infected right now. Bots and spectators do not count. */
