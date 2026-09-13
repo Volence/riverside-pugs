@@ -6,8 +6,15 @@ import { healthBar, TEMP_HEALTH_COLOR } from './hud';
 /** Roster slots 0-3 are the survivor team for this half and 4-7 are the
  *  infected. The player record carries no team field because the slot already
  *  is one. */
+/** Which side a player is on this round.
+ *
+ *  Decoded frames carry `infected` from the file header's side mask (format
+ *  version 3, or stamped by the serving route for older files of a known
+ *  match). The slot-order fallback is for hand-built samples and for old
+ *  standalone files, and it is exactly the assumption that put survivors in
+ *  the infected column for every second half and every join-ordered roster. */
 export function isSurvivor(p: PlayerSample): boolean {
-  return p.slot < 4;
+  return p.infected === undefined ? p.slot < 4 : !p.infected;
 }
 
 export function medianHeight(players: PlayerSample[]): number {

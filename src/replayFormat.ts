@@ -17,12 +17,16 @@
 export const MAGIC = 'L4RP';
 /** Format version.
  *
+ *  3: header bytes 156 and 157 carry a per-slot infected mask and a flag saying
+ *  it was filled (see OFF). Frames are unchanged. Before this a reader had to
+ *  assume slots 0 to 3 were survivors, which is false in every second half and
+ *  for any roster recorded in join order.
  *  2: `cls` carries `m_survivorCharacter` for a survivor, where version 1
  *  always wrote 0. No record grew and no offset moved, so a version 1 file
  *  still decodes correctly; only the meaning of one byte for one team
  *  changed, which is exactly why the version check in `parseReplay` had to
  *  land first. */
-export const VERSION = 2;
+export const VERSION = 3;
 
 export const HEADER_BYTES = 160;
 export const PLAYER_SLOTS = 8;
@@ -47,7 +51,16 @@ const OFF = {
   startedUnix: 76, indexOffset: 80, indexCount: 84,
   slots: 88,
   frameCount: 152,
+  /** Version 3: bit i set means roster slot i is on the infected side this
+   *  round, and `sidesFlag` is 1 when the writer (or the serving route) filled
+   *  the mask. Bytes 156 and 157 were zero padding in every earlier version,
+   *  so an old file reads as "sides unknown" and falls back to slot order. */
+  infectedMask: 156,
+  sidesFlag: 157,
 } as const;
+
+export const INFECTED_MASK_OFFSET: number = OFF.infectedMask;
+export const SIDES_FLAG_OFFSET: number = OFF.sidesFlag;
 
 export const TOKEN_BYTES = 32;
 const MAP_BYTES = 32;
@@ -156,6 +169,13 @@ export interface ReplayHeader {
   frameCount: number;
   /** SteamID64 as a decimal string per roster slot, or '' for an empty slot. */
   slots: string[];
+  /** Bit i set: slot i is infected this round. Meaningful only with `sidesKnown`. */
+  infectedMask: number;
+  /** Whether `infectedMask` was filled. Version 3 writers fill it at round
+   *  start; the serving route fills it for older files of a known match.
+   *  Without it a reader has only slot order to go on, which is wrong for
+   *  every second half and for any roster that was not team-ordered. */
+  sidesKnown: boolean;
 }
 
 export interface PlayerSample {
@@ -166,6 +186,15 @@ export interface PlayerSample {
   health: number; temp: number;
   cls: number; weapon: number;
   clip: number; reserve: number;
+  /** Which side this slot is on, from the header's side mask when known and
+   *  from slot order (0 to 3 survivors) when not. Optional only so hand-built
+   *  fixtures need not set it; `decodeFrames` always does. */
+  infected?: boolean;
+}
+
+/** Side of a roster slot as the header knows it. */
+export function slotInfected(h: Pick<ReplayHeader, 'infectedMask' | 'sidesKnown'>, slot: number): boolean {
+  return h.sidesKnown ? ((h.infectedMask >> slot) & 1) === 1 : slot >= 4;
 }
 
 export interface EntitySample {
@@ -247,6 +276,8 @@ export function encodeHeader(h: ReplayHeader): Uint8Array {
     const raw = h.slots[i] ?? '';
     v.setBigUint64(OFF.slots + i * 8, raw === '' ? 0n : BigInt(raw), true);
   }
+  v.setUint8(OFF.infectedMask, h.sidesKnown ? h.infectedMask & 0xff : 0);
+  v.setUint8(OFF.sidesFlag, h.sidesKnown ? 1 : 0);
   return buf;
 }
 
@@ -272,6 +303,8 @@ export function decodeHeader(buf: Uint8Array): ReplayHeader | null {
     indexCount: v.getUint32(OFF.indexCount, true),
     frameCount: v.getUint32(OFF.frameCount, true),
     slots,
+    infectedMask: v.getUint8(OFF.infectedMask),
+    sidesKnown: v.getUint8(OFF.sidesFlag) === 1,
   };
 }
 
@@ -319,6 +352,7 @@ export function encodeFrame(f: Frame): Uint8Array {
  *  which lives after the last frame and would otherwise be decoded as one. */
 export function decodeFrames(
   buf: Uint8Array, from: number, end: number,
+  sideOf: (slot: number) => boolean = (slot) => slot >= 4,
 ): { frames: Frame[]; truncatedBytes: number } {
   const v = dv(buf);
   const frames: Frame[] = [];
@@ -345,6 +379,7 @@ export function decodeFrames(
         weapon: v.getUint8(o + 15),
         clip: v.getUint16(o + 16, true),
         reserve: v.getUint16(o + 18, true),
+        infected: sideOf(slot),
       });
     }
     const entities: EntitySample[] = [];
@@ -393,6 +428,6 @@ export function parseReplay(buf: Uint8Array): Replay | null {
   const end = header.indexOffset > 0 && header.indexOffset <= buf.length
     ? header.indexOffset
     : buf.length;
-  const { frames, truncatedBytes } = decodeFrames(buf, HEADER_BYTES, end);
+  const { frames, truncatedBytes } = decodeFrames(buf, HEADER_BYTES, end, (slot) => slotInfected(header, slot));
   return { header, frames, truncatedBytes };
 }

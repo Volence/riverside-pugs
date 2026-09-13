@@ -6,8 +6,7 @@ import { listSessions, currentFileFor, resolveByName, type ReplayFileInfo } from
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
-  decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET,
-} from '../replayFormat.js';
+  decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET, INFECTED_MASK_OFFSET, SIDES_FLAG_OFFSET } from '../replayFormat.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -123,6 +122,7 @@ export function concatHeadAndStream(head: Buffer, rest: Readable): Readable {
 
 function sendSlice(
   reply: FastifyReply, path: string, info: ReplayFileInfo, since: number, nowMs: number,
+  infectedMask: number | null = null,
 ): FastifyReply {
   const cutoff = cutoffFor(path, info, nowMs);
   // Every legitimate `since` is a byte offset this server itself handed out
@@ -147,12 +147,25 @@ function sendSlice(
   // every future caller to address files by something other than a name.
   // No consumer reads `header.token` off a response: the one reader of that
   // field, `discoverMatchReplays`, opens the file on disk itself.
-  if (start < TOKEN_END) {
-    const headEnd = Math.min(cutoff, TOKEN_END);
+  // The side mask (format version 3) lives past the token, so when there is
+  // one to stamp the rewritten head runs to the end of the header.
+  const rewriteEnd = infectedMask === null ? TOKEN_END : HEADER_BYTES;
+  if (start < rewriteEnd) {
+    const headEnd = Math.min(cutoff, rewriteEnd);
     const head = readRange(path, start, headEnd);
     const zeroFrom = Math.max(start, TOKEN_OFFSET) - start;
     const zeroTo = Math.min(headEnd, TOKEN_END) - start;
     if (zeroTo > zeroFrom) head.fill(0, zeroFrom, Math.min(zeroTo, head.length));
+    // Older files (and a version 3 writer that could not resolve a side) say
+    // nothing about which slots are infected. For a replay of a known match
+    // the answer is in the database, so it is written into the header on the
+    // wire: roster team plus the round's survivor side. A file that already
+    // carries a mask keeps it; the writer saw the real teams.
+    if (infectedMask !== null && start === 0 && head.length >= HEADER_BYTES
+      && head[SIDES_FLAG_OFFSET] !== 1) {
+      head[INFECTED_MASK_OFFSET] = infectedMask & 0xff;
+      head[SIDES_FLAG_OFFSET] = 1;
+    }
     if (headEnd >= cutoff) return reply.send(head);
 
     // Header first, then the rest of the slice as a stream, so a closed file
@@ -165,6 +178,46 @@ function sendSlice(
   // rather than buffering matters for the closed case, where this is a
   // multi-megabyte download.
   return reply.send(createReadStream(path, { start, end: cutoff - 1 }));
+}
+
+/**
+ * Which roster slots are infected in one round of a match, as the header's
+ * version 3 side mask, or null when the answer is not knowable.
+ *
+ * Files recorded before version 3 say nothing about sides, and the viewer
+ * used to assume slots 0 to 3 were survivors, which is wrong for every second
+ * half and for any roster taken in join order. The database knows better:
+ * each rostered player's pug team, and which team survived this round
+ * (`match_rounds.surv_team`, absent until ROUND_START arrives with a side).
+ * The file's own slot table maps slots to players. Null leaves the header
+ * alone, so the viewer falls back to slot order exactly as before.
+ */
+export function infectedMaskFor(
+  db: DB, path: string, matchId: number, ordinal: number, half: number,
+): number | null {
+  const round = db.prepare(
+    'SELECT surv_team FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
+  ).get(matchId, ordinal, half) as { surv_team: 'a' | 'b' } | undefined;
+  if (!round) return null;
+  const team = new Map(
+    (db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ?')
+      .all(matchId) as { player_id: string; team: 'a' | 'b' }[])
+      .map((r) => [r.player_id, r.team] as const),
+  );
+  let head: Buffer;
+  try {
+    head = readRange(path, 0, HEADER_BYTES);
+  } catch {
+    return null;
+  }
+  const h = decodeHeader(head);
+  if (!h) return null;
+  let mask = 0;
+  for (let slot = 0; slot < h.slots.length; slot++) {
+    const t = team.get(h.slots[slot]);
+    if (t !== undefined && t !== round.surv_team) mask |= 1 << slot;
+  }
+  return mask;
 }
 
 export async function replayRoutes(
@@ -269,7 +322,8 @@ export async function replayRoutes(
       ? resolveByName(replayDir, row.filename, now)
       : liveRoundFor(Number(id), ordinal, half, now);
     if (!found) return reply.code(404).send({ error: 'no such replay' });
-    return sendSlice(reply, found.path, found.info, Number(since ?? 0), now);
+    return sendSlice(reply, found.path, found.info, Number(since ?? 0), now,
+      infectedMaskFor(db, found.path, Number(id), Number(ordinal), Number(half)));
   });
 
   /**

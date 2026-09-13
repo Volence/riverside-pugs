@@ -29,7 +29,7 @@
 // Changing one without changing the other produces a file that parses into
 // plausible nonsense rather than an error, which is why the in-game
 // verification at the end of this plan reads a real file back.
-#define RPL_VERSION        2
+#define RPL_VERSION        3
 #define RPL_HEADER_BYTES   160
 #define RPL_SLOTS          8
 #define RPL_PLAYER_RECORD  20
@@ -865,6 +865,24 @@ void RplOpen()
 	}
 	while (p < 152) p = RplU8(p, 0);
 	p = RplU32(p, 0);                          // frameCount, patched at close
+	// Version 3: which slots are infected THIS round. A connected player's real
+	// side wins; a disconnected one takes the side the orientation mapping
+	// gives their pug team. Readers used to assume slots 0 to 3 were the
+	// survivors, which is wrong every second half and for any roster taken in
+	// join order (auto-track, !load_4v4p).
+	int infectedMask = 0;
+	for (int slot = 0; slot < RPL_SLOTS && slot < g_iRosterCount; slot++)
+	{
+		int side = 0;
+		for (int c = 1; c <= MaxClients; c++)
+		{
+			if (g_iClientRoster[c] == slot && IsClientInGame(c)) { side = GetClientTeam(c); break; }
+		}
+		if (side != TEAM_SURVIVOR && side != TEAM_INFECTED) side = g_iPugSide[g_iRosterTeam[slot]];
+		if (side == TEAM_INFECTED) infectedMask |= (1 << slot);
+	}
+	p = RplU8(p, infectedMask);                // 156: infected slot mask
+	p = RplU8(p, 1);                           // 157: mask is filled
 	while (p < RPL_HEADER_BYTES) p = RplU8(p, 0);
 
 	// Reset BEFORE the write, not after: a failed header write goes straight to
