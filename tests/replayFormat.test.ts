@@ -4,7 +4,7 @@ import {
   WEAPON_NAMES, weaponName,
   SURVIVOR_CHARACTERS, PLAYER_RECORD_BYTES,
   encodeHeader, decodeHeader, encodeFrame, parseReplay, decodeIndex,
-  type ReplayHeader, type Frame,
+  type ReplayHeader, type Frame, slotInfected, frameBytes, decodeFrames,
 } from '../src/replayFormat.js';
 
 const TOKEN = 'a'.repeat(32);
@@ -15,6 +15,8 @@ function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
     playerHz: 10, entityHz: 10, map: 'l4d_vs_farm01_hilltop',
     startedUnix: 1785956274, indexOffset: 0, indexCount: 0, frameCount: 0,
     slots: ['76561198000000001', '76561198000000002', '', '', '', '', '', ''],
+    infectedMask: 0,
+    sidesKnown: false,
     ...over,
   };
 }
@@ -78,6 +80,46 @@ describe('replay header', () => {
   });
 });
 
+describe('replay header side mask (version 3)', () => {
+  it('round-trips the infected mask and the known flag', () => {
+    const h = header({ version: 3, infectedMask: 0b1010_0101, sidesKnown: true });
+    const back = decodeHeader(encodeHeader(h))!;
+    expect(back.infectedMask).toBe(0b1010_0101);
+    expect(back.sidesKnown).toBe(true);
+    expect(slotInfected(back, 0)).toBe(true);
+    expect(slotInfected(back, 1)).toBe(false);
+    expect(slotInfected(back, 7)).toBe(true);
+  });
+
+  // Bytes 156 and 157 were zero padding before version 3, so an old file
+  // decodes as "sides unknown" and the reader falls back to slot order.
+  it('reads an old header as sides unknown and falls back to slot order', () => {
+    const buf = encodeHeader(header({ version: 2, infectedMask: 0xff, sidesKnown: false }));
+    expect(buf[156]).toBe(0);
+    expect(buf[157]).toBe(0);
+    const back = decodeHeader(buf)!;
+    expect(back.sidesKnown).toBe(false);
+    expect(slotInfected(back, 3)).toBe(false);
+    expect(slotInfected(back, 4)).toBe(true);
+  });
+
+  it('stamps each decoded player with the side the header gives its slot', () => {
+    const h = header({ version: 3, infectedMask: 0b0000_1111, sidesKnown: true });
+    const f = frame({ tMs: 1000 });
+    const buf = new Uint8Array(HEADER_BYTES + frameBytes(0));
+    buf.set(encodeHeader(h), 0);
+    buf.set(encodeFrame(f), HEADER_BYTES);
+    const r = parseReplay(buf)!;
+    expect(r.frames[0].players.map((p) => p.infected)).toEqual([true, true, true, true, false, false, false, false]);
+  });
+
+  it('defaults to slot order when decodeFrames is given no side function', () => {
+    const buf = encodeFrame(frame({ tMs: 0 }));
+    const { frames } = decodeFrames(buf, 0, buf.length);
+    expect(frames[0].players.map((p) => p.infected)).toEqual([false, false, false, false, true, true, true, true]);
+  });
+});
+
 describe('replay frame', () => {
   it('round-trips positions, yaw and pitch through their packed widths', () => {
     const f = frame();
@@ -87,7 +129,8 @@ describe('replay frame', () => {
       health: 100, temp: 196, cls: 0, weapon: 7, clip: 5, reserve: 125,
     };
     const parsed = parseReplay(Buffer.concat([encodeHeader(header()), encodeFrame(f)]));
-    expect(parsed!.frames[0].players[0]).toEqual(f.players[0]);
+    // Decoded players also carry the side the header gives their slot.
+    expect(parsed!.frames[0].players[0]).toEqual({ ...f.players[0], infected: false });
   });
 
   it('round-trips a variable-length entity block', () => {
@@ -192,9 +235,9 @@ describe('format version', () => {
   });
 });
 
-describe('format version 2', () => {
+describe('format version 3', () => {
   it('is the current version', () => {
-    expect(VERSION).toBe(2);
+    expect(VERSION).toBe(3);
   });
 
   it('names a survivor character for every index the engine can report', () => {

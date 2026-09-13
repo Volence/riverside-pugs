@@ -9,6 +9,8 @@ const HEADER: ReplayHeader = {
   version: 2, token: '', ordinal: 0, half: 1, playerHz: 10, entityHz: 2, map: 'l4d_hospital01_apartment',
   startedUnix: 0, indexOffset: 0, indexCount: 0, frameCount: 0,
   slots: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
+  infectedMask: 0,
+  sidesKnown: false,
 };
 const NAMES = { A: 'bill', B: 'zoey', C: 'francis', D: 'louis', E: 'smk', F: 'boom', G: 'hunt', H: 'tank' };
 

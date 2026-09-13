@@ -22,6 +22,8 @@ function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
     startedUnix: Math.floor(Date.now() / 1000) - 600,
     indexOffset: 0, indexCount: 0, frameCount: 0,
     slots: ['', '', '', '', '', '', '', ''],
+    infectedMask: 0,
+    sidesKnown: false,
     ...over,
   };
 }
@@ -432,6 +434,44 @@ describe('GET /api/replays/live/:token', () => {
 });
 
 describe('GET /api/replays/match/:id/:ordinal/:half', () => {
+  // The viewer used to assume slots 0 to 3 were survivors. For a match the
+  // database knows each slot's pug team and which team survived the round, so
+  // the served header gets the version 3 side mask stamped in.
+  it('stamps the side mask into an old header from the roster and the round', async () => {
+    const slots = ['1001', '1002', '1003', '1004', '2001', '2002', '2003', '2004'];
+    const parts = [encodeHeader(header({ version: 2, slots, frameCount: 2 })), encodeFrame(emptyFrame(0)), encodeFrame(emptyFrame(1000))];
+    const path = join(dir, `pug_${TOKEN}_0_2.rpl`);
+    writeFileSync(path, Buffer.concat(parts));
+    const id = seedMatchReplay(`pug_${TOKEN}_0_2.rpl`, 0, 2, 0, 2);
+    // Join-ordered roster: team a is slots 0, 2, 4, 6. Team b survives half 2.
+    const ins = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
+    db.prepare("INSERT OR IGNORE INTO players (steamid, name) VALUES (?, ?)");
+    for (const [i, sid] of slots.entries()) {
+      db.prepare('INSERT OR IGNORE INTO players (steamid, name) VALUES (?, ?)').run(sid, `p${i}`);
+      ins.run(id, sid, i % 2 === 0 ? 'a' : 'b');
+    }
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score) VALUES (?, 0, 2, 'b', 0)").run(id);
+
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/2` });
+    expect(res.statusCode).toBe(200);
+    const h = decodeHeader(new Uint8Array(res.rawPayload))!;
+    expect(h.sidesKnown).toBe(true);
+    // Team a (even slots) is infected this half.
+    expect(h.infectedMask).toBe(0b0101_0101);
+    // The token is still blanked on the wire.
+    expect(h.token).toBe('');
+    // The file on disk is untouched.
+    expect(decodeHeader(readFileSync(path))!.sidesKnown).toBe(false);
+  });
+
+  it('leaves the header alone when the round side is not known yet', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    const h = decodeHeader(new Uint8Array(res.rawPayload))!;
+    expect(h.sidesKnown).toBe(false);
+  });
+
   it('serves a closed file whole via a match_replays row', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);

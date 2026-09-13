@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-  decodeFrames, decodeHeader, frameBytes, HEADER_BYTES, VERSION,
+  decodeFrames, decodeHeader, frameBytes, slotInfected, HEADER_BYTES, VERSION,
   type Frame, type ReplayHeader,
 } from '../../../src/replayFormat';
 
@@ -86,7 +86,7 @@ export function appendChunk(state: ReplayState, chunk: Uint8Array, base: number)
     from = HEADER_BYTES;
   }
 
-  const { frames } = decodeFrames(chunk, from, chunk.length);
+  const { frames } = decodeFrames(chunk, from, chunk.length, (slot) => slotInfected(header, slot));
   const shifted = base === 0 ? frames : frames.map((f) => ({ ...f, offset: f.offset + base }));
 
   // The cursor is where the last WHOLE frame ended, not where the chunk

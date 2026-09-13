@@ -25,6 +25,15 @@ export const MAX_STEP_MS = 100;
  *  this number should follow the capture rate rather than be tuned. */
 export const PUBLISH_INTERVAL_MS = 100;
 
+/** How far behind the newest live frame the clock runs while following, so
+ *  the frames a poll just delivered play out rather than being skipped to.
+ *  One poll interval: any less and the clock catches the end and stalls
+ *  between polls, any more is latency on top of the server's delay. */
+export const LIVE_BUFFER_MS = 1000;
+/** Behind by more than this while following and the clock jumps to the
+ *  buffer point instead of playing catch-up for seconds. */
+export const LIVE_SNAP_MS = 3000;
+
 /**
  * Where the clock lands after `elapsedMs` of real time.
  *
@@ -37,8 +46,20 @@ export const PUBLISH_INTERVAL_MS = 100;
 export function advance(
   tMs: number, elapsedMs: number, speed: number, endMs: number, following: boolean,
 ): number {
-  if (following) return endMs;
   const step = elapsedMs > MAX_STEP_MS ? MAX_STEP_MS : elapsedMs;
+  if (following) {
+    // Live used to mean "sit on the newest frame". Frames arrive in one
+    // second batches from the poll, so that snapped everyone forward once a
+    // second and played nothing in between. Instead the clock runs at real
+    // time about LIVE_BUFFER_MS behind the newest frame: each poll lands a
+    // second of frames just as the clock reaches them, and motion between
+    // frames interpolates the way a recording does. Only when the clock has
+    // fallen far behind (a stalled tab, a long poll gap) does it jump.
+    const target = endMs - LIVE_BUFFER_MS;
+    if (target - tMs > LIVE_SNAP_MS) return target < 0 ? 0 : target;
+    const next = tMs + step;
+    return next >= endMs ? endMs : next;
+  }
   const next = tMs + step * speed;
   if (next >= endMs) return endMs;
   return next < 0 ? 0 : next;

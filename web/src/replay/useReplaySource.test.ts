@@ -19,6 +19,8 @@ function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
     playerHz: 10, entityHz: 10, map: 'l4d_vs_farm01_hilltop',
     startedUnix: 1_785_956_274, indexOffset: 0, indexCount: 0, frameCount: 0,
     slots: ['', '', '', '', '', '', '', ''],
+    infectedMask: 0,
+    sidesKnown: false,
     ...over,
   };
 }
