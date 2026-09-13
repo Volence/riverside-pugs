@@ -19,9 +19,14 @@ export function campaignName(slug: string): string {
  * lightness, so a campaign the site has never seen still gets a tint at the
  * same visual weight as the originals, with no stylesheet edit. Deterministic
  * so the same campaign is the same color on every page and every visit.
+ *
+ * The hash is computed unconditionally, even for the four known slugs, so it
+ * can ride along as the token's fallback: `var(--c-x, <hash>)` degrades to a
+ * real color instead of an invalid one if a token is ever missing from
+ * tokens.css, where a bare `var(--c-x)` would leave `color-mix` and friends
+ * silently failing on an invalid value.
  */
 export function campaignTint(slug: string): string {
-  if (Object.hasOwn(CAMPAIGN_NAMES, slug)) return `var(--c-${slug.replace(/_/g, '-')})`;
   // FNV-1a over the slug, then spread across the hue circle. Multiplying by
   // the golden angle keeps neighbouring hashes from landing on neighbouring
   // hues, so two custom campaigns added together still look distinct.
@@ -31,7 +36,9 @@ export function campaignTint(slug: string): string {
     h = Math.imul(h, 0x01000193) >>> 0;
   }
   const hue = Math.round(((h % 360) * 137.508) % 360);
-  return `oklch(0.42 0.06 ${hue})`;
+  const hashed = `oklch(0.42 0.06 ${hue})`;
+  if (Object.hasOwn(CAMPAIGN_NAMES, slug)) return `var(--c-${slug.replace(/_/g, '-')}, ${hashed})`;
+  return hashed;
 }
 
 export const RESULT_LABEL: Record<MatchResult, string> = { win: 'W', loss: 'L', draw: 'D' };

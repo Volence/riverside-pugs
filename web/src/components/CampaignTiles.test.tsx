@@ -17,7 +17,7 @@ describe('CampaignTiles', () => {
     expect(screen.getByText('crash_course')).toBeTruthy();
     const tiles = container.querySelectorAll('.ctile');
     expect(tiles).toHaveLength(3);
-    expect((tiles[0] as HTMLElement).style.getPropertyValue('--campaign')).toBe('var(--c-no-mercy)');
+    expect((tiles[0] as HTMLElement).style.getPropertyValue('--campaign')).toMatch(/^var\(--c-no-mercy, oklch\(/);
     expect((tiles[2] as HTMLElement).style.getPropertyValue('--campaign')).toMatch(/^oklch/);
     expect(tiles[1].classList.contains('is-active')).toBe(true);
     expect(tiles[2].classList.contains('is-muted')).toBe(true);
