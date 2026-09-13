@@ -1,10 +1,14 @@
 import { boxSpan, projectView, type MapTransform, type View } from '../../../src/mapTransform';
-import { ENTITY_KIND, STATE, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
+import { ENTITY_KIND, STATE, ZOMBIE_CLASSES, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
 import { relativeLuminance } from './colorDistance';
+import {
+  AVATAR_BASE_R, TANK_BASE_R, FOLLOW_RING_GAP, FOLLOW_RING_WIDTH, drawMedallion,
+} from './avatar';
 import { DEAD_COLOR, stateRingColor, statusGlyph } from './stateRing';
-import { healthBar, TEMP_HEALTH_COLOR } from './hud';
+import { pictogramFor } from './pictograms';
+import { healthBar, portraitFor } from './hud';
 
-export { statusGlyph, stateRingColor, DEAD_COLOR };
+export { statusGlyph, stateRingColor, DEAD_COLOR, FOLLOW_RING_WIDTH };
 
 /** Roster slots 0-3 are the survivor team for this half and 4-7 are the
  *  infected. The player record carries no team field because the slot already
@@ -38,9 +42,21 @@ const HEIGHT_SCALE = 0.2;
  *  of it. */
 const HEIGHT_SPAN = 400;
 
-export function avatarRadius(z: number, medianZ: number, base = 7): number {
+export function avatarRadius(z: number, medianZ: number, base = AVATAR_BASE_R): number {
   const d = Math.max(-1, Math.min(1, (z - medianZ) / HEIGHT_SPAN));
   return base * (1 + d * HEIGHT_SCALE);
+}
+
+/** A player tank is drawn at the AI tank's size: the biggest thing on the
+ *  field is the biggest thing on the map. `cls` 5 is the tank in
+ *  `m_zombieClass`, the same test HudStrip.maxHealthFor makes. */
+export function playerBaseRadius(p: PlayerSample): number {
+  return !isSurvivor(p) && ZOMBIE_CLASSES[p.cls] === 'tank' ? TANK_BASE_R : AVATAR_BASE_R;
+}
+
+/** The health pool a player's arc is drawn over. */
+export function maxHealthOf(p: PlayerSample): number {
+  return !isSurvivor(p) && ZOMBIE_CLASSES[p.cls] === 'tank' ? 8000 : 100;
 }
 
 /**
@@ -179,11 +195,6 @@ export function numberInk(color: string): string {
   return relativeLuminance(color) > 0.19 ? '#0b0908' : '#ffffff';
 }
 
-/** Font size for the digit inside the avatar. At the base radius of 7 the dot
- *  is 14px across and its inscribed square is 9.9px, which a 9px digit (about
- *  6.4px of cap height and 5px wide) fits inside with room to spare. */
-const SLOT_NUMBER_PX = 9;
-
 const ENTITY_STYLES: Record<number, { color: string; radius: number }> = {
   [ENTITY_KIND.COMMON]: { color: '#6b6f57', radius: 2 },
   [ENTITY_KIND.WITCH]: { color: '#e8e8e8', radius: 5 },
@@ -263,6 +274,12 @@ export interface DrawArgs {
    *  session has no roster, so this is often all blanks. */
   slots: string[];
   followSlot: number | null;
+  /** Decoded portrait images by URL (the string `portraitFor` returns). An
+   *  image not yet loaded is simply absent and the disc draws without it. */
+  portraits: Record<string, HTMLImageElement>;
+  /** Replay format version, for `portraitFor`'s "is the character byte
+   *  real" check. */
+  version: number;
 }
 
 /**
@@ -271,25 +288,16 @@ export interface DrawArgs {
  * scale anywhere they are used below: they are icons over a map that softens
  * as it scales, not scale models that should soften with it.
  */
-const HEALTH_RING_GAP = 3;
-const HEALTH_RING_WIDTH = 2;
-/** The alert ring shares the health ring's radius and is drawn under it, so a
- *  four pixel width puts two pixels of colour proud on each side of the two
- *  pixel health arc and the alert signal costs the avatar no extra footprint
- *  at all. At the base radius of 7 that is a ring spanning r + 1 to r + 5,
- *  that is 8 to 12 pixels from the centre, around a 14 pixel dot. */
-const ALERT_RING_WIDTH = 4;
-const FOLLOW_RING_GAP = 8;
-export const FOLLOW_RING_WIDTH = 2;
 /** How far the glyph's baseline sits above the avatar's top edge.
  *
- *  The outermost thing an avatar ever draws is the follow ring's dark halo
- *  pass, whose outer edge is r + FOLLOW_RING_GAP + FOLLOW_RING_WIDTH, that is
- *  r + 10. The glyph is drawn on an alphabetic baseline, so its ink grows
- *  UPWARD from the y it is given and that y is its lowest point: a gap of 11
- *  puts the bottom of the glyph one pixel clear of the halo. Both terms carry
- *  the same r, so the clearance holds at every avatar size. */
-const GLYPH_GAP = 11;
+ *  The outermost thing an avatar ever draws (short of the follow ring) is
+ *  the follow halo pass, whose outer edge is r + FOLLOW_RING_GAP + 2. The
+ *  glyph is drawn on an alphabetic baseline, so its ink grows UPWARD from the
+ *  y it is given and that y is its lowest point: a gap of FOLLOW_RING_GAP + 3
+ *  puts the bottom of the glyph clear of the halo whether or not this
+ *  particular player is being followed. Both terms carry the same r, so the
+ *  clearance holds at every avatar size. */
+const GLYPH_GAP = FOLLOW_RING_GAP + 3;
 
 /** Label chrome, all in the same screen units (CSS pixels, since wave one
  *  made the backing store follow `clientWidth * devicePixelRatio`). */
@@ -309,9 +317,10 @@ export const LABEL_PAD_X = 3;
 export const LABEL_TICK_W = 2;
 /** How far the plate's LEFT EDGE sits right of the avatar's right edge.
  *  The text starts at r + LABEL_GAP and the plate begins LABEL_PAD_X before
- *  it, so the plate's left edge is at r + LABEL_GAP - LABEL_PAD_X = r + 11,
- *  one pixel clear of the follow halo's r + 10. */
-const LABEL_GAP = 14;
+ *  it, so the plate's left edge is at r + LABEL_GAP - LABEL_PAD_X, which with
+ *  FOLLOW_RING_GAP at 10 is r + 14: clear of the follow halo at r + 12
+ *  (FOLLOW_RING_GAP + FOLLOW_RING_WIDTH). */
+const LABEL_GAP = FOLLOW_RING_GAP + LABEL_PAD_X + 4;
 
 /** A label queued for the de-confliction pass. */
 interface LabelJob {
@@ -526,162 +535,88 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     if ((pl.state & STATE.PRESENT) === 0) continue;
     const alive = (pl.state & STATE.ALIVE) !== 0;
     const p = projectView(a.transform, a.view, pl.x, pl.y);
-    const r = avatarRadius(pl.z, median);
-    const color = slotColor(pl.slot);
 
     ctx.save();
     // A ghost is an infected that has not spawned. It is drawn hollow so it
     // reads as "not really there yet". The ten second server-side delay is
     // what makes showing it safe at all; nothing here may be relaxed into
-    // showing a ghost sooner, and none of the chrome below (health ring,
-    // alert ring, status glyph, name label, slot number, follow highlight)
-    // may be given to one either: every one of those would make an unspawned
-    // infected easier to read, which is the opposite of the point. The
-    // colour it is drawn in is fixed for the same reason.
+    // showing a ghost sooner, and none of the chrome below (health arc,
+    // state ring, status glyph, name label, badge, follow highlight) may be
+    // given to one either: every one of those would make an unspawned
+    // infected easier to read, which is the opposite of the point.
     const ghost = (pl.state & STATE.GHOST) !== 0;
     ctx.globalAlpha = alive ? (ghost ? 0.35 : 1) : 0.3;
-    // Every mark a ghost makes is in one fixed colour, the outline and the
-    // facing arrow alike: see GHOST_COLOR. `color` reaches only the branch
-    // below, which a ghost never enters.
-    const ink = ghost ? GHOST_COLOR : color;
 
-    ctx.beginPath();
-    ctx.arc(p.px, p.py, r, 0, Math.PI * 2);
+    const r = avatarRadius(pl.z, median, playerBaseRadius(pl));
+    const color = slotColor(pl.slot);
+    const survivor = isSurvivor(pl);
+
     if (ghost) {
-      ctx.strokeStyle = ink;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    } else {
-      ctx.fillStyle = color;
-      ctx.fill();
+      // The whole anti-ghosting contract in one call: hollow, muted, no
+      // chrome. drawMedallion ignores every other field when `hollow` is
+      // set.
+      drawMedallion(ctx, { x: p.px, y: p.py, r, rim: GHOST_COLOR, hollow: true, alpha: 0.35 });
+      ctx.restore();
+      continue;
     }
 
-    if (alive) {
-      // Yaw is degrees with 0 along +x, and canvas y grows downward, so the
-      // sine is negated to keep the arrow pointing where the player looks.
-      const rad = (pl.yaw * Math.PI) / 180;
-      const dx = Math.cos(rad);
-      const dy = -Math.sin(rad);
-      ctx.beginPath();
-      // Starts at the avatar's EDGE, not its centre. The slot number lives
-      // inside the dot now, and an arrow drawn from the centre outward would
-      // strike straight through the digit at four yaws out of every turn.
-      ctx.moveTo(p.px + dx * r, p.py + dy * r);
-      ctx.lineTo(p.px + dx * r * 2.2, p.py + dy * r * 2.2);
-      ctx.strokeStyle = ink;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+    const faceUrl = survivor ? portraitFor(pl.cls, a.version, true) : null;
+    const face = faceUrl ? a.portraits[faceUrl] ?? null : null;
+    const pictogram = survivor ? null : pictogramFor(pl.cls);
+    const bar = alive ? healthBar(pl.health, pl.temp, maxHealthOf(pl), pl.state) : null;
+    // Survivors always carry an arc; among infected only the tank has a pool
+    // worth reading (HudStrip draws the same two cases).
+    const arc = bar && (survivor || ZOMBIE_CLASSES[pl.cls] === 'tank')
+      ? { perm: bar.perm, temp: bar.temp, color: bar.color } : null;
 
-    // The slot number, inside the dot, on top of the arrow's root. This is
-    // what actually tells two teammates apart: see `slotNumber`.
-    if (!ghost && alive) {
-      ctx.font = `bold ${SLOT_NUMBER_PX}px sans-serif`;
+    drawMedallion(ctx, {
+      x: p.px, y: p.py, r,
+      rim: alive ? color : DEAD_COLOR,
+      face,
+      pictogram,
+      badge: alive ? { text: slotNumber(pl.slot), ink: numberInk(color) } : null,
+      yaw: alive ? pl.yaw : null,
+      ring: alive ? stateRingColor(pl.state) : null,
+      arc,
+      dead: !alive,
+      alpha: alive ? 1 : 0.7,
+      follow: a.followSlot === pl.slot,
+    });
+
+    // Status glyph above the medallion: the colour-blind channel for the
+    // ring, from the same table, so the two cannot disagree.
+    const glyph = alive ? statusGlyph(pl.state) : '';
+    if (glyph) {
+      const gy = p.py - r - GLYPH_GAP;
+      ctx.font = 'bold 9px sans-serif';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = numberInk(color);
-      ctx.fillText(slotNumber(pl.slot), p.px, p.py);
+      ctx.textBaseline = 'alphabetic';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.strokeText(glyph, p.px, gy);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(glyph, p.px, gy);
     }
 
-    if (!ghost) {
-      // Health ring: a living survivor's own health as a fraction of a full
-      // circle, in the HUD panel's own colour ramp, starting at 12 o'clock
-      // and sweeping clockwise. Full health closes the ring; a sliver is the
-      // same warning a nearly-empty HUD bar gives, without looking away from
-      // the map to see it. Restricted to survivors because a tank's health
-      // is not a 0-100 scale and an infected player record has no bar to
-      // echo in the first place.
-      if (alive && isSurvivor(pl)) {
-        const ringR = r + HEALTH_RING_GAP;
-
-        // The alert ring, under the health arc and sharing its radius: a
-        // closed circle of colour wide enough to catch the eye from across
-        // the map. Drawn first so the health arc rides on top of it.
-        const alert = stateRingColor(pl.state);
-        if (alert) {
-          ctx.beginPath();
-          ctx.arc(p.px, p.py, ringR, 0, Math.PI * 2);
-          ctx.strokeStyle = alert;
-          ctx.lineWidth = ALERT_RING_WIDTH;
-          ctx.stroke();
-        }
-
-        // The same reading the panel's bar draws, from the same function, so
-        // the map and the panel cannot disagree. Permanent health first from
-        // 12 o'clock, then temporary health continuing from where it ends:
-        // the two-part treatment the panel has always used, which the ring
-        // used to leave out entirely. A survivor on 20 permanent and 70
-        // temporary drew a red sliver here and a nearly full bar down there.
-        const bar = healthBar(pl.health, pl.temp, 100, pl.state);
-        const start = -Math.PI / 2;
-        const mid = start + bar.perm * Math.PI * 2;
-        ctx.lineWidth = HEALTH_RING_WIDTH;
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, ringR, start, mid);
-        ctx.strokeStyle = bar.color;
-        ctx.stroke();
-        if (bar.temp > 0) {
-          ctx.beginPath();
-          ctx.arc(p.px, p.py, ringR, mid, mid + bar.temp * Math.PI * 2);
-          ctx.strokeStyle = TEMP_HEALTH_COLOR;
-          ctx.stroke();
-        }
-      }
-
-      // Status glyph: one marker, not a stack, drawn above the avatar with a
-      // dark outline so it reads over both bright and dark map art.
-      const glyph = statusGlyph(pl.state);
-      if (glyph) {
-        const gy = p.py - r - GLYPH_GAP;
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'alphabetic';
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-        ctx.strokeText(glyph, p.px, gy);
-        ctx.fillStyle = '#c9a45c';
-        ctx.fillText(glyph, p.px, gy);
-      }
-
-      // Name label: resolved through the roster, never the raw SteamID64.
-      // A standalone `!mix` session has no roster at all, and that is the
-      // common case on the by-filename route, so an unresolved name falls
-      // back to the slot's own short label rather than to the seventeen-digit
-      // id, which would be worse than no label, or to nothing, which is what
-      // made the Names toggle a silent no-op on that route.
-      //
-      // Queued rather than drawn. Labels cannot be laid out one avatar at a
-      // time: whether this one has to move depends on every other label on
-      // screen, so the whole set is de-conflicted in one pass after the loop.
-      // Drawing them last also puts every label above every avatar, instead
-      // of leaving the ones drawn early to be painted over.
-      if (a.show.names) {
-        const name = a.names[a.slots[pl.slot]] || slotLabel(pl.slot);
-        labels.push({
-          ax: p.px + r, ay: p.py,
-          px: p.px + r + LABEL_GAP, py: p.py,
-          text: name, color,
-        });
-      }
-
-      // Follow highlight: a wider ring outside the health ring so the
-      // followed player is findable at a glance, on either team. A plain
-      // white stroke would wash out over the map's own near-white patches,
-      // so it gets the same dark halo as the text below: a wider dark pass
-      // first, then the bright ring on top of it.
-      if (a.followSlot === pl.slot) {
-        const followR = r + FOLLOW_RING_GAP;
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, followR, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-        ctx.lineWidth = FOLLOW_RING_WIDTH + 2;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, followR, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = FOLLOW_RING_WIDTH;
-        ctx.stroke();
-      }
+    // Name label: resolved through the roster, never the raw SteamID64.
+    // A standalone `!mix` session has no roster at all, and that is the
+    // common case on the by-filename route, so an unresolved name falls
+    // back to the slot's own short label rather than to the seventeen-digit
+    // id, which would be worse than no label, or to nothing, which is what
+    // made the Names toggle a silent no-op on that route.
+    //
+    // Queued rather than drawn. Labels cannot be laid out one avatar at a
+    // time: whether this one has to move depends on every other label on
+    // screen, so the whole set is de-conflicted in one pass after the loop.
+    // Drawing them last also puts every label above every avatar, instead
+    // of leaving the ones drawn early to be painted over.
+    if (a.show.names) {
+      const name = a.names[a.slots[pl.slot]] || slotLabel(pl.slot);
+      labels.push({
+        ax: p.px + r, ay: p.py,
+        px: p.px + r + LABEL_GAP, py: p.py,
+        text: name, color: alive ? color : DEAD_COLOR,
+      });
     }
     ctx.restore();
   }

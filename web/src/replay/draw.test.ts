@@ -1,19 +1,25 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
   slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget, GHOST_COLOR,
+  playerBaseRadius,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
 import { contrastRatio, distance, relativeLuminance, type Vision } from './colorDistance';
 import { barSegments, INCAP_ARC_MAX } from './hud';
+import { AVATAR_BASE_R, ARC_GAP, STATE_RING_GAP, TANK_BASE_R, FOLLOW_RING_GAP } from './avatar';
+import { DEAD_COLOR, stateRingColor } from './stateRing';
+import { resetPictogramCache } from './pictograms';
+
+class FakePath2D { constructor(public d: string) {} }
 
 function player(over: Partial<PlayerSample> = {}): PlayerSample {
   return {
     slot: 0, x: 0, y: 0, z: 0, yaw: 0, pitch: 0,
     state: STATE.PRESENT | STATE.ALIVE,
-    health: 100, temp: 0, cls: 0, weapon: 0, clip: 0, reserve: 0,
+    health: 100, temp: 0, cls: 0, weapon: 0, clip: 0, reserve: 0, infected: undefined,
     ...over,
   };
 }
@@ -47,7 +53,13 @@ describe('medianHeight', () => {
 
 describe('avatarRadius', () => {
   it('is the base size at the team median', () => {
-    expect(avatarRadius(500, 500, 10)).toBe(10);
+    expect(avatarRadius(100, 100)).toBe(11);
+  });
+
+  it('gives a player tank the big base radius', () => {
+    expect(playerBaseRadius(player({ slot: 4, cls: 5, infected: true }))).toBe(15);
+    expect(playerBaseRadius(player({ slot: 4, cls: 3, infected: true }))).toBe(11);
+    expect(playerBaseRadius(player({ slot: 0, cls: 5, infected: false }))).toBe(11);
   });
 
   // Higher reads as closer to an overhead camera, which is what separates a
@@ -404,8 +416,11 @@ describe('drawScene', () => {
   // `drawScene` back to raw `worldToImage` would leave every helper test
   // green while the exact original bug came back. Testing `drawScene`
   // itself is what closes that gap.
+  beforeEach(() => { (globalThis as any).Path2D = FakePath2D; resetPictogramCache(); });
+  afterEach(() => { delete (globalThis as any).Path2D; resetPictogramCache(); });
+
   function stubCtx() {
-    const calls: { fn: string; args: number[]; stroke: string; fill: string; width: number }[] = [];
+    const calls: { fn: string; args: number[]; raw: unknown[]; stroke: string; fill: string; width: number }[] = [];
     const texts: { fn: string; text: string; x: number; y: number }[] = [];
     // The paint styles are recorded alongside each call, because "which
     // colour was this stroked in" is a real assertion (the ghost outline has
@@ -418,9 +433,8 @@ describe('drawScene', () => {
       calls.push({
         fn,
         args: args.filter((a) => typeof a === 'number') as number[],
-        stroke: strokeStyle,
-        fill: fillStyle,
-        width: lineWidth,
+        raw: args,
+        stroke: strokeStyle, fill: fillStyle, width: lineWidth,
       });
     };
     // fillText/strokeText carry the label or glyph string as their first
@@ -438,6 +452,8 @@ describe('drawScene', () => {
         fill: rec('fill'), arc: rec('arc'), fillRect: rec('fillRect'),
         clearRect: rec('clearRect'), drawImage: rec('drawImage'),
         fillText: recText('fillText'), strokeText: recText('strokeText'),
+        clip: rec('clip'), closePath: rec('closePath'),
+        translate: rec('translate'), scale: rec('scale'), rotate: rec('rotate'),
         // Real 2D contexts measure text; the label plates need a width. Six
         // pixels per character at a 10px font is close enough for a stub and
         // makes the expected plate width arithmetic below exact.
@@ -445,6 +461,7 @@ describe('drawScene', () => {
         set fillStyle(v: string) { fillStyle = v; }, set strokeStyle(v: string) { strokeStyle = v; },
         set lineWidth(v: number) { lineWidth = v; }, set globalAlpha(_v: number) {},
         set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
+        set filter(_v: string) {}, set lineCap(_v: string) {},
       } as unknown as CanvasRenderingContext2D,
     };
   }
@@ -478,23 +495,24 @@ describe('drawScene', () => {
       height: 400,
       names: {},
       slots: [],
+      portraits: {}, version: 3,
       followSlot: null,
     });
 
-    // The default player is a living survivor at full health, which now
-    // also draws a health ring: this is an update to the new behaviour, not
-    // a weakened assertion, since the extra arc call is the health ring
-    // itself and the first arc (the avatar) is still checked below.
+    // The default player is a living survivor at full health, which is now
+    // drawn as a medallion (rim, disc, badge, arc and more): several arc
+    // calls, not one. The first arc is the medallion's own rim, at the
+    // avatar's radius, which is what this regression test cares about.
     const arcs = calls.filter((c) => c.fn === 'arc');
-    expect(arcs).toHaveLength(2);
+    expect(arcs.length).toBeGreaterThan(0);
     const [px, py, r] = arcs[0].args;
     // (1500 - 1000) * 0.8 + 0 = 400; (700 - 500) * 0.8 + 40 = 200.
     expect(px).toBeCloseTo(400, 5);
     expect(py).toBeCloseTo(200, 5);
     // The avatar radius stays in screen units and must NOT be scaled by the
-    // same factor: at 5-8 world units per pixel a survivor is 4-6 pixels, so
-    // markers are meant to be icons, not scale models.
-    expect(r).toBeCloseTo(7, 5);
+    // same factor: at 5-8 world units per pixel a survivor is a handful of
+    // pixels, so markers are meant to be icons, not scale models.
+    expect(r).toBeCloseTo(AVATAR_BASE_R, 5);
   });
 
   it('is the identity through the auto-fit path, where the view box already matches the canvas', () => {
@@ -518,13 +536,14 @@ describe('drawScene', () => {
       height: 794,
       names: {},
       slots: [],
+      portraits: {}, version: 3,
       followSlot: null,
     });
 
-    // Same update as the test above: a living survivor now draws a second
-    // arc for its health ring.
+    // Same update as the test above: a living survivor is now a medallion,
+    // so several arc calls are made rather than one.
     const arcs = calls.filter((c) => c.fn === 'arc');
-    expect(arcs).toHaveLength(2);
+    expect(arcs.length).toBeGreaterThan(0);
     const [px, py, r] = arcs[0].args;
     // The view is the identity here (auto-fit's box is the whole canvas), so
     // the canvas coordinate equals the raw worldToImage pixel. A future
@@ -532,7 +551,7 @@ describe('drawScene', () => {
     // would move this off (640, 300).
     expect(px).toBeCloseTo(640, 5);
     expect(py).toBeCloseTo(300, 5);
-    expect(r).toBeCloseTo(7, 5);
+    expect(r).toBeCloseTo(AVATAR_BASE_R, 5);
   });
 
   // Finding 17: `fitView` widens a degenerate box to one pixel before taking
@@ -555,6 +574,7 @@ describe('drawScene', () => {
       players: [], entities: [],
       show: { ci: true, entities: true, names: false },
       width: 800, height: 400,
+      portraits: {}, version: 3,
       names: {}, slots: [], followSlot: null,
     })).not.toThrow();
 
@@ -592,14 +612,16 @@ describe('drawScene', () => {
       players: [player({ slot: 0, health: 20, temp: 70 })],
       entities: [],
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
 
-    // Avatar, the permanent arc, and the temporary arc continuing from it.
-    const arcs = calls.filter((c) => c.fn === 'arc');
-    expect(arcs).toHaveLength(3);
-    const [, , permR, permStart, permEnd] = arcs[1].args;
-    const [, , tempR, tempStart, tempEnd] = arcs[2].args;
+    // The permanent arc, and the temporary arc continuing from it, both at
+    // the medallion's arc radius.
+    const arcs = calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP);
+    expect(arcs).toHaveLength(2);
+    const [, , permR, permStart, permEnd] = arcs[0].args;
+    const [, , tempR, tempStart, tempEnd] = arcs[1].args;
 
     // Temporary picks up exactly where permanent leaves off, on the same
     // circle, so the two read as one ring rather than as two.
@@ -621,12 +643,17 @@ describe('drawScene', () => {
       players: [player({ slot: 0, health: 70, temp: 0 })],
       entities: [],
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
-    // A zero-length arc would still be an arc call, and a stray stroke with
-    // the temp colour set would show as a dot at 12 o'clock on every
-    // unbuffed survivor.
-    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(2);
+    // The perm and temp arcs are always issued at the same radius (the arc
+    // is one shape to test against), but a zero-length temp arc paints
+    // nothing: no stray stroke shows as a dot at 12 o'clock on an unbuffed
+    // survivor.
+    const arcs = calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP);
+    expect(arcs).toHaveLength(2);
+    const [, , , tempStart, tempEnd] = arcs[1].args;
+    expect(tempEnd - tempStart).toBeCloseTo(0, 10);
   });
 
   it('draws the health ring as an arc spanning health/100 of a circle for a living survivor', () => {
@@ -638,18 +665,97 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: {}, slots: [], followSlot: null,
     });
 
-    const arcs = calls.filter((c) => c.fn === 'arc');
-    expect(arcs).toHaveLength(2);
-    const [, , ringR, start, end] = arcs[1].args;
+    const arc = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP);
+    expect(arc).toBeTruthy();
+    const [, , ringR, start, end] = arc!.args;
     // 50 health is half of 100, so the ring sweeps half a circle regardless
     // of where it starts.
     expect(end - start).toBeCloseTo(Math.PI, 5);
-    // The ring sits outside the avatar, not on top of it.
-    const avatarR = arcs[0].args[2];
-    expect(ringR).toBeGreaterThan(avatarR);
+    // The ring sits outside the avatar, at the medallion's own arc gap.
+    expect(ringR).toBeCloseTo(AVATAR_BASE_R + ARC_GAP, 5);
+  });
+
+  it('draws a survivor face from the portraits map, clipped, for a format 2 file', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const img = { width: 64, height: 64 } as HTMLImageElement;
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
+      entities: [], show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
+      followSlot: null, portraits: { '/portraits/francis.png': img }, version: 2,
+    });
+    const draw = calls.find((c) => c.fn === 'drawImage');
+    expect(draw?.raw[0]).toBe(img);
+    expect(calls.some((c) => c.fn === 'clip')).toBe(true);
+  });
+
+  it('draws the silhouette, not a face, for a format 1 survivor', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const face = { width: 64, height: 64 } as HTMLImageElement;
+    const unknown = { width: 128, height: 128 } as HTMLImageElement;
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
+      entities: [], show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
+      followSlot: null, portraits: { '/portraits/francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
+    });
+    expect(calls.find((c) => c.fn === 'drawImage')?.raw[0]).toBe(unknown);
+  });
+
+  it('draws a dead survivor in the dead grey with a dagger and no arc', () => {
+    const { transform, view } = identityScene();
+    const { calls, texts, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 1, infected: false, state: STATE.PRESENT, health: 0 })],
+      entities: [], show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
+      followSlot: null, portraits: {}, version: 3,
+    });
+    expect(calls.some((c) => c.fn === 'stroke' && c.stroke === DEAD_COLOR)).toBe(true);
+    // The dagger is stroked with a dark halo and then filled, same as the
+    // status glyph, so it reads over both bright and dark map art: both
+    // passes draw the same '†'.
+    expect(texts.map((t) => t.text)).toEqual(['†', '†']);
+    expect(calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)).toHaveLength(0);
+  });
+
+  it('gives a living player tank the big radius and an arc over the 8000 pool', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 5, cls: 5, infected: true, state: STATE.PRESENT | STATE.ALIVE, health: 4000, temp: 0 })],
+      entities: [], show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
+      followSlot: null, portraits: {}, version: 3,
+    });
+    const arc = calls.find((c) => c.fn === 'arc' && c.args[2] === TANK_BASE_R + ARC_GAP);
+    expect(arc).toBeTruthy();
+    expect(arc!.args[4] - arc!.args[3]).toBeCloseTo(Math.PI);
+  });
+
+  it('colours the state ring by priority and puts the glyph above', () => {
+    const { transform, view } = identityScene();
+    const { calls, texts, ctx } = stubCtx();
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [],
+      players: [player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE | STATE.BILED | STATE.INCAP, health: 20 })],
+      entities: [], show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
+      followSlot: null, portraits: {}, version: 3,
+    });
+    const ring = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP);
+    expect(calls[calls.indexOf(ring!) + 1].stroke).toBe(stateRingColor(STATE.ALIVE | STATE.INCAP));
+    expect(texts.some((t) => t.text === 'X')).toBe(true);
   });
 
   it('keeps a ghost hollow: no health ring, glyph, label, number or follow highlight', () => {
@@ -668,10 +774,12 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: { steam1: 'Ghost Name' }, slots, followSlot: 4,
     });
 
-    // Only the ghost's own hollow outline arc, nothing else.
+    // Only the ghost's own hollow outline arc, nothing else. The facing
+    // arrow is gone: a ghost now has no wedge at all.
     expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
     expect(texts).toHaveLength(0);
     // Finding 15: this test was titled "keeps a ghost hollow" and asserted
@@ -680,11 +788,13 @@ describe('drawScene', () => {
     // background uses fillRect, so `fill` is safe to assert absent: nothing
     // in a ghost-only scene has any business filling a path.
     expect(calls.filter((c) => c.fn === 'fill')).toHaveLength(0);
-    // Every mark a ghost makes is its own hollow outline and its facing
-    // arrow, both in the one ghost colour. A ring, a highlight or a plate
-    // would show up here as a stroke or a fill in some other colour.
+    expect(calls.filter((c) => c.fn === 'clip')).toHaveLength(0);
+    expect(calls.filter((c) => c.fn === 'drawImage')).toHaveLength(0);
+    // A ghost's only mark is its own hollow outline, in the one ghost
+    // colour. A ring, a highlight or a plate would show up here as a
+    // stroke in some other colour.
     const marks = fromAvatar(calls).filter((c) => c.fn === 'stroke');
-    expect(marks).toHaveLength(2);
+    expect(marks).toHaveLength(1);
     for (const m of marks) expect(m.stroke).toBe(GHOST_COLOR);
   });
 
@@ -701,12 +811,13 @@ describe('drawScene', () => {
         })],
         entities: [],
         show: { ci: true, entities: true, names: false },
+        portraits: {}, version: 3,
         width: 1280, height: 794, names: {}, slots: [], followSlot: null,
       });
-      // The hollow outline and the facing arrow. Both used to take the
-      // slot's colour, so both have to be clamped.
+      // The hollow outline, the only mark a ghost makes. It used to take
+      // the slot's colour, so it has to be clamped.
       const strokes = fromAvatar(calls).filter((c) => c.fn === 'stroke');
-      expect(strokes).toHaveLength(2);
+      expect(strokes).toHaveLength(1);
       for (const st of strokes) {
         seen.add(st.stroke);
         expect(st.stroke).not.toBe(slotColor(slot));
@@ -740,6 +851,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: { '76561198000000001': 'Zoey' }, slots, followSlot: null,
     });
     // Finding 10: the label used to be stroked and then filled. `strokeText`
@@ -770,6 +882,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: {}, slots, followSlot: null,
     });
     expect(unknown.texts.map((t) => t.text)).toContain('S1');
@@ -777,7 +890,7 @@ describe('drawScene', () => {
     for (const t of unknown.texts) expect(t.text).not.toMatch(/\d{5}/);
   });
 
-  it('draws a slot number inside every avatar, as the channel colour cannot carry', () => {
+  it('gives each avatar a badge with its own slot number, as the channel colour cannot carry', () => {
     const { transform, view } = identityScene();
     const { texts, ctx } = stubCtx();
     drawScene(ctx, {
@@ -789,20 +902,20 @@ describe('drawScene', () => {
         player({ slot: 7, x: 800, y: -200 }),
       ],
       entities: [],
-      // Names OFF: the number is not a label, it is part of the avatar, and
+      // Names OFF: the badge is not a label, it is part of the avatar, and
       // it must be there whether or not anyone asked for names.
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
 
+    // The badge's own position (offset to the avatar's corner) is drawMedallion's
+    // contract and is covered in avatar.test.ts; this only checks drawScene
+    // wires the right per-team slot number through for each player.
     expect(texts.map((t) => t.text).sort()).toEqual(['1', '1', '4', '4']);
-    // Centred on the avatar, not offset beside it: at r = 7 a 14px dot has a
-    // 9.9px inscribed square, which a 9px digit fits inside.
-    const drawn = new Map(texts.map((t) => [t.x, t.y]));
-    for (const px of [200, 400, 600, 800]) expect(drawn.get(px)).toBe(200);
   });
 
-  it('does not number or ring a dead player, but still says who it was', () => {
+  it('does not badge or arc a dead player, but still says who it was, with a dagger', () => {
     const { transform, view } = identityScene();
     const { calls, texts, ctx } = stubCtx();
     drawScene(ctx, {
@@ -811,14 +924,15 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: { s0: 'Zoey' }, slots: ['s0', '', '', '', '', '', '', ''], followSlot: null,
     });
-    // A body is drawn at 0.3 alpha, where a nine pixel digit is illegible and
-    // would only add to the pile the label pass is there to thin out. The
-    // label stays, because who died where is worth knowing; the number and
-    // the health ring go, because neither means anything on a corpse.
-    expect(texts.map((t) => t.text)).toEqual(['Zoey']);
-    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
+    // A body is drawn at 0.7 alpha in the dead grey with a dagger glyph
+    // (stroked then filled, both '†'), and the label stays, because who died
+    // where is worth knowing. Neither a badge nor a health arc means
+    // anything on a corpse.
+    expect(texts.map((t) => t.text)).toEqual(['†', '†', 'Zoey']);
+    expect(calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)).toHaveLength(0);
   });
 
   it('draws a downed survivor a small danger arc, not the closed green ring the raw pool gave', () => {
@@ -830,12 +944,12 @@ describe('drawScene', () => {
       players: [player({ slot: 0, health: 100 })],
       entities: [],
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
-    // Healthy: avatar plus a closed health ring, and no alert ring.
-    const upArcs = up.calls.filter((c) => c.fn === 'arc');
-    expect(upArcs).toHaveLength(2);
-    expect(upArcs[1].args[4] - upArcs[1].args[3]).toBeCloseTo(Math.PI * 2, 5);
+    // Healthy: a closed arc (a full circle) at the medallion's arc radius.
+    const upArc = up.calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
+    expect(upArc.args[4] - upArc.args[3]).toBeCloseTo(Math.PI * 2, 5);
 
     const down = stubCtx();
     drawScene(down.ctx, {
@@ -845,12 +959,11 @@ describe('drawScene', () => {
       players: [player({ slot: 0, health: 300, state: STATE.PRESENT | STATE.ALIVE | STATE.INCAP })],
       entities: [],
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
-    // Avatar, the alert ring from Finding 9, then the health arc on top.
-    const downArcs = down.calls.filter((c) => c.fn === 'arc');
-    expect(downArcs).toHaveLength(3);
-    const sweep = downArcs[2].args[4] - downArcs[2].args[3];
+    const downArc = down.calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
+    const sweep = downArc.args[4] - downArc.args[3];
     expect(sweep).toBeLessThanOrEqual(INCAP_ARC_MAX * Math.PI * 2);
     // The old code drew this at a full circle. Anything close to one would
     // be the bug back.
@@ -865,22 +978,19 @@ describe('drawScene', () => {
       players: [player({ slot: 0, health: 60, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED })],
       entities: [],
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
 
-    const arcs = calls.filter((c) => c.fn === 'arc');
-    expect(arcs).toHaveLength(3);
-    const [, , alertR, aStart, aEnd] = arcs[1].args;
+    const ring = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP)!;
+    const [, , , rStart, rEnd] = ring.args;
     // A closed circle, not an arc: that is what makes it findable in
     // peripheral vision rather than needing to be read.
-    expect(aEnd - aStart).toBeCloseTo(Math.PI * 2, 5);
-    // It shares the health ring's radius and is drawn under it, so the alert
-    // signal costs the avatar no extra footprint at all.
-    expect(alertR).toBeCloseTo(arcs[2].args[2], 5);
-    expect(alertR).toBeGreaterThan(arcs[0].args[2]);
+    expect(rEnd - rStart).toBeCloseTo(Math.PI * 2, 5);
+    expect(calls[calls.indexOf(ring) + 1].stroke).toBe(stateRingColor(STATE.ALIVE | STATE.PINNED));
   });
 
-  it('does not ring a healthy player, whose ring count is unchanged', () => {
+  it('does not ring a healthy player: no state ring arc is drawn', () => {
     const { transform, view } = identityScene();
     const { calls, ctx } = stubCtx();
     drawScene(ctx, {
@@ -888,9 +998,10 @@ describe('drawScene', () => {
       players: [player({ slot: 0, state: STATE.PRESENT | STATE.ALIVE })],
       entities: [],
       show: { ci: true, entities: true, names: false },
+      portraits: {}, version: 3,
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
     });
-    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(2);
+    expect(calls.some((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP)).toBe(false);
   });
 
   it('de-conflicts four crowded survivor labels instead of piling them up', () => {
@@ -913,6 +1024,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: { s0: 'Aaa', s1: 'Bbb', s2: 'Ccc', s3: 'Ddd' }, slots, followSlot: null,
     });
 
@@ -936,6 +1048,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: { s0: 'Zoey' }, slots, followSlot: null,
     });
 
@@ -960,18 +1073,16 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: { s0: 'Zoey' }, slots, followSlot: 0,
     });
 
-    const arcs = calls.filter((c) => c.fn === 'arc');
-    const avatarR = arcs[0].args[2];
     // The follow ring is the outermost thing an avatar draws, and its dark
     // halo pass shares that radius with two extra pixels of width, so the
     // halo's outer edge is followR + FOLLOW_RING_WIDTH.
-    const followR = arcs[arcs.length - 1].args[2];
+    const followR = AVATAR_BASE_R + FOLLOW_RING_GAP;
     const outer = 640 + followR + FOLLOW_RING_WIDTH;
     const plate = calls.filter((c) => c.fn === 'fillRect')[1];
-    expect(avatarR).toBeCloseTo(7, 5);
     // The plate's left edge, not just the text's, has to clear the ring.
     expect(plate.args[0]).toBeGreaterThan(outer);
     expect(texts.some((t) => t.text === 'Zoey')).toBe(true);
@@ -986,156 +1097,16 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794,
+      portraits: {}, version: 3,
       names: {}, slots: [], followSlot: 0,
     });
 
-    const arcs = calls.filter((c) => c.fn === 'arc');
-    // avatar, health ring, and the follow ring drawn twice (a dark halo
-    // pass, then the bright ring on top of it, so it still reads over a
-    // bright patch of map art).
-    expect(arcs).toHaveLength(4);
-    const avatarR = arcs[0].args[2];
-    const healthRingR = arcs[1].args[2];
-    const followRingR = arcs[2].args[2];
-    expect(healthRingR).toBeGreaterThan(avatarR);
-    expect(followRingR).toBeGreaterThan(healthRingR);
-    // Both follow-ring passes share the same radius; only the stroke width
-    // and colour differ.
-    expect(arcs[3].args[2]).toBeCloseTo(followRingR, 5);
-  });
-});
-
-describe('chrome layout', () => {
-  // Nobody can look at this page, so the clearances between the avatar and
-  // every ring around it are MEASURED from real draw calls rather than
-  // asserted in a comment. Each ring is recovered as the radius its arc was
-  // drawn at plus or minus half the line width in force when it was stroked,
-  // which is where canvas actually puts the ink.
-  function stubCtx2() {
-    const calls: { fn: string; args: number[]; width: number }[] = [];
-    let lineWidth = 0;
-    const rec = (fn: string) => (...args: unknown[]) => {
-      calls.push({ fn, args: args.filter((a) => typeof a === 'number') as number[], width: lineWidth });
-    };
-    const noop = () => {};
-    return {
-      calls,
-      ctx: {
-        save: noop, restore: noop, beginPath: noop, moveTo: noop, lineTo: noop,
-        stroke: rec('stroke'), fill: rec('fill'), arc: rec('arc'), fillRect: noop,
-        clearRect: noop, drawImage: noop, fillText: noop, strokeText: noop,
-        measureText: (t: string) => ({ width: t.length * 6 }),
-        set fillStyle(_v: string) {}, set strokeStyle(_v: string) {},
-        set lineWidth(v: number) { lineWidth = v; }, set globalAlpha(_v: number) {},
-        set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
-      } as unknown as CanvasRenderingContext2D,
-    };
-  }
-
-  /** Every stroked ring as [inner edge, outer edge], in draw order. */
-  function rings(state: number, followSlot: number | null) {
-    const transform: MapTransform = {
-      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
-    };
-    const view = fitView({ x0: 0, y0: 0, x1: 1280, y1: 794 }, 1280, 794, 0);
-    const { calls, ctx } = stubCtx2();
-    drawScene(ctx, {
-      transform, view, backdrop: {} as HTMLImageElement, trail: [],
-      players: [player({ slot: 0, x: 640, y: -300, health: 100, state })],
-      entities: [],
-      show: { ci: true, entities: true, names: false },
-      width: 1280, height: 794, names: {}, slots: [], followSlot,
-    });
-    const out: { r: number; inner: number; outer: number }[] = [];
-    for (let i = 0; i < calls.length; i++) {
-      if (calls[i].fn !== 'arc') continue;
-      const r = calls[i].args[2];
-      // An arc followed by a fill is the avatar's own dot, not a ring around
-      // it. Only an arc that is stroked lays down a ring of ink.
-      const next = calls.slice(i + 1).find((c) => c.fn === 'stroke' || c.fn === 'fill' || c.fn === 'arc');
-      if (!next || next.fn !== 'stroke') continue;
-      out.push({ r, inner: r - next.width / 2, outer: r + next.width / 2 });
-    }
-    return out;
-  }
-
-  const UP = STATE.PRESENT | STATE.ALIVE;
-  const AVATAR_R = 7;
-
-  it('puts the health ring outside the avatar with no overlap', () => {
-    const [health] = rings(UP, null);
-    expect(health.r).toBeCloseTo(AVATAR_R + 3, 5);
-    // 10 - 2/2 = 9, against an avatar that ends at 7. Two pixels of gap.
-    expect(health.inner).toBeCloseTo(9, 5);
-    expect(health.inner - AVATAR_R).toBeGreaterThanOrEqual(1);
-  });
-
-  it('nests the alert ring, the health ring and the follow ring without a collision', () => {
-    // Pinned and followed: every ring an avatar can draw, at once.
-    const all = rings(UP | STATE.PINNED, 0);
-    // Alert (full circle, width 4), health arc (width 2) on the same radius,
-    // then the follow ring's dark halo (width 4) and its bright pass (2).
-    expect(all).toHaveLength(4);
-    const [alert, health, halo, follow] = all;
-
-    // Alert: 10 +/- 2, so 8 to 12, around an avatar that ends at 7.
-    expect(alert.inner).toBeCloseTo(8, 5);
-    expect(alert.outer).toBeCloseTo(12, 5);
-    expect(alert.inner).toBeGreaterThan(AVATAR_R);
-    // The health arc rides inside the alert ring rather than beside it, which
-    // is what makes the alert signal cost no extra footprint.
-    expect(health.r).toBeCloseTo(alert.r, 5);
-    expect(health.inner).toBeGreaterThanOrEqual(alert.inner);
-    expect(health.outer).toBeLessThanOrEqual(alert.outer);
-
-    // Follow halo: 15 +/- 2, so 13 to 17. One clear pixel past the alert
-    // ring's 12, and the bright pass sits inside the halo.
-    expect(halo.r).toBeCloseTo(AVATAR_R + 8, 5);
-    expect(halo.inner).toBeCloseTo(13, 5);
-    expect(halo.outer).toBeCloseTo(17, 5);
-    expect(halo.inner - alert.outer).toBeCloseTo(1, 5);
-    expect(follow.r).toBeCloseTo(halo.r, 5);
-    expect(follow.inner).toBeGreaterThanOrEqual(halo.inner);
-    expect(follow.outer).toBeLessThanOrEqual(halo.outer);
-  });
-
-  // The clearance has to survive the avatar growing and shrinking with
-  // height, not just hold at the base radius, so it is checked at both ends
-  // of avatarRadius's plus or minus twenty percent.
-  it('holds every clearance at the largest and smallest avatar', () => {
-    for (const base of [avatarRadius(99_999, 0), avatarRadius(-99_999, 0)]) {
-      const r = base;
-      const alertOuter = r + 3 + 2;
-      const haloInner = r + 8 - 2;
-      expect(alertOuter).toBeLessThan(haloInner);
-      // Glyph and label both clear the outermost edge, r + 10.
-      expect(r + 11).toBeGreaterThan(r + 8 + 2);
-      expect(r + 14 - LABEL_PAD_X).toBeGreaterThan(r + 8 + 2);
-    }
-  });
-
-  // Nothing here may be multiplied by the view's scale: these are icons over
-  // a map that softens as it scales, not scale models that soften with it.
-  it('keeps every ring the same size however far the view is zoomed', () => {
-    const transform: MapTransform = {
-      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 2048, height: 1271,
-    };
-    const sizes = [0.25, 1, 4].map((zoom) => {
-      const span = 1280 / zoom;
-      const view = fitView({ x0: 0, y0: 0, x1: span, y1: span / 1.61 }, 1280, 794, 0);
-      const { calls, ctx } = stubCtx2();
-      drawScene(ctx, {
-        transform, view, backdrop: null, trail: [],
-        players: [player({ slot: 0, x: 100, y: -100, state: UP | STATE.PINNED })],
-        entities: [],
-        show: { ci: true, entities: true, names: false },
-        width: 1280, height: 794, names: {}, slots: [], followSlot: 0,
-      });
-      return calls.filter((c) => c.fn === 'arc').map((c) => c.args[2]);
-    });
-    expect(sizes[0]).toEqual(sizes[1]);
-    expect(sizes[1]).toEqual(sizes[2]);
-    expect(sizes[1][0]).toBeCloseTo(AVATAR_R, 5);
+    // The follow ring is drawn twice (a dark halo pass, then the bright ring
+    // on top of it, so it still reads over a bright patch of map art), both
+    // at the same radius, outside the health arc.
+    const followArcs = calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + FOLLOW_RING_GAP);
+    expect(followArcs).toHaveLength(2);
+    expect(AVATAR_BASE_R + FOLLOW_RING_GAP).toBeGreaterThan(AVATAR_BASE_R + ARC_GAP);
   });
 });
 
