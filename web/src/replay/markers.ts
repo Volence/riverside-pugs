@@ -92,7 +92,11 @@ export function eventPosition(frames: Frame[], slots: string[], e: TimelineEvent
     const slot = slots.indexOf(id);
     if (slot < 0) continue;
     const p = players[slot];
-    if (!p || (p.state & STATE.PRESENT) === 0 || p.x === 0) continue;
+    if (!p || (p.state & STATE.PRESENT) === 0) continue;
+    // An unspawned infected's position is what the server-side delay hides,
+    // so no event may ever be placed on one: a ghost target falls through to
+    // the actor, a ghost actor resolves nothing.
+    if ((p.state & STATE.GHOST) !== 0) continue;
     return { x: p.x, y: p.y, z: p.z };
   }
   return null;
@@ -111,9 +115,13 @@ export function actorPosition(frames: Frame[], slots: string[], e: TimelineEvent
  *  read from the frame by the caller; this only answers "by whom". */
 export function pinnersAt(timeline: TimelineEntry[], tMs: number): Map<string, string> {
   const out = new Map<string, string>();
+  const seqs = new Map<string, number>();
   for (const e of timeline) {
     if (e.kind !== 'event' || e.event !== 'pinned' || e.tMs > tMs || !e.target) continue;
+    const prevSeq = seqs.get(e.target);
+    if (prevSeq !== undefined && prevSeq >= e.seq) continue;
     out.set(e.target, e.actor);
+    seqs.set(e.target, e.seq);
   }
   return out;
 }
