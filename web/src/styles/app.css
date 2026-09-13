@@ -869,7 +869,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 /* The seam between each sprocket band and the stage it frames. */
 .replay__sprocket--l { border-right: 1px solid #0b0908; }
 .replay__sprocket--r { border-left: 1px solid #0b0908; }
-.replay__stage { position: relative; width: 100%; touch-action: none; cursor: grab; }
+.replay__stage { position: relative; width: 100%; touch-action: pan-y; cursor: grab; }
 .replay__stage.is-dragging { cursor: grabbing; }
 .replay__sep { width: 1px; height: 20px; background: var(--border); margin: 0 var(--sp-1); }
 .replay__canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
@@ -992,12 +992,14 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 
 /* ---------- theater (spec 7.1) ---------- */
 
-/* The viewer takes the viewport; the page behind keeps its scroll position
-   because nothing about it moved, it only stopped scrolling. */
+/* The viewer takes the viewport and stops the page behind from scrolling;
+   the page's own scroll position is saved on entry and restored on exit by
+   useTheater, since the fixed root below takes the viewer out of flow and
+   the document shrinks under it the moment theater opens. */
 body.is-theater { overflow: hidden; }
 .replay--theater { position: fixed; inset: 0; z-index: 50; gap: 0; background: var(--bg); }
 .replay--theater .replay__frame { position: absolute; inset: 0; border: 0; background: var(--bg); }
-.replay--theater .replay__stage { width: 100%; height: 100%; }
+.replay--theater .replay__stage { width: 100%; height: 100%; touch-action: none; }
 .replay--theater .replay__vignette { box-shadow: inset 0 0 160px rgba(0, 0, 0, 0.8); }
 
 /* Hidden chrome: the toolbar fades after two seconds without pointer

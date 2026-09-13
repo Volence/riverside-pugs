@@ -177,6 +177,7 @@ export function Viewer(
 
   const canvas = (
     <div
+      key="stage"
       class={`replay__stage${camera.dragging ? ' is-dragging' : ''}`}
       ref={stageRef}
       style={theater ? undefined : stageStyle}
@@ -281,9 +282,9 @@ export function Viewer(
   return (
     <div class={rootClass} ref={rootRef}>
       <div class="replay__frame">
-        <div class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
+        <div key="l" class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
         {canvas}
-        <div class="replay__sprocket replay__sprocket--r" aria-hidden="true" />
+        <div key="r" class="replay__sprocket replay__sprocket--r" aria-hidden="true" />
       </div>
 
       {rail}

@@ -60,4 +60,21 @@ describe('useTheater', () => {
     expect(req).toHaveBeenCalledTimes(1);
     expect(h.api.theater).toBe(true);
   });
+
+  it('restores the scroll position the page had before the fixed root shrank the document', () => {
+    const h = mount();
+    window.scrollTo(0, 800);
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    act(() => h.api.enter());
+    // The fixed root just took the viewer out of flow: the document shrinks
+    // and the browser clamps scrollTop to 0, same as a real one would.
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+    act(() => h.api.exit());
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        expect(scrollTo).toHaveBeenCalledWith(0, 800);
+        resolve();
+      });
+    });
+  });
 });
