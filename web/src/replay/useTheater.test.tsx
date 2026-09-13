@@ -51,4 +51,13 @@ describe('useTheater', () => {
     act(() => { document.dispatchEvent(new Event('fullscreenchange')); });
     expect(h.api.theater).toBe(false);
   });
+
+  it('survives a synchronously throwing requestFullscreen', () => {
+    const h = mount();
+    const req = vi.fn(() => { throw new Error('security error'); });
+    (h.root as HTMLElement & { requestFullscreen: () => Promise<void> }).requestFullscreen = req;
+    act(() => { h.api.enter(); });
+    expect(req).toHaveBeenCalledTimes(1);
+    expect(h.api.theater).toBe(true);
+  });
 });

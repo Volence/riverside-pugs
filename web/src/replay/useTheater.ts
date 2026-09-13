@@ -20,19 +20,28 @@ export function useTheater(
     setTheater(true);
     const el = rootRef.current;
     if (el && typeof el.requestFullscreen === 'function') {
-      // Older engines return undefined rather than a promise; a refusal
-      // (the user denied it, or an iframe forbids it) leaves the fixed
-      // layout, which is enough.
-      const p = el.requestFullscreen() as Promise<void> | undefined;
-      p?.catch?.(() => {});
+      // Older engines may throw or return undefined rather than a promise;
+      // a refusal (the user denied it, or an iframe forbids it) leaves the
+      // fixed layout, which is enough.
+      try {
+        const p = el.requestFullscreen() as Promise<void> | undefined;
+        p?.catch?.(() => {});
+      } catch {
+        /* ignore */
+      }
     }
   }, [rootRef]);
 
   const exit = useCallback(() => {
     setTheater(false);
     if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
-      const p = document.exitFullscreen() as Promise<void> | undefined;
-      p?.catch?.(() => {});
+      // Older engines may throw or return undefined rather than a promise.
+      try {
+        const p = document.exitFullscreen() as Promise<void> | undefined;
+        p?.catch?.(() => {});
+      } catch {
+        /* ignore */
+      }
     }
   }, []);
 
