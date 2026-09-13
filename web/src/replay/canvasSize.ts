@@ -51,6 +51,31 @@ export function canvasSize(
   };
 }
 
+/** Backing-store pixels a theater canvas may spend. The page budget is a
+ *  1280x794 canvas; a viewport-filling canvas at that budget would be drawn
+ *  at about 0.7 backing pixels per CSS pixel on a 1080p screen and look soft
+ *  exactly when the map is largest. 1440p is the biggest common desktop. */
+export const THEATER_PIXEL_BUDGET = 2560 * 1440;
+
+/**
+ * The canvas size for what was measured.
+ *
+ * Not filling: the width and the map's aspect, as ever. Filling (theater):
+ * the element's own width and height set the shape, because the stage is
+ * the viewport there and the fit letterboxes the map inside it. A fill with
+ * no height measured yet falls back to the map shape rather than dividing
+ * by zero.
+ */
+export function resolveSize(
+  width: number, height: number, aspect: number, dpr: number, fill: boolean,
+): CanvasSize {
+  const w = width > 0 ? width : canvasForAspect(aspect).width;
+  if (fill && width > 0 && height > 0) {
+    return canvasSize(w, width / height, dpr, THEATER_PIXEL_BUDGET);
+  }
+  return canvasSize(w, aspect, dpr);
+}
+
 function pixelRatio(): number {
   return typeof devicePixelRatio === 'number' && devicePixelRatio > 0
     ? devicePixelRatio
@@ -73,19 +98,20 @@ function pixelRatio(): number {
  * which a window listener would miss entirely.
  */
 export function useCanvasSize(
-  aspect: number,
+  aspect: number, fill = false,
 ): { size: CanvasSize; ref: (el: HTMLElement | null) => void } {
   const [el, setEl] = useState<HTMLElement | null>(null);
-  const [width, setWidth] = useState(0);
+  const [box, setBox] = useState({ w: 0, h: 0 });
 
   useEffect(() => {
     if (!el) return;
     const read = () => {
       const w = el.clientWidth;
+      const h = el.clientHeight;
       // A zero width is a hidden element or an environment with no layout at
       // all, not a real measurement. Keeping the last good one leaves the
       // budget-sized fallback below in place rather than collapsing to 1px.
-      if (w > 0) setWidth(w);
+      if (w > 0) setBox((b) => (b.w === w && b.h === h ? b : { w, h }));
     };
     read();
     if (typeof ResizeObserver === 'undefined') return;
@@ -94,12 +120,8 @@ export function useCanvasSize(
     return () => ro.disconnect();
   }, [el]);
 
-  // Before the first measurement, the budget canvas for this shape is the
-  // honest stand-in: it is exactly what the element takes on a page wide
-  // enough to give it one.
-  const fallback = canvasForAspect(aspect).width;
   return {
-    size: canvasSize(width > 0 ? width : fallback, aspect, pixelRatio()),
+    size: resolveSize(box.w, box.h, aspect, pixelRatio(), fill),
     // `setEl` is stable across renders, so preact does not detach and
     // reattach the observer on every frame of playback.
     ref: setEl,

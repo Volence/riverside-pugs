@@ -48,3 +48,27 @@ describe('useCanvasSize', () => {
     expect(last.pixelW).toBe(Math.round(640 * last.ratio));
   });
 });
+
+function FillProbe({ sizes }: { sizes: CanvasSize[] }) {
+  const { size, ref } = useCanvasSize(ASPECT, true);
+  sizes.push(size);
+  const attach = (el: HTMLElement | null) => {
+    if (el) {
+      Object.defineProperty(el, 'clientWidth', { value: 1600, configurable: true });
+      Object.defineProperty(el, 'clientHeight', { value: 900, configurable: true });
+    }
+    ref(el);
+  };
+  return <div ref={attach} />;
+}
+
+describe('useCanvasSize in fill mode', () => {
+  it('takes the element shape rather than the map shape', async () => {
+    const sizes: CanvasSize[] = [];
+    render(<FillProbe sizes={sizes} />);
+    await waitFor(() => {
+      expect(sizes[sizes.length - 1].cssW).toBe(1600);
+    });
+    expect(sizes[sizes.length - 1].cssH).toBe(900);
+  });
+});

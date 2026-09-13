@@ -1,6 +1,10 @@
 import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
-import type { TimelineEntry } from './timeline';
+import { tickEntries } from './bookmarks';
+import { entryText, type TimelineEntry } from './timeline';
+import {
+  FREE, TEAM, ZOOM_LEVELS, followSlotOf, type Follow,
+} from './camera';
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
  *  the frames carry; nobody wants to read that. Exported because the
@@ -16,8 +20,10 @@ export interface ReplayControlsProps {
   playback: ReturnType<typeof usePlayback>;
   endMs: number;
   live: boolean;
-  followSlot: number | null;
-  setFollowSlot: (slot: number | null) => void;
+  follow: Follow;
+  setFollow: (f: Follow) => void;
+  zoom: number;
+  setZoom: (z: number) => void;
   slots: string[];
   names: Record<string, string>;
   timeline?: TimelineEntry[];
@@ -28,9 +34,17 @@ export interface ReplayControlsProps {
  *  one of the callback props. */
 export function ReplayControls(
   {
-    playback, endMs, live, followSlot, setFollowSlot, slots, names, timeline,
+    playback, endMs, live, follow, setFollow, zoom, setZoom, slots, names, timeline,
   }: ReplayControlsProps,
 ) {
+  const nameOf = (id: string) => names[id] ?? id;
+  // The follow row is the bookmark selector (spec 7.2). An unrostered slot is
+  // '' in the header and selects nothing rather than everything.
+  const followSlot = followSlotOf(follow);
+  const selected = followSlot === null ? null : (slots[followSlot] ?? '');
+  const ticks = timeline ? tickEntries(timeline, selected) : [];
+  const pct = (t: number) => `${Math.min(100, Math.max(0, (t / endMs) * 100))}%`;
+
   return (
     <>
       <div class="replay__controls">
@@ -54,12 +68,15 @@ export function ReplayControls(
             style={{ width: `${endMs > 0 ? Math.min(100, (playback.tMs / endMs) * 100) : 0}%` }}
           />
           {timeline && endMs > 0 && (
-            <div class="scrub__ticks" aria-hidden="true">
-              {timeline.map((e) => (
-                <span
+            <div class="scrub__ticks">
+              {ticks.map(({ entry: e, role }) => (
+                <button
                   key={e.seq}
-                  class={`scrub__tick scrub__tick--${e.kind}`}
-                  style={{ left: `${Math.min(100, Math.max(0, (e.tMs / endMs) * 100))}%` }}
+                  type="button"
+                  class={`scrub__tick scrub__tick--${role ?? e.kind}`}
+                  style={{ left: pct(e.tMs) }}
+                  aria-label={`${formatTime(e.tMs)} ${nameOf(e.actor)} ${entryText(e, nameOf)}`}
+                  onClick={() => playback.seek(e.tMs)}
                 />
               ))}
             </div>
@@ -79,13 +96,30 @@ export function ReplayControls(
             onClick={playback.follow}
           >Live</button>
         )}
+        <span class="replay__sep" aria-hidden="true" />
+        {/* Spec 7.1: fit, 2x, 4x, 6x. Wheel zoom lands between chips, and
+            then none is lit, which is honest. */}
+        {ZOOM_LEVELS.map((z) => (
+          <button
+            key={z}
+            class={`chip ${Math.abs(zoom - z) < 0.01 ? 'is-on' : ''}`}
+            onClick={() => setZoom(z)}
+            aria-label={z === 1 ? 'Zoom to fit' : `Zoom ${z}x`}
+          >{z === 1 ? 'Fit' : `${z}x`}</button>
+        ))}
       </div>
 
       <div class="replay__toolbar">
         <button
-          class={`chip ${followSlot === null ? 'is-on' : ''}`}
-          onClick={() => setFollowSlot(null)}
+          class={`chip ${follow.kind === 'free' ? 'is-on' : ''}`}
+          onClick={() => setFollow(FREE)}
         >Free</button>
+        {/* The survivor centroid (spec 7.1). Following the team rather than
+            one player is what theater defaults to; here it is one chip. */}
+        <button
+          class={`chip ${follow.kind === 'team' ? 'is-on' : ''}`}
+          onClick={() => setFollow(TEAM)}
+        >Survivors</button>
         {/* One button per slot, in the slot's own colour. This is the only
             legend the map's eight colours have: without it nothing on the
             page ties a colour to a person, and a viewer has to guess which
@@ -105,7 +139,7 @@ export function ReplayControls(
             key={i}
             class={`chip chip--slot ${followSlot === i ? 'is-on' : ''}`}
             style={{ color: slotColor(i) }}
-            onClick={() => setFollowSlot(i)}
+            onClick={() => setFollow({ kind: 'slot', slot: i })}
           >
             <span class="replay__swatch" />
             <span class="replay__slot-name">{names[id] ?? slotLabel(i)}</span>
