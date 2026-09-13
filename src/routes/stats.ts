@@ -4,6 +4,11 @@ import { createReadStream } from 'node:fs';
 import { makeOptionalViewer } from './guards.js';
 import { resolveDemoPath } from '../demos.js';
 import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
+
+/** Every event a finished match can have. A four map night records around a
+ *  thousand; the bound exists so a runaway feed cannot become a multi-megabyte
+ *  page, not to window anything a real match produces. */
+const MATCH_EVENT_LIMIT = 20_000;
 import { playerMapBreakdown, mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
@@ -278,8 +283,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
 
     const nameOf = (sid: string) =>
       (players.find((p) => p.steamid === sid)?.name) ?? sid;
-    const events = eventsFor(db, id).map((e) => ({
-      seq: e.seq, kind: e.kind, mapOrdinal: e.mapOrdinal, value: e.value,
+    // The WHOLE feed, with its timing. This used to take eventsFor's default,
+    // which is the live page's 40-newest window, and dropped half and tMs on
+    // the way out. A completed match is a record, not a ticker: the clear
+    // latency table then saw two minutes of finale and did undefined minus
+    // undefined for every pair (NaN averages, three players, 2026-09-13).
+    const events = eventsFor(db, id, MATCH_EVENT_LIMIT).map((e) => ({
+      seq: e.seq, kind: e.kind, mapOrdinal: e.mapOrdinal, half: e.half, tMs: e.tMs, value: e.value,
       actor: { steamid: e.actor, name: nameOf(e.actor) },
       target: e.target ? { steamid: e.target, name: nameOf(e.target) } : null,
     }));

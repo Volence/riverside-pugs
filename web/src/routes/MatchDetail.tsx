@@ -44,14 +44,29 @@ function MapReplay(
   );
 }
 
-/** Why the round section has nothing to show, or null when it does.
+/** Which team held which side in each half of one map, as one line under
+ *  that map's stats, or null when nothing reliable is known.
  *
- *  An empty array means round capture did not exist when this match was
- *  played. That is not the same as a match with no rounds, and it must not
- *  render as an empty table. */
-export function roundsMessage(rounds: MatchDetailData['rounds']): string | null {
-  if (rounds.length === 0) return 'Round data was not captured for this match.';
-  return null;
+ *  This is the one fact the per-half round tables carried that the per-map
+ *  table does not. The tables themselves went on 2026-09-13: skill stats are
+ *  captured per match, so every per-round cell but the five core counters
+ *  read n/a, and the page grew four panels of grey for one line of news. */
+export function sideNote(rounds: MatchDetailData['rounds'], ordinal: number): string | null {
+  const parts = rounds
+    .filter((r) => r.ordinal === ordinal && r.reliable)
+    .sort((a, b) => a.half - b.half)
+    .map((r) => `Half ${r.half}: Team ${r.survTeam.toUpperCase()} survivors`);
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
+/** The map the page opens on: the one named in the URL hash (#map-2 is the
+ *  second map) when it exists, else the first. A link to a specific map's
+ *  replay is the whole reason the choice lives in the hash. */
+export function initialOrdinal(maps: { ordinal: number }[], hash: string): number | null {
+  if (maps.length === 0) return null;
+  const m = /^#map-(\d+)$/.exec(hash);
+  const wanted = m ? Number(m[1]) - 1 : NaN;
+  return maps.some((mp) => mp.ordinal === wanted) ? wanted : maps[0].ordinal;
 }
 
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
@@ -170,16 +185,18 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     ...r, name: players.find((p) => p.steamid === r.steamid)?.name ?? r.name,
   }));
 
-  const roundsMsg = roundsMessage(rounds);
-  const roundOrdinals = Array.from(new Set(rounds.map((r) => r.ordinal))).sort((a, b) => a - b);
-  const roundsForMap = (ordinal: number) =>
-    rounds.filter((r) => r.ordinal === ordinal).sort((a, b) => a.half - b.half);
-  const roundRows = (round: MatchDetailData['rounds'][number], team: 'a' | 'b'): StatRow[] =>
-    players.filter((p) => p.team === team).map((p) => ({
-      steamid: p.steamid,
-      name: p.name,
-      stats: deriveLiveStats(round.byPlayer?.[p.steamid] ?? {}),
-    }));
+  // One viewer, one map at a time. Four canvases each decoding a replay and
+  // running an animation loop was the heaviest thing on the page, and nobody
+  // watches four maps at once. The choice is in the URL hash so a link can
+  // open on map 3.
+  const [ordinal, setOrdinal] = useState<number | null>(
+    () => initialOrdinal(maps, typeof location === 'undefined' ? '' : location.hash),
+  );
+  const selectMap = (o: number) => {
+    setOrdinal(o);
+    if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}`);
+  };
+  const current = maps.find((mp) => mp.ordinal === ordinal) ?? maps[0];
 
   return (
     <div class="page page--match">
@@ -240,10 +257,28 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
           </Panel>
         )}
 
-        {maps.map((mp) => {
+        {current && (() => {
+          const mp = current;
           const demo = data.demos?.find((d) => d.ordinal === mp.ordinal);
+          const note = sideNote(rounds, mp.ordinal);
           return (
-            <Panel key={mp.ordinal}>
+            <Panel>
+              {maps.length > 1 && (
+                <div class="replay__rounds match__maps" role="tablist" aria-label="Map">
+                  {maps.map((m) => (
+                    <button
+                      key={m.ordinal}
+                      class={`chip ${m.ordinal === mp.ordinal ? 'is-on' : ''}`}
+                      role="tab"
+                      aria-selected={m.ordinal === mp.ordinal}
+                      onClick={() => selectMap(m.ordinal)}
+                    >
+                      Map {m.ordinal + 1}
+                      <span class="muted num"> {m.teamAScore} - {m.teamBScore}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <h3>
                 Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mp.map}</a>
                 <span class="muted"> · {mp.teamAScore} - {mp.teamBScore}</span>
@@ -251,7 +286,9 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                   demo {fmtBytes(demo.bytes)}
                 </a></>}
               </h3>
-              <MapReplay matchId={match.id} ordinal={mp.ordinal} names={playerNames} />
+              {/* Keyed by map so the round switch inside resets to round 1
+                  when the map changes, instead of carrying round 2 across. */}
+              <MapReplay key={mp.ordinal} matchId={match.id} ordinal={mp.ordinal} names={playerNames} />
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (
                   <StatTable
@@ -260,65 +297,13 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                   />
                   )
                 : <p class="muted">Per-map stats were not captured for this match.</p>}
+              {note && <p class="muted match__sides">{note}</p>}
             </Panel>
           );
-        })}
+        })()}
 
         {!hasMapStats && maps.length === 0 && (
           <Panel><Empty>No maps recorded.</Empty></Panel>
-        )}
-
-        {roundsMsg ? (
-          <Panel>
-            <h3>Rounds</h3>
-            <Empty>{roundsMsg}</Empty>
-          </Panel>
-        ) : (
-          roundOrdinals.map((ordinal) => {
-            const mp = maps.find((m) => m.ordinal === ordinal);
-            return (
-              <Panel key={`rounds-${ordinal}`}>
-                <h3>Map {ordinal + 1}{mp && <> · {mp.map}</>} rounds</h3>
-                <div class="stack">
-                  {roundsForMap(ordinal).map((round) => {
-                    const infTeam: Team = round.survTeam === 'a' ? 'b' : 'a';
-                    return (
-                      <div key={round.half}>
-                        <h4>
-                          {round.reliable
-                            ? <>Half {round.half} · Team {round.survTeam.toUpperCase()} survivors,
-                              {' '}Team {infTeam.toUpperCase()} infected</>
-                            : <>Half {round.half}, attribution unreliable</>}
-                          {' · '}
-                          {round.endedAt !== null
-                            ? (
-                              <span class="num">
-                                {/* The score is always the survivor team's score. When the
-                                    round is reliable, the heading above already names that
-                                    team, so the bare number reads unambiguously. When it is
-                                    not, the number needs its own label: which team survived
-                                    is exactly the fact just declared untrustworthy, so a bare
-                                    score would default to reading as Team A's. */}
-                                {round.reliable ? '' : 'survivor score '}{round.score}
-                              </span>
-                              )
-                            : <span class="muted">n/a</span>}
-                        </h4>
-                        {round.reliable ? (
-                          <StatTable
-                            teamA={roundRows(round, 'a')} teamB={roundRows(round, 'b')}
-                            cols={cols} statDefs={statDefs} groupStarts={statGroupStarts}
-                          />
-                        ) : (
-                          <p class="muted">Attribution for this round is unreliable and is not shown.</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </Panel>
-            );
-          })
         )}
 
         {data.events && data.events.length > 0 && (

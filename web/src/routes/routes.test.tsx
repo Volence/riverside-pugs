@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import { StatTable, EventFeed } from '../components/StatTable';
 import type { StatDef } from '../api';
 import { statGroupStarts } from '../format';
-import { roundsMessage } from './MatchDetail';
+import { initialOrdinal, sideNote } from './MatchDetail';
 import type { MatchDetail } from '../api';
 
 /* Deliberately shallow. These assert that each route reaches its loaded state
@@ -152,145 +152,51 @@ describe('MatchDetail', () => {
     await waitFor(() => expect(screen.getByText(/match not found/i)).toBeTruthy());
   });
 
-  it('says round data was not captured when rounds is an empty array', async () => {
-    // Empty is not the same as "this match had no rounds" (Task 6 brief): it
-    // means round capture did not exist yet, and must not render as a table.
+  it('shows one map at a time, with a chip row to pick another', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
-      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+      maps: [
+        { ordinal: 0, map: 'l4d_vs_farm01_hilltop', teamAScore: 54, teamBScore: 51, stats: { '1': { ck: 2 } } },
+        { ordinal: 1, map: 'l4d_vs_farm02_traintunnel', teamAScore: 300, teamBScore: 20, stats: { '1': { ck: 9 } } },
+      ],
       players: [
         { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
       ],
       demos: [], events: [], rounds: [],
     });
     render(<MatchDetail id="7" me="1" />);
-    await waitFor(() => expect(
-      screen.getByText('Round data was not captured for this match.'),
-    ).toBeTruthy());
+    const heading = (re: RegExp) => (_t: string, el: Element | null) =>
+      el?.tagName === 'H3' && re.test(el.textContent ?? '');
+    await waitFor(() => expect(screen.getByText(heading(/Map 1 · l4d_vs_farm01_hilltop/))).toBeTruthy());
+    // One viewer, not one per map: a single round switch on the page.
+    expect(screen.getAllByText('Round 1')).toHaveLength(1);
+    expect(screen.queryByText(heading(/Map 2 · l4d_vs_farm02_traintunnel/))).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: /Map 2/ }));
+    await waitFor(() => expect(screen.getByText(heading(/Map 2 · l4d_vs_farm02_traintunnel/))).toBeTruthy());
+    expect(screen.queryByText(heading(/Map 1 · l4d_vs_farm01_hilltop/))).toBeNull();
+    expect(location.hash).toBe('#map-2');
   });
 
-  it('renders a reliable round with a per-half score and stat table', async () => {
+  it('names which team held which side under the map instead of per-half tables', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
       maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
       players: [
         { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
-        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
       ],
       demos: [], events: [],
-      rounds: [{
-        ordinal: 0, half: 1, survTeam: 'a', score: 300,
-        endedAt: '2026-09-06 04:00', reliable: true,
-        byPlayer: { '1': { ck: 5, sidmg: 0 }, '2': { sidmg: 40 } },
-      }],
+      rounds: [
+        { ordinal: 0, half: 2, survTeam: 'b', score: 250, endedAt: null, reliable: true, byPlayer: {} },
+        { ordinal: 0, half: 1, survTeam: 'a', score: 300, endedAt: '2026-09-06 04:00', reliable: true, byPlayer: {} },
+      ],
     });
     const { container } = render(<MatchDetail id="7" me="1" />);
     await waitFor(() => expect(
-      screen.getByText((_t, el) => el?.tagName === 'H4'
-        && /Half 1/.test(el.textContent ?? '') && /300/.test(el.textContent ?? '')),
+      screen.getByText('Half 1: Team A survivors · Half 2: Team B survivors'),
     ).toBeTruthy());
-    // The round's own table renders both teams' players, in addition to the
-    // match totals table (the per-map table is absent here since this match
-    // has no per-map stats captured, per the mocked map's empty `stats`).
-    expect(container.querySelectorAll('table').length).toBe(2);
-    // alice's commons this round (5) differ from her match-total commons (2).
-    // Asserting the round-specific value is present, scoped to the round's own
-    // table, pins it to its own data source: fed the match totals instead,
-    // this would fail.
-    const roundTable = container.querySelectorAll('table')[1] as HTMLElement;
-    expect(within(roundTable).getByText('5')).toBeTruthy();
-  });
-
-  it('shows an unreliable round as unavailable rather than guessing its attribution', async () => {
-    mockApi.match.mockResolvedValue({
-      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
-      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
-      players: [
-        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
-        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
-      ],
-      demos: [], events: [],
-      rounds: [{
-        ordinal: 0, half: 1, survTeam: 'a', score: 300,
-        endedAt: '2026-09-06 04:00', reliable: false, byPlayer: {},
-      }],
-    });
-    const { container } = render(<MatchDetail id="7" me="1" />);
-    await waitFor(() => expect(
-      screen.getByText('Attribution for this round is unreliable and is not shown.'),
-    ).toBeTruthy());
-    // No stat table for the unreliable round, and no per-map table either
-    // (this match has no per-map stats captured): just the match totals.
+    // Only the match totals table: no per-map stats here, and no round tables any more.
     expect(container.querySelectorAll('table').length).toBe(1);
-  });
-
-  it('does not assert a team-to-side mapping in the heading when attribution is unreliable', async () => {
-    // The heading must not contradict the note below it. If the mapping is
-    // unreliable, the heading cannot claim "Team A survivors, Team B
-    // infected" as fact; a reliable round keeps making that claim.
-    mockApi.match.mockResolvedValue({
-      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
-      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
-      players: [
-        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
-        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
-      ],
-      demos: [], events: [],
-      rounds: [{
-        ordinal: 0, half: 1, survTeam: 'a', score: 300,
-        endedAt: '2026-09-06 04:00', reliable: false, byPlayer: {},
-      }],
-    });
-    render(<MatchDetail id="7" me="1" />);
-    const heading = await screen.findByText((_t, el) => el?.tagName === 'H4'
-      && /Half 1/.test(el.textContent ?? ''));
-    expect(heading.textContent ?? '').not.toMatch(/survivors/);
-    expect(heading.textContent ?? '').not.toMatch(/infected/);
-  });
-
-  it('keeps naming which team held which side in the heading when the round is reliable', async () => {
-    mockApi.match.mockResolvedValue({
-      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
-      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
-      players: [
-        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
-        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
-      ],
-      demos: [], events: [],
-      rounds: [{
-        ordinal: 0, half: 1, survTeam: 'a', score: 300,
-        endedAt: '2026-09-06 04:00', reliable: true,
-        byPlayer: { '1': { ck: 5, sidmg: 0 }, '2': { sidmg: 40 } },
-      }],
-    });
-    render(<MatchDetail id="7" me="1" />);
-    const heading = await screen.findByText((_t, el) => el?.tagName === 'H4'
-      && /Half 1/.test(el.textContent ?? ''));
-    expect(heading.textContent ?? '').toMatch(/Team A survivors/);
-    expect(heading.textContent ?? '').toMatch(/Team B infected/);
-  });
-
-  it('shows a round score as unavailable, not the stored 0, when the end message never arrived', async () => {
-    mockApi.match.mockResolvedValue({
-      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
-      maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
-      players: [
-        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
-        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
-      ],
-      demos: [], events: [],
-      rounds: [{
-        // The score column defaults to 0 in the database when the end-of-round
-        // message never arrived; endedAt null is the only reliable signal.
-        ordinal: 0, half: 1, survTeam: 'a', score: 0,
-        endedAt: null, reliable: true, byPlayer: {},
-      }],
-    });
-    render(<MatchDetail id="7" me="1" />);
-    const heading = await screen.findByText((_t, el) => el?.tagName === 'H4'
-      && /Half 1/.test(el.textContent ?? ''));
-    expect(within(heading as HTMLElement).getByText('n/a')).toBeTruthy();
-    expect(within(heading as HTMLElement).queryByText('0')).toBeNull();
+    expect(screen.queryByText(/Round data was not captured/)).toBeNull();
   });
 
   it('still renders its stats when the replay endpoints 404, a map with no replay row', async () => {
@@ -321,28 +227,6 @@ describe('MatchDetail', () => {
   });
 });
 
-const round = (over: Partial<MatchDetail['rounds'][number]> = {}) => ({
-  ordinal: 0, half: 1, survTeam: 'a' as const, score: 300,
-  endedAt: '2026-09-11 12:00', reliable: true, byPlayer: {}, ...over,
-});
-
-describe('roundsMessage', () => {
-  it('explains that an empty array means rounds were never captured', () => {
-    // Empty means "this match predates round capture", which is NOT the same
-    // as "this match had no rounds". It must never render as an empty table.
-    expect(roundsMessage([])).toBe('Round data was not captured for this match.');
-  });
-
-  it('returns null when there is something to show', () => {
-    expect(roundsMessage([round()])).toBeNull();
-  });
-
-  it('still returns null when the only round is unreliable', () => {
-    // The section renders; the unreliable round inside it is what gets
-    // suppressed, with its own note. Handled per round, not for the section.
-    expect(roundsMessage([round({ reliable: false })])).toBeNull();
-  });
-});
 
 describe('Profile', () => {
   const profile = {
@@ -848,5 +732,39 @@ describe('clear latency surfaces', () => {
     const panel = screen.getByText('Clear latency').closest('.panel') as HTMLElement;
     expect(within(panel).getByText('0.9s')).toBeTruthy();
     expect(within(panel).getByText('alice')).toBeTruthy();
+  });
+});
+
+describe('sideNote', () => {
+  const round = (over: Partial<MatchDetail['rounds'][number]> = {}) => ({
+    ordinal: 0, half: 1, survTeam: 'a' as const, score: 300,
+    endedAt: '2026-09-11 12:00', reliable: true, byPlayer: {}, ...over,
+  });
+
+  it('is null with no rounds, and null when the only round is unreliable', () => {
+    expect(sideNote([], 0)).toBeNull();
+    expect(sideNote([round({ reliable: false })], 0)).toBeNull();
+  });
+
+  it('lists the halves in order for the asked map only', () => {
+    expect(sideNote([
+      round({ ordinal: 1, half: 1, survTeam: 'b' }),
+      round({ half: 2, survTeam: 'b' }),
+      round({ half: 1, survTeam: 'a' }),
+    ], 0)).toBe('Half 1: Team A survivors · Half 2: Team B survivors');
+  });
+});
+
+describe('initialOrdinal', () => {
+  const maps = [{ ordinal: 0 }, { ordinal: 1 }, { ordinal: 3 }];
+  it('opens on the first map without a hash, and on the hashed map when it exists', () => {
+    expect(initialOrdinal(maps, '')).toBe(0);
+    expect(initialOrdinal(maps, '#map-2')).toBe(1);
+    expect(initialOrdinal(maps, '#map-4')).toBe(3);
+  });
+  it('falls back to the first map for a hash that names no map, and null with no maps', () => {
+    expect(initialOrdinal(maps, '#map-3')).toBe(0);
+    expect(initialOrdinal(maps, '#other')).toBe(0);
+    expect(initialOrdinal([], '#map-1')).toBeNull();
   });
 });

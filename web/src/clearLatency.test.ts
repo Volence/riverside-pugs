@@ -42,6 +42,15 @@ describe('clearLatencies', () => {
       .toEqual([]);
   });
 
+  it('treats a missing tMs or half as untimed rather than computing NaN', () => {
+    // An older server omitted both fields from the match payload; the guard
+    // must drop the pair, never average undefined minus undefined.
+    const untimed = [ev(1, 'pinned', 'si', 'surv', 1000), ev(2, 'cleared', 'mal', 'surv', 1910)]
+      .map((e) => { const { tMs: _t, half: _h, ...rest } = e; return rest as unknown as LiveEvent; });
+    expect(clearLatencies(untimed)).toEqual([]);
+    expect(clearLatencyByPlayer(untimed)).toEqual([]);
+  });
+
   it('never pairs across a map or a half boundary', () => {
     expect(clearLatencies([
       ev(1, 'pinned', 'si', 'surv', 1000),
