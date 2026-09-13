@@ -147,6 +147,7 @@ function mountViewer(frames: Frame[]) {
         slots={SLOTS}
         portraits={PORTRAITS}
         version={1}
+        witchStartled={false}
       />
     );
   }

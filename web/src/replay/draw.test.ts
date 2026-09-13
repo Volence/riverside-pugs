@@ -6,11 +6,12 @@ import {
   playerBaseRadius,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
-import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
+import { fitView, projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import { contrastRatio, distance, relativeLuminance, type Vision } from './colorDistance';
 import { barSegments, INCAP_ARC_MAX } from './hud';
 import {
   AVATAR_BASE_R, ARC_GAP, STATE_RING_GAP, STATE_RING_W, TANK_BASE_R, FOLLOW_RING_GAP,
+  ENTITY_MEDAL_R,
 } from './avatar';
 import { DEAD_COLOR, stateRingColor } from './stateRing';
 import { resetPictogramCache } from './pictograms';
@@ -451,7 +452,7 @@ describe('drawScene', () => {
       ctx: {
         save: rec('save'), restore: rec('restore'), beginPath: rec('beginPath'),
         moveTo: rec('moveTo'), lineTo: rec('lineTo'), stroke: rec('stroke'),
-        fill: rec('fill'), arc: rec('arc'), fillRect: rec('fillRect'),
+        fill: rec('fill'), arc: rec('arc'), ellipse: rec('ellipse'), fillRect: rec('fillRect'),
         clearRect: rec('clearRect'), drawImage: rec('drawImage'),
         fillText: recText('fillText'), strokeText: recText('strokeText'),
         clip: rec('clip'), closePath: rec('closePath'),
@@ -498,7 +499,7 @@ describe('drawScene', () => {
       names: {},
       slots: [],
       portraits: {}, version: 3,
-      followSlot: null,
+      followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     // The default player is a living survivor at full health, which is now
@@ -539,7 +540,7 @@ describe('drawScene', () => {
       names: {},
       slots: [],
       portraits: {}, version: 3,
-      followSlot: null,
+      followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     // Same update as the test above: a living survivor is now a medallion,
@@ -586,7 +587,7 @@ describe('drawScene', () => {
         names: {},
         slots: [],
         portraits: {}, version: 3,
-        followSlot: null,
+        followSlot: null, entitiesPrev: [], witchStartled: false,
       });
 
       const arcs = calls.filter((c) => c.fn === 'arc');
@@ -622,7 +623,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: false },
       width: 800, height: 400,
       portraits: {}, version: 3,
-      names: {}, slots: [], followSlot: null,
+      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     })).not.toThrow();
 
     const img = calls.find((c) => c.fn === 'drawImage')!;
@@ -660,7 +661,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     // The permanent arc, and the temporary arc continuing from it, both at
@@ -691,7 +692,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     // The perm and temp arcs are always issued at the same radius (the arc
     // is one shape to test against), but a zero-length temp arc paints
@@ -713,7 +714,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: {}, slots: [], followSlot: null,
+      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     const arc = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP);
@@ -735,7 +736,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, portraits: { '/portraits/francis.png': img }, version: 2,
+      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: { '/portraits/francis.png': img }, version: 2,
     });
     const draw = calls.find((c) => c.fn === 'drawImage');
     expect(draw?.raw[0]).toBe(img);
@@ -752,7 +753,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, portraits: { '/portraits/francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
+      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: { '/portraits/francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
     });
     expect(calls.find((c) => c.fn === 'drawImage')?.raw[0]).toBe(unknown);
   });
@@ -765,7 +766,7 @@ describe('drawScene', () => {
       players: [player({ slot: 1, infected: false, state: STATE.PRESENT, health: 0 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, portraits: {}, version: 3,
+      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: {}, version: 3,
     });
     expect(calls.some((c) => c.fn === 'stroke' && c.stroke === DEAD_COLOR)).toBe(true);
     // The dagger is stroked with a dark halo and then filled, same as the
@@ -783,7 +784,7 @@ describe('drawScene', () => {
       players: [player({ slot: 5, cls: 5, infected: true, state: STATE.PRESENT | STATE.ALIVE, health: 4000, temp: 0 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, portraits: {}, version: 3,
+      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: {}, version: 3,
     });
     const arc = calls.find((c) => c.fn === 'arc' && c.args[2] === TANK_BASE_R + ARC_GAP);
     expect(arc).toBeTruthy();
@@ -798,7 +799,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE | STATE.BILED | STATE.INCAP, health: 20 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, portraits: {}, version: 3,
+      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: {}, version: 3,
     });
     const ring = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP);
     expect(calls[calls.indexOf(ring!) + 1].stroke).toBe(stateRingColor(STATE.ALIVE | STATE.INCAP));
@@ -822,7 +823,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { steam1: 'Ghost Name' }, slots, followSlot: 4,
+      names: { steam1: 'Ghost Name' }, slots, followSlot: 4, entitiesPrev: [], witchStartled: false,
     });
 
     // Only the ghost's own hollow outline arc, nothing else. The facing
@@ -859,7 +860,7 @@ describe('drawScene', () => {
         entities: [],
         show: { ci: true, entities: true, names: false },
         portraits: {}, version: 3,
-        width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+        width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
       });
       // The hollow outline, the only mark a ghost makes. It used to take
       // the slot's colour, so it has to be clamped.
@@ -899,7 +900,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { '76561198000000001': 'Zoey' }, slots, followSlot: null,
+      names: { '76561198000000001': 'Zoey' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     // Finding 10: the label used to be stroked and then filled. `strokeText`
     // centres its stroke on the glyph outline, so a 3px stroke put 1.5px
@@ -930,7 +931,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: {}, slots, followSlot: null,
+      names: {}, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     expect(unknown.texts.map((t) => t.text)).toContain('S1');
     for (const t of unknown.texts) expect(t.text).not.toContain('76561198000000001');
@@ -953,7 +954,7 @@ describe('drawScene', () => {
       // it must be there whether or not anyone asked for names.
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     // The badge's own position (offset to the avatar's corner) is drawMedallion's
@@ -972,7 +973,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Zoey' }, slots: ['s0', '', '', '', '', '', '', ''], followSlot: null,
+      names: { s0: 'Zoey' }, slots: ['s0', '', '', '', '', '', '', ''], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     // A body is drawn at 0.7 alpha in the dead grey with a dagger glyph
     // (stroked then filled, both '†'), and the label stays, because who died
@@ -992,7 +993,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     // Healthy: a closed arc (a full circle) at the medallion's arc radius.
     const upArc = up.calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
@@ -1007,7 +1008,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     const downArc = down.calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
     const sweep = downArc.args[4] - downArc.args[3];
@@ -1026,7 +1027,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     const ring = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP)!;
@@ -1048,7 +1049,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
     });
     expect(calls.some((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP)).toBe(false);
   });
@@ -1074,7 +1075,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Aaa', s1: 'Bbb', s2: 'Ccc', s3: 'Ddd' }, slots, followSlot: null,
+      names: { s0: 'Aaa', s1: 'Bbb', s2: 'Ccc', s3: 'Ddd' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     const labels = texts.filter((t) => t.fn === 'fillText' && t.text.length === 3);
@@ -1098,7 +1099,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Zoey' }, slots, followSlot: null,
+      names: { s0: 'Zoey' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
     });
 
     // The background is the first fillRect; the plate and its slot-colour
@@ -1123,7 +1124,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Zoey' }, slots, followSlot: 0,
+      names: { s0: 'Zoey' }, slots, followSlot: 0, entitiesPrev: [], witchStartled: false,
     });
 
     // The follow ring is the outermost thing an avatar draws: its dark halo
@@ -1149,7 +1150,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: {}, slots: [], followSlot: 0,
+      names: {}, slots: [], followSlot: 0, entitiesPrev: [], witchStartled: false,
     });
 
     // The follow ring is drawn twice (a dark halo pass, then the bright ring
@@ -1161,6 +1162,99 @@ describe('drawScene', () => {
     expect(followArcs).toHaveLength(2);
     const healthArc = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
     expect(followArcs[0].args[2]).toBeGreaterThan(healthArc.args[2]);
+  });
+
+  const baseArgs = (transform: MapTransform, view: View) => ({
+    transform, view, backdrop: null, trail: [], players: [], entitiesPrev: [],
+    show: { ci: true, entities: true, names: false }, width: 1280, height: 794,
+    names: {}, slots: ['', '', '', '', '', '', '', ''], followSlot: null,
+    portraits: {}, version: 3, witchStartled: false,
+  });
+
+  it('draws a common as a two-part figure, not a dot', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, { ...baseArgs(transform, view), entities: [{ ref: 1, kind: ENTITY_KIND.COMMON, state: 0, x: 640, y: -300, z: 0, health: 50 }] });
+    // Body ellipse plus head disc: two fills in the common colour family.
+    expect(calls.filter((c) => c.fn === 'fill').length).toBe(2);
+    expect(calls.some((c) => c.fn === 'ellipse')).toBe(true);
+  });
+
+  it('draws an AI hunter as an 18px medallion with the hunter pictogram and no badge', () => {
+    const { transform, view } = identityScene();
+    const { calls, texts, ctx } = stubCtx();
+    drawScene(ctx, { ...baseArgs(transform, view), entities: [{ ref: 1, kind: ENTITY_KIND.HUNTER_AI, state: 0, x: 640, y: -300, z: 0, health: 250 }] });
+    // The stub records the CURRENT strokeStyle at arc() time, which for the
+    // medallion's own halo pass is whatever the backdrop-less grid last set,
+    // not the empty string, so the rim's own colour is confirmed on the
+    // stroke call that immediately follows the arc instead.
+    const arcs = calls.filter((c) => c.fn === 'arc' && c.args[2] === ENTITY_MEDAL_R);
+    expect(arcs.length).toBeGreaterThan(0);
+    expect(arcs.some((arc) => calls[calls.indexOf(arc) + 1].stroke === '#8d6bb0')).toBe(true);
+    expect(calls.some((c) => c.fn === 'fill' && c.raw[0] instanceof FakePath2D)).toBe(true);
+    expect(texts).toHaveLength(0);
+  });
+
+  it('draws a rock as a polygon with a streak back along its travel', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    // A real backdrop, so the map draws through `drawImage` rather than the
+    // no-art grid fallback: the grid strokes dozens of its own lineTo calls,
+    // which would otherwise swamp the polygon's exact count below.
+    drawScene(ctx, {
+      ...baseArgs(transform, view),
+      backdrop: {} as HTMLImageElement,
+      entitiesPrev: [{ ref: 7, kind: ENTITY_KIND.TANK_ROCK, state: 0, x: 600, y: -300, z: 0, health: 0 }],
+      entities: [{ ref: 7, kind: ENTITY_KIND.TANK_ROCK, state: 0, x: 640, y: -300, z: 0, health: 0 }],
+    });
+    // Six-sided polygon: one moveTo and five lineTo, then the streak's own
+    // moveTo/lineTo pair.
+    expect(calls.filter((c) => c.fn === 'lineTo').length).toBe(6);
+    const streak = calls.filter((c) => c.fn === 'stroke').pop()!;
+    expect(streak.stroke).toBe('#b07a3c');
+  });
+
+  it('draws no streak for a rock that has not moved', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const rock = { ref: 7, kind: ENTITY_KIND.TANK_ROCK, state: 0, x: 640, y: -300, z: 0, health: 0 };
+    drawScene(ctx, {
+      ...baseArgs(transform, view),
+      backdrop: {} as HTMLImageElement,
+      entitiesPrev: [rock],
+      entities: [rock],
+    });
+    expect(calls.filter((c) => c.fn === 'lineTo').length).toBe(5);
+  });
+
+  it('turns the witch rim red once startled', () => {
+    const { transform, view } = identityScene();
+    const witch = { ref: 3, kind: ENTITY_KIND.WITCH, state: 0, x: 640, y: -300, z: 0, health: 1000 };
+    const calm = stubCtx();
+    drawScene(calm.ctx, { ...baseArgs(transform, view), entities: [witch] });
+    expect(calm.calls.some((c) => c.fn === 'stroke' && c.stroke === '#e8e8e8')).toBe(true);
+    const mad = stubCtx();
+    drawScene(mad.ctx, { ...baseArgs(transform, view), entities: [witch], witchStartled: true });
+    expect(mad.calls.some((c) => c.fn === 'stroke' && c.stroke === '#de4e40')).toBe(true);
+    expect(mad.calls.some((c) => c.fn === 'stroke' && c.stroke === '#e8e8e8')).toBe(false);
+  });
+});
+
+describe('entity styles', () => {
+  it('sizes and shapes every kind as the spec table says', () => {
+    expect(entityStyle(ENTITY_KIND.COMMON)).toMatchObject({ radius: 3.5, shape: 'figure' });
+    expect(entityStyle(ENTITY_KIND.WITCH)).toMatchObject({ radius: 9, shape: 'medallion', pictogram: 'witch' });
+    expect(entityStyle(ENTITY_KIND.TANK_ROCK)).toMatchObject({ radius: 5, shape: 'rock' });
+    expect(entityStyle(ENTITY_KIND.TANK_AI)).toMatchObject({ radius: 15, shape: 'medallion', pictogram: 'tank' });
+    expect(entityStyle(ENTITY_KIND.SURVIVOR_BOT)).toMatchObject({ radius: 9, shape: 'medallion' });
+    expect(entityStyle(ENTITY_KIND.SMOKER_AI)).toMatchObject({ radius: 9, shape: 'medallion', pictogram: 'smoker' });
+    expect(entityStyle(ENTITY_KIND.BOOMER_AI)).toMatchObject({ radius: 9, shape: 'medallion', pictogram: 'boomer' });
+    expect(entityStyle(ENTITY_KIND.HUNTER_AI)).toMatchObject({ radius: 9, shape: 'medallion', pictogram: 'hunter' });
+  });
+
+  it('keeps every entity colour unchanged, since the slot palette was tested against them', () => {
+    expect(entityStyle(ENTITY_KIND.COMMON)!.color).toBe('#6b6f57');
+    expect(entityStyle(ENTITY_KIND.HUNTER_AI)!.color).toBe('#8d6bb0');
   });
 });
 

@@ -2,7 +2,7 @@ import { boxSpan, projectView, type MapTransform, type View } from '../../../src
 import { ENTITY_KIND, STATE, ZOMBIE_CLASSES, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
 import { relativeLuminance } from './colorDistance';
 import {
-  AVATAR_BASE_R, TANK_BASE_R, FOLLOW_RING_GAP, FOLLOW_RING_WIDTH, drawMedallion,
+  AVATAR_BASE_R, TANK_BASE_R, ENTITY_MEDAL_R, FOLLOW_RING_GAP, FOLLOW_RING_WIDTH, drawMedallion,
 } from './avatar';
 import { DEAD_COLOR, stateRingColor, statusGlyph } from './stateRing';
 import { pictogramFor } from './pictograms';
@@ -202,20 +202,38 @@ export function numberInk(color: string): string {
   return relativeLuminance(color) > 0.19 ? '#0b0908' : '#ffffff';
 }
 
-const ENTITY_STYLES: Record<number, { color: string; radius: number }> = {
-  [ENTITY_KIND.COMMON]: { color: '#6b6f57', radius: 2 },
-  [ENTITY_KIND.WITCH]: { color: '#e8e8e8', radius: 5 },
-  [ENTITY_KIND.TANK_ROCK]: { color: '#b07a3c', radius: 3 },
-  [ENTITY_KIND.TANK_AI]: { color: '#c0563a', radius: 9 },
-  [ENTITY_KIND.SURVIVOR_BOT]: { color: '#4d7d9e', radius: 6 },
-  [ENTITY_KIND.SMOKER_AI]: { color: '#7aa65f', radius: 5 },
-  [ENTITY_KIND.BOOMER_AI]: { color: '#9e8a3f', radius: 6 },
-  [ENTITY_KIND.HUNTER_AI]: { color: '#8d6bb0', radius: 5 },
+/** Darken a hex colour by a factor; the common's head against its body. */
+export function shade(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v: number) => Math.round(v * f).toString(16).padStart(2, '0');
+  return `#${c((n >> 16) & 255)}${c((n >> 8) & 255)}${c(n & 255)}`;
+}
+
+export type EntityShape = 'figure' | 'medallion' | 'rock' | 'dot';
+export interface EntityStyle { color: string; radius: number; shape: EntityShape; pictogram?: string }
+
+/** Colours are unchanged from the dot era, because the slot palette's tests
+ *  measure against them. Sizes and shapes are the spec's "medium" scale:
+ *  next to a 22px medallion a 4px common was gravel and a 6px rock a crumb. */
+const ENTITY_STYLES: Record<number, EntityStyle> = {
+  [ENTITY_KIND.COMMON]: { color: '#6b6f57', radius: 3.5, shape: 'figure' },
+  [ENTITY_KIND.WITCH]: { color: '#e8e8e8', radius: ENTITY_MEDAL_R, shape: 'medallion', pictogram: 'witch' },
+  [ENTITY_KIND.TANK_ROCK]: { color: '#b07a3c', radius: 5, shape: 'rock' },
+  [ENTITY_KIND.TANK_AI]: { color: '#c0563a', radius: TANK_BASE_R, shape: 'medallion', pictogram: 'tank' },
+  [ENTITY_KIND.SURVIVOR_BOT]: { color: '#4d7d9e', radius: ENTITY_MEDAL_R, shape: 'medallion' },
+  [ENTITY_KIND.SMOKER_AI]: { color: '#7aa65f', radius: ENTITY_MEDAL_R, shape: 'medallion', pictogram: 'smoker' },
+  [ENTITY_KIND.BOOMER_AI]: { color: '#9e8a3f', radius: ENTITY_MEDAL_R, shape: 'medallion', pictogram: 'boomer' },
+  [ENTITY_KIND.HUNTER_AI]: { color: '#8d6bb0', radius: ENTITY_MEDAL_R, shape: 'medallion', pictogram: 'hunter' },
 };
 
-export function entityStyle(kind: number): { color: string; radius: number } | null {
+export function entityStyle(kind: number): EntityStyle | null {
   return ENTITY_STYLES[kind] ?? null;
 }
+
+/** How long the rock's motion streak is, in CSS pixels. */
+export const ROCK_STREAK_PX = 12;
+/** Witch rim once startled: the alert red, until witch_killed. */
+export const WITCH_STARTLED_COLOR = '#de4e40';
 
 export interface ShowFlags {
   ci: boolean;
@@ -272,6 +290,11 @@ export interface DrawArgs {
   trail: { x: number; y: number }[];
   players: PlayerSample[];
   entities: EntitySample[];
+  /** The earlier of the two frames the scene was interpolated between, for
+   *  motion (the rock streak). Matched by `ref`. */
+  entitiesPrev: EntitySample[];
+  /** A witch_aggro has happened with no witch_killed after it. */
+  witchStartled: boolean;
   show: ShowFlags;
   width: number;
   height: number;
@@ -517,6 +540,9 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     ctx.restore();
   }
 
+  const prevByRef = new Map<number, EntitySample>();
+  for (const e of a.entitiesPrev) prevByRef.set(e.ref, e);
+
   for (const e of a.entities) {
     const style = entityStyle(e.kind);
     if (!style) continue;
@@ -524,10 +550,77 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     if (isCommon && !a.show.ci) continue;
     if (!isCommon && !a.show.entities) continue;
     const p = projectView(a.transform, a.view, e.x, e.y);
-    ctx.fillStyle = style.color;
-    ctx.beginPath();
-    ctx.arc(p.px, p.py, style.radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.save();
+    switch (style.shape) {
+      case 'figure': {
+        // Head and shoulders: a horde reads as bodies rather than gravel.
+        const r = style.radius;
+        ctx.fillStyle = style.color;
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.ellipse(p.px, p.py + r * 0.15, r, r * 0.72, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = shade(style.color, 0.6);
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, r * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'medallion': {
+        const startled = e.kind === ENTITY_KIND.WITCH && a.witchStartled;
+        drawMedallion(ctx, {
+          x: p.px, y: p.py, r: style.radius,
+          rim: startled ? WITCH_STARTLED_COLOR : style.color,
+          pictogram: style.pictogram ?? null,
+          face: style.pictogram ? null : a.portraits['/portraits/unknown.png'] ?? null,
+        });
+        break;
+      }
+      case 'rock': {
+        // Six-point rock, drawn first so the streak, if any, sits on top of
+        // it: a moving rock reads as trailing over its own edge.
+        const r = style.radius;
+        const pts = [[-0.6, 0.4], [-0.4, -0.7], [0.2, -0.9], [0.8, -0.2], [0.6, 0.6], [-0.1, 0.9]];
+        ctx.beginPath();
+        pts.forEach(([ux, uy], i) => {
+          const x = p.px + ux * r; const y = p.py + uy * r;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = style.color;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        const prev = prevByRef.get(e.ref);
+        if (prev && prev.kind === e.kind) {
+          const q = projectView(a.transform, a.view, prev.x, prev.y);
+          const dx = p.px - q.px; const dy = p.py - q.py;
+          const len = Math.hypot(dx, dy);
+          if (len > 0.5) {
+            ctx.beginPath();
+            ctx.moveTo(p.px, p.py);
+            ctx.lineTo(p.px - (dx / len) * ROCK_STREAK_PX, p.py - (dy / len) * ROCK_STREAK_PX);
+            ctx.strokeStyle = style.color;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.6;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+        }
+        break;
+      }
+      default: {
+        ctx.fillStyle = style.color;
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, style.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   const median = medianHeight(a.players);
