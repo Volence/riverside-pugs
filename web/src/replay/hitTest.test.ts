@@ -36,4 +36,11 @@ describe('hitTest', () => {
   it('finds the marker on its own, once nothing bigger is drawn over it', () => {
     expect(hitTest(items.slice(0, 2), 94, 100)).toMatchObject({ kind: 'marker' });
   });
+
+  // The marker (centre 100, r 8) also covers x 104 (4 away), but the entity
+  // (centre 104, r 9) is drawn later, so with the player out of the way the
+  // entity is the topmost hit here, not the marker underneath it.
+  it('gives the entity the win over a marker it was drawn over', () => {
+    expect(hitTest(items.slice(0, 2), 104, 100)).toMatchObject({ kind: 'entity' });
+  });
 });
