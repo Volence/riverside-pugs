@@ -470,3 +470,9 @@ Verification at every step:
   reads verbs from the same table.
 - Wheel zoom step is 1.25 per notch, range 1 to 8; chips are fit, 2x, 4x, 6x.
 - Drag is recognised after 3px of travel; a shorter press is a click.
+- Theater's fixed root takes the viewer out of flow, so the page behind it
+  can shrink and lose its scroll position; the position is saved on entry
+  and restored on exit rather than assumed to survive on its own.
+- The embedded stage allows vertical touch scrolling (`touch-action: pan-y`)
+  so a finger on the map does not trap the page; only theater claims every
+  touch gesture for panning and zooming.
