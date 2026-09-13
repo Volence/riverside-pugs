@@ -3,6 +3,7 @@ import { render, cleanup, fireEvent, screen } from '@testing-library/preact';
 import { TimelineRail } from './TimelineRail';
 import { DEFAULT_TOGGLES } from './useToggles';
 import { bookmarkSeekMs, type TimelineEntry } from './timeline';
+import { markerEntries } from './markers';
 
 afterEach(cleanup);
 
@@ -58,5 +59,20 @@ describe('TimelineRail, a player selected', () => {
   it('says so when the player has nothing this round', () => {
     mount('Q', 0);
     expect(screen.getByText(/nothing recorded for quiet/i)).toBeTruthy();
+  });
+
+  it('numbers each event entry to match markerEntries order, and leaves chat unnumbered', () => {
+    const { container } = mount('A', 0);
+    const expected = markerEntries(T, 'all', 'A').map((e, i) => [e.seq, i + 1] as const);
+    // Every numbered seq is a boom or a skeet on A's rail (dp on B is not, and
+    // has no number anywhere).
+    expect(expected).toEqual([[1, 1], [4, 2], [5, 3]]);
+
+    const numbers = [...container.querySelectorAll('.replay__entry-n')].map((n) => n.textContent);
+    expect(numbers).toEqual(['1', '2', '3']);
+
+    // Chat has no marker kind, so its row carries no bookmark number.
+    const chatRow = container.querySelector('.replay__entry--chat');
+    expect(chatRow?.querySelector('.replay__entry-n')).toBeNull();
   });
 });
