@@ -272,6 +272,8 @@ int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one ca
 ConVar g_cvMinOrient;                    // rostered players needed to move the orientation mapping
 ConVar g_cvDebug;                        // 1 = verbose state logging to the SourceMod log
 ConVar g_cvPugConfig;                    // config !load_4v4p execs
+ConVar g_cvTeamLock;                     // 0 = Timer_TeamLock never moves anyone (testing)
+ConVar g_cvRosterAtLive;                 // 1 = !load_4v4p records the roster at first go-live, not at the command
 ConVar g_cvRecordDemos;                  // 1 = record a named demo per map during a match
 
 public Plugin myinfo =
@@ -313,6 +315,15 @@ orientation threshold. Changing this changes the rules under every rating earned
 		FCVAR_NOTIFY);
 	g_cvRecordDemos = CreateConVar("sm_pug_record_demos", "1",
 		"1 = stop autorecord and record a named pug_<token>_<ordinal>_<map> demo for each map of a match.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvTeamLock = CreateConVar("sm_pug_team_lock", "1",
+		"1 = move rostered players back to their team's side every two seconds. 0 lets people \
+swap sides freely; the orientation vote still runs so scoring attribution keeps working. Testing only.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvRosterAtLive = CreateConVar("sm_pug_roster_at_live", "0",
+		"!load_4v4p roster timing. 0 = record whoever is on a side the moment the command runs. \
+1 = create the match now but record whoever is on a side when the first round goes live, so a \
+!mix after the load still lands in the roster.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 
 	g_cvReplayHz = CreateConVar("sm_pug_replay_hz", "10",
@@ -1368,6 +1379,54 @@ public Action Cmd_Roster(int args)
  *  Teams come from where people are standing right now: survivors become pug
  *  team a, infected become pug team b, which matches the backend's convention
  *  that team a starts as survivors on map 1. */
+/** Roster everyone on a side right now: survivors -> pug team a, infected -> b.
+ *  Capped at MAX_ROSTER; extras are left unrostered and unscored rather than
+ *  failing, because at go-live there is nobody to hand an error to. */
+int SnapshotRoster()
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
+		int team = GetClientTeam(i);
+		if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) continue;
+		if (g_iRosterCount >= MAX_ROSTER)
+		{
+			PugDebug("snapshot: roster full, leaving %N unrostered", i);
+			continue;
+		}
+		char id[32];
+		if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id)))
+		{
+			// No kick here: an unauthenticated client just goes unscored.
+			PugDebug("snapshot: could not auth %N, leaving unrostered", i);
+			continue;
+		}
+		int slot = g_iRosterCount++;
+		strcopy(g_sRosterId[slot], 32, id);
+		g_iRosterTeam[slot] = (team == TEAM_SURVIVOR) ? 1 : 2;
+		SanitizeName(i, g_sRosterName[slot], 64);
+		g_iClientRoster[i] = slot;
+	}
+	g_iPugSide[1] = TEAM_SURVIVOR;
+	g_iPugSide[2] = TEAM_INFECTED;
+	return g_iRosterCount;
+}
+
+/** The MATCH_CREATE / MATCH_ROSTER xN / MATCH_CREATE_END burst the backend
+ *  adopts a self-started match from. */
+void EmitRosterBurst()
+{
+	EmitPug("MATCH_CREATE map=%s players=%d", g_sCurrentMap, g_iRosterCount);
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		// name= is deliberately LAST on the line: in-game names contain spaces,
+		// so the backend parser takes the entire remainder as the name.
+		EmitPug("MATCH_ROSTER steamid=%s team=%s name=%s",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_sRosterName[i]);
+	}
+	EmitPug("MATCH_CREATE_END players=%d", g_iRosterCount);
+}
+
 public Action Cmd_LoadPug(int client, int args)
 {
 	if (g_State != MS_None)
@@ -1408,41 +1467,21 @@ public Action Cmd_LoadPug(int client, int args)
 	// campaign table and does not need one.
 	strcopy(g_sCampaign, sizeof(g_sCampaign), g_sCurrentMap);
 
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
-		int team = GetClientTeam(i);
-		if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) continue;
-		char id[32];
-		if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id)))
-		{
-			// No kick here: an unauthenticated client just goes unscored.
-			PugDebug("load: could not auth %N, leaving unrostered", i);
-			continue;
-		}
-		int slot = g_iRosterCount++;
-		strcopy(g_sRosterId[slot], 32, id);
-		g_iRosterTeam[slot] = (team == TEAM_SURVIVOR) ? 1 : 2;
-		SanitizeName(i, g_sRosterName[slot], 64);
-		g_iClientRoster[i] = slot;
-	}
-
 	g_State = MS_Pending;
-	g_iPugSide[1] = TEAM_SURVIVOR;
-	g_iPugSide[2] = TEAM_INFECTED;
-
-	// Announce before the exec: the config ends in sm_restartmap, so clients are
-	// about to cycle. The backend needs the roster in hand before that happens.
-	EmitPug("MATCH_CREATE map=%s players=%d", g_sCurrentMap, g_iRosterCount);
-	for (int i = 0; i < g_iRosterCount; i++)
+	if (g_cvRosterAtLive.BoolValue)
 	{
-		// name= is deliberately LAST on the line: in-game names contain spaces,
-		// so the backend parser takes the entire remainder as the name.
-		EmitPug("MATCH_ROSTER steamid=%s team=%s name=%s",
-			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_sRosterName[i]);
+		// Deferred roster: nothing is recorded yet, so a !mix between now and
+		// the first go-live still lands in the roster. OnRoundIsLive takes the
+		// snapshot and emits the burst; the backend adopts the match then.
+		PugDebug("self-started match token=%s, roster deferred to first go-live", g_sToken);
 	}
-	EmitPug("MATCH_CREATE_END players=%d", g_iRosterCount);
-
+	else
+	{
+		SnapshotRoster();
+		// Announce before the exec: the config ends in sm_restartmap, so clients are
+		// about to cycle. The backend needs the roster in hand before that happens.
+		EmitRosterBurst();
+	}
 	StartMatchDemo();
 
 	char cfg[64];
@@ -1450,7 +1489,10 @@ public Action Cmd_LoadPug(int client, int args)
 	PugDebug("self-started match token=%s roster=%d cfg=%s", g_sToken, g_iRosterCount, cfg);
 	ServerCommand("exec %s", cfg);
 
-	PrintToChatAll("[PUG] Match starting: %d players. Ready up.", g_iRosterCount);
+	if (g_cvRosterAtLive.BoolValue)
+		PrintToChatAll("[PUG] Match created. Teams are recorded when the first round goes live. Ready up.");
+	else
+		PrintToChatAll("[PUG] Match starting: %d players. Ready up.", g_iRosterCount);
 	if (spectating > 0)
 	{
 		ReplyToCommand(client, "[PUG] %d spectator(s) were not rostered and will not be scored.", spectating);
@@ -1947,6 +1989,9 @@ public Action Timer_TeamLock(Handle timer)
 	// vote ties at straight == inverted, so gating on confirmation would stall
 	// enforcement forever.
 	if (straight == 0 && inverted == 0) return Plugin_Continue;
+	// Testing switch: the vote above still tracks orientation for scoring, but
+	// nobody is moved. Never leave this off for a real ranked match.
+	if (!g_cvTeamLock.BoolValue) return Plugin_Continue;
 
 	for (int c = 1; c <= MaxClients; c++)
 	{
@@ -2090,6 +2135,20 @@ void RplFillStandaloneRoster()
 public void OnRoundIsLive()
 {
 	g_bHalfWasLive = true;
+	if (g_State == MS_Pending && g_bSelfStarted && g_iRosterCount == 0)
+	{
+		// sm_pug_roster_at_live: the roster is whoever is on a side at this
+		// moment, after any !mix that happened during ready-up.
+		int n = SnapshotRoster();
+		if (n == 0)
+		{
+			PrintToChatAll("[PUG] Nobody was on a team at go-live; the match is not tracked.");
+			ResetMatchState();
+			return;
+		}
+		EmitRosterBurst();
+		PrintToChatAll("[PUG] Teams recorded: %d players.", n);
+	}
 	if (g_State == MS_Pending)
 	{
 		g_State = MS_Live;
