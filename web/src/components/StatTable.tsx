@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { LiveEvent, StatDef } from '../api';
 import { fmtLatency, labelFor, liveGroupStarts } from '../format';
@@ -130,9 +131,17 @@ export function StatTable(
  *
  *  An unknown kind still renders, falling back to its raw slug, because a
  *  silently dropped event is worse than an ugly one. */
+/** How much of the feed shows before "Show all". The live page never has
+ *  more than its 40-newest window; a finished match carries the whole night,
+ *  about a thousand lines, and the page should not be that tall by default. */
+export const FEED_INITIAL = 60;
+
 export function EventFeed(
-  { events, maps }: { events: LiveEvent[]; maps: FeedMap[] },
+  { events: all, maps }: { events: LiveEvent[]; maps: FeedMap[] },
 ) {
+  const [expanded, setExpanded] = useState(false);
+  const events = expanded ? all : all.slice(0, FEED_INITIAL);
+  const hidden = all.length - events.length;
   // Newest first, so a map heading is emitted whenever the ordinal changes as
   // we walk down. Grouping rather than a per-row badge: consecutive entries
   // are almost always from the same map, and repeating it on every line is
@@ -187,6 +196,11 @@ export function EventFeed(
     <div class="feed">
       <h4>Feed</h4>
       <ul>{rows}</ul>
+      {hidden > 0 && (
+        <button class="chip feed__more" onClick={() => setExpanded(true)}>
+          Show all {all.length} events
+        </button>
+      )}
     </div>
   );
 }

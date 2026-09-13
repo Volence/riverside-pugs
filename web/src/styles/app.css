@@ -704,6 +704,9 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 /* Live event feed. Deliberately a list rather than a table: entries are short,
    newest-first, and read as a narrative rather than as columns to compare. */
 .feed { margin-top: var(--sp-4); }
+.feed__more { margin-top: var(--sp-2); }
+.match__maps { margin-bottom: var(--sp-3); }
+.match__sides { margin: var(--sp-2) 0 0; }
 .feed h4 {
   margin: 0 0 var(--sp-2);
   font-size: 0.75rem;

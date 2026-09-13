@@ -220,6 +220,28 @@ describe('stats routes', () => {
     expect(body.rounds[1].endedAt).toBeNull();
   });
 
+  it('serves the whole event feed with round timing, not the live 40-newest window', async () => {
+    // Clear latency on the match page is derived from pinned/cleared pairs
+    // and needs half and tMs on every event. The route used to serve the
+    // live page's 40 newest without either, so a match averaged NaN over
+    // whatever happened in the last two minutes of the finale.
+    const matchId = playCompletedMatch(db, 'a');
+    const ins = db.prepare(
+      `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+    );
+    for (let seq = 1; seq <= 60; seq++) {
+      ins.run(matchId, seq, seq % 2 ? 'pinned' : 'cleared', IDS[4], IDS[0], seq < 30 ? 0 : 1, seq < 30 ? 1 : 2, seq * 1000);
+    }
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(body.events).toHaveLength(60);
+    const first = body.events.find((e: any) => e.seq === 1);
+    expect(first).toMatchObject({ kind: 'pinned', mapOrdinal: 0, half: 1, tMs: 1000 });
+    const nameOf = (sid: string) => body.players.find((p: any) => p.steamid === sid).name;
+    expect(first.actor).toEqual({ steamid: IDS[4], name: nameOf(IDS[4]) });
+    expect(first.target).toEqual({ steamid: IDS[0], name: nameOf(IDS[0]) });
+  });
+
   it('returns an empty rounds array for a match recorded before rounds existed', async () => {
     const matchId = playCompletedMatch(db, 'b');
     const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();

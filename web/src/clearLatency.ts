@@ -37,6 +37,11 @@ export function clearLatencies(events: LiveEvent[]): ClearPair[] {
   for (const e of ordered) {
     // -1 means the event carried no round timing, so nothing it takes part in
     // can be measured. Those come from matches played before round capture.
+    // A server that predates the timing fields omits them altogether, and
+    // `undefined < 0` is false: the pair would then be measured as NaN and
+    // averaged into a "NaNs" cell, which is what the 2026-09-13 match page
+    // showed. Missing is untimed, the same as -1.
+    if (typeof e.half !== 'number' || typeof e.tMs !== 'number') continue;
     if (e.half < 0 || e.tMs < 0) continue;
     const victim = e.target?.steamid;
     if (!victim) continue;
