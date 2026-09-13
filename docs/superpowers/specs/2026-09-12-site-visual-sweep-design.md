@@ -1,6 +1,6 @@
 # Site visual sweep: design
 
-Written 2026-09-12. Status: steps 1 to 5 implemented on feat/skill-stats-5 (plan docs/superpowers/plans/2026-09-12-site-visual-sweep.md); step 6, theater mode, has its own plan still to be written.
+Written 2026-09-12. Status: steps 1 to 6 implemented on feat/skill-stats-5 and feat/theater-mode (plans docs/superpowers/plans/2026-09-12-site-visual-sweep.md and 2026-09-12-theater-mode.md).
 
 Reference canvas (the approved look, plus the three directions it was chosen
 from on a second page): https://claude.ai/code/artifact/7f1d586e-6bfd-4382-bf39-0f41f59f758e
@@ -453,3 +453,20 @@ Verification at every step:
   comment on the constant for the measurements.
 - HUD chip hit targets are 36px on desktop and 44px on phones, matching every
   other chip on the site, not the smaller sizes the overlay first shipped with.
+- Theater opens at 2x on the survivor centroid only when the viewer was at
+  fit and free; a camera the user had set is kept, and leaving theater
+  restores the camera from before entry.
+- Pan clamps per axis: an axis where the drawn map fits inside the canvas is
+  centred and cannot pan; one it overflows may bring the map edge to the
+  canvas edge and no further. Following is never clamped.
+- Theater canvas budget is 2560x1440 backing pixels, up from 1280x794, so a
+  viewport-filling canvas is not drawn soft.
+- The follow row is the bookmark selector; there is no separate control.
+  Role colour: `--win` did it, `--accent` had it done to them. `death` and
+  `incap` are victim-first kinds and the role table accounts for it.
+- The timeline payload is a discriminated union (event: `event`, `actor`,
+  `target`, `value`; chat: `actor`, `team`, `text`); the client composes
+  every sentence and resolves every id through the roster. The live feed
+  reads verbs from the same table.
+- Wheel zoom step is 1.25 per notch, range 1 to 8; chips are fit, 2x, 4x, 6x.
+- Drag is recognised after 3px of travel; a shorter press is a click.
