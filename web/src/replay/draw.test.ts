@@ -3,7 +3,7 @@ import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W,
   slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget, GHOST_COLOR,
-  playerBaseRadius,
+  playerBaseRadius, MARKER_SIZE,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform, type View } from '../../../src/mapTransform';
@@ -15,6 +15,8 @@ import {
 } from './avatar';
 import { DEAD_COLOR, stateRingColor } from './stateRing';
 import { resetPictogramCache } from './pictograms';
+import { markerKind, BURSTS } from './markers';
+import type { HitItem } from './hitTest';
 
 class FakePath2D { constructor(public d: string) {} }
 
@@ -423,7 +425,9 @@ describe('drawScene', () => {
   afterEach(() => { delete (globalThis as any).Path2D; resetPictogramCache(); });
 
   function stubCtx() {
-    const calls: { fn: string; args: number[]; raw: unknown[]; stroke: string; fill: string; width: number }[] = [];
+    const calls: {
+      fn: string; args: number[]; raw: unknown[]; stroke: string; fill: string; width: number; alpha: number;
+    }[] = [];
     const texts: { fn: string; text: string; x: number; y: number }[] = [];
     // The paint styles are recorded alongside each call, because "which
     // colour was this stroked in" is a real assertion (the ghost outline has
@@ -432,12 +436,13 @@ describe('drawScene', () => {
     let strokeStyle = '';
     let fillStyle = '';
     let lineWidth = 0;
+    let alpha = 1;
     const rec = (fn: string) => (...args: unknown[]) => {
       calls.push({
         fn,
         args: args.filter((a) => typeof a === 'number') as number[],
         raw: args,
-        stroke: strokeStyle, fill: fillStyle, width: lineWidth,
+        stroke: strokeStyle, fill: fillStyle, width: lineWidth, alpha,
       });
     };
     // fillText/strokeText carry the label or glyph string as their first
@@ -453,6 +458,7 @@ describe('drawScene', () => {
         save: rec('save'), restore: rec('restore'), beginPath: rec('beginPath'),
         moveTo: rec('moveTo'), lineTo: rec('lineTo'), stroke: rec('stroke'),
         fill: rec('fill'), arc: rec('arc'), ellipse: rec('ellipse'), fillRect: rec('fillRect'),
+        strokeRect: rec('strokeRect'),
         clearRect: rec('clearRect'), drawImage: rec('drawImage'),
         fillText: recText('fillText'), strokeText: recText('strokeText'),
         clip: rec('clip'), closePath: rec('closePath'),
@@ -462,7 +468,7 @@ describe('drawScene', () => {
         // makes the expected plate width arithmetic below exact.
         measureText: (t: string) => ({ width: t.length * 6 }),
         set fillStyle(v: string) { fillStyle = v; }, set strokeStyle(v: string) { strokeStyle = v; },
-        set lineWidth(v: number) { lineWidth = v; }, set globalAlpha(_v: number) {},
+        set lineWidth(v: number) { lineWidth = v; }, set globalAlpha(v: number) { alpha = v; },
         set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
         set filter(_v: string) {}, set lineCap(_v: string) {},
       } as unknown as CanvasRenderingContext2D,
@@ -499,7 +505,7 @@ describe('drawScene', () => {
       names: {},
       slots: [],
       portraits: {}, version: 3,
-      followSlot: null, entitiesPrev: [], witchStartled: false,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // The default player is a living survivor at full health, which is now
@@ -540,7 +546,7 @@ describe('drawScene', () => {
       names: {},
       slots: [],
       portraits: {}, version: 3,
-      followSlot: null, entitiesPrev: [], witchStartled: false,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // Same update as the test above: a living survivor is now a medallion,
@@ -587,7 +593,7 @@ describe('drawScene', () => {
         names: {},
         slots: [],
         portraits: {}, version: 3,
-        followSlot: null, entitiesPrev: [], witchStartled: false,
+        followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
       });
 
       const arcs = calls.filter((c) => c.fn === 'arc');
@@ -623,7 +629,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: false },
       width: 800, height: 400,
       portraits: {}, version: 3,
-      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     })).not.toThrow();
 
     const img = calls.find((c) => c.fn === 'drawImage')!;
@@ -661,7 +667,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // The permanent arc, and the temporary arc continuing from it, both at
@@ -692,7 +698,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     // The perm and temp arcs are always issued at the same radius (the arc
     // is one shape to test against), but a zero-length temp arc paints
@@ -714,7 +720,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     const arc = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP);
@@ -736,7 +742,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: { '/portraits/francis.png': img }, version: 2,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/portraits/francis.png': img }, version: 2,
     });
     const draw = calls.find((c) => c.fn === 'drawImage');
     expect(draw?.raw[0]).toBe(img);
@@ -753,7 +759,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, cls: 2, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: { '/portraits/francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: { '/portraits/francis.png': face, '/portraits/unknown.png': unknown }, version: 1,
     });
     expect(calls.find((c) => c.fn === 'drawImage')?.raw[0]).toBe(unknown);
   });
@@ -766,7 +772,7 @@ describe('drawScene', () => {
       players: [player({ slot: 1, infected: false, state: STATE.PRESENT, health: 0 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: {}, version: 3,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: {}, version: 3,
     });
     expect(calls.some((c) => c.fn === 'stroke' && c.stroke === DEAD_COLOR)).toBe(true);
     // The dagger is stroked with a dark halo and then filled, same as the
@@ -784,7 +790,7 @@ describe('drawScene', () => {
       players: [player({ slot: 5, cls: 5, infected: true, state: STATE.PRESENT | STATE.ALIVE, health: 4000, temp: 0 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: {}, version: 3,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: {}, version: 3,
     });
     const arc = calls.find((c) => c.fn === 'arc' && c.args[2] === TANK_BASE_R + ARC_GAP);
     expect(arc).toBeTruthy();
@@ -799,7 +805,7 @@ describe('drawScene', () => {
       players: [player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE | STATE.BILED | STATE.INCAP, health: 20 })],
       entities: [], show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: ['', '', '', '', '', '', '', ''],
-      followSlot: null, entitiesPrev: [], witchStartled: false, portraits: {}, version: 3,
+      followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(), portraits: {}, version: 3,
     });
     const ring = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP);
     expect(calls[calls.indexOf(ring!) + 1].stroke).toBe(stateRingColor(STATE.ALIVE | STATE.INCAP));
@@ -823,7 +829,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { steam1: 'Ghost Name' }, slots, followSlot: 4, entitiesPrev: [], witchStartled: false,
+      names: { steam1: 'Ghost Name' }, slots, followSlot: 4, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // Only the ghost's own hollow outline arc, nothing else. The facing
@@ -860,7 +866,7 @@ describe('drawScene', () => {
         entities: [],
         show: { ci: true, entities: true, names: false },
         portraits: {}, version: 3,
-        width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+        width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
       });
       // The hollow outline, the only mark a ghost makes. It used to take
       // the slot's colour, so it has to be clamped.
@@ -900,7 +906,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { '76561198000000001': 'Zoey' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: { '76561198000000001': 'Zoey' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     // Finding 10: the label used to be stroked and then filled. `strokeText`
     // centres its stroke on the glyph outline, so a 3px stroke put 1.5px
@@ -931,7 +937,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: {}, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: {}, slots, followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     expect(unknown.texts.map((t) => t.text)).toContain('S1');
     for (const t of unknown.texts) expect(t.text).not.toContain('76561198000000001');
@@ -954,7 +960,7 @@ describe('drawScene', () => {
       // it must be there whether or not anyone asked for names.
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // The badge's own position (offset to the avatar's corner) is drawMedallion's
@@ -973,7 +979,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Zoey' }, slots: ['s0', '', '', '', '', '', '', ''], followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: { s0: 'Zoey' }, slots: ['s0', '', '', '', '', '', '', ''], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     // A body is drawn at 0.7 alpha in the dead grey with a dagger glyph
     // (stroked then filled, both '†'), and the label stays, because who died
@@ -993,7 +999,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     // Healthy: a closed arc (a full circle) at the medallion's arc radius.
     const upArc = up.calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
@@ -1008,7 +1014,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     const downArc = down.calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
     const sweep = downArc.args[4] - downArc.args[3];
@@ -1027,7 +1033,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     const ring = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP)!;
@@ -1049,7 +1055,7 @@ describe('drawScene', () => {
       entities: [],
       show: { ci: true, entities: true, names: false },
       portraits: {}, version: 3,
-      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false,
+      width: 1280, height: 794, names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
     expect(calls.some((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + STATE_RING_GAP)).toBe(false);
   });
@@ -1075,7 +1081,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Aaa', s1: 'Bbb', s2: 'Ccc', s3: 'Ddd' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: { s0: 'Aaa', s1: 'Bbb', s2: 'Ccc', s3: 'Ddd' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     const labels = texts.filter((t) => t.fn === 'fillText' && t.text.length === 3);
@@ -1099,7 +1105,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Zoey' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false,
+      names: { s0: 'Zoey' }, slots, followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // The background is the first fillRect; the plate and its slot-colour
@@ -1124,7 +1130,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: true },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: { s0: 'Zoey' }, slots, followSlot: 0, entitiesPrev: [], witchStartled: false,
+      names: { s0: 'Zoey' }, slots, followSlot: 0, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // The follow ring is the outermost thing an avatar draws: its dark halo
@@ -1150,7 +1156,7 @@ describe('drawScene', () => {
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794,
       portraits: {}, version: 3,
-      names: {}, slots: [], followSlot: 0, entitiesPrev: [], witchStartled: false,
+      names: {}, slots: [], followSlot: 0, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
 
     // The follow ring is drawn twice (a dark halo pass, then the bright ring
@@ -1165,10 +1171,11 @@ describe('drawScene', () => {
   });
 
   const baseArgs = (transform: MapTransform, view: View) => ({
-    transform, view, backdrop: null, trail: [], players: [], entitiesPrev: [],
+    transform, view, backdrop: null, trail: [], players: [], entities: [], entitiesPrev: [],
     show: { ci: true, entities: true, names: false }, width: 1280, height: 794,
     names: {}, slots: ['', '', '', '', '', '', '', ''], followSlot: null,
     portraits: {}, version: 3, witchStartled: false,
+    tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map<string, string>(),
   });
 
   it('draws a common as a two-part figure, not a dot', () => {
@@ -1237,6 +1244,80 @@ describe('drawScene', () => {
     drawScene(mad.ctx, { ...baseArgs(transform, view), entities: [witch], witchStartled: true });
     expect(mad.calls.some((c) => c.fn === 'stroke' && c.stroke === '#de4e40')).toBe(true);
     expect(mad.calls.some((c) => c.fn === 'stroke' && c.stroke === '#e8e8e8')).toBe(false);
+  });
+
+  const mk = (seq: number, event: string, x: number, index: number | null = null) => ({
+    entry: { seq, tMs: seq * 1000, kind: 'event' as const, event, actor: 'A', target: 'B', value: 0 },
+    kind: markerKind(event)!, pos: { x, y: -300, z: 0 }, index,
+  });
+
+  it('draws a marker tag with its letter, dims one ahead of the playhead, and numbers a selected list', () => {
+    const { transform, view } = identityScene();
+    const { calls, texts, ctx } = stubCtx();
+    drawScene(ctx, {
+      ...baseArgs(transform, view), entities: [], tMs: 1500,
+      markers: [mk(1, 'boom', 600, 1), mk(2, 'dp', 700, 2)],
+    });
+    expect(texts.map((t) => t.text)).toEqual(expect.arrayContaining(['B', 'P', '1', '2']));
+    const rects = calls.filter((c) => c.fn === 'fillRect' && c.args[2] === MARKER_SIZE);
+    expect(rects).toHaveLength(2);
+    // The second marker is ahead of the playhead: drawn at reduced alpha.
+    expect(rects[1].alpha).toBeLessThan(rects[0].alpha);
+  });
+
+  it('records a hit item per player, entity and marker, players last', () => {
+    const { transform, view } = identityScene();
+    const { ctx } = stubCtx();
+    const hits: HitItem[] = [];
+    drawScene(ctx, {
+      ...baseArgs(transform, view), hits,
+      players: [player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
+      entities: [{ ref: 1, kind: ENTITY_KIND.HUNTER_AI, state: 0, x: 600, y: -300, z: 0, health: 250 }],
+      markers: [mk(1, 'boom', 700)],
+    });
+    expect(hits.map((h) => h.kind)).toEqual(['marker', 'entity', 'player']);
+  });
+
+  it('draws a pin line from the pinner to a pinned victim, in the pinner slot colour', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      ...baseArgs(transform, view),
+      slots: ['A', '', '', '', 'H', '', '', ''],
+      players: [
+        player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED, health: 100 }),
+        player({ slot: 4, infected: true, cls: 3, x: 700, state: STATE.PRESENT | STATE.ALIVE, health: 250 }),
+      ],
+      pinners: new Map([['A', 'H']]),
+    });
+    const line = calls.find((c) => c.fn === 'stroke' && c.stroke === SLOT_COLORS[4] && c.width === 2);
+    expect(line).toBeTruthy();
+  });
+
+  it('draws no pin line to a ghost pinner', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      ...baseArgs(transform, view),
+      slots: ['A', '', '', '', 'H', '', '', ''],
+      players: [
+        player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED, health: 100 }),
+        player({ slot: 4, infected: true, cls: 3, x: 700, state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST, health: 250 }),
+      ],
+      pinners: new Map([['A', 'H']]),
+    });
+    expect(calls.filter((c) => c.fn === 'stroke' && c.stroke === SLOT_COLORS[4])).toHaveLength(0);
+  });
+
+  it('draws a boom burst as a pulse whose ring grows with age', () => {
+    const { transform, view } = identityScene();
+    const young = stubCtx(); const old = stubCtx();
+    const burst = { entry: mk(1, 'boom', 600).entry, style: BURSTS.boom, startedAt: 0 };
+    const args = (nowMs: number) => ({ ...baseArgs(transform, view), nowMs, bursts: [{ burst, pos: { x: 600, y: -300, z: 0 }, from: null }] });
+    drawScene(young.ctx, args(100));
+    drawScene(old.ctx, args(800));
+    const ring = (c: ReturnType<typeof stubCtx>) => c.calls.filter((x) => x.fn === 'arc' && x.stroke === BURSTS.boom.color).pop()!;
+    expect(ring(old).args[2]).toBeGreaterThan(ring(young).args[2]);
   });
 });
 

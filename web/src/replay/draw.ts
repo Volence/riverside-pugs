@@ -7,8 +7,23 @@ import {
 import { DEAD_COLOR, stateRingColor, statusGlyph } from './stateRing';
 import { pictogramFor } from './pictograms';
 import { healthBar, portraitFor } from './hud';
+import type { ActiveBurst, MarkerKind, WorldPos } from './markers';
+import type { TimelineEvent } from './timeline';
+import { MARKER_HIT_R, type HitItem } from './hitTest';
 
 export { statusGlyph, stateRingColor, DEAD_COLOR, FOLLOW_RING_WIDTH };
+
+/** An event tag to leave on the map: already filtered to what should be
+ *  shown and positioned at the moment it happened. */
+export interface MarkerItem { entry: TimelineEvent; kind: MarkerKind; pos: WorldPos; index: number | null }
+/** A burst alive right now, positioned by `BurstStyle.at`. */
+export interface BurstItem { burst: ActiveBurst; pos: WorldPos; from: WorldPos | null }
+/** The marker tag's own square, in CSS pixels. */
+export const MARKER_SIZE = 12;
+/** How dim a tag is once the playhead has not reached it yet: visible enough
+ *  to preview what is coming, dim enough that it never competes with what
+ *  has actually happened. */
+const MARKER_AHEAD_ALPHA = 0.45;
 
 /** Roster slots 0-3 are the survivor team for this half and 4-7 are the
  *  infected. The player record carries no team field because the slot already
@@ -310,6 +325,18 @@ export interface DrawArgs {
   /** Replay format version, for `portraitFor`'s "is the character byte
    *  real" check. */
   version: number;
+  /** Event tags to leave on the map, already filtered and positioned. */
+  markers: MarkerItem[];
+  /** Bursts alive right now, positioned. */
+  bursts: BurstItem[];
+  /** Victim SteamID64 to pinner SteamID64, from `pinnersAt`. */
+  pinners: Map<string, string>;
+  /** Playhead, for dimming tags ahead of it. */
+  tMs: number;
+  /** Wall clock, for burst ages. */
+  nowMs: number;
+  /** If given, filled with what was drawn where, in draw order. */
+  hits?: HitItem[];
 }
 
 /**
@@ -540,6 +567,80 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     ctx.restore();
   }
 
+  // Markers: under everything that moves, over the trail. A tag never hides
+  // a player; a player standing on a tag hides only the tag.
+  for (const m of a.markers) {
+    const p = projectView(a.transform, a.view, m.pos.x, m.pos.y);
+    const half = MARKER_SIZE / 2;
+    ctx.save();
+    ctx.globalAlpha = m.entry.tMs > a.tMs ? MARKER_AHEAD_ALPHA : 1;
+    ctx.fillStyle = 'rgba(5,4,3,0.82)';
+    ctx.fillRect(p.px - half, p.py - half, MARKER_SIZE, MARKER_SIZE);
+    ctx.strokeStyle = m.kind.color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.px - half + 1, p.py - half + 1, MARKER_SIZE - 2, MARKER_SIZE - 2);
+    ctx.font = 'bold 7px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(m.kind.letter, p.px, p.py + 0.5);
+    if (m.index !== null) {
+      // Bookmark number, matching the rail's order for the selected player.
+      ctx.beginPath();
+      ctx.arc(p.px + half, p.py - half, 5, 0, Math.PI * 2);
+      ctx.fillStyle = m.kind.color;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = numberInk(m.kind.color);
+      ctx.fillText(String(m.index), p.px + half, p.py - half + 0.5);
+    }
+    ctx.restore();
+    a.hits?.push({ kind: 'marker', px: p.px, py: p.py, r: MARKER_HIT_R, seq: m.entry.seq });
+  }
+
+  // Bursts: wall-clock animations at an event's position.
+  for (const b of a.bursts) {
+    const age = Math.max(0, Math.min(1, (a.nowMs - b.burst.startedAt) / b.burst.style.lifeMs));
+    const p = projectView(a.transform, a.view, b.pos.x, b.pos.y);
+    const color = b.burst.style.color;
+    ctx.save();
+    switch (b.burst.style.kind) {
+      case 'pulse': {
+        ctx.globalAlpha = (1 - age) * 0.5;
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(p.px, p.py, 10 + age * 8, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = (1 - age) * 0.9;
+        ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(p.px, p.py, 10 + age * 20, 0, Math.PI * 2); ctx.stroke();
+        break;
+      }
+      case 'burst': {
+        ctx.globalAlpha = (1 - age) * 0.8;
+        ctx.strokeStyle = color; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(p.px, p.py, 8 + age * 18, 0, Math.PI * 2); ctx.stroke();
+        break;
+      }
+      case 'flash':
+      case 'line': {
+        ctx.globalAlpha = (1 - age) * 0.9;
+        if (b.from) {
+          const q = projectView(a.transform, a.view, b.from.x, b.from.y);
+          ctx.beginPath(); ctx.moveTo(q.px, q.py); ctx.lineTo(p.px, p.py);
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 4; ctx.stroke();
+          ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+        }
+        if (b.burst.style.kind === 'flash') {
+          ctx.strokeStyle = color; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(p.px, p.py, 6 + age * 6, 0, Math.PI * 2); ctx.stroke();
+        }
+        break;
+      }
+    }
+    ctx.restore();
+  }
+
   const prevByRef = new Map<number, EntitySample>();
   for (const e of a.entitiesPrev) prevByRef.set(e.ref, e);
 
@@ -621,6 +722,30 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       }
     }
     ctx.restore();
+    // Commons are skipped: a horde of thirty tooltips is noise.
+    if (!isCommon) {
+      a.hits?.push({ kind: 'entity', px: p.px, py: p.py, r: style.radius + 4, entityKind: e.kind, health: e.health, state: e.state });
+    }
+  }
+
+  // Pin lines: from the pinner to the pinned survivor while PINNED is set.
+  // Only to a spawned pinner, so a ghost is never given a line.
+  if (a.pinners.size > 0) {
+    const bySteam = new Map<string, PlayerSample>();
+    a.players.forEach((pl) => { const id = a.slots[pl.slot]; if (id) bySteam.set(id, pl); });
+    for (const [victimId, pinnerId] of a.pinners) {
+      const v = bySteam.get(victimId); const k = bySteam.get(pinnerId);
+      if (!v || !k) continue;
+      if ((v.state & STATE.PINNED) === 0) continue;
+      if ((k.state & STATE.ALIVE) === 0 || (k.state & STATE.GHOST) !== 0) continue;
+      const pv = projectView(a.transform, a.view, v.x, v.y);
+      const pk = projectView(a.transform, a.view, k.x, k.y);
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(pk.px, pk.py); ctx.lineTo(pv.px, pv.py);
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 4; ctx.stroke();
+      ctx.strokeStyle = slotColor(k.slot); ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
+    }
   }
 
   const median = medianHeight(a.players);
@@ -717,6 +842,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         text: name, color: alive ? color : DEAD_COLOR,
       });
     }
+    a.hits?.push({ kind: 'player', px: p.px, py: p.py, r: r + 6, slot: pl.slot });
     ctx.restore();
   }
 
