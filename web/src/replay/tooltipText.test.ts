@@ -39,4 +39,14 @@ describe('tooltipText', () => {
     expect(tooltipText({ kind: 'marker', px: 0, py: 0, r: 1, seq: 3 }, { ...base, players: [] })).toBe('1:01 · hank pounced alice for 24');
     expect(tooltipText({ kind: 'marker', px: 0, py: 0, r: 1, seq: 99 }, { ...base, players: [] })).toBeNull();
   });
+  it('names an unrostered actor as unknown, not the slot 1 label', () => {
+    const tl = [{ seq: 7, tMs: 5000, kind: 'event' as const, event: 'dp', actor: 'Z', target: 'A', value: 10 }];
+    expect(tooltipText({ kind: 'marker', px: 0, py: 0, r: 1, seq: 7 }, { ...base, players: [], timeline: tl }))
+      .toBe('0:05 · unknown pounced alice for 10');
+  });
+  it('shows only Dead for a dead player, never the status flags they were also carrying', () => {
+    const dead = sample({ slot: 0, cls: 2, state: STATE.PRESENT | STATE.BILED, health: 0 });
+    expect(tooltipText({ kind: 'player', px: 0, py: 0, r: 1, slot: 0 }, { ...base, players: [dead] }))
+      .toBe('alice · Francis · Dead');
+  });
 });

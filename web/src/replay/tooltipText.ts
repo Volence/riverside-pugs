@@ -30,7 +30,14 @@ export function tooltipText(hit: HitItem, c: TooltipContext): string | null {
   if (hit.kind === 'marker') {
     const e = c.timeline.find((t) => t.kind === 'event' && t.seq === hit.seq);
     if (!e || e.kind !== 'event') return null;
-    const nameOf = (id: string) => c.names[id] ?? slotLabel(Math.max(0, c.slots.indexOf(id)));
+    const nameOf = (id: string) => {
+      if (c.names[id]) return c.names[id];
+      const i = c.slots.indexOf(id);
+      // An id that is not in `slots` at all is not slot 0 either: falling
+      // back to `slotLabel(0)` (the old `Math.max(0, -1)`) misattributed an
+      // unrostered actor to "S1"'s label. Say plainly that it is unknown.
+      return i === -1 ? 'unknown' : slotLabel(i);
+    };
     return `${formatTime(e.tMs)} · ${eventSentence(e, nameOf)}`;
   }
   if (hit.kind === 'entity') {
@@ -49,9 +56,16 @@ export function tooltipText(hit: HitItem, c: TooltipContext): string | null {
   } else if (ZOMBIE_CLASSES[p.cls]) {
     parts.push(cap(ZOMBIE_CLASSES[p.cls]));
   }
-  const flags = statusFlags(p.state);
-  if (flags.length && (p.state & STATE.ALIVE) !== 0) parts.push(...flags);
-  if ((p.state & STATE.ALIVE) === 0) parts.push('Dead');
-  else parts.push(p.temp > 0 ? `${p.health} + ${p.temp}` : String(p.health));
+  // Flags mean something only for a player still alive to carry them; a dead
+  // player is just "Dead", and statusFlags is not even called for one (it
+  // would only ever return ['Dead'] again, which is what we are about to say
+  // once, not compute twice for nothing).
+  if ((p.state & STATE.ALIVE) === 0) {
+    parts.push('Dead');
+  } else {
+    const flags = statusFlags(p.state);
+    if (flags.length) parts.push(...flags);
+    parts.push(p.temp > 0 ? `${p.health} + ${p.temp}` : String(p.health));
+  }
   return parts.join(' · ');
 }

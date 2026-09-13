@@ -51,3 +51,17 @@ export function activeEntries(
   const from = tMs - windowMs;
   return entries.filter((e) => e.tMs <= tMs && e.tMs >= from);
 }
+
+/** How far before a bookmark's own moment a seek to it lands (owner
+ *  feedback: landing exactly on the tag's timestamp shows the moment right
+ *  after it resolved, e.g. a death already lying on the ground, rather than
+ *  the setup for it, e.g. the pounce that led there). */
+export const BOOKMARK_LEAD_MS = 3000;
+
+/** Where a seek triggered by clicking a bookmark should land: `BOOKMARK_LEAD_MS`
+ *  before the event, clamped to the start of the round. Used at every seek
+ *  site that jumps to a timeline entry, so a click from the rail, the scrub
+ *  ticks or a marker tag on the map all show the same lead-in. */
+export function bookmarkSeekMs(tMs: number): number {
+  return Math.max(0, tMs - BOOKMARK_LEAD_MS);
+}

@@ -1,5 +1,7 @@
 import { groupTicks, tickEntries } from './bookmarks';
-import { activeEntries, entryText, type TimelineEntry } from './timeline';
+import {
+  activeEntries, bookmarkSeekMs, entryText, type TimelineEntry,
+} from './timeline';
 import { formatTime } from './ReplayControls';
 import type { Toggles } from './useToggles';
 
@@ -21,7 +23,7 @@ function Entry(
   return (
     <button
       class={`replay__entry replay__entry--${e.kind}${e.tMs > tMs ? ' replay__entry--ahead' : ''}`}
-      onClick={() => seek(e.tMs)}
+      onClick={() => seek(bookmarkSeekMs(e.tMs))}
     >
       <span class="replay__entry-t">{formatTime(e.tMs)}</span>
       <span class="replay__entry-who">{nameOf(e.actor)}</span>
