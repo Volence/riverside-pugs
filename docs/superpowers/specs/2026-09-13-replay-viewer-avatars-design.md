@@ -337,3 +337,38 @@ Sprites on ground rings (rejected for now, may return as an option once the
 medallions ship), stacked state rings (rejected), always-on legend strip
 (rejected), event markers default (everything for everyone), entity scale
 (medium), facing (wedge on rim), legend (tooltips plus Key toggle).
+
+## Built 2026-09-13
+
+Tasks 1 to 10 of `docs/superpowers/plans/2026-09-13-replay-viewer-avatars.md`.
+Pinned gold moved from #c9a45c to #e0b654 (see stateRing.ts). Biled purple is
+exempt from the dichromacy rim test against survivor slots, by name, with the
+B glyph as the channel. Draw cost measured at 0.19 ms mean script time per
+frame (1.83 ms mean task time per frame; CDP `Performance.getMetrics` deltas
+over 600 rAF frames across a 10 s window at 1x playback on the standalone
+cluster fixture, `/replay/file/pug_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0_1.rpl`,
+eight players and its 14 commons); both clear the 2 ms budget. rAF interval
+held at 16.7 ms median / 16.8 ms p95 (steady 60 fps, no jank) over the same
+window.
+
+The state ring and arc centre radii shipped at r + 3.75 and r + 6.5, not the
+r + 1.5 and r + 5.5 this spec's section 2 first proposed: those two could not
+both clear the 2.5px rim plus its 1px edge without overlapping it. See the
+derivation in `avatar.ts` (`STATE_RING_GAP`, `ARC_GAP`).
+
+Bookmark seeks land `BOOKMARK_LEAD_MS` (3 s) before the event's own
+timestamp, not on it, per an owner request made 2026-09-13 after the first
+build: landing exactly on the event showed its aftermath rather than the
+moment itself. See `timeline.ts`.
+
+The tooltip anchors to the hit item's own recorded canvas position, not the
+live pointer: `Viewer.tsx` stores `hover.px/py` from the hit test and shifts
+it by the follow camera's translate on read, so the tooltip stays pinned to
+the medallion or marker as the camera pans instead of trailing the mouse.
+
+Visual pass (`npm run shoot` at 1400/390 on match 9001, plus the cluster
+fixture at 6x zoom): medallions show silhouette faces, rim, and state ring as
+designed; the cluster fixture's four overlapping survivors resolve to
+distinct numbered badges (S1 to S4) once zoomed past the overlap. No route
+reported horizontal overflow. Full detail in
+`.superpowers/sdd/2026-09-13-replay-viewer-avatars/task-11-report.md`.
