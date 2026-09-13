@@ -201,6 +201,7 @@ export function Viewer(
         slots={header.slots}
         portraits={portraits}
         version={header.version}
+        witchStartled={false}
       />
       <div class="replay__vignette" aria-hidden="true" />
       {!theater && (

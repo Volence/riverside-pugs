@@ -31,6 +31,9 @@ export interface ReplayCanvasProps {
   portraits: Record<string, HTMLImageElement>;
   /** Replay format version, threaded to `portraitFor` via `drawScene`. */
   version: number;
+  /** A witch_aggro has happened with no witch_killed after it, threaded to
+   *  `drawScene` so her rim turns the alert red. */
+  witchStartled: boolean;
 }
 
 /**
@@ -61,7 +64,9 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
   const ctx = canvas?.getContext('2d');
   if (!canvas || !ctx || !p.transform) return;
 
-  const { transform, view, size, backdrop, trail, show, follow, names, slots, portraits, version } = p;
+  const {
+    transform, view, size, backdrop, trail, show, follow, names, slots, portraits, version, witchStartled,
+  } = p;
   const pair = bracket(p.frames, p.timeRef.current);
   const players = pair ? interpolatePlayers(pair.a, pair.b, pair.f) : [];
   const entities = pair ? interpolateEntities(pair.a, pair.b, pair.f) : [];
@@ -99,6 +104,7 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
     transform, view, backdrop, trail,
     players,
     entities,
+    entitiesPrev: pair ? pair.a.entities : [],
     show,
     width: size.cssW,
     height: size.cssH,
@@ -107,6 +113,7 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
     followSlot: followSlotOf(follow),
     portraits,
     version,
+    witchStartled,
   });
   ctx.restore();
 }
@@ -150,6 +157,7 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
     props.frames, props.transform, props.view, props.backdrop, props.trail,
     props.show.ci, props.show.entities, props.show.names,
     props.follow, props.names, props.slots, props.portraits, props.version,
+    props.witchStartled,
     size.cssW, size.cssH, size.pixelW, size.pixelH, size.ratio,
   ]);
 
