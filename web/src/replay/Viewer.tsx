@@ -39,6 +39,16 @@ const THEATER_CAMERA: CameraState = { cam: { zoom: 2, panX: 0, panY: 0 }, follow
 /** The events-and-chat column's width in theater (spec 7.1, Hidden chrome). */
 const RAIL_W = 320;
 
+/** Whether a camera is still sitting at the "fit and free" default theater
+ *  should open over. Every other consumer of a zoomed camera compares zoom
+ *  with a tolerance (ReplayControls, `zoomLabel`) because repeated
+ *  zoom-in/zoom-out round trips through `zoomAbout`/`clampZoom` land on
+ *  values like `1.0000000000000002`, not exactly `1`; an exact `===` here
+ *  would silently keep the close theater camera from ever opening. */
+export function isDefaultCamera(s: CameraState): boolean {
+  return Math.abs(s.cam.zoom - 1) < 0.01 && s.follow.kind === FREE.kind;
+}
+
 /** The default roster lookup, as one shared object rather than a fresh `{}`
  *  per render. The canvas repaints when its props change, and a route that
  *  passes no names (the by-filename replay page) would otherwise hand it a
@@ -129,7 +139,7 @@ export function Viewer(
     if (theater) {
       const s = camera.snapshot();
       before.current = s;
-      if (s.cam.zoom === 1 && s.follow.kind === 'free') camera.restore(THEATER_CAMERA);
+      if (isDefaultCamera(s)) camera.restore(THEATER_CAMERA);
     } else if (before.current) {
       camera.restore(before.current);
       before.current = null;

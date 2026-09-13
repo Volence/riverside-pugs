@@ -1008,7 +1008,11 @@ body.is-theater { overflow: hidden; }
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
   background: linear-gradient(rgba(5, 4, 3, 0.9), rgba(5, 4, 3, 0));
   transition: opacity 0.4s ease;
+  pointer-events: none;
 }
+.theater__top .replay__controls,
+.theater__top .replay__toolbar,
+.theater__toggles { pointer-events: auto; }
 .theater__toggles { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .replay--theater.is-idle .theater__top { opacity: 0.15; }
 .replay--theater.is-idle .theater__top:hover,
@@ -1026,7 +1030,7 @@ body.is-theater { overflow: hidden; }
 }
 .hud-edge--l { left: 0; }
 .hud-edge--r { right: var(--rail-w, 0px); transition: right 0.25s ease; }
-.hud-edge .hudp { background: rgba(5, 4, 3, 0.78); border-color: rgba(255, 255, 255, 0.06); min-width: 0; flex: none; pointer-events: auto; }
+.hud-edge .hudp { background: rgba(5, 4, 3, 0.78); border-color: rgba(255, 255, 255, 0.06); min-width: 0; flex: none; }
 .hud-edge .hudp--empty { display: none; }
 
 /* The events and chat column. */

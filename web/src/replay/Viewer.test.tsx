@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent, act } from '@testing-library/preact';
-import { Viewer } from './Viewer';
+import { Viewer, isDefaultCamera } from './Viewer';
+import { FREE, TEAM } from './camera';
 import { STATE, type Frame, type ReplayHeader } from '../../../src/replayFormat';
 
 const HEADER: ReplayHeader = {
@@ -85,5 +86,30 @@ describe('Viewer theater', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
     expect(container.querySelector('.theater__rail')).toBeNull();
     expect(root.style.getPropertyValue('--rail-w')).toBe('0px');
+  });
+
+  it('leaves no interactive element inside the edge HUD plates for the stage to fight over pointer events', () => {
+    const { container } = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Theater' }));
+    const edges = container.querySelectorAll('.hud-edge');
+    expect(edges.length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('.hud-edge .hudp').length).toBeGreaterThan(0);
+    for (const edge of edges) {
+      expect(edge.querySelector('button, a, input')).toBeNull();
+    }
+  });
+});
+
+describe('isDefaultCamera', () => {
+  it('is true within tolerance of fit and free, even after a zoom-in/zoom-out round trip', () => {
+    expect(isDefaultCamera({ cam: { zoom: 1.0000000000000002, panX: 0, panY: 0 }, follow: FREE })).toBe(true);
+  });
+
+  it('is false when zoomed', () => {
+    expect(isDefaultCamera({ cam: { zoom: 2, panX: 0, panY: 0 }, follow: FREE })).toBe(false);
+  });
+
+  it('is false when following, even at fit zoom', () => {
+    expect(isDefaultCamera({ cam: { zoom: 1, panX: 0, panY: 0 }, follow: TEAM })).toBe(false);
   });
 });
