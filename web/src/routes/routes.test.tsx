@@ -54,9 +54,11 @@ describe('Leaderboard', () => {
       ],
     });
     render(<Leaderboard me="2" />);
-    await waitFor(() => expect(screen.getAllByText('alice').length).toBeGreaterThan(0));
+    // alice is also the top-rated headliner (1200 beats bob's 1100), so her
+    // name and rating each appear twice: the table row and the side card.
+    await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
     expect(screen.getByText('Season 1')).toBeTruthy();
-    expect(screen.getAllByText('1200').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1200')).toHaveLength(2);
   });
 
   it('says so when nobody is rated yet', async () => {
@@ -357,7 +359,9 @@ describe('Profile', () => {
     mockApi.profile.mockResolvedValue(profile);
     render(<Profile steamid="1" />);
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
-    expect(screen.getAllByText('1200').length).toBeGreaterThan(0);
+    // history's peak (1200) equals the current rating, so the same number
+    // appears twice: the rating hero and the "Peak" stat tile.
+    expect(screen.getAllByText('1200')).toHaveLength(2);
     expect(screen.getByText('Dead Air')).toBeTruthy();
     // Shown twice by design: beside the rating hero, and in the match row.
     expect(screen.getAllByText('+12')).toHaveLength(2);
@@ -446,7 +450,7 @@ describe('skill stats display', () => {
     });
     render(<MatchDetail id="8" me="1" />);
     // Appears twice now: in the versus header roster and in the totals table.
-    await waitFor(() => expect(screen.getAllByText('alice').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
     expect(screen.queryByText('Skeets')).toBeNull();
   });
 
@@ -561,7 +565,7 @@ describe('Leaderboard sorting', () => {
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
     const { container } = render(<Leaderboard me={null} />);
     // bob is also the top-rated headliner now, so this appears twice.
-    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
 
     const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
     expect(names).toEqual(['bob', 'alice']);
@@ -575,7 +579,8 @@ describe('Leaderboard sorting', () => {
   it('re-sorts when a column header is clicked', async () => {
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
+    // bob is also the top-rated headliner, so this appears twice.
+    await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
 
     // Commons descending puts bob first (99 vs 10); clicking again reverses.
     const head = container.querySelector('thead') as HTMLElement;
@@ -595,7 +600,8 @@ describe('Leaderboard sorting', () => {
     // her first as though she had scored 0.
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getAllByText('bob').length).toBeGreaterThan(0));
+    // bob is also the top-rated headliner, so this appears twice.
+    await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
 
     const head = container.querySelector('thead') as HTMLElement;
     (within(head).getByText('Tank damage') as HTMLElement).click(); // desc

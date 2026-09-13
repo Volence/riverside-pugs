@@ -166,7 +166,7 @@ export function slotLabel(slot: number): string {
  * its own ink rather than trusting that threshold.
  */
 export function numberInk(color: string): string {
-  return relativeLuminance(color) > 0.19 ? '#11130f' : '#ffffff';
+  return relativeLuminance(color) > 0.19 ? '#0b0908' : '#ffffff';
 }
 
 /** Font size for the digit inside the avatar. At the base radius of 7 the dot

@@ -903,7 +903,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .chip--slot.is-on { border-color: currentColor; }
 .replay__rail { display: flex; flex-direction: column; gap: 0.15rem; max-height: 18rem; overflow-y: auto; }
 .replay__entry { display: flex; gap: 0.4rem; text-align: left; font-size: 0.75rem; padding: 0.15rem 0.3rem; background: none; border: 0; cursor: pointer; border-radius: 2px; }
-.replay__entry:hover { background: #23261e; }
+.replay__entry:hover { background: var(--surface-2); }
 .replay__entry--chat .replay__entry-text { opacity: 0.85; font-style: italic; }
 .replay__entry-t { font-variant-numeric: tabular-nums; opacity: 0.55; }
 .replay__entry-who { font-weight: 600; }

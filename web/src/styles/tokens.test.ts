@@ -64,7 +64,10 @@ describe('tokens.css', () => {
   });
 
   it('has retired amber and the old gold everywhere under web/src', () => {
-    const forbidden = [/#e3892b/i, /#1a1206/i, /#f2cd6a/i, /227 137 43/, /242 205 106/, /Barlow/];
+    const forbidden = [
+      /#e3892b/i, /#1a1206/i, /#f2cd6a/i, /227 137 43/, /242 205 106/, /Barlow/,
+      /#e8b04b/i, /#7ec95e/i, /#d9534f/i, /#e35d5d/i, /#11130f/i, /#23261e/i,
+    ];
     for (const file of walk(ROOT)) {
       const src = readFileSync(file, 'utf8');
       for (const re of forbidden) expect(src, `${file} contains ${re}`).not.toMatch(re);
