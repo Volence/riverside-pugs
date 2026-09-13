@@ -1,6 +1,6 @@
 # Site visual sweep: design
 
-Written 2026-09-12. Status: steps 1 to 5 implemented on feat/skill-stats-5 (plan docs/superpowers/plans/2026-09-12-site-visual-sweep.md); step 6, theater mode, has its own plan still to be written.
+Written 2026-09-12. Status: steps 1 to 6 implemented on feat/skill-stats-5 and feat/theater-mode (plans docs/superpowers/plans/2026-09-12-site-visual-sweep.md and 2026-09-12-theater-mode.md).
 
 Reference canvas (the approved look, plus the three directions it was chosen
 from on a second page): https://claude.ai/code/artifact/7f1d586e-6bfd-4382-bf39-0f41f59f758e
@@ -335,6 +335,53 @@ project and inverse. The theater layout gets a render test that the card
 count and order match the roster and that Escape leaves theater. The
 existing draw tests must pass unchanged, because `drawScene` is untouched.
 
+### 7.2 Bookmarks
+
+Reference: Overwatch's replay bookmarks. The owner's use of the viewer is
+learning from their own rounds ("where did I get boomed and how many times",
+"I got a really good DP, what time was that at"), so the timeline has to be
+askable about one player, not only readable as a stream.
+
+**Selection.** Choosing a player in the follow row is the selection; there is
+no second control. With a player selected, the scrub ticks and the rail show
+only the events that player was part of, as actor or as target, plus that
+player's own chat lines. Choosing Free or Survivors clears the selection and
+the ticks and rail return to showing everything.
+
+**Role colour.** A filtered tick or rail entry is coloured by which side of
+the event the player was on: `--win` when they did it (a pounce they landed, a
+skeet, a clear), `--accent` when it happened to them (they got boomed, pinned,
+incapped). The plugin's `death` and `incap` kinds carry the survivor it
+happened to as the actor, so the role is decided per kind, not by field.
+
+**Clickable ticks.** Every tick on the filmstrip is a seek target with a 10px
+hit area drawn as the existing 2px line, and an accessible label of the time
+and the sentence. Unfiltered ticks keep the section 7 colours (event red, chat
+muted).
+
+**Rail.** Unselected, the rail is unchanged: the last twenty seconds, click to
+seek. Selected, it shows the whole round for that player, grouped by kind and
+side with a count in the heading ("Got boomed x3", "Pounces x2"), each entry
+click-to-seek, entries ahead of the playhead dimmed.
+
+**Sentences.** Event text is composed on the client from a per-kind table
+(verb, optional link word before the target, optional unit before the value,
+which side the actor is on) with every SteamID resolved through the roster.
+The raw `kind target value` string the server used to send, which rendered
+targets as seventeen-digit ids, is gone. The live page's event feed reads its
+verbs from the same table.
+
+**Payload.** `/api/replays/timeline` returns a discriminated union: an event
+entry carries `event` (the plugin's kind slug), `actor`, `target` and `value`;
+a chat entry carries `actor`, `team` and `text`. Both carry `seq` and `tMs`.
+
+**Tests.** The kind table is exercised by a sentence test per shape (target
+with value, target without, no target, `si_spawn`'s class name, an unknown
+kind falling back to its slug) and a role test for the two victim-first
+kinds. Filtering and grouping are pure functions with their own tests. The
+tick and rail components get render tests for filtering, role classes and
+click-to-seek.
+
 ## 8. Rollout and verification
 
 Six steps, each a commit on `feat/skill-stats-5` after the pending lockup
@@ -406,3 +453,26 @@ Verification at every step:
   comment on the constant for the measurements.
 - HUD chip hit targets are 36px on desktop and 44px on phones, matching every
   other chip on the site, not the smaller sizes the overlay first shipped with.
+- Theater opens at 2x on the survivor centroid only when the viewer was at
+  fit and free; a camera the user had set is kept, and leaving theater
+  restores the camera from before entry.
+- Pan clamps per axis: an axis where the drawn map fits inside the canvas is
+  centred and cannot pan; one it overflows may bring the map edge to the
+  canvas edge and no further. Following is never clamped.
+- Theater canvas budget is 2560x1440 backing pixels, up from 1280x794, so a
+  viewport-filling canvas is not drawn soft.
+- The follow row is the bookmark selector; there is no separate control.
+  Role colour: `--win` did it, `--accent` had it done to them. `death` and
+  `incap` are victim-first kinds and the role table accounts for it.
+- The timeline payload is a discriminated union (event: `event`, `actor`,
+  `target`, `value`; chat: `actor`, `team`, `text`); the client composes
+  every sentence and resolves every id through the roster. The live feed
+  reads verbs from the same table.
+- Wheel zoom step is 1.25 per notch, range 1 to 8; chips are fit, 2x, 4x, 6x.
+- Drag is recognised after 3px of travel; a shorter press is a click.
+- Theater's fixed root takes the viewer out of flow, so the page behind it
+  can shrink and lose its scroll position; the position is saved on entry
+  and restored on exit rather than assumed to survive on its own.
+- The embedded stage allows vertical touch scrolling (`touch-action: pan-y`)
+  so a finger on the map does not trap the page; only theater claims every
+  touch gesture for panning and zooming.

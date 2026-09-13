@@ -66,31 +66,48 @@ function Panel(
 }
 
 export function HudStrip(
-  { players, header, names, showHp, showGuns }:
-  { players: PlayerSample[]; header: ReplayHeader; names: Record<string, string>; showHp: boolean; showGuns: boolean },
+  { players, header, names, showHp, showGuns, layout = 'strip' }: {
+    players: PlayerSample[]; header: ReplayHeader; names: Record<string, string>;
+    showHp: boolean; showGuns: boolean;
+    /** `strip`: two labelled rows under the stage. `edges`: survivors down
+     *  the left, infected down the right, as plates over the map (theater,
+     *  spec 7.1). Same panels either way. */
+    layout?: 'strip' | 'edges';
+  },
 ) {
   const survivors = players.filter(isSurvivor);
   const infected = players.filter((p) => !isSurvivor(p));
 
+  const panels = (group: PlayerSample[]) => group.map((p) => (
+    <Panel
+      key={p.slot}
+      p={p}
+      header={header}
+      // The header's slot roster is SteamID64 per slot. The name lookup
+      // comes from the match page when there is one; a standalone session
+      // has no roster to look names up in, so the id is the name.
+      // Finding 12's rule, here too: a standalone session has no roster,
+      // and the seventeen-digit id is a worse answer than the slot's own
+      // short label.
+      name={names[header.slots[p.slot]] || slotLabel(p.slot)}
+      showHp={showHp}
+      showGuns={showGuns}
+    />
+  ));
+
+  if (layout === 'edges') {
+    return (
+      <>
+        <div class="hud-edge hud-edge--l">{panels(survivors)}</div>
+        <div class="hud-edge hud-edge--r">{panels(infected)}</div>
+      </>
+    );
+  }
+
   const row = (group: PlayerSample[], label: string) => (
     <div class="hud-row">
       <span class="hud-row__label">{label}</span>
-      {group.map((p) => (
-        <Panel
-          key={p.slot}
-          p={p}
-          header={header}
-          // The header's slot roster is SteamID64 per slot. The name lookup
-          // comes from the match page when there is one; a standalone session
-          // has no roster to look names up in, so the id is the name.
-          // Finding 12's rule, here too: a standalone session has no roster,
-          // and the seventeen-digit id is a worse answer than the slot's own
-          // short label.
-          name={names[header.slots[p.slot]] || slotLabel(p.slot)}
-          showHp={showHp}
-          showGuns={showGuns}
-        />
-      ))}
+      {panels(group)}
     </div>
   );
 

@@ -32,4 +32,17 @@ describe('ReplayHud', () => {
     );
     expect(screen.getByText(/live, 10s delayed/i)).toBeTruthy();
   });
+
+  it('offers a theater chip when given one, lit while on', () => {
+    const t = vi.fn();
+    render(
+      <ReplayHud tMs={0} endMs={0} counts={{ survivors: 0, commons: 0, specials: 0 }}
+        live={false} closed toggles={DEFAULT_TOGGLES} toggle={() => {}}
+        theater={{ on: true, toggle: t }} />,
+    );
+    const chip = screen.getByRole('button', { name: 'Theater' });
+    expect(chip.classList.contains('is-on')).toBe(true);
+    fireEvent.click(chip);
+    expect(t).toHaveBeenCalledTimes(1);
+  });
 });

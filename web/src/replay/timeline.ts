@@ -1,10 +1,35 @@
-export interface TimelineEntry {
+import { eventPhrase } from './eventText';
+
+interface TimelineBase {
+  /** Per-match monotonic sequence shared by events and chat, so the two
+   *  interleave in the order they really happened. */
   seq: number;
   tMs: number;
-  kind: 'event' | 'chat';
-  text: string;
+}
+
+/** One thing that happened, as the plugin reported it. `event` is the kind
+ *  slug (dp, boom, death...); see EVENT_KINDS for how each reads. */
+export interface TimelineEvent extends TimelineBase {
+  kind: 'event';
+  event: string;
+  actor: string;
+  target: string | null;
+  value: number;
+}
+
+export interface TimelineChat extends TimelineBase {
+  kind: 'chat';
   actor: string;
   team: string | null;
+  text: string;
+}
+
+export type TimelineEntry = TimelineEvent | TimelineChat;
+
+/** What the rail prints after the speaker or actor: the message, or the
+ *  event phrase with every id resolved. */
+export function entryText(e: TimelineEntry, nameOf: (id: string) => string): string {
+  return e.kind === 'chat' ? e.text : eventPhrase(e, nameOf);
 }
 
 /** How much history the rail shows by default. Long enough to read what just

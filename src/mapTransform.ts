@@ -192,6 +192,19 @@ export function projectView(
   };
 }
 
+/** Canvas pixel back to world position: the inverse of `projectView`. What a
+ *  drag needs to know which map point is under the cursor. */
+export function unprojectView(
+  t: MapTransform, v: View, px: number, py: number,
+): { x: number; y: number } {
+  const ipx = (px - v.offsetX) / v.scale + v.box.x0;
+  const ipy = (py - v.offsetY) / v.scale + v.box.y0;
+  return {
+    x: t.originX + ipx * t.unitsPerPixel,
+    y: t.originY - ipy * t.unitsPerPixel,
+  };
+}
+
 /** One horizontal slice of a map, matching the generated entries in
  *  src/mapOverviews.ts structurally. Declared here rather than imported from
  *  there because both modules are loaded by the browser and neither may carry a

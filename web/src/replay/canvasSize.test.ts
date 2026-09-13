@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canvasSize } from './canvasSize';
+import { canvasSize, resolveSize, THEATER_PIXEL_BUDGET } from './canvasSize';
 import { CANVAS_PIXEL_BUDGET } from '../../../src/mapTransform';
 
 describe('canvasSize', () => {
@@ -50,5 +50,28 @@ describe('canvasSize', () => {
     const s = canvasSize(0, 1.6, 1);
     expect(Number.isFinite(s.pixelW)).toBe(true);
     expect(s.pixelW).toBeGreaterThan(0);
+  });
+});
+
+describe('resolveSize', () => {
+  it('uses the map aspect and the page budget when not filling', () => {
+    const s = resolveSize(1000, 3000, 1.6, 1, false);
+    expect(s.cssW).toBe(1000);
+    expect(s.cssH).toBeCloseTo(625, 6);
+  });
+
+  it('takes the element shape and the theater budget when filling', () => {
+    const s = resolveSize(1920, 1080, 1.6, 2, true);
+    expect(s.cssW).toBe(1920);
+    expect(s.cssH).toBe(1080);
+    // 1920x1080 at 2x is 8.3M backing pixels, over the 3.7M theater budget:
+    // capped, but well above the 0.7 the page budget would have left.
+    expect(s.pixelW * s.pixelH).toBeLessThanOrEqual(THEATER_PIXEL_BUDGET * 1.01);
+    expect(s.ratio).toBeGreaterThan(1.3);
+  });
+
+  it('falls back to the map aspect while filling with no height yet', () => {
+    const s = resolveSize(1920, 0, 1.6, 1, true);
+    expect(s.cssH).toBeCloseTo(1200, 6);
   });
 });
