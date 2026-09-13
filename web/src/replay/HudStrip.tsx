@@ -1,13 +1,6 @@
 import { STATE, ZOMBIE_CLASSES, weaponName, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
-import { isSurvivor, slotColor, slotLabel, slotNumber } from './draw';
+import { isSurvivor, maxHealthOf, slotColor, slotLabel, slotNumber } from './draw';
 import { healthBar, portraitFor, statusFlags } from './hud';
-
-/** A tank carries 8000 health and everything else carries 100, so the bar
- *  needs to know which it is looking at or a tank's bar is permanently full.
- *  `cls` 5 is the tank in `m_zombieClass`. */
-function maxHealthFor(p: PlayerSample): number {
-  return !isSurvivor(p) && ZOMBIE_CLASSES[p.cls] === 'tank' ? 8000 : 100;
-}
 
 function Panel(
   { p, header, name, showHp, showGuns }:
@@ -16,7 +9,7 @@ function Panel(
   const present = (p.state & STATE.PRESENT) !== 0;
   const alive = (p.state & STATE.ALIVE) !== 0;
   const survivor = isSurvivor(p);
-  const max = maxHealthFor(p);
+  const max = maxHealthOf(p);
   // The map's health ring reads the identical call. See `healthBar`: the two
   // surfaces used to compute their own answers and disagree about both
   // temporary health and the 300 point incapacitation pool.
