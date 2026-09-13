@@ -2246,6 +2246,12 @@ public void OnRoundIsLive()
 		{
 			if (g_State == MS_Ended) LogUncollectedResult();
 			ResetMatchState();
+			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
+			// forward: this half is live. Left false, Event_RoundEnd returned early
+			// for half 1 of every auto-tracked match (no score, no ROUND_END, no
+			// half-1 calibration), and half 2's read then failed for want of that
+			// calibration, so map 1 stored 0 to 0 (matches 16 and 17, 2026-09-13).
+			g_bHalfWasLive = true;
 			g_bSelfStarted = true;
 			g_iMatchId = 0;
 			GenerateToken(g_sToken, sizeof(g_sToken));
@@ -2471,6 +2477,14 @@ int TryReadRoundScore(bool second)
 	else
 	{
 		survLogical = (g_iRound1Logical != 0) ? (3 - g_iRound1Logical) : 0;
+		// No half-1 calibration (the match started mid-map, or half 1's read
+		// failed): ask the engine directly. Logical team 1 begins as survivors
+		// and the sides swap for half 2, so the flipped flag names them.
+		if (survLogical == 0)
+		{
+			survLogical = view_as<bool>(GameRules_GetProp("m_bAreTeamsFlipped")) ? 2 : 1;
+			LogError("[pug] half-2 score read without half-1 calibration; using m_bAreTeamsFlipped (logical %d)", survLogical);
+		}
 	}
 	int score = (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
 	PugDebug("score read half=%d logical=%d score=%d (round1Logical=%d)",
