@@ -84,11 +84,11 @@ export function ReplayControls(
             legend the map's eight colours have: without it nothing on the
             page ties a colour to a person, and a viewer has to guess which
             blue dot is which. The colour rides on the button's `color`, so
-            `is-on`'s `outline: 1px solid currentColor` picks it up and the
-            swatch inherits it; the label itself is pinned back to --text,
-            because the darkest slot only reaches 3.5:1 on this surface and
-            that is a fine contrast for a dot or a rule and a poor one for
-            text.
+            `.chip--slot.is-on`'s `border-color: currentColor` picks it up
+            and the swatch inherits it; the label itself is pinned back to
+            --text, because the darkest slot only reaches 3.5:1 on this
+            surface and that is a fine contrast for a dot or a rule and a
+            poor one for text.
 
             Every slot gets a button, including one with no roster entry.
             The old `id === ''` skip meant the whole follow row was empty on
