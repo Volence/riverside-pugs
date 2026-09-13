@@ -274,6 +274,8 @@ ConVar g_cvDebug;                        // 1 = verbose state logging to the Sou
 ConVar g_cvPugConfig;                    // config !load_4v4p execs
 ConVar g_cvTeamLock;                     // 0 = Timer_TeamLock never moves anyone (testing)
 ConVar g_cvRosterAtLive;                 // 1 = !load_4v4p records the roster at first go-live, not at the command
+ConVar g_cvAutoTrack;                    // 1 = track any campaign that goes live with enough humans, no command needed
+ConVar g_cvAutoMinPlayers;               // humans on teams needed for auto-track to start a match
 ConVar g_cvRecordDemos;                  // 1 = record a named demo per map during a match
 
 public Plugin myinfo =
@@ -325,6 +327,15 @@ swap sides freely; the orientation vote still runs so scoring attribution keeps 
 1 = create the match now but record whoever is on a side when the first round goes live, so a \
 !mix after the load still lands in the roster.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvAutoTrack = CreateConVar("sm_pug_auto_track", "0",
+		"1 = no command needed: when a round goes live with no match and at least sm_pug_auto_min_players \
+humans on teams, a match starts for this campaign with whoever is on each side as the roster. It ends \
+after the fourth map or the moment a different campaign loads, and the next campaign starts a new one. \
+No config exec and no restart: it tracks the game already being played. Implies no team lock.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvAutoMinPlayers = CreateConVar("sm_pug_auto_min_players", "8",
+		"Humans on survivor or infected needed for sm_pug_auto_track to start a match at go-live.",
+		FCVAR_NOTIFY, true, 2.0, true, 8.0);
 
 	g_cvReplayHz = CreateConVar("sm_pug_replay_hz", "10",
 		"Replay sample rate in Hz. 0 disables recording. Takes effect at the next round.",
@@ -1519,20 +1530,78 @@ public Action Cmd_EndPug(int client, int args)
 		return Plugin_Handled;
 	}
 
-	// Same failsafe as OnMapStart: a 2nd-half round_end may have set this and
-	// the delayed score read may still be in flight. Finalize first so the map
-	// being played cannot vanish from the totals.
-	if (g_bPendingFinalize) FinalizeMap();
+	EndMatchNow("!endpug");
+	return Plugin_Handled;
+}
 
+/** Freeze the live match and report it. The backend follows with sm_pug_dump
+ *  (authoritative) and sm_pug_abort. One helper for the three triggers: the
+ *  finale loading, !endpug, and auto-track seeing a different campaign load. */
+void EndMatchNow(const char[] why)
+{
+	// A 2nd-half round_end may have set this and the delayed score read may
+	// still be in flight. Finalize first so the map being played cannot vanish
+	// from the totals.
+	if (g_bPendingFinalize) FinalizeMap();
 	g_State = MS_Ended;
 	int a, b;
 	TotalScores(a, b);
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
 	EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
-	PugDebug("ended by !endpug: a=%d b=%d winner=%s", a, b, winner);
+	PugDebug("ended (%s): a=%d b=%d winner=%s", why, a, b, winner);
 	PrintToChatAll("[PUG] Match ended: %d - %d. Reporting to the site.", a, b);
-	return Plugin_Handled;
+}
+
+/** Two map names belong to the same campaign when they share the prefix
+ *  before the first digit: l4d_vs_farm01_hilltop and l4d_vs_farm04_barn are
+ *  both "l4d_vs_farm". Good enough for every stock campaign; a custom
+ *  campaign whose maps are not named that way ends a match at each map. */
+bool SameCampaign(const char[] mapA, const char[] mapB)
+{
+	int i = 0;
+	while (mapA[i] != '\0' && mapB[i] != '\0')
+	{
+		bool digitA = (mapA[i] >= '0' && mapA[i] <= '9');
+		bool digitB = (mapB[i] >= '0' && mapB[i] <= '9');
+		if (digitA || digitB) return digitA && digitB && i > 0;
+		if (mapA[i] != mapB[i]) return false;
+		i++;
+	}
+	return mapA[i] == mapB[i];
+}
+
+/** Humans on survivor or infected right now. Bots and spectators do not count. */
+int HumansOnTeams()
+{
+	int n = 0;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
+		int team = GetClientTeam(i);
+		if (team == TEAM_SURVIVOR || team == TEAM_INFECTED) n++;
+	}
+	return n;
+}
+
+/** A result the backend never collected, about to be discarded so the next
+ *  campaign can be tracked. Logged in dump form so it can be fed to
+ *  scripts/recover-match.ts by hand. */
+void LogUncollectedResult()
+{
+	LogError("[PUG] auto-track: match %d (token %s) result was never collected; dump follows", g_iMatchId, g_sToken);
+	LogError("DUMP match=%d skilldetect=%d", g_iMatchId, g_bSkillDetect ? 1 : 0);
+	for (int i = 0; i < g_iMapCount; i++)
+		LogError("MAP map=%s a=%d b=%d", g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
+	for (int i = 0; i < g_iRosterCount; i++)
+		LogError("STAT steamid=%s team=%s sidmg=%d sikill=%d ck=%d ff=%d rev=%d",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
+			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
+	int a, b;
+	TotalScores(a, b);
+	char winner[8];
+	WinnerOf(a, b, winner, sizeof(winner));
+	LogError("END winner=%s a=%d b=%d", winner, a, b);
 }
 
 /** Backend hands back the match id it allocated for a self-started match.
@@ -1991,7 +2060,7 @@ public Action Timer_TeamLock(Handle timer)
 	if (straight == 0 && inverted == 0) return Plugin_Continue;
 	// Testing switch: the vote above still tracks orientation for scoring, but
 	// nobody is moved. Never leave this off for a real ranked match.
-	if (!g_cvTeamLock.BoolValue) return Plugin_Continue;
+	if (!g_cvTeamLock.BoolValue || g_cvAutoTrack.BoolValue) return Plugin_Continue;
 
 	for (int c = 1; c <= MaxClients; c++)
 	{
@@ -2083,19 +2152,22 @@ public void OnMapStart()
 	// this map, so replace it with a match-named one. Ordinal is g_iMapCount,
 	// which FinalizeMap has already advanced for every completed map, so the
 	// demo ordinal lines up with the map ordinal in the dump.
+	// Auto-track: a different campaign loading is how a friend-group night
+	// moves on (!cm to the next campaign after four maps). End the match with
+	// what was played; the next go-live starts a new one. Self-started matches
+	// keep their first map's name in g_sCampaign, which is what makes the
+	// comparison possible. Before StartMatchDemo so no demo for the new
+	// campaign is opened under the old token.
+	if (g_State == MS_Live && g_cvAutoTrack.BoolValue && g_bSelfStarted
+		&& !SameCampaign(g_sCurrentMap, g_sCampaign))
+	{
+		EndMatchNow("campaign changed");
+	}
+
 	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
 
-	if (g_State == MS_Live && L4D_IsMissionFinalMap(true))
-	{
-		// Campaign-minus-finale complete: freeze and report. Backend follows with
-		// sm_pug_dump (authoritative) + sm_pug_abort.
-		g_State = MS_Ended;
-		int a, b;
-		TotalScores(a, b);
-		char winner[8];
-		WinnerOf(a, b, winner, sizeof(winner));
-		EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
-	}
+	// Campaign-minus-finale complete: freeze and report.
+	if (g_State == MS_Live && L4D_IsMissionFinalMap(true)) EndMatchNow("finale loaded");
 }
 
 /** Fill the roster arrays from whoever is on a team right now, WITHOUT starting
@@ -2135,6 +2207,34 @@ void RplFillStandaloneRoster()
 public void OnRoundIsLive()
 {
 	g_bHalfWasLive = true;
+
+	// Auto-track (sm_pug_auto_track): nobody typed anything, a round of an
+	// untracked campaign is going live with a full lobby, so this IS the match.
+	if (g_cvAutoTrack.BoolValue && (g_State == MS_None || g_State == MS_Ended))
+	{
+		// Ended means a result the backend has not collected yet (it aborts the
+		// plugin right after pulling the dump). Same campaign: leave it, this is
+		// a replayed map or the finale. New campaign: the result must not block
+		// the night, so log it in dump form and move on.
+		bool blocked = (g_State == MS_Ended && SameCampaign(g_sCurrentMap, g_sCampaign));
+		if (!blocked && HumansOnTeams() >= g_cvAutoMinPlayers.IntValue)
+		{
+			if (g_State == MS_Ended) LogUncollectedResult();
+			ResetMatchState();
+			g_bSelfStarted = true;
+			g_iMatchId = 0;
+			GenerateToken(g_sToken, sizeof(g_sToken));
+			GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+			strcopy(g_sCampaign, sizeof(g_sCampaign), g_sCurrentMap);
+			g_State = MS_Pending;
+			int n = SnapshotRoster();
+			EmitRosterBurst();
+			StartMatchDemo();
+			PugDebug("auto-track: match started token=%s roster=%d map=%s", g_sToken, n, g_sCurrentMap);
+			PrintToChatAll("[PUG] Tracking this campaign: %d players.", n);
+		}
+	}
+
 	if (g_State == MS_Pending && g_bSelfStarted && g_iRosterCount == 0)
 	{
 		// sm_pug_roster_at_live: the roster is whoever is on a side at this
