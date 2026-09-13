@@ -92,17 +92,34 @@ describe('drawMedallion', () => {
     expect(apexY).toBeLessThan(50 - AVATAR_BASE_R);
   });
 
-  it('a hollow ghost is one stroked arc in the rim colour and nothing else', () => {
+  it('a hollow ghost is a stroked ring plus its class figure and digit in the rim colour, nothing else', () => {
     const { calls, ctx } = stubCtx();
     drawMedallion(ctx, {
       ...base, rim: '#9c5f5a', hollow: true, alpha: 0.35,
       face, pictogram: 'hunter', badge: { text: '1', ink: '#fff' }, yaw: 0,
       ring: '#a85cf0', arc: { perm: 1, temp: 0, color: '#45b39c' }, follow: true,
     });
-    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
+    // The ring and the badge disc.
+    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(2);
     expect(calls.filter((c) => c.fn === 'stroke')).toHaveLength(1);
     expect(calls.find((c) => c.fn === 'stroke')!.stroke).toBe('#9c5f5a');
     expect(calls.find((c) => c.fn === 'stroke')!.alpha).toBe(0.35);
+    // Class figure and badge, both in the rim colour.
+    const pict = calls.find((c) => c.fn === 'fill' && c.args[0] instanceof FakePath2D);
+    expect(pict?.fill).toBe('#9c5f5a');
+    expect(calls.find((c) => c.fn === 'fillText')?.args[0]).toBe('1');
+    // No face, wedge, state ring, arc or follow ring.
+    for (const fn of ['drawImage', 'lineTo', 'clip']) {
+      expect(calls.filter((c) => c.fn === fn)).toHaveLength(0);
+    }
+    expect(calls.filter((c) => c.fn === 'arc' && c.args[2] !== AVATAR_BASE_R && (c.args[2] as number) > 5)).toHaveLength(0);
+  });
+
+  it('a hollow ghost with no figure or badge is one stroked arc and nothing else', () => {
+    const { calls, ctx } = stubCtx();
+    drawMedallion(ctx, { ...base, rim: '#9c5f5a', hollow: true, alpha: 0.35, face, yaw: 0, follow: true });
+    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
+    expect(calls.filter((c) => c.fn === 'stroke')).toHaveLength(1);
     for (const fn of ['fill', 'drawImage', 'fillText', 'lineTo', 'clip']) {
       expect(calls.filter((c) => c.fn === fn)).toHaveLength(0);
     }

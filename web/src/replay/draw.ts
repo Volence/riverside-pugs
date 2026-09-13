@@ -20,6 +20,11 @@ export interface MarkerItem { entry: TimelineEvent; kind: MarkerKind; pos: World
 export interface BurstItem { burst: ActiveBurst; pos: WorldPos; from: WorldPos | null }
 /** The marker tag's own square, in CSS pixels. */
 export const MARKER_SIZE = 12;
+/** The pinned halo: one breath per PIN_PULSE_MS, swinging PIN_HALO_SWING px
+ *  outside a base gap that clears the follow ring's halo (r + 12). */
+export const PIN_PULSE_MS = 900;
+export const PIN_HALO_GAP = 13;
+export const PIN_HALO_SWING = 6;
 /** How dim a tag is once the playhead has not reached it yet: visible enough
  *  to preview what is coming, dim enough that it never competes with what
  *  has actually happened. */
@@ -766,8 +771,11 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       const pk = projectView(a.transform, a.view, k.x, k.y);
       ctx.save();
       ctx.beginPath(); ctx.moveTo(pk.px, pk.py); ctx.lineTo(pv.px, pv.py);
-      ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 4; ctx.stroke();
-      ctx.strokeStyle = slotColor(k.slot); ctx.lineWidth = 2; ctx.stroke();
+      const pulse = 0.5 + 0.5 * Math.sin(a.nowMs / PIN_PULSE_MS * Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 5; ctx.stroke();
+      ctx.globalAlpha = 0.7 + 0.3 * pulse;
+      ctx.strokeStyle = slotColor(k.slot); ctx.lineWidth = 3; ctx.stroke();
+      ctx.globalAlpha = 1;
       ctx.restore();
     }
   }
@@ -800,12 +808,46 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const survivor = isSurvivor(pl);
 
     if (ghost) {
-      // The whole anti-ghosting contract in one call: hollow, muted, no
-      // chrome. drawMedallion ignores every other field when `hollow` is
-      // set.
-      drawMedallion(ctx, { x: p.px, y: p.py, r, rim: GHOST_COLOR, hollow: true, alpha: 0.35 });
+      // A ghost is drawn hollow in one muted colour so it reads as "not on
+      // the field yet", but it is named: class figure and slot digit inside
+      // the ring, the name label beside it, a tooltip on hover. The owner
+      // asked (2026-09-13) why anyone should learn who a ghost is only after
+      // it spawns; the ten second server-side delay on the live page is the
+      // anti-cheat protection, not this drawing. Still withheld: facing, a
+      // health arc, a state ring, the follow ring, and any event position
+      // (eventPosition skips ghosts), so nothing here says where it is about
+      // to strike.
+      drawMedallion(ctx, {
+        x: p.px, y: p.py, r, rim: GHOST_COLOR, hollow: true, alpha: 0.5,
+        pictogram: survivor ? null : pictogramFor(pl.cls),
+        badge: { text: slotNumber(pl.slot), ink: '#ffffff' },
+      });
+      if (a.show.names) {
+        const name = a.names[a.slots[pl.slot]] || slotLabel(pl.slot);
+        labels.push({ ax: p.px + r, ay: p.py, px: p.px + r + LABEL_GAP, py: p.py, text: name, color: GHOST_COLOR });
+      }
+      a.hits?.push({ kind: 'player', px: p.px, py: p.py, r: r + 6, slot: pl.slot });
       ctx.restore();
       continue;
+    }
+
+    // A pinned survivor is the one state a teammate can still fix, so it is
+    // the loud one: a breathing halo in the pinned red under the medallion,
+    // on wall time so it moves while the replay is paused too.
+    if (alive && (pl.state & STATE.PINNED) !== 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(a.nowMs / PIN_PULSE_MS * Math.PI * 2);
+      const haloR = r + PIN_HALO_GAP + PIN_HALO_SWING * pulse;
+      const red = stateRingColor(STATE.ALIVE | STATE.PINNED) ?? '#de4e40';
+      ctx.beginPath();
+      ctx.arc(p.px, p.py, haloR, 0, Math.PI * 2);
+      ctx.fillStyle = red;
+      ctx.globalAlpha = 0.16 + 0.14 * pulse;
+      ctx.fill();
+      ctx.globalAlpha = 0.55 + 0.35 * pulse;
+      ctx.strokeStyle = red;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
 
     const faceUrl = survivor ? portraitFor(pl.cls, a.version, true) : null;

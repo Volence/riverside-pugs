@@ -48,8 +48,11 @@ export function tooltipText(hit: HitItem, c: TooltipContext): string | null {
   }
   const p = c.players.find((pl) => pl.slot === hit.slot);
   if (!p) return null;
-  if ((p.state & STATE.GHOST) !== 0) return 'Unspawned infected';
   const name = c.names[c.slots[p.slot]] || slotLabel(p.slot);
+  if ((p.state & STATE.GHOST) !== 0) {
+    const cls = ZOMBIE_CLASSES[p.cls];
+    return [name, cls ? cap(cls) : null, 'unspawned'].filter(Boolean).join(' · ');
+  }
   const parts = [name];
   if (isSurvivor(p)) {
     if (c.version >= 2 && SURVIVOR_CHARACTERS[p.cls]) parts.push(cap(SURVIVOR_CHARACTERS[p.cls]));

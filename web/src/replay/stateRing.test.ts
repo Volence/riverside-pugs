@@ -57,10 +57,10 @@ describe('state ring palette under dichromacy', () => {
 
   // Two exceptions, by name, and only these two.
   //
-  // Pinned gold against infected slot 6 gold: a gold ring only ever appears
-  // on a survivor, whose rim is cool, and an infected's gold rim never
-  // carries a gold ring. Cross-team adjacency is the one place they meet
-  // and the face inside disambiguates.
+  // Down and hanging gold against infected slot 6 gold: a gold ring only
+  // ever appears on a survivor, whose rim is cool, and an infected's gold
+  // rim never carries a gold ring. Cross-team adjacency is the one place
+  // they meet and the face inside disambiguates.
   //
   // Biled purple against the four survivor rims under protanopia and
   // deuteranopia: a dichromat cannot separate blue from purple at all, it
@@ -68,12 +68,11 @@ describe('state ring palette under dichromacy', () => {
   // channel for that viewer. Under normal vision the purple must still
   // clear every rim.
   it('keeps every state colour at least 15 from every slot rim, with the two named exceptions', () => {
-    const pinned = STATE_RINGS.find((r) => r.key === 'pinned')!;
     const biled = STATE_RINGS.find((r) => r.key === 'biled')!;
     for (const r of STATE_RINGS) {
       for (let slot = 0; slot < 8; slot++) {
         const rim = SLOT_COLORS[slot];
-        if (r === pinned && slot === 6) continue;
+        if ((r.key === 'incap' || r.key === 'ledged') && slot === 6) continue;
         if (r === biled && slot < 4) {
           expect(distance(r.color, rim, 'normal')).toBeGreaterThanOrEqual(15);
           continue;
