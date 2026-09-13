@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'preact/hooks';
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { canvasForAspect } from '../../../src/mapTransform';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
@@ -10,11 +10,14 @@ import { mapAspect, useMapLayer } from './useMapLayer';
 import { useCanvasSize } from './canvasSize';
 import { ReplayCanvas } from './ReplayCanvas';
 import { ReplayControls } from './ReplayControls';
-import { ReplayHud } from './ReplayHud';
+import { ReplayHud, ToggleChips } from './ReplayHud';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
-import { followSlotOf } from './camera';
-import { useCamera } from './useCamera';
+import { TheaterStatus } from './TheaterStatus';
+import { FREE, TEAM, followSlotOf } from './camera';
+import { useCamera, type CameraState } from './useCamera';
+import { useTheater } from './useTheater';
+import { useIdle } from './useIdle';
 import type { TimelineEntry } from './timeline';
 
 /**
@@ -27,6 +30,14 @@ import type { TimelineEntry } from './timeline';
  * one axis only and stretch the bitmap.
  */
 const STAGE_MAX_VH = 78;
+
+/** The camera theater opens with when the viewer was sitting at fit and
+ *  free (spec 7.1: a close camera, follow on by default). A camera the
+ *  viewer had already set up is kept as it is. */
+const THEATER_CAMERA: CameraState = { cam: { zoom: 2, panX: 0, panY: 0 }, follow: TEAM };
+
+/** The events-and-chat column's width in theater (spec 7.1, Hidden chrome). */
+const RAIL_W = 320;
 
 /** The default roster lookup, as one shared object rather than a fresh `{}`
  *  per render. The canvas repaints when its props change, and a route that
@@ -43,8 +54,11 @@ export function Viewer(
   const playback = usePlayback(endMs, { live });
   const [toggles, toggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
-  /** Written by the canvas on every paint. See ReplayCanvasProps.shiftRef. */
-  const shiftRef = useRef({ x: 0, y: 0 });
+
+  // Theater is a layout state of this component (spec 7.1), never a route.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { theater, toggle: toggleTheater } = useTheater(rootRef);
+  const { idle, wake } = useIdle(theater);
 
   /**
    * One interpolated frame per DOM tick, shared by everything made of DOM.
@@ -74,7 +88,9 @@ export function Viewer(
 
   /**
    * The canvas takes the map's own shape instead of one fixed rectangle, and
-   * its backing store follows the element's real width.
+   * its backing store follows the element's real width. In theater the stage
+   * is the viewport, so the element's own shape wins and the fit letterboxes
+   * the map inside it.
    *
    * The captures and the old fixed canvas were both 1.61 landscape, so
    * cropping a map's horizontal void only moved that void into the canvas as
@@ -83,7 +99,7 @@ export function Viewer(
    * has to follow the content box for the crop to buy anything at all.
    */
   const aspect = useMemo(() => mapAspect(header), [header?.map]);
-  const { size, ref: stageRef } = useCanvasSize(aspect);
+  const { size, ref: stageRef } = useCanvasSize(aspect, theater);
   const stageStyle = useMemo(() => ({
     // A single number, not a `w / h` pair, so the layout box and the backing
     // store are computed from the identical value and the browser has nothing
@@ -94,6 +110,8 @@ export function Viewer(
 
   const { transform, view, backdrop } = useMapLayer(header, frames, livePlayers, size);
 
+  /** Written by the canvas on every paint. See ReplayCanvasProps.shiftRef. */
+  const shiftRef = useRef({ x: 0, y: 0 });
   // The fit from useMapLayer is the camera's base; the canvas draws the
   // camera's view. Follow lives here too because following clears the pan.
   const camera = useCamera(view, size, shiftRef);
@@ -102,6 +120,23 @@ export function Viewer(
   // The follow row is the bookmark selector (spec 7.2). '' is an unrostered
   // slot and selects nothing; see tickEntries.
   const selected = followSlot === null || !header ? null : (header.slots[followSlot] ?? '');
+
+  /** Entering theater opens a close camera on the team if the viewer was
+   *  still at its defaults; leaving puts back whatever was there before,
+   *  so a viewer the user had already zoomed is not reset on them. */
+  const before = useRef<CameraState | null>(null);
+  useEffect(() => {
+    if (theater) {
+      const s = camera.snapshot();
+      before.current = s;
+      if (s.cam.zoom === 1 && s.follow.kind === 'free') camera.restore(THEATER_CAMERA);
+    } else if (before.current) {
+      camera.restore(before.current);
+      before.current = null;
+    }
+    // camera.snapshot and camera.restore are stable callbacks; only the
+    // theater flag should drive this.
+  }, [theater]);
 
   const trail = useMemo(() => {
     const out: { x: number; y: number }[] = [];
@@ -126,68 +161,124 @@ export function Viewer(
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
   if (!header) return <div class="replay replay--empty">Loading replay...</div>;
 
+  const railOn = Boolean(timeline) && (toggles.events || toggles.chat);
+  const theaterChip = { on: theater, toggle: toggleTheater };
+  const rootClass = `replay${theater ? ' replay--theater' : ''}${theater && idle ? ' is-idle' : ''}`;
+
+  const canvas = (
+    <div
+      class={`replay__stage${camera.dragging ? ' is-dragging' : ''}`}
+      ref={stageRef}
+      style={theater ? undefined : stageStyle}
+      onWheel={camera.onWheel}
+      onPointerDown={camera.onPointerDown}
+    >
+      <ReplayCanvas
+        transform={transform}
+        view={camera.view}
+        size={size}
+        backdrop={backdrop}
+        trail={trail}
+        frames={frames}
+        timeRef={playback.tRef}
+        show={show}
+        follow={follow}
+        shiftRef={shiftRef}
+        names={names}
+        slots={header.slots}
+      />
+      <div class="replay__vignette" aria-hidden="true" />
+      {!theater && (
+        <ReplayHud
+          tMs={playback.tMs}
+          endMs={endMs}
+          counts={counts}
+          live={live}
+          closed={closed}
+          toggles={toggles}
+          toggle={toggle}
+          theater={theaterChip}
+        />
+      )}
+    </div>
+  );
+
+  const controls = (
+    <ReplayControls
+      playback={playback}
+      endMs={endMs}
+      live={live}
+      follow={follow}
+      setFollow={setFollow}
+      slots={header.slots}
+      names={names}
+      timeline={timeline}
+      zoom={camera.cam.zoom}
+      setZoom={camera.setZoom}
+    />
+  );
+
+  const rail = timeline && railOn && (
+    <TimelineRail
+      timeline={timeline}
+      tMs={playback.tMs}
+      toggles={toggles}
+      seek={playback.seek}
+      names={names}
+      selected={selected}
+    />
+  );
+
+  if (theater) {
+    return (
+      <div
+        class={rootClass}
+        ref={rootRef}
+        style={{ '--rail-w': `${railOn ? RAIL_W : 0}px` } as Record<string, string>}
+        onPointerMove={wake}
+        onFocusIn={wake}
+      >
+        <div class="replay__frame">{canvas}</div>
+        {/* Spec 7.1, Hidden chrome: the toolbar along the top fades when idle.
+            Toggles join it because the in-stage HUD is not drawn here. */}
+        <div class="theater__top">
+          {controls}
+          <div class="theater__toggles">
+            <ToggleChips toggles={toggles} toggle={toggle} theater={theaterChip} />
+          </div>
+        </div>
+        <HudStrip
+          players={livePlayers}
+          header={header}
+          names={names}
+          showHp={toggles.hp}
+          showGuns={toggles.guns}
+          layout="edges"
+        />
+        {rail && <div class="theater__rail">{rail}</div>}
+        <TheaterStatus
+          tMs={playback.tMs}
+          endMs={endMs}
+          counts={counts}
+          zoom={camera.cam.zoom}
+          live={live}
+          closed={closed}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div class="replay">
+    <div class={rootClass} ref={rootRef}>
       <div class="replay__frame">
         <div class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
-        <div
-          class={`replay__stage${camera.dragging ? ' is-dragging' : ''}`}
-          ref={stageRef}
-          style={stageStyle}
-          onWheel={camera.onWheel}
-          onPointerDown={camera.onPointerDown}
-        >
-          <ReplayCanvas
-            transform={transform}
-            view={camera.view}
-            size={size}
-            backdrop={backdrop}
-            trail={trail}
-            frames={frames}
-            timeRef={playback.tRef}
-            show={show}
-            follow={follow}
-            shiftRef={shiftRef}
-            names={names}
-            slots={header.slots}
-          />
-          <div class="replay__vignette" aria-hidden="true" />
-          <ReplayHud
-            tMs={playback.tMs}
-            endMs={endMs}
-            counts={counts}
-            live={live}
-            closed={closed}
-            toggles={toggles}
-            toggle={toggle}
-          />
-        </div>
+        {canvas}
         <div class="replay__sprocket replay__sprocket--r" aria-hidden="true" />
       </div>
 
-      {timeline && (toggles.events || toggles.chat) && (
-        <TimelineRail
-          timeline={timeline}
-          tMs={playback.tMs}
-          toggles={toggles}
-          seek={playback.seek}
-          names={names}
-          selected={selected}
-        />
-      )}
+      {rail}
 
-      <ReplayControls
-        playback={playback}
-        endMs={endMs}
-        live={live}
-        follow={follow}
-        setFollow={setFollow}
-        zoom={camera.cam.zoom}
-        setZoom={camera.setZoom}
-        slots={header.slots}
-        names={names}
-        timeline={timeline}
-      />
+      {controls}
 
       <HudStrip
         players={livePlayers}
