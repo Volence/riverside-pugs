@@ -22,6 +22,10 @@ export const DEFAULT_TOGGLES: Toggles = {
   key: false, showKind: 'all',
 };
 
+/** The boolean-valued toggle keys, i.e. every key except `showKind` (a
+ *  string). `toggle(k)` only ever flips one of these. */
+export type BoolToggle = Exclude<keyof Toggles, 'showKind'>;
+
 const KEY = 'replay.toggles';
 
 /** Merge over the defaults rather than trusting what was stored.
@@ -42,7 +46,7 @@ export function readToggles(raw: string | null): Toggles {
 
 export function useToggles(): [
   Toggles,
-  (k: keyof Toggles) => void,
+  (k: BoolToggle) => void,
   <K extends keyof Toggles>(k: K, v: Toggles[K]) => void,
 ] {
   const [toggles, setToggles] = useState<Toggles>(() => {
@@ -55,7 +59,7 @@ export function useToggles(): [
     }
   });
 
-  const toggle = useCallback((k: keyof Toggles) => {
+  const toggle = useCallback((k: BoolToggle) => {
     setToggles((t) => {
       const next = { ...t, [k]: !t[k] };
       try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* not fatal */ }

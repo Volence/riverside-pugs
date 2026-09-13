@@ -1019,8 +1019,12 @@ body.is-theater { overflow: hidden; }
   transition: opacity 0.4s ease;
   pointer-events: none;
 }
+/* .replay__filters is the Show/for select pair (MarkerFilters); it renders
+   inside .theater__top in theater mode and needs pointer events back like
+   the other controls, or both selects are mouse-dead. */
 .theater__top .replay__controls,
 .theater__top .replay__toolbar,
+.theater__top .replay__filters,
 .theater__toggles { pointer-events: auto; }
 .theater__toggles { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .replay--theater.is-idle .theater__top { opacity: 0.15; }

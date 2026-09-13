@@ -90,6 +90,15 @@ describe('Viewer theater', () => {
     expect(root.style.getPropertyValue('--rail-w')).toBe('0px');
   });
 
+  it('renders the marker filters inside theater__top, where the pointer-events re-enabling rule reaches them', () => {
+    const { container } = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Theater' }));
+    const top = container.querySelector('.theater__top');
+    expect(top).not.toBeNull();
+    const filters = top!.querySelector('.replay__filters');
+    expect(filters).not.toBeNull();
+  });
+
   it('leaves no interactive element inside the edge HUD plates for the stage to fight over pointer events', () => {
     const { container } = mount();
     fireEvent.click(screen.getByRole('button', { name: 'Theater' }));
