@@ -36,4 +36,15 @@ describe('ReplayControls ticks', () => {
     );
     expect(container.querySelector('.scrub__tick')).toBeNull();
   });
+
+  it('sizes the progress fill as a percentage of the round, browser-independently', () => {
+    const { container } = render(
+      <ReplayControls
+        playback={{ ...playback, tMs: 25000 }} endMs={100000} live={false}
+        followSlot={null} setFollowSlot={() => {}} slots={[]} names={{}}
+      />,
+    );
+    const progress = container.querySelector('.scrub__progress') as HTMLElement;
+    expect(progress.style.width).toBe('25%');
+  });
 });

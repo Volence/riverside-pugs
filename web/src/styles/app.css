@@ -931,25 +931,43 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .hudp__bar-temp { background: #c2d9a7; } /* TEMP_HEALTH_COLOR in replay/hud.ts; keep the two in step. */
 .hudp__bar-perm { background: #45b39c; }
 
-/* Filmstrip scrub: a range input styled as a strip of frames, with event and
-   chat ticks laid over it from the timeline. */
-.scrub { position: relative; flex: 1 1 200px; height: 22px; }
+/* Filmstrip scrub: a range input styled as a strip of frames, with progress
+ * and event/chat ticks layered over it from the timeline. The progress fill
+ * is a plain absolutely-positioned div rather than ::-moz-range-progress /
+ * ::-webkit-slider-runnable-track fill tricks, because those two render
+ * completely differently across browsers; a real element looks the same
+ * everywhere. */
+.scrub {
+  position: relative;
+  flex: 1 1 200px;
+  height: 22px;
+  background: repeating-linear-gradient(90deg, #1a1512 0 26px, #241d18 26px 28px);
+}
+.scrub__progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--rule) 70%, transparent);
+  pointer-events: none;
+}
 .scrub__range {
   appearance: none;
   -webkit-appearance: none;
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 22px;
   margin: 0;
   padding: 0;
   border: 0;
-  background: repeating-linear-gradient(90deg, #1a1512 0 26px, #241d18 26px 28px);
+  background: transparent;
   cursor: pointer;
 }
 .scrub__range::-webkit-slider-runnable-track { height: 22px; background: transparent; }
 .scrub__range::-moz-range-track { height: 22px; background: transparent; }
 .scrub__range::-webkit-slider-thumb { -webkit-appearance: none; width: 3px; height: 30px; margin-top: -4px; background: var(--text-bright); border: 0; }
 .scrub__range::-moz-range-thumb { width: 3px; height: 30px; background: var(--text-bright); border: 0; border-radius: 0; }
-.scrub__range::-moz-range-progress { height: 22px; background: color-mix(in srgb, var(--rule) 70%, transparent); }
 .scrub__ticks { position: absolute; inset: 0; pointer-events: none; }
 .scrub__tick { position: absolute; top: 3px; width: 2px; height: 16px; }
 .scrub__tick--event { background: var(--accent); }

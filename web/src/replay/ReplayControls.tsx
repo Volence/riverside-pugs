@@ -45,7 +45,13 @@ export function ReplayControls(
             max={Math.max(endMs, 1)}
             value={playback.tMs}
             aria-label="Round position"
+            aria-valuetext={formatTime(playback.tMs)}
             onInput={(e) => playback.seek(Number((e.target as HTMLInputElement).value))}
+          />
+          <div
+            class="scrub__progress"
+            aria-hidden="true"
+            style={{ width: `${endMs > 0 ? Math.min(100, (playback.tMs / endMs) * 100) : 0}%` }}
           />
           {timeline && endMs > 0 && (
             <div class="scrub__ticks" aria-hidden="true">
