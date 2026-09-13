@@ -22,7 +22,7 @@ describe('tooltipText', () => {
     const hunter = sample({ slot: 4, cls: 3, infected: true, health: 250 });
     expect(tooltipText({ kind: 'player', px: 0, py: 0, r: 1, slot: 4 }, { ...base, players: [hunter] })).toBe('hank · Hunter · 250');
     const ghost = sample({ slot: 4, cls: 3, infected: true, state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST });
-    expect(tooltipText({ kind: 'player', px: 0, py: 0, r: 1, slot: 4 }, { ...base, players: [ghost] })).toBe('Unspawned infected');
+    expect(tooltipText({ kind: 'player', px: 0, py: 0, r: 1, slot: 4 }, { ...base, players: [ghost] })).toBe('hank · Hunter · unspawned');
   });
   it('falls back to the slot label with no roster', () => {
     const players = [sample({ slot: 1, health: 100 })];

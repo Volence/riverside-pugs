@@ -3,7 +3,7 @@ import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W,
   slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget, GHOST_COLOR,
-  playerBaseRadius, MARKER_SIZE,
+  playerBaseRadius, MARKER_SIZE, PIN_HALO_GAP, PIN_HALO_SWING, PIN_PULSE_MS,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
 import { fitView, projectView, type MapTransform, type View } from '../../../src/mapTransform';
@@ -812,17 +812,21 @@ describe('drawScene', () => {
     expect(texts.some((t) => t.text === 'X')).toBe(true);
   });
 
-  it('keeps a ghost hollow: no health ring, glyph, label, number or follow highlight', () => {
+  it('names a ghost but keeps it off the field: ring, class figure, digit and label, no arc, state ring, wedge or follow ring', () => {
     const { transform, view } = identityScene();
     const { calls, texts, ctx } = stubCtx();
     const slots = ['', '', '', '', 'steam1', '', '', ''];
+    const ghostBackdrop = {} as HTMLImageElement;
     drawScene(ctx, {
-      transform, view, backdrop: null, trail: [],
-      // A ghosted infected, pinned, and also the followed slot: every one of
-      // the new pieces of chrome would normally fire for this state, and
-      // none of them may for a ghost.
+      transform, view, trail: [],
+      // A ghosted hunter, pinned, and also the followed slot: every piece of
+      // chrome that says "on the field" would normally fire for this state,
+      // and none of them may for a ghost. What it does get (2026-09-13, the
+      // owner: "why should we know who it is only after they spawn?") is
+      // its identity: class figure, slot digit and name, all in the one
+      // muted ghost colour.
       players: [player({
-        slot: 4, health: 100,
+        slot: 4, health: 100, cls: 3, infected: true,
         state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST | STATE.PINNED,
       })],
       entities: [],
@@ -830,29 +834,36 @@ describe('drawScene', () => {
       width: 1280, height: 794,
       portraits: {}, version: 3,
       names: { steam1: 'Ghost Name' }, slots, followSlot: 4, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
+      // A stub backdrop, so the no-art grid's own lineTo calls stay out of
+      // the wedge count below (the same fixture choice the rock tests make).
+      backdrop: ghostBackdrop,
     });
 
-    // Only the ghost's own hollow outline arc, nothing else. The facing
-    // arrow is gone: a ghost now has no wedge at all.
-    expect(calls.filter((c) => c.fn === 'arc')).toHaveLength(1);
-    expect(texts).toHaveLength(0);
-    // Finding 15: this test was titled "keeps a ghost hollow" and asserted
-    // one arc, which a regression that FILLED that arc would have passed
-    // unchanged, since a filled circle records exactly one arc too. The
-    // background uses fillRect, so `fill` is safe to assert absent: nothing
-    // in a ghost-only scene has any business filling a path.
-    expect(calls.filter((c) => c.fn === 'fill')).toHaveLength(0);
+    const r = AVATAR_BASE_R;
+    const arcs = calls.filter((c) => c.fn === 'arc');
+    // The ring and the badge disc: nothing at the state ring, arc, follow
+    // ring or pinned halo radii.
+    expect(arcs.some((c) => c.args[2] === r)).toBe(true);
+    for (const forbidden of [r + STATE_RING_GAP, r + ARC_GAP, r + FOLLOW_RING_GAP]) {
+      expect(arcs.some((c) => Math.abs(c.args[2] - forbidden) < 0.01)).toBe(false);
+    }
+    expect(arcs.some((c) => c.args[2] > r + FOLLOW_RING_GAP)).toBe(false);
+    // Identity: class figure filled in the ghost colour, the digit, the name.
+    expect(calls.some((c) => c.fn === 'fill' && c.raw[0] instanceof FakePath2D && c.fill === GHOST_COLOR)).toBe(true);
+    expect(texts.map((t) => t.text)).toEqual(expect.arrayContaining(['1', 'Ghost Name']));
+    // No glyph letter: a ghost's PINNED bit means nothing.
+    expect(texts.some((t) => t.text === 'P')).toBe(false);
+    // No face (the one drawImage is the backdrop), no wedge.
+    expect(calls.filter((c) => c.fn === 'drawImage' && c.raw[0] !== ghostBackdrop)).toHaveLength(0);
     expect(calls.filter((c) => c.fn === 'clip')).toHaveLength(0);
-    expect(calls.filter((c) => c.fn === 'drawImage')).toHaveLength(0);
-    // A ghost's only mark is its own hollow outline, in the one ghost
-    // colour. A ring, a highlight or a plate would show up here as a
-    // stroke in some other colour.
+    expect(calls.filter((c) => c.fn === 'lineTo')).toHaveLength(0);
+    // Every stroke the ghost makes is in the one ghost colour.
     const marks = fromAvatar(calls).filter((c) => c.fn === 'stroke');
-    expect(marks).toHaveLength(1);
+    expect(marks.length).toBeGreaterThan(0);
     for (const m of marks) expect(m.stroke).toBe(GHOST_COLOR);
   });
 
-  it('records no hit item for a ghosted player, so a ghost gets no tooltip either', () => {
+  it('records a hit item for a ghosted player, so a ghost gets its tooltip', () => {
     const { transform, view } = identityScene();
     const { ctx } = stubCtx();
     const hits: HitItem[] = [];
@@ -865,7 +876,27 @@ describe('drawScene', () => {
       portraits: {}, version: 3,
       names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
     });
-    expect(hits).toHaveLength(0);
+    expect(hits).toEqual([expect.objectContaining({ kind: 'player', slot: 4 })]);
+  });
+
+  it('breathes a red halo under a pinned survivor, larger at the top of the pulse', () => {
+    const { transform, view } = identityScene();
+    const pinnedRed = stateRingColor(STATE.ALIVE | STATE.PINNED)!;
+    const haloAt = (nowMs: number) => {
+      const { calls, ctx } = stubCtx();
+      drawScene(ctx, {
+        ...baseArgs(transform, view), nowMs,
+        players: [player({ slot: 0, infected: false, health: 80, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED })],
+      });
+      const fills = calls.filter((c) => c.fn === 'fill' && c.fill === pinnedRed);
+      expect(fills.length).toBeGreaterThan(0);
+      const arc = calls.filter((c) => c.fn === 'arc' && c.args[2] >= AVATAR_BASE_R + PIN_HALO_GAP)[0];
+      return arc.args[2];
+    };
+    const low = haloAt(PIN_PULSE_MS * 0.75);   // sin at -1
+    const high = haloAt(PIN_PULSE_MS * 0.25);  // sin at +1
+    expect(high).toBeGreaterThan(low);
+    expect(high - low).toBeCloseTo(PIN_HALO_SWING, 1);
   });
 
   it('draws every ghost in one muted colour, never its own slot colour', () => {
@@ -1341,7 +1372,7 @@ describe('drawScene', () => {
       ],
       pinners: new Map([['A', 'H']]),
     });
-    const line = calls.find((c) => c.fn === 'stroke' && c.stroke === SLOT_COLORS[4] && c.width === 2);
+    const line = calls.find((c) => c.fn === 'stroke' && c.stroke === SLOT_COLORS[4] && c.width === 3);
     expect(line).toBeTruthy();
   });
 

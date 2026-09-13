@@ -20,20 +20,22 @@ export interface StateRing {
  *
  * Colours, measured with colorDistance.ts under normal vision, protanopia
  * and deuteranopia (stateRing.test.ts enforces the numbers):
- * - pinned moved from the site's rating gold #c9a45c to #e0b654 because the
- *   old gold sat 13.2 dE from the alert red, which is two states one letter
- *   apart on a dichromat's map. The new gold is 23 from red and 16 from
- *   orange; it sits 10 from infected slot 6's gold, accepted by name.
- * - incap and ledged share the site red, as the old alert ring did.
+ * - pinned is the site red: red means act now, and a capped or pulled
+ *   survivor is the one state a teammate can still fix (owner, 2026-09-13:
+ *   "something more dramatic if someone's pulled or capped, like red"). It
+ *   also gets a breathing halo in draw.ts.
+ * - incap and ledged share #e0b654, a gold moved off the site's rating gold
+ *   #c9a45c because that sat 13.2 dE from the red. It is 23 from red and 16
+ *   from orange, and 10 from infected slot 6's gold, accepted by name.
  * - burning orange clears every rim by 22 or more.
  * - biled purple clears every rim by 47 or more under normal vision and
  *   collapses onto the survivor blues for a dichromat, which no purple can
  *   avoid; the B glyph carries it there.
  */
 export const STATE_RINGS: readonly StateRing[] = [
-  { key: 'pinned', bit: STATE.PINNED, color: '#e0b654', glyph: 'P', label: 'Pinned' },
-  { key: 'incap', bit: STATE.INCAP, color: '#de4e40', glyph: 'X', label: 'Down' },
-  { key: 'ledged', bit: STATE.LEDGED, color: '#de4e40', glyph: 'L', label: 'Hanging' },
+  { key: 'pinned', bit: STATE.PINNED, color: '#de4e40', glyph: 'P', label: 'Pinned' },
+  { key: 'incap', bit: STATE.INCAP, color: '#e0b654', glyph: 'X', label: 'Down' },
+  { key: 'ledged', bit: STATE.LEDGED, color: '#e0b654', glyph: 'L', label: 'Hanging' },
   { key: 'burning', bit: STATE.BURNING, color: '#ff7a1a', glyph: 'F', label: 'Burning' },
   { key: 'biled', bit: STATE.BILED, color: '#a85cf0', glyph: 'B', label: 'Biled' },
 ];

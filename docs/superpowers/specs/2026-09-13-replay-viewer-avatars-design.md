@@ -372,3 +372,13 @@ designed; the cluster fixture's four overlapping survivors resolve to
 distinct numbered badges (S1 to S4) once zoomed past the overlap. No route
 reported horizontal overflow. Full detail in
 `.superpowers/sdd/2026-09-13-replay-viewer-avatars/task-11-report.md`.
+
+## Amended 2026-09-13 (owner review of the live build)
+
+- Pinned is the red (#de4e40) and gets a breathing halo (PIN_PULSE_MS 900, gap 13, swing 6) plus a
+  thicker pulsing pin line; down and hanging move to the gold (#e0b654). Red means act now.
+- Ghosts are named on every surface: class figure, slot digit and name label in the muted ghost
+  colour, a tooltip "name · Class · unspawned", a hit item. Still withheld: facing, arc, state ring,
+  follow ring, and any event position. The ten second server-side delay is the anti-cheat protection.
+  Section 1's "Ghost" bullet and the anti-ghosting trace are superseded to that extent.
+- Bookmark seeks land 3 s early; durations in the feed and rail read as words ("for 1.3 seconds").

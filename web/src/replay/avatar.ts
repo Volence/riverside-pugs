@@ -61,10 +61,38 @@ export function drawMedallion(ctx: CanvasRenderingContext2D, s: MedallionSpec): 
   ctx.globalAlpha = s.alpha ?? 1;
 
   if (s.hollow) {
+    // An unspawned infected: a hollow ring in the muted ghost colour, and
+    // since 2026-09-13 its class figure and slot digit in that same colour
+    // (the owner: "why should we know who it is only after they spawn?";
+    // the ten second server-side delay is the anti-cheat protection). No
+    // face, wedge, state ring, arc or follow ring: it is not on the field.
     circle(ctx, x, y, r);
     ctx.strokeStyle = s.rim;
     ctx.lineWidth = 2;
     ctx.stroke();
+    if (s.pictogram) {
+      const path = pictogramPath(s.pictogram);
+      if (path) {
+        ctx.save();
+        const scale = (r * 2 * 0.62) / PICTOGRAM_BOX;
+        ctx.translate(x - (PICTOGRAM_BOX * scale) / 2, y - (PICTOGRAM_BOX * scale) / 2);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = s.rim;
+        ctx.fill(path);
+        ctx.restore();
+      }
+    }
+    if (s.badge) {
+      const bx = x + r * Math.SQRT1_2; const by = y + r * Math.SQRT1_2;
+      circle(ctx, bx, by, BADGE_R);
+      ctx.fillStyle = s.rim;
+      ctx.fill();
+      ctx.font = `bold ${BADGE_FONT_PX}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = s.badge.ink;
+      ctx.fillText(s.badge.text, bx, by + 0.5);
+    }
     ctx.restore();
     return;
   }
