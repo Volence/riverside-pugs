@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { canvasForAspect } from '../../../src/mapTransform';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
@@ -21,7 +21,9 @@ import { useCamera, type CameraState } from './useCamera';
 import { useTheater } from './useTheater';
 import { useIdle } from './useIdle';
 import { eventPosition, markerEntries, markerKind, witchStartledAt } from './markers';
-import type { HitItem } from './hitTest';
+import { hitTest, type HitItem } from './hitTest';
+import { tooltipText } from './tooltipText';
+import { ReplayTooltip } from './ReplayTooltip';
 import type { TimelineEntry } from './timeline';
 
 /**
@@ -194,9 +196,16 @@ export function Viewer(
 
   const witchStartled = useMemo(() => witchStartledAt(tl, playback.tMs), [tl, playback.tMs]);
 
-  /** Written by the canvas on every paint, read by a future click handler
-   *  to hit-test the map. See ReplayCanvasProps.hitsRef. */
+  /** Written by the canvas on every paint, read by the pointer handlers
+   *  below to hit-test the map. See ReplayCanvasProps.hitsRef. */
   const hitsRef = useRef<HitItem[]>([]);
+
+  /** What the pointer is over right now, in stage-relative CSS pixels, or
+   *  null when nothing is hit or the pointer has left. Plain state: it
+   *  drives only the tooltip, a sibling DOM node the canvas never reads, so
+   *  a hover changing on every pointermove never touches ReplayCanvas's
+   *  props and never triggers its repaint effect. */
+  const [hover, setHover] = useState<{ x: number; y: number; hit: HitItem } | null>(null);
 
   if (tooNew) {
     return (
@@ -220,6 +229,21 @@ export function Viewer(
       style={theater ? undefined : stageStyle}
       onWheel={camera.onWheel}
       onPointerDown={camera.onPointerDown}
+      onPointerMove={(e) => {
+        if (camera.dragging) { setHover(null); return; }
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+        const s = shiftRef.current;
+        const hit = hitTest(hitsRef.current, x - s.x, y - s.y);
+        setHover(hit ? { x, y, hit } : null);
+      }}
+      onPointerLeave={() => setHover(null)}
+      onClick={() => {
+        if (!hover || hover.hit.kind !== 'marker') return;
+        const seq = hover.hit.seq;
+        const entry = tl.find((t) => t.kind === 'event' && t.seq === seq);
+        if (entry) playback.seek(entry.tMs);
+      }}
     >
       <ReplayCanvas
         transform={transform}
@@ -242,6 +266,15 @@ export function Viewer(
         hitsRef={hitsRef}
       />
       <div class="replay__vignette" aria-hidden="true" />
+      <ReplayTooltip
+        text={hover ? tooltipText(hover.hit, {
+          players: livePlayers, slots: header.slots, names, version: header.version, timeline: tl, witchStartled,
+        }) : null}
+        x={hover?.x ?? 0}
+        y={hover?.y ?? 0}
+        stageW={size.cssW}
+        stageH={size.cssH}
+      />
       {!theater && (
         <ReplayHud
           tMs={playback.tMs}
