@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render } from '@testing-library/preact';
 import { act } from 'preact/test-utils';
-import { useMemo } from 'preact/hooks';
-import { drawScene } from './draw';
+import { useMemo, useRef } from 'preact/hooks';
+import { drawScene, type MarkerItem } from './draw';
 import { ReplayCanvas } from './ReplayCanvas';
 import { FREE } from './camera';
 import { usePlayback, PUBLISH_INTERVAL_MS } from './playback';
 import { bracket, interpolatePlayers } from './interpolate';
 import { fitView, type MapTransform } from '../../../src/mapTransform';
 import { STATE, type Frame } from '../../../src/replayFormat';
+import type { HitItem } from './hitTest';
+import type { TimelineEntry } from './timeline';
 
 /* Render pressure, which is the one thing about this viewer nothing measured.
  *
@@ -44,6 +46,8 @@ const TRAIL: { x: number; y: number }[] = [];
 const NAMES: Record<string, string> = {};
 const PORTRAITS: Record<string, HTMLImageElement> = {};
 const SHIFT = { current: { x: 0, y: 0 } };
+const MARKERS: MarkerItem[] = [];
+const TIMELINE: TimelineEntry[] = [];
 
 const FPS = 60;
 const FRAME_MS = 1000 / FPS;
@@ -122,6 +126,7 @@ function mountViewer(frames: Frame[]) {
 
   function Host() {
     const pb = usePlayback(endMs);
+    const hitsRef = useRef<HitItem[]>([]);
     controls = pb;
     seen.renders++;
     // Stands in for everything the real Viewer derives from `tMs`: the HUD
@@ -148,6 +153,9 @@ function mountViewer(frames: Frame[]) {
         portraits={PORTRAITS}
         version={1}
         witchStartled={false}
+        markers={MARKERS}
+        timeline={TIMELINE}
+        hitsRef={hitsRef}
       />
     );
   }

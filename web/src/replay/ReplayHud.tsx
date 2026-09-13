@@ -1,7 +1,7 @@
 import { formatTime } from './ReplayControls';
 import type { Toggles } from './useToggles';
 
-const TOGGLE_LABELS: [keyof Toggles, string][] = [
+const TOGGLE_LABELS: [Exclude<keyof Toggles, 'showKind'>, string][] = [
   ['hp', 'HP'], ['names', 'Names'], ['guns', 'Guns'], ['events', 'Events'],
   ['chat', 'Chat'], ['ci', 'CI'], ['entities', 'Ents'],
 ];
