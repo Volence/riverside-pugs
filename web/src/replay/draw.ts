@@ -287,11 +287,11 @@ export function sceneCounts(players: PlayerSample[], entities: EntitySample[]): 
       // Same ghost exclusion as the player branch above, and for the same
       // reason: an AI special can be in GHOST state exactly like a rostered
       // one can (the recorder derives both from the same RplIsGhost call),
-      // and a ghost has not spawned yet. This narrows only the count. The
-      // draw loop below is untouched and keeps painting a ghost solid,
-      // because undercounting is safe in every world but a wrongly-hollow
-      // tank marker is not, if the ghost bit ever turns out to be a stale
-      // read rather than a true pre-spawn phase.
+      // and a ghost has not spawned yet. This narrows only the count, and it
+      // now matches what the draw loop below actually shows: a ghost AI
+      // special is painted as a plain dot, not its class medallion, and gets
+      // no tooltip hit item, so a ghost is never counted as a spawned
+      // special that is also easier to read than any other ghost.
       if ((e.state & STATE.GHOST) === 0) specials++;
     }
   }
@@ -661,7 +661,15 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     if (!isCommon && !a.show.entities) continue;
     const p = projectView(a.transform, a.view, e.x, e.y);
     ctx.save();
-    switch (style.shape) {
+    // An unspawned AI special (SMOKER_AI/BOOMER_AI/HUNTER_AI/TANK_AI with the
+    // GHOST bit) has not spawned in yet, exactly like a rostered ghost, and
+    // gets the same anti-ghosting treatment: a plain dot in the entity's own
+    // colour, no pictogram, no medallion chrome, and (below) no tooltip hit
+    // item. `dot` is the shared branch every unstyled shape already fell
+    // through to; a ghost is routed there deliberately instead of being a
+    // special case of its own.
+    const ghost = (e.state & STATE.GHOST) !== 0;
+    switch (ghost ? 'dot' : style.shape) {
       case 'figure': {
         // Head and shoulders: a horde reads as bodies rather than gravel.
         const r = style.radius;
@@ -684,7 +692,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
           x: p.px, y: p.py, r: style.radius,
           rim: startled ? WITCH_STARTLED_COLOR : style.color,
           pictogram: style.pictogram ?? null,
-          face: style.pictogram ? null : a.portraits['/portraits/unknown.png'] ?? null,
+          face: style.pictogram ? null : a.portraits[portraitFor(0, 1, true)] ?? null,
         });
         break;
       }
@@ -723,6 +731,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         }
         break;
       }
+      case 'dot':
       default: {
         ctx.fillStyle = style.color;
         ctx.beginPath();
@@ -731,8 +740,11 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       }
     }
     ctx.restore();
-    // Commons are skipped: a horde of thirty tooltips is noise.
-    if (!isCommon) {
+    // Commons are skipped: a horde of thirty tooltips is noise. A ghost gets
+    // no hit item either, for the same reason a ghost gets no chrome: a
+    // tooltip naming its class would be exactly the information the
+    // anti-ghosting rule exists to withhold.
+    if (!isCommon && !ghost) {
       a.hits?.push({ kind: 'entity', px: p.px, py: p.py, r: style.radius + 4, entityKind: e.kind, health: e.health, state: e.state });
     }
   }

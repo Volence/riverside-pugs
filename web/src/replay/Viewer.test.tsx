@@ -195,7 +195,7 @@ describe('Viewer hover and click-to-seek', () => {
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
-  it('seeks to BOOKMARK_LEAD_MS before the event when a hovered marker tag is clicked', () => {
+  it('seeks to BOOKMARK_LEAD_MS before the event when a marker tag is clicked, with no preceding hover', () => {
     mockHits = [{ kind: 'marker', px: 50, py: 60, r: 8, seq: 9 }];
     mockShift = { x: 0, y: 0 };
     const tl: TimelineEntry[] = [
@@ -203,9 +203,11 @@ describe('Viewer hover and click-to-seek', () => {
     ];
     const { stage, container } = mount(tl);
 
-    fireEvent.pointerMove(stage, { clientX: 50, clientY: 60 });
-    expect(screen.getByRole('tooltip')).toBeTruthy();
-    fireEvent.click(stage);
+    // No pointermove before this click: on touch, `pointerleave` fires after
+    // `pointerup` and before `click`, clearing hover before the click ever
+    // sees it. The seek has to come from the click event's own coordinates,
+    // not from hover state, or a tap would never seek.
+    fireEvent.click(stage, { clientX: 50, clientY: 60 });
 
     const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
     expect(scrub.value).toBe(String(bookmarkSeekMs(8000)));

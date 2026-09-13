@@ -853,7 +853,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 
 .replay__filters { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: 0 var(--sp-2); }
 .replay__filter { display: inline-flex; align-items: center; gap: var(--sp-1); font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.replay__filter select { background: rgba(21, 17, 14, 0.85); color: var(--text); border: 1px solid var(--border); padding: 2px 6px; font: inherit; text-transform: none; letter-spacing: 0; }
+.replay__filter select { background: rgba(21, 17, 14, 0.85); color: var(--text); border: 1px solid var(--border); padding: 2px 6px; font: inherit; text-transform: none; letter-spacing: 0; min-height: 32px; }
 
 /* The film frame: sprocket bands either side of the stage. The stage owns
    the shape (inline aspect-ratio and max-width from the map's content box);
@@ -894,7 +894,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .rhud__live { color: var(--accent); flex-basis: 100%; }
 .rhud__right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); }
 .rhud .chip { min-height: 36px; padding: 2px var(--sp-2); background: rgba(21, 17, 14, 0.85); pointer-events: auto; }
-@media (max-width: 640px) { .rhud__time { font-size: 1.75rem; } .rhud .chip { min-height: 44px; } }
+@media (max-width: 640px) { .rhud__time { font-size: 1.75rem; } .rhud .chip { min-height: 44px; } .replay__filter select { min-height: 44px; font-size: 16px; } }
 
 /* Map key/legend panel (Task 10): a floating card over the stage, built from
    the same tables the canvas draws from. */

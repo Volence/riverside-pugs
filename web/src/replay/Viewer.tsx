@@ -247,9 +247,16 @@ export function Viewer(
         setHover((prev) => (sameHit(prev, hit) ? prev : hit));
       }}
       onPointerLeave={() => setHover((prev) => (prev === null ? prev : null))}
-      onClick={() => {
-        if (!hover || hover.kind !== 'marker') return;
-        const entry = tl.find((t) => t.kind === 'event' && t.seq === hover.seq);
+      onClick={(e) => {
+        // Computed fresh from the click's own coordinates rather than read
+        // off `hover`: on touch, `pointerleave` fires after `pointerup` and
+        // before `click`, clearing hover before the click ever sees it, so a
+        // tap on a marker would never seek. `hover` still drives the tooltip
+        // and nothing else.
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const hit = stageHit(hitsRef.current, e.clientX - rect.left, e.clientY - rect.top, shiftRef.current, camera.dragging);
+        if (!hit || hit.kind !== 'marker') return;
+        const entry = tl.find((t) => t.kind === 'event' && t.seq === hit.seq);
         // Owner feedback: landing exactly on the tag's own moment shows the
         // aftermath rather than the setup, e.g. a death already on the
         // ground instead of the pounce that put them there.

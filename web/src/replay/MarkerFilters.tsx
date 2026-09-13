@@ -38,7 +38,7 @@ export function MarkerFilters(
           }}
         >
           <option value="">Everyone</option>
-          {slots.map((id, i) => id ? <option key={i} value={String(i)}>{names[id] ?? slotLabel(i)}</option> : null)}
+          {slots.map((id, i) => id ? <option key={i} value={String(i)}>{names[id] || slotLabel(i)}</option> : null)}
         </select>
       </label>
     </div>
