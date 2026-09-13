@@ -37,4 +37,10 @@ describe('readToggles', () => {
     expect(readToggles('42')).toEqual(DEFAULT_TOGGLES);
     expect(readToggles('null')).toEqual(DEFAULT_TOGGLES);
   });
+
+  it('defaults key off and showKind to all, and merges old storage without them', () => {
+    expect(DEFAULT_TOGGLES.key).toBe(false);
+    expect(DEFAULT_TOGGLES.showKind).toBe('all');
+    expect(readToggles(JSON.stringify({ hp: false }))).toMatchObject({ hp: false, key: false, showKind: 'all' });
+  });
 });

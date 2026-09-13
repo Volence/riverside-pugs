@@ -8,11 +8,18 @@ export interface Toggles {
   ci: boolean;
   entities: boolean;
   names: boolean;
+  /** The map key/legend panel (Task 10). A boolean toggle, unlike
+   *  `showKind`. */
+  key: boolean;
+  /** The event kind the Show select is narrowed to, or 'all'. Not a
+   *  boolean, so it is excluded from the chip row's toggle keys. */
+  showKind: string;
 }
 
 export const DEFAULT_TOGGLES: Toggles = {
   hp: true, guns: false, events: true, chat: true,
   ci: true, entities: true, names: true,
+  key: false, showKind: 'all',
 };
 
 const KEY = 'replay.toggles';
@@ -33,7 +40,11 @@ export function readToggles(raw: string | null): Toggles {
   }
 }
 
-export function useToggles(): [Toggles, (k: keyof Toggles) => void] {
+export function useToggles(): [
+  Toggles,
+  (k: keyof Toggles) => void,
+  <K extends keyof Toggles>(k: K, v: Toggles[K]) => void,
+] {
   const [toggles, setToggles] = useState<Toggles>(() => {
     try {
       return readToggles(localStorage.getItem(KEY));
@@ -52,5 +63,15 @@ export function useToggles(): [Toggles, (k: keyof Toggles) => void] {
     });
   }, []);
 
-  return [toggles, toggle];
+  /** Set one field to an explicit value, for the non-boolean toggles
+   *  (`showKind`) that a flip cannot express. */
+  const set = useCallback(<K extends keyof Toggles>(k: K, v: Toggles[K]) => {
+    setToggles((t) => {
+      const next = { ...t, [k]: v };
+      try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* not fatal */ }
+      return next;
+    });
+  }, []);
+
+  return [toggles, toggle, set];
 }

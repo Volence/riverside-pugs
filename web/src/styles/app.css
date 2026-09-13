@@ -851,6 +851,10 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 
 .replay { display: flex; flex-direction: column; gap: var(--sp-3); }
 
+.replay__filters { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: 0 var(--sp-2); }
+.replay__filter { display: inline-flex; align-items: center; gap: var(--sp-1); font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.replay__filter select { background: rgba(21, 17, 14, 0.85); color: var(--text); border: 1px solid var(--border); padding: 2px 6px; font: inherit; text-transform: none; letter-spacing: 0; }
+
 /* The film frame: sprocket bands either side of the stage. The stage owns
    the shape (inline aspect-ratio and max-width from the map's content box);
    the frame just wraps it. */

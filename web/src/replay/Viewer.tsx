@@ -4,7 +4,7 @@ import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
 import { usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
-import { isSurvivor, sceneCounts, type ShowFlags } from './draw';
+import { isSurvivor, sceneCounts, type ShowFlags, type MarkerItem } from './draw';
 import { useToggles } from './useToggles';
 import { usePortraits } from './usePortraits';
 import { mapAspect, useMapLayer } from './useMapLayer';
@@ -15,10 +15,13 @@ import { ReplayHud, ToggleChips } from './ReplayHud';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
 import { TheaterStatus } from './TheaterStatus';
+import { MarkerFilters } from './MarkerFilters';
 import { FREE, TEAM, followSlotOf } from './camera';
 import { useCamera, type CameraState } from './useCamera';
 import { useTheater } from './useTheater';
 import { useIdle } from './useIdle';
+import { eventPosition, markerEntries, markerKind, witchStartledAt } from './markers';
+import type { HitItem } from './hitTest';
 import type { TimelineEntry } from './timeline';
 
 /**
@@ -56,6 +59,12 @@ export function isDefaultCamera(s: CameraState): boolean {
  *  new object every render and make a paused viewer repaint for nothing. */
 const NO_NAMES: Record<string, string> = {};
 
+/** The default timeline, as one shared object rather than a fresh `[]` per
+ *  render. Passed to the canvas when there is no timeline, or events are
+ *  toggled off, so its prop identity stays stable across renders (see
+ *  NO_NAMES above, and renderRate.test.tsx). */
+const NO_TIMELINE: TimelineEntry[] = [];
+
 export function Viewer(
   { spec, live = false, names = NO_NAMES, timeline }:
   { spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[] },
@@ -63,7 +72,7 @@ export function Viewer(
   const { header, frames, closed, tooNew, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
-  const [toggles, toggle] = useToggles();
+  const [toggles, toggle, setToggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
   const portraits = usePortraits();
 
@@ -163,6 +172,32 @@ export function Viewer(
     return out;
   }, [frames.length]);
 
+  // A stable empty array when there is no timeline at all, so a route with
+  // none (the by-filename replay page) does not hand the canvas a fresh
+  // array every render. See NO_NAMES.
+  const tl = timeline ?? NO_TIMELINE;
+
+  /** The tags to leave on the map: the timeline filtered by Show/for and
+   *  positioned at each event's moment, in round order. Empty with events
+   *  off, so toggling them off clears the map along with the rail. */
+  const markers = useMemo<MarkerItem[]>(() => {
+    if (!header || tl.length === 0 || !toggles.events) return [];
+    const list = markerEntries(tl, toggles.showKind, selected);
+    const out: MarkerItem[] = [];
+    list.forEach((entry, i) => {
+      const pos = eventPosition(frames, header.slots, entry);
+      const kind = markerKind(entry.event);
+      if (pos && kind) out.push({ entry, kind, pos, index: selected ? i + 1 : null });
+    });
+    return out;
+  }, [tl, toggles.showKind, toggles.events, selected, frames.length, header?.slots]);
+
+  const witchStartled = useMemo(() => witchStartledAt(tl, playback.tMs), [tl, playback.tMs]);
+
+  /** Written by the canvas on every paint, read by a future click handler
+   *  to hit-test the map. See ReplayCanvasProps.hitsRef. */
+  const hitsRef = useRef<HitItem[]>([]);
+
   if (tooNew) {
     return (
       <div class="replay replay--empty">
@@ -201,7 +236,10 @@ export function Viewer(
         slots={header.slots}
         portraits={portraits}
         version={header.version}
-        witchStartled={false}
+        witchStartled={witchStartled}
+        markers={markers}
+        timeline={toggles.events ? tl : NO_TIMELINE}
+        hitsRef={hitsRef}
       />
       <div class="replay__vignette" aria-hidden="true" />
       {!theater && (
@@ -245,6 +283,18 @@ export function Viewer(
     />
   );
 
+  const filters = timeline && (
+    <MarkerFilters
+      timeline={tl}
+      showKind={toggles.showKind}
+      setShowKind={(k) => setToggle('showKind', k)}
+      slots={header.slots}
+      names={names}
+      follow={follow}
+      setFollow={setFollow}
+    />
+  );
+
   if (theater) {
     return (
       <div
@@ -259,6 +309,7 @@ export function Viewer(
             Toggles join it because the in-stage HUD is not drawn here. */}
         <div class="theater__top">
           {controls}
+          {filters}
           <div class="theater__toggles">
             <ToggleChips toggles={toggles} toggle={toggle} theater={theaterChip} />
           </div>
@@ -286,6 +337,7 @@ export function Viewer(
 
   return (
     <div class={rootClass} ref={rootRef}>
+      {filters}
       <div class="replay__frame">
         <div key="l" class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
         {canvas}

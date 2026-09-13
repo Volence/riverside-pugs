@@ -2,9 +2,12 @@ import { useEffect, useRef } from 'preact/hooks';
 import { projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import type { Frame } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
-import { drawScene, type ShowFlags } from './draw';
+import { drawScene, type ShowFlags, type MarkerItem, type BurstItem } from './draw';
 import { followPoint, followSlotOf, type Follow } from './camera';
 import type { CanvasSize } from './canvasSize';
+import { actorPosition, eventPosition, pinnersAt, BurstClock } from './markers';
+import type { TimelineEntry } from './timeline';
+import type { HitItem } from './hitTest';
 
 export interface ReplayCanvasProps {
   transform: MapTransform | null;
@@ -34,6 +37,17 @@ export interface ReplayCanvasProps {
   /** A witch_aggro has happened with no witch_killed after it, threaded to
    *  `drawScene` so her rim turns the alert red. */
   witchStartled: boolean;
+  /** Event tags to leave on the map, already filtered and positioned by the
+   *  Viewer from the timeline, the Show/for filters and the playhead. */
+  markers: MarkerItem[];
+  /** The full timeline, for the burst clock to find newly crossed events and
+   *  for `pinnersAt` to find who has whom pinned right now. Empty when
+   *  events are toggled off, so bursts and pins vanish with the tags. */
+  timeline: TimelineEntry[];
+  /** Filled with what was drawn where on the last paint, in draw order, so
+   *  a click on the canvas can hit-test against it. Owned by the Viewer;
+   *  this component only writes to it. */
+  hitsRef: { current: HitItem[] };
 }
 
 /**
@@ -60,7 +74,7 @@ export interface ReplayCanvasProps {
  *   hardcoded 1280 here would put the follow camera's centre and the drawn
  *   scene's extent somewhere other than the middle and edges of the canvas.
  */
-function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
+function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps, clock: BurstClock): void {
   const ctx = canvas?.getContext('2d');
   if (!canvas || !ctx || !p.transform) return;
 
@@ -70,6 +84,20 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
   const pair = bracket(p.frames, p.timeRef.current);
   const players = pair ? interpolatePlayers(pair.a, pair.b, pair.f) : [];
   const entities = pair ? interpolateEntities(pair.a, pair.b, pair.f) : [];
+
+  const t = p.timeRef.current;
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const active = clock.advance(t, now, p.timeline);
+  const bursts: BurstItem[] = [];
+  for (const b of active) {
+    const pos = eventPosition(p.frames, slots, b.entry);
+    if (!pos) continue;
+    const from = b.style.kind === 'flash' || b.style.kind === 'line'
+      ? actorPosition(p.frames, slots, b.entry) : null;
+    bursts.push({ burst: b, pos, from });
+  }
+  const pinners = pinnersAt(p.timeline, t);
+  const hits: HitItem[] = [];
 
   // Reset in device space before anything else. Without this, a follow
   // camera's translate below would shift drawScene's own internal clear by
@@ -114,15 +142,15 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
     portraits,
     version,
     witchStartled,
-    // Interim: Task 8 wires the real markers, bursts and pinners through
-    // from the timeline and the burst clock.
-    markers: [],
-    bursts: [],
-    pinners: new Map(),
-    tMs: p.timeRef.current,
-    nowMs: 0,
+    markers: p.markers,
+    bursts,
+    pinners,
+    tMs: t,
+    nowMs: now,
+    hits,
   });
   ctx.restore();
+  p.hitsRef.current = hits;
 }
 
 /**
@@ -146,6 +174,11 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
   const propsRef = useRef(props);
   propsRef.current = props;
 
+  /** Owned here, not by the Viewer: it tracks the previous playhead to spot
+   *  a crossing, which only makes sense kept alongside the loop that reads
+   *  the clock every frame. */
+  const clock = useRef(new BurstClock());
+
   /** Repaint when something OTHER than the clock changed what a frame should
    *  look like: a toggle, a resize, a newly decoded backdrop, the frames
    *  arriving. Drawn here and not merely flagged for the loop because
@@ -155,7 +188,7 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
    *  they do not fight: the loop skips any frame whose time it has already
    *  drawn, so a paused viewer repaints exactly once per change. */
   useEffect(() => {
-    paint(canvasRef.current, propsRef.current);
+    paint(canvasRef.current, propsRef.current, clock.current);
     // `show` is a fresh object every render, so its flags are listed
     // individually rather than the object itself, and `size` is listed by
     // field for the same reason. `frames` belongs here because a live round
@@ -164,7 +197,7 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
     props.frames, props.transform, props.view, props.backdrop, props.trail,
     props.show.ci, props.show.entities, props.show.names,
     props.follow, props.names, props.slots, props.portraits, props.version,
-    props.witchStartled,
+    props.witchStartled, props.markers, props.timeline,
     size.cssW, size.cssH, size.pixelW, size.pixelH, size.ratio,
   ]);
 
@@ -183,7 +216,7 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
       // change to hang that on.
       if (t !== drawnAt) {
         drawnAt = t;
-        paint(canvasRef.current, p);
+        paint(canvasRef.current, p, clock.current);
       }
       raf = requestAnimationFrame(frame);
     };
