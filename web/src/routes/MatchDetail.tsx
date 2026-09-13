@@ -78,6 +78,28 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   // on it.
   const statDefs = data.statDefs ?? [];
 
+  // rounds is also a property of the server build, not of the match: a current
+  // server always returns the field, using an empty array (not an omitted
+  // field) to mean "round capture did not exist when this match was played".
+  // Computed here, ahead of everything below that reads it, because the versus
+  // header eyebrows below need the earliest round and the per-map round
+  // sections further down need the full list.
+  const rounds = data.rounds ?? [];
+  // The versus header eyebrows name who played which side FIRST, so they must
+  // come from the earliest round (lowest ordinal, then lowest half), not just
+  // any round. An unreliable first round means attribution cannot be trusted,
+  // so both eyebrows fall back to VersusHeader's plain "Team A"/"Team B"
+  // defaults rather than asserting a side that might be wrong. Live matches
+  // have no round data at all (their payload carries no survTeam), so they
+  // always take the defaults too.
+  const firstRound = [...rounds].sort((a, b) => a.ordinal - b.ordinal || a.half - b.half)[0];
+  const eyebrowA = firstRound?.reliable
+    ? `Team A · ${firstRound.survTeam === 'a' ? 'survivors' : 'infected'} first`
+    : undefined;
+  const eyebrowB = firstRound?.reliable
+    ? `Team B · ${firstRound.survTeam === 'b' ? 'survivors' : 'infected'} first`
+    : undefined;
+
   // The two teams' stats, split into what each did as survivors versus as
   // infected. This is the whole point of the headline cards below: a raw team
   // total mixes survivor performance with infected performance, which are the
@@ -139,12 +161,6 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     }));
   const hasMapStats = maps.some((mp) => Object.keys(mp.stats ?? {}).length > 0);
 
-  // rounds is also a property of the server build, not of the match: a current
-  // server always returns the field, using an empty array (not an omitted
-  // field) to mean "round capture did not exist when this match was played".
-  // This guard, like statDefs above, is for new frontend JS running against an
-  // older server that omits the field entirely; roundsMessage treats the
-  // empty-array case as "never captured" regardless of which path produced it.
   // Derived from the event feed rather than the dump: latency is a property of
   // a pinned/cleared pair, not a counter any player accumulates.
   // Names come from the match roster, not from the event, because the feed
@@ -154,7 +170,6 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     ...r, name: players.find((p) => p.steamid === r.steamid)?.name ?? r.name,
   }));
 
-  const rounds = data.rounds ?? [];
   const roundsMsg = roundsMessage(rounds);
   const roundOrdinals = Array.from(new Set(rounds.map((r) => r.ordinal))).sort((a, b) => a - b);
   const roundsForMap = (ordinal: number) =>
@@ -186,6 +201,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
         teamB={teamPlayers('b').map((p) => p.name)}
         scoreA={match.teamAScore}
         scoreB={match.teamBScore}
+        eyebrowA={eyebrowA}
+        eyebrowB={eyebrowB}
       />
 
       <div class="stack">

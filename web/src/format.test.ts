@@ -331,11 +331,11 @@ describe('fmtLatency', () => {
 import { campaignTint } from './format';
 
 describe('campaignTint', () => {
-  it('returns the hand-picked token for the four L4D1 campaigns', () => {
-    expect(campaignTint('no_mercy')).toBe('var(--c-no-mercy)');
-    expect(campaignTint('death_toll')).toBe('var(--c-death-toll)');
-    expect(campaignTint('dead_air')).toBe('var(--c-dead-air)');
-    expect(campaignTint('blood_harvest')).toBe('var(--c-blood-harvest)');
+  it('returns the hand-picked token for the four L4D1 campaigns, with a hashed fallback', () => {
+    expect(campaignTint('no_mercy')).toMatch(/^var\(--c-no-mercy, oklch\(/);
+    expect(campaignTint('death_toll')).toMatch(/^var\(--c-death-toll, oklch\(/);
+    expect(campaignTint('dead_air')).toMatch(/^var\(--c-dead-air, oklch\(/);
+    expect(campaignTint('blood_harvest')).toMatch(/^var\(--c-blood-harvest, oklch\(/);
   });
 
   it('gives an unknown campaign a stable oklch tint at the shared weight', () => {
