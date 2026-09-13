@@ -76,7 +76,13 @@ export interface ReplayCanvasProps {
  */
 function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps, clock: BurstClock): void {
   const ctx = canvas?.getContext('2d');
-  if (!canvas || !ctx || !p.transform) return;
+  if (!canvas || !ctx || !p.transform) {
+    // No scene was drawn, so the previous paint's hit items no longer match
+    // anything on screen; a click before the next real paint must not hit-test
+    // against stale coordinates.
+    p.hitsRef.current = [];
+    return;
+  }
 
   const {
     transform, view, size, backdrop, trail, show, follow, names, slots, portraits, version, witchStartled,

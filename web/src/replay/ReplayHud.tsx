@@ -1,7 +1,7 @@
 import { formatTime } from './ReplayControls';
-import type { Toggles } from './useToggles';
+import type { BoolToggle, Toggles } from './useToggles';
 
-const TOGGLE_LABELS: [Exclude<keyof Toggles, 'showKind'>, string][] = [
+const TOGGLE_LABELS: [BoolToggle, string][] = [
   ['hp', 'HP'], ['names', 'Names'], ['guns', 'Guns'], ['events', 'Events'],
   ['chat', 'Chat'], ['ci', 'CI'], ['entities', 'Ents'],
 ];
@@ -13,7 +13,7 @@ export interface TheaterChip { on: boolean; toggle(): void }
  *  the top bar, which is why they are their own component. */
 export function ToggleChips(
   { toggles, toggle, theater }:
-  { toggles: Toggles; toggle: (k: keyof Toggles) => void; theater?: TheaterChip },
+  { toggles: Toggles; toggle: (k: BoolToggle) => void; theater?: TheaterChip },
 ) {
   return (
     <>
@@ -45,7 +45,7 @@ export function ReplayHud(
     live: boolean;
     closed: boolean;
     toggles: Toggles;
-    toggle: (k: keyof Toggles) => void;
+    toggle: (k: BoolToggle) => void;
     theater?: TheaterChip;
   },
 ) {
