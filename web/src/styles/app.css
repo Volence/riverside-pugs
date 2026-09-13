@@ -989,3 +989,69 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .scrub__tick--chat { --tick: var(--text-muted); opacity: 0.6; }
 .scrub__tick--did { --tick: var(--win); }
 .scrub__tick--suffered { --tick: var(--accent); }
+
+/* ---------- theater (spec 7.1) ---------- */
+
+/* The viewer takes the viewport; the page behind keeps its scroll position
+   because nothing about it moved, it only stopped scrolling. */
+body.is-theater { overflow: hidden; }
+.replay--theater { position: fixed; inset: 0; z-index: 50; gap: 0; background: var(--bg); }
+.replay--theater .replay__frame { position: absolute; inset: 0; border: 0; background: var(--bg); }
+.replay--theater .replay__stage { width: 100%; height: 100%; }
+.replay--theater .replay__vignette { box-shadow: inset 0 0 160px rgba(0, 0, 0, 0.8); }
+
+/* Hidden chrome: the toolbar fades after two seconds without pointer
+   movement (useIdle) and comes back on movement or keyboard focus. */
+.theater__top {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  background: linear-gradient(rgba(5, 4, 3, 0.9), rgba(5, 4, 3, 0));
+  transition: opacity 0.4s ease;
+}
+.theater__toggles { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.replay--theater.is-idle .theater__top { opacity: 0.15; }
+.replay--theater.is-idle .theater__top:hover,
+.replay--theater.is-idle .theater__top:focus-within { opacity: 1; }
+.replay--theater .chip { background: rgba(5, 4, 3, 0.78); }
+
+/* Edge HUD: survivors down the left, infected down the right, as plates
+   over the map. The right column sits inboard of the rail when the rail is
+   open (`--rail-w` is set on the root), so the feed pushes the cards in
+   rather than covering them. */
+.hud-edge {
+  position: absolute; top: 150px; bottom: 60px; z-index: 2;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  width: 240px; padding: var(--sp-2); overflow: hidden; pointer-events: none;
+}
+.hud-edge--l { left: 0; }
+.hud-edge--r { right: var(--rail-w, 0px); transition: right 0.25s ease; }
+.hud-edge .hudp { background: rgba(5, 4, 3, 0.78); border-color: rgba(255, 255, 255, 0.06); min-width: 0; flex: none; pointer-events: auto; }
+.hud-edge .hudp--empty { display: none; }
+
+/* The events and chat column. */
+.theater__rail {
+  position: absolute; top: 150px; right: 0; bottom: 60px; z-index: 2;
+  width: 320px; padding: var(--sp-2); overflow-y: auto;
+  background: rgba(5, 4, 3, 0.85); border-left: 1px solid var(--border);
+}
+.theater__rail .replay__rail { max-height: none; }
+
+/* Status line across the bottom. */
+.tstat {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  display: flex; align-items: baseline; gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text); background: linear-gradient(rgba(5, 4, 3, 0), rgba(5, 4, 3, 0.9));
+  pointer-events: none;
+}
+.tstat__time { font-family: var(--font-display); font-size: 1.75rem; line-height: 1; color: var(--text-bright); letter-spacing: 0; text-shadow: 0 3px 0 #000; }
+.tstat__item--win { color: var(--win); }
+.tstat__item--live { color: var(--accent); }
+
+@media (max-width: 900px) {
+  .hud-edge { width: 170px; }
+  .hud-edge .hudp__face { display: none; }
+  .theater__rail { width: 260px; }
+}
