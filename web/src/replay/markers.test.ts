@@ -90,7 +90,19 @@ describe('eventPosition', () => {
   it('treats an empty slot record as unresolvable', () => {
     const empty = frame(0, [0, 0, 0, 0, 0, 0, 0, 0]);
     empty.players[2].state = 0;
-    expect(eventPosition([empty], SLOTS, ev(1, 0, 'boom', 'F', 'C'))).toBeNull();
+    expect(eventPosition([empty], SLOTS, ev(1, 0, 'boom', 'nobody', 'C'))).toBeNull();
+    // With the same frame, a rostered and present actor is a valid fallback.
+    expect(eventPosition([empty], SLOTS, ev(1, 0, 'boom', 'F', 'C'))).toEqual({ x: 0, y: 50, z: 0 });
+  });
+  it('resolves a legitimately present player sitting at world x=0', () => {
+    expect(eventPosition([frame(0, [0, 0, 0, 0, 0, 0, 0, 0])], SLOTS, ev(1, 0, 'car_alarm', 'B', null))).toEqual({ x: 0, y: 10, z: 0 });
+  });
+  it('skips a ghosted slot: falls through from a ghost target, resolves nothing from a ghost actor', () => {
+    const withGhost = frame(0, [0, 100, 200, 300, 400, 500, 600, 700]);
+    withGhost.players[2].state = STATE.PRESENT | STATE.ALIVE | STATE.GHOST;
+    expect(eventPosition([withGhost], SLOTS, ev(1, 0, 'boom', 'F', 'C'))).toEqual({ x: 500, y: 50, z: 0 });
+    withGhost.players[5].state = STATE.PRESENT | STATE.ALIVE | STATE.GHOST;
+    expect(eventPosition([withGhost], SLOTS, ev(1, 0, 'car_alarm', 'F', null))).toBeNull();
   });
   it('actorPosition returns the actor position only', () => {
     expect(actorPosition(FR, SLOTS, ev(1, 500, 'dp', 'H', 'C'))).toEqual({ x: 705, y: 70, z: 0 });
@@ -108,6 +120,10 @@ describe('pinnersAt', () => {
     expect([...pinnersAt(P, 1600)]).toEqual([['A', 'H'], ['C', 'S']]);
     expect([...pinnersAt(P, 3500)]).toEqual([['A', 'H'], ['C', 'S']]);
     expect([...pinnersAt(P, 500)]).toEqual([]);
+  });
+  it('picks the pinner by highest seq regardless of input order', () => {
+    const reversed = [...P].reverse();
+    expect([...pinnersAt(reversed, 3500)]).toEqual([...pinnersAt(P, 3500)]);
   });
 });
 
