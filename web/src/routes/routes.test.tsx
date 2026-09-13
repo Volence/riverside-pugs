@@ -702,7 +702,8 @@ describe('clear latency surfaces', () => {
         maps={[{ ordinal: 0, map: 'l4d_hospital01_apartment' }]}
       />,
     );
-    expect(container.textContent).toContain('0.9s');
+    expect(container.textContent).toContain('cleared zoey from tami after 0.9 seconds');
+    expect(container.textContent).not.toMatch(/\d\.\ds\b/);
   });
 
   it('reads a spawn as its class, not "spawned as for 3"', () => {
@@ -726,8 +727,8 @@ describe('clear latency surfaces', () => {
       />,
     );
     const text = container.textContent ?? '';
-    expect(text).toContain('from tami');
-    expect(text).toContain('4.2s, cleared by mal');
+    expect(text).toContain('from tami after 4.2 seconds');
+    expect(text).toContain('for 4.2 seconds, cleared by mal');
     expect(text).toContain('(smoker)');
   });
 
@@ -735,9 +736,9 @@ describe('clear latency surfaces', () => {
     const { container } = render(
       <EventFeed events={[ce(1, 'cleared', 'mal', null, 1910)]} maps={[]} />,
     );
-    // The latency renders into .feed__val, which is also the value slot; this
-    // event has value 0, so any .feed__val at all would be a fabricated timing.
-    expect(container.querySelector('.feed__val')).toBeNull();
+    // Nothing to pair with, so no "from" and no duration may be invented.
+    expect(container.querySelector('.feed__detail')).toBeNull();
+    expect(container.textContent).not.toContain('seconds');
   });
 
   it('shows a clear latency panel on the match page', async () => {
