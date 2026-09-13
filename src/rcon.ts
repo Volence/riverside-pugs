@@ -12,16 +12,29 @@ export interface RconOpts {
 }
 
 /**
- * Minimal Source RCON (TCP) client. Each `exec` resolves with the body of the
- * RESPONSE_VALUE packet whose id matches the request. Our commands return a
- * single small (<4 KB) packet, so multi-packet fragmentation is intentionally
- * not handled here.
+ * Minimal Source RCON (TCP) client.
+ *
+ * A response longer than about 4 KB arrives as several RESPONSE_VALUE packets
+ * sharing the request id, and nothing in the protocol marks the last one. The
+ * standard trick is to follow the command with an empty RESPONSE_VALUE packet
+ * carrying its own id: the server answers requests in order, so its (empty)
+ * answer to that marker means every fragment of the real response is already
+ * in. `exec` collects fragments until the marker's answer lands.
+ *
+ * This was a real bug, not a theoretical one: sm_pug_dump grew past 4 KB once
+ * skill_detect stats were included (eight SKILL lines), the first packet had
+ * no END line, and match 14 on 2026-09-13 sat "live" with its result stuck in
+ * the plugin until the dump was pulled by hand.
  */
 export class RconClient {
   private sock: net.Socket | null = null;
   private buf: Buffer = Buffer.alloc(0);
   private nextId = 1;
   private pending = new Map<number, { resolve: (body: string) => void; reject: (e: Error) => void }>();
+  /** Fragments received so far for an in-flight command, by command id. */
+  private parts = new Map<number, string[]>();
+  /** Marker id -> command id it terminates. */
+  private markers = new Map<number, number>();
   private readonly timeoutMs: number;
 
   constructor(private opts: RconOpts) {
@@ -62,10 +75,24 @@ export class RconClient {
         continue;
       }
       if (p.type === SERVERDATA_RESPONSE_VALUE) {
-        const waiter = this.pending.get(p.id);
-        if (waiter) {
-          this.pending.delete(p.id);
-          waiter.resolve(p.body);
+        const cmdId = this.markers.get(p.id);
+        if (cmdId !== undefined) {
+          // The marker's answer: the command's response is complete. Source
+          // sends a second, junk-bodied packet for the same marker id right
+          // after; the marker is forgotten here so that one is dropped below.
+          this.markers.delete(p.id);
+          const waiter = this.pending.get(cmdId);
+          const body = (this.parts.get(cmdId) ?? []).join('');
+          this.parts.delete(cmdId);
+          if (waiter) {
+            this.pending.delete(cmdId);
+            waiter.resolve(body);
+          }
+          continue;
+        }
+        if (this.pending.has(p.id)) {
+          const list = this.parts.get(p.id);
+          if (list) list.push(p.body); else this.parts.set(p.id, [p.body]);
         }
       }
     }
@@ -74,16 +101,21 @@ export class RconClient {
   exec(cmd: string): Promise<string> {
     if (!this.sock) return Promise.reject(new Error('rcon not connected'));
     const id = this.nextId++;
+    const markerId = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.parts.delete(id);
+        this.markers.delete(markerId);
         reject(new Error(`rcon exec timeout: ${cmd}`));
       }, this.timeoutMs);
       this.pending.set(id, {
         resolve: (body) => { clearTimeout(timer); resolve(body); },
         reject: (e) => { clearTimeout(timer); reject(e); },
       });
+      this.markers.set(markerId, id);
       this.sock!.write(encodePacket(id, SERVERDATA_EXECCOMMAND, cmd));
+      this.sock!.write(encodePacket(markerId, SERVERDATA_RESPONSE_VALUE, ''));
     });
   }
 
@@ -92,5 +124,7 @@ export class RconClient {
     this.sock = null;
     for (const [, w] of this.pending) w.reject(new Error('rcon closed'));
     this.pending.clear();
+    this.parts.clear();
+    this.markers.clear();
   }
 }
