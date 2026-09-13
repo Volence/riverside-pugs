@@ -6,10 +6,17 @@ export function ReplayTooltip(
   if (!text) return null;
   const flipX = x > stageW - 180;
   const flipY = y < 40;
+  // Clamped into the stage after the flip is chosen, not instead of it: the
+  // flip picks which side of the anchor the tip grows from, and the clamp
+  // only stops that anchor itself from sitting off either edge of a narrow
+  // or heavily panned stage.
+  const rawLeft = flipX ? x - 12 : x + 12;
+  const left = Math.max(4, Math.min(rawLeft, stageW - 4));
   const style = {
-    left: `${flipX ? x - 12 : x + 12}px`,
+    left: `${left}px`,
     top: `${flipY ? y + 14 : y - 10}px`,
     transform: `translate(${flipX ? '-100%' : '0'}, ${flipY ? '0' : '-100%'})`,
+    maxWidth: `min(260px, ${stageW - 8}px)`,
   };
   return <div class="replay__tip" role="tooltip" style={style}>{text}</div>;
 }

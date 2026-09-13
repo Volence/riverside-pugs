@@ -33,7 +33,14 @@ export function KeyPanel({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div class="key" role="dialog" aria-label="Map key" onPointerDown={(e) => e.stopPropagation()}>
+    <div
+      class="key"
+      role="dialog"
+      aria-label="Map key"
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerMove={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div class="key__head">
         <span class="label">Key</span>
         <button type="button" class="chip" onClick={onClose} aria-label="Close key">Close</button>

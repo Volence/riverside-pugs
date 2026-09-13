@@ -110,15 +110,20 @@ describe('eventPosition', () => {
 });
 
 describe('pinnersAt', () => {
+  // Seq 4's actor is a THIRD pinner ('X'), distinct from seq 1's ('H'), so a
+  // buggy "last seen in iteration order" implementation and the correct
+  // "highest seq wins" one disagree once the input is reversed: both give
+  // 'X' for seq-order input, but only "highest seq" still gives 'X' once
+  // seq 4 is processed first instead of last.
   const P: TimelineEntry[] = [
     ev(1, 1000, 'pinned', 'H', 'A'),
     ev(2, 1500, 'pinned', 'S', 'C'),
     ev(3, 2000, 'cleared', 'B', 'A'),
-    ev(4, 3000, 'pinned', 'H', 'A'),
+    ev(4, 3000, 'pinned', 'X', 'A'),
   ];
   it('names the most recent pinner of each victim at or before the time', () => {
     expect([...pinnersAt(P, 1600)]).toEqual([['A', 'H'], ['C', 'S']]);
-    expect([...pinnersAt(P, 3500)]).toEqual([['A', 'H'], ['C', 'S']]);
+    expect([...pinnersAt(P, 3500)]).toEqual([['A', 'X'], ['C', 'S']]);
     expect([...pinnersAt(P, 500)]).toEqual([]);
   });
   it('picks the pinner by highest seq regardless of input order', () => {

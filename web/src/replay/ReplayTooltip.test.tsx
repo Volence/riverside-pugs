@@ -20,4 +20,20 @@ describe('ReplayTooltip', () => {
     const el = getByRole('tooltip') as HTMLElement;
     expect(el.style.transform).toContain('-100%');
   });
+
+  it('clamps the anchor so a long tooltip near the right edge never leaves the stage', () => {
+    const stageW = 800;
+    const { getByRole } = render(
+      <ReplayTooltip
+        text="hank pounced alice, francis was incapacitated, bill revived louis"
+        x={stageW - 10}
+        y={200}
+        stageW={stageW}
+        stageH={500}
+      />,
+    );
+    const el = getByRole('tooltip') as HTMLElement;
+    expect(parseFloat(el.style.left)).toBeLessThanOrEqual(stageW - 4);
+    expect(el.style.transform).toContain('-100%');
+  });
 });

@@ -852,6 +852,22 @@ describe('drawScene', () => {
     for (const m of marks) expect(m.stroke).toBe(GHOST_COLOR);
   });
 
+  it('records no hit item for a ghosted player, so a ghost gets no tooltip either', () => {
+    const { transform, view } = identityScene();
+    const { ctx } = stubCtx();
+    const hits: HitItem[] = [];
+    drawScene(ctx, {
+      transform, view, backdrop: null, trail: [], hits,
+      players: [player({ slot: 4, state: STATE.PRESENT | STATE.ALIVE | STATE.GHOST })],
+      entities: [],
+      show: { ci: true, entities: true, names: false },
+      width: 1280, height: 794,
+      portraits: {}, version: 3,
+      names: {}, slots: [], followSlot: null, entitiesPrev: [], witchStartled: false, tMs: 0, nowMs: 0, markers: [], bursts: [], pinners: new Map(),
+    });
+    expect(hits).toHaveLength(0);
+  });
+
   it('draws every ghost in one muted colour, never its own slot colour', () => {
     const { transform, view } = identityScene();
     const seen = new Set<string>();
@@ -1200,6 +1216,41 @@ describe('drawScene', () => {
     expect(arcs.some((arc) => calls[calls.indexOf(arc) + 1].stroke === '#8d6bb0')).toBe(true);
     expect(calls.some((c) => c.fn === 'fill' && c.raw[0] instanceof FakePath2D)).toBe(true);
     expect(texts).toHaveLength(0);
+  });
+
+  it('draws a ghosted AI hunter as a plain dot, not its medallion, and no tooltip hit item', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const hits: HitItem[] = [];
+    drawScene(ctx, {
+      ...baseArgs(transform, view), hits,
+      entities: [{ ref: 1, kind: ENTITY_KIND.HUNTER_AI, state: STATE.GHOST, x: 640, y: -300, z: 0, health: 250 }],
+    });
+    // Exactly one filled arc, at the AI special's own radius (ENTITY_MEDAL_R
+    // is what `style.radius` is for every AI special), immediately followed
+    // by the fill in the hunter's colour: the shared `dot` branch, not the
+    // medallion's halo-plus-rim stroke.
+    const arcs = calls.filter((c) => c.fn === 'arc' && c.args[2] === ENTITY_MEDAL_R);
+    expect(arcs).toHaveLength(1);
+    const fillCall = calls[calls.indexOf(arcs[0]) + 1];
+    expect(fillCall.fn).toBe('fill');
+    expect(fillCall.fill).toBe('#8d6bb0');
+    // No medallion chrome at all: no pictogram Path2D fill, no face image,
+    // and no stroke in the hunter's rim colour.
+    expect(calls.some((c) => c.fn === 'fill' && c.raw[0] instanceof FakePath2D)).toBe(false);
+    expect(calls.some((c) => c.fn === 'drawImage')).toBe(false);
+    expect(calls.some((c) => c.fn === 'stroke' && c.stroke === '#8d6bb0')).toBe(false);
+  });
+
+  it('records no entity hit item for a ghosted AI special', () => {
+    const { transform, view } = identityScene();
+    const { ctx } = stubCtx();
+    const hits: HitItem[] = [];
+    drawScene(ctx, {
+      ...baseArgs(transform, view), hits,
+      entities: [{ ref: 1, kind: ENTITY_KIND.HUNTER_AI, state: STATE.GHOST, x: 640, y: -300, z: 0, health: 250 }],
+    });
+    expect(hits).toHaveLength(0);
   });
 
   it('draws a rock as a polygon with a streak back along its travel', () => {
