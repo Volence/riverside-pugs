@@ -42,6 +42,9 @@ export function Viewer(
   const [toggles, toggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
   const [followSlot, setFollowSlot] = useState<number | null>(null);
+  // The follow row is the bookmark selector (spec 7.2). '' is an unrostered
+  // slot and selects nothing; see tickEntries.
+  const selected = followSlot === null || !header ? null : (header.slots[followSlot] ?? '');
 
   /**
    * One interpolated frame per DOM tick, shared by everything made of DOM.
@@ -153,6 +156,7 @@ export function Viewer(
           toggles={toggles}
           seek={playback.seek}
           names={names}
+          selected={selected}
         />
       )}
 
