@@ -962,7 +962,20 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .scrub__range::-moz-range-track { height: 22px; background: transparent; }
 .scrub__range::-webkit-slider-thumb { -webkit-appearance: none; width: 3px; height: 30px; margin-top: -4px; background: var(--text-bright); border: 0; }
 .scrub__range::-moz-range-thumb { width: 3px; height: 30px; background: var(--text-bright); border: 0; border-radius: 0; }
-.scrub__ticks { position: absolute; inset: 0; pointer-events: none; }
-.scrub__tick { position: absolute; top: 3px; width: 2px; height: 16px; }
-.scrub__tick--event { background: var(--accent); }
-.scrub__tick--chat { background: var(--text-muted); opacity: 0.6; }
+/* Ticks are seek targets (spec 7.2): a 10px button, centred on the moment,
+   drawing the 2px line it used to be as a pseudo element. They sit above the
+   range input so a click on a tick lands on the event rather than on the
+   pixel under it; the layer itself lets clicks through. */
+.scrub__ticks { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.scrub__tick {
+  position: absolute; top: 0; bottom: 0; width: 10px; transform: translateX(-50%);
+  padding: 0; border: 0; background: transparent; cursor: pointer; pointer-events: auto;
+  --tick: var(--accent);
+}
+.scrub__tick::after { content: ''; position: absolute; left: 4px; top: 3px; width: 2px; height: 16px; background: var(--tick); }
+.scrub__tick:hover::after, .scrub__tick:focus-visible::after { left: 3px; width: 4px; }
+.scrub__tick:focus-visible { outline: 2px solid var(--text-bright); outline-offset: -2px; }
+.scrub__tick--event { --tick: var(--accent); }
+.scrub__tick--chat { --tick: var(--text-muted); opacity: 0.6; }
+.scrub__tick--did { --tick: var(--win); }
+.scrub__tick--suffered { --tick: var(--accent); }

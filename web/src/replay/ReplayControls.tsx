@@ -1,6 +1,7 @@
 import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
-import type { TimelineEntry } from './timeline';
+import { tickEntries } from './bookmarks';
+import { entryText, type TimelineEntry } from './timeline';
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
  *  the frames carry; nobody wants to read that. Exported because the
@@ -31,6 +32,13 @@ export function ReplayControls(
     playback, endMs, live, followSlot, setFollowSlot, slots, names, timeline,
   }: ReplayControlsProps,
 ) {
+  const nameOf = (id: string) => names[id] ?? id;
+  // The follow row is the bookmark selector (spec 7.2). An unrostered slot is
+  // '' in the header and selects nothing rather than everything.
+  const selected = followSlot === null ? null : (slots[followSlot] ?? '');
+  const ticks = timeline ? tickEntries(timeline, selected) : [];
+  const pct = (t: number) => `${Math.min(100, Math.max(0, (t / endMs) * 100))}%`;
+
   return (
     <>
       <div class="replay__controls">
@@ -54,12 +62,15 @@ export function ReplayControls(
             style={{ width: `${endMs > 0 ? Math.min(100, (playback.tMs / endMs) * 100) : 0}%` }}
           />
           {timeline && endMs > 0 && (
-            <div class="scrub__ticks" aria-hidden="true">
-              {timeline.map((e) => (
-                <span
+            <div class="scrub__ticks">
+              {ticks.map(({ entry: e, role }) => (
+                <button
                   key={e.seq}
-                  class={`scrub__tick scrub__tick--${e.kind}`}
-                  style={{ left: `${Math.min(100, Math.max(0, (e.tMs / endMs) * 100))}%` }}
+                  type="button"
+                  class={`scrub__tick scrub__tick--${role ?? e.kind}`}
+                  style={{ left: pct(e.tMs) }}
+                  aria-label={`${formatTime(e.tMs)} ${nameOf(e.actor)} ${entryText(e, nameOf)}`}
+                  onClick={() => playback.seek(e.tMs)}
                 />
               ))}
             </div>
