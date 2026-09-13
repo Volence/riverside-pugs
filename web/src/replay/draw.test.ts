@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
   slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
-  alertColor,
   slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget, GHOST_COLOR,
 } from './draw';
 import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat';
@@ -886,7 +885,7 @@ describe('drawScene', () => {
     const { calls, ctx } = stubCtx();
     drawScene(ctx, {
       transform, view, backdrop: null, trail: [],
-      players: [player({ slot: 0, state: STATE.PRESENT | STATE.ALIVE | STATE.BURNING })],
+      players: [player({ slot: 0, state: STATE.PRESENT | STATE.ALIVE })],
       entities: [],
       show: { ci: true, entities: true, names: false },
       width: 1280, height: 794, names: {}, slots: [], followSlot: null,
