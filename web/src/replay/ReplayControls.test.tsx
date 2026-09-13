@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, fireEvent } from '@testing-library/preact';
 import { ReplayControls } from './ReplayControls';
+import { FREE, TEAM } from './camera';
 import type { TimelineEntry } from './timeline';
 
 afterEach(cleanup);
@@ -22,7 +23,7 @@ function mount(over: Partial<Parameters<typeof ReplayControls>[0]> = {}) {
   return render(
     <ReplayControls
       playback={playback} endMs={100000} live={false}
-      followSlot={null} setFollowSlot={() => {}} slots={SLOTS} names={NAMES}
+      follow={FREE} setFollow={() => {}} slots={SLOTS} names={NAMES}
       timeline={T}
       {...over}
     />,
@@ -57,7 +58,7 @@ describe('ReplayControls ticks', () => {
 
   // Spec 7.2: the follow row is the selector. Slot 0 is 'A'.
   it('filters and colours the ticks by the followed player and their side', () => {
-    const { container } = mount({ followSlot: 0 });
+    const { container } = mount({ follow: { kind: 'slot', slot: 0 } });
     const ticks = [...container.querySelectorAll('.scrub__tick')];
     expect(ticks).toHaveLength(2);
     expect(ticks[0].classList.contains('scrub__tick--suffered')).toBe(true);
@@ -65,7 +66,7 @@ describe('ReplayControls ticks', () => {
   });
 
   it('shows nothing for a followed slot with no roster entry', () => {
-    const { container } = mount({ followSlot: 2 });
+    const { container } = mount({ follow: { kind: 'slot', slot: 2 } });
     expect(container.querySelectorAll('.scrub__tick')).toHaveLength(0);
   });
 
@@ -73,5 +74,22 @@ describe('ReplayControls ticks', () => {
     const { container } = mount({ playback: { ...playback, tMs: 25000 } });
     const progress = container.querySelector('.scrub__progress') as HTMLElement;
     expect(progress.style.width).toBe('25%');
+  });
+});
+
+describe('ReplayControls follow row', () => {
+  it('offers free, the survivor centroid and every slot', () => {
+    const setFollow = vi.fn();
+    // No timeline here: with `follow` not on a slot, ticks render unfiltered
+    // (bookmarks.tickEntries with a null selection), and T's own chat line is
+    // from 'tino', which would collide with the slot chip of the same name
+    // under the same `/tino/` query. This test is about the follow row, not
+    // the ticks, so leaving the timeline out sidesteps the coincidence.
+    const { getByRole } = mount({ setFollow, follow: TEAM, timeline: undefined });
+    expect(getByRole('button', { name: 'Survivors' }).classList.contains('is-on')).toBe(true);
+    fireEvent.click(getByRole('button', { name: 'Free' }));
+    expect(setFollow).toHaveBeenCalledWith(FREE);
+    fireEvent.click(getByRole('button', { name: /tino/ }));
+    expect(setFollow).toHaveBeenCalledWith({ kind: 'slot', slot: 1 });
   });
 });
