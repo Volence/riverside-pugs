@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enrichEvents, enrichmentText, fromLiveEvents, fromTimeline, type EnrichableEvent } from './eventEnrich';
+import { enrichEvents, enrichmentText, fmtSeconds, fromLiveEvents, fromTimeline, type EnrichableEvent } from './eventEnrich';
 import type { TimelineEntry } from './replay/timeline';
 
 const ev = (
@@ -48,7 +48,7 @@ describe('enrichEvents: pins', () => {
       ev(1, 1000, 'pinned', 'H', 'K'),
       ev(2, 5200, 'cleared', 'I', 'K'),
     ]);
-    expect(en.get(2)?.from).toBe('H');
+    expect(en.get(2)?.from).toEqual({ pinner: 'H', afterMs: 4200 });
     expect(en.get(1)?.pin).toEqual({ durationMs: 4200, outcome: 'cleared', by: 'I' });
   });
 
@@ -73,7 +73,7 @@ describe('enrichEvents: pins', () => {
       ev(1, 1000, 'pinned', 'H', 'K'),
       ev(4, 2000, 'cleared', 'I', 'Y'),
     ]);
-    expect(en.get(4)?.from).toBe('S');
+    expect(en.get(4)?.from?.pinner).toBe('S');
     expect(en.get(3)).toBeUndefined();
     expect(en.get(1)).toBeUndefined();
   });
@@ -90,9 +90,9 @@ describe('enrichmentText', () => {
       ev(6, 9000, 'death', 'Y', 'S'),
     ]);
     expect(enrichmentText('incap', en.get(5), nameOf, 'happy')).toBe('(smoker)');
-    expect(enrichmentText('cleared', en.get(4), nameOf, 'KoRn')).toBe('from PowerMu$tache');
-    expect(enrichmentText('pinned', en.get(2), nameOf, 'KoRn')).toBe('4.2s, cleared by intel');
-    expect(enrichmentText('pinned', en.get(3), nameOf, 'happy')).toBe('6.0s, until happy died');
+    expect(enrichmentText('cleared', en.get(4), nameOf, 'KoRn')).toBe('from PowerMu$tache after 4.2 seconds');
+    expect(enrichmentText('pinned', en.get(2), nameOf, 'KoRn')).toBe('for 4.2 seconds, cleared by intel');
+    expect(enrichmentText('pinned', en.get(3), nameOf, 'happy')).toBe('for 6.0 seconds, until happy died');
     expect(enrichmentText('boom', en.get(99), nameOf, null)).toBe('');
   });
 });
@@ -109,5 +109,13 @@ describe('adapters', () => {
       { seq: 2, tMs: 600, kind: 'chat', actor: 'K', team: 'survivor', text: 'ow' },
     ];
     expect(fromTimeline(tl)).toEqual([{ seq: 1, tMs: 500, half: 1, mapOrdinal: 0, kind: 'dp', actor: 'H', target: 'K', value: 20 }]);
+  });
+});
+
+describe('fmtSeconds', () => {
+  it('spells the unit out, singular at exactly one', () => {
+    expect(fmtSeconds(1300)).toBe('1.3 seconds');
+    expect(fmtSeconds(1000)).toBe('1.0 second');
+    expect(fmtSeconds(0)).toBe('0.0 seconds');
   });
 });

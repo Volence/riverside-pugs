@@ -20,7 +20,8 @@ import type { TimelineEntry } from './replay/timeline';
  */
 export interface Enrichment {
   via?: string;
-  from?: string;
+  /** Who the clear freed the victim from, and how long they had been held. */
+  from?: { pinner: string; afterMs: number };
   pin?: { durationMs: number; outcome: 'cleared' | 'died'; by: string | null };
 }
 
@@ -118,7 +119,7 @@ export function enrichEvents(events: EnrichableEvent[]): Map<number, Enrichment>
         if (!e.target) break;
         const pin = open.get(e.target);
         if (!pin || e.tMs < pin.tMs) break;
-        add(e.seq, { from: pin.pinner });
+        add(e.seq, { from: { pinner: pin.pinner, afterMs: e.tMs - pin.tMs } });
         add(pin.seq, { pin: { durationMs: e.tMs - pin.tMs, outcome: 'cleared', by: e.actor } });
         open.delete(e.target);
         break;
@@ -130,8 +131,12 @@ export function enrichEvents(events: EnrichableEvent[]): Map<number, Enrichment>
   return out;
 }
 
-/** Seconds with one decimal, the same reading fmtLatency gives. */
-const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+/** Durations in words. "1.3s" after a name read as a clock time to the
+ *  owner ("no one will know what time it is"); "1.3 seconds" cannot. */
+export function fmtSeconds(ms: number): string {
+  const s = (ms / 1000).toFixed(1);
+  return `${s} second${s === '1.0' ? '' : 's'}`;
+}
 
 /**
  * The words appended after the event's own sentence, or '' when there is
@@ -144,12 +149,12 @@ export function enrichmentText(
   if (!en) return '';
   const parts: string[] = [];
   if (en.via && (kind === 'incap' || kind === 'death')) parts.push(`(${en.via})`);
-  if (en.from && kind === 'cleared') parts.push(`from ${nameOf(en.from)}`);
+  if (en.from && kind === 'cleared') parts.push(`from ${nameOf(en.from.pinner)} after ${fmtSeconds(en.from.afterMs)}`);
   if (en.pin && kind === 'pinned') {
     const how = en.pin.outcome === 'cleared'
       ? (en.pin.by ? `cleared by ${nameOf(en.pin.by)}` : 'cleared')
       : `until ${victim ?? 'they'} died`;
-    parts.push(`${secs(en.pin.durationMs)}, ${how}`);
+    parts.push(`for ${fmtSeconds(en.pin.durationMs)}, ${how}`);
   }
   return parts.join(' ');
 }

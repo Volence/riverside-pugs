@@ -1,8 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { LiveEvent, StatDef } from '../api';
-import { fmtLatency, labelFor, liveGroupStarts } from '../format';
-import { clearLatencies } from '../clearLatency';
+import { labelFor, liveGroupStarts } from '../format';
 import { PlayerLink } from './bits';
 import { markColumn, directionOf, type Mark } from '../outliers';
 import { EVENT_KINDS, valueText } from '../replay/eventText';
@@ -150,10 +149,6 @@ export function EventFeed(
   const nameOfMap = (ordinal: number) =>
     maps.find((mp) => mp.ordinal === ordinal)?.map ?? null;
 
-  // How long each clear took, keyed by the clear's own seq. Computed here
-  // rather than passed in: the feed already holds every event the pairing
-  // needs, and a clear with no pairable pin simply gets no annotation.
-  const latencyOf = new Map(clearLatencies(events).map((c) => [c.seq, c.latencyMs]));
   // Class, who-from and pin outcomes, read off the stream itself. Computed
   // over ALL events, not the folded window, because a pin that ended after
   // the fold still ended.
@@ -183,9 +178,6 @@ export function EventFeed(
           {' '}
           <span class="muted">{verb?.verb ?? e.kind}{verb?.link && e.target ? ` ${verb.link}` : ''}</span>
           {e.target && <> <strong>{e.target.name}</strong></>}
-          {latencyOf.has(e.seq) && (
-            <> <span class="feed__val num">{fmtLatency(latencyOf.get(e.seq)!)}</span></>
-          )}
           {(() => {
             // The same reading the rail gives: a spawn's value is a class
             // code and reads as its name, everything else is a quantity

@@ -89,8 +89,8 @@ describe('TimelineRail, enriched readings', () => {
       <TimelineRail timeline={tl} tMs={5000} toggles={DEFAULT_TOGGLES} seek={vi.fn()} names={NAMES} selected={null} />,
     );
     const text = container.textContent ?? '';
-    expect(text).toContain('pinned tino 2.1s, cleared by volence');
-    expect(text).toContain('cleared tino from hunter');
+    expect(text).toContain('pinned tino for 2.1 seconds, cleared by volence');
+    expect(text).toContain('cleared tino from hunter after 2.1 seconds');
     expect(text).toContain('went down to hunter (hunter)');
   });
 });
