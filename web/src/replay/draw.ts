@@ -1,7 +1,10 @@
 import { boxSpan, projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import { ENTITY_KIND, STATE, type EntitySample, type PlayerSample } from '../../../src/replayFormat';
 import { relativeLuminance } from './colorDistance';
+import { DEAD_COLOR, stateRingColor, statusGlyph } from './stateRing';
 import { healthBar, TEMP_HEALTH_COLOR } from './hud';
+
+export { statusGlyph, stateRingColor, DEAD_COLOR };
 
 /** Roster slots 0-3 are the survivor team for this half and 4-7 are the
  *  infected. The player record carries no team field because the slot already
@@ -180,45 +183,6 @@ export function numberInk(color: string): string {
  *  is 14px across and its inscribed square is 9.9px, which a 9px digit (about
  *  6.4px of cap height and 5px wide) fits inside with room to spare. */
 const SLOT_NUMBER_PX = 9;
-
-/**
- * The one status marker worth showing on the map, checked in priority order.
- *
- * At 5-8 world units per pixel a survivor is only 4-6 pixels across, so
- * several stacked markers would just be a smudge. Pinned wins ties because
- * that is the state someone watching needs to see soonest: it is the one
- * where a teammate is seconds from being carried off.
- */
-export function statusGlyph(state: number): string {
-  if ((state & STATE.PINNED) !== 0) return 'P';
-  if ((state & STATE.INCAP) !== 0) return 'X';
-  if ((state & STATE.LEDGED) !== 0) return 'L';
-  if ((state & STATE.BURNING) !== 0) return 'F';
-  if ((state & STATE.BILED) !== 0) return 'B';
-  return '';
-}
-
-/**
- * A large coloured ring for the two states someone watching needs to see
- * soonest, or null for everything else.
- *
- * This is the ring the slot-colour change removed. It was replaced by a
- * letter roughly seven CSS pixels tall, and a seven pixel letter is not
- * findable in peripheral vision while scanning a map, where a large coloured
- * ring is. `statusGlyph` is now the refinement that says WHICH of the two it
- * is, on top of a signal that gets the eye there in the first place.
- *
- * The priority order is deliberately identical to `statusGlyph`'s, so on a
- * player who is both pinned and down the ring's colour and the letter can
- * never disagree about which state won.
- */
-export function alertColor(state: number): string | null {
-  // The rating gold and the site red, so the ring reads with the rest of the
-  // page.
-  if ((state & STATE.PINNED) !== 0) return '#c9a45c';
-  if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) return '#de4e40';
-  return null;
-}
 
 const ENTITY_STYLES: Record<number, { color: string; radius: number }> = {
   [ENTITY_KIND.COMMON]: { color: '#6b6f57', radius: 2 },
@@ -633,7 +597,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         // The alert ring, under the health arc and sharing its radius: a
         // closed circle of colour wide enough to catch the eye from across
         // the map. Drawn first so the health arc rides on top of it.
-        const alert = alertColor(pl.state);
+        const alert = stateRingColor(pl.state);
         if (alert) {
           ctx.beginPath();
           ctx.arc(p.px, p.py, ringR, 0, Math.PI * 2);
