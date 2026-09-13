@@ -114,6 +114,13 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
     portraits,
     version,
     witchStartled,
+    // Interim: Task 8 wires the real markers, bursts and pinners through
+    // from the timeline and the burst clock.
+    markers: [],
+    bursts: [],
+    pinners: new Map(),
+    tMs: p.timeRef.current,
+    nowMs: 0,
   });
   ctx.restore();
 }
