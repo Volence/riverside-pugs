@@ -27,6 +27,11 @@ function fakeServer(dumpFor: (mid: string) => string) {
             sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
             sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dumpFor)));
+          } else if (p.type === SERVERDATA_RESPONSE_VALUE) {
+            // The client's multi-packet terminator. Source answers it with an
+            // empty packet and then four junk bytes, both under the marker id.
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, ''));
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, '\u0000\u0001\u0000\u0000'));
           }
         }
       });

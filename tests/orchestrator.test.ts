@@ -27,6 +27,11 @@ function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; c
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
             cmds.push(p.body);
             sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dumpBody)));
+          } else if (p.type === SERVERDATA_RESPONSE_VALUE) {
+            // The client's multi-packet terminator. Source answers it with an
+            // empty packet and then four junk bytes, both under the marker id.
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, ''));
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, '\u0000\u0001\u0000\u0000'));
           }
         }
       });
@@ -160,6 +165,9 @@ describe('RealOrchestrator', () => {
               } else {
                 sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dump)));
               }
+            } else if (p.type === SERVERDATA_RESPONSE_VALUE) {
+              sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, ''));
+              sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, '\u0000\u0001\u0000\u0000'));
             }
           }
         });
