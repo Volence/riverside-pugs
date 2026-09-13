@@ -2,7 +2,9 @@ import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
 import { tickEntries } from './bookmarks';
 import { entryText, type TimelineEntry } from './timeline';
-import { FREE, TEAM, followSlotOf, type Follow } from './camera';
+import {
+  FREE, TEAM, ZOOM_LEVELS, followSlotOf, type Follow,
+} from './camera';
 
 /** Round time as m:ss. The scrub bar is in milliseconds because that is what
  *  the frames carry; nobody wants to read that. Exported because the
@@ -20,6 +22,8 @@ export interface ReplayControlsProps {
   live: boolean;
   follow: Follow;
   setFollow: (f: Follow) => void;
+  zoom: number;
+  setZoom: (z: number) => void;
   slots: string[];
   names: Record<string, string>;
   timeline?: TimelineEntry[];
@@ -30,7 +34,7 @@ export interface ReplayControlsProps {
  *  one of the callback props. */
 export function ReplayControls(
   {
-    playback, endMs, live, follow, setFollow, slots, names, timeline,
+    playback, endMs, live, follow, setFollow, zoom, setZoom, slots, names, timeline,
   }: ReplayControlsProps,
 ) {
   const nameOf = (id: string) => names[id] ?? id;
@@ -92,6 +96,17 @@ export function ReplayControls(
             onClick={playback.follow}
           >Live</button>
         )}
+        <span class="replay__sep" aria-hidden="true" />
+        {/* Spec 7.1: fit, 2x, 4x, 6x. Wheel zoom lands between chips, and
+            then none is lit, which is honest. */}
+        {ZOOM_LEVELS.map((z) => (
+          <button
+            key={z}
+            class={`chip ${Math.abs(zoom - z) < 0.01 ? 'is-on' : ''}`}
+            onClick={() => setZoom(z)}
+            aria-label={z === 1 ? 'Zoom to fit' : `Zoom ${z}x`}
+          >{z === 1 ? 'Fit' : `${z}x`}</button>
+        ))}
       </div>
 
       <div class="replay__toolbar">

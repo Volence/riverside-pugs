@@ -23,7 +23,8 @@ function mount(over: Partial<Parameters<typeof ReplayControls>[0]> = {}) {
   return render(
     <ReplayControls
       playback={playback} endMs={100000} live={false}
-      follow={FREE} setFollow={() => {}} slots={SLOTS} names={NAMES}
+      follow={FREE} setFollow={() => {}} zoom={1} setZoom={() => {}}
+      slots={SLOTS} names={NAMES}
       timeline={T}
       {...over}
     />,
@@ -91,5 +92,15 @@ describe('ReplayControls follow row', () => {
     expect(setFollow).toHaveBeenCalledWith(FREE);
     fireEvent.click(getByRole('button', { name: /tino/ }));
     expect(setFollow).toHaveBeenCalledWith({ kind: 'slot', slot: 1 });
+  });
+});
+
+describe('ReplayControls zoom chips', () => {
+  it('lights the current level and sets a chosen one', () => {
+    const setZoom = vi.fn();
+    const { getByRole } = mount({ zoom: 4, setZoom });
+    expect(getByRole('button', { name: 'Zoom 4x' }).classList.contains('is-on')).toBe(true);
+    fireEvent.click(getByRole('button', { name: 'Zoom to fit' }));
+    expect(setZoom).toHaveBeenCalledWith(1);
   });
 });
