@@ -902,6 +902,14 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__entry--chat .replay__entry-text { opacity: 0.85; font-style: italic; }
 .replay__entry-t { font-variant-numeric: tabular-nums; opacity: 0.55; }
 .replay__entry-who { font-weight: 600; }
+.replay__entry--ahead { opacity: 0.45; }
+.replay__rail--player { max-height: 24rem; }
+.replay__rail-empty { font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); padding: var(--sp-2) 0.3rem; }
+.rail-group { display: flex; flex-direction: column; gap: 0.15rem; }
+.rail-group + .rail-group { margin-top: var(--sp-2); }
+.rail-group__head { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted); padding: 0.15rem 0.3rem; border-bottom: 1px solid var(--border); }
+.rail-group__head--did { color: var(--win); }
+.rail-group__head--suffered { color: var(--accent); }
 
 /* HUD strip: portrait tiles with health bars, survivors then infected. The
    left stripe is the slot colour, set inline from the palette the map draws
