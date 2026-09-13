@@ -142,7 +142,11 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   padding: var(--sp-5);
 }
 /* A panel heading: Anton left, the section's eyebrow right, one red rule. */
-.panel > h3:first-child,
+.panel > h3:first-child {
+  padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  border-bottom: 2px solid var(--rule);
+}
 .panel__head {
   display: flex;
   align-items: baseline;
@@ -152,7 +156,6 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   margin-bottom: var(--sp-3);
   border-bottom: 2px solid var(--rule);
 }
-.panel > h3:first-child { display: block; }
 
 .stack { display: flex; flex-direction: column; gap: var(--sp-5); }
 
@@ -268,8 +271,8 @@ tbody tr:hover { background: var(--surface-2); }
 th.num, td.num { text-align: right; }
 
 /* Links inside tables carry the text color, not the accent. A leaderboard of
- * thirty amber names is a wall of highlight that makes nothing stand out; amber
- * is reserved for the thing you are meant to click next. */
+ * thirty red names is a wall of highlight that makes nothing stand out; the
+ * accent is reserved for the thing you are meant to click next. */
 td a { color: var(--text); }
 td a:hover { color: var(--accent); }
 
@@ -296,7 +299,6 @@ tbody tr.is-me { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--a
 }
 .pname a:hover { color: var(--accent); }
 td, th { height: 46px; }
-tbody tr:hover { background: var(--surface-2); }
 /* The leader's row on a ranked table carries a gold wash from the left. */
 .lb--ranked tbody tr:first-child {
   background: linear-gradient(90deg, color-mix(in srgb, var(--rating) 10%, transparent), transparent 45%);
@@ -305,17 +307,18 @@ tbody tr:hover { background: var(--surface-2); }
   background: linear-gradient(90deg, color-mix(in srgb, var(--rating) 14%, transparent), var(--surface-2) 45%);
 }
 
-/* Campaign tint as a left rule: four hex values instead of artwork. It is
- * attached to the cell that names the campaign rather than to the first cell,
- * because on the profile table the first cell is the W/L/D chip and a colored
- * rule there reads as a second, contradictory result color. */
+/* Campaign tint as a left rule, driven by campaignTint() in format.ts rather
+ * than a fixed set of hex values, so an unregistered campaign still gets a
+ * tint. It is attached to the cell that names the campaign rather than to the
+ * first cell, because on the profile table the first cell is the W/L/D chip
+ * and a colored rule there reads as a second, contradictory result color. */
 td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
 
 /* ---------- campaign poster tiles ---------- */
 
 .ctiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
   gap: var(--sp-4);
 }
 .ctile {
@@ -437,7 +440,6 @@ button.ctile:hover { border-color: var(--text-muted); }
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
-.hero--rating { color: var(--rating); text-shadow: 0 3px 0 #2b0e0b; }
 
 /* Fixed-width so a column of deltas stays a column. The sign is always printed
  * (with a real U+2212 minus), so the chip reads correctly without its color. */
@@ -497,7 +499,7 @@ button.ctile:hover { border-color: var(--text-muted); }
     min-height: 62px;
     padding: var(--sp-3) var(--sp-5);
   }
-  .nav__links { flex-wrap: wrap; overflow-x: auto; flex-basis: 100%; }
+  .nav__links { flex-wrap: wrap; flex-basis: 100%; }
   .page { padding-inline: var(--sp-4); }
 }
 
@@ -629,15 +631,6 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .demos__row:last-child { border-bottom: 0; }
 
 /* Live spectator cards. */
-.live__head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-4);
-}
-.live__head h3 { margin: 0 0 var(--sp-1); }
-.live__head p { margin: 0; }
 .live__stale { color: var(--loss); }
 .live__teams {
   display: grid;
@@ -835,15 +828,14 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 }
 .tabs__tab {
   border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--text-muted);
   text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
 }
 .tabs__tab:hover { color: var(--text); }
-.tabs__tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
-.tabs__tab { border-radius: 0; border-bottom-width: 2px; }
-.tabs__tab.is-active { border-color: var(--border); border-bottom-color: var(--accent); }
+.tabs__tab.is-active { color: var(--text); border-color: var(--border); border-bottom-color: var(--accent); }
 .tabs__count {
   margin-left: 0.4em;
   padding: 0 0.4em;
@@ -874,6 +866,9 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   left: 7px; right: 7px; top: 0; bottom: 0;
   background: repeating-linear-gradient(180deg, #2b241f 0 10px, transparent 10px 22px, #2b241f 22px 34px);
 }
+/* The seam between each sprocket band and the stage it frames. */
+.replay__sprocket--l { border-right: 1px solid #0b0908; }
+.replay__sprocket--r { border-left: 1px solid #0b0908; }
 .replay__stage { position: relative; width: 100%; }
 .replay__canvas { display: block; width: 100%; height: 100%; background: var(--bg); }
 /* Lighter than the poster mockup on purpose: infected rings must keep their
