@@ -58,7 +58,7 @@ must be checked, not assumed.
 | `--rating` | `#c9a45c` | SR and rating numbers, and the rank numerals of the top three |
 | `--win` | `#45b39c` | wins, survivor health, survivor team marks |
 | `--loss` | `#de4e40` | losses, infected team marks (same hue as accent by design) |
-| `--draw` | `#8d7f66` | draws |
+| `--draw` | `#958770` | draws (same as muted text, as before) |
 
 `--accent-ink` becomes `#0b0908`, the page black: bone on this red is only
 3.1:1, so a filled button carries dark ink. The amber tokens
@@ -129,8 +129,10 @@ Height 62px, `--surface` at 70 percent alpha over the textured body, one
 hairline below. Wordmark "Riverside" in Anton at 26px, tracked 0.06em. Links
 in Oswald 13px tracked 0.16em, muted, with the active link bright and
 underlined by a 2px `--accent` rule. On the right, a live indicator: a red dot
-with a soft glow and "Live · <campaign> <map> · <score>" in Oswald 12px when a
-match is live, otherwise nothing. The urgent-state red rule survives.
+with a soft glow and "Live · <campaign>" in Oswald 12px when a match is live,
+otherwise nothing. Map and score are left out: showing them needs the server
+to push that data to the nav's live-match payload, which it does not today, so
+that is out of scope for this sweep. The urgent-state red rule survives.
 
 "Maps" is renamed "Campaigns" in the nav and in the page title. The route
 stays `/maps` so nothing bookmarked breaks.
@@ -205,7 +207,7 @@ existing half data.
 ### 5.5 Headliner card
 
 Profile hero, and the side card on Leaderboard for the top-rated player. An
-eyebrow, the name in Anton 40px, the rating in Anton 72px `--rating` with a
+eyebrow, the name in Anton 40px, the rating in Anton at `--fs-hero` `--rating` with a
 2px dark drop shadow, a season delta eyebrow in `--win` or `--loss`, then a
 three-up grid of small Anton numbers with eyebrows.
 
@@ -262,12 +264,15 @@ interpolation, layer selection and the playback loop are untouched.
   stage is removed, its content having moved into the overlay.
 - **Scrub.** `TimelineRail` and the scrub bar merge visually into one
   filmstrip: a 22px strip with 26px frame divisions, progress as `--rule` at
-  70 percent alpha, a 2px bright playhead, and event ticks colored by kind
-  (infected events red, survivor events teal, item and score events gold).
-  Seeking behavior is unchanged. Chat entries stay in the rail's list below.
+  70 percent alpha, a 2px bright playhead, and event ticks red, chat ticks
+  muted; finer kinds (infected versus survivor, item versus score) need a
+  richer timeline payload than the one the server sends today, so that
+  distinction is out of scope for this sweep. Seeking behavior is unchanged.
+  Chat entries stay in the rail's list below.
 - **HUD strip.** `HudStrip` renders the portrait tiles: team-colored left
   stripe, slot number and name in Oswald, health in Anton colored by
-  threshold (teal above 60, gold 30 to 60, red below 30, muted for ghost),
+  threshold (teal above 40, gold 20 to 40, red below 20, muted for ghost),
+  at the game's own 40 and 20 health breakpoints rather than round numbers,
   a health bar, and an eyebrow for weapon or infected class.
 - **Canvas chrome** (`draw.ts`): label plates become `rgba(5,4,3,0.78)` with a
   2px slot-colored left tick, unchanged in geometry. The grid fallback and the
@@ -387,3 +392,17 @@ Verification at every step:
   slider. Modeled on the l4dpug.com visualizer's close camera and edge HUD.
 - Accent brightened to #de4e40 and ink darkened after measuring contrast;
   recorded in tokens.test.ts.
+- `--draw` is #958770, the same value as muted text, as before; it was never
+  actually the #8d7f66 this doc used to say.
+- HUD strip health thresholds are the game's own 40 and 20, not 60 and 30.
+- Scrub ticks are two kinds, event (red) and chat (muted), not the four the
+  original direction described; telling infected/survivor or item/score
+  events apart needs a richer timeline payload than the server sends today.
+- The nav live indicator is "Live · <campaign>" only. Adding the map and
+  score needs a server change to the live-match payload, so both are out of
+  scope for this sweep.
+- `TEMP_HEALTH_COLOR` (hud.ts) moved to #c2d9a7, a pale sage green measured to
+  stay distinct from the rest of the health ramp under dichromacy; see the
+  comment on the constant for the measurements.
+- HUD chip hit targets are 36px on desktop and 44px on phones, matching every
+  other chip on the site, not the smaller sizes the overlay first shipped with.
