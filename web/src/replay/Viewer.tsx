@@ -6,6 +6,7 @@ import { usePlayback } from './playback';
 import { useReplaySource, type ReplaySpec } from './source';
 import { isSurvivor, sceneCounts, type ShowFlags } from './draw';
 import { useToggles } from './useToggles';
+import { usePortraits } from './usePortraits';
 import { mapAspect, useMapLayer } from './useMapLayer';
 import { useCanvasSize } from './canvasSize';
 import { ReplayCanvas } from './ReplayCanvas';
@@ -64,6 +65,7 @@ export function Viewer(
   const playback = usePlayback(endMs, { live });
   const [toggles, toggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
+  const portraits = usePortraits();
 
   // Theater is a layout state of this component (spec 7.1), never a route.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -197,6 +199,8 @@ export function Viewer(
         shiftRef={shiftRef}
         names={names}
         slots={header.slots}
+        portraits={portraits}
+        version={header.version}
       />
       <div class="replay__vignette" aria-hidden="true" />
       {!theater && (

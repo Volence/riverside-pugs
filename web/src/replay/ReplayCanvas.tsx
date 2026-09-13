@@ -27,6 +27,10 @@ export interface ReplayCanvasProps {
   shiftRef: { current: { x: number; y: number } };
   names: Record<string, string>;
   slots: string[];
+  /** Decoded portrait images by URL. See `usePortraits`. */
+  portraits: Record<string, HTMLImageElement>;
+  /** Replay format version, threaded to `portraitFor` via `drawScene`. */
+  version: number;
 }
 
 /**
@@ -57,7 +61,7 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
   const ctx = canvas?.getContext('2d');
   if (!canvas || !ctx || !p.transform) return;
 
-  const { transform, view, size, backdrop, trail, show, follow, names, slots } = p;
+  const { transform, view, size, backdrop, trail, show, follow, names, slots, portraits, version } = p;
   const pair = bracket(p.frames, p.timeRef.current);
   const players = pair ? interpolatePlayers(pair.a, pair.b, pair.f) : [];
   const entities = pair ? interpolateEntities(pair.a, pair.b, pair.f) : [];
@@ -101,6 +105,8 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
     names,
     slots,
     followSlot: followSlotOf(follow),
+    portraits,
+    version,
   });
   ctx.restore();
 }
@@ -143,7 +149,7 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
   }, [
     props.frames, props.transform, props.view, props.backdrop, props.trail,
     props.show.ci, props.show.entities, props.show.names,
-    props.follow, props.names, props.slots,
+    props.follow, props.names, props.slots, props.portraits, props.version,
     size.cssW, size.cssH, size.pixelW, size.pixelH, size.ratio,
   ]);
 

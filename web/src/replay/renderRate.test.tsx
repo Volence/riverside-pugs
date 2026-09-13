@@ -42,6 +42,7 @@ const SHOW = { ci: true, entities: true, names: true };
  * harness rather than the component. */
 const TRAIL: { x: number; y: number }[] = [];
 const NAMES: Record<string, string> = {};
+const PORTRAITS: Record<string, HTMLImageElement> = {};
 const SHIFT = { current: { x: 0, y: 0 } };
 
 const FPS = 60;
@@ -144,6 +145,8 @@ function mountViewer(frames: Frame[]) {
         shiftRef={SHIFT}
         names={NAMES}
         slots={SLOTS}
+        portraits={PORTRAITS}
+        version={1}
       />
     );
   }
