@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useMemo, useRef } from 'preact/hooks';
 import { canvasForAspect } from '../../../src/mapTransform';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
@@ -13,7 +13,8 @@ import { ReplayControls } from './ReplayControls';
 import { ReplayHud } from './ReplayHud';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
-import { FREE, followSlotOf, type Follow } from './camera';
+import { followSlotOf } from './camera';
+import { useCamera } from './useCamera';
 import type { TimelineEntry } from './timeline';
 
 /**
@@ -42,13 +43,8 @@ export function Viewer(
   const playback = usePlayback(endMs, { live });
   const [toggles, toggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
-  const [follow, setFollow] = useState<Follow>(FREE);
-  const followSlot = followSlotOf(follow);
   /** Written by the canvas on every paint. See ReplayCanvasProps.shiftRef. */
   const shiftRef = useRef({ x: 0, y: 0 });
-  // The follow row is the bookmark selector (spec 7.2). '' is an unrostered
-  // slot and selects nothing; see tickEntries.
-  const selected = followSlot === null || !header ? null : (header.slots[followSlot] ?? '');
 
   /**
    * One interpolated frame per DOM tick, shared by everything made of DOM.
@@ -98,6 +94,15 @@ export function Viewer(
 
   const { transform, view, backdrop } = useMapLayer(header, frames, livePlayers, size);
 
+  // The fit from useMapLayer is the camera's base; the canvas draws the
+  // camera's view. Follow lives here too because following clears the pan.
+  const camera = useCamera(view, size, shiftRef);
+  const { follow, setFollow } = camera;
+  const followSlot = followSlotOf(follow);
+  // The follow row is the bookmark selector (spec 7.2). '' is an unrostered
+  // slot and selects nothing; see tickEntries.
+  const selected = followSlot === null || !header ? null : (header.slots[followSlot] ?? '');
+
   const trail = useMemo(() => {
     const out: { x: number; y: number }[] = [];
     for (let i = 0; i < frames.length; i += 10) {
@@ -125,10 +130,16 @@ export function Viewer(
     <div class="replay">
       <div class="replay__frame">
         <div class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
-        <div class="replay__stage" ref={stageRef} style={stageStyle}>
+        <div
+          class={`replay__stage${camera.dragging ? ' is-dragging' : ''}`}
+          ref={stageRef}
+          style={stageStyle}
+          onWheel={camera.onWheel}
+          onPointerDown={camera.onPointerDown}
+        >
           <ReplayCanvas
             transform={transform}
-            view={view}
+            view={camera.view}
             size={size}
             backdrop={backdrop}
             trail={trail}
@@ -171,6 +182,8 @@ export function Viewer(
         live={live}
         follow={follow}
         setFollow={setFollow}
+        zoom={camera.cam.zoom}
+        setZoom={camera.setZoom}
         slots={header.slots}
         names={names}
         timeline={timeline}
