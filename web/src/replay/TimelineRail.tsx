@@ -4,6 +4,7 @@ import {
 } from './timeline';
 import { markerEntries } from './markers';
 import { formatTime } from './ReplayControls';
+import { enrichEvents, enrichmentText, fromTimeline, type Enrichment } from '../eventEnrich';
 import type { Toggles } from './useToggles';
 
 export interface TimelineRailProps {
@@ -18,9 +19,10 @@ export interface TimelineRailProps {
 }
 
 function Entry(
-  { e, tMs, seek, nameOf, n }:
-  { e: TimelineEntry; tMs: number; seek: (t: number) => void; nameOf: (id: string) => string; n?: number },
+  { e, tMs, seek, nameOf, n, en }:
+  { e: TimelineEntry; tMs: number; seek: (t: number) => void; nameOf: (id: string) => string; n?: number; en?: Enrichment },
 ) {
+  const extra = e.kind === 'event' ? enrichmentText(e.event, en, nameOf, e.target ? nameOf(e.target) : null) : '';
   return (
     <button
       class={`replay__entry replay__entry--${e.kind}${e.tMs > tMs ? ' replay__entry--ahead' : ''}`}
@@ -29,7 +31,7 @@ function Entry(
       {n !== undefined && <span class="replay__entry-n">{n}</span>}
       <span class="replay__entry-t">{formatTime(e.tMs)}</span>
       <span class="replay__entry-who">{nameOf(e.actor)}</span>
-      <span class="replay__entry-text">{entryText(e, nameOf)}</span>
+      <span class="replay__entry-text">{entryText(e, nameOf)}{extra ? <span class="muted"> {extra}</span> : null}</span>
     </button>
   );
 }
@@ -47,6 +49,7 @@ function Entry(
 export function TimelineRail({ timeline, tMs, toggles, seek, names, selected }: TimelineRailProps) {
   const nameOf = (id: string) => names[id] ?? id;
   const visible = (e: TimelineEntry) => (e.kind === 'chat' ? toggles.chat : toggles.events);
+  const enriched = enrichEvents(fromTimeline(timeline));
 
   if (selected !== null) {
     const ticks = tickEntries(timeline, selected).filter((t) => visible(t.entry));
@@ -73,7 +76,7 @@ export function TimelineRail({ timeline, tMs, toggles, seek, names, selected }: 
               {g.label} <span class="num">×{g.items.length}</span>
             </div>
             {g.items.map((i) => (
-              <Entry key={i.entry.seq} e={i.entry} tMs={tMs} seek={seek} nameOf={nameOf} n={numbered.get(i.entry.seq)} />
+              <Entry key={i.entry.seq} e={i.entry} tMs={tMs} seek={seek} nameOf={nameOf} n={numbered.get(i.entry.seq)} en={enriched.get(i.entry.seq)} />
             ))}
           </section>
         ))}
@@ -90,7 +93,7 @@ export function TimelineRail({ timeline, tMs, toggles, seek, names, selected }: 
   return (
     <div class="replay__rail">
       {activeEntries(timeline, tMs).filter(visible).map((e) => (
-        <Entry key={e.seq} e={e} tMs={tMs} seek={seek} nameOf={nameOf} />
+        <Entry key={e.seq} e={e} tMs={tMs} seek={seek} nameOf={nameOf} en={enriched.get(e.seq)} />
       ))}
     </div>
   );

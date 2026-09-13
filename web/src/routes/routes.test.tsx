@@ -705,6 +705,32 @@ describe('clear latency surfaces', () => {
     expect(container.textContent).toContain('0.9s');
   });
 
+  it('reads a spawn as its class, not "spawned as for 3"', () => {
+    const { container } = render(
+      <EventFeed events={[{ ...ce(1, 'si_spawn', 'tami', null, 1000), value: 3 }]} maps={[]} />,
+    );
+    expect(container.textContent).toContain('spawned as hunter');
+    expect(container.textContent).not.toContain('for 3');
+  });
+
+  it('says who a clear freed the victim from, what class downed someone, and how a pin ended', () => {
+    const { container } = render(
+      <EventFeed
+        events={[
+          ce(5, 'incap', 'zoey', 'tami', 9000),
+          ce(4, 'cleared', 'mal', 'zoey', 5200),
+          ce(3, 'pinned', 'tami', 'zoey', 1000),
+          { ...ce(1, 'si_spawn', 'tami', null, 500), value: 1 },
+        ]}
+        maps={[]}
+      />,
+    );
+    const text = container.textContent ?? '';
+    expect(text).toContain('from tami');
+    expect(text).toContain('4.2s, cleared by mal');
+    expect(text).toContain('(smoker)');
+  });
+
   it('leaves a clear with no pairable pin unannotated rather than guessing', () => {
     const { container } = render(
       <EventFeed events={[ce(1, 'cleared', 'mal', null, 1910)]} maps={[]} />,

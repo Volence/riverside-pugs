@@ -76,3 +76,21 @@ describe('TimelineRail, a player selected', () => {
     expect(chatRow?.querySelector('.replay__entry-n')).toBeNull();
   });
 });
+
+describe('TimelineRail, enriched readings', () => {
+  it('appends the attacker class, who a clear was from, and how a pin ended', () => {
+    const tl: TimelineEntry[] = [
+      { seq: 1, tMs: 500, kind: 'event', event: 'si_spawn', actor: 'H', target: null, value: 3 },
+      { seq: 2, tMs: 1000, kind: 'event', event: 'pinned', actor: 'H', target: 'B', value: 0 },
+      { seq: 3, tMs: 3100, kind: 'event', event: 'cleared', actor: 'A', target: 'B', value: 0 },
+      { seq: 4, tMs: 4000, kind: 'event', event: 'incap', actor: 'A', target: 'H', value: 0 },
+    ];
+    const { container } = render(
+      <TimelineRail timeline={tl} tMs={5000} toggles={DEFAULT_TOGGLES} seek={vi.fn()} names={NAMES} selected={null} />,
+    );
+    const text = container.textContent ?? '';
+    expect(text).toContain('pinned tino 2.1s, cleared by volence');
+    expect(text).toContain('cleared tino from hunter');
+    expect(text).toContain('went down to hunter (hunter)');
+  });
+});
