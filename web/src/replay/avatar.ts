@@ -9,9 +9,15 @@ export const RIM_W = 2.5;
 /** A 1px near-black edge outside the rim so a cyan rim survives pale map. */
 export const RIM_EDGE_W = 1;
 export const STATE_RING_W = 3;
-export const STATE_RING_GAP = 1.5;
+/** The rim is stroked at radius r with width RIM_W + 2*RIM_EDGE_W = 4.5, so
+ *  it covers r-2.25..r+2.25. The state ring (width STATE_RING_W = 3) must
+ *  sit flush outside that band, r+2.25..r+5.25, so its centre radius is
+ *  r + 3.75. */
+export const STATE_RING_GAP = 3.75;
 export const ARC_W = 2;
-export const ARC_GAP = 5.5;
+/** The arc sits just outside the state ring's outer edge, r+5.25..r+7.25 is
+ *  taken, so the arc (width ARC_W = 2) sits r+5.5..r+7.5 at centre r + 6.5. */
+export const ARC_GAP = 6.5;
 export const FOLLOW_RING_GAP = 10;
 export const FOLLOW_RING_WIDTH = 2;
 export const BADGE_R = 4.5;

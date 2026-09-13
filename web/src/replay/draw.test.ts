@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   avatarRadius, medianHeight, isSurvivor, entityStyle, drawScene, sceneCounts,
-  slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W, FOLLOW_RING_WIDTH,
+  slotColor, statusGlyph, stackLabels, LABEL_PAD_X, LABEL_TICK_W,
   slotLabel, slotNumber, numberInk, SLOT_COLORS, followTarget, GHOST_COLOR,
   playerBaseRadius,
 } from './draw';
@@ -9,7 +9,9 @@ import { STATE, ENTITY_KIND, type PlayerSample } from '../../../src/replayFormat
 import { fitView, projectView, type MapTransform } from '../../../src/mapTransform';
 import { contrastRatio, distance, relativeLuminance, type Vision } from './colorDistance';
 import { barSegments, INCAP_ARC_MAX } from './hud';
-import { AVATAR_BASE_R, ARC_GAP, STATE_RING_GAP, TANK_BASE_R, FOLLOW_RING_GAP } from './avatar';
+import {
+  AVATAR_BASE_R, ARC_GAP, STATE_RING_GAP, STATE_RING_W, TANK_BASE_R, FOLLOW_RING_GAP,
+} from './avatar';
 import { DEAD_COLOR, stateRingColor } from './stateRing';
 import { resetPictogramCache } from './pictograms';
 
@@ -554,6 +556,51 @@ describe('drawScene', () => {
     expect(r).toBeCloseTo(AVATAR_BASE_R, 5);
   });
 
+  it('keeps every ring radius fixed in screen units at any zoom, not scaled with the view', () => {
+    // A medallion is an icon, not a scale model: the rim, state ring and arc
+    // must sit at the same screen-pixel radii whether the view is zoomed
+    // out to a quarter size or in to four times, exactly like the single-
+    // scale regression above but swept across the range the in-game zoom
+    // control actually offers.
+    const transform: MapTransform = {
+      originX: 0, originY: 0, unitsPerPixel: 1, image: null, width: 1280, height: 794,
+    };
+    for (const scale of [0.25, 1, 4]) {
+      // Same auto-fit construction as "is the identity through the auto-fit
+      // path" above, sized so `fitView`'s own scale calculation comes out to
+      // exactly this sweep value rather than assuming a scale field can be
+      // poked in directly.
+      const view = fitView({ x0: 0, y0: 0, x1: 1280 / scale, y1: 794 / scale }, 1280, 794, 0);
+      expect(view.scale).toBeCloseTo(scale, 5);
+      const { calls, ctx } = stubCtx();
+      drawScene(ctx, {
+        transform,
+        view,
+        backdrop: null,
+        trail: [],
+        players: [player({ x: 640, y: -300, z: 0, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED })],
+        entities: [],
+        show: { ci: true, entities: true, names: false },
+        width: 1280,
+        height: 794,
+        names: {},
+        slots: [],
+        portraits: {}, version: 3,
+        followSlot: null,
+      });
+
+      const arcs = calls.filter((c) => c.fn === 'arc');
+      // The state ring is drawn before the rim, so the rim is found by its
+      // own radius rather than assumed to be the first arc call.
+      const rim = arcs.find((c) => c.args[2] === AVATAR_BASE_R);
+      expect(rim).toBeTruthy();
+      const ring = arcs.find((c) => c.args[2] === AVATAR_BASE_R + STATE_RING_GAP);
+      expect(ring).toBeTruthy();
+      const arc = arcs.find((c) => c.args[2] === AVATAR_BASE_R + ARC_GAP);
+      expect(arc).toBeTruthy();
+    }
+  });
+
   // Finding 17: `fitView` widens a degenerate box to one pixel before taking
   // its scale, but `drawScene` used to hand `drawImage` the raw `x1 - x0`,
   // and a zero-width source rect throws IndexSizeError. The generator falls
@@ -987,7 +1034,9 @@ describe('drawScene', () => {
     // A closed circle, not an arc: that is what makes it findable in
     // peripheral vision rather than needing to be read.
     expect(rEnd - rStart).toBeCloseTo(Math.PI * 2, 5);
-    expect(calls[calls.indexOf(ring) + 1].stroke).toBe(stateRingColor(STATE.ALIVE | STATE.PINNED));
+    const ringStroke = calls[calls.indexOf(ring) + 1];
+    expect(ringStroke.stroke).toBe(stateRingColor(STATE.ALIVE | STATE.PINNED));
+    expect(ringStroke.width).toBe(STATE_RING_W);
   });
 
   it('does not ring a healthy player: no state ring arc is drawn', () => {
@@ -1077,11 +1126,13 @@ describe('drawScene', () => {
       names: { s0: 'Zoey' }, slots, followSlot: 0,
     });
 
-    // The follow ring is the outermost thing an avatar draws, and its dark
-    // halo pass shares that radius with two extra pixels of width, so the
-    // halo's outer edge is followR + FOLLOW_RING_WIDTH.
-    const followR = AVATAR_BASE_R + FOLLOW_RING_GAP;
-    const outer = 640 + followR + FOLLOW_RING_WIDTH;
+    // The follow ring is the outermost thing an avatar draws: its dark halo
+    // pass is recorded as an arc immediately followed by the stroke that
+    // actually paints it, and that stroke's own width is what determines the
+    // halo's true outer edge, not an assumed constant.
+    const followArc = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + FOLLOW_RING_GAP)!;
+    const haloStroke = calls[calls.indexOf(followArc) + 1];
+    const outer = 640 + followArc.args[2] + haloStroke.width / 2;
     const plate = calls.filter((c) => c.fn === 'fillRect')[1];
     // The plate's left edge, not just the text's, has to clear the ring.
     expect(plate.args[0]).toBeGreaterThan(outer);
@@ -1103,10 +1154,13 @@ describe('drawScene', () => {
 
     // The follow ring is drawn twice (a dark halo pass, then the bright ring
     // on top of it, so it still reads over a bright patch of map art), both
-    // at the same radius, outside the health arc.
+    // at the same radius, outside the health arc. Both radii are read back
+    // from the actual recorded arc calls rather than assumed from the
+    // constants, so this fails if the two ever collide in practice.
     const followArcs = calls.filter((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + FOLLOW_RING_GAP);
     expect(followArcs).toHaveLength(2);
-    expect(AVATAR_BASE_R + FOLLOW_RING_GAP).toBeGreaterThan(AVATAR_BASE_R + ARC_GAP);
+    const healthArc = calls.find((c) => c.fn === 'arc' && c.args[2] === AVATAR_BASE_R + ARC_GAP)!;
+    expect(followArcs[0].args[2]).toBeGreaterThan(healthArc.args[2]);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  AVATAR_BASE_R, ARC_GAP, DISC_COLOR, STATE_RING_GAP, drawMedallion, type MedallionSpec,
+  AVATAR_BASE_R, ARC_GAP, DISC_COLOR, STATE_RING_GAP, FOLLOW_RING_GAP, drawMedallion, type MedallionSpec,
 } from './avatar';
 import { resetPictogramCache } from './pictograms';
 import { TEMP_HEALTH_COLOR } from './hud';
@@ -130,5 +130,62 @@ describe('drawMedallion', () => {
     expect(last.stroke).toBe('#ffffff');
     expect(halo.stroke).toBe('rgba(0,0,0,0.85)');
     expect(halo.width).toBeGreaterThan(last.width);
+  });
+});
+
+describe('layout', () => {
+  beforeEach(() => { (globalThis as any).Path2D = FakePath2D; resetPictogramCache(); });
+  afterEach(() => { delete (globalThis as any).Path2D; resetPictogramCache(); });
+
+  it('keeps the rim, state ring, arc and follow halo pairwise clear of each other', () => {
+    const { calls, ctx } = stubCtx();
+    drawMedallion(ctx, {
+      ...base,
+      ring: '#a85cf0',
+      arc: { perm: 0.6, temp: 0.1, color: '#45b39c' },
+      follow: true,
+    });
+
+    // Several strokes can share one radius (the rim's dark edge and colour
+    // passes, the arc's permanent and temporary passes, the follow ring's
+    // halo and white passes). The widest of them at a given radius is the
+    // one that actually determines the visible band; a narrower pass at the
+    // same radius sits inside its own halo pass, which is expected and not
+    // itself a collision. Each pass's true width is read from the `stroke`
+    // call immediately following its `arc` call, never from an imported
+    // constant, since that stroke is what the stub records the live
+    // `lineWidth` against.
+    const widestBandAt = (radius: number): { inner: number; outer: number } => {
+      const hits = calls
+        .map((c, i) => ({ c, i }))
+        .filter(({ c }) => c.fn === 'arc' && Math.abs((c.args[2] as number) - radius) < 1e-6);
+      expect(hits.length).toBeGreaterThan(0);
+      let widest = 0;
+      for (const { i } of hits) {
+        const stroke = calls[i + 1];
+        expect(stroke.fn).toBe('stroke');
+        widest = Math.max(widest, stroke.width);
+      }
+      return { inner: radius - widest / 2, outer: radius + widest / 2 };
+    };
+
+    const rim = widestBandAt(AVATAR_BASE_R);
+    const ring = widestBandAt(AVATAR_BASE_R + STATE_RING_GAP);
+    const arc = widestBandAt(AVATAR_BASE_R + ARC_GAP);
+    const follow = widestBandAt(AVATAR_BASE_R + FOLLOW_RING_GAP);
+
+    // Pairwise non-overlapping, in the order they nest outward from the
+    // disc: touching at a shared edge is fine (that is exactly what "flush"
+    // means), overlapping into each other's band is not.
+    const bands = [rim, ring, arc, follow];
+    for (let a = 0; a < bands.length; a++) {
+      for (let b = a + 1; b < bands.length; b++) {
+        expect(bands[a].outer).toBeLessThanOrEqual(bands[b].inner);
+      }
+    }
+    // The geometry the controller ruling fixed: the state ring used to be
+    // overdrawn by the rim edge down to 0.75px of visible colour. It must
+    // now start at or beyond the rim halo's own outer edge.
+    expect(ring.inner).toBeGreaterThanOrEqual(rim.outer);
   });
 });

@@ -47,16 +47,23 @@ export function avatarRadius(z: number, medianZ: number, base = AVATAR_BASE_R): 
   return base * (1 + d * HEIGHT_SCALE);
 }
 
+/** Is this a player-controlled tank: an infected slot whose class is the
+ *  tank in `m_zombieClass`. The one place that test is written, so
+ *  `playerBaseRadius`, `maxHealthOf` and the map's arc gate cannot drift
+ *  apart from each other or from HudStrip's panel. */
+export function isPlayerTank(p: PlayerSample): boolean {
+  return !isSurvivor(p) && ZOMBIE_CLASSES[p.cls] === 'tank';
+}
+
 /** A player tank is drawn at the AI tank's size: the biggest thing on the
- *  field is the biggest thing on the map. `cls` 5 is the tank in
- *  `m_zombieClass`, the same test HudStrip.maxHealthFor makes. */
+ *  field is the biggest thing on the map. */
 export function playerBaseRadius(p: PlayerSample): number {
-  return !isSurvivor(p) && ZOMBIE_CLASSES[p.cls] === 'tank' ? TANK_BASE_R : AVATAR_BASE_R;
+  return isPlayerTank(p) ? TANK_BASE_R : AVATAR_BASE_R;
 }
 
 /** The health pool a player's arc is drawn over. */
 export function maxHealthOf(p: PlayerSample): number {
-  return !isSurvivor(p) && ZOMBIE_CLASSES[p.cls] === 'tank' ? 8000 : 100;
+  return isPlayerTank(p) ? 8000 : 100;
 }
 
 /**
@@ -545,7 +552,6 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     // given to one either: every one of those would make an unspawned
     // infected easier to read, which is the opposite of the point.
     const ghost = (pl.state & STATE.GHOST) !== 0;
-    ctx.globalAlpha = alive ? (ghost ? 0.35 : 1) : 0.3;
 
     const r = avatarRadius(pl.z, median, playerBaseRadius(pl));
     const color = slotColor(pl.slot);
@@ -566,7 +572,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const bar = alive ? healthBar(pl.health, pl.temp, maxHealthOf(pl), pl.state) : null;
     // Survivors always carry an arc; among infected only the tank has a pool
     // worth reading (HudStrip draws the same two cases).
-    const arc = bar && (survivor || ZOMBIE_CLASSES[pl.cls] === 'tank')
+    const arc = bar && (survivor || isPlayerTank(pl))
       ? { perm: bar.perm, temp: bar.temp, color: bar.color } : null;
 
     drawMedallion(ctx, {
