@@ -4,6 +4,7 @@ import { act } from 'preact/test-utils';
 import { useMemo } from 'preact/hooks';
 import { drawScene } from './draw';
 import { ReplayCanvas } from './ReplayCanvas';
+import { FREE } from './camera';
 import { usePlayback, PUBLISH_INTERVAL_MS } from './playback';
 import { bracket, interpolatePlayers } from './interpolate';
 import { fitView, type MapTransform } from '../../../src/mapTransform';
@@ -41,6 +42,7 @@ const SHOW = { ci: true, entities: true, names: true };
  * harness rather than the component. */
 const TRAIL: { x: number; y: number }[] = [];
 const NAMES: Record<string, string> = {};
+const SHIFT = { current: { x: 0, y: 0 } };
 
 const FPS = 60;
 const FRAME_MS = 1000 / FPS;
@@ -138,7 +140,8 @@ function mountViewer(frames: Frame[]) {
         frames={frames}
         timeRef={pb.tRef}
         show={SHOW}
-        followSlot={null}
+        follow={FREE}
+        shiftRef={SHIFT}
         names={NAMES}
         slots={SLOTS}
       />

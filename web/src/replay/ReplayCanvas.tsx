@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'preact/hooks';
 import { projectView, type MapTransform, type View } from '../../../src/mapTransform';
 import type { Frame } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
-import { drawScene, followTarget, type ShowFlags } from './draw';
+import { drawScene, type ShowFlags } from './draw';
+import { followPoint, followSlotOf, type Follow } from './camera';
 import type { CanvasSize } from './canvasSize';
 
 export interface ReplayCanvasProps {
@@ -19,7 +20,11 @@ export interface ReplayCanvasProps {
   /** The playback clock, read every animation frame. See `usePlayback`. */
   timeRef: { current: number };
   show: ShowFlags;
-  followSlot: number | null;
+  follow: Follow;
+  /** The translate the last paint applied to centre the followed point, in
+   *  CSS pixels, or zero when free. A drag that starts while following reads
+   *  this to seed the pan so the map does not jump under the cursor. */
+  shiftRef: { current: { x: number; y: number } };
   names: Record<string, string>;
   slots: string[];
 }
@@ -52,7 +57,7 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
   const ctx = canvas?.getContext('2d');
   if (!canvas || !ctx || !p.transform) return;
 
-  const { transform, view, size, backdrop, trail, show, followSlot, names, slots } = p;
+  const { transform, view, size, backdrop, trail, show, follow, names, slots } = p;
   const pair = bracket(p.frames, p.timeRef.current);
   const players = pair ? interpolatePlayers(pair.a, pair.b, pair.f) : [];
   const entities = pair ? interpolateEntities(pair.a, pair.b, pair.f) : [];
@@ -67,22 +72,25 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
   ctx.clearRect(0, 0, size.pixelW, size.pixelH);
   ctx.restore();
 
-  const target = followTarget(players, followSlot);
+  const pt = followPoint(players, follow);
   ctx.save();
   // Everything below this line is in CSS pixels. One scale here is what
   // lets an avatar radius or a line width in the draw code mean the same
   // thing on a phone at 3x and a desktop at 1x, instead of meaning a
   // backing pixel that the browser then resamples to whatever is left.
   ctx.setTransform(size.ratio, 0, 0, size.ratio, 0, 0);
-  if (target) {
-    // Keep the followed player centred by moving the world under them.
+  let shift = { x: 0, y: 0 };
+  if (pt) {
+    // Keep the followed point centred by moving the world under it.
     // `projectView` is the same helper drawScene uses to turn a world
     // position into a canvas position, through the view's crop and scale;
     // a raw `worldToImage` result is in image space and would centre the
     // camera off by that same scale factor.
-    const pt = projectView(transform, view, target.x, target.y);
-    ctx.translate(size.cssW / 2 - pt.px, size.cssH / 2 - pt.py);
+    const c = projectView(transform, view, pt.x, pt.y);
+    shift = { x: size.cssW / 2 - c.px, y: size.cssH / 2 - c.py };
+    ctx.translate(shift.x, shift.y);
   }
+  p.shiftRef.current = shift;
   drawScene(ctx, {
     transform, view, backdrop, trail,
     players,
@@ -92,7 +100,7 @@ function paint(canvas: HTMLCanvasElement | null, p: ReplayCanvasProps): void {
     height: size.cssH,
     names,
     slots,
-    followSlot,
+    followSlot: followSlotOf(follow),
   });
   ctx.restore();
 }
@@ -135,7 +143,7 @@ export function ReplayCanvas(props: ReplayCanvasProps) {
   }, [
     props.frames, props.transform, props.view, props.backdrop, props.trail,
     props.show.ci, props.show.entities, props.show.names,
-    props.followSlot, props.names, props.slots,
+    props.follow, props.names, props.slots,
     size.cssW, size.cssH, size.pixelW, size.pixelH, size.ratio,
   ]);
 

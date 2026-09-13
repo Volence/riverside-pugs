@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { canvasForAspect } from '../../../src/mapTransform';
 import { STATE } from '../../../src/replayFormat';
 import { bracket, interpolateEntities, interpolatePlayers } from './interpolate';
@@ -13,6 +13,7 @@ import { ReplayControls } from './ReplayControls';
 import { ReplayHud } from './ReplayHud';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
+import { FREE, followSlotOf, type Follow } from './camera';
 import type { TimelineEntry } from './timeline';
 
 /**
@@ -41,7 +42,10 @@ export function Viewer(
   const playback = usePlayback(endMs, { live });
   const [toggles, toggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
-  const [followSlot, setFollowSlot] = useState<number | null>(null);
+  const [follow, setFollow] = useState<Follow>(FREE);
+  const followSlot = followSlotOf(follow);
+  /** Written by the canvas on every paint. See ReplayCanvasProps.shiftRef. */
+  const shiftRef = useRef({ x: 0, y: 0 });
   // The follow row is the bookmark selector (spec 7.2). '' is an unrostered
   // slot and selects nothing; see tickEntries.
   const selected = followSlot === null || !header ? null : (header.slots[followSlot] ?? '');
@@ -131,7 +135,8 @@ export function Viewer(
             frames={frames}
             timeRef={playback.tRef}
             show={show}
-            followSlot={followSlot}
+            follow={follow}
+            shiftRef={shiftRef}
             names={names}
             slots={header.slots}
           />
@@ -164,8 +169,8 @@ export function Viewer(
         playback={playback}
         endMs={endMs}
         live={live}
-        followSlot={followSlot}
-        setFollowSlot={setFollowSlot}
+        follow={follow}
+        setFollow={setFollow}
         slots={header.slots}
         names={names}
         timeline={timeline}
