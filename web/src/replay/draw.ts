@@ -527,6 +527,10 @@ function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
  * common drawn over a survivor makes a horde look like it has already won.
  */
 export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
+  // drawScene owns the hits array's contents for this paint: it is filled
+  // fresh every call, never appended to across repeated paints of a caller's
+  // one long-lived array.
+  if (a.hits) a.hits.length = 0;
   ctx.clearRect(0, 0, a.width, a.height);
   ctx.fillStyle = '#0b0908';
   ctx.fillRect(0, 0, a.width, a.height);
@@ -631,7 +635,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
           ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 4; ctx.stroke();
           ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
         }
-        if (b.burst.style.kind === 'flash') {
+        // A line burst with no actor position (the pin's own attacker did not
+        // resolve, or has none) still has to mark the target somehow: it
+        // draws the same small ring the flash kind draws. A flash always
+        // draws it, from-or-not; a line only when there is no line to carry
+        // that job instead.
+        if (b.burst.style.kind === 'flash' || !b.from) {
           ctx.strokeStyle = color; ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(p.px, p.py, 6 + age * 6, 0, Math.PI * 2); ctx.stroke();
         }
@@ -736,6 +745,9 @@ export function drawScene(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     for (const [victimId, pinnerId] of a.pinners) {
       const v = bySteam.get(victimId); const k = bySteam.get(pinnerId);
       if (!v || !k) continue;
+      // The player loop below draws only PRESENT players, so a line to an
+      // unpainted medallion (either end) would point at nothing on screen.
+      if ((v.state & STATE.PRESENT) === 0 || (k.state & STATE.PRESENT) === 0) continue;
       if ((v.state & STATE.PINNED) === 0) continue;
       if ((k.state & STATE.ALIVE) === 0 || (k.state & STATE.GHOST) !== 0) continue;
       const pv = projectView(a.transform, a.view, v.x, v.y);

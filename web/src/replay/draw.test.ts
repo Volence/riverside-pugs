@@ -1319,6 +1319,77 @@ describe('drawScene', () => {
     const ring = (c: ReturnType<typeof stubCtx>) => c.calls.filter((x) => x.fn === 'arc' && x.stroke === BURSTS.boom.color).pop()!;
     expect(ring(old).args[2]).toBeGreaterThan(ring(young).args[2]);
   });
+
+  // Finding 1: drawScene appended to a.hits and never cleared it, so a caller
+  // reusing one array across paints accumulated stale items forever and
+  // hitTest returned positions that were no longer on screen.
+  it('owns the hits array: a second paint with the same array replaces, not appends', () => {
+    const { transform, view } = identityScene();
+    const { ctx } = stubCtx();
+    const hits: HitItem[] = [];
+    const args = {
+      ...baseArgs(transform, view), hits,
+      players: [player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE, health: 100 })],
+      markers: [mk(1, 'boom', 700)],
+    };
+    drawScene(ctx, args);
+    expect(hits).toHaveLength(2);
+    drawScene(ctx, args);
+    expect(hits).toHaveLength(2);
+  });
+
+  // Finding 2: a 'line' burst (the pinned kind) with `from: null` drew
+  // nothing at all, silently, so a pin whose attacker position never
+  // resolved left no mark on the map for that instant.
+  it('draws a flash burst\'s line and dark halo when it has an actor position', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const burst = { entry: mk(1, 'dp', 600).entry, style: BURSTS.dp, startedAt: 0 };
+    drawScene(ctx, {
+      ...baseArgs(transform, view), nowMs: 100,
+      bursts: [{ burst, pos: { x: 600, y: -300, z: 0 }, from: { x: 500, y: -300, z: 0 } }],
+    });
+    const moveAt = calls.findIndex((c) => c.fn === 'moveTo');
+    const lineAt = calls.findIndex((c) => c.fn === 'lineTo');
+    const haloAt = calls.findIndex((c) => c.fn === 'stroke' && c.width === 4);
+    const colorAt = calls.findIndex((c) => c.fn === 'stroke' && c.stroke === BURSTS.dp.color && c.width === 2);
+    expect(moveAt).toBeGreaterThanOrEqual(0);
+    // moveTo, then lineTo, then the dark halo stroke, then the colour stroke
+    // on top of it, in that order.
+    expect(lineAt).toBeGreaterThan(moveAt);
+    expect(haloAt).toBeGreaterThan(lineAt);
+    expect(colorAt).toBeGreaterThan(haloAt);
+  });
+
+  it('still marks the target of a pinned line burst with no actor position', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    const burst = { entry: mk(1, 'pinned', 600).entry, style: BURSTS.pinned, startedAt: 0 };
+    drawScene(ctx, {
+      ...baseArgs(transform, view), nowMs: 100,
+      bursts: [{ burst, pos: { x: 600, y: -300, z: 0 }, from: null }],
+    });
+    const ring = calls.find((c) => c.fn === 'arc' && c.stroke === BURSTS.pinned.color);
+    expect(ring).toBeTruthy();
+  });
+
+  // Finding 3: the pin-line pass gated on PINNED, ALIVE and not GHOST but not
+  // on PRESENT, while the player loop below draws only PRESENT players, so a
+  // line could be drawn to a medallion that was never painted.
+  it('draws no pin line to a pinner who is not present', () => {
+    const { transform, view } = identityScene();
+    const { calls, ctx } = stubCtx();
+    drawScene(ctx, {
+      ...baseArgs(transform, view),
+      slots: ['A', '', '', '', 'H', '', '', ''],
+      players: [
+        player({ slot: 0, infected: false, state: STATE.PRESENT | STATE.ALIVE | STATE.PINNED, health: 100 }),
+        player({ slot: 4, infected: true, cls: 3, x: 700, state: STATE.ALIVE, health: 250 }),
+      ],
+      pinners: new Map([['A', 'H']]),
+    });
+    expect(calls.filter((c) => c.fn === 'stroke' && c.stroke === SLOT_COLORS[4])).toHaveLength(0);
+  });
 });
 
 describe('entity styles', () => {
