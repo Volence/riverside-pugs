@@ -246,6 +246,41 @@ describe('Viewer hover and click-to-seek', () => {
   });
 });
 
+describe('Viewer key panel', () => {
+  it('opens the key panel from the Key chip and closes it from the panel button', () => {
+    const { container } = mount();
+    expect(container.querySelector('.key')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Key' }));
+    expect(container.querySelector('.key')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Key' }).classList.contains('is-on')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close key' }));
+    expect(container.querySelector('.key')).toBeNull();
+  });
+
+  it('does not let a press inside the panel (on a non-button element) start the stage drag', () => {
+    const { container, stage } = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Key' }));
+    const heading = container.querySelector('.key h5') as HTMLElement;
+    expect(heading).not.toBeNull();
+
+    fireEvent.pointerDown(heading, { clientX: 50, clientY: 60, button: 0 });
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 65, clientY: 75, bubbles: true }));
+    });
+
+    // useCamera's onPointerDown never saw the press (stopped on the panel
+    // root), so the window pointermove above never crosses into a drag: the
+    // stage never picks up its dragging class.
+    expect(stage.classList.contains('is-dragging')).toBe(false);
+
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointerup', { clientX: 65, clientY: 75, bubbles: true }));
+    });
+  });
+});
+
 describe('isDefaultCamera', () => {
   it('is true within tolerance of fit and free, even after a zoom-in/zoom-out round trip', () => {
     expect(isDefaultCamera({ cam: { zoom: 1.0000000000000002, panX: 0, panY: 0 }, follow: FREE })).toBe(true);

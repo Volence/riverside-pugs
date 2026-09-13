@@ -12,6 +12,7 @@ import { useCanvasSize } from './canvasSize';
 import { ReplayCanvas } from './ReplayCanvas';
 import { ReplayControls } from './ReplayControls';
 import { ReplayHud, ToggleChips } from './ReplayHud';
+import { KeyPanel } from './KeyPanel';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
 import { TheaterStatus } from './TheaterStatus';
@@ -302,6 +303,7 @@ export function Viewer(
           theater={theaterChip}
         />
       )}
+      {toggles.key && <KeyPanel onClose={() => setToggle('key', false)} />}
     </div>
   );
 

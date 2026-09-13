@@ -896,6 +896,19 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .rhud .chip { min-height: 36px; padding: 2px var(--sp-2); background: rgba(21, 17, 14, 0.85); pointer-events: auto; }
 @media (max-width: 640px) { .rhud__time { font-size: 1.75rem; } .rhud .chip { min-height: 44px; } }
 
+/* Map key/legend panel (Task 10): a floating card over the stage, built from
+   the same tables the canvas draws from. */
+.key { position: absolute; z-index: 4; top: var(--sp-3); left: var(--sp-3); max-width: min(92%, 640px); max-height: calc(100% - 2 * var(--sp-3)); overflow: auto; background: rgba(5, 4, 3, 0.94); border: 1px solid var(--border); padding: var(--sp-2) var(--sp-3); font-size: 12px; pointer-events: auto; }
+.key__head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
+.key__cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-3); }
+.key h5 { margin: 0 0 var(--sp-1); font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.key ul { list-style: none; margin: 0 0 var(--sp-2); padding: 0; }
+.key li { display: flex; align-items: center; gap: 6px; line-height: 1.6; }
+.key__swatch { width: 12px; height: 12px; border-radius: 50%; background: currentColor; flex: none; }
+.key__swatch--ring { background: #14110f; border: 2.5px solid currentColor; }
+.key__pict { width: 14px; height: 14px; color: #fff; flex: none; }
+.key__tag { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; border: 2px solid; background: rgba(5, 4, 3, 0.82); font: bold 7px sans-serif; color: #fff; flex: none; }
+
 .replay--empty { padding: 2rem; text-align: center; color: var(--text-muted); }
 .replay__controls, .replay__toolbar, .replay__rounds { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .replay__time { font-family: var(--font-label); font-variant-numeric: tabular-nums; font-size: var(--fs-dense); color: var(--text-muted); letter-spacing: 0.08em; }
@@ -911,6 +924,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__entry:hover { background: var(--surface-2); }
 .replay__entry--chat .replay__entry-text { opacity: 0.85; font-style: italic; }
 .replay__entry-t { font-variant-numeric: tabular-nums; opacity: 0.55; }
+.replay__entry-n { display: inline-block; min-width: 1.2em; margin-right: 4px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .replay__entry-who { font-weight: 600; }
 .replay__entry--ahead { opacity: 0.45; }
 .replay__rail--player { max-height: 24rem; }
