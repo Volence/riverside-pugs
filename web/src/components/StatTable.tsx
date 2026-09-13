@@ -5,7 +5,8 @@ import { fmtLatency, labelFor, liveGroupStarts } from '../format';
 import { clearLatencies } from '../clearLatency';
 import { PlayerLink } from './bits';
 import { markColumn, directionOf, type Mark } from '../outliers';
-import { EVENT_KINDS } from '../replay/eventText';
+import { EVENT_KINDS, valueText } from '../replay/eventText';
+import { enrichEvents, enrichmentText, fromLiveEvents } from '../eventEnrich';
 
 /** A player row for any stat table: live, per-map, or match totals. */
 export interface StatRow {
@@ -153,6 +154,12 @@ export function EventFeed(
   // rather than passed in: the feed already holds every event the pairing
   // needs, and a clear with no pairable pin simply gets no annotation.
   const latencyOf = new Map(clearLatencies(events).map((c) => [c.seq, c.latencyMs]));
+  // Class, who-from and pin outcomes, read off the stream itself. Computed
+  // over ALL events, not the folded window, because a pin that ended after
+  // the fold still ended.
+  const enriched = enrichEvents(fromLiveEvents(all));
+  const nameOf = (id: string) => all.find((x) => x.actor.steamid === id)?.actor.name
+    ?? all.find((x) => x.target?.steamid === id)?.target?.name ?? 'unknown';
 
   const rows: JSX.Element[] = [];
   let lastOrdinal: number | null = null;
@@ -179,14 +186,22 @@ export function EventFeed(
           {latencyOf.has(e.seq) && (
             <> <span class="feed__val num">{fmtLatency(latencyOf.get(e.seq)!)}</span></>
           )}
-          {e.value > 0 && (
-            <>
-              {' '}
-              <span class="muted">{verb?.unit ?? 'for'}</span>
-              {' '}
-              <span class="feed__val num">{e.value}</span>
-            </>
-          )}
+          {(() => {
+            // The same reading the rail gives: a spawn's value is a class
+            // code and reads as its name, everything else is a quantity
+            // with its unit. This used to print "spawned as for 3".
+            const v = valueText(e.kind, e.value);
+            if (!v) return null;
+            if (e.kind === 'si_spawn') return <> <span class="feed__val">{v}</span></>;
+            // A quantity: its own unit when the kind has one, else "for".
+            const unit = verb?.unit ?? 'for';
+            const num = v.startsWith(`${unit} `) ? v.slice(unit.length + 1) : v;
+            return <> <span class="muted">{unit}</span> <span class="feed__val num">{num}</span></>;
+          })()}
+          {(() => {
+            const extra = enrichmentText(e.kind, enriched.get(e.seq), nameOf, e.target?.name ?? null);
+            return extra ? <> <span class="muted feed__detail">{extra}</span></> : null;
+          })()}
         </span>
       </li>,
     );
