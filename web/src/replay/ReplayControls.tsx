@@ -1,7 +1,9 @@
+import { useState } from 'preact/hooks';
 import { slotColor, slotLabel } from './draw';
 import { SPEEDS, type usePlayback } from './playback';
 import { tickEntries } from './bookmarks';
 import { bookmarkSeekMs, entryText, type TimelineEntry } from './timeline';
+import { eventSentence } from './eventText';
 import {
   FREE, TEAM, ZOOM_LEVELS, followSlotOf, type Follow,
 } from './camera';
@@ -14,6 +16,22 @@ export function formatTime(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** What a scrub tick says when hovered: the moment, then the same sentence
+ *  the map tag tooltip uses for an event, or speaker and message for chat.
+ *  The aria-label carries the phrase form; this is the readable one. */
+export function tickText(e: TimelineEntry, nameOf: (id: string) => string): string {
+  const what = e.kind === 'chat' ? `${nameOf(e.actor)}: ${e.text}` : eventSentence(e, nameOf);
+  return `${formatTime(e.tMs)} · ${what}`;
+}
+
+/** Which way the tick tip grows so it stays inside the bar: centred on the
+ *  tick, or from its left/right edge near the ends. */
+export function tipAnchor(fraction: number): 'start' | 'mid' | 'end' {
+  if (fraction < 0.12) return 'start';
+  if (fraction > 0.88) return 'end';
+  return 'mid';
 }
 
 export interface ReplayControlsProps {
@@ -44,6 +62,10 @@ export function ReplayControls(
   const selected = followSlot === null ? null : (slots[followSlot] ?? '');
   const ticks = timeline ? tickEntries(timeline, selected) : [];
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / endMs) * 100))}%`;
+  // The hovered or focused tick's seq. Plain state: it drives one tooltip
+  // and nothing the canvas reads.
+  const [hoverTick, setHoverTick] = useState<number | null>(null);
+  const tipEntry = hoverTick === null ? null : ticks.find((t) => t.entry.seq === hoverTick)?.entry ?? null;
 
   return (
     <>
@@ -77,9 +99,20 @@ export function ReplayControls(
                   style={{ left: pct(e.tMs) }}
                   aria-label={`${formatTime(e.tMs)} ${nameOf(e.actor)} ${entryText(e, nameOf)}`}
                   onClick={() => playback.seek(bookmarkSeekMs(e.tMs))}
+                  onPointerEnter={() => setHoverTick(e.seq)}
+                  onPointerLeave={() => setHoverTick((h) => (h === e.seq ? null : h))}
+                  onFocus={() => setHoverTick(e.seq)}
+                  onBlur={() => setHoverTick((h) => (h === e.seq ? null : h))}
                 />
               ))}
             </div>
+          )}
+          {tipEntry && endMs > 0 && (
+            <div
+              class={`replay__tip scrub__tip scrub__tip--${tipAnchor(tipEntry.tMs / endMs)}`}
+              role="tooltip"
+              style={{ left: pct(tipEntry.tMs) }}
+            >{tickText(tipEntry, nameOf)}</div>
           )}
         </div>
         <span class="replay__time">{formatTime(playback.tMs)} / {formatTime(endMs)}</span>

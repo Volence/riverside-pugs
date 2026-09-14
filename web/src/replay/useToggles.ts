@@ -11,6 +11,8 @@ export interface Toggles {
   /** The map key/legend panel (Task 10). A boolean toggle, unlike
    *  `showKind`. */
   key: boolean;
+  /** The running box score panel (StatsPanel). */
+  stats: boolean;
   /** The event kind the Show select is narrowed to, or 'all'. Not a
    *  boolean, so it is excluded from the chip row's toggle keys. */
   showKind: string;
@@ -19,7 +21,7 @@ export interface Toggles {
 export const DEFAULT_TOGGLES: Toggles = {
   hp: true, guns: false, events: true, chat: true,
   ci: true, entities: true, names: true,
-  key: false, showKind: 'all',
+  key: false, stats: false, showKind: 'all',
 };
 
 /** The boolean-valued toggle keys, i.e. every key except `showKind` (a

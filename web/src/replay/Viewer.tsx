@@ -25,6 +25,7 @@ import { eventPosition, markerEntries, markerKind, witchStartledAt } from './mar
 import { sameHit, stageHit, type HitItem } from './hitTest';
 import { tooltipText } from './tooltipText';
 import { ReplayTooltip } from './ReplayTooltip';
+import { StatsPanel } from './StatsPanel';
 import { bookmarkSeekMs, type TimelineEntry } from './timeline';
 
 /**
@@ -311,6 +312,16 @@ export function Viewer(
         />
       )}
       {toggles.key && <KeyPanel onClose={() => setToggle('key', false)} />}
+      {toggles.stats && timeline && (
+        <StatsPanel
+          timeline={tl}
+          tMs={playback.tMs}
+          players={livePlayers}
+          slots={header.slots}
+          names={names}
+          onClose={() => setToggle('stats', false)}
+        />
+      )}
     </div>
   );
 
