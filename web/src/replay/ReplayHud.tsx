@@ -3,7 +3,7 @@ import type { BoolToggle, Toggles } from './useToggles';
 
 const TOGGLE_LABELS: [BoolToggle, string][] = [
   ['hp', 'HP'], ['names', 'Names'], ['guns', 'Guns'], ['events', 'Events'],
-  ['chat', 'Chat'], ['ci', 'CI'], ['entities', 'Ents'], ['key', 'Key'],
+  ['chat', 'Chat'], ['ci', 'CI'], ['entities', 'Ents'], ['stats', 'Stats'], ['key', 'Key'],
 ];
 
 export interface TheaterChip { on: boolean; toggle(): void }

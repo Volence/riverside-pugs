@@ -248,6 +248,25 @@ describe('Viewer hover and click-to-seek', () => {
   });
 });
 
+describe('Viewer stats panel', () => {
+  it('opens the running box score from the Stats chip, at the playhead, and closes it from the panel', () => {
+    const { container } = mount();
+    expect(container.querySelector('.box')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stats' }));
+    const box = container.querySelector('.box');
+    expect(box).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Stats' }).classList.contains('is-on')).toBe(true);
+    // DEFAULT_TIMELINE's one boom at 0.1s is behind a playhead at 0 only once
+    // it plays; the column exists from the start because the round has it.
+    expect([...box!.querySelectorAll('th')].map((h) => h.textContent)).toContain('Booms');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close stats' }));
+    expect(container.querySelector('.box')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stats' }).classList.contains('is-on')).toBe(false);
+  });
+});
+
 describe('Viewer key panel', () => {
   it('opens the key panel from the Key chip and closes it from the panel button', () => {
     const { container } = mount();

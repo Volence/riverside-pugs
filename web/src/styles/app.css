@@ -909,6 +909,23 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .key__pict { width: 14px; height: 14px; color: #fff; flex: none; }
 .key__tag { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; border: 2px solid; background: rgba(5, 4, 3, 0.82); font: bold 7px sans-serif; color: #fff; flex: none; }
 
+/* Running box score (StatsPanel): bottom centre of the stage, above the
+   theater status line, clear of the edge HUD columns on both sides. */
+.box { position: absolute; z-index: 4; left: 50%; bottom: var(--sp-3); transform: translateX(-50%); max-width: min(96%, 900px); max-height: calc(100% - 2 * var(--sp-3)); overflow: auto; background: rgba(5, 4, 3, 0.94); border: 1px solid var(--border); padding: var(--sp-2) var(--sp-3); font-size: 12px; pointer-events: auto; }
+.replay--theater .box { bottom: 64px; }
+.box__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.box__t { color: var(--text-muted); margin-left: var(--sp-2); }
+.box__cols { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; }
+.box h5 { margin: 0 0 var(--sp-1); font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.box table { border-collapse: collapse; white-space: nowrap; }
+.box th { font-family: var(--font-label); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); font-weight: normal; text-align: right; padding: 0 6px 3px; }
+.box td { padding: 1px 6px; line-height: 1.5; }
+.box td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-bright); }
+.box td.num.is-zero { color: var(--text-muted); opacity: 0.55; }
+.box__who { display: flex; align-items: center; gap: 6px; }
+.box__dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: none; }
+.box__none { margin: 0; font-size: 11px; }
+
 .replay--empty { padding: 2rem; text-align: center; color: var(--text-muted); }
 .replay__controls, .replay__toolbar, .replay__rounds { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .replay__time { font-family: var(--font-label); font-variant-numeric: tabular-nums; font-size: var(--fs-dense); color: var(--text-muted); letter-spacing: 0.08em; }
@@ -1011,6 +1028,13 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .scrub__tick--chat { --tick: var(--text-muted); opacity: 0.6; }
 .scrub__tick--did { --tick: var(--win); }
 .scrub__tick--suffered { --tick: var(--accent); }
+/* The tick tooltip: the stage tooltip's look, sat above the bar on the
+   tick's own fraction. Near either end it grows inward from the tick rather
+   than being centred on it, so it never leaves the bar. */
+.scrub__tip { top: auto; bottom: calc(100% + 6px); transform: translateX(-50%); z-index: 5; }
+.scrub__tip--start { transform: none; margin-left: -5px; }
+.scrub__tip--end { transform: translateX(-100%); margin-left: 5px; }
+.theater__top .scrub__tip { top: calc(100% + 6px); bottom: auto; }
 
 /* ---------- theater (spec 7.1) ---------- */
 

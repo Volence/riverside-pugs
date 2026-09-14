@@ -104,3 +104,39 @@ describe('ReplayControls zoom chips', () => {
     expect(setZoom).toHaveBeenCalledWith(1);
   });
 });
+
+describe('ReplayControls tick tooltip', () => {
+  it('names the moment on hover, in the map tag sentence, and hides on leave', () => {
+    const { container } = mount();
+    const tick = container.querySelectorAll('.scrub__tick')[0] as HTMLButtonElement;
+    expect(container.querySelector('.scrub__tip')).toBeNull();
+    fireEvent.pointerEnter(tick);
+    const tip = container.querySelector('.scrub__tip') as HTMLElement;
+    expect(tip.textContent).toBe('0:25 · hunter pounced volence for 12');
+    expect(tip.style.left).toBe('25%');
+    fireEvent.pointerLeave(tick);
+    expect(container.querySelector('.scrub__tip')).toBeNull();
+  });
+
+  it('reads a chat tick as speaker and message, and shows on keyboard focus too', () => {
+    const { container } = mount();
+    const tick = container.querySelectorAll('.scrub__tick')[1] as HTMLButtonElement;
+    fireEvent.focus(tick);
+    expect((container.querySelector('.scrub__tip') as HTMLElement).textContent).toBe('0:50 · tino: gg');
+    fireEvent.blur(tick);
+    expect(container.querySelector('.scrub__tip')).toBeNull();
+  });
+
+  it('anchors the tip to the side that keeps it inside the bar near either edge', () => {
+    const edge: TimelineEntry[] = [
+      { seq: 1, tMs: 2000, kind: 'event', event: 'skeet', actor: 'A', target: 'H', value: 0 },
+      { seq: 2, tMs: 98000, kind: 'event', event: 'skeet', actor: 'A', target: 'H', value: 0 },
+    ];
+    const { container } = mount({ timeline: edge });
+    const ticks = container.querySelectorAll('.scrub__tick');
+    fireEvent.pointerEnter(ticks[0]);
+    expect(container.querySelector('.scrub__tip')!.classList.contains('scrub__tip--start')).toBe(true);
+    fireEvent.pointerEnter(ticks[1]);
+    expect(container.querySelector('.scrub__tip')!.classList.contains('scrub__tip--end')).toBe(true);
+  });
+});
