@@ -322,7 +322,11 @@ orientation threshold. Changing this changes the rules under every rating earned
 		"1 = move rostered players back to their team's side every two seconds. 0 lets people \
 swap sides freely; the orientation vote still runs so scoring attribution keeps working. Testing only.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
-	g_cvRosterAtLive = CreateConVar("sm_pug_roster_at_live", "0",
+	// Default 1 since 2026-09-14: with 0, a !mix after !load_4v4p left the pre-mix
+	// roster in place (matches 13 and 18), and the rcon-set 1 was lost on every
+	// server restart. Recording at go-live is the behaviour that matches how the
+	// command is actually used: load, mix, ready up.
+	g_cvRosterAtLive = CreateConVar("sm_pug_roster_at_live", "1",
 		"!load_4v4p roster timing. 0 = record whoever is on a side the moment the command runs. \
 1 = create the match now but record whoever is on a side when the first round goes live, so a \
 !mix after the load still lands in the roster.",
