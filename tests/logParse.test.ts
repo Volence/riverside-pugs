@@ -112,7 +112,13 @@ describe('parseLogDatagram: self-started match lines', () => {
       steamid: '76561198030413993',
       team: 'a',
       name: 'volence',
+      joinedMap: 0,
     });
+  });
+
+  it('reads joined_map on a MATCH_ROSTER line, before the name', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198005192652 team=b joined_map=2 name=mayhem`));
+    expect(ev).toMatchObject({ kind: 'match_roster', team: 'b', name: 'mayhem', joinedMap: 2 });
   });
 
   // name= is emitted last precisely so that spaces are safe. If this ever

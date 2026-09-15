@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { displaySr, applyMatchRatings } from '../src/rating.js';
+import { displaySr, applyMatchRatings, ratedForMaps } from '../src/rating.js';
 import { upsertPlayer, ensureRating } from '../src/players.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -24,9 +24,35 @@ describe('displaySr', () => {
   });
 });
 
+describe('ratedForMaps', () => {
+  it('rates a player who played at least half the maps, and everyone when no maps are recorded', () => {
+    expect(ratedForMaps(0, 4)).toBe(true);
+    expect(ratedForMaps(2, 4)).toBe(true);  // played maps 2 and 3 of 0..3: half
+    expect(ratedForMaps(3, 4)).toBe(false); // played the last map only
+    expect(ratedForMaps(1, 2)).toBe(true);
+    expect(ratedForMaps(1, 1)).toBe(false);
+    expect(ratedForMaps(5, 0)).toBe(true);
+  });
+});
+
 describe('applyMatchRatings', () => {
   let db: DB;
   beforeEach(() => { db = openDb(':memory:'); });
+
+  it('skips a sub who joined after half the maps, keeps their row, rates the rest', () => {
+    const matchId = seedCompletedMatch(db, 'b');
+    const insMap = db.prepare('INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, ?, ?, 0, 0)');
+    for (let i = 0; i < 4; i++) insMap.run(matchId, i, `m${i}`);
+    db.prepare('UPDATE match_players SET joined_map = 3 WHERE match_id = ? AND player_id = ?').run(matchId, IDS[7]);
+    db.prepare('UPDATE match_players SET joined_map = 2 WHERE match_id = ? AND player_id = ?').run(matchId, IDS[6]);
+    applyMatchRatings(db, matchId);
+    const hist = db.prepare('SELECT player_id FROM rating_history WHERE match_id = ?').all(matchId) as { player_id: string }[];
+    expect(hist).toHaveLength(7);
+    expect(hist.map((h) => h.player_id)).not.toContain(IDS[7]);
+    expect(hist.map((h) => h.player_id)).toContain(IDS[6]);
+    expect(ensureRating(db, IDS[7]).wins).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM match_players WHERE match_id = ?').get(matchId) as any).n).toBe(8);
+  });
 
   it('raises winners, lowers losers, records history and W/L', () => {
     const matchId = seedCompletedMatch(db, 'b');

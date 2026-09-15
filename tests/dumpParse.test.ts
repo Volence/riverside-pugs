@@ -19,8 +19,8 @@ describe('parseDump', () => {
       { map: 'l4d_hospital02_subway', a: 400, b: 300 },
     ]);
     expect(d.players).toEqual([
-      { steamid: '76561198000000001', team: 'a', sidmg: 1240, sikill: 8, ck: 312, ff: 45, rev: 3 },
-      { steamid: '76561198000000002', team: 'b', sidmg: 980, sikill: 6, ck: 280, ff: 12, rev: 1 },
+      { steamid: '76561198000000001', team: 'a', joinedMap: 0, sidmg: 1240, sikill: 8, ck: 312, ff: 45, rev: 3 },
+      { steamid: '76561198000000002', team: 'b', joinedMap: 0, sidmg: 980, sikill: 6, ck: 280, ff: 12, rev: 1 },
     ]);
     expect(d.winner).toBe('a');
     expect(d.totalA).toBe(645);

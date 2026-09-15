@@ -58,6 +58,10 @@ export class SelfStartedMatches {
         break;
       }
       case 'match_roster': {
+        // A roster line for a match that is already live is a late joiner or
+        // a sub the plugin rostered at a go-live (RosterLateJoiners). Add
+        // them to the match directly; there is no burst to wait for.
+        if (this.addLateJoiner(ev)) break;
         const p = this.ensure(ev.token);
         p.roster.set(ev.steamid, { team: ev.team, name: ev.name });
         this.maybeCommit(ev.token);
@@ -72,6 +76,29 @@ export class SelfStartedMatches {
       default:
         break;
     }
+  }
+
+  /** True when the line belonged to a live match and was applied to it. A
+   *  repeat of a line already applied is a no-op that still returns true. */
+  private addLateJoiner(ev: Extract<LogEvent, { kind: 'match_roster' }>): boolean {
+    const { db } = this.deps;
+    const live = db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+      .get(ev.token) as { id: number } | undefined;
+    if (!live) return false;
+    const admins = this.deps.adminSteamIds ?? [];
+    const isAdmin = admins.includes(ev.steamid);
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO players (steamid, name, avatar, status, is_admin)
+         VALUES (?, ?, NULL, ?, ?)
+         ON CONFLICT(steamid) DO NOTHING`,
+      ).run(ev.steamid, ev.name, isAdmin ? 'active' : 'invited', isAdmin ? 1 : 0);
+      const r = db.prepare(
+        'INSERT OR IGNORE INTO match_players (match_id, player_id, team, joined_map) VALUES (?, ?, ?, ?)',
+      ).run(live.id, ev.steamid, ev.team, ev.joinedMap);
+      if (r.changes > 0) console.log(`[selfStarted] match ${live.id}: rostered ${ev.steamid} on ${ev.team} at map ${ev.joinedMap}`);
+    })();
+    return true;
   }
 
   private ensure(token: string): Pending {

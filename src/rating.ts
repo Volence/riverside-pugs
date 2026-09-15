@@ -7,7 +7,16 @@ export function displaySr(mu: number, sigma: number): number {
   return Math.max(0, Math.round((mu - 2 * sigma) * 100));
 }
 
-interface MpRow { player_id: string; team: 'a' | 'b' }
+interface MpRow { player_id: string; team: 'a' | 'b'; joined_map: number }
+
+/** Whether a player who was rostered on map `joinedMap` of a `mapsPlayed`-map
+ *  match played enough of it to be rated: at least half the maps. A sub who
+ *  came in for the last map of four keeps their stats but is not rated on
+ *  it; with no maps recorded everyone is rated (nothing to judge by). */
+export function ratedForMaps(joinedMap: number, mapsPlayed: number): boolean {
+  if (mapsPlayed <= 0) return true;
+  return (mapsPlayed - joinedMap) * 2 >= mapsPlayed;
+}
 
 /** Apply OpenSkill updates for a completed match: player_ratings mu/sigma/W-L
  *  plus one rating_history row per player. Idempotent via rating_history guard.
@@ -19,7 +28,9 @@ export function applyMatchRatings(db: DB, matchId: number): void {
   if (!match || match.state !== 'completed' || !match.winner) return;
   if (db.prepare('SELECT 1 FROM rating_history WHERE match_id = ? LIMIT 1').get(matchId)) return;
 
-  const mps = db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ?').all(matchId) as MpRow[];
+  const all = db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ?').all(matchId) as MpRow[];
+  const mapsPlayed = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
+  const mps = all.filter((r) => ratedForMaps(r.joined_map, mapsPlayed));
   const teamA = mps.filter((r) => r.team === 'a').map((r) => r.player_id);
   const teamB = mps.filter((r) => r.team === 'b').map((r) => r.player_id);
   if (teamA.length === 0 || teamB.length === 0) return;

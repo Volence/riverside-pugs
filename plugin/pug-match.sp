@@ -10,7 +10,11 @@
 
 #define PLUGIN_VERSION "0.1.0"
 
-#define MAX_ROSTER 8
+// 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
+// (RosterLateJoiners), so a night with two subs needs room past the eight who
+// started. The replay format still draws RPL_SLOTS (8) players; slots past
+// that are scored and rated but not drawn on the map.
+#define MAX_ROSTER 12
 #define MAX_MAPS 8
 #define TEAM_SPEC 1
 #define TEAM_SURVIVOR 2
@@ -81,6 +85,7 @@ char g_sCampaign[64];
 // Roster: fixed slots, parallel arrays, keyed by SteamID64.
 char g_sRosterId[MAX_ROSTER][32];
 int g_iRosterTeam[MAX_ROSTER];          // 1 = a, 2 = b
+int g_iRosterJoinedMap[MAX_ROSTER];     // map ordinal the slot was rostered on; 0 = from the start
 int g_iRosterCount;
 
 // In-game names, captured at roster time. Only populated for self-started
@@ -1452,12 +1457,67 @@ int SnapshotRoster()
 		int slot = g_iRosterCount++;
 		strcopy(g_sRosterId[slot], 32, id);
 		g_iRosterTeam[slot] = (team == TEAM_SURVIVOR) ? 1 : 2;
+		g_iRosterJoinedMap[slot] = g_iMapCount;
 		SanitizeName(i, g_sRosterName[slot], 64);
 		g_iClientRoster[i] = slot;
 	}
 	g_iPugSide[1] = TEAM_SURVIVOR;
 	g_iPugSide[2] = TEAM_INFECTED;
 	return g_iRosterCount;
+}
+
+/** Roster anyone on a side who is not rostered yet, at a live match's go-live.
+ *
+ *  A late joiner or a sub goes on the pug team whose rostered players share
+ *  their game team right now (majority), falling back to the orientation
+ *  mapping when nobody rostered is on that side. mayhem played all four maps
+ *  of match 18 (2026-09-14) unrostered: no stats, no rating, and every pin on
+ *  him went out with target=0. The backend adds the player to the live match
+ *  on the MATCH_ROSTER line; the dump carries joined_map so the rating step
+ *  can skip someone who only played the tail of a match. */
+int RosterLateJoiners()
+{
+	int added = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || IsFakeClient(c) || g_iClientRoster[c] != -1) continue;
+		int team = GetClientTeam(c);
+		if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) continue;
+		if (g_iRosterCount >= MAX_ROSTER)
+		{
+			LogError("[pug] roster full (%d), %N stays unrostered", MAX_ROSTER, c);
+			continue;
+		}
+		char id[32];
+		if (!GetClientAuthId(c, AuthId_SteamID64, id, sizeof(id))) continue;
+
+		int onSide[3];
+		for (int o = 1; o <= MaxClients; o++)
+		{
+			int s = g_iClientRoster[o];
+			if (s == -1 || !IsClientInGame(o) || GetClientTeam(o) != team) continue;
+			onSide[g_iRosterTeam[s]]++;
+		}
+		int pug = 0;
+		if (onSide[1] > onSide[2]) pug = 1;
+		else if (onSide[2] > onSide[1]) pug = 2;
+		else if (g_iPugSide[1] == team) pug = 1;
+		else if (g_iPugSide[2] == team) pug = 2;
+		if (pug == 0) continue;
+
+		int slot = g_iRosterCount++;
+		strcopy(g_sRosterId[slot], 32, id);
+		g_iRosterTeam[slot] = pug;
+		g_iRosterJoinedMap[slot] = g_iMapCount;
+		SanitizeName(c, g_sRosterName[slot], 64);
+		g_iClientRoster[c] = slot;
+		EmitPug("MATCH_ROSTER steamid=%s team=%s joined_map=%d name=%s",
+			id, pug == 1 ? "a" : "b", g_iMapCount, g_sRosterName[slot]);
+		PrintToChatAll("[PUG] %N joined team %s for the rest of the match.", c, pug == 1 ? "A" : "B");
+		PugDebug("late roster: %N -> pug %d at map %d (slot %d)", c, pug, g_iMapCount, slot);
+		added++;
+	}
+	return added;
 }
 
 /** The MATCH_CREATE / MATCH_ROSTER xN / MATCH_CREATE_END burst the backend
@@ -1469,8 +1529,8 @@ void EmitRosterBurst()
 	{
 		// name= is deliberately LAST on the line: in-game names contain spaces,
 		// so the backend parser takes the entire remainder as the name.
-		EmitPug("MATCH_ROSTER steamid=%s team=%s name=%s",
-			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_sRosterName[i]);
+		EmitPug("MATCH_ROSTER steamid=%s team=%s joined_map=%d name=%s",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_iRosterJoinedMap[i], g_sRosterName[i]);
 	}
 	EmitPug("MATCH_CREATE_END players=%d", g_iRosterCount);
 }
@@ -1639,8 +1699,8 @@ void LogUncollectedResult()
 	for (int i = 0; i < g_iMapCount; i++)
 		LogError("MAP map=%s a=%d b=%d", g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
 	for (int i = 0; i < g_iRosterCount; i++)
-		LogError("STAT steamid=%s team=%s sidmg=%d sikill=%d ck=%d ff=%d rev=%d",
-			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
+		LogError("STAT steamid=%s team=%s joined_map=%d sidmg=%d sikill=%d ck=%d ff=%d rev=%d",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_iRosterJoinedMap[i],
 			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
 	int a, b;
 	TotalScores(a, b);
@@ -1898,6 +1958,7 @@ void ResetMatchState()
 		g_sRosterId[i][0] = '\0';
 		g_sRosterName[i][0] = '\0';
 		g_iRosterTeam[i] = 0;
+		g_iRosterJoinedMap[i] = 0;
 		g_iStatSiDmg[i] = 0;
 		g_iStatSiKill[i] = 0;
 		g_iStatCk[i] = 0;
@@ -2379,6 +2440,7 @@ public void OnRoundIsLive()
 		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
 
+		RosterLateJoiners();
 		CheckRosterMismatch();
 		RplOpen();
 	}
@@ -3176,8 +3238,8 @@ void WriteDump()
 	}
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
-		DumpLine("STAT steamid=%s team=%s sidmg=%d sikill=%d ck=%d ff=%d rev=%d",
-			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
+		DumpLine("STAT steamid=%s team=%s joined_map=%d sidmg=%d sikill=%d ck=%d ff=%d rev=%d",
+			g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b", g_iRosterJoinedMap[i],
 			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
 	}
 	WriteSkillLines();
