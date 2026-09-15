@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS match_players (
   ff_dealt INTEGER NOT NULL DEFAULT 0,
   revives INTEGER NOT NULL DEFAULT 0,
   stats_json TEXT NOT NULL DEFAULT '{}',
+  joined_map INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, player_id)
 );
 CREATE TABLE IF NOT EXISTS match_maps (
@@ -271,6 +272,10 @@ export function openDb(path: string): DB {
   // millisecond of a round). -1 means "recorded before round timing existed".
   ensureColumn(db, 'match_live_events', 'half', 'INTEGER NOT NULL DEFAULT -1');
   ensureColumn(db, 'match_live_events', 't_ms', 'INTEGER NOT NULL DEFAULT -1');
+  // Which map a player was rostered on: 0 for the starting roster, later for a
+  // sub rostered at a go-live. The rating step skips anyone who played under
+  // half the maps.
+  ensureColumn(db, 'match_players', 'joined_map', 'INTEGER NOT NULL DEFAULT 0');
   seed(db);
   return db;
 }

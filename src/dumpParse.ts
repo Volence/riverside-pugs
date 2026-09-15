@@ -9,6 +9,10 @@ export interface DumpMap {
 export interface DumpPlayer {
   steamid: string;
   team: 'a' | 'b';
+  /** Map ordinal the player was rostered on; 0 from the start. Optional so
+   *  hand-built dumps (dev simulation, tests) need not set it; the parser
+   *  always does, reading an absent key from an older plugin as 0. */
+  joinedMap?: number;
   sidmg: number;
   sikill: number;
   ck: number;
@@ -88,7 +92,8 @@ export function parseDump(body: string): Dump | null {
       if (rest.team !== 'a' && rest.team !== 'b') return null;
       if (nums.some((n) => n === null)) return null;
       const [sidmg, sikill, ck, ff, rev] = nums as number[];
-      players.push({ steamid: rest.steamid, team: rest.team, sidmg, sikill, ck, ff, rev });
+      const joinedMap = Math.max(0, intOf(rest.joined_map) ?? 0);
+      players.push({ steamid: rest.steamid, team: rest.team, joinedMap, sidmg, sikill, ck, ff, rev });
     } else if (verb === 'SKILL') {
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       const stats: Record<string, number> = {};

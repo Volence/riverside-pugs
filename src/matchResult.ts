@@ -21,13 +21,13 @@ export function completeMatch(db: DB, matchId: number, d: Dump): boolean {
     );
     d.maps.forEach((m, i) => insMap.run(matchId, i, m.map, m.a, m.b));
     const upd = db.prepare(
-      `UPDATE match_players SET si_damage = ?, si_kills = ?, common_kills = ?, ff_dealt = ?, revives = ?, stats_json = ?
+      `UPDATE match_players SET si_damage = ?, si_kills = ?, common_kills = ?, ff_dealt = ?, revives = ?, stats_json = ?, joined_map = ?
        WHERE match_id = ? AND player_id = ?`,
     );
     for (const p of d.players) {
       const result = upd.run(p.sidmg, p.sikill, p.ck, p.ff, p.rev,
         JSON.stringify({ sidmg: String(p.sidmg), sikill: String(p.sikill), ck: String(p.ck), ff: String(p.ff), rev: String(p.rev) }),
-        matchId, p.steamid);
+        p.joinedMap ?? 0, matchId, p.steamid);
       if (result.changes === 0) {
         console.warn(`[matchResult] dump stat for ${p.steamid} matched no roster row in match ${matchId}`);
       }

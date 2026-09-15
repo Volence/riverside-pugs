@@ -12,7 +12,10 @@ export type LogEvent =
   // treat players as a set it accumulates and MATCH_CREATE_END as the signal
   // that it should have `players` of them, not as a guarantee that it does.
   | { kind: 'match_create'; token: string; map: string; players: number }
-  | { kind: 'match_roster'; token: string; steamid: string; team: 'a' | 'b'; name: string }
+  // joinedMap: the map ordinal the player was rostered on; 0 for the starting
+  // eight, later for a sub or late joiner rostered at a go-live (plugin
+  // RosterLateJoiners). Absent on older plugins, read as 0.
+  | { kind: 'match_roster'; token: string; steamid: string; team: 'a' | 'b'; name: string; joinedMap: number }
   | { kind: 'match_create_end'; token: string; players: number }
   // Per-player counters for the spectator view, emitted every 10s while live.
   // Cosmetic: the identical counters are pulled authoritatively over rcon at
@@ -136,7 +139,8 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (at < 0) return null;
       const name = line.slice(at + ' name='.length).trim();
       if (!name) return null;
-      return { kind: 'match_roster', token, steamid: rest.steamid, team: rest.team, name };
+      const joinedMap = Math.max(0, intOf(rest.joined_map) ?? 0);
+      return { kind: 'match_roster', token, steamid: rest.steamid, team: rest.team, name, joinedMap };
     }
     case 'MATCH_CREATE_END': {
       const players = intOf(rest.players);

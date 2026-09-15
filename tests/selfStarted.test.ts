@@ -14,8 +14,8 @@ function ids(n: number): string[] {
 function create(token = TOKEN, players = 2, map = MAP): LogEvent {
   return { kind: 'match_create', token, map, players };
 }
-function roster(steamid: string, team: 'a' | 'b', name = 'someone', token = TOKEN): LogEvent {
-  return { kind: 'match_roster', token, steamid, team, name };
+function roster(steamid: string, team: 'a' | 'b', name = 'someone', token = TOKEN, joinedMap = 0): LogEvent {
+  return { kind: 'match_roster', token, steamid, team, name, joinedMap };
 }
 function end(players = 2, token = TOKEN): LogEvent {
   return { kind: 'match_create_end', token, players };
@@ -56,6 +56,20 @@ async function burst(n = 2) {
 }
 
 describe('SelfStartedMatches', () => {
+  it('adds a late joiner to a live match from a lone MATCH_ROSTER line', async () => {
+    await burst();
+    const sub = '76561199000000009';
+    adopter.handle(roster(sub, 'b', 'mayhem', TOKEN, 2));
+    const rows = db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = 1 ORDER BY player_id').all() as any[];
+    expect(rows).toHaveLength(3);
+    expect(rows.find((r) => r.player_id === sub)).toEqual({ player_id: sub, team: 'b', joined_map: 2 });
+    expect((db.prepare('SELECT name, status FROM players WHERE steamid = ?').get(sub) as any)).toEqual({ name: 'mayhem', status: 'invited' });
+    // A repeat of the same line changes nothing and creates no second match.
+    adopter.handle(roster(sub, 'b', 'mayhem', TOKEN, 2));
+    expect((db.prepare('SELECT COUNT(*) AS n FROM match_players WHERE match_id = 1').get() as any).n).toBe(3);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM matches').get() as any).n).toBe(1);
+  });
+
   it('creates a live match with the right campaign, players and teams', async () => {
     await burst(2);
     const [a, b] = ids(2);
