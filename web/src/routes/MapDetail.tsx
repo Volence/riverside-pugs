@@ -31,7 +31,13 @@ export function MapDetail({ map }: { map: string }) {
       <PageHeader eyebrow="Map" title={data.map}>
         <Figures>
           <Figure label="Played" value={data.played} />
-          <Figure label="Avg score" value={`${data.avgTeamA} - ${data.avgTeamB}`} sub="A vs B" />
+          {/* Null when no playing of this map has a real score: say so
+              rather than average zeros that were never results. */}
+          <Figure
+            label="Avg score"
+            value={data.avgTeamA === null || data.avgTeamB === null ? 'not recorded' : `${data.avgTeamA} - ${data.avgTeamB}`}
+            sub="A vs B"
+          />
           <Figure label="Players" value={players.length} />
         </Figures>
       </PageHeader>

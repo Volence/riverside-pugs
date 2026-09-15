@@ -155,6 +155,9 @@ describe('demo routes', () => {
     });
     upsertPlayer(rdb, { steamid: ME, name: 'me', avatar: null }, [ME]);
     rdb.prepare("INSERT INTO matches (season_id, state, campaign, token, winner) VALUES (1, 'completed', 'no_mercy', ?, 'a')").run(TOKEN);
+    // Every completed match has its maps: completeMatch writes them from the
+    // dump, and the detail route lists demos only for those ordinals.
+    rdb.prepare("INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (1, 0, 'l4d_vs_hospital01_apartment', 300, 200)").run();
     writeFileSync(join(rdir, `pug_${TOKEN}_0_l4d_vs_hospital01_apartment.dem`), Buffer.alloc(64, 7));
     recordMatchDemos(rdb, 1, TOKEN, rdir);
     cookies = authedCookie(app, rdb, ME);
