@@ -56,6 +56,9 @@ export interface LeaderboardRow {
   wins: number;
   losses: number;
   games: number;
+  /** False under three games: listed as provisional, below the ranked rows,
+   *  with no rank number and no claim on the top-rated card. */
+  ranked: boolean;
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
@@ -63,6 +66,8 @@ export interface LeaderboardRow {
 
 export interface Leaderboard {
   season: { id: number; name: string };
+  /** Distinct matches that produced a rating this season. */
+  matchesRated: number;
   rows: LeaderboardRow[];
 }
 
@@ -157,6 +162,11 @@ export interface MatchDetail {
     /** Per-player stats for this map, keyed by steamid. Empty for matches
      *  played before per-map capture existed. */
     stats: Record<string, Record<string, number>>;
+    /** False when the stored score is not a result (a round the plugin could
+     *  not attribute or read). The page says "not recorded" instead of the
+     *  scoreline. Optional only for an older server that predates the flag,
+     *  which is read as recorded. */
+    recorded?: boolean;
   }[];
   players: MatchPlayerStats[];
   events?: LiveEvent[];
@@ -182,8 +192,9 @@ export interface MapIndexRow {
   map: string;
   campaign: string | null;
   played: number;
-  avgTeamA: number;
-  avgTeamB: number;
+  /** Mean over the recorded playings only; null when none has a real score. */
+  avgTeamA: number | null;
+  avgTeamB: number | null;
 }
 
 export interface MapLeaderRow {
@@ -198,8 +209,9 @@ export interface MapLeaderRow {
 export interface MapDetail {
   map: string;
   played: number;
-  avgTeamA: number;
-  avgTeamB: number;
+  /** Mean over the recorded playings only; null when none has a real score. */
+  avgTeamA: number | null;
+  avgTeamB: number | null;
   players: MapLeaderRow[];
 }
 

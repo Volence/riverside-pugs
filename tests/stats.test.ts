@@ -120,6 +120,36 @@ describe('stats routes', () => {
     expect(winner.name).toBe('p4');
   });
 
+  it('leaderboard: a player is ranked from three games, and the rated-match count is real', async () => {
+    // The page used to show the TOP player's game count as "Matches rated",
+    // which is wrong as soon as anyone misses a night. The count is the
+    // distinct matches with a rating_history row this season.
+    playCompletedMatch(db, 'b');
+    let body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(1);
+    expect(body.rows.every((r: any) => r.ranked === false)).toBe(true);
+
+    playCompletedMatch(db, 'a');
+    body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(2);
+    expect(body.rows.every((r: any) => r.ranked === false)).toBe(true);
+
+    playCompletedMatch(db, 'draw');
+    body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(3);
+    expect(body.rows.every((r: any) => r.games === 3 && r.ranked === true)).toBe(true);
+  });
+
+  it('leaderboard: the rated-match count ignores another season', async () => {
+    playCompletedMatch(db, 'b');
+    db.prepare("INSERT INTO seasons (name) VALUES ('old')").run();
+    db.prepare(
+      'INSERT INTO rating_history (player_id, match_id, season_id, mu_before, sigma_before, mu_after, sigma_after) VALUES (?, 999, 2, 25, 8, 26, 7)',
+    ).run(ME);
+    const body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(1);
+  });
+
   it('profile: rating, totals, recent matches with SR delta, history', async () => {
     playCompletedMatch(db, 'a');
     const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
@@ -183,6 +213,20 @@ describe('stats routes', () => {
     expect(winnerPlayer.team).toBe('b');
     expect(winnerPlayer.srDelta).toBeGreaterThan(0);
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
+  });
+
+  it('lists demos only for maps the match actually has', async () => {
+    // The recorder opens a demo on every map load under the match token,
+    // including the post-finale map the server rolls to after the match
+    // ended (2026-09-13). That file is real but it is not part of the match,
+    // so a completed match lists only the ordinals present in match_maps.
+    const matchId = playCompletedMatch(db, 'b');
+    const ins = db.prepare('INSERT INTO match_demos (match_id, ordinal, map, filename, bytes) VALUES (?, ?, ?, ?, ?)');
+    ins.run(matchId, 0, 'm1', 'pug_tok_0_m1.dem', 100);
+    ins.run(matchId, 1, 'l4d_vs_farm01_hilltop', 'pug_tok_1_l4d_vs_farm01_hilltop.dem', 200);
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(body.maps.map((m: any) => m.ordinal)).toEqual([0]);
+    expect(body.demos).toEqual([{ ordinal: 0, map: 'm1', bytes: 100 }]);
   });
 
   it('returns rounds with side attribution', async () => {
@@ -357,5 +401,46 @@ describe('stats routes', () => {
     const res = await app.inject({ method: 'GET', url: '/api/leaderboard' });
     const row = res.json().rows.find((r: any) => r.steamid === ME);
     for (const k of selfKeys) expect(Object.keys(row.stats)).not.toContain(k);
+  });
+
+  describe('map recorded flag', () => {
+    // A map's score in match_maps comes from the authoritative dump, but when
+    // the plugin could not attribute or read a round (match 18, 2026-09-14)
+    // the dump carried a 0 that was never a result. The rounds table is where
+    // that shows: any round of the ordinal with reliable = 0 means the map's
+    // score must be shown as "not recorded" rather than as 0 to 0.
+    it('is true for a map with no round rows at all (pre round-capture match)', async () => {
+      const matchId = playCompletedMatch(db, 'a');
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.maps[0].recorded).toBe(true);
+    });
+
+    it('is true when every round of the ordinal is reliable', async () => {
+      const matchId = playCompletedMatch(db, 'a');
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 300, '2026-09-11 00:10:00')").run(matchId);
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 2, 'b', 250, '2026-09-11 00:30:00')").run(matchId);
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.maps[0].recorded).toBe(true);
+    });
+
+    it('is false when any round of the ordinal is unreliable', async () => {
+      const matchId = playCompletedMatch(db, 'a');
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at) VALUES (?, 0, 1, 'a', 300, 1, '2026-09-11 00:10:00')").run(matchId);
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at) VALUES (?, 0, 2, 'a', 0, 0, '2026-09-11 00:30:00')").run(matchId);
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.maps[0].recorded).toBe(false);
+    });
+
+    it('is false when the two halves fail to partition the sides, matching rounds[].reliable', async () => {
+      // Both halves say team a held survivor. roundAttribution already forces
+      // both rounds unreliable in its return value; the map flag must agree
+      // with it rather than reading the stored column alone.
+      const matchId = playCompletedMatch(db, 'a');
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 300, '2026-09-11 00:10:00')").run(matchId);
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 2, 'a', 250, '2026-09-11 00:30:00')").run(matchId);
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.rounds.every((r: any) => r.reliable === false)).toBe(true);
+      expect(body.maps[0].recorded).toBe(false);
+    });
   });
 });

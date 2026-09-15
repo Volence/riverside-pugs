@@ -13,12 +13,15 @@ import { playerMapBreakdown, mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
-import { roundAttribution } from '../roundStats.js';
+import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string }
 
 const RECENT_MATCH_LIMIT = 50;
 const PROFILE_MATCH_LIMIT = 20;
+/** Games before a player holds a rank. Under this they are listed as
+ *  provisional: one lucky night at high sigma should not top the board. */
+const RANKED_MIN_GAMES = 3;
 
 /** Strip self-only stats unless the requester IS the subject.
  *
@@ -96,12 +99,21 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       statsBy.set(r.steamid, bucket);
     }
 
+    // How many matches have produced ratings this season. The page used to
+    // show the top player's game count under this label, which is only right
+    // while everyone has played every match.
+    const { matchesRated } = db.prepare(
+      'SELECT COUNT(DISTINCT match_id) AS matchesRated FROM rating_history WHERE season_id = ?',
+    ).get(seasonId) as { matchesRated: number };
+
     return {
       season,
+      matchesRated,
       rows: rows
         .map((r) => ({
           steamid: r.steamid, name: r.name, avatar: r.avatar,
           sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games,
+          ranked: r.games >= RANKED_MIN_GAMES,
           stats: statsBy.get(r.steamid) ?? {},
         }))
         .sort((x, y) => y.sr - x.sr),
@@ -241,9 +253,15 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // live pipeline; the authoritative dump only carries match totals. Absent
     // for any match played before that existed, hence the ?? {}.
     const byMap = mapStatsFor(db, id);
+    // `recorded` false means the stored score is not a result (a round the
+    // plugin could not attribute or read), and the page must say "not
+    // recorded" instead of 0 to 0. See unrecordedOrdinals for the rule.
+    const unrecorded = unrecordedOrdinals(db, id);
     const maps = (db.prepare(
       'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
-    ).all(id) as { ordinal: number }[]).map((mp) => ({ ...mp, stats: byMap.get(mp.ordinal) ?? {} }));
+    ).all(id) as { ordinal: number }[]).map((mp) => ({
+      ...mp, stats: byMap.get(mp.ordinal) ?? {}, recorded: !unrecorded.has(mp.ordinal),
+    }));
     const statRows = db.prepare(
       'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',
     ).all(id) as { player_id: string; stat: string; value: number }[];
@@ -277,8 +295,16 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // query, no positional join.
     const rounds = roundAttribution(db, id, teamOf);
 
+    // Only demos for maps the match actually has. The recorder opens a demo
+    // on every map load under the match token, including the post-finale
+    // map the server rolls to after the match has ended, so a file can exist
+    // for an ordinal match_maps never had. This route serves completed
+    // matches only; the live view (getLiveMatches) keeps every demo because
+    // its map list is still growing.
     const demos = db.prepare(
-      'SELECT ordinal, map, bytes FROM match_demos WHERE match_id = ? ORDER BY ordinal',
+      `SELECT d.ordinal, d.map, d.bytes FROM match_demos d
+       JOIN match_maps mm ON mm.match_id = d.match_id AND mm.ordinal = d.ordinal
+       WHERE d.match_id = ? ORDER BY d.ordinal`,
     ).all(id);
 
     const nameOf = (sid: string) =>

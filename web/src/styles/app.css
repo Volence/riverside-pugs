@@ -1111,3 +1111,8 @@ body.is-theater { overflow: hidden; }
   .hud-edge .hudp__face { display: none; }
   .theater__rail { width: 260px; }
 }
+
+/* Leaderboard: players under three games sit below the ranked rows, greyed,
+   under one eyebrow row that names the group. */
+.lb tbody tr.is-provisional td { opacity: 0.55; }
+.lb tbody tr.lb__group td { height: auto; padding-top: var(--sp-3); padding-bottom: var(--sp-1); border-bottom: 0; }
