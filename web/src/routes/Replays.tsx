@@ -1,5 +1,6 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
+import { campaignName } from '../format';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 
@@ -46,9 +47,10 @@ export function Replays() {
             {sessions.map((s) => (
               <Panel class="panel--table" key={s.token}>
                 {/* The token is the session identity but it is 32 hex
-                    characters, so the time is the heading and the token is
-                    the subtitle. */}
-                <h3>{when(s.startedUnix)}</h3>
+                    characters, so the campaign and the time are the heading
+                    and the token is the subtitle. A map the site does not
+                    know leaves just the time. */}
+                <h3>{s.campaign ? `${campaignName(s.campaign)} · ${when(s.startedUnix)}` : when(s.startedUnix)}</h3>
                 <p class="muted mono">{s.token}</p>
                 <div class="table-wrap">
                   <table>

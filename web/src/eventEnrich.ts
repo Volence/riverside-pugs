@@ -18,12 +18,29 @@ import type { TimelineEntry } from './replay/timeline';
  * down (claw, choke, pounce, punch, friendly fire, commons), the death cause,
  * pills and kits, rock hits. Those need a `via` field on the wire.
  */
+/** How a pin closed. `ended` is the honest "it stopped, we do not know when":
+ *  the pinner respawned or turned up doing something else, or the clear came
+ *  too late to be the same pin. */
+export type PinOutcome = 'cleared' | 'died' | 'incapped' | 'ended';
+
 export interface Enrichment {
   via?: string;
   /** Who the clear freed the victim from, and how long they had been held. */
   from?: { pinner: string; afterMs: number };
-  pin?: { durationMs: number; outcome: 'cleared' | 'died'; by: string | null };
+  /** `durationMs` is null when the pin is known to be over but not when. */
+  pin?: { durationMs: number | null; outcome: PinOutcome; by: string | null };
 }
+
+/**
+ * The longest a clear may trail its pin and still be the same pin.
+ *
+ * Match 18 (2026-09-14): a pin ended by the victim's incap stayed open, and a
+ * clear 71.8 seconds later paired with it. No pin lasts that long: a tongue
+ * drag or a ride ends in well under 30 seconds one way or another, so a clear
+ * further out than this is a different pin whose `pinned` line was lost or
+ * carried no target.
+ */
+export const MAX_PIN_MS = 30_000;
 
 /** The one shape both event sources reduce to. Actor and target are
  *  SteamID64 strings; the renderers resolve names themselves. */
@@ -82,10 +99,31 @@ export function enrichEvents(events: EnrichableEvent[]): Map<number, Enrichment>
   for (const e of ordered) {
     const cls = bag(classes, scope(e));
     const open = bag(pins, scope(e));
+
+    /** The victim's pin closed at this moment, with a known duration. */
+    const closeVictim = (victim: string, outcome: PinOutcome, by: string | null) => {
+      const pin = open.get(victim);
+      if (!pin || e.tMs < pin.tMs) return;
+      add(pin.seq, { pin: { durationMs: e.tMs - pin.tMs, outcome, by } });
+      open.delete(victim);
+    };
+    /** Every pin this pinner still holds is over, ended at an unknown time.
+     *  One special infected holds one survivor at a time, so seeing the pinner
+     *  respawn or hurt someone else means whatever they held before is gone
+     *  and any later clear of that victim is a different pin. */
+    const forgetPinner = (pinner: string) => {
+      for (const [victim, pin] of open) {
+        if (pin.pinner !== pinner) continue;
+        add(pin.seq, { pin: { durationMs: null, outcome: 'ended', by: null } });
+        open.delete(victim);
+      }
+    };
+
     switch (e.kind) {
       case 'si_spawn': {
         const name = ZOMBIE_CLASSES[e.value];
         if (name) cls.set(e.actor, name);
+        forgetPinner(e.actor);
         break;
       }
       case 'tank_spawn':
@@ -102,14 +140,12 @@ export function enrichEvents(events: EnrichableEvent[]): Map<number, Enrichment>
           const via = cls.get(e.target);
           if (via) add(e.seq, { via });
         }
-        // A survivor dying while held ends the pin.
-        if (e.kind === 'death') {
-          const pin = open.get(e.actor);
-          if (pin && e.tMs >= pin.tMs) {
-            add(pin.seq, { pin: { durationMs: e.tMs - pin.tMs, outcome: 'died', by: null } });
-            open.delete(e.actor);
-          }
-        }
+        // A survivor dying or going down while held ends the pin. Incap has
+        // to count: a pounce or ride ends the moment the victim is down, and
+        // the plugin sends no `cleared` for it (match 18, 2026-09-14).
+        closeVictim(e.actor, e.kind === 'death' ? 'died' : 'incapped', null);
+        // The attacker cannot also still be holding someone else.
+        if (e.target) forgetPinner(e.target);
         break;
       }
       case 'pinned':
@@ -119,9 +155,15 @@ export function enrichEvents(events: EnrichableEvent[]): Map<number, Enrichment>
         if (!e.target) break;
         const pin = open.get(e.target);
         if (!pin || e.tMs < pin.tMs) break;
+        if (e.tMs - pin.tMs > MAX_PIN_MS) {
+          // Too old to be this pin. The victim is free now, but when the hold
+          // actually ended is unknown, so neither line gets a number.
+          add(pin.seq, { pin: { durationMs: null, outcome: 'ended', by: null } });
+          open.delete(e.target);
+          break;
+        }
         add(e.seq, { from: { pinner: pin.pinner, afterMs: e.tMs - pin.tMs } });
-        add(pin.seq, { pin: { durationMs: e.tMs - pin.tMs, outcome: 'cleared', by: e.actor } });
-        open.delete(e.target);
+        closeVictim(e.target, 'cleared', e.actor);
         break;
       }
       default:
@@ -150,10 +192,14 @@ export function enrichmentText(
   const parts: string[] = [];
   if (en.via && (kind === 'incap' || kind === 'death')) parts.push(`(${en.via})`);
   if (en.from && kind === 'cleared') parts.push(`from ${nameOf(en.from.pinner)} after ${fmtSeconds(en.from.afterMs)}`);
-  if (en.pin && kind === 'pinned') {
+  // A pin that ended at an unknown time says nothing: "for ? seconds" is
+  // worse than the bare line.
+  if (en.pin && kind === 'pinned' && en.pin.durationMs !== null) {
     const how = en.pin.outcome === 'cleared'
       ? (en.pin.by ? `cleared by ${nameOf(en.pin.by)}` : 'cleared')
-      : `until ${victim ?? 'they'} died`;
+      : en.pin.outcome === 'incapped'
+        ? `until ${victim ?? 'they'} went down`
+        : `until ${victim ?? 'they'} died`;
     parts.push(`for ${fmtSeconds(en.pin.durationMs)}, ${how}`);
   }
   return parts.join(' ');

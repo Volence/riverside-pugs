@@ -1,6 +1,7 @@
 import { readdirSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { decodeHeader, HEADER_BYTES } from './replayFormat.js';
+import { campaignForMap } from './campaigns.js';
 import type { ReplayFileInfo, ReplaySession } from './replaySessionTypes.js';
 
 // Re-exported so every existing importer of these two types from this module
@@ -104,6 +105,8 @@ export function listSessions(dir: string, nowMs: number): ReplaySession[] {
     out.push({
       token,
       startedUnix: Math.min(...files.map((f) => f.startedUnix)),
+      // Sorted above, so files[0] is the first map played.
+      campaign: campaignForMap(files[0].map),
       files,
     });
   }
