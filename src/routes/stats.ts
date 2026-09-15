@@ -295,8 +295,16 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // query, no positional join.
     const rounds = roundAttribution(db, id, teamOf);
 
+    // Only demos for maps the match actually has. The recorder opens a demo
+    // on every map load under the match token, including the post-finale
+    // map the server rolls to after the match has ended, so a file can exist
+    // for an ordinal match_maps never had. This route serves completed
+    // matches only; the live view (getLiveMatches) keeps every demo because
+    // its map list is still growing.
     const demos = db.prepare(
-      'SELECT ordinal, map, bytes FROM match_demos WHERE match_id = ? ORDER BY ordinal',
+      `SELECT d.ordinal, d.map, d.bytes FROM match_demos d
+       JOIN match_maps mm ON mm.match_id = d.match_id AND mm.ordinal = d.ordinal
+       WHERE d.match_id = ? ORDER BY d.ordinal`,
     ).all(id);
 
     const nameOf = (sid: string) =>
