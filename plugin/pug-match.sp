@@ -131,6 +131,13 @@ int g_iRound1SurvPug;                    // pug team (1|2) that played survivors
 // stale roster left only one rostered player per side on the survivors. Survives
 // OnMapStart on purpose; reset only with the match.
 int g_iLogicalOfPugA;                    // logical team (1|2) that is pug team a; 0 = not yet learned
+// Roster-versus-sides watchdog (task A3): consecutive live halves a rostered
+// player has started on the OTHER pug team's side. Two in a row means the
+// roster is wrong (a !mix after the snapshot, match 13 and 18), and the
+// players are told once so someone can fix it while it still matters.
+int g_iMismatchHalves[MAXPLAYERS + 1];
+bool g_bMismatchWarned;
+bool g_bMatchDemoOpen;                   // a tv_record we started for this match is running
 int g_iLastSurvLogical;                  // logical team whose score TryReadRoundScore last resolved; 0 = none
 int g_iHalf;                             // 1 or 2 within the current map, DERIVED from
                                           // m_bInSecondHalfOfRound at go-live, never counted;
@@ -1574,6 +1581,7 @@ void EndMatchNow(const char[] why)
 	// from the totals.
 	if (g_bPendingFinalize) FinalizeMap();
 	g_State = MS_Ended;
+	StopMatchDemo();
 	int a, b;
 	TotalScores(a, b);
 	char winner[8];
@@ -1716,13 +1724,23 @@ void StartMatchDemo()
 	if (!g_cvRecordDemos.BoolValue || g_State == MS_None) return;
 	ServerCommand("tv_stoprecord");
 	ServerCommand("tv_record pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
+	g_bMatchDemoOpen = true;
 	PugDebug("demo: pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
+}
+
+/** Close the match demo we opened, and only that: tv_autorecord's own file
+ *  for a map we did not record is left alone. */
+void StopMatchDemo()
+{
+	if (!g_bMatchDemoOpen) return;
+	g_bMatchDemoOpen = false;
+	ServerCommand("tv_stoprecord");
 }
 
 public Action Cmd_Abort(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
-	if (g_cvRecordDemos.BoolValue && g_State != MS_None) ServerCommand("tv_stoprecord");
+	StopMatchDemo();
 	ResetMatchState();
 	PrintToServer("PUGOK aborted");
 	return Plugin_Handled;
@@ -1866,6 +1884,8 @@ void ResetMatchState()
 	g_iRound1SurvPug = 0;
 	g_iLogicalOfPugA = 0;
 	g_iLastSurvLogical = 0;
+	g_bMismatchWarned = false;
+	g_bMatchDemoOpen = false;
 	g_iHalf = 0;
 	g_fRoundLiveAt = 0.0;
 	g_bRoundEnded = false;
@@ -1888,6 +1908,7 @@ void ResetMatchState()
 	{
 		g_iClientRoster[i] = -1;
 		g_iLockAttempts[i] = 0;
+		g_iMismatchHalves[i] = 0;
 		g_iPinnedBy[i] = 0;
 		ClearPinRelease(i);
 	}
@@ -2203,10 +2224,12 @@ public void OnMapStart()
 		EndMatchNow("campaign changed");
 	}
 
-	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
-
-	// Campaign-minus-finale complete: freeze and report.
+	// Campaign-minus-finale complete: freeze and report. Before StartMatchDemo,
+	// like the campaign-change end above, so the finale never gets a match
+	// demo of its own (each match used to list a 1 MB stub for it).
 	if (g_State == MS_Live && L4D_IsMissionFinalMap(true)) EndMatchNow("finale loaded");
+
+	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
 }
 
 /** Fill the roster arrays from whoever is on a team right now, WITHOUT starting
@@ -2238,6 +2261,33 @@ void RplFillStandaloneRoster()
 		strcopy(g_sRosterId[slot], 32, id);
 		g_iRosterTeam[slot] = (team == TEAM_SURVIVOR) ? 1 : 2;
 		g_iClientRoster[i] = slot;
+	}
+}
+
+/** Roster watchdog, run once per live half. A rostered player starting a
+ *  second consecutive half on the other pug team's side means the recorded
+ *  roster no longer matches who is playing with whom. Scores still go to the
+ *  right side (they follow the observed survivors), but stats, the site's
+ *  team lists and the ratings follow the roster, so say so once, in chat and
+ *  the error log, while the match is young enough to abort and redo. */
+void CheckRosterMismatch()
+{
+	if (g_iPugSide[1] == 0 || g_iPugSide[2] == 0) return;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		int slot = g_iClientRoster[c];
+		if (slot == -1 || !IsClientInGame(c)) { continue; }
+		int have = GetClientTeam(c);
+		if (have != TEAM_SURVIVOR && have != TEAM_INFECTED) continue;
+		if (have == g_iPugSide[g_iRosterTeam[slot]]) { g_iMismatchHalves[c] = 0; continue; }
+		g_iMismatchHalves[c]++;
+		if (g_iMismatchHalves[c] >= 2 && !g_bMismatchWarned)
+		{
+			g_bMismatchWarned = true;
+			PrintToChatAll("[PUG] %N is playing on the other team from the recorded roster. Scores follow the real sides; stats and ratings follow the roster. Abort and reload if the teams changed.", c);
+			LogError("[pug] roster mismatch: %N (slot %d, pug %s) has started two halves on the other side",
+				c, slot, g_iRosterTeam[slot] == 1 ? "a" : "b");
+		}
 	}
 }
 
@@ -2329,6 +2379,7 @@ public void OnRoundIsLive()
 		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
 
+		CheckRosterMismatch();
 		RplOpen();
 	}
 	else if (g_State == MS_None && g_cvReplayStandalone.BoolValue)
@@ -2613,11 +2664,12 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// OnMapStart failsafe finalizes with whatever was accumulated,
 			// guaranteeing the map is recorded either way.
 			//
-			// Emit ROUND_END anyway with whatever score accumulated before the
-			// reads gave up: a round with a wrong score is still recoverable,
-			// a round with no side recorded at all is not.
-			int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
-			EmitRoundEnd(half, survEnd, mine);
+			// Emit ROUND_END anyway, with score=-1: the side is real and worth
+			// recording, the score is unknown. The backend stores the round
+			// unreliable and the site says "not recorded". This used to send
+			// the half accumulator, which is 0 here, and 0 looked like a real
+			// result (matches 16 and 17, 2026-09-13).
+			EmitRoundEnd(half, survEnd, -1);
 			if (second) FinalizeMap();
 		}
 		return Plugin_Stop;

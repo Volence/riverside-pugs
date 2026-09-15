@@ -295,18 +295,24 @@ export function recordRoundEnd(
       `[rounds] match ${id} map ${ordinal} half ${ev.half}: side moved ${existing.surv_team} -> ${ev.surv}`,
     );
   }
+  // A negative score is the plugin saying "side known, score unknown": every
+  // read of the engine's round score failed. Stored unreliable with a zero
+  // rather than as a zero that looks like a result (matches 16 and 17 on
+  // 2026-09-13 showed 0 to 0 for a map that was played).
+  const known = ev.score >= 0;
   db.prepare(
     `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at)
-     VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
        surv_team = excluded.surv_team,
        score = excluded.score,
        -- Promotes a round whose START had no side: this line carries the
        -- authoritative one, so the placeholder is now replaced by an
-       -- observation and the row is trustworthy again.
-       reliable = 1,
+       -- observation and the row is trustworthy again. Unless the score
+       -- itself is unknown, in which case the row stays unreliable.
+       reliable = excluded.reliable,
        ended_at = excluded.ended_at`,
-  ).run(id, ordinal, ev.half, ev.surv, ev.score);
+  ).run(id, ordinal, ev.half, ev.surv, known ? ev.score : 0, known ? 1 : 0);
   touch(db, id);
 }
 

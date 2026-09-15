@@ -512,6 +512,15 @@ describe('round persistence', () => {
     expect(row.endedAt).not.toBeNull();
   });
 
+  it('stores a failed score read (score=-1) as an unreliable zero, not a result', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: -1 });
+    const [row] = roundsFor(db, 1);
+    expect(row).toMatchObject({ half: 1, survTeam: 'a', score: 0, reliable: false });
+    expect(row.endedAt).not.toBeNull();
+  });
+
   it('leaves endedAt null for a round that never ended', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
