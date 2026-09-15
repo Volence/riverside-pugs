@@ -215,6 +215,20 @@ describe('stats routes', () => {
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
   });
 
+  it('lists demos only for maps the match actually has', async () => {
+    // The recorder opens a demo on every map load under the match token,
+    // including the post-finale map the server rolls to after the match
+    // ended (2026-09-13). That file is real but it is not part of the match,
+    // so a completed match lists only the ordinals present in match_maps.
+    const matchId = playCompletedMatch(db, 'b');
+    const ins = db.prepare('INSERT INTO match_demos (match_id, ordinal, map, filename, bytes) VALUES (?, ?, ?, ?, ?)');
+    ins.run(matchId, 0, 'm1', 'pug_tok_0_m1.dem', 100);
+    ins.run(matchId, 1, 'l4d_vs_farm01_hilltop', 'pug_tok_1_l4d_vs_farm01_hilltop.dem', 200);
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(body.maps.map((m: any) => m.ordinal)).toEqual([0]);
+    expect(body.demos).toEqual([{ ordinal: 0, map: 'm1', bytes: 100 }]);
+  });
+
   it('returns rounds with side attribution', async () => {
     const matchId = playCompletedMatch(db, 'a');
     db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 300, '2026-09-11 00:10:00')").run(matchId);
