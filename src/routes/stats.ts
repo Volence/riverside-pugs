@@ -19,6 +19,9 @@ export interface StatsRouteOpts { db: DB; demoDir?: string }
 
 const RECENT_MATCH_LIMIT = 50;
 const PROFILE_MATCH_LIMIT = 20;
+/** Games before a player holds a rank. Under this they are listed as
+ *  provisional: one lucky night at high sigma should not top the board. */
+const RANKED_MIN_GAMES = 3;
 
 /** Strip self-only stats unless the requester IS the subject.
  *
@@ -96,12 +99,21 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       statsBy.set(r.steamid, bucket);
     }
 
+    // How many matches have produced ratings this season. The page used to
+    // show the top player's game count under this label, which is only right
+    // while everyone has played every match.
+    const { matchesRated } = db.prepare(
+      'SELECT COUNT(DISTINCT match_id) AS matchesRated FROM rating_history WHERE season_id = ?',
+    ).get(seasonId) as { matchesRated: number };
+
     return {
       season,
+      matchesRated,
       rows: rows
         .map((r) => ({
           steamid: r.steamid, name: r.name, avatar: r.avatar,
           sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games,
+          ranked: r.games >= RANKED_MIN_GAMES,
           stats: statsBy.get(r.steamid) ?? {},
         }))
         .sort((x, y) => y.sr - x.sr),

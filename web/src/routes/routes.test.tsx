@@ -50,9 +50,10 @@ describe('Leaderboard', () => {
   it('renders ranked rows', async () => {
     mockApi.leaderboard.mockResolvedValue({
       season: { id: 1, name: 'Season 1' },
+      matchesRated: 4,
       rows: [
-        { steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4 },
-        { steamid: '2', name: 'bob', avatar: null, sr: 1100, wins: 1, losses: 3, games: 4 },
+        { steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true },
+        { steamid: '2', name: 'bob', avatar: null, sr: 1100, wins: 1, losses: 3, games: 4, ranked: true },
       ],
     });
     render(<Leaderboard me="2" />);
@@ -64,9 +65,52 @@ describe('Leaderboard', () => {
   });
 
   it('says so when nobody is rated yet', async () => {
-    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows: [] });
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 0, rows: [] });
     render(<Leaderboard me={null} />);
     await waitFor(() => expect(screen.getByText(/no rated players/i)).toBeTruthy());
+  });
+
+  it('lists players under three games after the ranked ones, as provisional, and reads the rated count from the API', async () => {
+    // carol has the highest SR after one game. She is not the leader: her
+    // row goes below the ranked group under a "Provisional" eyebrow with no
+    // rank number, and the top-rated card ignores her. "Matches rated" is
+    // the API's distinct-match count, not the top player's game count.
+    mockApi.leaderboard.mockResolvedValue({
+      season: { id: 1, name: 'Season 1' },
+      matchesRated: 5,
+      rows: [
+        { steamid: '3', name: 'carol', avatar: null, sr: 1500, wins: 1, losses: 0, games: 1, ranked: false },
+        { steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true },
+        { steamid: '2', name: 'bob', avatar: null, sr: 1100, wins: 1, losses: 3, games: 4, ranked: true },
+      ],
+    });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
+    // carol appears once: in the table, not as the headliner.
+    expect(screen.getAllByText('carol')).toHaveLength(1);
+    const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
+    expect(names).toEqual(['alice', 'bob', 'carol']);
+    expect(screen.getByText(/provisional, under 3 games/i)).toBeTruthy();
+    const ranks = [...container.querySelectorAll('tbody td.rank')].map((c) => c.textContent);
+    expect(ranks).toEqual(['01', '02', '–']);
+    expect(container.querySelector('tbody tr.is-provisional')?.textContent).toMatch(/carol/);
+    // The figure reads the API count (5), not max games (4).
+    const figure = screen.getByText('Matches rated').parentElement as HTMLElement;
+    expect(figure.textContent).toMatch(/5/);
+    expect(figure.textContent).not.toMatch(/4/);
+  });
+
+  it('shows no top-rated card when nobody is ranked yet', async () => {
+    mockApi.leaderboard.mockResolvedValue({
+      season: { id: 1, name: 'Season 1' },
+      matchesRated: 1,
+      rows: [
+        { steamid: '3', name: 'carol', avatar: null, sr: 1500, wins: 1, losses: 0, games: 1, ranked: false },
+      ],
+    });
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getAllByText('carol')).toHaveLength(1));
+    expect(screen.queryByText('Top rated')).toBeNull();
   });
 });
 
@@ -474,12 +518,12 @@ describe('Play', () => {
 
 describe('Leaderboard sorting', () => {
   const rows = [
-    { steamid: '1', name: 'alice', avatar: null, sr: 900, wins: 1, losses: 3, games: 4, stats: { ck: 10, tank_damage: 500 } },
-    { steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, stats: { ck: 99 } },
+    { steamid: '1', name: 'alice', avatar: null, sr: 900, wins: 1, losses: 3, games: 4, ranked: true, stats: { ck: 10, tank_damage: 500 } },
+    { steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true, stats: { ck: 99 } },
   ];
 
   it('defaults to SR descending and renders every stat column', async () => {
-    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 4, rows });
     const { container } = render(<Leaderboard me={null} />);
     // bob is also the top-rated headliner now, so this appears twice.
     await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
@@ -494,7 +538,7 @@ describe('Leaderboard sorting', () => {
   });
 
   it('re-sorts when a column header is clicked', async () => {
-    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 4, rows });
     const { container } = render(<Leaderboard me={null} />);
     // bob is also the top-rated headliner, so this appears twice.
     await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
@@ -515,7 +559,7 @@ describe('Leaderboard sorting', () => {
   it('sorts a player with the stat absent LAST, not as a zero', async () => {
     // alice has no tank_damage at all. Ascending by tank_damage must not put
     // her first as though she had scored 0.
-    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, rows });
+    mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 4, rows });
     const { container } = render(<Leaderboard me={null} />);
     // bob is also the top-rated headliner, so this appears twice.
     await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
