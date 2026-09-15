@@ -6,13 +6,18 @@ import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 
-/** Columns that are not stats and so are not part of the stat bag. */
+/** Columns that are not stats and so are not part of the stat bag.
+ *
+ *  `cls` is the layout hook the stylesheet pins or hides by: SR stays on
+ *  screen with the rank and the name while the rest scrolls, and W, L and
+ *  Win % go under 480px where there is no room for them (Games stays, as
+ *  the one figure that says how much a rating is worth). */
 const BASE_COLS = [
-  { key: 'sr', label: 'SR' },
-  { key: 'wins', label: 'W' },
-  { key: 'losses', label: 'L' },
-  { key: 'games', label: 'Games' },
-  { key: 'winrate', label: 'Win %' },
+  { key: 'sr', label: 'SR', cls: 'lb__sr' },
+  { key: 'wins', label: 'W', cls: 'lb__wl' },
+  { key: 'losses', label: 'L', cls: 'lb__wl' },
+  { key: 'games', label: 'Games', cls: '' },
+  { key: 'winrate', label: 'Win %', cls: 'lb__wl' },
 ] as const;
 
 type Row = LeaderboardRow & { stats?: Record<string, number> };
@@ -64,9 +69,9 @@ export function Leaderboard({ me }: { me: string | null }) {
     return out;
   }, [rows, sort]);
 
-  const th = (key: string, label: string) => (
+  const th = (key: string, label: string, cls = '') => (
     <th
-      class={`num sortable${sort.key === key ? ' is-sorted' : ''}`}
+      class={`num sortable${cls ? ` ${cls}` : ''}${sort.key === key ? ' is-sorted' : ''}`}
       key={key}
       onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))}
       title={`Sort by ${label}`}
@@ -111,9 +116,9 @@ export function Leaderboard({ me }: { me: string | null }) {
               <table>
                 <thead>
                   <tr>
-                    <th class="rank">#</th>
+                    <th class="rank lb__rank">#</th>
                     <th class="lb__pcol">Player</th>
-                    {BASE_COLS.map((c) => th(c.key, c.label))}
+                    {BASE_COLS.map((c) => th(c.key, c.label, c.cls))}
                     {statCols.map((k) => th(k, labelFor(k)))}
                   </tr>
                 </thead>
@@ -124,13 +129,15 @@ export function Leaderboard({ me }: { me: string | null }) {
                       <tr key={r.steamid} class={r.steamid === me ? 'is-me' : ''}>
                         {/* Rank follows the CURRENT sort, so it stays meaningful
                             when the table is ordered by something other than SR. */}
-                        <td class={`rank ${i < 3 ? 'rank--top' : ''}`}>{String(i + 1).padStart(2, '0')}</td>
-                        <td class="lb__pcol pname"><PlayerLink steamid={r.steamid} name={r.name} /></td>
-                        <td class="num sr">{r.sr}</td>
-                        <td class="num">{r.wins}</td>
-                        <td class="num">{r.losses}</td>
+                        <td class={`rank lb__rank${i < 3 ? ' rank--top' : ''}`}>{String(i + 1).padStart(2, '0')}</td>
+                        {/* The cell is a fixed width so SR can pin beside it; a
+                            long name is clipped, and the title carries the rest. */}
+                        <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /></td>
+                        <td class="num sr lb__sr">{r.sr}</td>
+                        <td class="num lb__wl">{r.wins}</td>
+                        <td class="num lb__wl">{r.losses}</td>
                         <td class="num muted">{r.games}</td>
-                        <td class="num">
+                        <td class="num lb__wl">
                           {decided > 0
                             ? `${Math.round((r.wins / decided) * 100)}%`
                             : <span class="muted">n/a</span>}

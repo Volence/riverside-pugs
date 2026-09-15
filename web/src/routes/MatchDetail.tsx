@@ -334,9 +334,9 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
             <ul class="demos">
               {data.demos.map((d) => (
                 <li class="demos__row" key={d.ordinal}>
-                  <span>{d.map}</span>
-                  <span class="muted num">{fmtBytes(d.bytes)}</span>
-                  <a href={`/api/matches/${match.id}/demos/${d.ordinal}`} download>Download</a>
+                  <span class="demos__map">{d.map}</span>
+                  <span class="demos__size muted num">{fmtBytes(d.bytes)}</span>
+                  <a class="demos__link" href={`/api/matches/${match.id}/demos/${d.ordinal}`} download>Download</a>
                 </li>
               ))}
             </ul>
