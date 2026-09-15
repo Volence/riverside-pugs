@@ -141,6 +141,41 @@ void WriteSkillLines()
 	}
 }
 
+/** The full skill set for the live feed, once per map at FinalizeMap (task A6).
+ *
+ *  Timer_LiveStats sends a curated subset every ten seconds because one line
+ *  has to fit EmitPug's buffer. The per-map tables on the site are built from
+ *  the backend's end-of-map snapshot of whatever the live feed has delivered,
+ *  so every skill_detect column read n/a there while the same numbers sat in
+ *  the dump. This sends the whole set as as many LIVESTAT lines as it takes,
+ *  each under 600 bytes; the backend merges lines per player. Same gate as
+ *  WriteSkillLines: a stat that needs skill_detect is omitted, never zero,
+ *  when skill_detect is not loaded. */
+void EmitSkillLive()
+{
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		char line[700];
+		Format(line, sizeof(line), "LIVESTAT steamid=%s", g_sRosterId[i]);
+		int prefixLen = strlen(line);
+		bool any = false;
+		for (int s = 0; s < view_as<int>(PS_MAX); s++)
+		{
+			if (!g_bSkillDetect && StatNeedsSkillDetect(view_as<PugStat>(s))) continue;
+			char kv[40];
+			Format(kv, sizeof(kv), " %s=%d", g_sStatKey[s], g_iSkill[i][s]);
+			if (strlen(line) + strlen(kv) > 600)
+			{
+				EmitPug("%s", line);
+				Format(line, sizeof(line), "LIVESTAT steamid=%s", g_sRosterId[i]);
+			}
+			StrCat(line, sizeof(line), kv);
+			any = true;
+		}
+		if (any && strlen(line) > prefixLen) EmitPug("%s", line);
+	}
+}
+
 // ---------- skill_detect forwards ----------
 //
 // NOTE: OnSkeet does NOT fire for weapon-specific skeets. The dispatch in
