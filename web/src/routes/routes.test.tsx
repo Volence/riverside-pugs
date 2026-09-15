@@ -614,6 +614,64 @@ describe('StatTable comparison', () => {
     render(<StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets']} />);
     expect(screen.queryByText('Team total')).toBeNull();
   });
+
+  it('shows dashes for a player whose stats were never captured, and leaves them out of marks and totals', () => {
+    // The uncaptured row carries values in its bag (the match page derives
+    // zeros from the fixed columns), so the only thing that can keep it out
+    // of the comparison is the flag.
+    const ghost = { steamid: 'g', name: 'ghost', stats: { skeets: 5 }, captured: false };
+    const { container } = render(
+      <StatTable teamA={markRows([1, 2])} teamB={[...markRows([3, 40]), ghost]}
+                 cols={['skeets']} statDefs={markDefs} showTotals />,
+    );
+    const row = screen.getByText('ghost').closest('tr')!;
+    const cells = [...row.querySelectorAll('td.num')];
+    expect(cells.map((c) => c.textContent)).toEqual(['–']);
+    expect(cells.every((c) => c.classList.contains('is-dim'))).toBe(true);
+    expect(row.getAttribute('title')).toMatch(/not captured/);
+    // 1 is still the weak link: the ghost's 5 (or a real 0) never competes.
+    const badCells = container.querySelectorAll('.is-bad');
+    expect(badCells).toHaveLength(1);
+    expect(badCells[0].textContent).toBe('1');
+    expect(row.querySelector('.is-bad')).toBeNull();
+    // Team B totals 43, not 48.
+    const totals = screen.getAllByText('Team total').map((el) => el.closest('tr')!.querySelector('td.num')!.textContent);
+    expect(totals).toEqual(['3', '43']);
+  });
+});
+
+describe('MatchDetail uncaptured players', () => {
+  const player = (steamid: string, name: string, team: 'a' | 'b', over: Record<string, unknown> = {}) => ({
+    steamid, name, team, siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: 0, stats: {}, ...over,
+  });
+
+  it('dashes out a player with no skill stats and nothing in the fixed columns, not one who just has no skill stats', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [],
+      players: [
+        player('1', 'alice', 'a', { siDamage: 10, commonKills: 2, stats: { skeets: 3 } }),
+        // Played before skill_detect: no bag, but the fixed columns are real.
+        player('2', 'bob', 'a', { commonKills: 7 }),
+        // Never rostered in time: nothing was captured at all.
+        player('3', 'carol', 'b'),
+      ],
+      demos: [],
+      events: [],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    // Names also appear in the versus header, so find the table's own link.
+    const rowOf = (name: string) => screen.getByRole('link', { name }).closest('tr')!;
+    await waitFor(() => expect(screen.getByRole('link', { name: 'carol' })).toBeTruthy());
+    const carol = rowOf('carol');
+    const carolCells = [...carol.querySelectorAll('td.num')].map((c) => c.textContent);
+    expect(carolCells.length).toBeGreaterThan(0);
+    expect(new Set(carolCells)).toEqual(new Set(['–']));
+    expect(carol.getAttribute('title')).toMatch(/not captured/);
+    const bob = rowOf('bob');
+    expect(bob.getAttribute('title')).toBeNull();
+    expect([...bob.querySelectorAll('td.num')].map((c) => c.textContent)).toContain('7');
+  });
 });
 
 describe('MatchDetail column order', () => {
