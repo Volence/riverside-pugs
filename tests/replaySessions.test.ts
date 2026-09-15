@@ -58,6 +58,16 @@ describe('listSessions', () => {
     expect(a.files.map((f) => [f.ordinal, f.half])).toEqual([[0, 1], [1, 2]]);
   });
 
+  it('names each session by the campaign of its first map, or null for a map it does not know', () => {
+    write(`pug_${TOKEN_A}_1_1.rpl`, header({ ordinal: 1, map: 'l4d_vs_hospital02_subway' }));
+    write(`pug_${TOKEN_A}_0_1.rpl`, header({ ordinal: 0, map: 'l4d_vs_farm01_hilltop' }));
+    write(`pug_${TOKEN_B}_0_1.rpl`, header({ token: TOKEN_B, map: 'c1m1_hotel' }));
+
+    const sessions = listSessions(dir, NOW);
+    expect(sessions.find((s) => s.token === TOKEN_A)?.campaign).toBe('blood_harvest');
+    expect(sessions.find((s) => s.token === TOKEN_B)?.campaign).toBeNull();
+  });
+
   it('ignores files that are not replays', () => {
     write(`pug_${TOKEN_A}_0_1.rpl`, header());
     writeFileSync(join(dir, 'notes.txt'), 'hello');
