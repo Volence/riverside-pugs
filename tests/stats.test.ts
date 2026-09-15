@@ -120,6 +120,36 @@ describe('stats routes', () => {
     expect(winner.name).toBe('p4');
   });
 
+  it('leaderboard: a player is ranked from three games, and the rated-match count is real', async () => {
+    // The page used to show the TOP player's game count as "Matches rated",
+    // which is wrong as soon as anyone misses a night. The count is the
+    // distinct matches with a rating_history row this season.
+    playCompletedMatch(db, 'b');
+    let body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(1);
+    expect(body.rows.every((r: any) => r.ranked === false)).toBe(true);
+
+    playCompletedMatch(db, 'a');
+    body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(2);
+    expect(body.rows.every((r: any) => r.ranked === false)).toBe(true);
+
+    playCompletedMatch(db, 'draw');
+    body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(3);
+    expect(body.rows.every((r: any) => r.games === 3 && r.ranked === true)).toBe(true);
+  });
+
+  it('leaderboard: the rated-match count ignores another season', async () => {
+    playCompletedMatch(db, 'b');
+    db.prepare("INSERT INTO seasons (name) VALUES ('old')").run();
+    db.prepare(
+      'INSERT INTO rating_history (player_id, match_id, season_id, mu_before, sigma_before, mu_after, sigma_after) VALUES (?, 999, 2, 25, 8, 26, 7)',
+    ).run(ME);
+    const body = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(body.matchesRated).toBe(1);
+  });
+
   it('profile: rating, totals, recent matches with SR delta, history', async () => {
     playCompletedMatch(db, 'a');
     const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });

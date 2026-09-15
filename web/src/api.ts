@@ -56,6 +56,9 @@ export interface LeaderboardRow {
   wins: number;
   losses: number;
   games: number;
+  /** False under three games: listed as provisional, below the ranked rows,
+   *  with no rank number and no claim on the top-rated card. */
+  ranked: boolean;
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
@@ -63,6 +66,8 @@ export interface LeaderboardRow {
 
 export interface Leaderboard {
   season: { id: number; name: string };
+  /** Distinct matches that produced a rating this season. */
+  matchesRated: number;
   rows: LeaderboardRow[];
 }
 
