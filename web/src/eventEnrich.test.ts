@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { enrichEvents, enrichmentText, fmtSeconds, fromLiveEvents, fromTimeline, type EnrichableEvent } from './eventEnrich';
+import {
+  MAX_PIN_MS, enrichEvents, enrichmentText, fmtSeconds, fromLiveEvents, fromTimeline, type EnrichableEvent,
+} from './eventEnrich';
 import type { TimelineEntry } from './replay/timeline';
 
 const ev = (
@@ -77,6 +79,68 @@ describe('enrichEvents: pins', () => {
     expect(en.get(3)).toBeUndefined();
     expect(en.get(1)).toBeUndefined();
   });
+
+  it('closes the pin when the victim goes down, so a later clear has nothing to pair with', () => {
+    const en = enrichEvents([
+      ev(1, 1000, 'pinned', 'H', 'K'),
+      ev(2, 4000, 'incap', 'K', 'H'),
+      ev(3, 9000, 'cleared', 'I', 'K'),
+    ]);
+    expect(en.get(1)?.pin).toEqual({ durationMs: 3000, outcome: 'incapped', by: null });
+    expect(en.get(3)?.from).toBeUndefined();
+  });
+
+  it('forgets every pin a pinner held once they respawn; the duration is unknown', () => {
+    const en = enrichEvents([
+      ev(1, 1000, 'pinned', 'H', 'K'),
+      ev(2, 20000, 'si_spawn', 'H', null, 3),
+      ev(3, 21000, 'cleared', 'I', 'K'),
+    ]);
+    expect(en.get(1)?.pin).toEqual({ durationMs: null, outcome: 'ended', by: null });
+    expect(en.get(3)?.from).toBeUndefined();
+  });
+
+  it('forgets a stale pin when its pinner shows up killing someone else', () => {
+    const en = enrichEvents([
+      ev(1, 1000, 'pinned', 'H', 'K'),
+      ev(2, 5000, 'death', 'Y', 'H'),
+      ev(3, 6000, 'cleared', 'I', 'K'),
+    ]);
+    expect(en.get(1)?.pin).toEqual({ durationMs: null, outcome: 'ended', by: null });
+    expect(en.get(2)?.via).toBeUndefined();
+    expect(en.get(3)?.from).toBeUndefined();
+  });
+
+  it('never pairs a clear with a pin more than MAX_PIN_MS old', () => {
+    const en = enrichEvents([
+      ev(1, 1000, 'pinned', 'H', 'K'),
+      ev(2, 1000 + MAX_PIN_MS + 1, 'cleared', 'I', 'K'),
+    ]);
+    expect(en.get(2)?.from).toBeUndefined();
+    expect(en.get(1)?.pin).toEqual({ durationMs: null, outcome: 'ended', by: null });
+    // Exactly at the limit still pairs: the cap is on stale pins, not on a
+    // long tongue drag.
+    const edge = enrichEvents([
+      ev(1, 1000, 'pinned', 'H', 'K'),
+      ev(2, 1000 + MAX_PIN_MS, 'cleared', 'I', 'K'),
+    ]);
+    expect(edge.get(2)?.from).toEqual({ pinner: 'H', afterMs: MAX_PIN_MS });
+  });
+
+  it('match 18: an unrostered pin, the victim incapped, a clear 71.8 s later says nothing', () => {
+    // The plugin emitted `pinned` with no target for the unrostered pinner,
+    // then a real pin on K ended by incap, then a clear of K much later. The
+    // feed read "cleared K from H after 71.8 seconds"; it must read nothing.
+    const en = enrichEvents([
+      ev(1, 500, 'pinned', 'X', null),
+      ev(2, 1000, 'pinned', 'H', 'K'),
+      ev(3, 6000, 'incap', 'K', 'H'),
+      ev(4, 72800, 'cleared', 'I', 'K'),
+    ]);
+    expect(enrichmentText('cleared', en.get(4), nameOf, 'KoRn')).toBe('');
+    expect(enrichmentText('pinned', en.get(2), nameOf, 'KoRn')).toBe('for 5.0 seconds, until KoRn went down');
+    expect(en.get(1)).toBeUndefined();
+  });
 });
 
 describe('enrichmentText', () => {
@@ -92,7 +156,8 @@ describe('enrichmentText', () => {
     expect(enrichmentText('incap', en.get(5), nameOf, 'happy')).toBe('(smoker)');
     expect(enrichmentText('cleared', en.get(4), nameOf, 'KoRn')).toBe('from PowerMu$tache after 4.2 seconds');
     expect(enrichmentText('pinned', en.get(2), nameOf, 'KoRn')).toBe('for 4.2 seconds, cleared by intel');
-    expect(enrichmentText('pinned', en.get(3), nameOf, 'happy')).toBe('for 6.0 seconds, until happy died');
+    // The pin ends at the incap, not at the death two seconds later.
+    expect(enrichmentText('pinned', en.get(3), nameOf, 'happy')).toBe('for 4.0 seconds, until happy went down');
     expect(enrichmentText('boom', en.get(99), nameOf, null)).toBe('');
   });
 });

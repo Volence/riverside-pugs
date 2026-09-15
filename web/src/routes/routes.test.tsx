@@ -112,6 +112,30 @@ describe('Leaderboard', () => {
     await waitFor(() => expect(screen.getAllByText('carol')).toHaveLength(1));
     expect(screen.queryByText('Top rated')).toBeNull();
   });
+
+  it('marks the identity columns and the W, L, Win % columns so a phone can pin and hide them', async () => {
+    mockApi.leaderboard.mockResolvedValue({
+      season: { id: 1, name: 'Season 1' },
+      matchesRated: 4,
+      rows: [{ steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true, stats: { skeets: 2 } }],
+    });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(container.querySelector('tbody tr')).toBeTruthy());
+    // Header and body agree cell for cell, or the sticky offsets would not
+    // line up and a hidden column would leave its header behind.
+    const headCls = [...container.querySelectorAll('thead th')].map((th) => th.className);
+    const bodyCls = [...container.querySelectorAll('tbody td')].map((td) => td.className);
+    for (const cls of [headCls, bodyCls]) {
+      expect(cls[0]).toMatch(/\blb__rank\b/);
+      expect(cls[1]).toMatch(/\blb__pcol\b/);
+      expect(cls[2]).toMatch(/\blb__sr\b/);
+      expect(cls.filter((c) => /\blb__wl\b/.test(c))).toHaveLength(3);
+      expect(cls[3]).toMatch(/\blb__wl\b/);   // W
+      expect(cls[4]).toMatch(/\blb__wl\b/);   // L
+      expect(cls[5]).not.toMatch(/\blb__wl\b/); // Games stays
+      expect(cls[6]).toMatch(/\blb__wl\b/);   // Win %
+    }
+  });
 });
 
 describe('Matches', () => {
@@ -626,26 +650,45 @@ describe('MapDetail', () => {
 });
 
 describe('Replays', () => {
+  const session = (over: Record<string, unknown> = {}) => ({
+    token: 'abc123',
+    startedUnix: 1757000000,
+    campaign: 'no_mercy',
+    files: [
+      {
+        filename: 'abc123_0_1.rpl', token: 'abc123', ordinal: 0, half: 1,
+        bytes: 2_097_152, mtimeMs: 1757000000000, map: 'l4d_hospital01_apartment',
+        startedUnix: 1757000000, frameCount: 100, playerHz: 20, version: 1, closed: true,
+      },
+    ],
+    ...over,
+  });
+
   it('lists sessions grouped by token with real map names', async () => {
-    mockApi.replaySessions.mockResolvedValue({
-      sessions: [
-        {
-          token: 'abc123',
-          startedUnix: 1757000000,
-          files: [
-            {
-              filename: 'abc123_0_1.rpl', token: 'abc123', ordinal: 0, half: 1,
-              bytes: 2_097_152, mtimeMs: 1757000000000, map: 'l4d_hospital01_apartment',
-              startedUnix: 1757000000, frameCount: 100, playerHz: 20, version: 1, closed: true,
-            },
-          ],
-        },
-      ],
-    });
+    mockApi.replaySessions.mockResolvedValue({ sessions: [session()] });
     render(<Replays />);
     await waitFor(() => expect(screen.getByText('l4d_hospital01_apartment')).toBeTruthy());
     expect(screen.getByText('abc123')).toBeTruthy();
     expect(screen.getByText('finished')).toBeTruthy();
+  });
+
+  it('titles a session by its campaign and date, with the token demoted to a muted line', async () => {
+    mockApi.replaySessions.mockResolvedValue({ sessions: [session()] });
+    const { container } = render(<Replays />);
+    await waitFor(() => expect(screen.getByText('abc123')).toBeTruthy());
+    const h3 = container.querySelector('h3')!;
+    expect(h3.textContent).toMatch(/No Mercy/);
+    expect(h3.textContent).not.toContain('abc123');
+    expect(screen.getByText('abc123').classList.contains('muted')).toBe(true);
+  });
+
+  it('falls back to a plain date heading when the campaign is unknown', async () => {
+    mockApi.replaySessions.mockResolvedValue({ sessions: [session({ campaign: null })] });
+    const { container } = render(<Replays />);
+    await waitFor(() => expect(screen.getByText('abc123')).toBeTruthy());
+    const h3 = container.querySelector('h3')!;
+    expect(h3.textContent).toMatch(/\d/);
+    expect(h3.textContent).not.toMatch(/null|undefined/);
   });
 
   it('says so when there are no replays on disk', async () => {
@@ -698,6 +741,64 @@ describe('StatTable comparison', () => {
   it('omits total rows by default', () => {
     render(<StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets']} />);
     expect(screen.queryByText('Team total')).toBeNull();
+  });
+
+  it('shows dashes for a player whose stats were never captured, and leaves them out of marks and totals', () => {
+    // The uncaptured row carries values in its bag (the match page derives
+    // zeros from the fixed columns), so the only thing that can keep it out
+    // of the comparison is the flag.
+    const ghost = { steamid: 'g', name: 'ghost', stats: { skeets: 5 }, captured: false };
+    const { container } = render(
+      <StatTable teamA={markRows([1, 2])} teamB={[...markRows([3, 40]), ghost]}
+                 cols={['skeets']} statDefs={markDefs} showTotals />,
+    );
+    const row = screen.getByText('ghost').closest('tr')!;
+    const cells = [...row.querySelectorAll('td.num')];
+    expect(cells.map((c) => c.textContent)).toEqual(['–']);
+    expect(cells.every((c) => c.classList.contains('is-dim'))).toBe(true);
+    expect(row.getAttribute('title')).toMatch(/not captured/);
+    // 1 is still the weak link: the ghost's 5 (or a real 0) never competes.
+    const badCells = container.querySelectorAll('.is-bad');
+    expect(badCells).toHaveLength(1);
+    expect(badCells[0].textContent).toBe('1');
+    expect(row.querySelector('.is-bad')).toBeNull();
+    // Team B totals 43, not 48.
+    const totals = screen.getAllByText('Team total').map((el) => el.closest('tr')!.querySelector('td.num')!.textContent);
+    expect(totals).toEqual(['3', '43']);
+  });
+});
+
+describe('MatchDetail uncaptured players', () => {
+  const player = (steamid: string, name: string, team: 'a' | 'b', over: Record<string, unknown> = {}) => ({
+    steamid, name, team, siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: 0, stats: {}, ...over,
+  });
+
+  it('dashes out a player with no skill stats and nothing in the fixed columns, not one who just has no skill stats', async () => {
+    mockApi.match.mockResolvedValue({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+      maps: [],
+      players: [
+        player('1', 'alice', 'a', { siDamage: 10, commonKills: 2, stats: { skeets: 3 } }),
+        // Played before skill_detect: no bag, but the fixed columns are real.
+        player('2', 'bob', 'a', { commonKills: 7 }),
+        // Never rostered in time: nothing was captured at all.
+        player('3', 'carol', 'b'),
+      ],
+      demos: [],
+      events: [],
+    });
+    render(<MatchDetail id="7" me="1" />);
+    // Names also appear in the versus header, so find the table's own link.
+    const rowOf = (name: string) => screen.getByRole('link', { name }).closest('tr')!;
+    await waitFor(() => expect(screen.getByRole('link', { name: 'carol' })).toBeTruthy());
+    const carol = rowOf('carol');
+    const carolCells = [...carol.querySelectorAll('td.num')].map((c) => c.textContent);
+    expect(carolCells.length).toBeGreaterThan(0);
+    expect(new Set(carolCells)).toEqual(new Set(['–']));
+    expect(carol.getAttribute('title')).toMatch(/not captured/);
+    const bob = rowOf('bob');
+    expect(bob.getAttribute('title')).toBeNull();
+    expect([...bob.querySelectorAll('td.num')].map((c) => c.textContent)).toContain('7');
   });
 });
 

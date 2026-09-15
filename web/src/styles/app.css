@@ -617,18 +617,27 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 }
 .devpanel button:hover { color: var(--text); border-color: var(--text-muted); }
 
-/* Demo downloads on the match page. Three columns so the map, the size and
-   the action line up down the list rather than reflowing per row. */
+/* Demo downloads on the match page. The map name takes the slack so the size
+   and the action line up down the list on a desktop; on a phone the row wraps
+   instead of overflowing. This was a 1fr auto auto grid, and a map name is one
+   unbreakable word, so at 390px the three Download links stood 14px past the
+   viewport and the whole page scrolled sideways. */
 .demos { list-style: none; margin: 0; padding: 0; }
 .demos__row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: var(--sp-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
   align-items: baseline;
   padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border);
 }
 .demos__row:last-child { border-bottom: 0; }
+.demos__map { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.demos__size { flex: 0 0 auto; min-width: 5rem; text-align: right; white-space: nowrap; }
+.demos__link { flex: 0 0 auto; white-space: nowrap; }
+/* Once the size and the link have wrapped under the name there is no column
+   to line up with, so the size starts flush left like the name above it. */
+@media (max-width: 480px) { .demos__size { min-width: 0; text-align: left; } }
 
 /* Live spectator cards. */
 .live__stale { color: var(--loss); }
@@ -765,19 +774,56 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 }
 
 /* Sortable leaderboard. Many numeric columns, so the same treatment as the
-   live table: pinned player column, dimmed zeros, clear sort affordance. */
+   live table: pinned identity columns, dimmed zeros, clear sort affordance.
+
+   Rank, player and SR all stay put while the stats scroll. Sticky offsets are
+   cumulative, so the two columns before SR need known widths: rank and name
+   are fixed (border-box, so the padding is inside the figure) and a long name
+   is clipped with an ellipsis rather than pushing SR off its offset. On a
+   390px phone the first view used to cut SR to three digits. */
+.lb { --lb-rank-w: 3.25rem; --lb-name-w: 13rem; }
 .lb table { border-collapse: separate; border-spacing: 0; }
-.lb th, .lb td { white-space: nowrap; border-bottom: 1px solid var(--border); }
-.lb__pcol {
+.lb th, .lb td { white-space: nowrap; border-bottom: 1px solid var(--border); box-sizing: border-box; }
+.lb .lb__rank, .lb .lb__pcol, .lb .lb__sr {
   position: sticky;
-  left: 0;
   z-index: 2;
-  text-align: left;
+  /* Opaque, or the scrolling numbers show through underneath. */
   background: var(--surface);
-  padding-right: var(--sp-4);
 }
-.lb thead .lb__pcol { z-index: 3; }
+.lb thead .lb__rank, .lb thead .lb__pcol, .lb thead .lb__sr { z-index: 3; }
+.lb .lb__rank { left: 0; width: var(--lb-rank-w); min-width: var(--lb-rank-w); }
+.lb .lb__pcol {
+  left: var(--lb-rank-w);
+  width: var(--lb-name-w);
+  min-width: var(--lb-name-w);
+  text-align: left;
+  padding-right: var(--sp-3);
+}
+.lb .lb__pcol a {
+  display: block;
+  max-width: calc(var(--lb-name-w) - var(--sp-3) * 2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb .lb__sr { left: calc(var(--lb-rank-w) + var(--lb-name-w)); }
+/* The pinned cells paint over the row, so they repeat the row's own tints:
+   hover, the viewer's row, and the leader's gold wash. */
+.lb tbody tr:hover > .lb__rank, .lb tbody tr:hover > .lb__pcol, .lb tbody tr:hover > .lb__sr,
+.lb tbody tr.is-me > .lb__rank, .lb tbody tr.is-me > .lb__pcol, .lb tbody tr.is-me > .lb__sr {
+  background: var(--surface-2);
+}
+.lb--ranked tbody tr:first-child > .lb__rank,
+.lb--ranked tbody tr:first-child > .lb__pcol {
+  background: color-mix(in srgb, var(--rating) 8%, var(--surface));
+}
 .lb td.is-dim { opacity: 0.35; }
+@media (max-width: 480px) {
+  .lb { --lb-rank-w: 2.75rem; --lb-name-w: 7.5rem; }
+  .lb .lb__rank { padding-inline: var(--sp-2); }
+  /* No room for the record on a phone; Games stays as the weight of the
+     rating and Win % is a tap away on the profile. */
+  .lb .lb__wl { display: none; }
+}
 
 .sortable { cursor: pointer; user-select: none; }
 .sortable:hover { color: var(--text); }

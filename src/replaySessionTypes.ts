@@ -32,5 +32,9 @@ export interface ReplaySession {
   token: string;
   /** Earliest `startedUnix` across the session's files, in seconds. */
   startedUnix: number;
+  /** Campaign slug of the session's first map (see src/campaigns.ts), or
+   *  null for a map the site does not know. The page titles a session by
+   *  this because a 32-character token says nothing to anyone. */
+  campaign: string | null;
   files: ReplayFileInfo[];
 }
