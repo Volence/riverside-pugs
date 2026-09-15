@@ -122,27 +122,51 @@ export interface RoundAttribution {
   byPlayer: Record<string, Record<string, number>>;
 }
 
+/** Ordinals whose two recorded halves agree on who held survivor, which is
+ *  not a partition of the map at all (see the header). A lone half (map still
+ *  in progress) has nothing to disagree with, so it is not flagged. */
+function unpartitionedOrdinals(rounds: RoundRow[]): Set<number> {
+  const byOrdinal = new Map<number, RoundRow[]>();
+  for (const r of rounds) {
+    const list = byOrdinal.get(r.ordinal);
+    if (list) list.push(r); else byOrdinal.set(r.ordinal, [r]);
+  }
+  const out = new Set<number>();
+  for (const [ordinal, list] of byOrdinal) {
+    if (list.length === 2 && list[0].survTeam === list[1].survTeam) out.add(ordinal);
+  }
+  return out;
+}
+
+/** The maps of a match whose stored score must NOT be shown as a result.
+ *
+ *  `match_maps` is written from the authoritative dump, but the dump can only
+ *  carry what the plugin managed to attribute: match 18 (2026-09-14) lost two
+ *  round scores to a tied orientation vote, and a failed score read is stored
+ *  as `reliable = 0` with a 0 score. In both cases the map's row says 0 to 0,
+ *  which was never a result. The rounds are where that shows, so a map is
+ *  unrecorded when ANY round of its ordinal is unreliable, either as stored or
+ *  by roundAttribution's partition check, so the two never disagree about the
+ *  same ordinal.
+ *
+ *  A map with no round rows at all is recorded: it predates round capture and
+ *  its score came straight from MAP_RESULT. Every consumer (the match page,
+ *  the campaign averages, the per-map win/loss columns) treats an ordinal in
+ *  this set as "not recorded" rather than as 0, and nothing is written back. */
+export function unrecordedOrdinals(db: DB, matchId: number): Set<number> {
+  const rounds = roundsFor(db, matchId);
+  const out = unpartitionedOrdinals(rounds);
+  for (const r of rounds) if (!r.reliable) out.add(r.ordinal);
+  return out;
+}
+
 export function roundAttribution(
   db: DB, matchId: number, teamOf: Map<string, 'a' | 'b'>,
 ): RoundAttribution[] {
   const rounds = roundsFor(db, matchId);
   if (rounds.length === 0) return [];
   const byMap = mapStatsFor(db, matchId);
-
-  const byOrdinal = new Map<number, RoundRow[]>();
-  for (const r of rounds) {
-    const list = byOrdinal.get(r.ordinal);
-    if (list) list.push(r); else byOrdinal.set(r.ordinal, [r]);
-  }
-  // An ordinal's two halves are only a trustworthy partition of the map if
-  // they disagree on who held survivor. A lone half (map still in progress)
-  // has nothing to disagree with, so it is not flagged.
-  const unpartitioned = new Set<number>();
-  for (const [ordinal, list] of byOrdinal) {
-    if (list.length === 2 && list[0].survTeam === list[1].survTeam) {
-      unpartitioned.add(ordinal);
-    }
-  }
+  const unpartitioned = unpartitionedOrdinals(rounds);
 
   return rounds.map((r) => {
     const mapStats = byMap.get(r.ordinal) ?? {};

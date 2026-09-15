@@ -1,6 +1,29 @@
 import type { DB } from './db.js';
 import { mapStatsFor } from './liveView.js';
 import { campaignForMap } from './campaigns.js';
+import { unrecordedOrdinals } from './roundStats.js';
+
+/** Which of a match's maps have a real score. Same rule as the match page's
+ *  `recorded` flag (roundStats.ts). An unrecorded map still counts as played
+ *  and keeps its stats, since those are captured independently of the score,
+ *  but it decides no win or loss and joins no average: a stored 0 to 0 that
+ *  was never a result would otherwise become a win for the other side.
+ *  Memoised per match because every function here walks maps match by match. */
+function recordedFor(db: DB): (matchId: number, ordinal: number) => boolean {
+  const cache = new Map<number, Set<number>>();
+  return (matchId, ordinal) => {
+    let set = cache.get(matchId);
+    if (!set) { set = unrecordedOrdinals(db, matchId); cache.set(matchId, set); }
+    return !set.has(ordinal);
+  };
+}
+
+/** The rounded mean of the recorded scores, or null when none was recorded.
+ *  Null, not 0: a page must say "not recorded" rather than show an average
+ *  that never happened. */
+function avgOrNull(sum: number, n: number): number | null {
+  return n === 0 ? null : Math.round(sum / n);
+}
 
 export interface MapBreakdownRow {
   map: string;
@@ -40,6 +63,7 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
      FROM match_maps WHERE match_id = ? ORDER BY ordinal`,
   );
 
+  const recorded = recordedFor(db);
   const acc = new Map<string, MapBreakdownRow>();
   for (const { id, team } of played) {
     const maps = mapsOf.all(id) as { ordinal: number; map: string; a: number; b: number }[];
@@ -52,12 +76,15 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
         acc.set(mp.map, row);
       }
       row.games++;
-      // A drawn map counts as neither. Scores are per map, so a player can win
-      // maps inside a match they lost overall, which is the point of this view.
-      const mine = team === 'a' ? mp.a : mp.b;
-      const theirs = team === 'a' ? mp.b : mp.a;
-      if (mine > theirs) row.wins++;
-      else if (theirs > mine) row.losses++;
+      // A drawn map counts as neither, and so does an unrecorded one. Scores
+      // are per map, so a player can win maps inside a match they lost
+      // overall, which is the point of this view.
+      if (recorded(id, mp.ordinal)) {
+        const mine = team === 'a' ? mp.a : mp.b;
+        const theirs = team === 'a' ? mp.b : mp.a;
+        if (mine > theirs) row.wins++;
+        else if (theirs > mine) row.losses++;
+      }
 
       for (const [k, v] of Object.entries(byOrdinal.get(mp.ordinal)?.[steamid] ?? {})) {
         // hp is a level: summing "health at end of map" across maps would be
@@ -83,8 +110,9 @@ export interface MapLeaderRow {
 export interface MapDetail {
   map: string;
   played: number;
-  avgTeamA: number;
-  avgTeamB: number;
+  /** Mean over the RECORDED playings only, null when there are none. */
+  avgTeamA: number | null;
+  avgTeamB: number | null;
   players: MapLeaderRow[];
 }
 
@@ -112,13 +140,19 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
   const teamOf = db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ?');
   const nameOf = db.prepare('SELECT name FROM players WHERE steamid = ?');
 
+  const recorded = recordedFor(db);
   const acc = new Map<string, MapLeaderRow>();
   let sumA = 0;
   let sumB = 0;
+  let recordedCount = 0;
 
   for (const r of rows) {
-    sumA += r.a;
-    sumB += r.b;
+    const isRecorded = recorded(r.match_id, r.ordinal);
+    if (isRecorded) {
+      sumA += r.a;
+      sumB += r.b;
+      recordedCount++;
+    }
     const byOrdinal = mapStatsFor(db, r.match_id);
     const stats = byOrdinal.get(r.ordinal) ?? {};
 
@@ -133,10 +167,12 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
         acc.set(p.player_id, row);
       }
       row.games++;
-      const mine = p.team === 'a' ? r.a : r.b;
-      const theirs = p.team === 'a' ? r.b : r.a;
-      if (mine > theirs) row.wins++;
-      else if (theirs > mine) row.losses++;
+      if (isRecorded) {
+        const mine = p.team === 'a' ? r.a : r.b;
+        const theirs = p.team === 'a' ? r.b : r.a;
+        if (mine > theirs) row.wins++;
+        else if (theirs > mine) row.losses++;
+      }
 
       for (const [k, v] of Object.entries(stats[p.player_id] ?? {})) {
         if (k === 'hp') continue;
@@ -148,8 +184,8 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
   return {
     map,
     played: rows.length,
-    avgTeamA: Math.round(sumA / rows.length),
-    avgTeamB: Math.round(sumB / rows.length),
+    avgTeamA: avgOrNull(sumA, recordedCount),
+    avgTeamB: avgOrNull(sumB, recordedCount),
     players: [...acc.values()].sort((x, y) => y.wins - x.wins || y.games - x.games),
   };
 }
@@ -158,8 +194,9 @@ export interface MapIndexRow {
   map: string;
   campaign: string | null;
   played: number;
-  avgTeamA: number;
-  avgTeamB: number;
+  /** Mean over the RECORDED playings only, null when there are none. */
+  avgTeamA: number | null;
+  avgTeamB: number | null;
 }
 
 /**
@@ -172,18 +209,28 @@ export interface MapIndexRow {
  * worth linking to.
  */
 export function mapIndex(db: DB): MapIndexRow[] {
+  // Aggregated here rather than in SQL so the recorded rule is the one
+  // function in roundStats.ts and not a second copy of it in a query.
   const rows = db
     .prepare(
-      `SELECT mm.map,
-              COUNT(*) AS played,
-              CAST(ROUND(AVG(mm.team_a_score)) AS INTEGER) AS avgTeamA,
-              CAST(ROUND(AVG(mm.team_b_score)) AS INTEGER) AS avgTeamB
+      `SELECT mm.match_id, mm.ordinal, mm.map, mm.team_a_score AS a, mm.team_b_score AS b
        FROM match_maps mm JOIN matches m ON m.id = mm.match_id
        WHERE m.state = 'completed'
-       GROUP BY mm.map
        ORDER BY mm.map`,
     )
-    .all() as { map: string; played: number; avgTeamA: number; avgTeamB: number }[];
+    .all() as { match_id: number; ordinal: number; map: string; a: number; b: number }[];
 
-  return rows.map((r) => ({ ...r, campaign: campaignForMap(r.map) }));
+  const recorded = recordedFor(db);
+  const acc = new Map<string, { played: number; n: number; sumA: number; sumB: number }>();
+  for (const r of rows) {
+    let row = acc.get(r.map);
+    if (!row) { row = { played: 0, n: 0, sumA: 0, sumB: 0 }; acc.set(r.map, row); }
+    row.played++;
+    if (recorded(r.match_id, r.ordinal)) { row.n++; row.sumA += r.a; row.sumB += r.b; }
+  }
+
+  return [...acc.entries()].map(([map, r]) => ({
+    map, campaign: campaignForMap(map), played: r.played,
+    avgTeamA: avgOrNull(r.sumA, r.n), avgTeamB: avgOrNull(r.sumB, r.n),
+  }));
 }

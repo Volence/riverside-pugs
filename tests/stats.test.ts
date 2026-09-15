@@ -358,4 +358,45 @@ describe('stats routes', () => {
     const row = res.json().rows.find((r: any) => r.steamid === ME);
     for (const k of selfKeys) expect(Object.keys(row.stats)).not.toContain(k);
   });
+
+  describe('map recorded flag', () => {
+    // A map's score in match_maps comes from the authoritative dump, but when
+    // the plugin could not attribute or read a round (match 18, 2026-09-14)
+    // the dump carried a 0 that was never a result. The rounds table is where
+    // that shows: any round of the ordinal with reliable = 0 means the map's
+    // score must be shown as "not recorded" rather than as 0 to 0.
+    it('is true for a map with no round rows at all (pre round-capture match)', async () => {
+      const matchId = playCompletedMatch(db, 'a');
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.maps[0].recorded).toBe(true);
+    });
+
+    it('is true when every round of the ordinal is reliable', async () => {
+      const matchId = playCompletedMatch(db, 'a');
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 300, '2026-09-11 00:10:00')").run(matchId);
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 2, 'b', 250, '2026-09-11 00:30:00')").run(matchId);
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.maps[0].recorded).toBe(true);
+    });
+
+    it('is false when any round of the ordinal is unreliable', async () => {
+      const matchId = playCompletedMatch(db, 'a');
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at) VALUES (?, 0, 1, 'a', 300, 1, '2026-09-11 00:10:00')").run(matchId);
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at) VALUES (?, 0, 2, 'a', 0, 0, '2026-09-11 00:30:00')").run(matchId);
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.maps[0].recorded).toBe(false);
+    });
+
+    it('is false when the two halves fail to partition the sides, matching rounds[].reliable', async () => {
+      // Both halves say team a held survivor. roundAttribution already forces
+      // both rounds unreliable in its return value; the map flag must agree
+      // with it rather than reading the stored column alone.
+      const matchId = playCompletedMatch(db, 'a');
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 1, 'a', 300, '2026-09-11 00:10:00')").run(matchId);
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, 0, 2, 'a', 250, '2026-09-11 00:30:00')").run(matchId);
+      const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+      expect(body.rounds.every((r: any) => r.reliable === false)).toBe(true);
+      expect(body.maps[0].recorded).toBe(false);
+    });
+  });
 });

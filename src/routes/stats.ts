@@ -13,7 +13,7 @@ import { playerMapBreakdown, mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
-import { roundAttribution } from '../roundStats.js';
+import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string }
 
@@ -241,9 +241,15 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // live pipeline; the authoritative dump only carries match totals. Absent
     // for any match played before that existed, hence the ?? {}.
     const byMap = mapStatsFor(db, id);
+    // `recorded` false means the stored score is not a result (a round the
+    // plugin could not attribute or read), and the page must say "not
+    // recorded" instead of 0 to 0. See unrecordedOrdinals for the rule.
+    const unrecorded = unrecordedOrdinals(db, id);
     const maps = (db.prepare(
       'SELECT ordinal, map, team_a_score AS teamAScore, team_b_score AS teamBScore FROM match_maps WHERE match_id = ? ORDER BY ordinal',
-    ).all(id) as { ordinal: number }[]).map((mp) => ({ ...mp, stats: byMap.get(mp.ordinal) ?? {} }));
+    ).all(id) as { ordinal: number }[]).map((mp) => ({
+      ...mp, stats: byMap.get(mp.ordinal) ?? {}, recorded: !unrecorded.has(mp.ordinal),
+    }));
     const statRows = db.prepare(
       'SELECT player_id, stat, value FROM match_player_stats WHERE match_id = ?',
     ).all(id) as { player_id: string; stat: string; value: number }[];

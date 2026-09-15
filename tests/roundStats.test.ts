@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
-import { roundAttribution } from '../src/roundStats.js';
+import { roundAttribution, unrecordedOrdinals } from '../src/roundStats.js';
 
 const P_A = 'STEAM_0:0:1';
 const P_B = 'STEAM_0:0:2';
@@ -139,5 +139,30 @@ describe('per-round side attribution', () => {
     db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
     db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'completed', 'no_mercy')").run();
     expect(roundAttribution(db, 1, TEAMS)).toEqual([]);
+  });
+});
+
+describe('unrecordedOrdinals', () => {
+  it('is empty for a match with no rounds, and for one whose rounds all hold up', () => {
+    const empty = openDb(':memory:');
+    empty.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    empty.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'completed', 'no_mercy')").run();
+    expect(unrecordedOrdinals(empty, 1).size).toBe(0);
+    expect(unrecordedOrdinals(matchWithOneMap(), 1).size).toBe(0);
+  });
+
+  it('names an ordinal with any stored unreliable round', () => {
+    const db = matchWithOneMap();
+    db.prepare('UPDATE match_rounds SET reliable = 0 WHERE match_id = 1 AND ordinal = 0 AND half = 2').run();
+    expect([...unrecordedOrdinals(db, 1)]).toEqual([0]);
+  });
+
+  it('names an ordinal whose two halves fail to partition the sides, as roundAttribution does', () => {
+    // Same correction, same answer: the map flag and rounds[].reliable must
+    // never disagree about the same ordinal.
+    const db = matchWithOneMap();
+    db.prepare("UPDATE match_rounds SET surv_team = 'a' WHERE match_id = 1 AND ordinal = 0 AND half = 2").run();
+    expect([...unrecordedOrdinals(db, 1)]).toEqual([0]);
+    expect(roundAttribution(db, 1, TEAMS).every((r) => !r.reliable)).toBe(true);
   });
 });
