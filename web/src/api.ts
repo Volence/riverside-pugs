@@ -157,6 +157,11 @@ export interface MatchDetail {
     /** Per-player stats for this map, keyed by steamid. Empty for matches
      *  played before per-map capture existed. */
     stats: Record<string, Record<string, number>>;
+    /** False when the stored score is not a result (a round the plugin could
+     *  not attribute or read). The page says "not recorded" instead of the
+     *  scoreline. Optional only for an older server that predates the flag,
+     *  which is read as recorded. */
+    recorded?: boolean;
   }[];
   players: MatchPlayerStats[];
   events?: LiveEvent[];
@@ -182,8 +187,9 @@ export interface MapIndexRow {
   map: string;
   campaign: string | null;
   played: number;
-  avgTeamA: number;
-  avgTeamB: number;
+  /** Mean over the recorded playings only; null when none has a real score. */
+  avgTeamA: number | null;
+  avgTeamB: number | null;
 }
 
 export interface MapLeaderRow {
@@ -198,8 +204,9 @@ export interface MapLeaderRow {
 export interface MapDetail {
   map: string;
   played: number;
-  avgTeamA: number;
-  avgTeamB: number;
+  /** Mean over the recorded playings only; null when none has a real score. */
+  avgTeamA: number | null;
+  avgTeamB: number | null;
   players: MapLeaderRow[];
 }
 

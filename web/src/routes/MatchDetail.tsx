@@ -69,6 +69,14 @@ export function initialOrdinal(maps: { ordinal: number }[], hash: string): numbe
   return maps.some((mp) => mp.ordinal === wanted) ? wanted : maps[0].ordinal;
 }
 
+/** A map's scoreline for the chip row and the heading, or the words "not
+ *  recorded" when the API says the stored score is not a result. Muted either
+ *  way; the caller decides the wrapper. An absent flag (older server) reads
+ *  as recorded, the same way the other server-build fields are guarded. */
+export function mapScoreLabel(mp: { teamAScore: number; teamBScore: number; recorded?: boolean }): string {
+  return mp.recorded === false ? 'not recorded' : `${mp.teamAScore} - ${mp.teamBScore}`;
+}
+
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
@@ -274,14 +282,14 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                       onClick={() => selectMap(m.ordinal)}
                     >
                       Map {m.ordinal + 1}
-                      <span class="muted num"> {m.teamAScore} - {m.teamBScore}</span>
+                      <span class="muted num"> {mapScoreLabel(m)}</span>
                     </button>
                   ))}
                 </div>
               )}
               <h3>
                 Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mp.map}</a>
-                <span class="muted"> · {mp.teamAScore} - {mp.teamBScore}</span>
+                <span class="muted"> · {mapScoreLabel(mp)}</span>
                 {demo && <> · <a href={`/api/matches/${match.id}/demos/${demo.ordinal}`} download>
                   demo {fmtBytes(demo.bytes)}
                 </a></>}

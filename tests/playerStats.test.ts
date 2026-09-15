@@ -36,6 +36,17 @@ function seedMatch(
   }
 }
 
+/** Two closed halves for map `ordinal` of match `id`. `reliable` false marks
+ *  half 2 as one the plugin could not attribute, which is the shape match 18
+ *  left behind: a score of 0 in match_maps that was never a result. */
+function seedRounds(id: number, ordinal: number, reliable = true): void {
+  const ins = db.prepare(
+    "INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at) VALUES (?, ?, ?, ?, ?, ?, '2026-09-14 00:00:00')",
+  );
+  ins.run(id, ordinal, 1, 'a', 100, 1);
+  ins.run(id, ordinal, 2, 'b', 100, reliable ? 1 : 0);
+}
+
 beforeEach(() => {
   db = openDb(':memory:');
   upsertPlayer(db, { steamid: ME, name: 'me', avatar: null }, []);
@@ -111,6 +122,17 @@ describe('playerMapBreakdown', () => {
     expect(playerMapBreakdown(db, ME)[0].stats.ck).toBe(5);
   });
 
+  it('counts an unrecorded map as played but as neither a win nor a loss', () => {
+    // Match 18 shape: the stored 0 for one side is not a result, so the map
+    // must not become a win for the other side.
+    seedMatch(1, [{ map: 'airport01', a: 300, b: 0 }], { 0: { [ME]: { ck: 7 } } });
+    seedRounds(1, 0, false);
+    const row = playerMapBreakdown(db, ME)[0];
+    expect(row).toMatchObject({ games: 1, wins: 0, losses: 0 });
+    // Stats were captured independently of the score and still count.
+    expect(row.stats.ck).toBe(7);
+  });
+
   it('orders by games played, most first', () => {
     seedMatch(1, [{ map: 'rare', a: 1, b: 0 }], {});
     seedMatch(2, [{ map: 'common', a: 1, b: 0 }], {});
@@ -151,6 +173,27 @@ describe('mapDetail', () => {
     expect(mapDetail(db, 'airport01')).toBeNull();
   });
 
+  it('leaves an unrecorded map out of the averages and the win/loss columns', () => {
+    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], {});
+    seedMatch(2, [{ map: 'airport01', a: 0, b: 900 }], {});
+    seedRounds(2, 0, false);
+    const d = mapDetail(db, 'airport01')!;
+    // Still played twice: the map happened, only its score is unknown.
+    expect(d.played).toBe(2);
+    expect(d.avgTeamA).toBe(300);
+    expect(d.avgTeamB).toBe(100);
+    expect(d.players.find((p) => p.steamid === ME)).toMatchObject({ games: 2, wins: 1, losses: 0 });
+  });
+
+  it('reports the average as unknown, not 0, when no playing of the map was recorded', () => {
+    seedMatch(1, [{ map: 'airport01', a: 0, b: 0 }], {});
+    seedRounds(1, 0, false);
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.played).toBe(1);
+    expect(d.avgTeamA).toBeNull();
+    expect(d.avgTeamB).toBeNull();
+  });
+
   it('agrees with playerMapBreakdown for the same player and map', () => {
     // The two views share a source, so they must never disagree.
     seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 12, sidmg: 300 } } });
@@ -178,6 +221,20 @@ describe('mapIndex', () => {
     expect(idx).toHaveLength(2);
     const first = idx.find((r) => r.map === 'l4d_vs_airport01_greenhouse')!;
     expect(first).toMatchObject({ played: 2, campaign: 'dead_air', avgTeamA: 200, avgTeamB: 200 });
+  });
+
+  it('averages only recorded playings, and says so with null when there are none', () => {
+    seedMatch(1, [{ map: 'l4d_vs_airport01_greenhouse', a: 300, b: 100 }], {});
+    seedMatch(2, [{ map: 'l4d_vs_airport01_greenhouse', a: 0, b: 0 }], {});
+    seedRounds(2, 0, false);
+    seedMatch(3, [{ map: 'l4d_vs_airport02_offices', a: 0, b: 0 }], {});
+    seedRounds(3, 0, false);
+
+    const idx = mapIndex(db);
+    expect(idx.find((r) => r.map === 'l4d_vs_airport01_greenhouse'))
+      .toMatchObject({ played: 2, avgTeamA: 300, avgTeamB: 100 });
+    expect(idx.find((r) => r.map === 'l4d_vs_airport02_offices'))
+      .toMatchObject({ played: 1, avgTeamA: null, avgTeamB: null });
   });
 
   it('leaves campaign null for a map the campaign table does not know', () => {
