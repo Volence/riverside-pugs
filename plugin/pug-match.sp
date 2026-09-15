@@ -2694,6 +2694,9 @@ void FinalizeMap()
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
 	g_iMapScoreB[g_iMapCount] = g_iHalfScoreB;
 	g_iMapCount++;
+	// The full skill set for this map's live snapshot, before MAP_RESULT so the
+	// backend's end-of-map snapshot (taken on MAP_RESULT) already holds it.
+	EmitSkillLive();
 	// No g_iHalf reset here any more. It was needed while the half was a
 	// counter that had to restart at each map; it is now read from
 	// m_bInSecondHalfOfRound every time a half goes live, so zeroing it would

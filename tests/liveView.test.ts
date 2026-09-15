@@ -220,12 +220,16 @@ describe('liveView: per-player live stats', () => {
     expect(m.teamB[0].stats).toEqual({});
   });
 
-  it('replaces rather than merges on each update', () => {
+  // The end-of-map skill set arrives as several LIVESTAT lines per player
+  // (EmitSkillLive splits it to fit the plugin's buffer), so lines merge: a
+  // repeated key takes the newest value, a key seen once stays.
+  it('merges each update over the last, newest value winning', () => {
     seedLive();
-    recordLiveStat(db, TOKEN, A[0], { ck: 5 });
+    recordLiveStat(db, TOKEN, A[0], { ck: 5, sidmg: 100 });
     recordLiveStat(db, TOKEN, A[0], { ck: 9, skeets: 2 });
+    recordLiveStat(db, TOKEN, A[0], { crowns: 1 });
     expect(getLiveMatches(db)[0].teamA.find((p) => p.steamid === A[0])!.stats)
-      .toEqual({ ck: 9, skeets: 2 });
+      .toEqual({ ck: 9, sidmg: 100, skeets: 2, crowns: 1 });
   });
 
   // The live payload is public and has no per-viewer redaction step, so a

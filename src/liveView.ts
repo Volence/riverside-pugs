@@ -125,11 +125,21 @@ export function recordLiveStat(
     if (statDef(k)?.visibility === 'self') continue;
     safe[k] = v;
   }
-  stats = safe;
+  // Merge, never replace: the end-of-map skill set arrives as several LIVESTAT
+  // lines per player (EmitSkillLive splits it to fit the plugin's buffer), and
+  // the ten-second line carries a subset. A key that stops arriving keeps its
+  // last value, which is what a counter should do.
+  const prev = db
+    .prepare('SELECT stats_json FROM match_live_players WHERE match_id = ? AND player_id = ?')
+    .get(id, steamid) as { stats_json: string } | undefined;
+  let merged: Record<string, number> = safe;
+  if (prev) {
+    try { merged = { ...(JSON.parse(prev.stats_json) as Record<string, number>), ...safe }; } catch { merged = safe; }
+  }
   db.prepare(
     `INSERT INTO match_live_players (match_id, player_id, stats_json) VALUES (?, ?, ?)
      ON CONFLICT (match_id, player_id) DO UPDATE SET stats_json = excluded.stats_json`,
-  ).run(id, steamid, JSON.stringify(stats));
+  ).run(id, steamid, JSON.stringify(merged));
   touch(db, id);
 }
 
