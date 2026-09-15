@@ -124,6 +124,14 @@ int g_iHalfScoreA;
 int g_iHalfScoreB;
 int g_iRound1Logical;                    // logical team (1|2) that played survivors in half 1; 0 = unknown
 int g_iRound1SurvPug;                    // pug team (1|2) that played survivors in half 1; 0 = unknown
+// The engine's logical team index (what L4D_GetTeamScore is keyed by) is stable
+// for a whole match, so once one round's survivor vote is decisive we know which
+// logical team is pug A and can attribute a later tied or unobserved round from
+// it. Match 18 (2026-09-14) lost two rounds, 1244 and 726, to a 1:1 tie when a
+// stale roster left only one rostered player per side on the survivors. Survives
+// OnMapStart on purpose; reset only with the match.
+int g_iLogicalOfPugA;                    // logical team (1|2) that is pug team a; 0 = not yet learned
+int g_iLastSurvLogical;                  // logical team whose score TryReadRoundScore last resolved; 0 = none
 int g_iHalf;                             // 1 or 2 within the current map, DERIVED from
                                           // m_bInSecondHalfOfRound at go-live, never counted;
                                           // 0 only before the first half of a match goes live
@@ -1741,9 +1749,9 @@ public Action Cmd_Status(int args)
 		g_sToken[0] == '\0' ? "(none)" : g_sToken,
 		g_sCampaign[0] == '\0' ? "(none)" : g_sCampaign,
 		g_sCurrentMap);
-	DumpLine("STATUS orient a=%s b=%s round1Logical=%d round1SurvPug=%d minOrient=%d debug=%d",
+	DumpLine("STATUS orient a=%s b=%s round1Logical=%d round1SurvPug=%d logicalOfA=%d minOrient=%d debug=%d",
 		SideName(g_iPugSide[1]), SideName(g_iPugSide[2]),
-		g_iRound1Logical, g_iRound1SurvPug, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
+		g_iRound1Logical, g_iRound1SurvPug, g_iLogicalOfPugA, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
 	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
 	DumpLine("STATUS selfStarted=%d enforceRoster=%d recordDemos=%d",
@@ -1856,6 +1864,8 @@ void ResetMatchState()
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
 	g_iRound1SurvPug = 0;
+	g_iLogicalOfPugA = 0;
+	g_iLastSurvLogical = 0;
 	g_iHalf = 0;
 	g_fRoundLiveAt = 0.0;
 	g_bRoundEnded = false;
@@ -2491,6 +2501,7 @@ int TryReadRoundScore(bool second)
 		}
 	}
 	int score = (survLogical != 0) ? L4D_GetTeamScore(survLogical, false) : -1;
+	if (survLogical != 0) g_iLastSurvLogical = survLogical;
 	PugDebug("score read half=%d logical=%d score=%d (round1Logical=%d)",
 		second ? 2 : 1, survLogical, score, g_iRound1Logical);
 	return score;
@@ -2524,6 +2535,28 @@ void AttributeScore(int survPug, int score, bool second)
 		survPug = 3 - g_iRound1SurvPug;
 		LogError("[pug] half-2 score %d unobserved, attributing to pug team %s by half-1 inversion",
 			score, survPug == 1 ? "a" : "b");
+	}
+
+	// Logical-team mapping: learned from every decisive observation, spent on
+	// the ones that are not. The engine keeps a player's logical team across
+	// maps and halves (sm_swap and friends move people BETWEEN logical teams,
+	// which is exactly what an observation then re-learns), so this is the
+	// same fact the vote measures, remembered.
+	if (survPug != 0 && g_iLastSurvLogical != 0)
+	{
+		int learned = (survPug == 1) ? g_iLastSurvLogical : 3 - g_iLastSurvLogical;
+		if (g_iLogicalOfPugA != 0 && g_iLogicalOfPugA != learned)
+		{
+			PugDebug("logical-team mapping changed: pug a was logical %d, now %d", g_iLogicalOfPugA, learned);
+		}
+		g_iLogicalOfPugA = learned;
+	}
+	else if (survPug == 0 && g_iLogicalOfPugA != 0 && g_iLastSurvLogical != 0)
+	{
+		survPug = (g_iLastSurvLogical == g_iLogicalOfPugA) ? 1 : 2;
+		LogError("[pug] round score %d attributed to pug team %s by logical-team mapping (vote tied or empty)",
+			score, survPug == 1 ? "a" : "b");
+		if (!second) g_iRound1SurvPug = survPug;
 	}
 
 	if (survPug == 1) { g_iHalfScoreA += score; PugDebug("credit %d to pug team a (half total %d)", score, g_iHalfScoreA); }
