@@ -148,9 +148,20 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   // The dump gives per-player totals as fixed columns plus a bag of skill
   // stats; fold them into one object so the match page and the live page share
   // exactly one table component and one column order.
+  //
+  // A player nothing was captured for (rostered after the dump's stats were
+  // seeded, match 18) arrives with an empty bag and every fixed column at 0.
+  // Those zeros are not a performance, and the table must not compare them
+  // as one. From this side of the API the two facts the plan names (an empty
+  // stats_json and no match_player_stats rows) are exactly "no skill stats
+  // and nothing in the fixed columns", which is what is tested here.
+  const wasCaptured = (p: typeof players[number]): boolean =>
+    Object.keys(p.stats ?? {}).length > 0
+    || [p.siDamage, p.siKills, p.commonKills, p.ffDealt, p.revives].some((v) => v !== 0);
   const rowFor = (p: typeof players[number]): StatRow => ({
     steamid: p.steamid,
     name: p.name,
+    captured: wasCaptured(p),
     stats: deriveLiveStats({
       ck: p.commonKills, sidmg: p.siDamage, sikill: p.siKills,
       ff: p.ffDealt, rev: p.revives,
@@ -168,10 +179,14 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     statDefs,
   );
 
+  // Per map, "captured" is simply whether the end-of-map snapshot has a row
+  // for this player; a late joiner is missing from the maps before they were
+  // rostered.
   const mapRows = (mp: typeof maps[number], team: 'a' | 'b'): StatRow[] =>
     players.filter((p) => p.team === team).map((p) => ({
       steamid: p.steamid,
       name: p.name,
+      captured: mp.stats?.[p.steamid] !== undefined,
       stats: deriveLiveStats(mp.stats?.[p.steamid] ?? {}),
     }));
   const hasMapStats = maps.some((mp) => Object.keys(mp.stats ?? {}).length > 0);

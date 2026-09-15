@@ -12,7 +12,17 @@ export interface StatRow {
   steamid: string;
   name: string;
   stats: Record<string, number>;
+  /** False when nothing was ever recorded for this player (rostered too late
+   *  for the dump, match 18). Their bag is then fixed-column zeros, which
+   *  would read as the worst numbers in the match; the row renders dashes
+   *  instead and takes no part in marks or totals. Absent means captured. */
+  captured?: boolean;
 }
+
+/** What an uncaptured cell reads. An en dash, not a zero and not "n/a":
+ *  n/a means "this stat was not measured for anyone". */
+const UNCAPTURED = '–';
+const UNCAPTURED_TITLE = 'stats were not captured for this player';
 
 /** A map heading needs a name; a map still in progress has none yet. */
 export interface FeedMap { ordinal: number; map: string }
@@ -51,16 +61,19 @@ export function StatTable(
   const marks = new Map<string, (Mark | null)[]>();
   if (statDefs) {
     for (const k of cols) {
-      marks.set(k, markColumn(all.map((r) => r.stats?.[k]), directionOf(k, statDefs)));
+      // An uncaptured row contributes "absent" to every column, so its zeros
+      // can never be the column's low end.
+      marks.set(k, markColumn(all.map((r) => (r.captured === false ? undefined : r.stats?.[k])), directionOf(k, statDefs)));
     }
   }
 
   /** Column totals for one team. A column nobody recorded stays absent rather
-   *  than summing to a fabricated zero. */
+   *  than summing to a fabricated zero, and an uncaptured player adds nothing. */
   const totalsFor = (players: StatRow[]) => {
     const out: Record<string, number> = {};
+    const counted = players.filter((p) => p.captured !== false);
     for (const k of cols) {
-      const vals = players.map((p) => p.stats?.[k]).filter((v): v is number => v !== undefined);
+      const vals = counted.map((p) => p.stats?.[k]).filter((v): v is number => v !== undefined);
       if (vals.length > 0) out[k] = vals.reduce((a, b) => a + b, 0);
     }
     return out;
@@ -77,9 +90,12 @@ export function StatTable(
         {cols.map((k) => <td class={cls(k)} key={k} />)}
       </tr>,
       ...players.map((p, i) => (
-        <tr key={p.steamid}>
+        <tr key={p.steamid} title={p.captured === false ? UNCAPTURED_TITLE : undefined}>
           <td class="live__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
           {cols.map((k) => {
+            if (p.captured === false) {
+              return <td class={`${cls(k)} is-dim`} key={k}>{UNCAPTURED}</td>;
+            }
             const v = p.stats?.[k];
             const dim = v === 0 || v === undefined ? ' is-dim' : '';
             const m = marks.get(k)?.[indexOffset + i] ?? null;
