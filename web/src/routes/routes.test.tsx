@@ -66,6 +66,29 @@ describe('Leaderboard', () => {
     render(<Leaderboard me={null} />);
     await waitFor(() => expect(screen.getByText(/no rated players/i)).toBeTruthy());
   });
+
+  it('marks the identity columns and the W, L, Win % columns so a phone can pin and hide them', async () => {
+    mockApi.leaderboard.mockResolvedValue({
+      season: { id: 1, name: 'Season 1' },
+      rows: [{ steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, stats: { skeets: 2 } }],
+    });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(container.querySelector('tbody tr')).toBeTruthy());
+    // Header and body agree cell for cell, or the sticky offsets would not
+    // line up and a hidden column would leave its header behind.
+    const headCls = [...container.querySelectorAll('thead th')].map((th) => th.className);
+    const bodyCls = [...container.querySelectorAll('tbody td')].map((td) => td.className);
+    for (const cls of [headCls, bodyCls]) {
+      expect(cls[0]).toMatch(/\blb__rank\b/);
+      expect(cls[1]).toMatch(/\blb__pcol\b/);
+      expect(cls[2]).toMatch(/\blb__sr\b/);
+      expect(cls.filter((c) => /\blb__wl\b/.test(c))).toHaveLength(3);
+      expect(cls[3]).toMatch(/\blb__wl\b/);   // W
+      expect(cls[4]).toMatch(/\blb__wl\b/);   // L
+      expect(cls[5]).not.toMatch(/\blb__wl\b/); // Games stays
+      expect(cls[6]).toMatch(/\blb__wl\b/);   // Win %
+    }
+  });
 });
 
 describe('Matches', () => {
