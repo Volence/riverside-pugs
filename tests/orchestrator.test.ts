@@ -98,6 +98,30 @@ describe('RealOrchestrator', () => {
     expect(srv.cmds.some((c) => c.startsWith('changelevel'))).toBe(true);
   });
 
+  it('stamps went_live_at when the match goes live', async () => {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+
+    const releaser = new ServerReleaser(db, async () => {});
+    const orch = new RealOrchestrator({
+      db, listener,
+      logPublicAddress: '127.0.0.1:27500',
+      releaser,
+      makeRcon: (o) => o,
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+
+    const row = db.prepare('SELECT state, went_live_at FROM matches WHERE id = ?').get(mid) as
+      { state: string; went_live_at: string | null };
+    expect(row.state).toBe('live');
+    expect(row.went_live_at).not.toBeNull();
+  });
+
   it('setupMatch aborts the match when no server is free', async () => {
     const orch = new RealOrchestrator({
       db, listener: new LogListener(() => {}),

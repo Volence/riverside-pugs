@@ -276,6 +276,10 @@ export function openDb(path: string): DB {
   // sub rostered at a go-live. The rating step skips anyone who played under
   // half the maps.
   ensureColumn(db, 'match_players', 'joined_map', 'INTEGER NOT NULL DEFAULT 0');
+  // When the match actually went live, which is not when its row was inserted:
+  // a match with no free server now waits in 'configuring' instead of aborting,
+  // so created_at can be arbitrarily older. The no-show reaper times from here.
+  ensureColumn(db, 'matches', 'went_live_at', 'TEXT');
   seed(db);
   return db;
 }

@@ -120,7 +120,8 @@ export class RealOrchestrator implements Orchestrator {
       for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
       await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
       markLive(this.db, server.id);
-      this.db.prepare("UPDATE matches SET state = 'live' WHERE id = ?").run(matchId);
+      this.db.prepare("UPDATE matches SET state = 'live', went_live_at = datetime('now') WHERE id = ?")
+        .run(matchId);
       live = true;
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
