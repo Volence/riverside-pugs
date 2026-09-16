@@ -22,6 +22,7 @@ import {
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
 } from './liveView.js';
+import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
@@ -191,6 +192,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               }
             }
           }
+          else if (ev.kind === 'player' && ev.event === 'connect') {
+            recordPlayerConnect(deps.db, ev.token, ev.steamid);
+          }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
@@ -310,6 +314,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       reapOrphanedMatches(deps.db, releaser);
     } catch (err) {
       console.error('[liveView] reaper failed:', err);
+    }
+    try {
+      reapNoShowMatches(deps.db, releaser);
+    } catch (err) {
+      console.error('[noShow] reaper failed:', err);
     }
   }, 60_000);
   reaper.unref();
