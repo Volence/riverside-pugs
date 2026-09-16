@@ -56,7 +56,9 @@ export interface StateSnapshot {
     teamB: NamedPlayer[];
     /** Only for a viewer on this roster, and only once the match is live. */
     connect: { host: string; port: number; password: string } | null;
-    /** Live but serverless means it is queued behind another match. */
+    /** True while the match is configuring and no server has been claimed
+     *  yet, so it is queued behind another match. Never true once the match
+     *  is live. */
     waitingForServer: boolean;
   } | null;
 }

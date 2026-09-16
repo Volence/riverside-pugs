@@ -582,7 +582,11 @@ describe('Play', () => {
           queue: { count: 0, joined: false, players: [] },
           lobby: null,
           match: {
-            id: 1, state: 'setting_up', campaign: 'no_mercy',
+            // 'configuring' is the real pre-live state (db.ts's CHECK
+            // constraint: 'configuring' | 'live' | 'completed' | 'aborted').
+            // waitingForServer stays false here: a server has been claimed,
+            // just not finished setting up yet.
+            id: 1, state: 'configuring', campaign: 'no_mercy',
             teamA: [{ steamid: '1', name: 'alice', avatar: null }],
             teamB: [{ steamid: '2', name: 'bob', avatar: null }],
             connect: null, waitingForServer: false,
@@ -603,7 +607,11 @@ describe('Play', () => {
           queue: { count: 0, joined: false, players: [] },
           lobby: null,
           match: {
-            id: 1, state: 'live', campaign: 'no_mercy',
+            // The server only ever sets waitingForServer while the match is
+            // still configuring (matchmaker.ts), never once it is live, so
+            // this fixture uses 'configuring' rather than 'live' to exercise
+            // a state the backend can actually produce.
+            id: 1, state: 'configuring', campaign: 'no_mercy',
             teamA: [{ steamid: '1', name: 'alice', avatar: null }],
             teamB: [{ steamid: '2', name: 'bob', avatar: null }],
             connect: null, waitingForServer: true,
