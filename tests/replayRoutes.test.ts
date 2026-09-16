@@ -98,64 +98,6 @@ function seedMatchReplay(
   return id;
 }
 
-describe('GET /api/replays/sessions', () => {
-  it('lists sessions grouped by token', async () => {
-    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
-    const res = await app.inject({ url: '/api/replays/sessions' });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { sessions: { token: string; files: unknown[] }[] };
-    expect(body.sessions).toHaveLength(1);
-    expect(body.sessions[0].token).toBe(TOKEN);
-  });
-
-  // This page exists for the standalone `!mix` files, which have no match
-  // page to be reached through. A ranked session is reachable through its
-  // match page and its token is the seed for the game server's sv_password,
-  // so listing it here would publish a way into a private match.
-  it('omits a session whose token belongs to a match', async () => {
-    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
-    seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
-    const res = await app.inject({ url: '/api/replays/sessions' });
-    expect((res.json() as { sessions: unknown[] }).sessions).toEqual([]);
-    expect(res.payload).not.toContain(TOKEN);
-  });
-
-  it('omits a match session even when only a later map was claimed', async () => {
-    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
-    writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 600, true);
-    seedMatchReplay(`pug_${TOKEN}_1_1.rpl`, 1, 1, 0, 5);
-    const res = await app.inject({ url: '/api/replays/sessions' });
-    expect((res.json() as { sessions: unknown[] }).sessions).toEqual([]);
-  });
-
-  it('keeps a standalone session when an unrelated match has replays', async () => {
-    const other = 'd'.repeat(32);
-    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
-    seedMatchReplay(`pug_${other}_0_1.rpl`, 0, 1, 0, 5);
-    const body = (await app.inject({ url: '/api/replays/sessions' }))
-      .json() as { sessions: { token: string }[] };
-    expect(body.sessions.map((s) => s.token)).toEqual([TOKEN]);
-  });
-
-  // The round-one window. match_replays rows are only written at round_end,
-  // so for the whole of a ranked match's first round there is no row to
-  // filter on, and a listing keyed on those rows published the token of a
-  // match that was in progress: precisely when the sv_password it seeds
-  // matters most. The matches row exists from the moment the orchestrator
-  // takes a server, so filtering on matches.token has no window.
-  it('omits a ranked session in its first round, before any match_replays row', async () => {
-    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 30, false);
-    db.prepare(
-      `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
-    ).run(TOKEN);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM match_replays').get())
-      .toEqual({ n: 0 });
-    const res = await app.inject({ url: '/api/replays/sessions' });
-    expect((res.json() as { sessions: unknown[] }).sessions).toEqual([]);
-    expect(res.payload).not.toContain(TOKEN);
-  });
-});
-
 describe('GET /api/replays/live/match/:id', () => {
   // BEHAVIOUR REVERSAL. This route used to answer with the filename, which is
   // `pug_<token>_<ordinal>_<half>.rpl`: the token was therefore in the
@@ -646,13 +588,18 @@ describe('replayRoutes registration on the real server', () => {
     // Fastify instance, which is the right harness for exercising the cutoff but
     // proves nothing about src/server.ts. This one test exists so that deleting
     // the register line there fails something.
+    //
+    // Probes the file route rather than the old /api/replays/sessions, which
+    // was removed with the replays index page: the viewer is reachable from
+    // every match, so a second listing of raw capture files was duplicate
+    // navigation. Any registered route serves this test's purpose equally.
     writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
     const real = await buildServer({
       config: loadConfig({ REPLAY_DIR: dir }),
       db: openDb(':memory:'),
       orchestrator: stubOrchestrator(),
     });
-    const res = await real.inject({ url: '/api/replays/sessions' });
+    const res = await real.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
     expect(res.statusCode).toBe(200);
     await real.close();
   });

@@ -19,7 +19,6 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
   ['/maps', 'Campaigns'],
-  ['/replays', 'Replays'],
   ['/crosshair.html', 'Crosshair', '_blank'],
 ];
 

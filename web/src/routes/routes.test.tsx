@@ -19,7 +19,6 @@ const { mockApi } = vi.hoisted(() => ({
     map: vi.fn(),
     maps: vi.fn(),
     profile: vi.fn(),
-    replaySessions: vi.fn(),
     queue: vi.fn(),
   },
 }));
@@ -36,7 +35,6 @@ const { MapDetail } = await import('./MapDetail');
 const { Maps } = await import('./Maps');
 const { Profile } = await import('./Profile');
 const { Play, QueuePanel } = await import('./Play');
-const { Replays } = await import('./Replays');
 
 // Auto-cleanup only runs when vitest exposes globals, which this config does
 // not; without it each render stacks another copy in document.body and every
@@ -790,55 +788,6 @@ describe('MapDetail', () => {
     mockApi.map.mockRejectedValue(new Error('404'));
     render(<MapDetail map="nope" />);
     await waitFor(() => expect(screen.getByText('Nobody has played that map yet.')).toBeTruthy());
-  });
-});
-
-describe('Replays', () => {
-  const session = (over: Record<string, unknown> = {}) => ({
-    token: 'abc123',
-    startedUnix: 1757000000,
-    campaign: 'no_mercy',
-    files: [
-      {
-        filename: 'abc123_0_1.rpl', token: 'abc123', ordinal: 0, half: 1,
-        bytes: 2_097_152, mtimeMs: 1757000000000, map: 'l4d_hospital01_apartment',
-        startedUnix: 1757000000, frameCount: 100, playerHz: 20, version: 1, closed: true,
-      },
-    ],
-    ...over,
-  });
-
-  it('lists sessions grouped by token with real map names', async () => {
-    mockApi.replaySessions.mockResolvedValue({ sessions: [session()] });
-    render(<Replays />);
-    await waitFor(() => expect(screen.getByText('l4d_hospital01_apartment')).toBeTruthy());
-    expect(screen.getByText('abc123')).toBeTruthy();
-    expect(screen.getByText('finished')).toBeTruthy();
-  });
-
-  it('titles a session by its campaign and date, with the token demoted to a muted line', async () => {
-    mockApi.replaySessions.mockResolvedValue({ sessions: [session()] });
-    const { container } = render(<Replays />);
-    await waitFor(() => expect(screen.getByText('abc123')).toBeTruthy());
-    const h3 = container.querySelector('h3')!;
-    expect(h3.textContent).toMatch(/No Mercy/);
-    expect(h3.textContent).not.toContain('abc123');
-    expect(screen.getByText('abc123').classList.contains('muted')).toBe(true);
-  });
-
-  it('falls back to a plain date heading when the campaign is unknown', async () => {
-    mockApi.replaySessions.mockResolvedValue({ sessions: [session({ campaign: null })] });
-    const { container } = render(<Replays />);
-    await waitFor(() => expect(screen.getByText('abc123')).toBeTruthy());
-    const h3 = container.querySelector('h3')!;
-    expect(h3.textContent).toMatch(/\d/);
-    expect(h3.textContent).not.toMatch(/null|undefined/);
-  });
-
-  it('says so when there are no replays on disk', async () => {
-    mockApi.replaySessions.mockResolvedValue({ sessions: [] });
-    render(<Replays />);
-    await waitFor(() => expect(screen.getByText(/no replays on disk/i)).toBeTruthy());
   });
 });
 
