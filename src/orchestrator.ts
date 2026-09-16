@@ -4,7 +4,8 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { LogListener } from './logListener.js';
 import { newToken } from './matchToken.js';
 import { parseDump, type Dump } from './dumpParse.js';
-import { claimIdle, release, markLive, getServer, type ServerRow } from './serverPool.js';
+import { claimIdle, markLive, getServer, type ServerRow } from './serverPool.js';
+import type { ServerReleaser } from './serverRelease.js';
 import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
@@ -31,6 +32,10 @@ export interface RealOrchestratorDeps {
   db: DB;
   listener: LogListener;
   logPublicAddress: string;
+  /** The single chokepoint for freeing a server, so sv_password always gets
+   *  cleared. Required, not optional: an optional dep would silently skip
+   *  the clear, which is the bug this exists to fix. */
+  releaser: ServerReleaser;
   /** Injectable opts transform so tests can redirect the connection; production leaves opts untouched. */
   makeRcon?: (opts: RconOpts) => RconOpts;
   notify?: (msg: string) => void;
@@ -53,6 +58,7 @@ export class RealOrchestrator implements Orchestrator {
   private db: DB;
   private listener: LogListener;
   private logPublicAddress: string;
+  private releaser: ServerReleaser;
   private makeRcon: (opts: RconOpts) => RconOpts;
   private notify: (msg: string) => void;
   private demoDir: string;
@@ -62,6 +68,7 @@ export class RealOrchestrator implements Orchestrator {
     this.db = deps.db;
     this.listener = deps.listener;
     this.logPublicAddress = deps.logPublicAddress;
+    this.releaser = deps.releaser;
     this.makeRcon = deps.makeRcon ?? ((o) => o);
     this.notify = deps.notify ?? (() => {});
     this.demoDir = deps.demoDir ?? '';
@@ -87,7 +94,7 @@ export class RealOrchestrator implements Orchestrator {
       | { id: number; campaign: string }
       | undefined;
     if (!match) {
-      release(this.db, server.id);
+      this.releaser.release(server.id);
       return;
     }
     const roster = this.db
@@ -118,7 +125,7 @@ export class RealOrchestrator implements Orchestrator {
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
       this.listener.unregister(token);
-      release(this.db, server.id);
+      this.releaser.release(server.id);
       this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
     } finally {
       rcon?.close();
@@ -209,7 +216,7 @@ export class RealOrchestrator implements Orchestrator {
       // The authoritative match_maps rows were just written by completeMatch.
       clearLive(this.db, matchId);
       this.listener.unregister(match.token);
-      release(this.db, match.server_id);
+      this.releaser.release(match.server_id);
       if (dump) {
         const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
         this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA}, Team B ${dump.totalB}. ${winnerText}!`);

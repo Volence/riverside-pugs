@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
 import { RealOrchestrator } from '../src/orchestrator.js';
+import { ServerReleaser } from '../src/serverRelease.js';
 import { addServer, getServer } from '../src/serverPool.js';
 import { LogListener } from '../src/logListener.js';
 import { currentSeasonId } from '../src/players.js';
@@ -75,9 +76,11 @@ describe('RealOrchestrator', () => {
     await listener.listen(0);
     cleanup.push(() => listener.close());
 
+    const releaser = new ServerReleaser(db, async () => {});
     const orch = new RealOrchestrator({
       db, listener,
       logPublicAddress: '127.0.0.1:27500',
+      releaser,
       makeRcon: (o) => o,
     });
     const mid = seedMatch(db);
@@ -98,7 +101,7 @@ describe('RealOrchestrator', () => {
   it('setupMatch aborts the match when no server is free', async () => {
     const orch = new RealOrchestrator({
       db, listener: new LogListener(() => {}),
-      logPublicAddress: '127.0.0.1:27500', makeRcon: (o) => o,
+      logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
     });
     const mid = seedMatch(db);
     await orch.setupMatch(mid);
@@ -119,7 +122,7 @@ describe('RealOrchestrator', () => {
     const listener = new LogListener(() => {});
     await listener.listen(0);
     cleanup.push(() => listener.close());
-    const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', makeRcon: (o) => o });
+    const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o });
 
     const realMid = seedMatch(db);
     expect(realMid).toBe(mid);
@@ -186,6 +189,7 @@ describe('RealOrchestrator', () => {
     cleanup.push(() => listener.close());
     const orch = new RealOrchestrator({
       db, listener, logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}),
       // sm_pug_abort never gets a response once the fake server destroys the socket;
       // use a short rcon exec timeout so the test doesn't wait out the default 5s.
       makeRcon: (o) => ({ ...o, timeoutMs: 300 }),
@@ -215,7 +219,7 @@ describe('RealOrchestrator', () => {
     const listener = new LogListener(() => {});
     await listener.listen(0);
     cleanup.push(() => listener.close());
-    const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', makeRcon: (o) => o });
+    const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o });
 
     const realMid = seedMatch(db);
     expect(realMid).toBe(mid);

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
+import { ServerReleaser } from '../src/serverRelease.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, clearLive, getLiveMatches,
   STALE_AFTER_MS, LIVE_EVENT_LIMIT, reapOrphanedMatches, ORPHAN_AFTER_MS, mapStatsFor, eventsFor,
@@ -339,7 +340,8 @@ describe('reapOrphanedMatches', () => {
     recordHeartbeat(db, TOKEN);
     db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS + 60_000));
 
-    expect(reapOrphanedMatches(db)).toEqual([id]);
+    const releaser = new ServerReleaser(db, async () => {});
+    expect(reapOrphanedMatches(db, releaser)).toEqual([id]);
     expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'aborted' });
     expect(db.prepare('SELECT status FROM servers WHERE id = 1').get()).toEqual({ status: 'idle' });
     expect(getLiveMatches(db)).toEqual([]);
@@ -349,7 +351,7 @@ describe('reapOrphanedMatches', () => {
     seedLive();
     recordHeartbeat(db, TOKEN);
     db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS - 60_000));
-    expect(reapOrphanedMatches(db)).toEqual([]);
+    expect(reapOrphanedMatches(db, new ServerReleaser(db, async () => {}))).toEqual([]);
     expect(getLiveMatches(db)).toHaveLength(1);
   });
 
@@ -357,7 +359,7 @@ describe('reapOrphanedMatches', () => {
     // No match_live row at all: adopted seconds ago, no heartbeat due yet.
     // Reaping this would kill matches the moment they start.
     seedLive();
-    expect(reapOrphanedMatches(db)).toEqual([]);
+    expect(reapOrphanedMatches(db, new ServerReleaser(db, async () => {}))).toEqual([]);
     expect(getLiveMatches(db)).toHaveLength(1);
   });
 
@@ -371,7 +373,7 @@ describe('reapOrphanedMatches', () => {
     recordMapResult(db, TOKEN, 'l4d_vs_hospital01_apartment', 100, 50);
     db.prepare('UPDATE match_live SET last_seen = ?').run(stamp(ORPHAN_AFTER_MS + 60_000));
 
-    reapOrphanedMatches(db);
+    reapOrphanedMatches(db, new ServerReleaser(db, async () => {}));
     for (const t of ['match_live', 'match_live_players', 'match_live_maps']) {
       expect(db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get(), t).toEqual({ n: 0 });
     }

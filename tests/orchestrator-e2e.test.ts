@@ -3,6 +3,7 @@ import net from 'node:net';
 import dgram from 'node:dgram';
 import { openDb, type DB } from '../src/db.js';
 import { RealOrchestrator } from '../src/orchestrator.js';
+import { ServerReleaser } from '../src/serverRelease.js';
 import { LogListener } from '../src/logListener.js';
 import { addServer } from '../src/serverPool.js';
 import { currentSeasonId } from '../src/players.js';
@@ -75,7 +76,10 @@ describe('orchestrator end-to-end (fake server + real UDP)', () => {
     const port = await listener.listen(0);
     cleanup.push(() => listener.close());
 
-    const orch = new RealOrchestrator({ db, listener, logPublicAddress: `127.0.0.1:${port}`, makeRcon: (o) => o });
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: `127.0.0.1:${port}`,
+      releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
     onMatchEnd = (token) => {
       const mid = (db.prepare('SELECT id FROM matches WHERE token = ?').get(token) as any).id;
       void orch.finishMatch(mid);
