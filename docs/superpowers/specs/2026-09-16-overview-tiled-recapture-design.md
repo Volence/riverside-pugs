@@ -1,7 +1,7 @@
 # Overview tiled recapture: design
 
 Date: 2026-09-16
-Status: approved design, spec under review
+Status: approved 2026-09-16; plan at docs/superpowers/plans/2026-09-16-overview-tiled-recapture.md
 Tooling repo: `/home/volence/l4d/overviews` (git, branch `main`)
 Web repo: `/home/volence/l4d/pug`
 
