@@ -10,20 +10,26 @@ well as the server, and its types are written out structurally so that
 src/mapTransform.ts can declare matching named types without either file
 importing the other.
 """
+import argparse
 import json
 import os
-import sys
 
 from PIL import Image, ImageChops, ImageDraw
 
-src, out = sys.argv[1], sys.argv[2]
+parser = argparse.ArgumentParser()
+parser.add_argument('src', help='the 1x capture directory')
+parser.add_argument('out', help='the TypeScript module to write')
+parser.add_argument('--override', help='a directory whose manifests replace same-named maps in src')
+args = parser.parse_args()
+src, out = args.src, args.out
 
-# Every capture so far is this size, and the emitted table says so for each
-# layer. Asserting it against the real file rather than taking it on trust is
-# the point: an off-size capture would otherwise be written out as 2048x1271
-# and silently put every avatar on that map in the wrong place, which is the
-# exact failure class this generated file exists to prevent.
-EXPECTED_SIZE = (2048, 1271)
+# The sizes a capture can legitimately be: a single 1x shot, or a 2x2 stitch of
+# them. Asserting against the real file rather than taking it on trust is the
+# point: an off-size capture would otherwise be written out with the wrong
+# dimensions and silently put every avatar on that map in the wrong place,
+# which is the exact failure class this generated file exists to prevent.
+KNOWN_SIZES = {(2048, 1271), (4096, 2542)}
+ONE_X = (2048, 1271)
 
 # mat_fullbright void is pure black; this only rejects encoder noise.
 THRESHOLD = 12
@@ -58,7 +64,10 @@ def content_box(paths):
     for p in paths:
         with Image.open(p) as im:
             rgb = im.convert('RGB')
-            ImageDraw.Draw(rgb).rectangle(HUD_TEXT_BOX, fill=(0, 0, 0))
+            # The notification sits at a fixed screen position in 1x captures only;
+            # the tiled capture waits for it to fade before shooting.
+            if rgb.size == ONE_X:
+                ImageDraw.Draw(rgb).rectangle(HUD_TEXT_BOX, fill=(0, 0, 0))
             r, _g, bch = rgb.split()
             bright = rgb.convert('L').point(lambda v: 255 if v > THRESHOLD else 0)
             not_pure_green = ImageChops.lighter(r, bch).point(lambda v: 255 if v > 0 else 0)
@@ -72,26 +81,34 @@ def content_box(paths):
     return box
 
 
+# Later directories win per map, so a recaptured map replaces its 1x version
+# without touching any other.
+manifests = {}
+for directory in [src] + ([args.override] if args.override and os.path.isdir(args.override) else []):
+    for name in os.listdir(directory):
+        if name.endswith('.layers.json'):
+            manifests[name] = directory
+
 maps = []
-for name in sorted(os.listdir(src)):
-    if not name.endswith('.layers.json'):
-        continue
-    with open(os.path.join(src, name)) as fh:
+for name in sorted(manifests):
+    base = manifests[name]
+    with open(os.path.join(base, name)) as fh:
         m = json.load(fh)
     layers = sorted(m['layers'], key=lambda l: l['cut_height'])
     paths = []
     for layer in layers:
-        path = os.path.join(src, layer['image'])
+        path = os.path.join(base, layer['image'])
         paths.append(path)
         with Image.open(path) as im:
             size = im.size
-        if size != EXPECTED_SIZE:
+        if size not in KNOWN_SIZES:
             raise SystemExit(
-                f"{layer['image']} is {size[0]}x{size[1]}, expected "
-                f'{EXPECTED_SIZE[0]}x{EXPECTED_SIZE[1]}. Either the capture is '
-                'wrong or this generator needs to emit per-layer dimensions.'
+                f"{layer['image']} is {size[0]}x{size[1]}, not a known capture size "
+                f'{sorted(KNOWN_SIZES)}.'
             )
         layer['width'], layer['height'] = size
+    if len({(l['width'], l['height']) for l in layers}) != 1:
+        raise SystemExit(f"{m['map']}: layers disagree on image size")
 
     # The source PNGs are lossless; the union across every layer is the map's
     # true footprint, since a deep layer showing only a basement would

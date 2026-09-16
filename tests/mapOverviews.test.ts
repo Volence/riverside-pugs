@@ -41,17 +41,40 @@ describe('OVERVIEWS', () => {
   it('points every layer at a webp under /overviews/', () => {
     for (const m of Object.values(OVERVIEWS)) {
       for (const l of m.layers) {
-        expect(l.image).toMatch(/^\/overviews\/[a-z0-9_+-]+\.webp$/);
+        expect(l.image).toMatch(/^\/overviews\/[a-z0-9_+-]+(\.4x)?\.webp$/);
       }
     }
   });
 
+  // Blood Harvest 1 is the 4x tiled recapture: same corner, half the units per
+  // pixel, twice the pixels on each side.
   it('carries the spec values for a known map', () => {
     const m = overviewFor('l4d_vs_farm01_hilltop')!;
     expect(m.layers).toHaveLength(5);
-    expect(m.layers[0].unitsPerPixel).toBeCloseTo(7.250983, 5);
-    expect(m.layers[0].originX).toBe(-16547);
-    expect(m.layers[0].originY).toBe(-6299);
+    expect(m.layers[0].unitsPerPixel).toBeCloseTo(3.625492, 5);
+    expect(m.layers[0].originX).toBeCloseTo(-16547, 0);
+    expect(m.layers[0].originY).toBeCloseTo(-6299, 0);
+  });
+
+  // The transform is per layer, but a map whose layers disagreed on size would
+  // mean one of them came from a different capture.
+  it('gives every layer of a map one image size', () => {
+    for (const m of Object.values(OVERVIEWS)) {
+      const sizes = new Set(m.layers.map((l) => `${l.width}x${l.height}`));
+      expect(sizes.size).toBe(1);
+    }
+  });
+
+  // Phase 1 of the recapture ships one map. Anything else at 4x, or farm01 at
+  // 1x, means the converter took the wrong source.
+  it('ships Blood Harvest 1 at 4x and every other map at 1x', () => {
+    for (const m of Object.values(OVERVIEWS)) {
+      const is4x = m.map === 'l4d_vs_farm01_hilltop';
+      for (const l of m.layers) {
+        expect([l.width, l.height]).toEqual(is4x ? [4096, 2542] : [2048, 1271]);
+        expect(l.image.endsWith('.4x.webp')).toBe(is4x);
+      }
+    }
   });
 });
 
