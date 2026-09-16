@@ -36,6 +36,26 @@ SourceMod log), which needs `L4D_HOST` set:
 `/home/pug/app` or have pulled a copy of `pug.db` locally; adjust the path to
 match wherever you are actually running it from.
 
+### Before you restart `pug-web`
+
+Several recovery steps below tell you to restart `pug-web`. **Every one of
+them has the same precondition: srcds must already be answering rcon.**
+Confirm it, every time, immediately before the restart:
+
+    R "status"
+
+If that times out or errors, wait for srcds and re-check. Do not restart
+`pug-web` until it answers.
+
+Why: boot drains the pending list through `setupMatch`, and `setupMatch`
+treats an rcon failure as fatal and **aborts the match**. Start `pug-web`
+while srcds is down or mid-`changelevel` (a whole-box restart, or a restart
+timed into a map change) and a match that was merely waiting for a box is
+killed outright instead of waiting a little longer. That trade is deliberate,
+since a match stuck in `configuring` locks its eight players out of the queue
+entirely, but it does mean the restart is only safe once the game server is
+back.
+
 ## 1. Preconditions (do this first, before anything else)
 
 This step exists because of the single most likely way tonight goes wrong
@@ -69,12 +89,13 @@ hung queue. Catch it here, not after eight people are already waiting.
    | status seen | what it means | what to do |
    |---|---|---|
    | `idle` | claimable, proceed | nothing, you're clear |
-   | `offline` | the schema's default for a freshly-inserted row; nothing in production ever promotes this to `idle` on its own | this is the box's actual row if it has never yet been released by a real match. Restart `pug-web` (boot runs `reconcileServers`, see below) and re-check; if it is still `offline`, manually set it: `sqlite3 data/pug.db "UPDATE servers SET status='idle' WHERE id=<server id>;"` only after you have independently confirmed via `R "status"` that no match owns the box |
-   | `reserved` or `live` with no owning match | stranded from a crash | restart `pug-web`. Its boot sequence calls `reconcileServers`, which frees any server marked `reserved` or `live` that no **`live`** match row owns. Re-run the query in this step after the restart to confirm it moved to `idle` |
-   | `reserved` or `live` owned by a `configuring` match | a crash between `setupMatch` writing `server_id` and `setupMatch` flipping the match to `live`. The match is holding the only box and can never claim one again by itself | restart `pug-web`. `reconcileServers` frees the box (a `configuring` match no longer protects one) and the boot drain hands it straight back to that same match, which should read `live` within a few seconds. Re-run both this query and the match query in item 2 to confirm |
+   | `offline` | the schema's default for a freshly-inserted row; nothing in production ever promotes this to `idle` on its own | this is the box's actual row if it has never yet been released by a real match. Confirm srcds answers `R "status"` (see **Before you restart `pug-web`**), restart `pug-web` (boot runs `reconcileServers`, see below) and re-check; if it is still `offline`, manually set it: `sqlite3 data/pug.db "UPDATE servers SET status='idle' WHERE id=<server id>;"` only after you have independently confirmed via `R "status"` that no match owns the box |
+   | `reserved` or `live` with no owning match | stranded from a crash | confirm srcds answers `R "status"` (see **Before you restart `pug-web`**), then restart `pug-web`. Its boot sequence calls `reconcileServers`, which frees any server marked `reserved` or `live` that no **`live`** match row owns. Re-run the query in this step after the restart to confirm it moved to `idle` |
+   | `reserved` or `live` owned by a `configuring` match | a crash between `setupMatch` writing `server_id` and `setupMatch` flipping the match to `live`. The match is holding the only box and can never claim one again by itself | confirm srcds answers `R "status"` (see **Before you restart `pug-web`**), then restart `pug-web`. `reconcileServers` frees the box (a `configuring` match no longer protects one) and the boot drain hands it straight back to that same match, which should read `live` within a few seconds. Re-run both this query and the match query in item 2 to confirm |
    | `reserved` or `live` with a real `live` match | genuinely in use | do not touch it; that match needs to finish or be rolled back first (Step 9) |
 
-   **If you set a row to `idle` by hand, restart `pug-web` afterward.** A row
+   **If you set a row to `idle` by hand, restart `pug-web` afterward** (srcds
+   answering rcon first, as always: see **Before you restart `pug-web`**). A row
    that simply becomes idle in place fires no release, and releases are what
    normally wake a waiting match. Boot now also drains the pending list once,
    which is the only thing that will pair an already-idle box with a match
@@ -297,6 +318,12 @@ Play the match normally, or shortcut it. The chat command is `!endpug`
    cancelled only where a genuinely new match begins (`sm_pug_match`,
    `!load_4v4p`, auto-track adoption).
 
+   **Backend-driven matches only.** A self-started (`!load_4v4p`) or
+   auto-tracked match prints the same result line and kicks nobody. Ending
+   one of those is what an ordinary friend-group night does at every campaign
+   change, and emptying the box each time is not wanted. So do not expect this
+   check to pass on an in-game night, and do not "fix" it if it does not.
+
 3. Confirm the box is actually empty before anyone tries to queue again:
 
        R "status"
@@ -391,7 +418,8 @@ freed row. **The order below matters; do not restart first.**
 
     sqlite3 data/pug.db "UPDATE matches SET state='aborted', ended_at=datetime('now') WHERE id=<match id>;"
 
-Then restart `pug-web`. Its boot sequence calls `reconcileServers`
+Then confirm srcds is answering rcon (`R "status"`; see **Before you restart
+`pug-web`**) and restart `pug-web`. Its boot sequence calls `reconcileServers`
 (`src/serverRelease.ts`), which frees any server marked `reserved` or
 `live` whose match is **not** `live` any more. Restarting before the update
 is a no-op: `reconcileServers` excludes a server whose match is still
@@ -447,12 +475,14 @@ locked out of re-queueing, because `hasOpenMatch` (`src/matchmaker.ts`) counts
 `configuring`, and each later pop mints another one of these and locks out
 another eight people.
 
-- `server_id` **not null**: a crash mid-`setupMatch`. Restart `pug-web`;
+- `server_id` **not null**: a crash mid-`setupMatch`. Restart `pug-web` once
+  srcds answers rcon (see **Before you restart `pug-web`**);
   `reconcileServers` frees the box and the boot drain hands it back. Expect
   the row to read `live` within a few seconds of the restart.
 - `server_id` **null**: it is genuinely waiting for a box. Free one (finish or
   roll back whatever owns it) and it drains on the next release. If no match
-  owns any box, restart `pug-web`: the boot drain is the only thing that pairs
+  owns any box, restart `pug-web` once srcds answers rcon (see **Before you
+  restart `pug-web`**): the boot drain is the only thing that pairs
   an already-idle server with an already-waiting match.
 
 Pass condition either way: after the restart, no row remains in `configuring`
@@ -477,14 +507,17 @@ line beginning `[orchestrator] INCIDENT:` with the match id and token.
   `sv_password` empty, box empty.
 - **The result is lost**: no scores, no rating movement for those eight. Say so
   in the Discord call; it is an incident, not a tidy-up.
-- Recover it if the plugin has not been reloaded since. The INCIDENT line
-  carries the token:
+- **Recover it from the log, not from the box.** The INCIDENT line carries the
+  match's final dump inline, on the lines right after it: `finishWithRetry`
+  pulls it one last time before releasing. Feed that body to
+  `scripts/recover-match.ts`.
 
-      R "sm_pug_dump <token>"
-
-  then feed that dump to `scripts/recover-match.ts`. If `sm_pug_dump` answers
-  `PUGERR`, the plugin has already dropped the match and the result is gone
-  for good.
+  Do not go and run `sm_pug_dump <token>` yourself; it will answer `PUGERR`.
+  The release that follows the INCIDENT line sends `sm_pug_abort` for that
+  same token, and the plugin discards its result on that, so the log copy is
+  the only one left. If the INCIDENT line says the dump could NOT be collected
+  either (the box was unreachable at that moment too), the result really is
+  gone for good.
 
 One consequence worth knowing for both paths above: `ServerReleaser.release`
 now sends a best-effort `sm_pug_abort` alongside the `sv_password` clear, so
