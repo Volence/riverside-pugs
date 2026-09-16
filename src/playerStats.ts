@@ -25,6 +25,36 @@ function avgOrNull(sum: number, n: number): number | null {
   return n === 0 ? null : Math.round(sum / n);
 }
 
+/** Per-map-played means for a bag of summed stats.
+ *
+ *  One divisor for every key, which is correct here and worth stating because
+ *  it looks too simple. Every stat in statKeys.ts declares a side, and a side's
+ *  stats can only accrue while its owner is playing that side (the argument
+ *  roundStats.ts rests on). A versus map is two halves with the teams
+ *  swapping, so a player who played a map held survivor for exactly one half
+ *  and infected for exactly one. Dividing tank damage by maps played is
+ *  therefore already "per infected half", and no per-side divisor is needed.
+ *
+ *  A key that was never measured stays absent rather than becoming a zero
+ *  average: absent means nobody recorded it, zero would claim the player did
+ *  it badly. */
+function perMapAverages(stats: Record<string, number>, games: number): Record<string, number> {
+  if (games === 0) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(stats)) out[k] = Math.round((v / games) * 10) / 10;
+  return out;
+}
+
+/** Whether a player rostered at `joinedMap` was present for `ordinal`.
+ *
+ *  A sub rostered on map 3 did not play maps 1 and 2, and crediting them
+ *  anyway is invisible in a total (their contribution really is zero) but
+ *  wrong in an average, which then divides by maps they never saw. Same
+ *  column rating.ts consults through ratedForMaps, for the same reason. */
+function playedMap(joinedMap: number, ordinal: number): boolean {
+  return ordinal >= joinedMap;
+}
+
 export interface MapBreakdownRow {
   map: string;
   games: number;
@@ -33,6 +63,10 @@ export interface MapBreakdownRow {
   /** Summed across every playing of this map. Keys absent entirely when never
    *  measured, so the page can distinguish "never happened" from zero. */
   stats: Record<string, number>;
+  /** The same keys divided by `games`, to one decimal. What a player usually
+   *  gets here, which is the comparable number: a total just says who has
+   *  played the most. */
+  avgStats: Record<string, number>;
 }
 
 /**
@@ -51,11 +85,11 @@ export interface MapBreakdownRow {
 export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
   const played = db
     .prepare(
-      `SELECT m.id, mp.team FROM match_players mp
+      `SELECT m.id, mp.team, mp.joined_map AS joinedMap FROM match_players mp
        JOIN matches m ON m.id = mp.match_id
        WHERE mp.player_id = ? AND m.state = 'completed'`,
     )
-    .all(steamid) as { id: number; team: 'a' | 'b' }[];
+    .all(steamid) as { id: number; team: 'a' | 'b'; joinedMap: number }[];
   if (played.length === 0) return [];
 
   const mapsOf = db.prepare(
@@ -65,14 +99,16 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
 
   const recorded = recordedFor(db);
   const acc = new Map<string, MapBreakdownRow>();
-  for (const { id, team } of played) {
+  for (const { id, team, joinedMap } of played) {
     const maps = mapsOf.all(id) as { ordinal: number; map: string; a: number; b: number }[];
     const byOrdinal = mapStatsFor(db, id);
 
     for (const mp of maps) {
+      // A sub did not play the maps that happened before they were rostered.
+      if (!playedMap(joinedMap, mp.ordinal)) continue;
       let row = acc.get(mp.map);
       if (!row) {
-        row = { map: mp.map, games: 0, wins: 0, losses: 0, stats: {} };
+        row = { map: mp.map, games: 0, wins: 0, losses: 0, stats: {}, avgStats: {} };
         acc.set(mp.map, row);
       }
       row.games++;
@@ -95,6 +131,7 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
     }
   }
 
+  for (const row of acc.values()) row.avgStats = perMapAverages(row.stats, row.games);
   return [...acc.values()].sort((x, y) => y.games - x.games || x.map.localeCompare(y.map));
 }
 
@@ -105,14 +142,30 @@ export interface MapLeaderRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
+  /** Per map played, to one decimal. See perMapAverages. */
+  avgStats: Record<string, number>;
 }
 
 export interface MapDetail {
   map: string;
   played: number;
-  /** Mean over the RECORDED playings only, null when there are none. */
-  avgTeamA: number | null;
-  avgTeamB: number | null;
+  /**
+   * The average score a team puts up on this map, over RECORDED playings
+   * only, null when there are none.
+   *
+   * One number, not the avgTeamA/avgTeamB pair this replaced. `team_a_score`
+   * for a map is that team's score WHILE THEY HELD SURVIVOR, and both teams
+   * hold survivor once per map, so A and B are two samples of the same
+   * quantity. Reporting them separately split the sample in half and invited
+   * a comparison between labels that balanceTeams assigns arbitrarily, which
+   * carried no information about the map at all. Combined, it is a real
+   * difficulty measure: what a team typically scores here.
+   */
+  avgScore: number | null;
+  /** What anyone usually does on this map: every player's stats pooled and
+   *  divided by the total number of player-maps. The map's own baseline, as
+   *  opposed to any one player's line in `players`. */
+  avgStats: Record<string, number>;
   players: MapLeaderRow[];
 }
 
@@ -137,7 +190,9 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
     .all(map) as { match_id: number; ordinal: number; a: number; b: number }[];
   if (rows.length === 0) return null;
 
-  const teamOf = db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ?');
+  const teamOf = db.prepare(
+    'SELECT player_id, team, joined_map AS joinedMap FROM match_players WHERE match_id = ?',
+  );
   const nameOf = db.prepare('SELECT name FROM players WHERE steamid = ?');
 
   const recorded = recordedFor(db);
@@ -156,13 +211,16 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
     const byOrdinal = mapStatsFor(db, r.match_id);
     const stats = byOrdinal.get(r.ordinal) ?? {};
 
-    for (const p of teamOf.all(r.match_id) as { player_id: string; team: 'a' | 'b' }[]) {
+    for (const p of teamOf.all(r.match_id) as
+         { player_id: string; team: 'a' | 'b'; joinedMap: number }[]) {
+      // A sub rostered later in the match was not on this map at all.
+      if (!playedMap(p.joinedMap, r.ordinal)) continue;
       let row = acc.get(p.player_id);
       if (!row) {
         const n = nameOf.get(p.player_id) as { name: string } | undefined;
         row = {
           steamid: p.player_id, name: n?.name ?? p.player_id,
-          games: 0, wins: 0, losses: 0, stats: {},
+          games: 0, wins: 0, losses: 0, stats: {}, avgStats: {},
         };
         acc.set(p.player_id, row);
       }
@@ -181,11 +239,23 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
     }
   }
 
+  // Pooled across every player-map, which is what makes it the map's baseline
+  // rather than an average of averages weighted by who turned up most.
+  const pooled: Record<string, number> = {};
+  let playerMaps = 0;
+  for (const row of acc.values()) {
+    row.avgStats = perMapAverages(row.stats, row.games);
+    playerMaps += row.games;
+    for (const [k, v] of Object.entries(row.stats)) pooled[k] = (pooled[k] ?? 0) + v;
+  }
+
   return {
     map,
     played: rows.length,
-    avgTeamA: avgOrNull(sumA, recordedCount),
-    avgTeamB: avgOrNull(sumB, recordedCount),
+    // Divided by 2 * recorded playings: each playing contributes two survivor
+    // scores, one per team, and both are samples of the same quantity.
+    avgScore: avgOrNull(sumA + sumB, recordedCount * 2),
+    avgStats: perMapAverages(pooled, playerMaps),
     players: [...acc.values()].sort((x, y) => y.wins - x.wins || y.games - x.games),
   };
 }
@@ -194,9 +264,9 @@ export interface MapIndexRow {
   map: string;
   campaign: string | null;
   played: number;
-  /** Mean over the RECORDED playings only, null when there are none. */
-  avgTeamA: number | null;
-  avgTeamB: number | null;
+  /** Average score a team puts up here, over RECORDED playings only. See
+   *  MapDetail.avgScore for why this is one number and not a per-team pair. */
+  avgScore: number | null;
 }
 
 /**
@@ -231,6 +301,6 @@ export function mapIndex(db: DB): MapIndexRow[] {
 
   return [...acc.entries()].map(([map, r]) => ({
     map, campaign: campaignForMap(map), played: r.played,
-    avgTeamA: avgOrNull(r.sumA, r.n), avgTeamB: avgOrNull(r.sumB, r.n),
+    avgScore: avgOrNull(r.sumA + r.sumB, r.n * 2),
   }));
 }

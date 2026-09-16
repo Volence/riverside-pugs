@@ -743,11 +743,13 @@ describe('MapDetail', () => {
   const mapData = {
     map: 'l4d_vs_airport01_greenhouse',
     played: 3,
-    avgTeamA: 200,
-    avgTeamB: 180,
+    avgScore: 190,
+    avgStats: { ck: 6.7, tank_damage: 150 },
     players: [
-      { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0, stats: { ck: 30, tank_damage: 900 } },
-      { steamid: '2', name: 'bob', games: 3, wins: 0, losses: 3, stats: { ck: 10 } },
+      { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
+        stats: { ck: 30, tank_damage: 900 }, avgStats: { ck: 10, tank_damage: 300 } },
+      { steamid: '2', name: 'bob', games: 3, wins: 0, losses: 3,
+        stats: { ck: 10 }, avgStats: { ck: 3.3 } },
     ],
   };
 
@@ -756,7 +758,7 @@ describe('MapDetail', () => {
     const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
     await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
 
-    expect(screen.getByText('200 - 180')).toBeTruthy();
+    expect(screen.getByText('190')).toBeTruthy();
     // One bar per player, and the 100% winner is toned as good.
     expect(container.querySelectorAll('.bar').length).toBe(2);
     expect(container.querySelector('.bar__value--good')).toBeTruthy();
@@ -777,7 +779,7 @@ describe('MapDetail', () => {
   });
 
   it('says "not recorded" for the average when no playing of the map has a real score', async () => {
-    mockApi.map.mockResolvedValue({ ...mapData, avgTeamA: null, avgTeamB: null });
+    mockApi.map.mockResolvedValue({ ...mapData, avgScore: null });
     render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
     await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
     expect(screen.getByText('not recorded')).toBeTruthy();
@@ -788,6 +790,38 @@ describe('MapDetail', () => {
     mockApi.map.mockRejectedValue(new Error('404'));
     render(<MapDetail map="nope" />);
     await waitFor(() => expect(screen.getByText('Nobody has played that map yet.')).toBeTruthy());
+  });
+
+  it('shows per-map averages by default, not career totals', async () => {
+    // A total mostly reports who has played the most. What a player usually
+    // gets on a map is the number that compares across people.
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Records on this map')).toBeTruthy());
+    const body = container.querySelector('.lb tbody') as HTMLElement;
+    expect(within(body).getByText('10')).toBeTruthy();
+    expect(within(body).queryByText('30')).toBeNull();
+  });
+
+  it('switches the records table to totals when asked', async () => {
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Records on this map')).toBeTruthy());
+    const strip = container.querySelectorAll('.tabs')[1] as HTMLElement;
+    (within(strip).getByText('Totals') as HTMLElement).click();
+    const body = container.querySelector('.lb tbody') as HTMLElement;
+    await waitFor(() => expect(within(body).getByText('30')).toBeTruthy());
+  });
+
+  it('carries the map baseline as a footer row', async () => {
+    // "What does anyone usually get here", so a player line has something to
+    // be read against.
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Records on this map')).toBeTruthy());
+    const foot = container.querySelector('.lb tfoot') as HTMLElement;
+    expect(foot).toBeTruthy();
+    expect(within(foot).getByText('6.7')).toBeTruthy();
   });
 });
 
@@ -1080,13 +1114,13 @@ describe('Maps', () => {
   it('lists averages, and says "not recorded" for a map with no recorded score', async () => {
     mockApi.maps.mockResolvedValue({
       maps: [
-        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgTeamA: 300, avgTeamB: 100 },
-        { map: 'l4d_vs_airport02_offices', campaign: 'dead_air', played: 1, avgTeamA: null, avgTeamB: null },
+        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgScore: 200 },
+        { map: 'l4d_vs_airport02_offices', campaign: 'dead_air', played: 1, avgScore: null },
       ],
     });
     render(<Maps />);
     await waitFor(() => expect(screen.getByText('l4d_vs_airport02_offices')).toBeTruthy());
-    expect(screen.getByText('300')).toBeTruthy();
+    expect(screen.getByText('200')).toBeTruthy();
     expect(screen.getByText('not recorded')).toBeTruthy();
     expect(screen.queryByText(/null/)).toBeNull();
   });

@@ -8,6 +8,9 @@ import { PageHeader, Figures, Figure } from '../components/PageHeader';
 export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
   const [tab, setTab] = useState('winrate');
+  // Averages first: a total mostly reports who has played the most, while
+  // what someone usually gets on a map is the number that compares.
+  const [mode, setMode] = useState<'avg' | 'total'>('avg');
 
   if (error) {
     return (
@@ -21,7 +24,12 @@ export function MapDetail({ map }: { map: string }) {
   const players: MapLeaderRow[] = data.players.map((p) => ({
     ...p,
     stats: deriveLiveStats(p.stats ?? {}),
+    avgStats: deriveLiveStats(p.avgStats ?? {}),
   }));
+  // The map's own baseline, pooled over everyone, so a player row has
+  // something to be read against.
+  const baseline = deriveLiveStats(data.avgStats ?? {});
+  const cellsOf = (p: MapLeaderRow) => (mode === 'avg' ? p.avgStats : p.stats);
   const cols = orderLiveStatKeys(
     Array.from(new Set(players.flatMap((p) => Object.keys(p.stats)))),
   );
@@ -35,8 +43,8 @@ export function MapDetail({ map }: { map: string }) {
               rather than average zeros that were never results. */}
           <Figure
             label="Avg score"
-            value={data.avgTeamA === null || data.avgTeamB === null ? 'not recorded' : `${data.avgTeamA} - ${data.avgTeamB}`}
-            sub="A vs B"
+            value={data.avgScore === null ? 'not recorded' : data.avgScore}
+            sub="per team"
           />
           <Figure label="Players" value={players.length} />
         </Figures>
@@ -100,6 +108,11 @@ export function MapDetail({ map }: { map: string }) {
           Every completed match, both teams. A map won inside a match lost
           overall still counts here.
         </p>
+        <Tabs
+          active={mode}
+          onSelect={(k) => setMode(k as 'avg' | 'total')}
+          tabs={[{ key: 'avg', label: 'Per map' }, { key: 'total', label: 'Totals' }]}
+        />
         <div class="table-wrap lb">
           <table>
             <thead>
@@ -127,15 +140,34 @@ export function MapDetail({ map }: { map: string }) {
                         ? `${Math.round((p.wins / decided) * 100)}%`
                         : <span class="muted">n/a</span>}
                     </td>
-                    {cols.map((k) => (
-                      <td class={`num${p.stats[k] ? '' : ' is-dim'}`} key={k}>
-                        {p.stats[k] ?? <span class="muted">n/a</span>}
-                      </td>
-                    ))}
+                    {cols.map((k) => {
+                      const v = cellsOf(p)[k];
+                      return (
+                        <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                          {v ?? <span class="muted">n/a</span>}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
             </tbody>
+            {/* Only under Per map. A pooled TOTAL would just be the sum of the
+                column above it, which says nothing a reader cannot see. */}
+            {mode === 'avg' && (
+              <tfoot>
+                <tr>
+                  <td class="lb__pcol">Map average</td>
+                  <td class="num">{data.played}</td>
+                  <td class="num" colSpan={3} />
+                  {cols.map((k) => (
+                    <td class={`num${baseline[k] ? '' : ' is-dim'}`} key={k}>
+                      {baseline[k] ?? <span class="muted">n/a</span>}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </Panel>

@@ -152,8 +152,8 @@ describe('mapDetail', () => {
 
     const d = mapDetail(db, 'airport01')!;
     expect(d.played).toBe(2);
-    expect(d.avgTeamA).toBe(200);
-    expect(d.avgTeamB).toBe(200);
+    // (300 + 100 + 100 + 300) / (2 playings * 2 teams)
+    expect(d.avgScore).toBe(200);
 
     const mine = d.players.find((p) => p.steamid === ME)!;
     expect(mine).toMatchObject({ games: 2, wins: 1, losses: 1 });
@@ -180,8 +180,8 @@ describe('mapDetail', () => {
     const d = mapDetail(db, 'airport01')!;
     // Still played twice: the map happened, only its score is unknown.
     expect(d.played).toBe(2);
-    expect(d.avgTeamA).toBe(300);
-    expect(d.avgTeamB).toBe(100);
+    // Only match 1 is recorded: (300 + 100) / 2.
+    expect(d.avgScore).toBe(200);
     expect(d.players.find((p) => p.steamid === ME)).toMatchObject({ games: 2, wins: 1, losses: 0 });
   });
 
@@ -190,8 +190,7 @@ describe('mapDetail', () => {
     seedRounds(1, 0, false);
     const d = mapDetail(db, 'airport01')!;
     expect(d.played).toBe(1);
-    expect(d.avgTeamA).toBeNull();
-    expect(d.avgTeamB).toBeNull();
+    expect(d.avgScore).toBeNull();
   });
 
   it('agrees with playerMapBreakdown for the same player and map', () => {
@@ -220,7 +219,7 @@ describe('mapIndex', () => {
     const idx = mapIndex(db);
     expect(idx).toHaveLength(2);
     const first = idx.find((r) => r.map === 'l4d_vs_airport01_greenhouse')!;
-    expect(first).toMatchObject({ played: 2, campaign: 'dead_air', avgTeamA: 200, avgTeamB: 200 });
+    expect(first).toMatchObject({ played: 2, campaign: 'dead_air', avgScore: 200 });
   });
 
   it('averages only recorded playings, and says so with null when there are none', () => {
@@ -232,9 +231,9 @@ describe('mapIndex', () => {
 
     const idx = mapIndex(db);
     expect(idx.find((r) => r.map === 'l4d_vs_airport01_greenhouse'))
-      .toMatchObject({ played: 2, avgTeamA: 300, avgTeamB: 100 });
+      .toMatchObject({ played: 2, avgScore: 200 });
     expect(idx.find((r) => r.map === 'l4d_vs_airport02_offices'))
-      .toMatchObject({ played: 1, avgTeamA: null, avgTeamB: null });
+      .toMatchObject({ played: 1, avgScore: null });
   });
 
   it('leaves campaign null for a map the campaign table does not know', () => {
@@ -248,5 +247,129 @@ describe('mapIndex', () => {
     seedMatch(1, [{ map: 'l4d_vs_airport01_greenhouse', a: 1, b: 0 }], {});
     db.prepare("UPDATE matches SET state = 'aborted' WHERE id = 1").run();
     expect(mapIndex(db)).toEqual([]);
+  });
+});
+
+describe('combined team averages', () => {
+  it('reports one average survivor score rather than a per-team pair', () => {
+    // team_a_score on a map is that team's score WHILE THEY HELD SURVIVOR, so
+    // A and B are two samples of the same quantity, not two rivals. The old
+    // avgTeamA/avgTeamB pair printed half the sample each and invited a
+    // comparison between arbitrary labels that balanceTeams assigns.
+    seedMatch(1, [{ map: 'airport01', a: 200, b: 400 }], {});
+    seedRounds(1, 0);
+    expect(mapDetail(db, 'airport01')!.avgScore).toBe(300);
+  });
+
+  it('averages over every half played, not every match', () => {
+    seedMatch(1, [{ map: 'airport01', a: 100, b: 200 }], {});
+    seedRounds(1, 0);
+    seedMatch(2, [{ map: 'airport01', a: 300, b: 400 }], {});
+    seedRounds(2, 0);
+    // (100 + 200 + 300 + 400) / 4 halves
+    expect(mapDetail(db, 'airport01')!.avgScore).toBe(250);
+  });
+
+  it('leaves the average null when no playing was recorded', () => {
+    seedMatch(1, [{ map: 'airport01', a: 0, b: 0 }], {});
+    seedRounds(1, 0, false);
+    expect(mapDetail(db, 'airport01')!.avgScore).toBeNull();
+  });
+
+  it('gives mapIndex the same combined average', () => {
+    seedMatch(1, [{ map: 'airport01', a: 200, b: 400 }], {});
+    seedRounds(1, 0);
+    expect(mapIndex(db).find((r) => r.map === 'airport01')!.avgScore).toBe(300);
+  });
+});
+
+describe('per-map averages', () => {
+  it('divides a player total by the maps they played', () => {
+    // Cumulative snapshots: 100 then 300 means the second map contributed 200.
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
+      0: { [ME]: { ck: 100 } },
+      1: { [ME]: { ck: 300 } },
+    });
+    seedRounds(1, 0);
+    seedRounds(1, 1);
+    const row = playerMapBreakdown(db, ME)[0];
+    expect(row.games).toBe(2);
+    expect(row.stats.ck).toBe(300);
+    expect(row.avgStats.ck).toBe(150);
+  });
+
+  it('averages every stat, not a chosen few', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
+      0: { [ME]: { ck: 10, sidmg: 500, tank_damage: 40 } },
+      1: { [ME]: { ck: 30, sidmg: 700, tank_damage: 60 } },
+    });
+    seedRounds(1, 0);
+    seedRounds(1, 1);
+    // Diffed: ck 10 then 20, sidmg 500 then 200, tank 40 then 20.
+    const row = playerMapBreakdown(db, ME)[0];
+    expect(row.avgStats).toMatchObject({ ck: 15, sidmg: 350, tank_damage: 30 });
+  });
+
+  it('omits an average for a stat that was never measured', () => {
+    // Absent must stay absent: a zero average would claim the player did the
+    // thing badly rather than that nobody recorded it.
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedRounds(1, 0);
+    expect(playerMapBreakdown(db, ME)[0].avgStats).toEqual({});
+  });
+
+  it('gives the map page a per-player average too', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
+      0: { [ME]: { ck: 100 } },
+      1: { [ME]: { ck: 300 } },
+    });
+    seedRounds(1, 0);
+    seedRounds(1, 1);
+    const me = mapDetail(db, 'airport01')!.players.find((p) => p.steamid === ME)!;
+    expect(me.stats.ck).toBe(300);
+    expect(me.avgStats.ck).toBe(150);
+  });
+
+  it('gives the map an overall average across everyone who played it', () => {
+    // "What does anyone usually get here", the map's own baseline, as opposed
+    // to any one player's.
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {
+      0: { [ME]: { ck: 100 }, [OTHER]: { ck: 200 } },
+    });
+    seedRounds(1, 0);
+    expect(mapDetail(db, 'airport01')!.avgStats.ck).toBe(150);
+  });
+});
+
+describe('a player who joined partway through a match', () => {
+  it('is not credited maps that were played before they arrived', () => {
+    // joined_map is the ordinal a sub was rostered on. Totals hid this,
+    // because their contribution to the earlier maps really is zero; an
+    // average exposes it by dividing by maps they never played.
+    seedMatch(1, [
+      { map: 'airport01', a: 1, b: 0 }, { map: 'airport02', a: 1, b: 0 },
+      { map: 'airport03', a: 1, b: 0 }, { map: 'airport04', a: 1, b: 0 },
+    ], { 2: { [ME]: { ck: 100 } }, 3: { [ME]: { ck: 200 } } });
+    for (let i = 0; i < 4; i++) seedRounds(1, i);
+    db.prepare('UPDATE match_players SET joined_map = 2 WHERE match_id = 1 AND player_id = ?').run(ME);
+
+    const rows = playerMapBreakdown(db, ME);
+    expect(rows.map((r) => r.map).sort()).toEqual(['airport03', 'airport04']);
+    expect(rows.find((r) => r.map === 'airport03')!.avgStats.ck).toBe(100);
+  });
+
+  it('is left off the map page for maps played before they arrived', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport02', a: 1, b: 0 }], {});
+    seedRounds(1, 0);
+    seedRounds(1, 1);
+    db.prepare('UPDATE match_players SET joined_map = 1 WHERE match_id = 1 AND player_id = ?').run(ME);
+    expect(mapDetail(db, 'airport01')!.players.map((p) => p.steamid)).toEqual([OTHER]);
+    expect(mapDetail(db, 'airport02')!.players.map((p) => p.steamid).sort()).toEqual([ME, OTHER].sort());
+  });
+
+  it('still counts the map as played for everyone who was there from the start', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedRounds(1, 0);
+    expect(mapDetail(db, 'airport01')!.played).toBe(1);
   });
 });

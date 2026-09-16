@@ -9,6 +9,9 @@ import { Figures, Figure } from '../components/PageHeader';
 
 export function Profile({ steamid }: { steamid: string }) {
   const { data, error } = useFetch((s) => api.profile(steamid, s), [steamid]);
+  // Per map by default: a career total on the per-map table mostly reports
+  // which maps come up most in the rotation, not how the player does on them.
+  const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
 
   if (error) {
     return (
@@ -129,6 +132,11 @@ export function Profile({ steamid }: { steamid: string }) {
               })}
             </Bars>
 
+            <Tabs
+              active={mapMode}
+              onSelect={(k) => setMapMode(k as 'avg' | 'total')}
+              tabs={[{ key: 'avg', label: 'Per map' }, { key: 'total', label: 'Totals' }]}
+            />
             <div class="table-wrap lb">
               <table>
                 <thead>
@@ -149,11 +157,14 @@ export function Profile({ steamid }: { steamid: string }) {
                       <td class="num">{r.games}</td>
                       <td class="num">{r.wins}</td>
                       <td class="num">{r.losses}</td>
-                      {mapCols.map((k) => (
-                        <td class={`num${r.stats[k] ? '' : ' is-dim'}`} key={k}>
-                          {r.stats[k] ?? <span class="muted">n/a</span>}
-                        </td>
-                      ))}
+                      {mapCols.map((k) => {
+                        const v = (mapMode === 'avg' ? r.avgStats : r.stats)[k];
+                        return (
+                          <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                            {v ?? <span class="muted">n/a</span>}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
