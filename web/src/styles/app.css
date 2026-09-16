@@ -106,6 +106,78 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .nav__me a { color: var(--text); }
 .nav__me img { width: 24px; height: 24px; border-radius: 4px; }
 
+/* ---------- queue bar ---------- */
+
+/* The viewer's own queue, lobby or match, pinned under the nav on every page
+ * except /play (which renders all of it at full size already). Sticky rather
+ * than fixed so it scrolls with the shell on a long stats table but never
+ * leaves the top of the viewport. */
+.queuebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+.queuebar:hover { text-decoration: none; color: var(--text-bright); }
+
+.queuebar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+.queuebar__text { flex: 1; }
+/* Tabular so the clock does not jitter the layout as digits change width. */
+.queuebar__clock { font-variant-numeric: tabular-nums; color: var(--text-bright); }
+.queuebar__cta {
+  color: var(--accent);
+  border-bottom: 1px solid transparent;
+}
+.queuebar:hover .queuebar__cta { border-bottom-color: var(--accent); }
+
+/* Urgent states only: a ready check running out, or a match live without you.
+ * Both are cases where reading another page actually costs you the game. The
+ * dot pulses because a static red bar reads as decoration after the second
+ * time you see it. */
+.queuebar.is-urgent {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+  border-bottom-color: var(--accent);
+  color: var(--text-bright);
+}
+.queuebar.is-urgent .queuebar__dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: queuebar-pulse 1s ease-in-out infinite;
+}
+
+@keyframes queuebar-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (max-width: 640px) {
+  /* The call to action is the whole bar on a phone: tapping anywhere already
+   * navigates, so the word is redundant and the campaign name is not. */
+  .queuebar { letter-spacing: 0.1em; padding: var(--sp-3) var(--sp-4); }
+  .queuebar__cta { display: none; }
+}
+
+/* Motion is decoration here, never the only signal: the colour change and the
+ * text carry the state on their own. */
+@media (prefers-reduced-motion: reduce) {
+  .queuebar.is-urgent .queuebar__dot { animation: none; }
+}
+
 /* Per-page content width. One column was too narrow for the stat tables and
  * too wide for the queue panel; each page names what it needs. */
 .page { margin: var(--sp-6) auto var(--sp-7); padding-inline: var(--sp-5); }
