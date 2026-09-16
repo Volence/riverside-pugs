@@ -492,7 +492,7 @@ describe('Play', () => {
 
   it('shows the queue when idle', () => {
     render(
-      <Play session={active} state={{ queue: { count: 3, joined: false }, lobby: null, match: null }} refresh={noop} />,
+      <Play session={active} state={{ queue: { count: 3, joined: false, players: [] }, lobby: null, match: null }} refresh={noop} />,
     );
     expect(screen.getByText('3')).toBeTruthy();
     expect(screen.getByText(/join queue/i)).toBeTruthy();
@@ -503,10 +503,13 @@ describe('Play', () => {
       <Play
         session={active}
         state={{
-          queue: { count: 8, joined: true },
+          queue: { count: 8, joined: true, players: [] },
           lobby: {
             id: 'l1', phase: 'ready_check',
-            players: [{ steamid: '1', name: 'alice' }, { steamid: '2', name: 'bob' }],
+            players: [
+              { steamid: '1', name: 'alice', avatar: null },
+              { steamid: '2', name: 'bob', avatar: null },
+            ],
             ready: ['1'], options: [], votes: {}, deadline: Date.now() + 30_000, myVote: null,
           },
           match: null,
@@ -523,12 +526,13 @@ describe('Play', () => {
       <Play
         session={active}
         state={{
-          queue: { count: 0, joined: false },
+          queue: { count: 0, joined: false, players: [] },
           lobby: null,
           match: {
             id: 1, state: 'live', campaign: 'no_mercy',
-            teamA: [{ steamid: '1', name: 'alice' }],
-            teamB: [{ steamid: '2', name: 'bob' }],
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: null, waitingForServer: false,
           },
         }}
         refresh={noop}
@@ -877,7 +881,8 @@ describe('StatTable group dividers', () => {
 describe('clear latency surfaces', () => {
   const ce = (seq: number, kind: string, actor: string, target: string | null, tMs: number) => ({
     seq, kind, mapOrdinal: 0, half: 1, tMs,
-    actor: { steamid: actor, name: actor }, target: target ? { steamid: target, name: target } : null,
+    actor: { steamid: actor, name: actor, avatar: null },
+    target: target ? { steamid: target, name: target, avatar: null } : null,
     value: 0,
   });
 
