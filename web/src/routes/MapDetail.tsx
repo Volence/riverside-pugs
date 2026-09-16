@@ -1,6 +1,6 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, labelFor, orderLiveStatKeys } from '../format';
+import { deriveLiveStats, fmtClock, labelFor, orderLiveStatKeys } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
@@ -47,6 +47,20 @@ export function MapDetail({ map }: { map: string }) {
             sub="per team"
           />
           <Figure label="Players" value={players.length} />
+          {/* n/a, not 0%, when no round here was measured: survival only
+              started being recorded when the plugin began reporting it. */}
+          <Figure
+            label="Survived"
+            value={data.rounds.survivalPct === null ? 'n/a' : `${data.rounds.survivalPct}%`}
+            sub={data.rounds.attempts > 0 ? `${data.rounds.attempts} rounds` : undefined}
+          />
+          <Figure
+            label="Avg round"
+            value={data.rounds.avgSec === null ? 'n/a' : fmtClock(data.rounds.avgSec)}
+            sub={data.rounds.fastestSec !== null && data.rounds.slowestSec !== null
+              ? `${fmtClock(data.rounds.fastestSec)} to ${fmtClock(data.rounds.slowestSec)}`
+              : undefined}
+          />
         </Figures>
       </PageHeader>
 

@@ -1,6 +1,6 @@
 import { api, type MapIndexRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName } from '../format';
+import { campaignName, fmtClock } from '../format';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { CampaignTiles } from '../components/CampaignTiles';
@@ -75,6 +75,10 @@ export function Maps() {
                         <th>Map</th>
                         <th class="num">Played</th>
                         <th class="num">Avg score</th>
+                        <th class="num">Survived</th>
+                        <th class="num">Fastest</th>
+                        <th class="num">Average</th>
+                        <th class="num">Slowest</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -85,6 +89,15 @@ export function Maps() {
                           {m.avgScore === null
                             ? <td class="num muted">not recorded</td>
                             : <td class="num">{m.avgScore}</td>}
+                          {/* Survival is null for every round played before
+                              the plugin reported it, which is not the same as
+                              nobody surviving. Say so rather than print 0%. */}
+                          <td class={`num${m.rounds.survivalPct === null ? ' muted' : ''}`}>
+                            {m.rounds.survivalPct === null ? 'n/a' : `${m.rounds.survivalPct}%`}
+                          </td>
+                          <RoundTime sec={m.rounds.fastestSec} />
+                          <RoundTime sec={m.rounds.avgSec} />
+                          <RoundTime sec={m.rounds.slowestSec} />
                         </tr>
                       ))}
                     </tbody>
@@ -97,4 +110,10 @@ export function Maps() {
       )}
     </div>
   );
+}
+
+/** A round duration as mm:ss, or a muted dash when no round was timed. */
+function RoundTime({ sec }: { sec: number | null }) {
+  if (sec === null) return <td class="num muted">n/a</td>;
+  return <td class="num">{fmtClock(sec)}</td>;
 }
