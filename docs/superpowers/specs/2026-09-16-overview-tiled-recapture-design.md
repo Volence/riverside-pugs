@@ -233,18 +233,32 @@ guesses.
 
 ### Measured on Blood Harvest 1 (2026-09-16, attempt 14)
 
-All checks pass. Geometry is the worst quadrant as MAD / shifted baseline (ratio); seams
-and entities are 4x first, then the comparison value.
+Geometry is the worst quadrant as MAD / shifted baseline (ratio); seams are content-only,
+seam then neighbourhood; entities are 4x then 1x with void judged by `stitch.void_mask` on
+both images (the final review found the earlier rule counted the no-surface green as
+geometry, which had inflated the 4x scores).
 
-| cut height | geometry worst quadrant | vertical seam / neighbourhood | horizontal seam / neighbourhood | entities 4x / 1x | dip-filled px |
-|---|---|---|---|---|---|
-| 326 | 27.6 / 39.0 (0.71) | 30.4 / 24.2 | 15.5 / 16.8 | 98.6% / 36.3% | 0 |
-| 582 | 22.5 / 39.6 (0.57) | 26.0 / 21.6 | 21.0 / 20.8 | 96.3% / 91.4% | 2 |
-| 838 | 22.2 / 40.6 (0.55) | 25.4 / 21.7 | 20.3 / 20.4 | 99.4% / 98.6% | 139 |
-| 1406 | 22.0 / 40.6 (0.54) | 23.8 / 21.4 | 19.2 / 19.4 | 100.0% / 100.0% | 5 |
-| 2270 | 22.0 / 40.4 (0.54) | 23.7 / 21.4 | 19.2 / 19.5 | 100.0% / 100.0% | 100123 |
-The owner asked for the result on the site for testing, so check 5 (the side-by-side
-approval) is replaced by the owner reviewing the live viewer.
+| cut height | geometry worst quadrant | vertical seam / neighbourhood | horizontal seam / neighbourhood | entities 4x / 1x | dip-filled px | result |
+|---|---|---|---|---|---|---|
+| 326 | 27.6 / 39.0 (0.71) | 30.4 / 24.2 | 15.5 / 16.8 | 34.7% / 41.3% | 0 | entities FAIL |
+| 582 | 22.5 / 39.6 (0.57) | 26.0 / 21.6 | 21.0 / 20.8 | 90.6% / 92.2% | 2 | pass |
+| 838 | 22.2 / 40.6 (0.55) | 25.4 / 21.7 | 20.3 / 20.4 | 99.0% / 98.8% | 139 | pass |
+| 1406 | 22.0 / 40.6 (0.54) | 23.8 / 21.4 | 19.2 / 19.4 | 100.0% / 100.0% | 5 | pass |
+| 2270 | 22.0 / 40.4 (0.54) | 23.7 / 21.4 | 19.2 / 19.5 | 100.0% / 100.0% | 100123 | pass |
+
+**The z+326 entity failure is the 1x reference, not missing content.** Comparing void masks
+on the 1x grid: 7.2% of the 1x layer's content is void in the 4x layer, and it is a hairline
+ring along every map edge (the 1x edges are softened and slightly widened by post-processing)
+plus the notification text baked into the 1x image; 45,617 px are content only in the 4x (a
+building interior the 1x rendered as void). Entity origins hug walls and edges, so the 1x
+counts more of them as on geometry. The interiors match completely. Left as a recorded
+failure rather than a rule change.
+
+**What acceptance can and cannot catch.** Shifting a real tile in memory: geometry still
+passes a 4 px (1x) shift on z+326 and an 8 px shift on z+1406, failing at 8 and 16 px; seams
+pass an 8 px vertical shift. Small misplacements are caught only by the per-shot render-origin
+verification in `verdict.py`, which is the real placement guard. A per-quadrant best-fit offset
+search would measure placement directly and is a candidate for Phase 2.
 
 ## Amendments from the first real captures (2026-09-16)
 
