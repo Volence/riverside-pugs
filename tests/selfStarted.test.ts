@@ -222,3 +222,23 @@ describe('SelfStartedMatches: server status', () => {
     expect(s.status).toBe('live');
   });
 });
+
+describe('SelfStartedMatches: the no-show reaper must not see these', () => {
+  // went_live_at is the no-show reaper's entire scope guard (src/noShow.ts).
+  // Stamping it here enrolled adopted matches in a reaper they can never
+  // satisfy: rule 1 counts match_players.connected_at, which is written only
+  // from `PLAYER ... event=connect`, which the plugin emits only from
+  // OnClientPostAdminCheck for a client joining a match that already has a
+  // roster. An adopted match snapshots its roster from players who are already
+  // in game, so that forward never fires and all eight stay NULL. Ten minutes
+  // after adoption the reaper would abort a match being actively played and
+  // hand its server to the next queue pop, which would changelevel everyone
+  // out mid-match. The reaper is for web-driven matches only.
+  it('leaves went_live_at NULL so an adopted match is out of the reaper scope', async () => {
+    await burst(2);
+    const m = db.prepare('SELECT state, went_live_at FROM matches WHERE id = 1').get() as
+      { state: string; went_live_at: string | null };
+    expect(m.state).toBe('live');
+    expect(m.went_live_at).toBeNull();
+  });
+});

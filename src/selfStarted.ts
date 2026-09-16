@@ -171,11 +171,23 @@ export class SelfStartedMatches {
           insPlayer.run(steamid, name, isAdmin ? 'active' : 'invited', isAdmin ? 1 : 0);
         }
 
+        // went_live_at is deliberately NOT stamped. It is the no-show reaper's
+        // scope guard (src/noShow.ts), and an adopted match can never satisfy
+        // that reaper: its rule 1 counts match_players.connected_at, which is
+        // fed only by `PLAYER ... event=connect`, which the plugin emits only
+        // from OnClientPostAdminCheck for a client joining a match that
+        // already holds a roster. SnapshotRoster builds an adopted roster from
+        // players who are ALREADY in game, so the forward never fires for any
+        // of them and all eight stay NULL forever. Stamping this column here
+        // would enrol the match in the reaper and get it aborted ten minutes
+        // after go-live while it was being played, with the box handed to the
+        // next queue pop to changelevel everyone out of. The reaper exists for
+        // web-driven matches, which setupMatch stamps.
         const id = Number(
           db
             .prepare(
-              `INSERT INTO matches (season_id, state, campaign, server_id, token, went_live_at)
-               VALUES (?, 'live', ?, ?, ?, datetime('now'))`,
+              `INSERT INTO matches (season_id, state, campaign, server_id, token)
+               VALUES (?, 'live', ?, ?, ?)`,
             )
             .run(currentSeasonId(db), campaign, serverId, token).lastInsertRowid,
         );
