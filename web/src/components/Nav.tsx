@@ -6,10 +6,11 @@ import type { Session } from '../hooks/useLiveState';
 /** [href, label, target?].
  *
  *  A target is what keeps preact-iso's click handler off a link: it only
- *  intercepts same-origin clicks whose target is absent or _self (router.js:45).
- *  The crosshair maker is a standalone static page with its own document, not a
- *  route, so without the target the router would swallow the click and show the
- *  SPA's not-found instead of the page.
+ *  intercepts same-origin clicks whose target is absent or _self
+ *  (router.js:45), so anything that is a real file rather than a route needs
+ *  one. Nothing here needs it today, since the crosshair maker became a route.
+ *  The rule is kept, and tested, because the next static page added here would
+ *  otherwise land on the SPA's not-found.
  *
  *  The maps route is labelled Campaigns: that is how players refer to what it
  *  lists. The path stays /maps so nothing bookmarked breaks. */
@@ -19,7 +20,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
   ['/maps', 'Campaigns'],
-  ['/crosshair.html', 'Crosshair', '_blank'],
+  ['/crosshair', 'Crosshair'],
 ];
 
 export function Nav({ session, state }: { session: Session; state: StateSnapshot | null }) {

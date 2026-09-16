@@ -106,6 +106,77 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .nav__me a { color: var(--text); }
 .nav__me img { width: 24px; height: 24px; border-radius: 4px; }
 
+/* ---------- crosshair maker ---------- */
+
+.xh { display: grid; grid-template-columns: 340px 1fr; gap: var(--sp-4); align-items: start; }
+.xh__controls { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.xh__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; }
+.xh__group legend { padding: 0 var(--sp-2); }
+
+/* Label, control, readout. The readout column is fixed so the sliders all
+ * start and end at the same x, which is what makes the stack scannable. */
+.xh__row { display: grid; grid-template-columns: 5.5rem 1fr 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.xh__row > span:first-child { font-size: var(--fs-dense); color: var(--text-muted); }
+.xh__row output { text-align: right; font-size: var(--fs-dense); }
+.xh__row input[type='range'] { width: 100%; accent-color: var(--accent); }
+.xh__row select, .xh__row input[type='text'] {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+}
+.xh__row input[type='color'] {
+  width: 100%; height: 32px; padding: 2px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+
+.xh__check { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); }
+.xh__check input { accent-color: var(--accent); }
+
+.xh__presets { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.xh__swatches { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.xh__swatch { width: 28px; height: 24px; border: 1px solid var(--border-strong); cursor: pointer; padding: 0; }
+.xh__swatch:hover { border-color: var(--text-bright); }
+
+/* The native file input is unstylable across browsers, so it is hidden and
+ * the label around it does the work. */
+.xh__file { display: block; margin-top: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
+.xh__file input[type='file'] { display: block; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
+.xh__file--inline { margin: 0; }
+.xh__file--inline input[type='file'] { display: none; }
+
+.xh__status { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+
+.xh__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
+.xh__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
+.xh__note { margin-left: auto; }
+
+.xh__preview { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4); align-items: start; }
+/* The preview canvas sizes itself from this box and redraws at 1:1, so it
+ * must not be scaled by CSS after the fact. */
+.xh__canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border); background: #000; }
+.xh__zoomcol { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+/* pixelated on both: the point of the zoom and the texture view is to show
+ * the exact pixels the game will draw, so smoothing would be a lie. */
+.xh__zoom { width: 192px; height: 192px; image-rendering: pixelated; border: 1px solid var(--border); background: #000; }
+.xh__tex { width: 128px; height: 128px; image-rendering: pixelated; border: 1px solid var(--border); background: #000; }
+
+.xh__help { color: var(--text-muted); font-size: var(--fs-dense); line-height: 1.7; }
+.xh__help code { font-size: 0.8125rem; color: var(--text); overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .xh { grid-template-columns: 1fr; }
+  /* The zoom column drops under the preview rather than squeezing it: the
+   * preview is the thing being judged. */
+  .xh__preview { grid-template-columns: 1fr; }
+  .xh__zoomcol { flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .xh__note { margin-left: 0; }
+}
+
 /* ---------- queue bar ---------- */
 
 /* The viewer's own queue, lobby or match, pinned under the nav on every page
@@ -186,6 +257,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .page--list { max-width: 1120px; }
 .page--profile { max-width: 960px; }
 .page--match { max-width: 1120px; }
+/* The crosshair maker: a control column beside a 16:9 preview needs more
+ * room than any of the stats pages. */
+.page--wide { max-width: 1320px; }
 .lb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-5); align-items: start; }
 @media (max-width: 960px) { .lb-layout { grid-template-columns: minmax(0, 1fr); } }
 /* Same reason: panels hold wide scrolling tables. */
@@ -297,6 +371,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; filter: none; }
 .btn--block { width: 100%; }
 .btn--ghost { background: transparent; border-color: var(--border); color: var(--text-muted); min-height: 40px; }
+/* For dense grids of choices (presets, swatches) where a full-height button
+ * would push the controls below the fold. */
+.btn--sm { min-height: 30px; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-label); letter-spacing: 0.08em; }
 
 @media (max-width: 640px) {
   .chip, .btn--ghost, .tabs__tab, .btn { min-height: 44px; }

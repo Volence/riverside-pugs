@@ -12,6 +12,7 @@ import { MatchDetail } from './routes/MatchDetail';
 import { MapDetail } from './routes/MapDetail';
 import { Maps } from './routes/Maps';
 import { Profile } from './routes/Profile';
+import { Crosshair } from './routes/Crosshair';
 import { ReplayPage } from './routes/ReplayPage';
 import { Empty, Panel } from './components/bits';
 import './styles/app.css';
@@ -49,6 +50,7 @@ function App() {
           <Route path="/live" component={Live} me={me} />
           <Route path="/match/:id" component={MatchDetail} me={me} />
           <Route path="/maps" component={Maps} />
+          <Route path="/crosshair" component={Crosshair} />
           <Route path="/replay/file/:name" component={ReplayPage} />
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} />
