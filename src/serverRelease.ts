@@ -21,12 +21,29 @@ export type ServerCleaner = (server: ServerRow, token: string | null) => Promise
  */
 export class ServerReleaser {
   private waiters: Array<() => void> = [];
+  private inFlight = new Set<Promise<void>>();
 
   constructor(private db: DB, private cleanServer: ServerCleaner) {}
 
   /** Called when a box frees, so a match waiting for one can claim it. */
   onFreed(fn: () => void): void {
     this.waiters.push(fn);
+  }
+
+  /**
+   * Resolves once every cleanup started BEFORE this call has settled.
+   *
+   * For boot, which is the one moment that frees servers outside the waiter
+   * mechanism: reconcileServers releases stranded boxes and server.ts then has
+   * to drain the pending list, and doing that synchronously put a setup's
+   * `sv_password "pug_..."` in flight against the clear those releases had just
+   * started. Awaiting this first puts the drain on the same footing as a
+   * waiter. Deliberately a snapshot of what is outstanding now, not a barrier:
+   * a waiter is free to release another box, and waiting on that too would
+   * never finish.
+   */
+  async settled(): Promise<void> {
+    await Promise.all([...this.inFlight]);
   }
 
   /**
@@ -38,12 +55,16 @@ export class ServerReleaser {
    * that buys is narrower than it looks, so state it exactly: a match handed
    * this box by the DRAIN path dials its own sv_password set strictly after
    * the old clear has landed, so those two round trips cannot cross and leave
-   * a live ranked match unpassworded. That is the whole guarantee. It is not a
-   * general one: onLobbyComplete calls setupMatch directly (src/matchmaker.ts)
-   * rather than through a waiter, so a lobby completing while the clear is
-   * still in flight can claim the row the instant release() marks it idle and
-   * race the clear anyway. Closing that would mean keeping the row unclaimable
-   * until the rcon settles, which is a larger change than this class.
+   * a live ranked match unpassworded. The boot drain gets the same ordering by
+   * a different route, since it runs on no waiter: server.ts sequences it
+   * behind settled() below.
+   *
+   * That is the whole guarantee, and it is not a general one: onLobbyComplete
+   * calls setupMatch directly (src/matchmaker.ts) rather than through a waiter,
+   * so a lobby completing while the clear is still in flight can claim the row
+   * the instant release() marks it idle and race the clear anyway. Closing that
+   * would mean keeping the row unclaimable until the rcon settles, which is a
+   * larger change than this class.
    */
   release(serverId: number): void {
     const server = getServer(this.db, serverId);
@@ -54,7 +75,7 @@ export class ServerReleaser {
     // aborted token is harmless: the plugin answers PUGERR and changes nothing.
     const token = lastTokenOn(this.db, serverId);
     release(this.db, serverId);
-    this.cleanServer(server, token)
+    const done = this.cleanServer(server, token)
       .catch((err) => {
         // A dead rcon target must never wedge the queue: the waiters still
         // fire below even when the cleanup fails.
@@ -69,6 +90,11 @@ export class ServerReleaser {
           }
         }
       });
+    // Tracked only so settled() can order the boot drain behind it. Dropped
+    // again on completion so a long-lived process does not accumulate one
+    // entry per match it ever ran.
+    this.inFlight.add(done);
+    void done.finally(() => this.inFlight.delete(done));
   }
 }
 
