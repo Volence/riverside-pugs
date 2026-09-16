@@ -110,9 +110,10 @@ function Live(
     return (
       <Panel>
         <p class="eyebrow">
-          {/* waitingForServer is checked first: a live match with no server
-              yet ("live but serverless" per StateSnapshot) is still live, so
-              state === 'live' alone cannot distinguish the two. */}
+          {/* waitingForServer and state === 'live' are mutually exclusive
+              (the server only sets waitingForServer while configuring), so
+              checking waitingForServer first is defensive rather than
+              required: either order produces the same result today. */}
           {match.waitingForServer ? 'Waiting for a server'
             : match.state === 'live' ? 'Match in progress'
             : 'Setting up server'}
