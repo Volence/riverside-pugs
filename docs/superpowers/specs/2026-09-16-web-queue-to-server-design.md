@@ -7,7 +7,8 @@ Status: approved in chat, pending spec review
 
 Make the full website path work end to end for the first time: sign in, join
 the queue, ready up, vote a campaign, get balanced teams, receive a connect
-handoff, play, and have the match report itself.
+handoff, play, get sent to the main menu with the result when map 4 ends, and
+have the match report itself so everyone can requeue.
 
 Every match on the box so far (14 through 26) was started in game with
 `!load_4v4p` and *adopted* by the backend. That path never touches
@@ -32,7 +33,7 @@ Do not rebuild any of this. The plan should read it first.
   `selfStarted.ts:189` and `markLive` both set `servers.status = 'live'`, and
   `claimIdle` only selects `status = 'idle'`.
 
-## The seven pieces
+## The nine pieces
 
 ### 1. Connect handoff
 
@@ -162,6 +163,57 @@ Two changes, both in `plugin/pug-match.sp`:
   auto-track half of that gate must not apply to it. The `sm_pug_team_lock`
   half stays, since that is the deliberate testing switch.
 
+### 8. Match end sends everyone to the main menu with the result
+
+The "game over, team X wins" moment happens **in game, not on the website**.
+When the match ends, the final score prints in chat, and a few seconds later
+every client is kicked with the result as the kick reason, which Source shows
+in the dialog on the main menu:
+
+    Blood Harvest: Team A wins 1247 to 980
+
+Everyone, spectators included, so the box is left completely empty and ready for
+the next queue pop. The short delay exists so the score can be read in game
+first rather than only in the menu dialog.
+
+This is safe for reporting, which was checked before choosing it: `WriteDump`
+reads only the roster-slot arrays (`g_sRosterId`, `g_iStat*`, `g_iMapScore*`)
+and nothing about connected clients, so the backend can still pull a complete
+dump from an empty server. The kick must not wait on the backend either; the
+data lives in the plugin until `sm_pug_abort`.
+
+Hooks into `EndMatchNow`, which already fires on `L4D_IsMissionFinalMap`
+(`pug-match.sp:2291`) and on `!endpug`.
+
+**No website result panel.** `stateFor` returns a null match the moment the
+match completes, so the Play page falls back to the queue, which is the right
+thing for someone about to requeue. Completed matches already live on
+`/matches` with per-map scores and SR deltas.
+
+### 9. No-show timeout
+
+`Timer_Heartbeat` emits whenever `g_State != MS_None`, so it beats whether or
+not a single human is connected, and the orphan reaper only catches heartbeat
+*loss*. A match where the eight never connect therefore heartbeats forever,
+stays `live` forever, and pins `servers.status = 'live'` forever.
+
+Today that costs a manual cleanup. **Piece 3 turns it into a deadlock**: once
+"no free box" means "wait" instead of "abort", every future queue pop waits on a
+server that will never free. So piece 3 cannot ship without this.
+
+The plugin already emits `PLAYER steamid=... event=connect`, which is the signal
+the backend needs. Proposed rule, with both thresholds as `settings` rows so
+they are tunable without a deploy:
+
+- If ten minutes after going live fewer than six of the eight rostered players
+  have ever connected, abort the match and release the server.
+- As a backstop, if thirty minutes pass with no round ever recorded, abort and
+  release regardless of who connected. This catches the case where everyone
+  arrives and then nobody readies up.
+
+Both paths go through piece 3's `releaseServer`, so the password is cleared and
+any waiting match is woken.
+
 ## Testing
 
 - Unit and integration in the existing suite (1094 tests currently green):
@@ -169,7 +221,8 @@ Two changes, both in `plugin/pug-match.sp`:
   `/api/queue` carries no connect field, a match that cannot claim waits rather
   than aborts and then starts when `releaseServer` runs, password cleared on all
   four release paths including the reaper, backfill does not clobber a real
-  persona and survives a missing key.
+  persona and survives a missing key, a match with too few connects is aborted
+  and its server released at the threshold while a fully attended one is not.
 - Plugin changes need staging on an empty box, per the usual rule.
 - The steam:// handoff itself cannot be unit tested. It is verified in the
   first-run runbook.
@@ -184,6 +237,13 @@ before anyone connects, confirm team placement happens, and confirm
 Ship order follows the rule learned on 2026-09-15: `./deploy-web.sh` first, then
 `plugin/stage.sh` with the server empty, then re-assert the cvars, since a
 plugin reload resets every cvar until the next map change.
+
+## Known gap, deliberately not covered
+
+**Mid-match abandonment.** If someone quits on map 2, nothing detects it: the
+match plays out short-handed and rates normally. That is 4e (suspensions and
+no-show penalties) and stays there. Piece 9 covers only the case where a match
+never gets going at all, because that one pins the server.
 
 ## Out of scope
 
