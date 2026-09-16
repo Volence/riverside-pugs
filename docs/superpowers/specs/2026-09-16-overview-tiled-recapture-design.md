@@ -116,7 +116,7 @@ each 4x layer compares 1:1 with the 1x layer it replaces. For farm01 that is 5 l
 Generated per map. No alias defined anywhere else is referenced, and nothing is latched.
 
 1. **Setup, once:** `unbind F9` first, so a second keypress can never start a second
-   interleaved chain. Then `echo [OV] run begin`, `sv_allow_wait_command 1`, `sv_cheats 1`
+   interleaved chain. Then `echo OV_RUN_BEGIN`, `sv_allow_wait_command 1`, `sv_cheats 1`
    (a no-op with no notification when the launch line already set it), the capture render
    state from today's `ov_quality`/`ov_vis`/`ov_view` (fullbright, no tonemapping,
    `r_novis 1`, `r_portalsopenall 1`, `r_visocclusion 0`, `r_drawskybox 0`, fog off, HUD,
@@ -128,7 +128,11 @@ Generated per map. No alias defined anywhere else is referenced, and nothing is 
    screenshot; wait 30`.
 4. **Control shot:** after the last tile, repeat tile 0's pose exactly. Used only for
    verification (see Runner).
-5. **End:** `echo [OV] run done; wait 120; quit`.
+5. **End:** `echo OV_RUN_DONE; wait 120; quit`.
+
+Log markers are single tokens on purpose. The spike logged `echo [SPIKE] B1 move` as
+`B1 [SPIKE] move`: Source can reorder words within a console line, so a multi-word marker
+can fail to match.
 
 F9 is bound to the chain's entry alias, and the chain unbinds it. Nothing else is bound.
 
@@ -152,7 +156,7 @@ For each map, in order:
    (`mat_antialias`, `mat_forceaniso`, `gpu_level`, `cpu_level`) are dropped.
 5. **Trigger.** Tail `console.log`, timestamping every line into `timeline.log`. On
    `Redownloading all lightmaps`, wait 3 s, activate the window, press F9. Expect
-   `[OV] run begin` within 10 s. If it is absent, activate and press once more. That is safe
+   `OV_RUN_BEGIN` within 10 s. If it is absent, activate and press once more. That is safe
    whatever happened: the chain's first command unbinds F9, so a press that did land makes
    the second one inert. Still absent after that: fail the attempt.
 6. **Early size check.** When the first tile appears in `screenshots/`, read its TGA
@@ -169,7 +173,7 @@ For each map, in order:
     - tile count equals the plan, plus the control shot;
     - every `getpos` is within 0.5 units of its planned x/y and planned z + 62, with angle
       `0 90 0`, paired by order;
-    - no `setpos into world` after `[OV] run begin`;
+    - no `setpos into world` after `OV_RUN_BEGIN`;
     - every tile is 2048x1271;
     - the control shot is pixel-identical to tile 0, proving nothing transient (notification
       text, exposure drift, a spawned entity) differed across the run.
@@ -205,10 +209,13 @@ All automated, results in `runs/l4d_vs_farm01_hilltop/acceptance.json`:
 1. **Unattended run** passed verification with no manual input.
 2. **Geometry:** each stitched layer, **before dip fill**, downscaled 2x (box filter), is
    compared against the 1x layer at the same cut height, as mean absolute difference (MAD)
-   per quadrant. Calibrated in the same run the way `verify.py` calibrates against a
-   shifted transform: the 1x layer is also compared against itself shifted by 32 px, which
-   is what a misplaced tile looks like. **Pass:** every quadrant's MAD is below half of
-   that shifted baseline, and no quadrant is more than 2x the layer's best quadrant.
+   per quadrant, over pixels that are not void in both images (so empty space does not
+   dilute the number). Each quadrant is calibrated the way `verify.py` calibrates against a
+   shifted transform: the same 1x quadrant compared against itself shifted by 32 px, which
+   is what a misplaced tile looks like. **Pass:** every quadrant with at least 1000 content
+   pixels has a MAD below half of its own shifted baseline. Quadrants are not compared with
+   each other, because a forest quadrant legitimately gains more fine detail at 4x than an
+   open field does.
 3. **Seams:** for each seam, the MAD between the two pixel lines either side of it, against
    the MAD between adjacent lines 8 px away on both sides. **Pass:** the seam value is at
    most 1.5x its neighbourhood.
