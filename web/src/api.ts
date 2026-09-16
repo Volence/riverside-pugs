@@ -37,6 +37,14 @@ export interface LobbySnapshot {
   myVote: string | null;
 }
 
+/** The GET /api/queue shape: public, so carries nothing viewer-relative and
+ *  no connect block, unlike StateSnapshot['queue']. */
+export interface PublicQueue {
+  count: number;
+  players: NamedPlayer[];
+  phase: LobbyPhase | null;
+}
+
 export interface StateSnapshot {
   queue: { count: number; joined: boolean; players: NamedPlayer[] };
   lobby: LobbySnapshot | null;
@@ -294,6 +302,7 @@ async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
+  queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
   leaderboard: (signal?: AbortSignal) => get<Leaderboard>('/api/leaderboard', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),

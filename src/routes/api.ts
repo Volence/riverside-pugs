@@ -49,4 +49,8 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     if (!steamid) return;
     return matchmaker.stateFor(steamid);
   });
+
+  // Public on purpose: the point is that people can watch the queue fill
+  // without signing in. Carries nothing viewer-relative and no connect block.
+  app.get('/api/queue', async () => matchmaker.publicQueue());
 }

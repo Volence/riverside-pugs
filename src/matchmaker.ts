@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
-import { Lobby, realScheduler, type Scheduler, type LobbySnapshot } from './lobby.js';
+import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase } from './lobby.js';
 import { balanceTeams } from './balance.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
@@ -187,10 +187,7 @@ export class Matchmaker {
   }
 
   stateFor(steamid: string): StateSnapshot {
-    const named = (id: string): NamedPlayer => {
-      const p = getPlayer(this.db, id);
-      return { steamid: id, name: p?.name ?? id, avatar: p?.avatar ?? null };
-    };
+    const named = this.named.bind(this);
 
     const lobby = this.lobbyFor(steamid);
     const snap = lobby?.snapshot();
@@ -250,5 +247,26 @@ export class Matchmaker {
         : null,
       match,
     };
+  }
+
+  /**
+   * The queue as anyone may see it, signed in or not.
+   *
+   * Deliberately not stateFor with the auth removed: that snapshot is entirely
+   * viewer-relative (are YOU queued, YOUR lobby, YOUR vote) and would be
+   * meaningless anonymously. Carries no connect block and no match id.
+   */
+  publicQueue(): { count: number; players: NamedPlayer[]; phase: LobbyPhase | null } {
+    const anyLobby = [...this.lobbies.values()][0];
+    return {
+      count: this.queue.count(),
+      players: this.queue.list().map((id) => this.named(id)),
+      phase: anyLobby?.snapshot().phase ?? null,
+    };
+  }
+
+  private named(id: string): NamedPlayer {
+    const p = getPlayer(this.db, id);
+    return { steamid: id, name: p?.name ?? id, avatar: p?.avatar ?? null };
   }
 }
