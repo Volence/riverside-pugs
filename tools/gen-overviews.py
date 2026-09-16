@@ -23,12 +23,12 @@ parser.add_argument('--override', help='a directory whose manifests replace same
 args = parser.parse_args()
 src, out = args.src, args.out
 
-# The sizes a capture can legitimately be: a single 1x shot, or a 2x2 stitch of
-# them. Asserting against the real file rather than taking it on trust is the
+# The sizes a capture can legitimately be: a single 1x shot, or a 2x2 or 4x4
+# stitch of them. Asserting against the real file rather than taking it on trust is the
 # point: an off-size capture would otherwise be written out with the wrong
 # dimensions and silently put every avatar on that map in the wrong place,
 # which is the exact failure class this generated file exists to prevent.
-KNOWN_SIZES = {(2048, 1271), (4096, 2542)}
+KNOWN_SIZES = {(2048, 1271), (4096, 2542), (8192, 5084)}
 ONE_X = (2048, 1271)
 
 # mat_fullbright void is pure black; this only rejects encoder noise.

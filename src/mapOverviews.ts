@@ -120,13 +120,13 @@ export const OVERVIEWS: Record<string, {
   'l4d_vs_farm01_hilltop': {
     map: 'l4d_vs_farm01_hilltop',
     layers: [
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+0326.4x.webp', cutHeight: 326, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+0582.4x.webp', cutHeight: 582, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+0838.4x.webp', cutHeight: 838, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+1406.4x.webp', cutHeight: 1406, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+2270.4x.webp', cutHeight: 2270, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+0326.16x.webp', cutHeight: 326, unitsPerPixel: 1.812746, originX: -16547, originY: -6299, width: 8192, height: 5084 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+0582.16x.webp', cutHeight: 582, unitsPerPixel: 1.812746, originX: -16547, originY: -6299, width: 8192, height: 5084 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+0838.16x.webp', cutHeight: 838, unitsPerPixel: 1.812746, originX: -16547, originY: -6299, width: 8192, height: 5084 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+1406.16x.webp', cutHeight: 1406, unitsPerPixel: 1.812746, originX: -16547, originY: -6299, width: 8192, height: 5084 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+2270.16x.webp', cutHeight: 2270, unitsPerPixel: 1.812746, originX: -16547, originY: -6299, width: 8192, height: 5084 },
     ],
-    contentBox: { x0: 779, y0: 0, x1: 3367, y1: 2542 },
+    contentBox: { x0: 1559, y0: 0, x1: 7464, y1: 5084 },
   },
   'l4d_vs_farm02_traintunnel': {
     map: 'l4d_vs_farm02_traintunnel',

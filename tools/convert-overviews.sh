@@ -62,7 +62,9 @@ for row in "${WANTED[@]}"; do
       rm -f "$OUT/${map}"_z*.webp
       CLEARED[$map]=1
     fi
-    magick "$dir/$name" -quality 82 "$OUT/$base.webp"
+    # Recaptured maps exist to be zoomed into, where quality 82 left visible
+    # blotches in fine ground texture, so they spend more bytes on detail.
+    magick "$dir/$name" -quality 90 "$OUT/$base.webp"
   elif [ ! -e "$OUT/$base.webp" ]; then
     magick "$dir/$name" -quality 82 "$OUT/$base.webp"
   fi
