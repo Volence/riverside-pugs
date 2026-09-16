@@ -13,7 +13,7 @@ import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
-import { ServerReleaser } from './serverRelease.js';
+import { ServerReleaser, reconcileServers } from './serverRelease.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -254,6 +254,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       for (const r of running) logListener.register(r.token);
       if (running.length > 0) {
         console.log(`[server] re-registered ${running.length} in-flight match token(s)`);
+      }
+
+      // Same discipline as the token re-registration above: reapOrphanedMatches
+      // only ever finds a match that is still 'live', so a crash between the
+      // abort write and the release write in a previous run leaves a server
+      // stranded non-idle forever with nothing left pointing at it. Boot is
+      // the one moment that can self-heal that, since it is not scoped to
+      // matches at all.
+      const stranded = reconcileServers(deps.db, releaser);
+      if (stranded.length > 0) {
+        console.log(`[server] reconciled ${stranded.length} stranded server(s) at boot`);
       }
 
       // Day one is a single game server, so the self-start burst is admitted
