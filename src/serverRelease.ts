@@ -66,12 +66,20 @@ export class ServerReleaser {
  * crash between the two therefore strands a server that no reaper can re-find,
  * since they all select on the match being live. Reconciling at boot is the
  * self-healing answer, and it covers strand paths a transaction never would.
+ *
+ * Only 'reserved' and 'live' qualify as stranded: those are exactly the
+ * statuses a crash mid-match can leave behind with no owning row. 'offline'
+ * is deliberately excluded even though it is not 'idle': it is the schema's
+ * DEFAULT for every newly inserted server row, and nothing in production ever
+ * calls markOffline, so it means "not yet verified reachable", not "a match
+ * used to own this". Reconciling it to idle would silently make an unverified
+ * server claimable the moment it boots.
  */
 export function reconcileServers(db: DB, releaser: ServerReleaser): number[] {
   const rows = db
     .prepare(
       `SELECT id FROM servers
-       WHERE status != 'idle'
+       WHERE status IN ('reserved', 'live')
        AND id NOT IN (
          SELECT server_id FROM matches
          WHERE state IN ('configuring', 'live') AND server_id IS NOT NULL

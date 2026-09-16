@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
-import { addServer, getServer, markLive } from '../src/serverPool.js';
+import { addServer, getServer, markLive, markOffline } from '../src/serverPool.js';
 import { ServerReleaser, reconcileServers, type PasswordClearer } from '../src/serverRelease.js';
 
 function seedServer(db: ReturnType<typeof openDb>): number {
@@ -131,5 +131,19 @@ describe('reconcileServers', () => {
 
     expect(reconcileServers(db, releaser)).toEqual([]);
     expect(getServer(db, id)!.status).toBe('idle');
+  });
+
+  it('leaves an offline server with no owning match offline, not idle', () => {
+    // offline is the DEFAULT status for every newly inserted row (src/db.ts),
+    // and nothing in production ever calls markOffline: it means "not
+    // verified reachable yet", not "a crash stranded this mid-match". Auto-
+    // promoting it to idle would make an unverified server claimable.
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    markOffline(db, id);
+    const releaser = new ServerReleaser(db, async () => {});
+
+    expect(reconcileServers(db, releaser)).toEqual([]);
+    expect(getServer(db, id)!.status).toBe('offline');
   });
 });
