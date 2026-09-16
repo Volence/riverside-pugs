@@ -34,7 +34,7 @@ describe('backfillPersonas', () => {
   it('does nothing without an api key', async () => {
     const db = openDb(':memory:');
     db.prepare('INSERT INTO players (steamid, name) VALUES (?, ?)').run('76561198000000003', 'x');
-    expect(await backfillPersonas(db, null)).toBe(0);
+    expect(await backfillPersonas(db, null, (async () => { throw new Error('must not fetch'); }) as any)).toBe(0);
   });
 
   it('survives a steam outage without touching any row', async () => {
@@ -52,5 +52,31 @@ describe('backfillPersonas', () => {
     const db = openDb(':memory:');
     db.prepare('INSERT INTO players (steamid, name) VALUES (?, ?)').run('76561198000000005', 'ghost');
     expect(await backfillPersonas(db, 'key', OK([]))).toBe(0);
+  });
+
+  it('keeps existing nickname when steam response has no personaname but provides avatar', async () => {
+    const db = openDb(':memory:');
+    db.prepare('INSERT INTO players (steamid, name) VALUES (?, ?)').run('76561198000000006', 'dizzy');
+
+    const n = await backfillPersonas(db, 'key', OK([
+      { steamid: '76561198000000006', avatarfull: 'http://a/6.jpg' },
+    ]));
+
+    expect(n).toBe(1);
+    const row = db.prepare('SELECT name, avatar FROM players WHERE steamid = ?').get('76561198000000006') as any;
+    expect(row).toEqual({ name: 'dizzy', avatar: 'http://a/6.jpg' });
+  });
+
+  it('leaves player completely untouched when steam response has neither personaname nor avatar', async () => {
+    const db = openDb(':memory:');
+    db.prepare('INSERT INTO players (steamid, name) VALUES (?, ?)').run('76561198000000007', 'KoRn');
+
+    const n = await backfillPersonas(db, 'key', OK([
+      { steamid: '76561198000000007' },
+    ]));
+
+    expect(n).toBe(0);
+    const row = db.prepare('SELECT name, avatar FROM players WHERE steamid = ?').get('76561198000000007') as any;
+    expect(row).toEqual({ name: 'KoRn', avatar: null });
   });
 });
