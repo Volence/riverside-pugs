@@ -14,6 +14,7 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers } from './serverRelease.js';
+import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -236,6 +237,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         }
       });
       await logListener.listen(deps.config.logListenPort);
+      // pending is declared before the orchestrator it depends on and assigned
+      // after: the same forward-reference the selfStarted callback above uses.
+      // onNoServer only ever fires once setupMatch has returned, by which
+      // point construction below has finished and pending is assigned.
+      let pending: PendingMatches;
       orchestrator = new RealOrchestrator({
         db: deps.db,
         listener: logListener,
@@ -244,6 +250,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         notify,
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
+        onNoServer: (id) => pending.add(id),
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -270,6 +277,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       if (stranded.length > 0) {
         console.log(`[server] reconciled ${stranded.length} stranded server(s) at boot`);
       }
+
+      // Rebuilt from state='configuring' rather than trusted to survive in
+      // memory: the same class of bug already deafened in-flight matches once
+      // (see the token re-registration above), and a deploy while a match is
+      // waiting on a box must not strand it. Registered after reconcileServers
+      // so a server it just freed can drain straight into a waiting match.
+      pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
+      pending.rebuildFromDb();
+      releaser.onFreed(() => pending.drain());
 
       // Day one is a single game server, so the self-start burst is admitted
       // from each known server's address and adopted onto the first server row.
