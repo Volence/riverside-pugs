@@ -360,3 +360,36 @@ assumptions above. Where this section and the earlier text disagree, this sectio
   height would take the lower layer's pixels. Since void outside the map is black in every
   layer, only interior dips should change; `dip_filled_px` and the visual toggle make any
   surprise visible.
+
+## Second iteration: 4x4 tiles (2026-09-16, live)
+
+After comparing a third-party viewer that renders Blood Harvest 1 at about 1.42 units per
+pixel, the owner approved a 4x4 grid (`plan.TILES = 4`) and filling holes from above.
+Deployed as pug `05ee307`; tooling on overviews `main`.
+
+- **Layers** are 8192x5084 at 1.81 units per pixel, named `.16x`, encoded at WebP quality 90
+  (about 10 MB per layer, 49 MB for the map). 80 tiles plus the control shot captured in under
+  5 minutes, verified on the first attempt.
+- **Fill from above.** After the fill from below, remaining void takes the nearest higher
+  layer's pixel: a low cut that passes under a hill renders nothing there. On multi-floor maps
+  this paints upper floors around a basement layer; decide per map in Phase 2.
+- **`fog_override 1`.** `fog_enable 0` is ignored without it, and the map's fog painted distant
+  ground a flat navy (37, 45, 57): 6-10% of each 16x layer and 1-2% of the deployed 2x2 set.
+  (The "building interior only the 4x shows" noted for the 2x2 set was this navy, not content.)
+- **Void threshold 24.** With fog overridden, empty space renders as (2, 5, 12), one exact colour
+  covering 6.2% of all pixels, just above the old near-black threshold of 12.
+- **Checks generalise to N**: geometry downscales by the grid size, seams cover every internal
+  line.
+
+### Measured on Blood Harvest 1, 4x4 (attempt 16)
+
+| cut height | geometry worst quadrant | vertical seam / neighbourhood | horizontal seam / neighbourhood | entities 16x / 1x | filled below / above px | result |
+|---|---|---|---|---|---|---|
+| 326 | 23.7 / 40.0 (0.59) | 29.0 / 25.3 | 19.3 / 16.0 | 34.1% / 36.6% | 0 / 9228331 | entities FAIL |
+| 582 | 22.2 / 40.0 (0.55) | 18.5 / 15.9 | 31.5 / 28.9 | 89.7% / 91.4% | 19 / 4425199 | pass |
+| 838 | 22.1 / 40.7 (0.54) | 29.0 / 25.3 | 31.1 / 27.3 | 98.4% / 98.6% | 63 / 1368423 | pass |
+| 1406 | 22.3 / 40.7 (0.55) | 29.0 / 25.3 | 30.8 / 27.0 | 100.0% / 100.0% | 142 / 212732 | pass |
+| 2270 | 22.2 / 40.7 (0.55) | 29.0 / 25.3 | 28.4 / 26.2 | 100.0% / 100.0% | 7503 / 0 | pass |
+z+326 again fails only the entity rule, against the 1x reference: 3.4% of the 1x layer's content
+is void in the 16x layer (7.2% for the 2x2 set), which is the post-processing-softened edge ring
+and baked notification text described above; 1,705 px are content only in the 16x.
