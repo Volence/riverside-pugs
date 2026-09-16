@@ -70,8 +70,15 @@ hung queue. Catch it here, not after eight people are already waiting.
    |---|---|---|
    | `idle` | claimable, proceed | nothing, you're clear |
    | `offline` | the schema's default for a freshly-inserted row; nothing in production ever promotes this to `idle` on its own | this is the box's actual row if it has never yet been released by a real match. Restart `pug-web` (boot runs `reconcileServers`, see below) and re-check; if it is still `offline`, manually set it: `sqlite3 data/pug.db "UPDATE servers SET status='idle' WHERE id=<server id>;"` only after you have independently confirmed via `R "status"` that no match owns the box |
-   | `reserved` or `live` with no owning match | stranded from a crash | restart `pug-web`. Its boot sequence calls `reconcileServers`, which frees any server marked `reserved` or `live` that no `configuring`/`live` match row owns. Re-run the query in this step after the restart to confirm it moved to `idle` |
-   | `reserved` or `live` with a real owning match | genuinely in use | do not touch it; that match needs to finish or be rolled back first (Step 9) |
+   | `reserved` or `live` with no owning match | stranded from a crash | restart `pug-web`. Its boot sequence calls `reconcileServers`, which frees any server marked `reserved` or `live` that no **`live`** match row owns. Re-run the query in this step after the restart to confirm it moved to `idle` |
+   | `reserved` or `live` owned by a `configuring` match | a crash between `setupMatch` writing `server_id` and `setupMatch` flipping the match to `live`. The match is holding the only box and can never claim one again by itself | restart `pug-web`. `reconcileServers` frees the box (a `configuring` match no longer protects one) and the boot drain hands it straight back to that same match, which should read `live` within a few seconds. Re-run both this query and the match query in item 2 to confirm |
+   | `reserved` or `live` with a real `live` match | genuinely in use | do not touch it; that match needs to finish or be rolled back first (Step 9) |
+
+   **If you set a row to `idle` by hand, restart `pug-web` afterward.** A row
+   that simply becomes idle in place fires no release, and releases are what
+   normally wake a waiting match. Boot now also drains the pending list once,
+   which is the only thing that will pair an already-idle box with a match
+   that was already waiting.
 
    Do not skip ahead assuming this is fine. The failure mode is silent by
    design (see Task 12 background): a match with no free server logs a
@@ -156,7 +163,9 @@ first map of the voted campaign.
    **waiting**, almost certainly because of the Step 1 trap: re-check
    `SELECT status FROM servers`. If it now reads `idle` and the match is
    still waiting, check the `pug-web` service log for `[orchestrator] no
-   idle server` or `[pendingMatches]` lines.
+   idle server` or `[pendingMatches]` lines. If `state` is `configuring` but
+   `server_id` is **not** null, setup died partway through; see "Two strand
+   modes that are not the plugin misbehaved" in Step 9.
 
    **Write down both numbers from this row and keep them straight for the
    rest of the night.** The `id` column is the *match id*, referred to below
@@ -269,9 +278,32 @@ Play the match normally, or shortcut it. The chat command is `!endpug`
    is kicked to the main menu, with the disconnect/kick dialog showing the
    same result string, e.g. `blood_harvest: Team A wins 1247 to 980`. This
    is new behavior this branch adds; previously nobody was kicked at match
-   end. If people are not kicked after roughly 8 seconds, that is a
-   regression worth flagging even though it does not block the match from
-   having completed correctly on the backend.
+   end.
+
+   **Pass/fail:** everyone is out of the server within about 8 seconds on the
+   `!endpug` path. On a **finale** path the first attempt lands while the
+   finale map is still loading and most clients are not yet in game, so give
+   it up to about 40 seconds: the kick retries every 8 seconds for 5 passes
+   and stops as soon as the box is empty. Anyone still connected after that,
+   or a `status` that still shows humans, is a real regression.
+
+   This expectation used to be a near-certain false alarm and is now
+   reliable, so treat a failure as real. The kick was keyed off the same
+   buffer `ResetMatchState()` blanks, and the backend sends `sm_pug_abort`
+   (which resets that state) within a few hundred milliseconds of a
+   successful report, so the kick was cancelled long before its 8 second
+   timer fired and only ever ran when **reporting failed**. It now holds its
+   own timer and reason, survives the backend's routine abort, and is
+   cancelled only where a genuinely new match begins (`sm_pug_match`,
+   `!load_4v4p`, auto-track adoption).
+
+3. Confirm the box is actually empty before anyone tries to queue again:
+
+       R "status"
+
+   Expected: `0 humans`. A non-empty box here does not corrupt the result,
+   which is already recorded, but the next queue pop will `changelevel`
+   whoever is left.
 
 ## 8. Teardown checks
 
@@ -361,11 +393,16 @@ freed row. **The order below matters; do not restart first.**
 
 Then restart `pug-web`. Its boot sequence calls `reconcileServers`
 (`src/serverRelease.ts`), which frees any server marked `reserved` or
-`live` whose match is **not** `configuring` or `live` any more. Restarting
-before the update is a no-op: `reconcileServers` explicitly excludes a
-server whose match is still `configuring` or `live`, which is exactly the
-state the match is in right after a bare `sm_pug_abort` and before this
-update runs. Do the update first, always.
+`live` whose match is **not** `live` any more. Restarting before the update
+is a no-op: `reconcileServers` excludes a server whose match is still
+`live`, which is exactly the state the match is in right after a bare
+`sm_pug_abort` and before this update runs. Do the update first, always.
+
+(`configuring` used to be excluded here too, and is not any more. That is a
+deliberate fix, not a widening you need to work around: a `configuring`
+match only ever holds a `server_id` because `setupMatch` crashed between
+claiming the box and going live, and a match that is merely waiting for a
+box has `server_id IS NULL` and so is never touched.)
 
 The `reapOrphanedMatches` / `reapNoShowMatches` pair in `src/liveView.ts`
 and `src/noShow.ts` are the correct pattern this scoped update imitates:
@@ -393,3 +430,64 @@ Expected: `idle`. If Path B's restart still leaves this non-idle, re-check
 that the `UPDATE matches` statement actually ran (`SELECT state FROM matches
 WHERE id = <match id>;` should read `aborted`) before assuming
 `reconcileServers` itself is broken.
+
+### Two strand modes that are not "the plugin misbehaved"
+
+Both of these pin the box with the plugin behaving perfectly, so neither is
+found by staging the old `.smx`. Both now self-heal; the checks below are how
+you confirm that rather than what you have to do by hand.
+
+**A match stuck in `configuring`, and nobody can queue.**
+
+    sqlite3 data/pug.db "SELECT id, state, server_id FROM matches WHERE state = 'configuring';"
+
+Symptom in the Discord call: the queue pops, the ready check passes, and then
+nothing. No connect button, no error anywhere. Everyone on that roster is also
+locked out of re-queueing, because `hasOpenMatch` (`src/matchmaker.ts`) counts
+`configuring`, and each later pop mints another one of these and locks out
+another eight people.
+
+- `server_id` **not null**: a crash mid-`setupMatch`. Restart `pug-web`;
+  `reconcileServers` frees the box and the boot drain hands it back. Expect
+  the row to read `live` within a few seconds of the restart.
+- `server_id` **null**: it is genuinely waiting for a box. Free one (finish or
+  roll back whatever owns it) and it drains on the next release. If no match
+  owns any box, restart `pug-web`: the boot drain is the only thing that pairs
+  an already-idle server with an already-waiting match.
+
+Pass condition either way: after the restart, no row remains in `configuring`
+for more than a few seconds.
+
+**A match that was played but never reported.**
+
+    journalctl -u pug-web | grep INCIDENT
+
+This is the `MATCH_END`-arrives-but-`sm_pug_dump`-times-out case (match 8,
+2026-09-11). It is invisible to both reapers: the plugin keeps heartbeating in
+`MS_Ended`, so `reapOrphanedMatches` never sees heartbeat loss, and
+`reapNoShowMatches` matches neither rule because those players connected and
+rounds were recorded. It used to leave the match `live` and the box `live`
+indefinitely, which now means every later queue pop pends behind it.
+
+`finishWithRetry` (`src/server.ts`) retries for about four minutes and then
+aborts the match and releases the box through the `ServerReleaser`, logging a
+line beginning `[orchestrator] INCIDENT:` with the match id and token.
+
+- Expected after roughly four minutes: match `aborted`, server `idle`,
+  `sv_password` empty, box empty.
+- **The result is lost**: no scores, no rating movement for those eight. Say so
+  in the Discord call; it is an incident, not a tidy-up.
+- Recover it if the plugin has not been reloaded since. The INCIDENT line
+  carries the token:
+
+      R "sm_pug_dump <token>"
+
+  then feed that dump to `scripts/recover-match.ts`. If `sm_pug_dump` answers
+  `PUGERR`, the plugin has already dropped the match and the result is gone
+  for good.
+
+One consequence worth knowing for both paths above: `ServerReleaser.release`
+now sends a best-effort `sm_pug_abort` alongside the `sv_password` clear, so
+any automatic release also drops the plugin's match. That is why the box stops
+heartbeating on its own after a reaper fires, where previously you had to run
+`sm_pug_abort` yourself.
