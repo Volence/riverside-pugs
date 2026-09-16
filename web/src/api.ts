@@ -207,8 +207,7 @@ export interface MapIndexRow {
   campaign: string | null;
   played: number;
   /** Mean over the recorded playings only; null when none has a real score. */
-  avgTeamA: number | null;
-  avgTeamB: number | null;
+  avgScore: number | null;
 }
 
 export interface MapLeaderRow {
@@ -218,14 +217,19 @@ export interface MapLeaderRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
+  /** Per map played, to one decimal. */
+  avgStats: Record<string, number>;
 }
 
 export interface MapDetail {
   map: string;
   played: number;
-  /** Mean over the recorded playings only; null when none has a real score. */
-  avgTeamA: number | null;
-  avgTeamB: number | null;
+  /** What a team typically scores here. One number, not a per-team pair:
+   *  both teams hold survivor once per map, so A and B were two samples of
+   *  the same quantity and comparing them compared arbitrary labels. */
+  avgScore: number | null;
+  /** Pooled across everyone who has played the map, per map played. */
+  avgStats: Record<string, number>;
   players: MapLeaderRow[];
 }
 
@@ -235,6 +239,8 @@ export interface MapBreakdownRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
+  /** Per map played, to one decimal. */
+  avgStats: Record<string, number>;
 }
 
 export interface ProfileMatch extends MatchSummary {

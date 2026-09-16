@@ -74,8 +74,7 @@ export function Maps() {
                       <tr>
                         <th>Map</th>
                         <th class="num">Played</th>
-                        <th class="num">Avg A</th>
-                        <th class="num">Avg B</th>
+                        <th class="num">Avg score</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -83,12 +82,9 @@ export function Maps() {
                         <tr key={m.map}>
                           <td><a href={`/map/${encodeURIComponent(m.map)}`}>{m.map}</a></td>
                           <td class="num">{m.played}</td>
-                          {m.avgTeamA === null || m.avgTeamB === null
-                            ? <td class="num muted" colSpan={2}>not recorded</td>
-                            : <>
-                              <td class="num">{m.avgTeamA}</td>
-                              <td class="num">{m.avgTeamB}</td>
-                            </>}
+                          {m.avgScore === null
+                            ? <td class="num muted">not recorded</td>
+                            : <td class="num">{m.avgScore}</td>}
                         </tr>
                       ))}
                     </tbody>
