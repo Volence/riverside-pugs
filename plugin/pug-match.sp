@@ -96,12 +96,10 @@ int g_iRosterCount;
 char g_sRosterName[MAX_ROSTER][64];
 
 /** True when this match was started in-game by !load_4v4p rather than by the
- *  backend over rcon. Two behavioural differences, both deliberate:
- *    - the match id is 0 until the backend assigns one via sm_pug_setid
- *    - OnClientPostAdminCheck does NOT kick non-rostered players
- *  The kick exists to enforce a backend-issued roster for a real ranked PUG.
- *  A match started from inside a running game has no such authority, and
- *  kicking a friend who happened to be spectating would be a nasty surprise. */
+ *  backend over rcon. One behavioural difference: the match id is 0 until the
+ *  backend assigns one via sm_pug_setid. No match, self-started or not, kicks
+ *  a non-rostered player; the rostered eight are placed by Timer_TeamLock and
+ *  anyone else may spectate. */
 bool g_bSelfStarted;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
@@ -2081,13 +2079,12 @@ public void OnClientPostAdminCheck(int client)
 	int slot = RosterIndexOfId(id);
 	if (slot == -1)
 	{
-		// Roster enforcement only applies to a backend-issued roster. A match
-		// started in-game with !load_4v4p has no authority to kick anyone, and
-		// the config's sm_restartmap cycles every client through here moments
-		// after the snapshot, so kicking would eject the spectators who were
-		// simply not on a team at snapshot time. They stay, unscored.
-		if (g_bSelfStarted) return;
-		KickClient(client, "You are not on this match's roster");
+		// Nobody is kicked, backend match or not. The owner's rule is that the
+		// rostered eight belong in the correct slots and anyone else may
+		// spectate; Timer_TeamLock does the placing, so enforcement never
+		// needed a door policy. This also removes the first-run failure mode
+		// where one bad roster line bounced all eight players with no in-game
+		// recourse.
 		return;
 	}
 	g_iClientRoster[client] = slot;
@@ -2181,7 +2178,12 @@ public Action Timer_TeamLock(Handle timer)
 	if (straight == 0 && inverted == 0) return Plugin_Continue;
 	// Testing switch: the vote above still tracks orientation for scoring, but
 	// nobody is moved. Never leave this off for a real ranked match.
-	if (!g_cvTeamLock.BoolValue || g_cvAutoTrack.BoolValue) return Plugin_Continue;
+	if (!g_cvTeamLock.BoolValue) return Plugin_Continue;
+	// Auto-track implies no team lock only for the matches auto-track itself
+	// starts, which have no authority: their "roster" is just whoever happened
+	// to be on each side. A backend-issued roster is authoritative and must be
+	// enforced even while auto_track is on, which it always is on the live box.
+	if (g_cvAutoTrack.BoolValue && g_bSelfStarted) return Plugin_Continue;
 
 	for (int c = 1; c <= MaxClients; c++)
 	{
