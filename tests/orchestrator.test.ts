@@ -138,6 +138,69 @@ describe('RealOrchestrator', () => {
     expect(pended).toEqual([mid]);
   });
 
+  it('setupMatch aborts (and does not pend) when the rcon setup itself fails', async () => {
+    const cmds: string[] = [];
+    const srv = await new Promise<{ port: number; close: () => Promise<void> }>((resolve) => {
+      const server = net.createServer((sock) => {
+        let buf: Buffer = Buffer.alloc(0);
+        sock.on('data', (chunk) => {
+          buf = Buffer.concat([buf, chunk as Buffer]);
+          const { packets, rest } = decodePackets(buf);
+          buf = rest;
+          for (const p of packets) {
+            if (p.type === SERVERDATA_AUTH) {
+              sock.write(encodePacket(0, SERVERDATA_RESPONSE_VALUE, ''));
+              sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
+            } else if (p.type === SERVERDATA_EXECCOMMAND) {
+              cmds.push(p.body);
+              // The plugin refuses the match itself, the way it does on the real
+              // box for a bad arg: PUGERR rather than PUGOK. expectPugOk throws,
+              // and setupMatch must take the catch-block abort path here, not the
+              // no-idle-server path: this test is what tells those two apart.
+              if (p.body.startsWith('sm_pug_match')) {
+                sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, 'PUGERR bad campaign'));
+              } else {
+                sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, '')));
+              }
+            } else if (p.type === SERVERDATA_RESPONSE_VALUE) {
+              sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, ''));
+              sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, '\u0000\u0001\u0000\u0000'));
+            }
+          }
+        });
+      });
+      server.listen(0, '127.0.0.1', () => {
+        resolve({
+          port: (server.address() as net.AddressInfo).port,
+          close: () => new Promise((r) => server.close(() => r())),
+        });
+      });
+    });
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+
+    const pended: number[] = [];
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}),
+      makeRcon: (o) => o,
+      onNoServer: (id) => pended.push(id),
+    });
+    const mid = seedMatch(db);
+
+    await orch.setupMatch(mid);
+
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+    expect(getServer(db, serverId)!.status).toBe('idle');
+    // The invariant this task introduces: a broken setup must never be
+    // mistaken for "no server was free" and pended, or a permanently broken
+    // box would pin the queue retrying a setup that can never succeed.
+    expect(pended).toEqual([]);
+  });
+
   it('finishMatch pulls the dump, persists scores/stats, resets server, completes match', async () => {
     const mid = 1;
     const dump = [

@@ -238,10 +238,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       });
       await logListener.listen(deps.config.logListenPort);
       // pending is declared before the orchestrator it depends on and assigned
-      // after: the same forward-reference the selfStarted callback above uses.
-      // onNoServer only ever fires once setupMatch has returned, by which
-      // point construction below has finished and pending is assigned.
-      let pending: PendingMatches;
+      // after: the same forward-reference the selfStarted callback above uses,
+      // including the null default and optional call so a read before
+      // assignment no-ops instead of throwing. Nothing today can reach
+      // onNoServer before pending is assigned (every statement in between is
+      // synchronous), but the null-safe form keeps a future await inserted in
+      // that stretch from turning this into a crash instead of a silent no-op.
+      let pending: PendingMatches | null = null;
       orchestrator = new RealOrchestrator({
         db: deps.db,
         listener: logListener,
@@ -250,7 +253,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         notify,
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
-        onNoServer: (id) => pending.add(id),
+        onNoServer: (id) => pending?.add(id),
       });
 
       // Re-arm the listener for matches that were already running when this
