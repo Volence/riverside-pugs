@@ -512,16 +512,65 @@ describe('round persistence', () => {
   it('records a round and closes it with the score', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300, alive: null });
     const [row] = roundsFor(db, 1);
     expect(row).toMatchObject({ ordinal: 0, half: 1, survTeam: 'a', score: 300, reliable: true });
     expect(row.endedAt).not.toBeNull();
   });
 
+  it('stores the surviving-survivor count from ROUND_END', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300, alive: 2,
+    });
+    const row = db.prepare('SELECT survivors_alive FROM match_rounds WHERE match_id = 1').get() as
+      { survivors_alive: number | null };
+    expect(row.survivors_alive).toBe(2);
+  });
+
+  it('stores a wipe as 0 rather than as no reading', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 50, alive: 0,
+    });
+    const row = db.prepare('SELECT survivors_alive FROM match_rounds WHERE match_id = 1').get() as
+      { survivors_alive: number | null };
+    expect(row.survivors_alive).toBe(0);
+  });
+
+  it('leaves survivors_alive null for a round an older plugin closed', () => {
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300, alive: null,
+    });
+    const row = db.prepare('SELECT survivors_alive FROM match_rounds WHERE match_id = 1').get() as
+      { survivors_alive: number | null };
+    expect(row.survivors_alive).toBeNull();
+  });
+
+  it('does not let a later ROUND_END blank a survival reading it lacks', () => {
+    // The row is upserted, and a duplicate ROUND_END from an older plugin (or
+    // a retry that lost the field) must not erase a count already observed.
+    const db = liveMatchForRounds();
+    recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300, alive: 3,
+    });
+    recordRoundEnd(db, ROUND_TOKEN, {
+      kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: 300, alive: null,
+    });
+    const row = db.prepare('SELECT survivors_alive FROM match_rounds WHERE match_id = 1').get() as
+      { survivors_alive: number | null };
+    expect(row.survivors_alive).toBe(3);
+  });
+
   it('stores a failed score read (score=-1) as an unreliable zero, not a result', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: -1 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a', score: -1, alive: null });
     const [row] = roundsFor(db, 1);
     expect(row).toMatchObject({ half: 1, survTeam: 'a', score: 0, reliable: false });
     expect(row.endedAt).not.toBeNull();
@@ -551,7 +600,7 @@ describe('round persistence', () => {
   it('trusts the round-end side when start and end disagree', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'a' });
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'b', score: 120 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'b', score: 120, alive: null });
     expect(roundsFor(db, 1)[0].survTeam).toBe('b');
   });
 
@@ -575,7 +624,7 @@ describe('round persistence', () => {
   it('promotes a sideless round to reliable when round end supplies the side', () => {
     const db = liveMatchForRounds();
     recordRoundStart(db, ROUND_TOKEN, { kind: 'round_start', token: ROUND_TOKEN, map: 'm', half: 1, surv: null });
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'b', score: 175 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm', half: 1, surv: 'b', score: 175, alive: null });
     expect(roundsFor(db, 1)[0]).toMatchObject({ survTeam: 'b', score: 175, reliable: true });
   });
 
@@ -585,7 +634,7 @@ describe('round persistence', () => {
     // MAP_RESULT for m0 lands first, so the naive COUNT(match_live_maps)
     // derivation would now put m0's own round end on ordinal 1.
     recordMapResult(db, ROUND_TOKEN, 'm0', 300, 250);
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm0', half: 2, surv: 'b', score: 250 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: 'm0', half: 2, surv: 'b', score: 250, alive: null });
     const rows = roundsFor(db, 1);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ ordinal: 0, half: 2, score: 250 });
@@ -594,7 +643,7 @@ describe('round persistence', () => {
   it('falls back to the map count when a round end carries no map', () => {
     const db = liveMatchForRounds();
     db.prepare("INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (1, 'm0', 0, 1, 2)").run();
-    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: null, half: 1, surv: 'a', score: 50 });
+    recordRoundEnd(db, ROUND_TOKEN, { kind: 'round_end', token: ROUND_TOKEN, map: null, half: 1, surv: 'a', score: 50, alive: null });
     expect(roundsFor(db, 1)[0].ordinal).toBe(1);
   });
 

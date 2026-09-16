@@ -286,6 +286,12 @@ export function openDb(path: string): DB {
   // First time this rostered player was seen connected to the match server.
   // Null means they never turned up, which is what the no-show reaper counts.
   ensureColumn(db, 'match_players', 'connected_at', 'TEXT');
+  // How many survivors were still standing when the round ended. NULL, not 0,
+  // as the default: every round recorded before the plugin emitted this was
+  // simply not measured, and 0 is a real value here (a wipe). Defaulting to 0
+  // would retroactively record every historic round as a wipe and drag
+  // survival rate to nothing.
+  ensureColumn(db, 'match_rounds', 'survivors_alive', 'INTEGER');
   seed(db);
   return db;
 }

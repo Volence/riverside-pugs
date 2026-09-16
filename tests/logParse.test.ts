@@ -238,15 +238,44 @@ describe('round lines', () => {
   });
 
   it('parses ROUND_END', () => {
-    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=l4d_hospital01_apartment half=2 surv=b score=412`))).toEqual({
-      kind: 'round_end', token: TOKEN, map: 'l4d_hospital01_apartment', half: 2, surv: 'b', score: 412,
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=l4d_hospital01_apartment half=2 surv=b score=412 alive=3`))).toEqual({
+      kind: 'round_end', token: TOKEN, map: 'l4d_hospital01_apartment', half: 2, surv: 'b', score: 412, alive: 3,
     });
   });
 
   it('parses a ROUND_END from an older plugin that carries no map', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END half=2 surv=b score=412`))).toEqual({
-      kind: 'round_end', token: TOKEN, map: null, half: 2, surv: 'b', score: 412,
+      kind: 'round_end', token: TOKEN, map: null, half: 2, surv: 'b', score: 412, alive: null,
     });
+  });
+
+  it('carries alive=0 as a wipe, not as an absent reading', () => {
+    // Nobody left standing is the single most interesting survival result, and
+    // 0 is falsy: a truthiness check anywhere on this path would turn every
+    // wipe into "not measured" and bias survival rate upward forever.
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=1 surv=a score=50 alive=0`));
+    expect(ev).toEqual({
+      kind: 'round_end', token: TOKEN, map: 'm', half: 1, surv: 'a', score: 50, alive: 0,
+    });
+  });
+
+  it('treats a ROUND_END with no alive= as unmeasured rather than a wipe', () => {
+    // An older plugin staged mid-season omits the field. That must read as
+    // "we do not know", never as zero survivors, which would be a false wipe.
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=1 surv=a score=50`));
+    expect(ev).toMatchObject({ kind: 'round_end', alive: null });
+  });
+
+  it('drops a negative alive, which no real reading can be', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=1 surv=a score=50 alive=-1`)))
+      .toMatchObject({ kind: 'round_end', score: 50, alive: null });
+  });
+
+  it('drops a malformed alive rather than rejecting the whole line', () => {
+    // The score and side are what the match record depends on; a corrupt
+    // survival reading must not cost us the round entirely.
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END map=m half=1 surv=a score=50 alive=x`)))
+      .toMatchObject({ kind: 'round_end', score: 50, alive: null });
   });
 
   it('accepts a ROUND_START with no side, rather than one that invents one', () => {
