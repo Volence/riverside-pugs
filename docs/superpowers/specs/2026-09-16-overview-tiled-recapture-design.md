@@ -61,7 +61,7 @@ New units in `overviews/`. The manual F9/F10 flow (`run_overview.sh`, `prepare_a
 
 | unit | responsibility | depends on |
 |---|---|---|
-| `plan.py` | For one map, produce the shot list and the command chain | `gen_overview_cfg.compute_framing`, `prepare_all.height_ladder`, `out/<map>.layers.json` |
+| `plan.py` | For one map, produce the shot list and the command chain | `out/<map>.layers.json` and its layer JSONs |
 | `runner.py` | Run one or more maps unattended, verify each, retry | `plan.py` output, `profile.sh`, KWin, uinput |
 | `stitch.py` | Turn a verified run into stitched, cleaned layers | run directory |
 | `acceptance.py` | Phase 1 checks against the existing 1x layers | `out4x/`, `out/`, `verify.py` |
@@ -85,7 +85,16 @@ acceptance.py <map>
 
 ## Capture geometry
 
-For a map with framing centre `(cx, cy)`, engine scale `s`, and the capture size
+**Framing comes from the existing capture, not from `compute_framing`.** Each map's layer
+JSONs in `out/` record the camera x/y, `engine_scale` and image size the 1x set was actually
+shot with. These differ from `compute_framing`: farm01's camera is at x = -9122 where
+`compute_framing` gives -11939, because the 2026-09-12 session aligned Valve's upper-left
+corner rather than the centre. Reusing the recorded values is what keeps every 4x layer on
+the same transform as the layer it replaces. All 22 maps have a capture, so there is no
+fallback; `plan.py` refuses a map without one, or one whose layers disagree on camera x/y,
+scale or size.
+
+For a map with recorded camera `(cx, cy)`, engine scale `s`, and capture size
 `W x H = 2048 x 1271`:
 
 - Full-frame spans: `spanY = 1024 * s`, `spanX = spanY * W / H`, `upp = spanY / H`.
@@ -97,10 +106,10 @@ For a map with framing centre `(cx, cy)`, engine scale `s`, and the capture size
 - Tile centres go to `setpos` with fractional coordinates, so each tile's upper-left falls
   exactly on pixel `(0|W, 0|H)` of the canvas. No resampling anywhere.
 
-**Heights.** When `out/<map>.layers.json` exists, reuse its cut heights exactly
-(`setpos z = cut_height - 62`), so each 4x layer compares 1:1 with the 1x layer it replaces.
-Otherwise fall back to `height_ladder`. For farm01 that is 5 layers (326, 582, 838, 1406,
-2270), 20 tiles, scale 9.0 to 4.5, `upp` 7.251 to 3.626.
+**Heights.** Reuse the manifest's cut heights exactly (`setpos z = cut_height - 62`), so
+each 4x layer compares 1:1 with the 1x layer it replaces. For farm01 that is 5 layers (326,
+582, 838, 1406, 2270), 20 tiles, camera (-9122, -10907), scale 9.0 to 4.5, `upp` 7.251 to
+3.626.
 
 ## The command chain (`ov_run.cfg`)
 
@@ -203,8 +212,10 @@ All automated, results in `runs/l4d_vs_farm01_hilltop/acceptance.json`:
 3. **Seams:** for each seam, the MAD between the two pixel lines either side of it, against
    the MAD between adjacent lines 8 px away on both sides. **Pass:** the seam value is at
    most 1.5x its neighbourhood.
-4. **Entity projection:** `verify.py` on each 4x layer, **before dip fill**, scores at least
-   96%, the existing set's bar. Before, because filled pixels could otherwise mask a
+4. **Entity projection:** `verify.py`'s scoring on each 4x layer, **before dip fill**,
+   scores no more than 2 points below the 1x layer at the same height. Relative rather
+   than a flat 96%, because a low cut hides every entity above it by design and scores low
+   in the 1x set too. Before dip fill, because filled pixels could otherwise mask a
    misplaced layer.
 5. **Visual:** an artifact with matched 1x and 4x crops at the same zoom, for the owner to
    judge. Dip-filled regions get a toggle overlay.
@@ -216,10 +227,12 @@ guesses.
 ## Web integration (pug)
 
 - `tools/convert-overviews.sh` takes an override source: maps with a manifest in
-  `overviews/out4x/` come from there, all others from `overviews/out/` as today. Only the
-  overridden maps' WebP files are re-encoded (quality 82), and that map's old WebP files are
-  deleted, so the other 21 maps produce no diff.
-- `tools/gen-overviews.py` reads both sources with the same precedence. `EXPECTED_SIZE`
+  `overviews/out4x/` come from there, all others from `overviews/out/` as today. The
+  overridden maps' old WebP files are deleted and their layers encoded (quality 82). Other
+  maps' layers are encoded only when their WebP is missing, so the other 21 maps produce no
+  diff.
+- `tools/gen-overviews.py SRC OUT --override DIR` reads both sources with the same
+  precedence. `EXPECTED_SIZE`
   becomes a check that all layers of one map share a size from the known set
   `{2048x1271, 4096x2542}`. The fixed notification mask `HUD_TEXT_BOX` applies only to
   2048x1271 layers.
@@ -229,6 +242,9 @@ guesses.
 - No viewer changes: the viewer already reads per-layer `width`/`height` through
   `mapTransform.ts` and decodes only the layer on screen, so browser memory goes from about
   10 MB to 41 MB for that one image.
+- `tests/mapOverviews.test.ts` changes with the data: the image pattern admits `.4x`,
+  farm01's known values become `unitsPerPixel` 3.625492 at 4096x2542, and new tests pin
+  that every layer of a map shares one size and that only farm01 is 4x.
 - Existing tests, typecheck and build must pass. farm01's added WebP weight is recorded in
   the commit message.
 
