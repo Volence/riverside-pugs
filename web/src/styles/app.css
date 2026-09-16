@@ -513,16 +513,47 @@ button.ctile:hover { border-color: var(--text-muted); }
 }
 
 /* Eight fixed slots. Empty slots are the information: a half-full queue
- * should look half full rather than just showing a smaller number. */
-.slots { display: flex; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-5); }
+ * should look half full rather than just showing a smaller number. Filled
+ * slots grow to carry a face and a name; empty ones stay the plain dashed
+ * meter bar, aligned to the bottom of the row so the two read as one line. */
+.slots { display: flex; align-items: flex-end; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-5); }
 .slot {
   flex: 1;
+  min-width: 0;
   height: 6px;
   border-radius: 0;
   border: 1px dashed var(--border);
   transition: background-color 200ms linear, border-color 200ms linear;
 }
-.slot--filled { background: var(--accent); border-color: var(--accent); border-style: solid; }
+.slot--filled {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-1);
+  background: var(--surface-2);
+  border-color: var(--accent);
+  border-style: solid;
+}
+.slot__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface);
+}
+.slot__avatar--none { border: 1px dashed var(--border); }
+/* Ellipsized rather than wrapped: a name box that grows taller than its
+ * neighbours on a long name would break the row's shared baseline. */
+.slot__name {
+  max-width: 100%;
+  font-size: var(--fs-label);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ---------- play: connect panel ---------- */
 
