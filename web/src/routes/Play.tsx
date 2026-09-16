@@ -1,5 +1,5 @@
-import { useState } from 'preact/hooks';
-import { api, ApiError, type LobbySnapshot, type StateSnapshot } from '../api';
+import { useEffect, useState } from 'preact/hooks';
+import { api, ApiError, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
 import { campaignName } from '../format';
 import { Countdown, useCountdownChrome, useSecondsLeft } from '../components/Countdown';
 import { Empty, Panel } from '../components/bits';
@@ -28,6 +28,18 @@ export function Play(
 }
 
 function SignIn() {
+  const [q, setQ] = useState<PublicQueue | null>(null);
+  useEffect(() => {
+    let alive = true;
+    // Polled rather than pushed over the websocket: the socket nudge is
+    // session-scoped and an anonymous visitor has no session, same as why the
+    // live match page polls.
+    const tick = () => api.queue().then((r) => { if (alive) setQ(r); }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
   return (
     <div class="page page--play">
       <Panel class="hero-panel">
@@ -36,6 +48,16 @@ function SignIn() {
         <p class="muted">Sign in to join the queue.</p>
         <a class="btn" href="/auth/steam">Sign in through Steam</a>
       </Panel>
+      {q && (
+        <Panel>
+          <p class="eyebrow">Queue</p>
+          <div class="queue-count">
+            <span class="hero">{q.count}</span>
+            <span class="queue-count__of">/ {QUEUE_SIZE}</span>
+          </div>
+          <Slots players={q.players} />
+        </Panel>
+      )}
     </div>
   );
 }
@@ -118,11 +140,12 @@ function Live(
 
   if (lobby && lobby.phase === 'ready_check') return <ReadyCheck lobby={lobby} me={me} refresh={refresh} />;
   if (lobby && lobby.phase === 'map_vote') return <MapVote lobby={lobby} refresh={refresh} />;
-  return <QueuePanel count={queue.count} joined={queue.joined} refresh={refresh} />;
+  return <QueuePanel count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh} />;
 }
 
-function QueuePanel(
-  { count, joined, refresh }: { count: number; joined: boolean; refresh: () => void },
+export function QueuePanel(
+  { count, joined, players, refresh }:
+    { count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void },
 ) {
   const [error, setError] = useState('');
   useCountdownChrome(null, 0);
@@ -144,7 +167,7 @@ function QueuePanel(
         <span class="hero">{count}</span>
         <span class="queue-count__of">/ {QUEUE_SIZE}</span>
       </div>
-      <Slots filled={count} />
+      <Slots players={players} />
       {joined ? (
         <button class="btn btn--block btn--ghost" onClick={() => act(api.leaveQueue)}>Leave queue</button>
       ) : (
@@ -156,13 +179,27 @@ function QueuePanel(
 }
 
 /** Eight fixed slots rather than a list that grows. A half-full queue should
- *  look like a half-full queue: the empty slots are the information. */
-function Slots({ filled }: { filled: number }) {
+ *  look like a half-full queue: the empty slots are the information. Filled
+ *  ones now name who is in them, which is what a friend group actually wants
+ *  to know before deciding to join. */
+function Slots({ players }: { players: NamedPlayer[] }) {
   return (
     <div class="slots">
-      {Array.from({ length: QUEUE_SIZE }, (_, i) => (
-        <div key={i} class={`slot ${i < filled ? 'slot--filled' : ''}`} />
-      ))}
+      {Array.from({ length: QUEUE_SIZE }, (_, i) => {
+        const p = players[i];
+        return (
+          <div key={i} class={`slot ${p ? 'slot--filled' : ''}`} title={p?.name}>
+            {p && (
+              <>
+                {p.avatar
+                  ? <img class="slot__avatar" src={p.avatar} alt="" />
+                  : <span class="slot__avatar slot__avatar--none" aria-hidden="true" />}
+                <span class="slot__name">{p.name}</span>
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

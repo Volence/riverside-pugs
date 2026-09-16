@@ -34,7 +34,7 @@ const { MatchDetail } = await import('./MatchDetail');
 const { MapDetail } = await import('./MapDetail');
 const { Maps } = await import('./Maps');
 const { Profile } = await import('./Profile');
-const { Play } = await import('./Play');
+const { Play, QueuePanel } = await import('./Play');
 const { Replays } = await import('./Replays');
 
 // Auto-cleanup only runs when vitest exposes globals, which this config does
@@ -541,6 +541,18 @@ describe('Play', () => {
     expect(screen.getByText('No Mercy')).toBeTruthy();
     expect(screen.getByText('Team A')).toBeTruthy();
     expect(screen.getByText('Team B')).toBeTruthy();
+  });
+
+  it('shows who is in the queue and keeps the empty slots visible', () => {
+    const players = [
+      { steamid: '1', name: 'dizzy', avatar: 'http://a/1.jpg' },
+      { steamid: '2', name: 'mayhem', avatar: null },
+    ];
+    render(<QueuePanel count={2} joined={false} players={players} refresh={() => {}} />);
+
+    expect(screen.getByText('dizzy')).toBeTruthy();
+    expect(screen.getByText('mayhem')).toBeTruthy();
+    expect(document.querySelectorAll('.slot').length).toBe(8);
   });
 });
 
