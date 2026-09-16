@@ -13,6 +13,8 @@ import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
+import { ServerReleaser } from './serverRelease.js';
+import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import {
@@ -125,6 +127,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   const notify = (msg: string) => notifyDiscord(deps.db, msg);
 
+  // Built unconditionally, not just in the RealOrchestrator branch: the orphan
+  // reaper below needs it too, and construction itself dials no rcon.
+  const releaser = new ServerReleaser(deps.db, async (server) => {
+    const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+    try {
+      await rcon.connect();
+      await rcon.exec('sv_password ""');
+    } finally {
+      rcon.close();
+    }
+  });
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   if (!orchestrator) {
@@ -222,6 +236,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         db: deps.db,
         listener: logListener,
         logPublicAddress: deps.config.logPublicAddress,
+        releaser,
         notify,
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
@@ -281,7 +296,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // match can ever claim it.
   const reaper = setInterval(() => {
     try {
-      reapOrphanedMatches(deps.db);
+      reapOrphanedMatches(deps.db, releaser);
     } catch (err) {
       console.error('[liveView] reaper failed:', err);
     }
