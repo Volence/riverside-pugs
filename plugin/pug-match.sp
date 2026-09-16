@@ -24,6 +24,7 @@
 #define ZC_HUNTER 3
 #define ZC_TANK 5
 #define LOCK_ATTEMPT_CAP 6
+#define END_KICK_DELAY 8.0
 
 /** Longest chat message emitted. Long enough for anything anyone types in a
  *  PUG, short enough that a message cannot push a log line into truncation. */
@@ -81,6 +82,7 @@ MatchState g_State = MS_None;
 int g_iMatchId;
 char g_sToken[65];
 char g_sCampaign[64];
+char g_sEndResult[128];
 
 // Roster: fixed slots, parallel arrays, keyed by SteamID64.
 char g_sRosterId[MAX_ROSTER][32];
@@ -1646,7 +1648,33 @@ void EndMatchNow(const char[] why)
 	WinnerOf(a, b, winner, sizeof(winner));
 	EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
 	PugDebug("ended (%s): a=%d b=%d winner=%s", why, a, b, winner);
-	PrintToChatAll("[PUG] Match ended: %d - %d. Reporting to the site.", a, b);
+
+	char teamName[16];
+	if (StrEqual(winner, "draw")) strcopy(teamName, sizeof(teamName), "Draw");
+	else Format(teamName, sizeof(teamName), "Team %s wins", winner[0] == 'a' ? "A" : "B");
+
+	// Held in a global because the timer fires after this frame and cannot be
+	// handed a string. One match ends at a time, so a single buffer is enough.
+	Format(g_sEndResult, sizeof(g_sEndResult), "%s: %s %d to %d",
+		g_sCampaign, teamName, a, b);
+
+	PrintToChatAll("[PUG] Match ended. %s. Reporting to the site.", g_sEndResult);
+	// Everyone, spectators included, so the box is empty and ready for the next
+	// queue pop. Delayed so the score can be read in game first rather than
+	// only in the menu dialog. Safe for reporting: WriteDump reads roster slots,
+	// not clients, so the backend still gets a complete dump from an empty
+	// server.
+	CreateTimer(END_KICK_DELAY, Timer_EndKick);
+}
+
+public Action Timer_EndKick(Handle timer)
+{
+	if (g_sEndResult[0] == '\0') return Plugin_Stop;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientInGame(c) && !IsFakeClient(c)) KickClient(c, "%s", g_sEndResult);
+	}
+	return Plugin_Stop;
 }
 
 /** Two map names belong to the same campaign when they share the prefix
@@ -1930,6 +1958,7 @@ void ResetMatchState()
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
 	g_sCampaign[0] = '\0';
+	g_sEndResult[0] = '\0';
 	g_iRosterCount = 0;
 	g_bSelfStarted = false;
 	g_iEventSeq = 0;
