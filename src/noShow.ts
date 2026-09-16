@@ -18,8 +18,18 @@ export function recordPlayerConnect(db: DB, token: string, steamid: string): voi
   ).run(steamid, token);
 }
 
+/**
+ * A numeric setting, or the fallback when the row is missing or blank.
+ *
+ * The emptiness check is not belt and braces. These rows are meant to be
+ * hand-edited in sqlite, and Number('') is 0, not NaN, so a blank value used
+ * to sail past the isFinite guard: noshow_minutes = 0 makes `age_min >= 0`
+ * true for every live match, and the next 60 second tick aborted all of them.
+ */
 function num(db: DB, key: string, fallback: number): number {
-  const raw = Number(getSetting(db, key));
+  const value = getSetting(db, key);
+  if (value === undefined || value.trim() === '') return fallback;
+  const raw = Number(value);
   return Number.isFinite(raw) ? raw : fallback;
 }
 
@@ -62,6 +72,13 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
   );
 
   for (const r of doomed) {
+    // No clearLive() here, unlike the sibling reapOrphanedMatches, and that is
+    // deliberate rather than an oversight: getLiveMatches only ever selects
+    // matches in state 'live', so the leftover match_live rows of a match we
+    // have just marked 'aborted' are unreachable scratch. The orphan reaper
+    // clears them because it runs on matches that WERE heartbeating and so
+    // have a full scratch set worth reclaiming; a no-show match has almost
+    // none. Adding the call would be harmless, but nothing depends on it.
     db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
       .run(r.id);
     if (r.server_id !== null) releaser.release(r.server_id);
