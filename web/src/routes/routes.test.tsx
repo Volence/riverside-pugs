@@ -485,6 +485,25 @@ describe('Play', () => {
     expect(screen.getByText(/sign in through steam/i)).toBeTruthy();
   });
 
+  // Regression guard. /auth/steam is a backend route, not an SPA route, so
+  // preact-iso must NOT intercept the click: it only leaves a same-origin link
+  // alone when the target is something other than _self (router.js:45).
+  // Without it the router renders its own "No such page" and only a manual
+  // refresh reaches the server, which is how sign-in was broken from 2b42626
+  // until 2026-09-16 without anyone noticing.
+  it('lets the browser navigate to Steam sign-in instead of the SPA router', () => {
+    render(<Play session={{ kind: 'anonymous' }} state={null} refresh={noop} />);
+    const link = screen.getByText(/sign in through steam/i) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/auth/steam');
+    const target = link.getAttribute('target');
+    expect(target).toBeTruthy();
+    // The exact values preact-iso would still swallow.
+    expect(/^(_?self)?$/i.test(target ?? '')).toBe(false);
+    // and it must stay in this tab, or the Steam redirect comes back to an
+    // orphaned window rather than the page the user started from.
+    expect(target).not.toBe('_blank');
+  });
+
   it('asks for an invite code when registered but not active', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false };
     render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);

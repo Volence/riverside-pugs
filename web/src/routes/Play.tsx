@@ -46,7 +46,16 @@ function SignIn() {
         <p class="eyebrow">Riverside</p>
         <h1>Ranked 4v4 pick-up games</h1>
         <p class="muted">Sign in to join the queue.</p>
-        <a class="btn" href="/auth/steam">Sign in through Steam</a>
+        {/* target is load bearing, exactly as it is for the .html links in
+            Nav: preact-iso intercepts a same-origin click unless the target
+            is set to something other than _self (router.js:45). /auth/steam
+            is a BACKEND route, not an SPA route, so without this the router
+            swallows the click and renders its own "No such page", and only a
+            manual refresh reaches the server. That is what happened between
+            2b42626 and 2026-09-16, during which nobody could sign in at all.
+            _top rather than _blank: the Steam redirect has to come back to
+            this tab, not orphan itself in a new one. */}
+        <a class="btn" href="/auth/steam" target="_top" rel="noopener">Sign in through Steam</a>
       </Panel>
       {q && (
         <Panel>
