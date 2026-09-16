@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { NAV_LINKS } from './Nav';
 
 describe('NAV_LINKS', () => {
-  it('offers the crosshair maker', () => {
-    expect(NAV_LINKS.find(([href]) => href === '/crosshair.html')).toBeTruthy();
+  it('offers the crosshair maker as an in-site route', () => {
+    // It was /crosshair.html with target=_blank, a standalone document with
+    // its own palette and no way back. Now a route, so it keeps the header.
+    const link = NAV_LINKS.find(([href]) => href === '/crosshair');
+    expect(link).toBeTruthy();
+    expect(link![2]).toBeUndefined();
   });
 
   it('gives every static page a target so the SPA router does not swallow it', () => {
