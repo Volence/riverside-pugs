@@ -8,6 +8,7 @@ import { STATUS_CODES } from 'node:http';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
+import { backfillPersonas } from './personaBackfill.js';
 import { authRoutes } from './routes/auth.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
@@ -109,6 +110,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       message: 'internal server error',
     });
   });
+
+  // Best effort and never awaited: a Steam outage must not delay boot.
+  void backfillPersonas(deps.db, deps.config.steamApiKey)
+    .then((n) => { if (n > 0) console.log(`[persona] backfilled ${n} player(s)`); })
+    .catch((err) => console.error('[persona] backfill failed:', err));
 
   await app.register(cookie, { secret: deps.config.cookieSecret });
   await app.register(websocket);
