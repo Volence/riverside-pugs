@@ -4,6 +4,7 @@ import { campaignName } from '../format';
 import { Countdown, useCountdownChrome, useSecondsLeft } from '../components/Countdown';
 import { Empty, Panel } from '../components/bits';
 import { CampaignTiles } from '../components/CampaignTiles';
+import { ConnectPanel } from '../components/ConnectPanel';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 
@@ -86,7 +87,11 @@ function Live(
   if (match) {
     return (
       <Panel>
-        <p class="eyebrow">{match.state === 'live' ? 'Match in progress' : 'Setting up server'}</p>
+        <p class="eyebrow">
+          {match.state === 'live' ? 'Match in progress'
+            : match.waitingForServer ? 'Waiting for a server'
+            : 'Setting up server'}
+        </p>
         <h2>{campaignName(match.campaign)}</h2>
         <div class="teams">
           {(['A', 'B'] as const).map((label) => {
@@ -103,6 +108,10 @@ function Live(
             );
           })}
         </div>
+        {match.connect && <ConnectPanel connect={match.connect} />}
+        {match.waitingForServer && (
+          <Empty>Waiting for a free server. The match starts as soon as one opens up.</Empty>
+        )}
       </Panel>
     );
   }

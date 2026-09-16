@@ -524,6 +524,30 @@ button.ctile:hover { border-color: var(--text-muted); }
 }
 .slot--filled { background: var(--accent); border-color: var(--accent); border-style: solid; }
 
+/* ---------- play: connect panel ---------- */
+
+/* sv_password makes this the only door in, so the console line is a fallback
+ * that must never force the page wider: it wraps inside its own box rather
+ * than pushing a horizontal scrollbar onto the whole page at phone width. */
+.connect { margin-top: var(--sp-4); }
+.connect__line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.connect__line code {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-dense);
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 .hero-panel h1 { margin: var(--sp-2) 0 var(--sp-3); }
 .hero-panel .btn { margin-top: var(--sp-4); }
 
