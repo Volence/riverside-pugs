@@ -120,13 +120,13 @@ export const OVERVIEWS: Record<string, {
   'l4d_vs_farm01_hilltop': {
     map: 'l4d_vs_farm01_hilltop',
     layers: [
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+0326.webp', cutHeight: 326, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+0582.webp', cutHeight: 582, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+0838.webp', cutHeight: 838, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+1406.webp', cutHeight: 1406, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
-      { image: '/overviews/l4d_vs_farm01_hilltop_z+2270.webp', cutHeight: 2270, unitsPerPixel: 7.250983, originX: -16547, originY: -6299, width: 2048, height: 1271 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+0326.4x.webp', cutHeight: 326, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+0582.4x.webp', cutHeight: 582, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+0838.4x.webp', cutHeight: 838, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+1406.4x.webp', cutHeight: 1406, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
+      { image: '/overviews/l4d_vs_farm01_hilltop_z+2270.4x.webp', cutHeight: 2270, unitsPerPixel: 3.625492, originX: -16547, originY: -6299, width: 4096, height: 2542 },
     ],
-    contentBox: { x0: 390, y0: 0, x1: 1684, y1: 1271 },
+    contentBox: { x0: 779, y0: 0, x1: 3367, y1: 2542 },
   },
   'l4d_vs_farm02_traintunnel': {
     map: 'l4d_vs_farm02_traintunnel',
