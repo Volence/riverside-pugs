@@ -238,12 +238,34 @@ Ship order follows the rule learned on 2026-09-15: `./deploy-web.sh` first, then
 `plugin/stage.sh` with the server empty, then re-assert the cvars, since a
 plugin reload resets every cvar until the next map change.
 
-## Known gap, deliberately not covered
+## Known gap: mid-match abandonment, its own spec next
 
-**Mid-match abandonment.** If someone quits on map 2, nothing detects it: the
-match plays out short-handed and rates normally. That is 4e (suspensions and
-no-show penalties) and stays there. Piece 9 covers only the case where a match
+If someone quits on map 2, nothing here detects it: the match plays out
+short-handed and rates normally. Piece 9 covers only the case where a match
 never gets going at all, because that one pins the server.
+
+Deliberately sequenced after this spec rather than bundled into it. The first
+website-to-playing run does not depend on abandonment handling, and eight people
+actually playing one will teach us more about what to build than guessing now.
+
+Rules already decided by the owner, recorded here so the next spec starts from
+them rather than re-asking:
+
+- A rostered player disconnecting mid-match **pauses the game**.
+- If they are not back within **five minutes**, they are **banned for one day**
+  and the match **ends**.
+- The ending is a **forfeit**: the abandoner's team takes the loss and SR moves
+  accordingly. The seven who stayed get something for their time, and quitting
+  is never a way to dodge a loss.
+
+Groundwork that already exists: rotoblin provides `sm_pause`, plus `forcepause`
+and `forceunpause` for admins, and its unpause requires both teams to `!ready`.
+So the plugin can force-pause on the drop and let the normal consent flow resume
+it once the player is back and loaded, rather than fighting rotoblin's state
+machine. On the backend side `players.status` accepts `'banned'` but carries no
+expiry, reason or history, so a one-day ban needs real storage: a `bans` table
+rather than a status flag, since the admin panel (roadmap item 3) will want to
+list and lift them.
 
 ## Out of scope
 
