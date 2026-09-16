@@ -188,6 +188,10 @@ first map of the voted campaign.
    `server_id` is **not** null, setup died partway through; see "Two strand
    modes that are not the plugin misbehaved" in Step 9.
 
+   One case here is expected rather than wrong: a SECOND queue popping while
+   the first match is still live waits exactly like this, because there is
+   only one server. See Step 8b before touching it.
+
    **Write down both numbers from this row and keep them straight for the
    rest of the night.** The `id` column is the *match id*, referred to below
    as `<match id>`. The `server_id` column is a different number from a
@@ -336,14 +340,20 @@ Play the match normally, or shortcut it. The chat command is `!endpug`
 
 Do all four. Do not stop at the first one that looks right.
 
-1. Password cleared:
+1. Standing password restored:
 
        R "sv_password"
 
-   Expected: empty value (no password set). If it still shows
-   `pug_<token8>`, the `ServerReleaser` did not clear it; casual players will
-   not be able to join the box until this is fixed by hand
-   (`R "sv_password \"\""`) and the underlying bug investigated.
+   Expected: **the box's standing password from `secrets.cfg`, not an empty
+   value.** An earlier draft of this runbook said to expect empty; that was
+   written before `74f7230`, which changed release to `exec secrets.cfg`
+   rather than blanking the password. This box carries a standing
+   `sv_password` (exec'd by `local.cfg`) and that is what keeps strangers
+   off it, so an EMPTY value here is now the bug, not the pass condition.
+
+   If it still shows `pug_<token8>`, the `ServerReleaser` never ran its
+   restore; re-assert by hand with `R "exec secrets.cfg"` (never a literal,
+   the file is the single source of truth) and investigate.
 
 2. Server row freed:
 
@@ -371,6 +381,67 @@ Do all four. Do not stop at the first one that looks right.
 If all four pass, the first real web-to-server match is confirmed working
 end to end. Tell the Discord call. Go to bed.
 
+## 8b. A second queue while the first match is live
+
+This is expected behaviour with one server, not a fault. Worth reading before
+the night starts so nobody debugs it live.
+
+The queue does not freeze at 8/8 when it pops. `maybeStartLobby` calls
+`queue.takeBatch(8)`, which is a `splice`, so the eight leave the queue
+immediately and a ninth person joining lands in a fresh `1/8`. That part
+needs no intervention.
+
+What follows is the part to explain to people out loud. When that second
+queue fills and its lobby completes, `onLobbyComplete` inserts the match as
+`configuring` and calls `setupMatch`, which finds no idle box because match 1
+holds the only one. `onNoServer` puts it in `PendingMatches` and those eight
+see **"Waiting for a server"**. They stay there until match 1 releases, and
+the release drains exactly one pending match. Correct, by design.
+
+Three consequences, all of them things that look like bugs at 1am:
+
+- **A waiting match has no timeout.** `reapNoShowMatches` selects only
+  `state='live' AND went_live_at IS NOT NULL` (`src/noShow.ts`). A match
+  waiting for a box is `configuring` with `server_id IS NULL`, so nothing
+  reaps it. It waits indefinitely.
+- **Those eight cannot leave.** `hasOpenMatch` counts `configuring`, so
+  `/api/queue/join` refuses them, and `/api/queue/leave` does nothing because
+  they are not in the queue. There is no in-product way for them to back out.
+- **There is no admin cancel route.** Production registers six routes
+  (`queue/join`, `queue/leave`, `lobby/ready`, `lobby/vote`, `state`,
+  `queue`). The only abort lives in `src/routes/dev.ts` behind `DEV_MODE=1`,
+  which is deliberately not set on the box.
+
+So the escape hatch is by hand, and it must be **targeted at one id**. The
+blanket form is what killed a match the owner had just started:
+
+    # Find it first. Never abort without reading this output.
+    sqlite3 /home/pug/app/data/pug.db \
+      "SELECT id, state, campaign, server_id, created_at FROM matches
+       WHERE state = 'configuring';"
+
+    # Confirm it is the WAITING one: server_id must be NULL. If server_id is
+    # set, this is a match mid-setup that owns a box, and section 9 applies
+    # instead.
+
+    # Then, one id only:
+    sqlite3 /home/pug/app/data/pug.db \
+      "UPDATE matches SET state='aborted', ended_at=datetime('now')
+       WHERE id=<match id> AND state='configuring' AND server_id IS NULL;"
+
+The `AND` clauses are not decoration: they make the statement a no-op rather
+than a disaster if the match moved on between your SELECT and your UPDATE.
+
+Restart `pug-web` afterward so `PendingMatches.rebuildFromDb` drops it from
+the in-memory waiting list. Without that, the aborted id stays in `waiting`
+until the next drain, where it is skipped harmlessly (`drain` re-reads state
+and continues past anything not `configuring`), so the restart is tidiness
+rather than a repair. The eight players can re-queue as soon as the row is
+`aborted`, restart or not, because `hasOpenMatch` reads the database directly.
+
+**If you would rather not deal with any of this:** hold the second queue.
+Tell people not to fill it until match 1 is close to ending.
+
 ## 9. Rollback
 
 If the plugin misbehaves at any point after staging (wrong placement, no
@@ -392,7 +463,7 @@ kicks, roster mismatch, whatever):
 
 **`sm_pug_abort` only resets the plugin's own in-memory state.** `Cmd_Abort`
 in `plugin/pug-match.sp` calls `ResetMatchState()` and nothing else: it never
-touches the database and never clears `sv_password`. Immediately after a bare
+touches the database and never restores `sv_password`. Immediately after a bare
 `sm_pug_abort`, expect the match row to still read `state = live` and the
 server row to still be non-idle. That is correct, not a bug, and the next two
 paragraphs are what actually closes it out. Do not stop at `sm_pug_abort`
@@ -407,8 +478,8 @@ match whose heartbeat has been silent for `ORPHAN_AFTER_MS` (600000ms, i.e.
 10 minutes). That reaper runs on a 60 second interval alongside
 `reapNoShowMatches` (`src/server.ts`), so worst case is 10 minutes plus
 just under 60 seconds, roughly 10 to 11 minutes total. When it fires it goes
-through the same `ServerReleaser` as every other path, so `sv_password` is
-cleared as part of it. If you can afford to wait that long, running
+through the same `ServerReleaser` as every other path, so the standing
+`sv_password` is restored as part of it. If you can afford to wait that long, running
 `sm_pug_abort` and then leaving it alone is enough; just say so out loud in
 the Discord call so nobody re-tries the same match in the meantime.
 
@@ -435,7 +506,7 @@ box has `server_id IS NULL` and so is never touched.)
 The `reapOrphanedMatches` / `reapNoShowMatches` pair in `src/liveView.ts`
 and `src/noShow.ts` are the correct pattern this scoped update imitates:
 update one specific match row to `aborted`, then let the release path
-(directly via the reaper, or via `reconcileServers` on next boot) clear
+(directly via the reaper, or via `reconcileServers` on next boot) restore
 `sv_password` and free the server. Never skip straight to touching
 `servers.status` by hand; go through a match-state change and let a
 reaper or `reconcileServers` do the release, so the release logic only
@@ -504,7 +575,7 @@ aborts the match and releases the box through the `ServerReleaser`, logging a
 line beginning `[orchestrator] INCIDENT:` with the match id and token.
 
 - Expected after roughly four minutes: match `aborted`, server `idle`,
-  `sv_password` empty, box empty.
+  `sv_password` back to the standing value from `secrets.cfg`, box empty.
 - **The result is lost**: no scores, no rating movement for those eight. Say so
   in the Discord call; it is an incident, not a tidy-up.
 - **Recover it from the log, not from the box.** The INCIDENT line carries the
@@ -520,7 +591,7 @@ line beginning `[orchestrator] INCIDENT:` with the match id and token.
   gone for good.
 
 One consequence worth knowing for both paths above: `ServerReleaser.release`
-now sends a best-effort `sm_pug_abort` alongside the `sv_password` clear, so
+now sends a best-effort `sm_pug_abort` alongside the `sv_password` restore, so
 any automatic release also drops the plugin's match. That is why the box stops
 heartbeating on its own after a reaper fires, where previously you had to run
 `sm_pug_abort` yourself.
