@@ -2,7 +2,7 @@ import { readFileSync, createReadStream, openSync, readSync, closeSync } from 'n
 import { PassThrough, pipeline, type Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
-import { listSessions, currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
+import { currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
@@ -225,35 +225,6 @@ export async function replayRoutes(
 ): Promise<void> {
   const { db, replayDir } = opts;
 
-  /**
-   * The standalone `!mix` sessions, and only those.
-   *
-   * A ranked match's replays are reachable through its match page, so they do
-   * not need to be listed here. The orphan files, recorded under a token the
-   * plugin generated for a mix, have no other route to them, and that is what
-   * this page is for.
-   *
-   * Filtering ranked sessions out also keeps their tokens off a public page.
-   * A match token seeds the game server's sv_password in orchestrator.ts, and
-   * every token in this listing is rendered in the browser.
-   *
-   * The filter is on `matches.token`, NOT on the presence of a match_replays
-   * row. Those rows are written at round_end, so filtering on them left the
-   * whole of a ranked match's first round unclaimed and published its token
-   * on this page, which is exactly the window in which the password matters.
-   * The orchestrator writes the token the moment it takes a server, so
-   * matching on it has no window at all. A standalone `!mix` session has no
-   * matches row and stays listed.
-   */
-  app.get('/api/replays/sessions', async () => {
-    const rows = db
-      .prepare('SELECT token FROM matches WHERE token IS NOT NULL')
-      .all() as { token: string }[];
-    const ranked = new Set(rows.map((r) => r.token));
-    const sessions = listSessions(replayDir, Date.now())
-      .filter((s) => !ranked.has(s.token));
-    return { sessions };
-  });
 
   /**
    * Which round of a match is being recorded right now, addressed by match id.
