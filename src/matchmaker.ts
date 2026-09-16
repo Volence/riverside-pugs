@@ -1,9 +1,10 @@
 import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
-import { Lobby, realScheduler, type Scheduler, type LobbySnapshot } from './lobby.js';
+import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase } from './lobby.js';
 import { balanceTeams } from './balance.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
+import { getServer } from './serverPool.js';
 import type { Orchestrator } from './orchestrator.js';
 
 export interface MatchmakerDeps {
@@ -30,10 +31,11 @@ function safeThresholds(raw: string | undefined): number[] {
 export interface NamedPlayer {
   steamid: string;
   name: string;
+  avatar: string | null;
 }
 
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean };
+  queue: { count: number; joined: boolean; players: NamedPlayer[] };
   lobby:
     | (Omit<LobbySnapshot, 'players'> & { players: NamedPlayer[]; myVote: string | null })
     | null;
@@ -43,6 +45,12 @@ export interface StateSnapshot {
     campaign: string;
     teamA: NamedPlayer[];
     teamB: NamedPlayer[];
+    /** Only for a viewer on this roster, and only once the match is live. */
+    connect: { host: string; port: number; password: string } | null;
+    /** True while the match is configuring and no server has been claimed
+     *  yet, so it is queued behind another match. Never true once the match
+     *  is live. */
+    waitingForServer: boolean;
   } | null;
 }
 
@@ -181,14 +189,13 @@ export class Matchmaker {
   }
 
   stateFor(steamid: string): StateSnapshot {
-    const named = (id: string): NamedPlayer => ({
-      steamid: id,
-      name: getPlayer(this.db, id)?.name ?? id,
-    });
+    const named = this.named.bind(this);
 
     const lobby = this.lobbyFor(steamid);
     const snap = lobby?.snapshot();
 
+    // The JOIN on match_players below is what puts the viewer on the roster:
+    // no separate roster check is needed (or wanted) anywhere in this method.
     const matchRow = this.db
       .prepare(
         `SELECT m.* FROM matches m
@@ -196,28 +203,72 @@ export class Matchmaker {
          WHERE mp.player_id = ? AND m.state IN ('configuring','live')
          ORDER BY m.id DESC LIMIT 1`,
       )
-      .get(steamid) as { id: number; state: string; campaign: string } | undefined;
+      .get(steamid) as
+      | { id: number; state: string; campaign: string; server_id: number | null; token: string | null }
+      | undefined;
 
     let match: StateSnapshot['match'] = null;
     if (matchRow) {
       const mps = this.db
         .prepare('SELECT player_id, team FROM match_players WHERE match_id = ?')
         .all(matchRow.id) as { player_id: string; team: 'a' | 'b' }[];
+
+      // Derived, never stored twice: this is the same expression setupMatch
+      // uses to set sv_password, so the two cannot drift.
+      let connect: { host: string; port: number; password: string } | null = null;
+      if (matchRow.state === 'live' && matchRow.server_id !== null && matchRow.token) {
+        const server = getServer(this.db, matchRow.server_id);
+        if (server) {
+          connect = {
+            host: server.host,
+            port: server.port,
+            password: `pug_${matchRow.token.slice(0, 8)}`,
+          };
+        }
+      }
+
       match = {
         id: matchRow.id,
         state: matchRow.state,
         campaign: matchRow.campaign,
         teamA: mps.filter((r) => r.team === 'a').map((r) => named(r.player_id)),
         teamB: mps.filter((r) => r.team === 'b').map((r) => named(r.player_id)),
+        connect,
+        waitingForServer: matchRow.state === 'configuring' && matchRow.server_id === null,
       };
     }
 
     return {
-      queue: { count: this.queue.count(), joined: this.queue.has(steamid) },
+      queue: {
+        count: this.queue.count(),
+        joined: this.queue.has(steamid),
+        players: this.queue.list().map(named),
+      },
       lobby: snap && lobby
         ? { ...snap, players: snap.players.map(named), myVote: lobby.myVote(steamid) }
         : null,
       match,
     };
+  }
+
+  /**
+   * The queue as anyone may see it, signed in or not.
+   *
+   * Deliberately not stateFor with the auth removed: that snapshot is entirely
+   * viewer-relative (are YOU queued, YOUR lobby, YOUR vote) and would be
+   * meaningless anonymously. Carries no connect block and no match id.
+   */
+  publicQueue(): { count: number; players: NamedPlayer[]; phase: LobbyPhase | null } {
+    const anyLobby = [...this.lobbies.values()][0];
+    return {
+      count: this.queue.count(),
+      players: this.queue.list().map((id) => this.named(id)),
+      phase: anyLobby?.snapshot().phase ?? null,
+    };
+  }
+
+  private named(id: string): NamedPlayer {
+    const p = getPlayer(this.db, id);
+    return { steamid: id, name: p?.name ?? id, avatar: p?.avatar ?? null };
   }
 }

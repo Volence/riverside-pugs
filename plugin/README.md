@@ -28,17 +28,14 @@ the roster over the `logaddress` feed, starts a match-named demo, and execs the
 ranked config. The backend materialises the match and hands back the id it
 allocated via `sm_pug_setid`.
 
-Differences from a backend-driven match, both deliberate:
+Difference from a backend-driven match, deliberate:
 
 - **The match id is 0 until the backend assigns one.** The plugin cannot invent
   it, because `matches.id` is an autoincrement the backend owns.
-- **Non-rostered players are NOT kicked.** Roster enforcement exists to hold a
-  backend-issued roster to the people who signed up for it. A match started
-  from inside a running game has no such authority, and the config's
-  `sm_restartmap` cycles every client through `OnClientPostAdminCheck` moments
-  after the snapshot, so kicking would eject anyone who happened to be
-  spectating. They stay, unscored. `sm_pug_status` reports this as
-  `selfStarted=1 enforceRoster=0`.
+
+No match, self-started or not, kicks a non-rostered player. `Timer_TeamLock`
+places the rostered eight on their correct sides; anyone else stays,
+unscored, and may spectate.
 
 Refuses cleanly when a match is already configured, when nobody is on a team,
 or when more than `MAX_ROSTER` (8) players are on teams.
@@ -83,9 +80,9 @@ plus placeholder SteamID64s that never connect; the roster does not have to be
 full for the plugin to arm.
 
 **Solo, unmodified:** items 1, 2, 3, 4, 5, 9, 10, 11. That is the whole RCON
-contract, the kick path, the UDP line format, the dump grammar and its
-idempotency, abort, and heartbeats. `sm_pug_status` after each step tells you
-what the plugin thinks happened.
+contract, non-rostered clients staying unscored, the UDP line format, the dump
+grammar and its idempotency, abort, and heartbeats. `sm_pug_status` after each
+step tells you what the plugin thinks happened.
 
 **Needs `sm_pug_min_orient 1`:** items 6 and 8, the score attribution and the
 cross-map relabeling case. The orientation vote at `Timer_TeamLock` normally
@@ -211,9 +208,9 @@ change, nobody kicked. It refuses to run while players are connected unless you
 pass `--force`.
 
 **The plugin is inert until a match is configured.** Every hook early-returns at
-`MS_None`, including the kick path in `OnClientPostAdminCheck`, so it is safe to
-leave installed on the casual server between test sessions. The only things
-running are two timers that return immediately.
+`MS_None`, including `OnClientPostAdminCheck`, so it is safe to leave installed
+on the casual server between test sessions. The only things running are two
+timers that return immediately.
 
 Step-by-step runbook with copy-pasteable RCON: `plugin/TESTING.md`.
 
@@ -227,7 +224,7 @@ didn't work" into a specific line.
    `pug-match`.
 2. RCON `sm_pug_match 999 testtoken no_mercy` + 8 `sm_pug_roster` lines (use
    real friends' steamid64s) → `PUGOK` responses.
-3. Non-rostered player joins → kicked with roster message.
+3. Non-rostered player joins → not kicked, stays a spectator.
 4. Rostered players join → placed on their teams; `PLAYER ... event=connect`
    lines reach the backend UDP listener (capture the real line format, research
    item #1, and pin `logParse.ts` tests with it).
@@ -241,5 +238,5 @@ didn't work" into a specific line.
 9. On finale load → `MATCH_END`; `sm_pug_dump testtoken` over RCON returns
    full DUMP/MAP/STAT/END; run it twice (idempotent).
 10. `sm_pug_abort testtoken` → `PUGOK aborted`; after the abort, roster
-    enforcement stops and rejoining players are no longer kicked.
+    enforcement stops and rejoining players are no longer placed on teams.
 11. Heartbeats arrive every 30s throughout.

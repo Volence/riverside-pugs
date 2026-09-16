@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent } from './logParse.js';
+import type { ServerReleaser } from './serverRelease.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
  *  emits one every 30s, so this tolerates three consecutive losses on a lossy
@@ -420,7 +421,11 @@ export const ORPHAN_AFTER_MS = 600_000;
  * row at all is left alone, because it may have been adopted seconds ago and
  * not yet reported in.
  */
-export function reapOrphanedMatches(db: DB, olderThanMs = ORPHAN_AFTER_MS): number[] {
+export function reapOrphanedMatches(
+  db: DB,
+  releaser: ServerReleaser,
+  olderThanMs = ORPHAN_AFTER_MS,
+): number[] {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString().replace('T', ' ').slice(0, 19);
   const rows = db
     .prepare(
@@ -431,13 +436,11 @@ export function reapOrphanedMatches(db: DB, olderThanMs = ORPHAN_AFTER_MS): numb
     .all(cutoff) as { id: number; server_id: number | null }[];
 
   for (const r of rows) {
-    db.transaction(() => {
-      db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
-        .run(r.id);
-      if (r.server_id !== null) {
-        db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(r.server_id);
-      }
-    })();
+    db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
+      .run(r.id);
+    // Through the releaser, not a raw status write: a reaped match is exactly
+    // the one whose sv_password nobody is left to clear by hand.
+    if (r.server_id !== null) releaser.release(r.server_id);
     clearLive(db, r.id);
     console.warn(`[liveView] reaped orphaned match ${r.id}: no heartbeat for ${olderThanMs}ms`);
   }

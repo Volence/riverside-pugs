@@ -20,6 +20,7 @@ const { mockApi } = vi.hoisted(() => ({
     maps: vi.fn(),
     profile: vi.fn(),
     replaySessions: vi.fn(),
+    queue: vi.fn(),
   },
 }));
 
@@ -34,7 +35,7 @@ const { MatchDetail } = await import('./MatchDetail');
 const { MapDetail } = await import('./MapDetail');
 const { Maps } = await import('./Maps');
 const { Profile } = await import('./Profile');
-const { Play } = await import('./Play');
+const { Play, QueuePanel } = await import('./Play');
 const { Replays } = await import('./Replays');
 
 // Auto-cleanup only runs when vitest exposes globals, which this config does
@@ -44,6 +45,11 @@ afterEach(cleanup);
 
 beforeEach(() => {
   for (const fn of Object.values(mockApi)) fn.mockReset();
+  // Every anonymous render of Play reaches SignIn, which polls this on mount.
+  // A sensible default here keeps the other describes from hitting the real
+  // network the way "offers Steam sign-in when logged out" did before this
+  // mock existed; tests that care about the queue panel override it.
+  mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
 });
 
 describe('Leaderboard', () => {
@@ -492,7 +498,7 @@ describe('Play', () => {
 
   it('shows the queue when idle', () => {
     render(
-      <Play session={active} state={{ queue: { count: 3, joined: false }, lobby: null, match: null }} refresh={noop} />,
+      <Play session={active} state={{ queue: { count: 3, joined: false, players: [] }, lobby: null, match: null }} refresh={noop} />,
     );
     expect(screen.getByText('3')).toBeTruthy();
     expect(screen.getByText(/join queue/i)).toBeTruthy();
@@ -503,10 +509,13 @@ describe('Play', () => {
       <Play
         session={active}
         state={{
-          queue: { count: 8, joined: true },
+          queue: { count: 8, joined: true, players: [] },
           lobby: {
             id: 'l1', phase: 'ready_check',
-            players: [{ steamid: '1', name: 'alice' }, { steamid: '2', name: 'bob' }],
+            players: [
+              { steamid: '1', name: 'alice', avatar: null },
+              { steamid: '2', name: 'bob', avatar: null },
+            ],
             ready: ['1'], options: [], votes: {}, deadline: Date.now() + 30_000, myVote: null,
           },
           match: null,
@@ -523,12 +532,13 @@ describe('Play', () => {
       <Play
         session={active}
         state={{
-          queue: { count: 0, joined: false },
+          queue: { count: 0, joined: false, players: [] },
           lobby: null,
           match: {
             id: 1, state: 'live', campaign: 'no_mercy',
-            teamA: [{ steamid: '1', name: 'alice' }],
-            teamB: [{ steamid: '2', name: 'bob' }],
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: null, waitingForServer: false,
           },
         }}
         refresh={noop}
@@ -537,6 +547,114 @@ describe('Play', () => {
     expect(screen.getByText('No Mercy')).toBeTruthy();
     expect(screen.getByText('Team A')).toBeTruthy();
     expect(screen.getByText('Team B')).toBeTruthy();
+  });
+
+  it('shows the connect panel and an in-progress eyebrow for a live match with connect details', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 0, joined: false, players: [] },
+          lobby: null,
+          match: {
+            id: 1, state: 'live', campaign: 'no_mercy',
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: { host: '45.32.199.85', port: 27015, password: 'pug_a1b2c3d4' },
+            waitingForServer: false,
+          },
+        }}
+        refresh={noop}
+      />,
+    );
+    expect(screen.getByText(/match in progress/i)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /join server/i })).toBeTruthy();
+  });
+
+  // The important one: sv_password makes the connect panel the only door into
+  // the server, so it must not render at all until connect is real, no matter
+  // what state the match is in.
+  it('renders no connect panel when connect is null', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 0, joined: false, players: [] },
+          lobby: null,
+          match: {
+            // 'configuring' is the real pre-live state (db.ts's CHECK
+            // constraint: 'configuring' | 'live' | 'completed' | 'aborted').
+            // waitingForServer stays false here: a server has been claimed,
+            // just not finished setting up yet.
+            id: 1, state: 'configuring', campaign: 'no_mercy',
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: null, waitingForServer: false,
+          },
+        }}
+        refresh={noop}
+      />,
+    );
+    expect(screen.queryByRole('link', { name: /join server/i })).toBeNull();
+    expect(screen.getByText(/setting up server/i)).toBeTruthy();
+  });
+
+  it('shows the waiting-for-server message and its own eyebrow when waitingForServer is true', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 0, joined: false, players: [] },
+          lobby: null,
+          match: {
+            // The server only ever sets waitingForServer while the match is
+            // still configuring (matchmaker.ts), never once it is live, so
+            // this fixture uses 'configuring' rather than 'live' to exercise
+            // a state the backend can actually produce.
+            id: 1, state: 'configuring', campaign: 'no_mercy',
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: null, waitingForServer: true,
+          },
+        }}
+        refresh={noop}
+      />,
+    );
+    expect(screen.getByText(/waiting for a server/i)).toBeTruthy();
+    expect(screen.getByText(/waiting for a free server/i)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /join server/i })).toBeNull();
+  });
+
+  it('does not show the public queue panel while api.queue() is still pending', () => {
+    let resolveQueue: (v: unknown) => void = () => {};
+    mockApi.queue.mockReturnValue(new Promise((r) => { resolveQueue = r; }));
+    render(<Play session={{ kind: 'anonymous' }} state={null} refresh={noop} />);
+    expect(screen.queryByText('Queue')).toBeNull();
+    // Settle the promise so it does not leak into the next test.
+    resolveQueue({ count: 0, players: [], phase: null });
+  });
+
+  it('shows the public queue panel once api.queue() resolves', async () => {
+    mockApi.queue.mockResolvedValue({
+      count: 1,
+      players: [{ steamid: '1', name: 'dizzy', avatar: null }],
+      phase: null,
+    });
+    render(<Play session={{ kind: 'anonymous' }} state={null} refresh={noop} />);
+    await waitFor(() => expect(screen.getByText('dizzy')).toBeTruthy());
+    expect(screen.getByText('Queue')).toBeTruthy();
+  });
+
+  it('shows who is in the queue and keeps the empty slots visible', () => {
+    const players = [
+      { steamid: '1', name: 'dizzy', avatar: 'http://a/1.jpg' },
+      { steamid: '2', name: 'mayhem', avatar: null },
+    ];
+    render(<QueuePanel count={2} joined={false} players={players} refresh={() => {}} />);
+
+    expect(screen.getByText('dizzy')).toBeTruthy();
+    expect(screen.getByText('mayhem')).toBeTruthy();
+    expect(document.querySelectorAll('.slot').length).toBe(8);
   });
 });
 
@@ -877,7 +995,8 @@ describe('StatTable group dividers', () => {
 describe('clear latency surfaces', () => {
   const ce = (seq: number, kind: string, actor: string, target: string | null, tMs: number) => ({
     seq, kind, mapOrdinal: 0, half: 1, tMs,
-    actor: { steamid: actor, name: actor }, target: target ? { steamid: target, name: target } : null,
+    actor: { steamid: actor, name: actor, avatar: null },
+    target: target ? { steamid: target, name: target, avatar: null } : null,
     value: 0,
   });
 
