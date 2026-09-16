@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, ApiError, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
 import { campaignName } from '../format';
-import { Countdown, useCountdownChrome, useSecondsLeft } from '../components/Countdown';
+import { Countdown, useSecondsLeft } from '../components/Countdown';
+import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel } from '../components/bits';
 import { CampaignTiles } from '../components/CampaignTiles';
 import { ConnectPanel } from '../components/ConnectPanel';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 
-const QUEUE_SIZE = 8;
+
 
 export function Play(
   { session, state, refresh }: { session: Session; state: StateSnapshot | null; refresh: () => void },
@@ -161,7 +162,6 @@ export function QueuePanel(
     { count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void },
 ) {
   const [error, setError] = useState('');
-  useCountdownChrome(null, 0);
 
   const act = async (fn: () => Promise<unknown>) => {
     setError('');
@@ -221,7 +221,6 @@ function ReadyCheck(
   { lobby, me, refresh }: { lobby: LobbySnapshot; me: string; refresh: () => void },
 ) {
   const left = useSecondsLeft(lobby.deadline);
-  useCountdownChrome('Ready check', left);
   const iAmReady = lobby.ready.includes(me);
 
   return (
@@ -251,7 +250,6 @@ function ReadyCheck(
 
 function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void }) {
   const left = useSecondsLeft(lobby.deadline);
-  useCountdownChrome('Campaign vote', left);
   const total = Object.values(lobby.votes).reduce((a, b) => a + b, 0);
   const leader = Math.max(0, ...Object.values(lobby.votes));
 

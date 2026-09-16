@@ -1,7 +1,8 @@
 import { render } from 'preact';
-import { LocationProvider, Route, Router } from 'preact-iso';
+import { LocationProvider, Route, Router, useLocation } from 'preact-iso';
 import { useLiveState } from './hooks/useLiveState';
 import { Nav } from './components/Nav';
+import { QueueBar } from './components/QueueBar';
 import { DevPanel } from './components/DevPanel';
 import { Play } from './routes/Play';
 import { Leaderboard } from './routes/Leaderboard';
@@ -31,10 +32,16 @@ function NotFound() {
 function App() {
   const { session, state, refresh } = useLiveState();
   const me = session.kind === 'active' ? session.me.steamid : null;
+  const { path } = useLocation();
 
   return (
     <>
       <Nav session={session} state={state} />
+      {/* Below the nav and above the router: it belongs to the shell, not to
+          any page, and it is what keeps a running ready check visible while
+          you are reading the leaderboard. It also owns data-urgent and the
+          tab title for the whole app, so nothing else may set them. */}
+      <QueueBar state={state} path={path} />
       <main>
         <Router>
           <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
