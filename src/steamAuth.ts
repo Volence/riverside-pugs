@@ -78,3 +78,30 @@ export async function fetchPersona(
     return { name: steamid, avatar: null };
   }
 }
+
+/** Batch persona lookup. GetPlayerSummaries takes up to 100 ids per call, so
+ *  the whole players table is normally a single request. Best effort like its
+ *  single-id sibling: a failure yields an empty map, never a throw. */
+export async function fetchPersonas(
+  steamids: string[],
+  apiKey: string | null,
+  fetchFn: FetchFn = fetch,
+): Promise<Map<string, { name: string; avatar: string | null }>> {
+  const out = new Map<string, { name: string; avatar: string | null }>();
+  if (!apiKey || steamids.length === 0) return out;
+  for (let i = 0; i < steamids.length; i += 100) {
+    const batch = steamids.slice(i, i + 100);
+    try {
+      const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${apiKey}&steamids=${batch.join(',')}`;
+      const res = await fetchFn(url);
+      const data: any = await res.json();
+      for (const p of data?.response?.players ?? []) {
+        if (!p?.steamid) continue;
+        out.set(p.steamid, { name: p.personaname ?? p.steamid, avatar: p.avatarfull ?? null });
+      }
+    } catch {
+      // Leave this batch out. The caller updates only what came back.
+    }
+  }
+  return out;
+}
