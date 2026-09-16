@@ -41,17 +41,17 @@ describe('OVERVIEWS', () => {
   it('points every layer at a webp under /overviews/', () => {
     for (const m of Object.values(OVERVIEWS)) {
       for (const l of m.layers) {
-        expect(l.image).toMatch(/^\/overviews\/[a-z0-9_+-]+(\.4x)?\.webp$/);
+        expect(l.image).toMatch(/^\/overviews\/[a-z0-9_+-]+(\.\d+x)?\.webp$/);
       }
     }
   });
 
-  // Blood Harvest 1 is the 4x tiled recapture: same corner, half the units per
-  // pixel, twice the pixels on each side.
+  // Blood Harvest 1 is the 4x4 tiled recapture: same corner, a quarter of the
+  // units per pixel, four times the pixels on each side.
   it('carries the spec values for a known map', () => {
     const m = overviewFor('l4d_vs_farm01_hilltop')!;
     expect(m.layers).toHaveLength(5);
-    expect(m.layers[0].unitsPerPixel).toBeCloseTo(3.625492, 5);
+    expect(m.layers[0].unitsPerPixel).toBeCloseTo(1.812746, 5);
     expect(m.layers[0].originX).toBeCloseTo(-16547, 0);
     expect(m.layers[0].originY).toBeCloseTo(-6299, 0);
   });
@@ -65,14 +65,14 @@ describe('OVERVIEWS', () => {
     }
   });
 
-  // Phase 1 of the recapture ships one map. Anything else at 4x, or farm01 at
+  // Phase 1 of the recapture ships one map. Anything else tiled, or farm01 at
   // 1x, means the converter took the wrong source.
-  it('ships Blood Harvest 1 at 4x and every other map at 1x', () => {
+  it('ships Blood Harvest 1 at 4x4 tiles and every other map at 1x', () => {
     for (const m of Object.values(OVERVIEWS)) {
-      const is4x = m.map === 'l4d_vs_farm01_hilltop';
+      const tiled = m.map === 'l4d_vs_farm01_hilltop';
       for (const l of m.layers) {
-        expect([l.width, l.height]).toEqual(is4x ? [4096, 2542] : [2048, 1271]);
-        expect(l.image.endsWith('.4x.webp')).toBe(is4x);
+        expect([l.width, l.height]).toEqual(tiled ? [8192, 5084] : [2048, 1271]);
+        expect(l.image.endsWith('.16x.webp')).toBe(tiled);
       }
     }
   });
