@@ -24,7 +24,14 @@
 #define ZC_HUNTER 3
 #define ZC_TANK 5
 #define LOCK_ATTEMPT_CAP 6
+/** First attempt at the end-of-match kick, and the gap between retries. */
 #define END_KICK_DELAY 8.0
+/** How many passes the kick gets before it gives up. The finale path fires
+ *  EndMatchNow from OnMapStart, so pass 1 lands mid map load with most clients
+ *  not yet in game; at 8 s a pass this covers roughly 40 s, which is a slow
+ *  L4D1 map load and then some. Bounded so a client that never finishes
+ *  loading cannot leave a timer running for the rest of the night. */
+#define END_KICK_TRIES 5
 
 /** Longest chat message emitted. Long enough for anything anyone types in a
  *  PUG, short enough that a message cannot push a log line into truncation. */
@@ -83,6 +90,22 @@ int g_iMatchId;
 char g_sToken[65];
 char g_sCampaign[64];
 char g_sEndResult[128];
+
+// The end-of-match kick, held in its OWN state rather than reading the match
+// state or g_sEndResult.
+//
+// It used to key off g_sEndResult, which ResetMatchState blanks. The backend's
+// routine sm_pug_abort right after a successful report calls ResetMatchState,
+// and on a healthy box that whole round trip is a few hundred milliseconds
+// against an 8 second timer, so the kick was cancelled long before it fired
+// and only ever ran when REPORTING FAILED. Exactly backwards: the box was left
+// full after every good match and emptied only after a bad one.
+//
+// So the reason lives here, survives ResetMatchState, and is cleared only by
+// CancelEndKick, which the three new-match entry points call deliberately.
+Handle g_hEndKick = null;
+char g_sEndKickReason[128];
+int g_iEndKickTries;
 
 // Roster: fixed slots, parallel arrays, keyed by SteamID64.
 char g_sRosterId[MAX_ROSTER][32];
@@ -1373,6 +1396,9 @@ public Action Cmd_Match(int args)
 		PrintToServer("PUGERR bad matchid");
 		return Plugin_Handled;
 	}
+	// A new match, so any kick still pending from the last one is void. This
+	// and the two sites below are the ONLY places the kick is cancelled.
+	CancelEndKick();
 	ResetMatchState();
 	g_iMatchId = matchId;
 	GetCmdArg(2, g_sToken, sizeof(g_sToken));
@@ -1566,6 +1592,7 @@ public Action Cmd_LoadPug(int client, int args)
 		return Plugin_Handled;
 	}
 
+	CancelEndKick();                 // new match: a kick left over from the last one is void
 	ResetMatchState();
 	g_bSelfStarted = true;
 	g_iMatchId = 0;                  // the backend owns match ids; assigned later via sm_pug_setid
@@ -1663,18 +1690,83 @@ void EndMatchNow(const char[] why)
 	// queue pop. Delayed so the score can be read in game first rather than
 	// only in the menu dialog. Safe for reporting: WriteDump reads roster slots,
 	// not clients, so the backend still gets a complete dump from an empty
-	// server.
-	CreateTimer(END_KICK_DELAY, Timer_EndKick);
+	// server, and it survives the sm_pug_abort that follows a successful report.
+	ArmEndKick(g_sEndResult);
+}
+
+/** (Re)arm the end-of-match kick with the message players will see. */
+void ArmEndKick(const char[] reason)
+{
+	// EndMatchNow can run twice in a night (campaign changed, then a finale),
+	// so clear any timer still pending before making a second one.
+	CancelEndKick();
+	strcopy(g_sEndKickReason, sizeof(g_sEndKickReason), reason);
+	g_iEndKickTries = 0;
+	g_hEndKick = CreateTimer(END_KICK_DELAY, Timer_EndKick, _, TIMER_REPEAT);
+}
+
+/** Drop a pending kick on the floor. Called ONLY where a genuinely new match
+ *  begins, so a stale result can never kick players out of a fresh one. Never
+ *  from ResetMatchState: the backend's routine sm_pug_abort goes through that,
+ *  and cancelling there is what stopped the kick from ever firing. */
+void CancelEndKick()
+{
+	if (g_hEndKick != null)
+	{
+		KillTimer(g_hEndKick);
+		g_hEndKick = null;
+	}
+	g_sEndKickReason[0] = '\0';
+	g_iEndKickTries = 0;
+}
+
+/** A real person the end-of-match kick should clear off the box.
+ *
+ *  Bots are not people, and the SourceTV relay must survive: it is a permanent
+ *  fixture on the Dallas box and it is what writes the match demos, so kicking
+ *  it would cost every LATER match its demo, not just this one. SourceMod
+ *  reports HLTV as a fake client, but the explicit check says why out loud and
+ *  costs nothing. This never mattered before, because the kick almost never
+ *  fired. */
+bool IsEndKickTarget(int client)
+{
+	return !IsFakeClient(client) && !IsClientSourceTV(client);
 }
 
 public Action Timer_EndKick(Handle timer)
 {
-	if (g_sEndResult[0] == '\0') return Plugin_Stop;
+	if (g_sEndKickReason[0] == '\0')
+	{
+		g_hEndKick = null;
+		return Plugin_Stop;
+	}
+	g_iEndKickTries++;
+
+	// Counted BEFORE anyone is kicked: KickClient does not necessarily drop the
+	// client within this frame, so a post-kick count would read stale. A pass
+	// that finds nobody left is the normal way this stops.
+	int present = 0;
 	for (int c = 1; c <= MaxClients; c++)
 	{
-		if (IsClientInGame(c) && !IsFakeClient(c)) KickClient(c, "%s", g_sEndResult);
+		if (IsClientConnected(c) && IsEndKickTarget(c)) present++;
 	}
-	return Plugin_Stop;
+	if (present == 0 || g_iEndKickTries > END_KICK_TRIES)
+	{
+		g_hEndKick = null;
+		g_sEndKickReason[0] = '\0';
+		return Plugin_Stop;
+	}
+
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		// IsClientInGame, not merely connected: on the finale path this timer's
+		// first pass lands in the middle of the map load that triggered it, and
+		// kicking a client who has not finished loading is not safe. They are
+		// caught by a later pass instead, which is the whole reason this timer
+		// repeats. Format string never the buffer itself.
+		if (IsClientInGame(c) && IsEndKickTarget(c)) KickClient(c, "%s", g_sEndKickReason);
+	}
+	return Plugin_Continue;
 }
 
 /** Two map names belong to the same campaign when they share the prefix
@@ -2410,6 +2502,10 @@ public void OnRoundIsLive()
 		if (!blocked && HumansOnTeams() >= g_cvAutoMinPlayers.IntValue)
 		{
 			if (g_State == MS_Ended) LogUncollectedResult();
+			// Auto-track adoption is a new match, so a kick armed by the match
+			// that just ended must not fire into it. The window is real: the
+			// previous EndMatchNow may have been seconds ago.
+			CancelEndKick();
 			ResetMatchState();
 			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
 			// forward: this half is live. Left false, Event_RoundEnd returned early
