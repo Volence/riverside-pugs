@@ -74,12 +74,14 @@ Confirm the plugin agrees:
 
 Expect `state=pending`, `match=999`, eight roster lines, `connected=0` for all.
 
-## 3. Non-rostered kick
+## 3. Non-rostered clients are not kicked
 
 Have someone not on the roster join, or temporarily roster only fake IDs and
-join yourself. Expect a kick with the roster message.
+join yourself. Expect NOT to be kicked: you stay connected, unscored, and free
+to spectate. `Timer_TeamLock` never moves you because you are not in any
+roster slot.
 
-Then check `sm_pug_status` shows `connected=0` again.
+Then check `sm_pug_status` still shows `connected=0` for every rostered slot.
 
 ## 4. Rostered join + the UDP wire format
 
@@ -141,9 +143,10 @@ idempotent, the backend may call it more than once).
 
     R "sm_pug_abort testtoken"
 
-Expect `PUGOK aborted`. After this, rostered enforcement stops: a non-rostered
-player joining is no longer kicked. Verify that, since a stuck enforcer would
-kick your casual players.
+Expect `PUGOK aborted`. After this, team-lock placement stops: `g_State`
+resets to `MS_None`, so `Timer_TeamLock` bails immediately and nobody joining
+afterward gets moved onto a side. Verify that, since a stuck lock would drag
+your casual players onto teams.
 
 ## 11. Heartbeats
 
@@ -245,7 +248,8 @@ clients and bots are excluded by `IsFakeClient`.
    up." and the server to restart the map into the PUG config with the
    "4v4 PUG" league notice.
 3. `sm_pug_status` over rcon. Expect `state=pending`, `selfStarted=1`,
-   `enforceRoster=0`, a 32-hex token, and a roster slot per player.
+   `teamLock=1` (rostered players will be placed on their assigned sides), a
+   32-hex token, and a roster slot per player.
 4. **The match id is the thing to watch.** Within a second or two the backend
    should adopt the match and rcon `sm_pug_setid` back. Re-run `sm_pug_status`:
    `match=` must be non-zero. If it stays 0, the adopt path failed and the
@@ -269,8 +273,10 @@ whole match instead of one per map.
 
 ### Things that will look wrong but are not
 
-- **Spectators are not kicked.** Deliberate for self-started matches; they are
-  simply unscored. `enforceRoster=0` in status confirms it.
+- **Spectators are not kicked.** Deliberate, and not specific to self-started
+  matches: no match ever kicks a non-rostered client, so spectators are simply
+  unscored. `teamLock=1` in status confirms the plugin is still placing the
+  rostered eight; it says nothing about anyone else, who is left alone.
 - **`sm_pug_min_orient` is currently 1** from `stage.sh --solo`. `pug_match.cfg`
   sets it back to 3 on exec, so `!load_4v4p` self-heals this. Check status
   after loading if you care.

@@ -20,6 +20,7 @@ export interface Me {
 export interface NamedPlayer {
   steamid: string;
   name: string;
+  avatar: string | null;
 }
 
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
@@ -36,8 +37,16 @@ export interface LobbySnapshot {
   myVote: string | null;
 }
 
+/** The GET /api/queue shape: public, so carries nothing viewer-relative and
+ *  no connect block, unlike StateSnapshot['queue']. */
+export interface PublicQueue {
+  count: number;
+  players: NamedPlayer[];
+  phase: LobbyPhase | null;
+}
+
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean };
+  queue: { count: number; joined: boolean; players: NamedPlayer[] };
   lobby: LobbySnapshot | null;
   match: {
     id: number;
@@ -45,6 +54,12 @@ export interface StateSnapshot {
     campaign: string;
     teamA: NamedPlayer[];
     teamB: NamedPlayer[];
+    /** Only for a viewer on this roster, and only once the match is live. */
+    connect: { host: string; port: number; password: string } | null;
+    /** True while the match is configuring and no server has been claimed
+     *  yet, so it is queued behind another match. Never true once the match
+     *  is live. */
+    waitingForServer: boolean;
   } | null;
 }
 
@@ -289,6 +304,7 @@ async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
+  queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
   leaderboard: (signal?: AbortSignal) => get<Leaderboard>('/api/leaderboard', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),

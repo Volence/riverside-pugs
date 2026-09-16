@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { LiveEvent } from './api';
 import { clearLatencies, clearLatencyByPlayer } from './clearLatency';
 
-const p = (steamid: string) => ({ steamid, name: steamid });
+const p = (steamid: string) => ({ steamid, name: steamid, avatar: null });
 const ev = (
   seq: number, kind: string, actor: string, target: string | null, tMs: number,
   over: Partial<LiveEvent> = {},

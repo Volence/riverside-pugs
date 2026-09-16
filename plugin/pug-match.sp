@@ -24,6 +24,14 @@
 #define ZC_HUNTER 3
 #define ZC_TANK 5
 #define LOCK_ATTEMPT_CAP 6
+/** First attempt at the end-of-match kick, and the gap between retries. */
+#define END_KICK_DELAY 8.0
+/** How many passes the kick gets before it gives up. The finale path fires
+ *  EndMatchNow from OnMapStart, so pass 1 lands mid map load with most clients
+ *  not yet in game; at 8 s a pass this covers roughly 40 s, which is a slow
+ *  L4D1 map load and then some. Bounded so a client that never finishes
+ *  loading cannot leave a timer running for the rest of the night. */
+#define END_KICK_TRIES 5
 
 /** Longest chat message emitted. Long enough for anything anyone types in a
  *  PUG, short enough that a message cannot push a log line into truncation. */
@@ -81,6 +89,23 @@ MatchState g_State = MS_None;
 int g_iMatchId;
 char g_sToken[65];
 char g_sCampaign[64];
+char g_sEndResult[128];
+
+// The end-of-match kick, held in its OWN state rather than reading the match
+// state or g_sEndResult.
+//
+// It used to key off g_sEndResult, which ResetMatchState blanks. The backend's
+// routine sm_pug_abort right after a successful report calls ResetMatchState,
+// and on a healthy box that whole round trip is a few hundred milliseconds
+// against an 8 second timer, so the kick was cancelled long before it fired
+// and only ever ran when REPORTING FAILED. Exactly backwards: the box was left
+// full after every good match and emptied only after a bad one.
+//
+// So the reason lives here, survives ResetMatchState, and is cleared only by
+// CancelEndKick, which the three new-match entry points call deliberately.
+Handle g_hEndKick = null;
+char g_sEndKickReason[128];
+int g_iEndKickTries;
 
 // Roster: fixed slots, parallel arrays, keyed by SteamID64.
 char g_sRosterId[MAX_ROSTER][32];
@@ -95,13 +120,16 @@ int g_iRosterCount;
 // those players.
 char g_sRosterName[MAX_ROSTER][64];
 
-/** True when this match was started in-game by !load_4v4p rather than by the
- *  backend over rcon. Two behavioural differences, both deliberate:
- *    - the match id is 0 until the backend assigns one via sm_pug_setid
- *    - OnClientPostAdminCheck does NOT kick non-rostered players
- *  The kick exists to enforce a backend-issued roster for a real ranked PUG.
- *  A match started from inside a running game has no such authority, and
- *  kicking a friend who happened to be spectating would be a nasty surprise. */
+/** True when this match was started in-game by !load_4v4p or adopted by
+ *  auto-track, rather than driven by the backend over rcon.
+ *
+ *  Two behavioural differences. The match id is 0 until the backend assigns one
+ *  via sm_pug_setid. And the end-of-match kick is never armed (see
+ *  EndMatchNow), because a campaign change is how an in-game night moves on and
+ *  emptying the box at every one of them is not what anybody asked for.
+ *
+ *  No match, self-started or not, kicks a non-rostered player; the rostered
+ *  eight are placed by Timer_TeamLock and anyone else may spectate. */
 bool g_bSelfStarted;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
@@ -1373,6 +1401,9 @@ public Action Cmd_Match(int args)
 		PrintToServer("PUGERR bad matchid");
 		return Plugin_Handled;
 	}
+	// A new match, so any kick still pending from the last one is void. This
+	// and the two sites below are the ONLY places the kick is cancelled.
+	CancelEndKick();
 	ResetMatchState();
 	g_iMatchId = matchId;
 	GetCmdArg(2, g_sToken, sizeof(g_sToken));
@@ -1566,6 +1597,7 @@ public Action Cmd_LoadPug(int client, int args)
 		return Plugin_Handled;
 	}
 
+	CancelEndKick();                 // new match: a kick left over from the last one is void
 	ResetMatchState();
 	g_bSelfStarted = true;
 	g_iMatchId = 0;                  // the backend owns match ids; assigned later via sm_pug_setid
@@ -1648,7 +1680,117 @@ void EndMatchNow(const char[] why)
 	WinnerOf(a, b, winner, sizeof(winner));
 	EmitPug("MATCH_END a=%d b=%d winner=%s", a, b, winner);
 	PugDebug("ended (%s): a=%d b=%d winner=%s", why, a, b, winner);
-	PrintToChatAll("[PUG] Match ended: %d - %d. Reporting to the site.", a, b);
+
+	char teamName[16];
+	if (StrEqual(winner, "draw")) strcopy(teamName, sizeof(teamName), "Draw");
+	else Format(teamName, sizeof(teamName), "Team %s wins", winner[0] == 'a' ? "A" : "B");
+
+	// Held in a global because the timer fires after this frame and cannot be
+	// handed a string. One match ends at a time, so a single buffer is enough.
+	Format(g_sEndResult, sizeof(g_sEndResult), "%s: %s %d to %d",
+		g_sCampaign, teamName, a, b);
+
+	// Announced on BOTH paths: every match says who won, whether the website
+	// started it or the players did.
+	PrintToChatAll("[PUG] Match ended. %s. Reporting to the site.", g_sEndResult);
+
+	// The kick is for backend-driven matches ONLY, and this gate is load
+	// bearing: do not remove it as redundant.
+	//
+	// A self-started (!load_4v4p) or auto-tracked match is a friend-group night
+	// on the box, and one of its ordinary match boundaries is !cm to the next
+	// campaign. OnMapStart sees the new campaign and ends the match right here,
+	// so an armed kick would dump the whole server to the main menu mid-night,
+	// every campaign change. The auto-track cancel in OnRoundIsLive cannot save
+	// them: it runs only once ready-up completes, and an eight-person L4D1
+	// ready-up is normally slower than this kick's T+8 to T+40 second passes.
+	//
+	// What the owner asked for was a WEBSITE match ending with a result so
+	// those eight go back and requeue. Nobody asked an in-game night to be
+	// ejected from its own server.
+	if (g_bSelfStarted) return;
+
+	// Everyone, spectators included, so the box is empty and ready for the next
+	// queue pop. Delayed so the score can be read in game first rather than
+	// only in the menu dialog. Safe for reporting: WriteDump reads roster slots,
+	// not clients, so the backend still gets a complete dump from an empty
+	// server, and it survives the sm_pug_abort that follows a successful report.
+	ArmEndKick(g_sEndResult);
+}
+
+/** (Re)arm the end-of-match kick with the message players will see. */
+void ArmEndKick(const char[] reason)
+{
+	// EndMatchNow can run twice in a night (campaign changed, then a finale),
+	// so clear any timer still pending before making a second one.
+	CancelEndKick();
+	strcopy(g_sEndKickReason, sizeof(g_sEndKickReason), reason);
+	g_iEndKickTries = 0;
+	g_hEndKick = CreateTimer(END_KICK_DELAY, Timer_EndKick, _, TIMER_REPEAT);
+}
+
+/** Drop a pending kick on the floor. Called ONLY where a genuinely new match
+ *  begins, so a stale result can never kick players out of a fresh one. Never
+ *  from ResetMatchState: the backend's routine sm_pug_abort goes through that,
+ *  and cancelling there is what stopped the kick from ever firing. */
+void CancelEndKick()
+{
+	if (g_hEndKick != null)
+	{
+		KillTimer(g_hEndKick);
+		g_hEndKick = null;
+	}
+	g_sEndKickReason[0] = '\0';
+	g_iEndKickTries = 0;
+}
+
+/** A real person the end-of-match kick should clear off the box.
+ *
+ *  Bots are not people, and the SourceTV relay must survive: it is a permanent
+ *  fixture on the Dallas box and it is what writes the match demos, so kicking
+ *  it would cost every LATER match its demo, not just this one. SourceMod
+ *  reports HLTV as a fake client, but the explicit check says why out loud and
+ *  costs nothing. This never mattered before, because the kick almost never
+ *  fired. */
+bool IsEndKickTarget(int client)
+{
+	return !IsFakeClient(client) && !IsClientSourceTV(client);
+}
+
+public Action Timer_EndKick(Handle timer)
+{
+	if (g_sEndKickReason[0] == '\0')
+	{
+		g_hEndKick = null;
+		return Plugin_Stop;
+	}
+	g_iEndKickTries++;
+
+	// Counted BEFORE anyone is kicked: KickClient does not necessarily drop the
+	// client within this frame, so a post-kick count would read stale. A pass
+	// that finds nobody left is the normal way this stops.
+	int present = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientConnected(c) && IsEndKickTarget(c)) present++;
+	}
+	if (present == 0 || g_iEndKickTries > END_KICK_TRIES)
+	{
+		g_hEndKick = null;
+		g_sEndKickReason[0] = '\0';
+		return Plugin_Stop;
+	}
+
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		// IsClientInGame, not merely connected: on the finale path this timer's
+		// first pass lands in the middle of the map load that triggered it, and
+		// kicking a client who has not finished loading is not safe. They are
+		// caught by a later pass instead, which is the whole reason this timer
+		// repeats. Format string never the buffer itself.
+		if (IsClientInGame(c) && IsEndKickTarget(c)) KickClient(c, "%s", g_sEndKickReason);
+	}
+	return Plugin_Continue;
 }
 
 /** Two map names belong to the same campaign when they share the prefix
@@ -1832,8 +1974,8 @@ public Action Cmd_Status(int args)
 		g_iRound1Logical, g_iRound1SurvPug, g_iLogicalOfPugA, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
 	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
-	DumpLine("STATUS selfStarted=%d enforceRoster=%d recordDemos=%d",
-		g_bSelfStarted ? 1 : 0, g_bSelfStarted ? 0 : 1, g_cvRecordDemos.BoolValue ? 1 : 0);
+	DumpLine("STATUS selfStarted=%d teamLock=%d recordDemos=%d",
+		g_bSelfStarted ? 1 : 0, TeamLockActive() ? 1 : 0, g_cvRecordDemos.BoolValue ? 1 : 0);
 
 	int straight, inverted;
 	OrientationVote(straight, inverted);
@@ -1932,6 +2074,7 @@ void ResetMatchState()
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
 	g_sCampaign[0] = '\0';
+	g_sEndResult[0] = '\0';
 	g_iRosterCount = 0;
 	g_bSelfStarted = false;
 	g_iEventSeq = 0;
@@ -2081,13 +2224,12 @@ public void OnClientPostAdminCheck(int client)
 	int slot = RosterIndexOfId(id);
 	if (slot == -1)
 	{
-		// Roster enforcement only applies to a backend-issued roster. A match
-		// started in-game with !load_4v4p has no authority to kick anyone, and
-		// the config's sm_restartmap cycles every client through here moments
-		// after the snapshot, so kicking would eject the spectators who were
-		// simply not on a team at snapshot time. They stay, unscored.
-		if (g_bSelfStarted) return;
-		KickClient(client, "You are not on this match's roster");
+		// Nobody is kicked, backend match or not. The owner's rule is that the
+		// rostered eight belong in the correct slots and anyone else may
+		// spectate; Timer_TeamLock does the placing, so enforcement never
+		// needed a door policy. This also removes the first-run failure mode
+		// where one bad roster line bounced all eight players with no in-game
+		// recourse.
 		return;
 	}
 	g_iClientRoster[client] = slot;
@@ -2125,6 +2267,22 @@ void OrientationVote(int &straight, int &inverted)
 	}
 	straight = onSide[1][TEAM_SURVIVOR] + onSide[2][TEAM_INFECTED];
 	inverted = onSide[1][TEAM_INFECTED] + onSide[2][TEAM_SURVIVOR];
+}
+
+/** Whether Timer_TeamLock will actually move anyone right now, independent of
+ *  the orientation vote. Shared with Cmd_Status so the STATUS line can never
+ *  drift from the gate it is reporting on. */
+bool TeamLockActive()
+{
+	// Testing switch: the vote still tracks orientation for scoring, but
+	// nobody is moved. Never leave this off for a real ranked match.
+	if (!g_cvTeamLock.BoolValue) return false;
+	// Auto-track implies no team lock only for the matches auto-track itself
+	// starts, which have no authority: their "roster" is just whoever happened
+	// to be on each side. A backend-issued roster is authoritative and must be
+	// enforced even while auto_track is on, which it always is on the live box.
+	if (g_cvAutoTrack.BoolValue && g_bSelfStarted) return false;
+	return true;
 }
 
 /** Observation-based cohesion lock. Every tick:
@@ -2179,9 +2337,7 @@ public Action Timer_TeamLock(Handle timer)
 	// vote ties at straight == inverted, so gating on confirmation would stall
 	// enforcement forever.
 	if (straight == 0 && inverted == 0) return Plugin_Continue;
-	// Testing switch: the vote above still tracks orientation for scoring, but
-	// nobody is moved. Never leave this off for a real ranked match.
-	if (!g_cvTeamLock.BoolValue || g_cvAutoTrack.BoolValue) return Plugin_Continue;
+	if (!TeamLockActive()) return Plugin_Continue;
 
 	for (int c = 1; c <= MaxClients; c++)
 	{
@@ -2301,9 +2457,9 @@ public void OnMapStart()
  *  slot table from g_sRosterId, so populating those is the whole job.
  *
  *  Safe to do at MS_None because nothing else in this plugin acts on a roster
- *  while there is no tracked match. Roster kick enforcement, the team lock, the
- *  stat counters, EmitEvent and chat are each gated on match state, so none of
- *  them can observe what this writes. A real match overwrites all of it:
+ *  while there is no tracked match. The team lock, the stat counters,
+ *  EmitEvent and chat are each gated on match state, so none of them can
+ *  observe what this writes. A real match overwrites all of it:
  *  Cmd_LoadPug calls ResetMatchState first, and Cmd_Match rebuilds the roster. */
 void RplFillStandaloneRoster()
 {
@@ -2370,6 +2526,13 @@ public void OnRoundIsLive()
 		if (!blocked && HumansOnTeams() >= g_cvAutoMinPlayers.IntValue)
 		{
 			if (g_State == MS_Ended) LogUncollectedResult();
+			// Auto-track adoption is a new match, so a kick armed by the match
+			// that just ended must not fire into it. Only a backend-driven
+			// match can have armed one (EndMatchNow skips the arming for
+			// self-started matches), and that is exactly the case where the
+			// window is real: people staying on the box after a website match
+			// and simply playing on.
+			CancelEndKick();
 			ResetMatchState();
 			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
 			// forward: this half is live. Left false, Event_RoundEnd returned early

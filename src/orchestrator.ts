@@ -4,7 +4,8 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { LogListener } from './logListener.js';
 import { newToken } from './matchToken.js';
 import { parseDump, type Dump } from './dumpParse.js';
-import { claimIdle, release, markLive, getServer, type ServerRow } from './serverPool.js';
+import { claimIdle, markLive, getServer, type ServerRow } from './serverPool.js';
+import type { ServerReleaser } from './serverRelease.js';
 import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
@@ -31,9 +32,16 @@ export interface RealOrchestratorDeps {
   db: DB;
   listener: LogListener;
   logPublicAddress: string;
+  /** The single chokepoint for freeing a server, so sv_password always gets
+   *  cleared. Required, not optional: an optional dep would silently skip
+   *  the clear, which is the bug this exists to fix. */
+  releaser: ServerReleaser;
   /** Injectable opts transform so tests can redirect the connection; production leaves opts untouched. */
   makeRcon?: (opts: RconOpts) => RconOpts;
   notify?: (msg: string) => void;
+  /** Called when setupMatch finds no idle server. The match stays 'configuring'
+   *  rather than aborting; the pending list is what retries it once one frees. */
+  onNoServer?: (matchId: number) => void;
   /** Where srcds writes demos. Empty disables demo recording on the site. */
   demoDir?: string;
   /** Where the plugin writes replay files. Empty disables replay recording on
@@ -53,19 +61,23 @@ export class RealOrchestrator implements Orchestrator {
   private db: DB;
   private listener: LogListener;
   private logPublicAddress: string;
+  private releaser: ServerReleaser;
   private makeRcon: (opts: RconOpts) => RconOpts;
   private notify: (msg: string) => void;
   private demoDir: string;
   private replayDir: string;
+  onNoServer?: (matchId: number) => void;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
     this.listener = deps.listener;
     this.logPublicAddress = deps.logPublicAddress;
+    this.releaser = deps.releaser;
     this.makeRcon = deps.makeRcon ?? ((o) => o);
     this.notify = deps.notify ?? (() => {});
     this.demoDir = deps.demoDir ?? '';
     this.replayDir = deps.replayDir ?? '';
+    this.onNoServer = deps.onNoServer;
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
@@ -78,8 +90,12 @@ export class RealOrchestrator implements Orchestrator {
   async setupMatch(matchId: number): Promise<void> {
     const server = claimIdle(this.db);
     if (!server) {
-      this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
-      console.error(`[orchestrator] no idle server for match ${matchId}; aborted`);
+      // Wait, do not abort. The match stays 'configuring' and the pending list
+      // retries it when a box frees. Only the no-server case pends: an rcon
+      // failure below still aborts, because retrying a broken setup forever
+      // would pin the queue on a server that is not going to work.
+      console.warn(`[orchestrator] no idle server for match ${matchId}; waiting`);
+      this.onNoServer?.(matchId);
       return;
     }
 
@@ -87,7 +103,7 @@ export class RealOrchestrator implements Orchestrator {
       | { id: number; campaign: string }
       | undefined;
     if (!match) {
-      release(this.db, server.id);
+      this.releaser.release(server.id);
       return;
     }
     const roster = this.db
@@ -113,12 +129,13 @@ export class RealOrchestrator implements Orchestrator {
       for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
       await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
       markLive(this.db, server.id);
-      this.db.prepare("UPDATE matches SET state = 'live' WHERE id = ?").run(matchId);
+      this.db.prepare("UPDATE matches SET state = 'live', went_live_at = datetime('now') WHERE id = ?")
+        .run(matchId);
       live = true;
     } catch (err) {
       console.error(`[orchestrator] setup failed for match ${matchId}:`, err);
       this.listener.unregister(token);
-      release(this.db, server.id);
+      this.releaser.release(server.id);
       this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
     } finally {
       rcon?.close();
@@ -140,6 +157,31 @@ export class RealOrchestrator implements Orchestrator {
     try {
       rcon = await this.connectRcon(server);
       await expectPugOk(rcon, `sm_pug_setid ${token} ${matchId}`);
+    } finally {
+      rcon?.close();
+    }
+  }
+
+  /** Fetch the plugin's dump for a token, raw: no parse, no completion, no
+   *  abort.
+   *
+   *  For the give-up path in finishWithRetry, which is about to release the
+   *  box and so is about to send sm_pug_abort for this same token, and the
+   *  plugin discards its result on that. Pulling the body one last time is the
+   *  only chance to preserve it, and it goes to the log rather than through
+   *  parseDump because parsing is precisely what has already failed; a human
+   *  with scripts/recover-match.ts can still do something with the text.
+   *
+   *  Keyed on serverId and token rather than a match id because the caller has
+   *  already flipped that match out of 'live'. Throws on failure; the caller
+   *  must not let that stop the release. */
+  async pullDump(serverId: number, token: string): Promise<string> {
+    const server = getServer(this.db, serverId);
+    if (!server) throw new Error(`pullDump: no server row ${serverId}`);
+    let rcon: RconClient | null = null;
+    try {
+      rcon = await this.connectRcon(server);
+      return await rcon.exec(`sm_pug_dump ${token}`);
     } finally {
       rcon?.close();
     }
@@ -209,7 +251,7 @@ export class RealOrchestrator implements Orchestrator {
       // The authoritative match_maps rows were just written by completeMatch.
       clearLive(this.db, matchId);
       this.listener.unregister(match.token);
-      release(this.db, match.server_id);
+      this.releaser.release(match.server_id);
       if (dump) {
         const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
         this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA}, Team B ${dump.totalB}. ${winnerText}!`);

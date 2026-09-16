@@ -166,7 +166,8 @@ describe('adapters', () => {
   it('reduces live events and timeline entries to the same shape', () => {
     const live = fromLiveEvents([{
       seq: 1, kind: 'cleared', mapOrdinal: 2, half: 1, tMs: 500,
-      actor: { steamid: 'I', name: 'intel' }, target: { steamid: 'K', name: 'KoRn' }, value: 0,
+      actor: { steamid: 'I', name: 'intel', avatar: null },
+      target: { steamid: 'K', name: 'KoRn', avatar: null }, value: 0,
     }]);
     expect(live[0]).toEqual({ seq: 1, tMs: 500, half: 1, mapOrdinal: 2, kind: 'cleared', actor: 'I', target: 'K', value: 0 });
     const tl: TimelineEntry[] = [

@@ -248,6 +248,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_queue_thresholds: JSON.stringify([4, 6]),
   replay_retention_days: '90',
   replay_free_floor_gb: '10',
+  noshow_minutes: '10',
+  noshow_min_connected: '6',
+  no_round_minutes: '30',
 };
 
 /** Add a column if the table lacks it. No-op when already present. */
@@ -276,6 +279,13 @@ export function openDb(path: string): DB {
   // sub rostered at a go-live. The rating step skips anyone who played under
   // half the maps.
   ensureColumn(db, 'match_players', 'joined_map', 'INTEGER NOT NULL DEFAULT 0');
+  // When the match actually went live, which is not when its row was inserted:
+  // a match with no free server now waits in 'configuring' instead of aborting,
+  // so created_at can be arbitrarily older. The no-show reaper times from here.
+  ensureColumn(db, 'matches', 'went_live_at', 'TEXT');
+  // First time this rostered player was seen connected to the match server.
+  // Null means they never turned up, which is what the no-show reaper counts.
+  ensureColumn(db, 'match_players', 'connected_at', 'TEXT');
   seed(db);
   return db;
 }
