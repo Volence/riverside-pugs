@@ -52,7 +52,7 @@ hung queue. Catch it here, not after eight people are already waiting.
        sqlite3 data/pug.db "SELECT id, state FROM matches WHERE state IN ('configuring','live');"
 
    Expected: no rows. Any row here means a previous match is still open;
-   resolve it (see Step 8, Rollback) before starting a new one.
+   resolve it (see Step 9, Rollback) before starting a new one.
 
 3. **Confirm the server row is claimable.** This is the trap:
 
@@ -66,7 +66,7 @@ hung queue. Catch it here, not after eight people are already waiting.
    | `idle` | claimable, proceed | nothing, you're clear |
    | `offline` | the schema's default for a freshly-inserted row; nothing in production ever promotes this to `idle` on its own | this is the box's actual row if it has never yet been released by a real match. Restart `pug-web` (boot runs `reconcileServers`, see below) and re-check; if it is still `offline`, manually set it: `sqlite3 data/pug.db "UPDATE servers SET status='idle' WHERE id=<id>;"` only after you have independently confirmed via `R "status"` that no match owns the box |
    | `reserved` or `live` with no owning match | stranded from a crash | restart `pug-web`. Its boot sequence calls `reconcileServers`, which frees any server marked `reserved` or `live` that no `configuring`/`live` match row owns. Re-run the query in this step after the restart to confirm it moved to `idle` |
-   | `reserved` or `live` with a real owning match | genuinely in use | do not touch it; that match needs to finish or be rolled back first (Step 8) |
+   | `reserved` or `live` with a real owning match | genuinely in use | do not touch it; that match needs to finish or be rolled back first (Step 9) |
 
    Do not skip ahead assuming this is fine. The failure mode is silent by
    design (see Task 12 background): a match with no free server logs a
@@ -157,8 +157,8 @@ real backend. Do this before telling anyone to click Join.
 
 1.       R "sm_pug_status"
 
-   Expected fields to read off the `STATUS state=...` and `STATUS
-   roster slot=... steamid=... team=... connected=0 ...` lines:
+   Expected fields to read off the output (lines start with `STATUS state=...`
+   and `STATUS roster slot=... steamid=... team=... connected=0 ...`):
 
    - `state=live`
    - `match=<id>` matching the id from Step 3.1
