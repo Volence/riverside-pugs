@@ -2341,9 +2341,9 @@ public void OnMapStart()
  *  slot table from g_sRosterId, so populating those is the whole job.
  *
  *  Safe to do at MS_None because nothing else in this plugin acts on a roster
- *  while there is no tracked match. Roster kick enforcement, the team lock, the
- *  stat counters, EmitEvent and chat are each gated on match state, so none of
- *  them can observe what this writes. A real match overwrites all of it:
+ *  while there is no tracked match. The team lock, the stat counters,
+ *  EmitEvent and chat are each gated on match state, so none of them can
+ *  observe what this writes. A real match overwrites all of it:
  *  Cmd_LoadPug calls ResetMatchState first, and Cmd_Match rebuilds the roster. */
 void RplFillStandaloneRoster()
 {
