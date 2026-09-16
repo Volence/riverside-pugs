@@ -231,6 +231,63 @@ Gate to the web step: checks 1 to 4 pass and the owner approves check 5. The mea
 numbers are written back into this spec, so Phase 2 starts from observed values rather than
 guesses.
 
+### Measured on Blood Harvest 1 (2026-09-16, attempt 14)
+
+All checks pass. Geometry is the worst quadrant as MAD / shifted baseline (ratio); seams
+and entities are 4x first, then the comparison value.
+
+| cut height | geometry worst quadrant | vertical seam / neighbourhood | horizontal seam / neighbourhood | entities 4x / 1x | dip-filled px |
+|---|---|---|---|---|---|
+| 326 | 27.6 / 39.0 (0.71) | 30.4 / 24.2 | 15.5 / 16.8 | 98.6% / 36.3% | 0 |
+| 582 | 22.5 / 39.6 (0.57) | 26.0 / 21.6 | 21.0 / 20.8 | 96.3% / 91.4% | 2 |
+| 838 | 22.2 / 40.6 (0.55) | 25.4 / 21.7 | 20.3 / 20.4 | 99.4% / 98.6% | 139 |
+| 1406 | 22.0 / 40.6 (0.54) | 23.8 / 21.4 | 19.2 / 19.4 | 100.0% / 100.0% | 5 |
+| 2270 | 22.0 / 40.4 (0.54) | 23.7 / 21.4 | 19.2 / 19.5 | 100.0% / 100.0% | 100123 |
+The owner asked for the result on the site for testing, so check 5 (the side-by-side
+approval) is replaced by the owner reviewing the live viewer.
+
+## Amendments from the first real captures (2026-09-16)
+
+Fourteen attempts and seven diagnostic launches on Blood Harvest 1 overturned several
+assumptions above. Where this section and the earlier text disagree, this section wins.
+
+- **Primary display.** The game caps its windowed size at the primary display's resolution
+  wherever the window opens. With the 1920x1080 display primary every tile was 1920x1080.
+  The runner requests the capture size exactly (`profile.sh on 2048 1271`, `-w 2048 -h 1271`)
+  and preflight refuses to run unless the primary display is at least that size.
+- **Campaign intros.** Blood Harvest 1's director forces the survivors into place until 16.5 s
+  after gameplay starts, so a chain started earlier cannot move the camera. F9 is pressed 25 s
+  after the spawn signal, not 3 s.
+- **Window captions.** The KWin scripts match the caption `Left 4 Dead` exactly. A substring
+  match grabbed the owner's Discord window, titled `... Left 4 Dead Revival - Discord`.
+- **View angles do not matter; the render origin does.** Source's overview render forces its
+  own view angles and renders from the origin it prints as `Overview: scale, pos_x, pos_y`.
+  Verification checks that printed origin per shot (engine integer size math, within 1 unit)
+  instead of the `0 90 0` angle rule, which rejected good attempts.
+- **`setpos into world` is a warning.** With noclip on it only means the destination is inside
+  geometry; the move still happens. It is recorded, not failed on.
+- **getpos output can be split** by other console output between its position and angle
+  halves; only the position half is required.
+- **Render state additions**, each proven by a diagnostic: `r_shadowdist 0;
+  cl_drawshadowtexture 0` (the player's shadow flickered under the camera),
+  `cl_detail_avoid_force 0; cl_detail_avoid_radius 0` (grass bent away from the player
+  and recovered over time), `mat_postprocess_enable 0` (the map's post-processing darkened a
+  band along the top of every frame, which repeated at the top of each tile).
+  `fog_override`/`fog_enable` and overriding the grass fade distance had no effect.
+- **Settle is 900 frames, not 120.** Near the ground, grass around the camera still changed
+  0.4 s after a move and had settled by 3 s.
+- **Acceptance checks.** Seams compare content only, because void renders green in one tile
+  and black in the next. A seam passes at up to 1.5x its neighbourhood with a 1.0 MAD noise
+  floor. Geometry passes below 0.75x the quadrant's shifted baseline, not 0.5x: the Sep 12 1x
+  reference was rendered with post-processing on and carries a ~0.2% vertical stretch, so
+  correctly placed quadrants measure 0.54 to 0.71, while a misplaced tile measures about 1.0.
+- **Dip fill** is nearly idle once post-processing is off (0 to 139 px on four layers, 100k on
+  the highest). The ~600k px "dips" in an earlier attempt were content darkened by the
+  post-processing band, not void.
+- **The Sep 12 1x set** carries the post-processing band at its top edge and the ~0.2% vertical
+  stretch. Phase 2 replaces it map by map.
+
+
 ## Web integration (pug)
 
 - `tools/convert-overviews.sh` takes an override source: maps with a manifest in
