@@ -53,31 +53,81 @@ export interface ServerDeps {
  *
  *  Every failure path in finishMatch deliberately leaves the match 'live' and
  *  logs "leaving live for retry" -- this is the thing that was supposed to be
- *  doing the retrying. Spaced to cover a slow map load and then some. */
+ *  doing the retrying. Spaced to cover a slow map load and then some.
+ *
+ *  Roughly four minutes end to end. When they run out the match is aborted and
+ *  its server released; see the give-up block at the end of finishWithRetry for
+ *  why leaving it live is not an option. */
 const FINISH_RETRY_MS = [5_000, 15_000, 30_000, 60_000, 120_000];
 
-async function finishWithRetry(
-  db: DB, orchestrator: RealOrchestrator, matchId: number,
+/** Injection seam for the tests only; production passes nothing. */
+export interface FinishRetryOpts {
+  delays?: number[];
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export async function finishWithRetry(
+  db: DB, orchestrator: RealOrchestrator, matchId: number, releaser: ServerReleaser,
+  opts: FinishRetryOpts = {},
 ): Promise<void> {
+  const delays = opts.delays ?? FINISH_RETRY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => { setTimeout(r, ms); }));
   const stillLive = () =>
     (db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as
       { state: string } | undefined)?.state === 'live';
 
   await orchestrator.finishMatch(matchId);
-  for (const wait of FINISH_RETRY_MS) {
+  for (const wait of delays) {
     if (!stillLive()) return;
-    await new Promise((r) => setTimeout(r, wait));
+    await sleep(wait);
     // Re-check after the wait: another path may have completed it meanwhile.
     if (!stillLive()) return;
     console.warn(`[orchestrator] retrying collection of match ${matchId}`);
     await orchestrator.finishMatch(matchId);
   }
-  if (stillLive()) {
-    console.error(
-      `[orchestrator] match ${matchId} still uncollected after ${FINISH_RETRY_MS.length} retries; ` +
-      'the plugin holds the result, so sm_pug_dump can still recover it by hand',
-    );
-  }
+  if (!stillLive()) return;
+
+  // Out of retries. Leaving the match 'live' was the old behaviour and it pins
+  // the box forever, because nothing can ever find it again: the plugin's
+  // Timer_Heartbeat emits for any state that is not MS_None and MS_Ended
+  // qualifies, so an ended-but-uncollected match keeps heartbeating and
+  // reapOrphanedMatches, which needs heartbeat LOSS, never fires; and
+  // reapNoShowMatches matches neither of its rules, because these players did
+  // connect and rounds were recorded. Before the web queue that cost a manual
+  // cleanup (match 8, 2026-09-11). With it, every later queue pop pends behind
+  // the pinned server and the queue is dead.
+  //
+  // Guarded on state = 'live' so a completion that lands in the same tick as
+  // this write is never clobbered.
+  const row = db.prepare('SELECT server_id, token FROM matches WHERE id = ?').get(matchId) as
+    { server_id: number | null; token: string | null } | undefined;
+  const changed = db
+    .prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ? AND state = 'live'")
+    .run(matchId).changes;
+  if (changed === 0) return;
+
+  // Loud, and worded as an incident rather than a routine sweep: a played
+  // match whose result was lost costs everyone on it their rating movement,
+  // and the dump is the only copy. Log the token so sm_pug_dump and
+  // scripts/recover-match.ts can still be pointed at it by hand, as long as
+  // nobody has reloaded the plugin.
+  console.error(
+    `[orchestrator] INCIDENT: match ${matchId} was played but never collected after ` +
+    `${delays.length} retries. It has been aborted and its server released so the queue can ` +
+    `move on, which means NO result and NO rating change was recorded. ` +
+    `Recover by hand if the plugin still holds it: sm_pug_dump ${row?.token ?? '<token>'}, ` +
+    'then scripts/recover-match.ts.',
+  );
+  // Through the releaser rather than a raw status write, and this is the half
+  // that also stops the heartbeat: the releaser clears sv_password AND sends
+  // sm_pug_abort for this token, so the plugin drops back to MS_None instead
+  // of holding a match nobody is collecting. It also wakes the waiters.
+  //
+  // Deliberately no clearLive() here, unlike reapOrphanedMatches: the live
+  // scratch rows are now the only surviving trace of a match whose
+  // authoritative dump was lost, and they cost nothing, since every reader
+  // filters on state = 'live'.
+  if (row?.server_id != null) releaser.release(row.server_id);
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -137,11 +187,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
-  const releaser = new ServerReleaser(deps.db, async (server) => {
+  const releaser = new ServerReleaser(deps.db, async (server, token) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
       await rcon.connect();
-      await rcon.exec('sv_password ""');
+      // Both halves on the one connection, and each guarded on its own so a
+      // failure of either still lets the other run. Freeing the row while the
+      // plugin still held the match was the gap: after a no-show abort the box
+      // was advertised as claimable, players stayed connected, and the plugin
+      // went on enforcing a roster and a token the backend had already binned.
+      // A stale or unknown token just draws a PUGERR, which is a no-op.
+      try {
+        await rcon.exec('sv_password ""');
+      } catch (err) {
+        console.error(`[serverRelease] sv_password clear failed on ${server.name} (non-fatal):`, err);
+      }
+      if (token) {
+        try {
+          await rcon.exec(`sm_pug_abort ${token}`);
+        } catch (err) {
+          console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
+        }
+      }
     } finally {
       rcon.close();
     }
@@ -159,7 +226,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       logListener = new LogListener((ev) => {
         if (ev.kind === 'match_end') {
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
-          if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id);
+          if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
@@ -295,6 +362,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
       pending.rebuildFromDb();
       releaser.onFreed(() => pending.drain());
+      // Drain once right here, before any release() ever fires. The pending
+      // list is otherwise driven entirely by servers being freed, and an
+      // already-idle box frees nothing: a match that was waiting when the
+      // process died and an idle server sitting next to it would never meet,
+      // and the match would sit 'configuring' forever, which hasOpenMatch
+      // counts, locking its eight players out of the queue. This is also the
+      // path an operator takes when Step 1 of the runbook tells them to set a
+      // server back to idle by hand.
+      pending.drain();
 
       // Day one is a single game server, so the self-start burst is admitted
       // from each known server's address and adopted onto the first server row.
