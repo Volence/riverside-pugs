@@ -162,6 +162,31 @@ export class RealOrchestrator implements Orchestrator {
     }
   }
 
+  /** Fetch the plugin's dump for a token, raw: no parse, no completion, no
+   *  abort.
+   *
+   *  For the give-up path in finishWithRetry, which is about to release the
+   *  box and so is about to send sm_pug_abort for this same token, and the
+   *  plugin discards its result on that. Pulling the body one last time is the
+   *  only chance to preserve it, and it goes to the log rather than through
+   *  parseDump because parsing is precisely what has already failed; a human
+   *  with scripts/recover-match.ts can still do something with the text.
+   *
+   *  Keyed on serverId and token rather than a match id because the caller has
+   *  already flipped that match out of 'live'. Throws on failure; the caller
+   *  must not let that stop the release. */
+  async pullDump(serverId: number, token: string): Promise<string> {
+    const server = getServer(this.db, serverId);
+    if (!server) throw new Error(`pullDump: no server row ${serverId}`);
+    let rcon: RconClient | null = null;
+    try {
+      rcon = await this.connectRcon(server);
+      return await rcon.exec(`sm_pug_dump ${token}`);
+    } finally {
+      rcon?.close();
+    }
+  }
+
   async finishMatch(matchId: number): Promise<void> {
     const match = this.db
       .prepare('SELECT id, state, campaign, server_id, token FROM matches WHERE id = ?')

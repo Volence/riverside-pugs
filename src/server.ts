@@ -106,17 +106,41 @@ export async function finishWithRetry(
     .run(matchId).changes;
   if (changed === 0) return;
 
+  // Collect the dump HERE, before the release, because the release is what
+  // destroys it: releaser.release sends sm_pug_abort for this same token and
+  // the plugin drops its result on that. This block used to tell the operator
+  // to run sm_pug_dump afterwards, which by then answers PUGERR every time, so
+  // a case that was recoverable by hand (match 8, 2026-09-11, the incident
+  // that motivated these retries) had become guaranteed unrecoverable.
+  //
+  // Best effort on purpose: a dump we cannot fetch is a worse incident, never
+  // a reason to keep the box, since giving up exists precisely so a lost
+  // result cannot wedge the queue.
+  let dump: string | null = null;
+  if (row?.server_id != null && row.token) {
+    try {
+      dump = await orchestrator.pullDump(row.server_id, row.token);
+    } catch (err) {
+      console.error(
+        `[orchestrator] could not pull the dump for match ${matchId} before releasing:`, err,
+      );
+    }
+  }
+
   // Loud, and worded as an incident rather than a routine sweep: a played
   // match whose result was lost costs everyone on it their rating movement,
-  // and the dump is the only copy. Log the token so sm_pug_dump and
-  // scripts/recover-match.ts can still be pointed at it by hand, as long as
-  // nobody has reloaded the plugin.
+  // and the dump is the only copy. It is inlined below rather than left on the
+  // box, so it survives in the log whether or not anyone reaches the server in
+  // time, and whether or not the plugin is reloaded first.
   console.error(
     `[orchestrator] INCIDENT: match ${matchId} was played but never collected after ` +
     `${delays.length} retries. It has been aborted and its server released so the queue can ` +
     `move on, which means NO result and NO rating change was recorded. ` +
-    `Recover by hand if the plugin still holds it: sm_pug_dump ${row?.token ?? '<token>'}, ` +
-    'then scripts/recover-match.ts.',
+    (dump
+      ? 'Its final dump follows; feed it to scripts/recover-match.ts to close the match by ' +
+        `hand.\n${dump}`
+      : 'Its dump could NOT be collected either, so there is nothing left to recover from ' +
+        'and scripts/recover-match.ts has no input.'),
   );
   // Through the releaser rather than a raw status write, and this is the half
   // that also stops the heartbeat: the releaser clears sv_password AND sends
@@ -362,15 +386,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
       pending.rebuildFromDb();
       releaser.onFreed(() => pending.drain());
-      // Drain once right here, before any release() ever fires. The pending
-      // list is otherwise driven entirely by servers being freed, and an
-      // already-idle box frees nothing: a match that was waiting when the
-      // process died and an idle server sitting next to it would never meet,
-      // and the match would sit 'configuring' forever, which hasOpenMatch
-      // counts, locking its eight players out of the queue. This is also the
-      // path an operator takes when Step 1 of the runbook tells them to set a
-      // server back to idle by hand.
-      pending.drain();
+      // Drain once at boot, because the pending list is otherwise driven
+      // entirely by servers being freed and an already-idle box frees nothing:
+      // a match that was waiting when the process died and an idle server
+      // sitting next to it would never meet, and the match would sit
+      // 'configuring' forever, which hasOpenMatch counts, locking its eight
+      // players out of the queue. This is also the path an operator takes when
+      // Step 1 of the runbook tells them to set a server back to idle by hand.
+      //
+      // Sequenced behind the reconcile above rather than fired synchronously
+      // alongside it: this drain calls setupMatch, which dials
+      // `sv_password "pug_..."`, and reconcileServers has rcon sessions of its
+      // own in flight clearing that same cvar. Run concurrently the clear can
+      // land last and leave a recovered ranked match sitting unpassworded.
+      // Not awaited, so an unreachable box delays only the drain, not boot.
+      void releaser.settled().then(() => pending.drain());
 
       // Day one is a single game server, so the self-start burst is admitted
       // from each known server's address and adopted onto the first server row.
