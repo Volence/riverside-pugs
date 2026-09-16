@@ -27,22 +27,61 @@ export class ServerReleaser {
 
   /**
    * Free the server. The DB half is synchronous so a caller can assert on it
-   * immediately; the rcon half is best effort and fire-and-forget, because a
-   * match result is never allowed to fail over a password reset.
+   * immediately. The rcon half is best effort, because a match result is
+   * never allowed to fail over a password reset, but waiters are held back
+   * until it settles either way: once a drain hands this server to the next
+   * match, that match dials its own sv_password set, and firing waiters
+   * before the old clear lands would let the two rcon round trips race, with
+   * the old clear sometimes landing after the new set and leaving a live
+   * ranked match unpassworded.
    */
   release(serverId: number): void {
     const server = getServer(this.db, serverId);
     if (!server) return;
     release(this.db, serverId);
-    void this.clearPassword(server).catch((err) => {
-      console.error(`[serverRelease] could not clear sv_password on ${server.name}:`, err);
-    });
-    for (const fn of this.waiters) {
-      try {
-        fn();
-      } catch (err) {
-        console.error('[serverRelease] waiter threw:', err);
-      }
-    }
+    this.clearPassword(server)
+      .catch((err) => {
+        // A dead rcon target must never wedge the queue: the waiters still
+        // fire below even when the clear fails.
+        console.error(`[serverRelease] could not clear sv_password on ${server.name}:`, err);
+      })
+      .then(() => {
+        for (const fn of this.waiters) {
+          try {
+            fn();
+          } catch (err) {
+            console.error('[serverRelease] waiter threw:', err);
+          }
+        }
+      });
   }
+}
+
+/**
+ * Free servers that no live match owns any more.
+ *
+ * Marking a match aborted and freeing its server are two separate writes, and
+ * deliberately not one transaction: the releaser notifies waiters that go on to
+ * claim a server, which would be a nested write inside an open transaction. A
+ * crash between the two therefore strands a server that no reaper can re-find,
+ * since they all select on the match being live. Reconciling at boot is the
+ * self-healing answer, and it covers strand paths a transaction never would.
+ */
+export function reconcileServers(db: DB, releaser: ServerReleaser): number[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM servers
+       WHERE status != 'idle'
+       AND id NOT IN (
+         SELECT server_id FROM matches
+         WHERE state IN ('configuring', 'live') AND server_id IS NOT NULL
+       )`,
+    )
+    .all() as { id: number }[];
+
+  for (const r of rows) {
+    console.warn(`[serverRelease] reconciling stranded server ${r.id}: no live or configuring match owns it`);
+    releaser.release(r.id);
+  }
+  return rows.map((r) => r.id);
 }
