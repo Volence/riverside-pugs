@@ -110,8 +110,11 @@ function Live(
     return (
       <Panel>
         <p class="eyebrow">
-          {match.state === 'live' ? 'Match in progress'
-            : match.waitingForServer ? 'Waiting for a server'
+          {/* waitingForServer is checked first: a live match with no server
+              yet ("live but serverless" per StateSnapshot) is still live, so
+              state === 'live' alone cannot distinguish the two. */}
+          {match.waitingForServer ? 'Waiting for a server'
+            : match.state === 'live' ? 'Match in progress'
             : 'Setting up server'}
         </p>
         <h2>{campaignName(match.campaign)}</h2>

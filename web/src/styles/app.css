@@ -555,6 +555,16 @@ button.ctile:hover { border-color: var(--text-muted); }
   text-overflow: ellipsis;
 }
 
+@media (max-width: 480px) {
+  /* Four per row instead of eight: the same row width now buys each name
+   * roughly double the room to stay readable, while the queue is still eight
+   * fixed slots and still shows a half-full queue as half full, just as two
+   * rows of four instead of one row of eight. `end` (not `flex-end`, which
+   * grid ignores) keeps a short empty slot at the row's bottom edge instead
+   * of stretching it to match a filled neighbour's height. */
+  .slots { display: grid; grid-template-columns: repeat(4, 1fr); align-items: end; }
+}
+
 /* ---------- play: connect panel ---------- */
 
 /* sv_password makes this the only door in, so the console line is a fallback

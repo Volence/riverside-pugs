@@ -20,6 +20,7 @@ const { mockApi } = vi.hoisted(() => ({
     maps: vi.fn(),
     profile: vi.fn(),
     replaySessions: vi.fn(),
+    queue: vi.fn(),
   },
 }));
 
@@ -44,6 +45,11 @@ afterEach(cleanup);
 
 beforeEach(() => {
   for (const fn of Object.values(mockApi)) fn.mockReset();
+  // Every anonymous render of Play reaches SignIn, which polls this on mount.
+  // A sensible default here keeps the other describes from hitting the real
+  // network the way "offers Steam sign-in when logged out" did before this
+  // mock existed; tests that care about the queue panel override it.
+  mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
 });
 
 describe('Leaderboard', () => {
@@ -541,6 +547,94 @@ describe('Play', () => {
     expect(screen.getByText('No Mercy')).toBeTruthy();
     expect(screen.getByText('Team A')).toBeTruthy();
     expect(screen.getByText('Team B')).toBeTruthy();
+  });
+
+  it('shows the connect panel and an in-progress eyebrow for a live match with connect details', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 0, joined: false, players: [] },
+          lobby: null,
+          match: {
+            id: 1, state: 'live', campaign: 'no_mercy',
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: { host: '45.32.199.85', port: 27015, password: 'pug_a1b2c3d4' },
+            waitingForServer: false,
+          },
+        }}
+        refresh={noop}
+      />,
+    );
+    expect(screen.getByText(/match in progress/i)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /join server/i })).toBeTruthy();
+  });
+
+  // The important one: sv_password makes the connect panel the only door into
+  // the server, so it must not render at all until connect is real, no matter
+  // what state the match is in.
+  it('renders no connect panel when connect is null', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 0, joined: false, players: [] },
+          lobby: null,
+          match: {
+            id: 1, state: 'setting_up', campaign: 'no_mercy',
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: null, waitingForServer: false,
+          },
+        }}
+        refresh={noop}
+      />,
+    );
+    expect(screen.queryByRole('link', { name: /join server/i })).toBeNull();
+    expect(screen.getByText(/setting up server/i)).toBeTruthy();
+  });
+
+  it('shows the waiting-for-server message and its own eyebrow when waitingForServer is true', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 0, joined: false, players: [] },
+          lobby: null,
+          match: {
+            id: 1, state: 'live', campaign: 'no_mercy',
+            teamA: [{ steamid: '1', name: 'alice', avatar: null }],
+            teamB: [{ steamid: '2', name: 'bob', avatar: null }],
+            connect: null, waitingForServer: true,
+          },
+        }}
+        refresh={noop}
+      />,
+    );
+    expect(screen.getByText(/waiting for a server/i)).toBeTruthy();
+    expect(screen.getByText(/waiting for a free server/i)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /join server/i })).toBeNull();
+  });
+
+  it('does not show the public queue panel while api.queue() is still pending', () => {
+    let resolveQueue: (v: unknown) => void = () => {};
+    mockApi.queue.mockReturnValue(new Promise((r) => { resolveQueue = r; }));
+    render(<Play session={{ kind: 'anonymous' }} state={null} refresh={noop} />);
+    expect(screen.queryByText('Queue')).toBeNull();
+    // Settle the promise so it does not leak into the next test.
+    resolveQueue({ count: 0, players: [], phase: null });
+  });
+
+  it('shows the public queue panel once api.queue() resolves', async () => {
+    mockApi.queue.mockResolvedValue({
+      count: 1,
+      players: [{ steamid: '1', name: 'dizzy', avatar: null }],
+      phase: null,
+    });
+    render(<Play session={{ kind: 'anonymous' }} state={null} refresh={noop} />);
+    await waitFor(() => expect(screen.getByText('dizzy')).toBeTruthy());
+    expect(screen.getByText('Queue')).toBeTruthy();
   });
 
   it('shows who is in the queue and keeps the empty slots visible', () => {

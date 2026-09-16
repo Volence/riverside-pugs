@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 export interface ConnectInfo {
   host: string;
@@ -17,11 +17,18 @@ export function ConnectPanel({ connect }: { connect: ConnectInfo }) {
   const [copied, setCopied] = useState(false);
   const line = `connect ${connect.host}:${connect.port}; password ${connect.password}`;
 
+  // Tracked so a page navigation within the 2s "Copied" window can cancel it;
+  // otherwise the reset fires setState on an unmounted component.
+  const resetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (resetTimeout.current !== null) clearTimeout(resetTimeout.current);
+  }, []);
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(line);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      resetTimeout.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard denied. The line is on screen to select by hand.
     }
