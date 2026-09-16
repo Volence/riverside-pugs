@@ -55,6 +55,84 @@ function playedMap(joinedMap: number, ordinal: number): boolean {
   return ordinal >= joinedMap;
 }
 
+export interface RoundAggregate {
+  /** Closed, reliable halves of this map. Two per playing when both were
+   *  recorded, since each half is an independent survivor attempt. */
+  attempts: number;
+  fastestSec: number | null;
+  avgSec: number | null;
+  slowestSec: number | null;
+  /** Percentage of MEASURED attempts the survivors lived through, or null
+   *  when none was measured. Null rather than 0: survivors_alive is NULL for
+   *  every round played before the plugin emitted it, and treating those as
+   *  wipes would report the whole back catalogue as lethal. */
+  survivalPct: number | null;
+}
+
+const NO_ROUNDS: RoundAggregate = {
+  attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null,
+};
+
+/**
+ * Timing and survival for every reliable, closed half of the given maps.
+ *
+ * One query for all maps rather than one per map, because the campaign index
+ * asks for twenty-odd of them at once.
+ *
+ * `reliable = 1` is the same gate the scores already use: a half the plugin
+ * could not attribute is not an observation. `ended_at IS NOT NULL` excludes a
+ * round still open, which would otherwise register as a zero-second record and
+ * take the "fastest" column permanently.
+ *
+ * Survival and timing are counted independently. A round can have a trustworthy
+ * clock and no survival reading (an older plugin), and dropping it from the
+ * timing stats too would throw away data we have for the sake of data we do not.
+ */
+function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
+  const out = new Map<string, RoundAggregate>();
+  if (maps.length === 0) return out;
+  const rows = db
+    .prepare(
+      `SELECT mm.map AS map,
+              (julianday(r.ended_at) - julianday(r.started_at)) * 86400 AS secs,
+              r.survivors_alive AS alive
+       FROM match_rounds r
+       JOIN match_maps mm ON mm.match_id = r.match_id AND mm.ordinal = r.ordinal
+       JOIN matches m ON m.id = r.match_id
+       WHERE m.state = 'completed'
+         AND r.reliable = 1
+         AND r.ended_at IS NOT NULL
+         AND r.started_at IS NOT NULL
+         AND mm.map IN (${maps.map(() => '?').join(',')})`,
+    )
+    .all(...maps) as { map: string; secs: number | null; alive: number | null }[];
+
+  const acc = new Map<string, { secs: number[]; measured: number; survived: number }>();
+  for (const r of rows) {
+    let a = acc.get(r.map);
+    if (!a) { a = { secs: [], measured: 0, survived: 0 }; acc.set(r.map, a); }
+    if (r.secs !== null && r.secs >= 0) a.secs.push(r.secs);
+    if (r.alive !== null) {
+      a.measured++;
+      // > 0, not >= 1 by accident: a versus round ends when the survivors
+      // either wipe or reach the checkpoint, so anyone still standing means
+      // they got there.
+      if (r.alive > 0) a.survived++;
+    }
+  }
+
+  for (const [map, a] of acc) {
+    out.set(map, {
+      attempts: a.secs.length,
+      fastestSec: a.secs.length ? Math.round(Math.min(...a.secs)) : null,
+      slowestSec: a.secs.length ? Math.round(Math.max(...a.secs)) : null,
+      avgSec: a.secs.length ? Math.round(a.secs.reduce((x, y) => x + y, 0) / a.secs.length) : null,
+      survivalPct: a.measured === 0 ? null : Math.round((a.survived / a.measured) * 100),
+    });
+  }
+  return out;
+}
+
 export interface MapBreakdownRow {
   map: string;
   games: number;
@@ -166,6 +244,8 @@ export interface MapDetail {
    *  divided by the total number of player-maps. The map's own baseline, as
    *  opposed to any one player's line in `players`. */
   avgStats: Record<string, number>;
+  /** How long a round here takes and how often survivors live through it. */
+  rounds: RoundAggregate;
   players: MapLeaderRow[];
 }
 
@@ -256,6 +336,7 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
     // scores, one per team, and both are samples of the same quantity.
     avgScore: avgOrNull(sumA + sumB, recordedCount * 2),
     avgStats: perMapAverages(pooled, playerMaps),
+    rounds: roundAggregates(db, [map]).get(map) ?? NO_ROUNDS,
     players: [...acc.values()].sort((x, y) => y.wins - x.wins || y.games - x.games),
   };
 }
@@ -267,6 +348,8 @@ export interface MapIndexRow {
   /** Average score a team puts up here, over RECORDED playings only. See
    *  MapDetail.avgScore for why this is one number and not a per-team pair. */
   avgScore: number | null;
+  /** How long a round here takes and how often survivors live through it. */
+  rounds: RoundAggregate;
 }
 
 /**
@@ -299,8 +382,10 @@ export function mapIndex(db: DB): MapIndexRow[] {
     if (recorded(r.match_id, r.ordinal)) { row.n++; row.sumA += r.a; row.sumB += r.b; }
   }
 
+  const rounds = roundAggregates(db, [...acc.keys()]);
   return [...acc.entries()].map(([map, r]) => ({
     map, campaign: campaignForMap(map), played: r.played,
     avgScore: avgOrNull(r.sumA + r.sumB, r.n * 2),
+    rounds: rounds.get(map) ?? NO_ROUNDS,
   }));
 }

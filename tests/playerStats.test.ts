@@ -373,3 +373,89 @@ describe('a player who joined partway through a match', () => {
     expect(mapDetail(db, 'airport01')!.played).toBe(1);
   });
 });
+
+describe('map round aggregates', () => {
+  /** A closed half with an explicit duration and survival reading. */
+  function seedHalf(
+    id: number, ordinal: number, half: number,
+    opts: { seconds: number; alive: number | null; reliable?: boolean },
+  ): void {
+    db.prepare(
+      `INSERT INTO match_rounds
+         (match_id, ordinal, half, surv_team, score, reliable, started_at, ended_at, survivors_alive)
+       VALUES (?, ?, ?, 'a', 100, ?, '2026-09-14 00:00:00',
+               datetime('2026-09-14 00:00:00', '+' || ? || ' seconds'), ?)`,
+    ).run(id, ordinal, half, opts.reliable === false ? 0 : 1, opts.seconds, opts.alive);
+  }
+
+  it('reports fastest, average and slowest round in seconds', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 120, alive: 2 });
+    seedHalf(1, 0, 2, { seconds: 300, alive: 0 });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds).toMatchObject({ fastestSec: 120, slowestSec: 300, avgSec: 210, attempts: 2 });
+  });
+
+  it('computes survival rate from the survivor count, counting a wipe as a loss', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 100, alive: 3 });
+    seedHalf(1, 0, 2, { seconds: 100, alive: 0 });
+    expect(mapDetail(db, 'airport01')!.rounds.survivalPct).toBe(50);
+  });
+
+  it('leaves survival null when no round was measured, rather than calling it 0%', () => {
+    // Every round played before the plugin emitted alive= has survivors_alive
+    // NULL. Treating those as wipes would report every historic map as lethal.
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 100, alive: null });
+    seedHalf(1, 0, 2, { seconds: 100, alive: null });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds.survivalPct).toBeNull();
+    // Timing is independent and still known.
+    expect(d.rounds.avgSec).toBe(100);
+  });
+
+  it('counts only the rounds it could measure towards survival', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 100, alive: 4 });
+    seedHalf(1, 0, 2, { seconds: 100, alive: null });
+    // One measured round, survived: 100%, not 50%.
+    expect(mapDetail(db, 'airport01')!.rounds.survivalPct).toBe(100);
+  });
+
+  it('ignores an unreliable round entirely', () => {
+    // Same rule the scores already use: a round the plugin could not attribute
+    // is not an observation.
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 100, alive: 4 });
+    seedHalf(1, 0, 2, { seconds: 9999, alive: 0, reliable: false });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds).toMatchObject({ attempts: 1, fastestSec: 100, slowestSec: 100 });
+    expect(d.rounds.survivalPct).toBe(100);
+  });
+
+  it('reports nulls rather than zeros for a map with no closed rounds', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds).toMatchObject({
+      attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null,
+    });
+  });
+
+  it('skips a round that never closed, so an open one cannot be a 0-second record', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 200, alive: 1 });
+    db.prepare(
+      "INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at) VALUES (1, 0, 2, 'b', 0, 1, '2026-09-14 00:00:00')",
+    ).run();
+    expect(mapDetail(db, 'airport01')!.rounds).toMatchObject({ attempts: 1, fastestSec: 200 });
+  });
+
+  it('carries the same aggregate on the campaign index', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 120, alive: 2 });
+    seedHalf(1, 0, 2, { seconds: 300, alive: 0 });
+    const row = mapIndex(db).find((r) => r.map === 'airport01')!;
+    expect(row.rounds).toMatchObject({ attempts: 2, avgSec: 210, survivalPct: 50 });
+  });
+});

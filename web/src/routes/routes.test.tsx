@@ -745,6 +745,7 @@ describe('MapDetail', () => {
     played: 3,
     avgScore: 190,
     avgStats: { ck: 6.7, tank_damage: 150 },
+    rounds: { attempts: 6, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50 },
     players: [
       { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
         stats: { ck: 30, tank_damage: 900 }, avgStats: { ck: 10, tank_damage: 300 } },
@@ -1114,8 +1115,10 @@ describe('Maps', () => {
   it('lists averages, and says "not recorded" for a map with no recorded score', async () => {
     mockApi.maps.mockResolvedValue({
       maps: [
-        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgScore: 200 },
-        { map: 'l4d_vs_airport02_offices', campaign: 'dead_air', played: 1, avgScore: null },
+        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgScore: 200,
+          rounds: { attempts: 4, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50 } },
+        { map: 'l4d_vs_airport02_offices', campaign: 'dead_air', played: 1, avgScore: null,
+          rounds: { attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null } },
       ],
     });
     render(<Maps />);

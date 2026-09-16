@@ -202,12 +202,23 @@ export interface MatchDetail {
   }[];
 }
 
+export interface RoundAggregate {
+  attempts: number;
+  fastestSec: number | null;
+  avgSec: number | null;
+  slowestSec: number | null;
+  /** Null, not 0, when no round was measured: survivors_alive is NULL for
+   *  every round played before the plugin reported it. */
+  survivalPct: number | null;
+}
+
 export interface MapIndexRow {
   map: string;
   campaign: string | null;
   played: number;
   /** Mean over the recorded playings only; null when none has a real score. */
   avgScore: number | null;
+  rounds: RoundAggregate;
 }
 
 export interface MapLeaderRow {
@@ -230,6 +241,7 @@ export interface MapDetail {
   avgScore: number | null;
   /** Pooled across everyone who has played the map, per map played. */
   avgStats: Record<string, number>;
+  rounds: RoundAggregate;
   players: MapLeaderRow[];
 }
 
