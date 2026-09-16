@@ -122,14 +122,20 @@ describe('RealOrchestrator', () => {
     expect(row.went_live_at).not.toBeNull();
   });
 
-  it('setupMatch aborts the match when no server is free', async () => {
+  it('waits rather than aborting when no server is idle', async () => {
     const orch = new RealOrchestrator({
       db, listener: new LogListener(() => {}),
       logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
     });
     const mid = seedMatch(db);
+    const pended: number[] = [];
+    orch.onNoServer = (id: number) => pended.push(id);
+
     await orch.setupMatch(mid);
-    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state)
+      .toBe('configuring');
+    expect(pended).toEqual([mid]);
   });
 
   it('finishMatch pulls the dump, persists scores/stats, resets server, completes match', async () => {

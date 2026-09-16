@@ -39,6 +39,9 @@ export interface RealOrchestratorDeps {
   /** Injectable opts transform so tests can redirect the connection; production leaves opts untouched. */
   makeRcon?: (opts: RconOpts) => RconOpts;
   notify?: (msg: string) => void;
+  /** Called when setupMatch finds no idle server. The match stays 'configuring'
+   *  rather than aborting; the pending list is what retries it once one frees. */
+  onNoServer?: (matchId: number) => void;
   /** Where srcds writes demos. Empty disables demo recording on the site. */
   demoDir?: string;
   /** Where the plugin writes replay files. Empty disables replay recording on
@@ -63,6 +66,7 @@ export class RealOrchestrator implements Orchestrator {
   private notify: (msg: string) => void;
   private demoDir: string;
   private replayDir: string;
+  onNoServer?: (matchId: number) => void;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -73,6 +77,7 @@ export class RealOrchestrator implements Orchestrator {
     this.notify = deps.notify ?? (() => {});
     this.demoDir = deps.demoDir ?? '';
     this.replayDir = deps.replayDir ?? '';
+    this.onNoServer = deps.onNoServer;
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
@@ -85,8 +90,12 @@ export class RealOrchestrator implements Orchestrator {
   async setupMatch(matchId: number): Promise<void> {
     const server = claimIdle(this.db);
     if (!server) {
-      this.db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
-      console.error(`[orchestrator] no idle server for match ${matchId}; aborted`);
+      // Wait, do not abort. The match stays 'configuring' and the pending list
+      // retries it when a box frees. Only the no-server case pends: an rcon
+      // failure below still aborts, because retrying a broken setup forever
+      // would pin the queue on a server that is not going to work.
+      console.warn(`[orchestrator] no idle server for match ${matchId}; waiting`);
+      this.onNoServer?.(matchId);
       return;
     }
 
