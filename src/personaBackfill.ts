@@ -23,12 +23,21 @@ export async function backfillPersonas(db: DB, apiKey: string | null, fetchFn?: 
   const personas = await fetchPersonas(rows.map((r) => r.steamid), apiKey, fetchFn);
   if (personas.size === 0) return 0;
 
-  const update = db.prepare('UPDATE players SET name = ?, avatar = ? WHERE steamid = ?');
+  const updateBoth = db.prepare('UPDATE players SET name = ?, avatar = ? WHERE steamid = ?');
+  const updateName = db.prepare('UPDATE players SET name = ? WHERE steamid = ?');
+  const updateAvatar = db.prepare('UPDATE players SET avatar = ? WHERE steamid = ?');
   let n = 0;
   db.transaction(() => {
     for (const [steamid, p] of personas) {
-      update.run(p.name, p.avatar, steamid);
-      n++;
+      if (p.name === null && p.avatar === null) continue;
+
+      if (p.name !== null && p.avatar !== null) {
+        n += updateBoth.run(p.name, p.avatar, steamid).changes;
+      } else if (p.name !== null) {
+        n += updateName.run(p.name, steamid).changes;
+      } else {
+        n += updateAvatar.run(p.avatar, steamid).changes;
+      }
     }
   })();
   return n;
