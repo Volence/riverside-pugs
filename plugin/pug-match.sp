@@ -120,11 +120,16 @@ int g_iRosterCount;
 // those players.
 char g_sRosterName[MAX_ROSTER][64];
 
-/** True when this match was started in-game by !load_4v4p rather than by the
- *  backend over rcon. One behavioural difference: the match id is 0 until the
- *  backend assigns one via sm_pug_setid. No match, self-started or not, kicks
- *  a non-rostered player; the rostered eight are placed by Timer_TeamLock and
- *  anyone else may spectate. */
+/** True when this match was started in-game by !load_4v4p or adopted by
+ *  auto-track, rather than driven by the backend over rcon.
+ *
+ *  Two behavioural differences. The match id is 0 until the backend assigns one
+ *  via sm_pug_setid. And the end-of-match kick is never armed (see
+ *  EndMatchNow), because a campaign change is how an in-game night moves on and
+ *  emptying the box at every one of them is not what anybody asked for.
+ *
+ *  No match, self-started or not, kicks a non-rostered player; the rostered
+ *  eight are placed by Timer_TeamLock and anyone else may spectate. */
 bool g_bSelfStarted;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
@@ -1685,7 +1690,26 @@ void EndMatchNow(const char[] why)
 	Format(g_sEndResult, sizeof(g_sEndResult), "%s: %s %d to %d",
 		g_sCampaign, teamName, a, b);
 
+	// Announced on BOTH paths: every match says who won, whether the website
+	// started it or the players did.
 	PrintToChatAll("[PUG] Match ended. %s. Reporting to the site.", g_sEndResult);
+
+	// The kick is for backend-driven matches ONLY, and this gate is load
+	// bearing: do not remove it as redundant.
+	//
+	// A self-started (!load_4v4p) or auto-tracked match is a friend-group night
+	// on the box, and one of its ordinary match boundaries is !cm to the next
+	// campaign. OnMapStart sees the new campaign and ends the match right here,
+	// so an armed kick would dump the whole server to the main menu mid-night,
+	// every campaign change. The auto-track cancel in OnRoundIsLive cannot save
+	// them: it runs only once ready-up completes, and an eight-person L4D1
+	// ready-up is normally slower than this kick's T+8 to T+40 second passes.
+	//
+	// What the owner asked for was a WEBSITE match ending with a result so
+	// those eight go back and requeue. Nobody asked an in-game night to be
+	// ejected from its own server.
+	if (g_bSelfStarted) return;
+
 	// Everyone, spectators included, so the box is empty and ready for the next
 	// queue pop. Delayed so the score can be read in game first rather than
 	// only in the menu dialog. Safe for reporting: WriteDump reads roster slots,
@@ -2503,8 +2527,11 @@ public void OnRoundIsLive()
 		{
 			if (g_State == MS_Ended) LogUncollectedResult();
 			// Auto-track adoption is a new match, so a kick armed by the match
-			// that just ended must not fire into it. The window is real: the
-			// previous EndMatchNow may have been seconds ago.
+			// that just ended must not fire into it. Only a backend-driven
+			// match can have armed one (EndMatchNow skips the arming for
+			// self-started matches), and that is exactly the case where the
+			// window is real: people staying on the box after a website match
+			// and simply playing on.
 			CancelEndKick();
 			ResetMatchState();
 			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
