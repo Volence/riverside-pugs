@@ -20,6 +20,7 @@ export interface Me {
 export interface NamedPlayer {
   steamid: string;
   name: string;
+  avatar: string | null;
 }
 
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
@@ -37,7 +38,7 @@ export interface LobbySnapshot {
 }
 
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean };
+  queue: { count: number; joined: boolean; players: NamedPlayer[] };
   lobby: LobbySnapshot | null;
   match: {
     id: number;
@@ -45,6 +46,10 @@ export interface StateSnapshot {
     campaign: string;
     teamA: NamedPlayer[];
     teamB: NamedPlayer[];
+    /** Only for a viewer on this roster, and only once the match is live. */
+    connect: { host: string; port: number; password: string } | null;
+    /** Live but serverless means it is queued behind another match. */
+    waitingForServer: boolean;
   } | null;
 }
 

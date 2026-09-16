@@ -41,8 +41,11 @@ describe('Nav', () => {
 
   it('shows a live indicator naming the campaign while a match is live', () => {
     const state = {
-      queue: { count: 0, joined: false }, lobby: null,
-      match: { id: 4, state: 'live', campaign: 'no_mercy', teamA: [], teamB: [] },
+      queue: { count: 0, joined: false, players: [] }, lobby: null,
+      match: {
+        id: 4, state: 'live', campaign: 'no_mercy', teamA: [], teamB: [],
+        connect: null, waitingForServer: false,
+      },
     };
     const { container } = render(
       <LocationProvider><Nav session={{ kind: 'anonymous' }} state={state} /></LocationProvider>,

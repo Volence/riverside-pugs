@@ -3,6 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
+import { addServer } from '../src/serverPool.js';
 import type { Scheduler } from '../src/lobby.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
@@ -47,6 +48,40 @@ beforeEach(() => {
 
 function fillQueue() {
   for (const id of IDS) mm.join(id);
+}
+
+/** The bare db/mm from beforeEach, handed back by name for readability at the
+ *  call site rather than reaching for the module-level bindings directly. */
+function fixture(): { db: DB; mm: Matchmaker } {
+  return { db, mm };
+}
+
+/** A live match with a claimed server and a full roster, for the connect-block
+ *  tests. The token is fixed so the expected derived password is fixed too. */
+function fixtureWithLiveMatch(): { db: DB; mm: Matchmaker; matchId: number } {
+  const serverId = addServer(db, {
+    name: 's1',
+    host: '10.0.0.1',
+    port: 27015,
+    rconPort: 27115,
+    rconPassword: 'rconpw',
+    status: 'live',
+  });
+  const season = db.prepare('SELECT id FROM seasons ORDER BY id LIMIT 1').get() as { id: number };
+  const token = 'abcdef1234567890';
+  const matchId = Number(
+    db
+      .prepare(
+        `INSERT INTO matches (season_id, state, campaign, server_id, token)
+         VALUES (?, 'live', 'dead_air', ?, ?)`,
+      )
+      .run(season.id, serverId, token).lastInsertRowid,
+  );
+  const insertMp = db.prepare(
+    'INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)',
+  );
+  IDS.forEach((id, i) => insertMp.run(matchId, id, i < 4 ? 'a' : 'b'));
+  return { db, mm, matchId };
 }
 
 describe('Matchmaker', () => {
@@ -129,5 +164,37 @@ describe('Matchmaker', () => {
     const res = notifyMm.join(IDS[0]);
     expect(res.ok).toBe(true);
     expect(notifications).toEqual([]);
+  });
+});
+
+describe('stateFor connect details', () => {
+  it('gives a rostered player the connect block once the match is live', () => {
+    const { db, mm } = fixtureWithLiveMatch();
+    const snap = mm.stateFor(IDS[0]);
+    expect(snap.match!.connect).toEqual({
+      host: '10.0.0.1', port: 27015, password: 'pug_abcdef12',
+    });
+  });
+
+  it('withholds the connect block while the match is still configuring', () => {
+    const { db, mm, matchId } = fixtureWithLiveMatch();
+    db.prepare("UPDATE matches SET state = 'configuring' WHERE id = ?").run(matchId);
+    expect(mm.stateFor(IDS[0]).match!.connect).toBeNull();
+  });
+
+  it('lists who is in the queue, with avatars', () => {
+    const { db, mm } = fixture();
+    db.prepare('UPDATE players SET avatar = ? WHERE steamid = ?').run('http://a/1.jpg', IDS[0]);
+    mm.join(IDS[0]);
+    const snap = mm.stateFor(IDS[0]);
+    expect(snap.queue.players).toEqual([
+      { steamid: IDS[0], name: expect.any(String), avatar: 'http://a/1.jpg' },
+    ]);
+  });
+
+  it('flags a match that is waiting for a free server', () => {
+    const { db, mm, matchId } = fixtureWithLiveMatch();
+    db.prepare("UPDATE matches SET state = 'configuring', server_id = NULL WHERE id = ?").run(matchId);
+    expect(mm.stateFor(IDS[0]).match!.waitingForServer).toBe(true);
   });
 });
