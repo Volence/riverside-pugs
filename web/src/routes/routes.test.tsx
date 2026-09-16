@@ -587,7 +587,12 @@ describe('Play', () => {
       />,
     );
     expect(screen.getByText(/match in progress/i)).toBeTruthy();
-    expect(screen.getByRole('link', { name: /join server/i })).toBeTruthy();
+    // Assert on the console line, not the steam:// link: that line is the one
+    // path confirmed to actually get a player in, and it is what the panel
+    // leads with. Keyed on the password appearing BEFORE the connect.
+    expect(
+      screen.getByText('password pug_a1b2c3d4; connect 45.32.199.85:27015'),
+    ).toBeTruthy();
   });
 
   // The important one: sv_password makes the connect panel the only door into
@@ -614,7 +619,9 @@ describe('Play', () => {
         refresh={noop}
       />,
     );
-    expect(screen.queryByRole('link', { name: /join server/i })).toBeNull();
+    // No console line and no steam:// link: the panel must not render at all.
+    expect(screen.queryByText(/password pug_/)).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
     expect(screen.getByText(/setting up server/i)).toBeTruthy();
   });
 

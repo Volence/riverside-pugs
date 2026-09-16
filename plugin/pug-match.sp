@@ -2382,6 +2382,40 @@ public void OnMapEnd()
 	RplClose();
 }
 
+/**
+ * Re-assert the match password after the map's configs have run.
+ *
+ * The backend sets sv_password "pug_<token8>" and then changelevels, and that
+ * changelevel destroys it: server.cfg re-execs on every map change, local.cfg
+ * runs from it, and local.cfg execs secrets.cfg, which sets this box's standing
+ * sv_password back. So the per-match password survived for about a second and
+ * the site handed eight players a password the server had already discarded.
+ * Caught on 2026-09-16 the first time anyone tried to join a backend-driven
+ * match: "Bad password", every time, unrecoverably.
+ *
+ * It has to be re-asserted from here rather than from the backend, because
+ * OnConfigsExecuted is the one hook that fires AFTER the file that clobbers it.
+ * A backend retry would be racing a map load it cannot see the end of.
+ *
+ * Backend matches only. A self-started or auto-tracked match is a casual night
+ * and must keep the standing password, not get a per-match one it never asked
+ * for and that nobody has been told.
+ */
+public void OnConfigsExecuted()
+{
+	if (g_State == MS_None || g_State == MS_Ended) return;
+	if (g_bSelfStarted) return;
+	if (g_sToken[0] == '\0') return;
+
+	// strcopy truncates to sizeof(dest) - 1, so this is the token's first 8
+	// characters: the same slice the backend uses to build the password it
+	// advertises on the site. The two must not drift.
+	char tok8[9];
+	strcopy(tok8, sizeof(tok8), g_sToken);
+	ServerCommand("sv_password \"pug_%s\"", tok8);
+	PugDebug("re-asserted sv_password after configs for match %d", g_iMatchId);
+}
+
 public void OnMapStart()
 {
 	// Past the finale, FinalizeMap never runs (it lives behind the MS_Live
