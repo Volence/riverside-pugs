@@ -1,9 +1,13 @@
 import type { DB } from './db.js';
 import { getServer, release, type ServerRow } from './serverPool.js';
 
-/** Clears sv_password on a server we are done with. Injected so tests never
- *  dial rcon and so the reaper, which has no rcon of its own, can still do it. */
-export type PasswordClearer = (server: ServerRow) => Promise<void>;
+/** Hands a server back: clear sv_password, and tell the plugin the match whose
+ *  token this is (if any) is over. Injected so tests never dial rcon and so the
+ *  reapers, which have no rcon of their own, can still do both.
+ *
+ *  `token` is null when no match on that box ever got one, in which case there
+ *  is nothing to abort. */
+export type ServerCleaner = (server: ServerRow, token: string | null) => Promise<void>;
 
 /**
  * The single place a server stops being ours.
@@ -18,7 +22,7 @@ export type PasswordClearer = (server: ServerRow) => Promise<void>;
 export class ServerReleaser {
   private waiters: Array<() => void> = [];
 
-  constructor(private db: DB, private clearPassword: PasswordClearer) {}
+  constructor(private db: DB, private cleanServer: ServerCleaner) {}
 
   /** Called when a box frees, so a match waiting for one can claim it. */
   onFreed(fn: () => void): void {
@@ -28,22 +32,33 @@ export class ServerReleaser {
   /**
    * Free the server. The DB half is synchronous so a caller can assert on it
    * immediately. The rcon half is best effort, because a match result is
-   * never allowed to fail over a password reset, but waiters are held back
-   * until it settles either way: once a drain hands this server to the next
-   * match, that match dials its own sv_password set, and firing waiters
-   * before the old clear lands would let the two rcon round trips race, with
-   * the old clear sometimes landing after the new set and leaving a live
-   * ranked match unpassworded.
+   * never allowed to fail over a password reset or an abort.
+   *
+   * Waiters are held back until that rcon half settles either way, and what
+   * that buys is narrower than it looks, so state it exactly: a match handed
+   * this box by the DRAIN path dials its own sv_password set strictly after
+   * the old clear has landed, so those two round trips cannot cross and leave
+   * a live ranked match unpassworded. That is the whole guarantee. It is not a
+   * general one: onLobbyComplete calls setupMatch directly (src/matchmaker.ts)
+   * rather than through a waiter, so a lobby completing while the clear is
+   * still in flight can claim the row the instant release() marks it idle and
+   * race the clear anyway. Closing that would mean keeping the row unclaimable
+   * until the rcon settles, which is a larger change than this class.
    */
   release(serverId: number): void {
     const server = getServer(this.db, serverId);
     if (!server) return;
+    // Read before the row is freed, though nothing here depends on the order:
+    // release() writes only the servers table. The newest match on the box is
+    // the one whose match the plugin may still be holding. A stale or already
+    // aborted token is harmless: the plugin answers PUGERR and changes nothing.
+    const token = lastTokenOn(this.db, serverId);
     release(this.db, serverId);
-    this.clearPassword(server)
+    this.cleanServer(server, token)
       .catch((err) => {
         // A dead rcon target must never wedge the queue: the waiters still
-        // fire below even when the clear fails.
-        console.error(`[serverRelease] could not clear sv_password on ${server.name}:`, err);
+        // fire below even when the cleanup fails.
+        console.error(`[serverRelease] could not clean up ${server.name}:`, err);
       })
       .then(() => {
         for (const fn of this.waiters) {
@@ -55,6 +70,22 @@ export class ServerReleaser {
         }
       });
   }
+}
+
+/**
+ * The token of the most recent match to hold this server, or null.
+ *
+ * The releaser looks this up itself rather than taking it as an argument
+ * because three of its four callers (both reapers and reconcileServers) know
+ * only a server id, and threading a token through them would spread knowledge
+ * of the plugin protocol into code that has no other reason to hold it. One
+ * narrow read of a column the releaser is already keyed on is cheaper.
+ */
+function lastTokenOn(db: DB, serverId: number): string | null {
+  const row = db
+    .prepare('SELECT token FROM matches WHERE server_id = ? AND token IS NOT NULL ORDER BY id DESC LIMIT 1')
+    .get(serverId) as { token: string } | undefined;
+  return row?.token ?? null;
 }
 
 /**
@@ -74,6 +105,18 @@ export class ServerReleaser {
  * calls markOffline, so it means "not yet verified reachable", not "a match
  * used to own this". Reconciling it to idle would silently make an unverified
  * server claimable the moment it boots.
+ *
+ * Only a 'live' match protects its server, and 'configuring' deliberately does
+ * NOT. A configuring match can only hold a server_id because setupMatch wrote
+ * one after a successful claimIdle and the process then died before flipping
+ * the match to 'live' (setupMatch and SelfStartedMatches, which inserts rows
+ * that are already 'live', are the only two writers of that column). Excluding it
+ * meant boot left that server reserved and skipped: rebuildFromDb re-pended
+ * the match, drain called setupMatch, claimIdle found nothing because the only
+ * box was the one the match itself was holding, onNoServer re-pended it, and
+ * the match was immortal in a state hasOpenMatch counts, locking all eight
+ * players out of the queue for good. A match that is merely WAITING for a box
+ * has server_id IS NULL, so it can never be reconciled by accident.
  */
 export function reconcileServers(db: DB, releaser: ServerReleaser): number[] {
   const rows = db
@@ -82,13 +125,13 @@ export function reconcileServers(db: DB, releaser: ServerReleaser): number[] {
        WHERE status IN ('reserved', 'live')
        AND id NOT IN (
          SELECT server_id FROM matches
-         WHERE state IN ('configuring', 'live') AND server_id IS NOT NULL
+         WHERE state = 'live' AND server_id IS NOT NULL
        )`,
     )
     .all() as { id: number }[];
 
   for (const r of rows) {
-    console.warn(`[serverRelease] reconciling stranded server ${r.id}: no live or configuring match owns it`);
+    console.warn(`[serverRelease] reconciling stranded server ${r.id}: no live match owns it`);
     releaser.release(r.id);
   }
   return rows.map((r) => r.id);
