@@ -35,7 +35,12 @@ export type LogEvent =
   | { kind: 'round_start'; token: string; map: string; half: number; surv: 'a' | 'b' | null }
   // `map` rides along so recordRoundEnd can resolve the round to the map it
   // actually belongs to rather than to whatever had finished by arrival time.
-  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number }
+  // `alive` is how many survivors were still standing when the round ended,
+  // which is what survival rate is computed from. Null means the reading was
+  // absent or malformed, NOT that nobody survived: zero is a real, and the
+  // most interesting, value. Optional for the same reason `map` is, an older
+  // plugin does not send it.
+  | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null }
   // One discrete thing that happened, for the live feed. Generic on purpose:
   // the plugin decides the `kind` and the page renders per kind, so a new
   // event type needs no backend change. `seq` is per-match monotonic and makes
@@ -179,7 +184,19 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (half === null || surv === null || score === null) return null;
       // Optional: a staged older plugin does not send it, and the ordinal
       // falls back to the map count in that case.
-      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score };
+      //
+      // alive is optional on the same grounds, but is deliberately NOT
+      // allowed to fail the line: the side and score are what the match
+      // record is built from, and losing a whole round to a corrupt survival
+      // reading would be a bad trade. intOf returns null for both absent and
+      // malformed, and null here reads downstream as "not measured".
+      // A negative survivor count is not a thing the plugin can legitimately
+      // report (CountAliveSurvivors counts upward from zero), so treat one as
+      // a corrupt reading rather than storing nonsense that would later be
+      // averaged into a survival rate.
+      const aliveRaw = intOf(rest.alive);
+      const alive = aliveRaw !== null && aliveRaw >= 0 ? aliveRaw : null;
+      return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score, alive };
     }
     case 'EVENT': {
       const seq = intOf(rest.seq);

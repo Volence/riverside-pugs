@@ -575,6 +575,36 @@ int RoundMs()
 	return RoundToNearest((GetGameTime() - g_fRoundLiveAt) * 1000.0);
 }
 
+/** How many survivors were still standing when the round ended.
+ *
+ *  This is the entire survival reading. The backend stores the count and
+ *  derives "did they make it" from count > 0, rather than this deciding it
+ *  here: a versus round only ends when the survivors either wipe or reach the
+ *  checkpoint, so a non-zero count is exactly the survivors who got there.
+ *  Storing the observation instead of the verdict means the definition can be
+ *  revised later without the recorded data being already cooked.
+ *
+ *  Bots count. A bot walking into the saferoom still means the team survived,
+ *  and a mid-round disconnect is precisely when one is holding a survivor
+ *  slot. Incapacitated players count as alive, which is correct at this
+ *  instant: anyone left incapped outside a closing saferoom is dead by the
+ *  time the round is actually over, and if every survivor is down they bleed
+ *  out and the count is zero.
+ *
+ *  MUST be read at round_end time and carried, never re-read inside
+ *  Timer_ReadScore's retry chain 2 to 8 seconds later: by then the next half
+ *  can have spawned a fresh survivor team and the count would describe the
+ *  wrong round entirely. Same discipline as `half` and `surv`. */
+int CountAliveSurvivors()
+{
+	int alive = 0;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR && IsPlayerAlive(i)) alive++;
+	}
+	return alive;
+}
+
 /** Close out a half: emit ROUND_END (if a side was resolved) and mark the
  *  half no longer live. This is the single exit point for all three
  *  terminal paths of Event_RoundEnd's score read: the synchronous success,
@@ -589,7 +619,7 @@ int RoundMs()
  *  round_end time, not read fresh from g_iHalf/g_iPugSide here. The half is
  *  derived from m_bInSecondHalfOfRound at the time the round goes live, and
  *  the team lock timer may have flipped g_iPugSide by the time this is called. */
-void EmitRoundEnd(int half, const char[] surv, int score)
+void EmitRoundEnd(int half, const char[] surv, int score, int alive)
 {
 	if (surv[0] != '\0')
 	{
@@ -600,7 +630,16 @@ void EmitRoundEnd(int half, const char[] surv, int score)
 		// datagrams reordering in flight would file the round on the next map.
 		// g_sCurrentMap is safe to read here even from the retry chain: that
 		// chain is TIMER_FLAG_NO_MAPCHANGE, so it cannot outlive this map.
-		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d", g_sCurrentMap, half, surv, score);
+		// alive= rides on this line rather than becoming an EVENT because
+		// eventKinds.ts is explicit that the event feed carries timing, never
+		// totals: it is lossy UDP, and a survival rate counted from dropped
+		// datagrams would be quietly wrong forever. This line is the same path
+		// the authoritative score already takes, covered by the same reliable
+		// flag. CountAliveSurvivors never returns a negative, so every value
+		// sent here is a real reading; the parser treats absent or
+		// non-numeric as "not measured", which is distinct from zero.
+		EmitPug("ROUND_END map=%s half=%d surv=%s score=%d alive=%d",
+			g_sCurrentMap, half, surv, score, alive);
 	}
 	// Match-critical work first, replay second. RplClose can in principle
 	// throw (see the stale-handle note on it), and an unwind here would skip
@@ -2749,6 +2788,9 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	int half = g_iHalf;
 	char survEnd[2];
 	SurvSideOf(survPug, survEnd, sizeof(survEnd));
+	// Captured here for the same reason as half and survEnd: by the time the
+	// retry chain runs, the next half may already have a living survivor team.
+	int alive = CountAliveSurvivors();
 
 	// Flush here, while this round's clock is still valid: g_iHalf still names
 	// this half and EmitRoundEnd has not yet zeroed g_fRoundLiveAt. Left to
@@ -2763,7 +2805,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		// The survivor team's own score for this half. g_iHalfScoreA/B are
 		// already the per-half accumulators.
 		int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
-		EmitRoundEnd(half, survEnd, mine);
+		EmitRoundEnd(half, survEnd, mine, alive);
 
 		if (second) FinalizeMap();
 		return;
@@ -2775,6 +2817,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	pack.WriteCell(survPug);
 	pack.WriteCell(0); // retry counter
 	pack.WriteCell(half);
+	pack.WriteCell(alive);
 	pack.WriteString(survEnd);
 }
 
@@ -2897,6 +2940,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	int survPug = pack.ReadCell();
 	int attempt = pack.ReadCell();
 	int half = pack.ReadCell();
+	int alive = pack.ReadCell();
 	char survEnd[2];
 	pack.ReadString(survEnd, sizeof(survEnd));
 	if (g_State != MS_Live) return Plugin_Stop;
@@ -2912,6 +2956,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			retry.WriteCell(survPug);
 			retry.WriteCell(attempt + 1);
 			retry.WriteCell(half);
+			retry.WriteCell(alive);
 			retry.WriteString(survEnd);
 		}
 		else
@@ -2928,7 +2973,10 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// unreliable and the site says "not recorded". This used to send
 			// the half accumulator, which is 0 here, and 0 looked like a real
 			// result (matches 16 and 17, 2026-09-13).
-			EmitRoundEnd(half, survEnd, -1);
+			// alive is still carried even though the score is unknown: the two
+			// readings are independent, and a round whose score never landed
+			// still tells us truthfully whether anyone survived it.
+			EmitRoundEnd(half, survEnd, -1, alive);
 			if (second) FinalizeMap();
 		}
 		return Plugin_Stop;
@@ -2936,7 +2984,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 
 	AttributeScore(survPug, score, second);
 	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
-	EmitRoundEnd(half, survEnd, mine);
+	EmitRoundEnd(half, survEnd, mine, alive);
 	if (second) FinalizeMap();
 	return Plugin_Stop;
 }

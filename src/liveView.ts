@@ -312,8 +312,8 @@ export function recordRoundEnd(
   // 2026-09-13 showed 0 to 0 for a map that was played).
   const known = ev.score >= 0;
   db.prepare(
-    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at, survivors_alive)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
      ON CONFLICT (match_id, ordinal, half) DO UPDATE SET
        surv_team = excluded.surv_team,
        score = excluded.score,
@@ -322,8 +322,14 @@ export function recordRoundEnd(
        -- observation and the row is trustworthy again. Unless the score
        -- itself is unknown, in which case the row stays unreliable.
        reliable = excluded.reliable,
-       ended_at = excluded.ended_at`,
-  ).run(id, ordinal, ev.half, ev.surv, known ? ev.score : 0, known ? 1 : 0);
+       ended_at = excluded.ended_at,
+       -- COALESCE, not a plain overwrite: a duplicate ROUND_END that carries
+       -- no reading must not erase one already observed. Every other column
+       -- here is authoritative on every line, but this one is the single
+       -- field an older plugin can omit, so absence has to lose to presence
+       -- rather than win by arriving second.
+       survivors_alive = COALESCE(excluded.survivors_alive, match_rounds.survivors_alive)`,
+  ).run(id, ordinal, ev.half, ev.surv, known ? ev.score : 0, known ? 1 : 0, ev.alive);
   touch(db, id);
 }
 
