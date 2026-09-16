@@ -221,10 +221,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // was advertised as claimable, players stayed connected, and the plugin
       // went on enforcing a roster and a token the backend had already binned.
       // A stale or unknown token just draws a PUGERR, which is a no-op.
+      // RESTORE the configured password, never blank it. This box carries a
+      // standing sv_password from secrets.cfg (exec'd by local.cfg) which is
+      // how strangers are kept off it; local.cfg's own comment records them
+      // walking in when it was not being enforced. Blanking it here, which is
+      // what this line did when it only had to undo a per-match password,
+      // would have left the server open to the internet the first time any
+      // match was released, including an ordinary in-game one.
+      //
+      // exec is the right shape rather than setting a literal: secrets.cfg is
+      // the single source of truth, it lives on the box, it is gitignored, and
+      // the backend has no business knowing the value. Re-exec is idempotent
+      // and only re-asserts rcon_password to what it already is.
       try {
-        await rcon.exec('sv_password ""');
+        await rcon.exec('exec secrets.cfg');
       } catch (err) {
-        console.error(`[serverRelease] sv_password clear failed on ${server.name} (non-fatal):`, err);
+        console.error(`[serverRelease] sv_password restore failed on ${server.name} (non-fatal):`, err);
       }
       if (token) {
         try {
