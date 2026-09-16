@@ -27,6 +27,11 @@ does not:
     export L4D_RCON_PW=$(sed -n 's/^ *rcon_password *"\([^"]*\)".*/\1/p' \
       /home/volence/l4d/deploy/overrides/left4dead/cfg/secrets.cfg | head -1)
 
+A couple of steps below also `ssh` to the box directly (to tail the
+SourceMod log), which needs `L4D_HOST` set:
+
+    . /home/volence/l4d/deploy/server.env   # sets L4D_HOST
+
 `sqlite3 data/pug.db "..."` below assumes you are either on the box at
 `/home/pug/app` or have pulled a copy of `pug.db` locally; adjust the path to
 match wherever you are actually running it from.
@@ -64,7 +69,7 @@ hung queue. Catch it here, not after eight people are already waiting.
    | status seen | what it means | what to do |
    |---|---|---|
    | `idle` | claimable, proceed | nothing, you're clear |
-   | `offline` | the schema's default for a freshly-inserted row; nothing in production ever promotes this to `idle` on its own | this is the box's actual row if it has never yet been released by a real match. Restart `pug-web` (boot runs `reconcileServers`, see below) and re-check; if it is still `offline`, manually set it: `sqlite3 data/pug.db "UPDATE servers SET status='idle' WHERE id=<id>;"` only after you have independently confirmed via `R "status"` that no match owns the box |
+   | `offline` | the schema's default for a freshly-inserted row; nothing in production ever promotes this to `idle` on its own | this is the box's actual row if it has never yet been released by a real match. Restart `pug-web` (boot runs `reconcileServers`, see below) and re-check; if it is still `offline`, manually set it: `sqlite3 data/pug.db "UPDATE servers SET status='idle' WHERE id=<server id>;"` only after you have independently confirmed via `R "status"` that no match owns the box |
    | `reserved` or `live` with no owning match | stranded from a crash | restart `pug-web`. Its boot sequence calls `reconcileServers`, which frees any server marked `reserved` or `live` that no `configuring`/`live` match row owns. Re-run the query in this step after the restart to confirm it moved to `idle` |
    | `reserved` or `live` with a real owning match | genuinely in use | do not touch it; that match needs to finish or be rolled back first (Step 9) |
 
@@ -90,14 +95,16 @@ so nothing will reset them for you.
 
    Expected: rsync summary, `npm ci` / `npm run build` succeed on the remote,
    `pug-web` restarts, and the script's own check prints `HTTP 200`. If it
-   prints anything else, do not proceed to step 2; the web half is what owns
-   the queue and the server-claim logic you just verified in Step 1.
+   prints anything else, do not proceed to Step 2's item 2 below; the web
+   half is what owns the queue and the server-claim logic you just verified
+   in Step 1.
 
-2. Confirm the server is still empty (people can join between Step 1 and now):
+2. Confirm the server is still empty (people can join between Step 1 and
+   now):
 
        R "status"
 
-   Expected: 0 humans, same as Step 1.3.
+   Expected: 0 humans, same check as Step 1.1.
 
 3. Build and stage the plugin:
 
@@ -124,7 +131,8 @@ so nothing will reset them for you.
        R "sm_pug_auto_track"
        R "sm_pug_roster_at_live"
 
-   Expected: both print `1`.
+   Expected: a raw cvar query, not a bare value, so look for the `1` inside
+   it: `"sm_pug_auto_track" = "1"` and `"sm_pug_roster_at_live" = "1"`.
 
 ## 3. Let the queue pop
 
@@ -150,6 +158,13 @@ first map of the voted campaign.
    still waiting, check the `pug-web` service log for `[orchestrator] no
    idle server` or `[pendingMatches]` lines.
 
+   **Write down both numbers from this row and keep them straight for the
+   rest of the night.** The `id` column is the *match id*, referred to below
+   as `<match id>`. The `server_id` column is a different number from a
+   different table (`servers`), referred to below as `<server id>`. They are
+   not interchangeable; a query against `servers` needs `<server id>`, a
+   query against `matches` or `match_players` needs `<match id>`.
+
 ## 4. Roster identity check, before anyone connects
 
 This is the single pairing that has never once been exercised against the
@@ -161,7 +176,7 @@ real backend. Do this before telling anyone to click Join.
    and `STATUS roster slot=... steamid=... team=... connected=0 ...`):
 
    - `state=live`
-   - `match=<id>` matching the id from Step 3.1
+   - `match=<match id>` matching the match id from Step 3.1
    - eight `STATUS roster` lines, each `connected=0` (nobody has joined yet)
    - `teamLock=1` on the `STATUS selfStarted=... teamLock=... recordDemos=...`
      line
@@ -175,7 +190,7 @@ real backend. Do this before telling anyone to click Join.
 2. Compare the eight `steamid=` values from `sm_pug_status` against the
    database:
 
-       sqlite3 data/pug.db "SELECT player_id, team FROM match_players WHERE match_id = <id>;"
+       sqlite3 data/pug.db "SELECT player_id, team FROM match_players WHERE match_id = <match id>;"
 
    Expected: the same eight SteamID64s, same team letters, in the plugin's
    roster as in `match_players`. A mismatch here means the `sm_pug_roster`
@@ -273,13 +288,13 @@ Do all four. Do not stop at the first one that looks right.
 
 2. Server row freed:
 
-       sqlite3 data/pug.db "SELECT id, status FROM servers WHERE id = <id>;"
+       sqlite3 data/pug.db "SELECT id, status FROM servers WHERE id = <server id>;"
 
    Expected: `status = idle`.
 
 3. Match row completed:
 
-       sqlite3 data/pug.db "SELECT id, state, winner, team_a_score, team_b_score, ended_at FROM matches WHERE id = <id>;"
+       sqlite3 data/pug.db "SELECT id, state, winner, team_a_score, team_b_score, ended_at FROM matches WHERE id = <match id>;"
 
    Expected: `state = completed`, `winner` and both scores populated,
    `ended_at` non-null.
@@ -300,7 +315,7 @@ end to end. Tell the Discord call. Go to bed.
 ## 9. Rollback
 
 If the plugin misbehaves at any point after staging (wrong placement, no
-kicks, roster mismatch, whatever), the fix is:
+kicks, roster mismatch, whatever):
 
 1. Stage the previous `.smx`. You need the old build; if you don't have it
    saved, check out the previous commit of `plugin/pug-match.sp` and
@@ -314,7 +329,52 @@ kicks, roster mismatch, whatever), the fix is:
        R "sm_pug_abort <token>"
 
    Use the actual token for that match, from `sqlite3 data/pug.db "SELECT
-   token FROM matches WHERE id = <id>;"`.
+   token FROM matches WHERE id = <match id>;"`.
+
+**`sm_pug_abort` only resets the plugin's own in-memory state.** `Cmd_Abort`
+in `plugin/pug-match.sp` calls `ResetMatchState()` and nothing else: it never
+touches the database and never clears `sv_password`. Immediately after a bare
+`sm_pug_abort`, expect the match row to still read `state = live` and the
+server row to still be non-idle. That is correct, not a bug, and the next two
+paragraphs are what actually closes it out. Do not stop at `sm_pug_abort`
+and consider the box recovered.
+
+**Path A, automatic (takes 10 to 11 minutes, no further action needed):**
+`Timer_Heartbeat` in the plugin only emits `HEARTBEAT` while
+`g_State != MS_None`, and `ResetMatchState()` sets `g_State = MS_None`, so the
+heartbeat stops the instant `sm_pug_abort` runs. `match_live.last_seen` then
+goes stale, and `reapOrphanedMatches` in `src/liveView.ts` aborts any `live`
+match whose heartbeat has been silent for `ORPHAN_AFTER_MS` (600000ms, i.e.
+10 minutes). That reaper runs on a 60 second interval alongside
+`reapNoShowMatches` (`src/server.ts`), so worst case is 10 minutes plus
+just under 60 seconds, roughly 10 to 11 minutes total. When it fires it goes
+through the same `ServerReleaser` as every other path, so `sv_password` is
+cleared as part of it. If you can afford to wait that long, running
+`sm_pug_abort` and then leaving it alone is enough; just say so out loud in
+the Discord call so nobody re-tries the same match in the meantime.
+
+**Path B, manual (when you will not wait):** update the match row yourself,
+then restart the web service so the boot-time reconciler picks up the now-
+freed row. **The order below matters; do not restart first.**
+
+    sqlite3 data/pug.db "UPDATE matches SET state='aborted', ended_at=datetime('now') WHERE id=<match id>;"
+
+Then restart `pug-web`. Its boot sequence calls `reconcileServers`
+(`src/serverRelease.ts`), which frees any server marked `reserved` or
+`live` whose match is **not** `configuring` or `live` any more. Restarting
+before the update is a no-op: `reconcileServers` explicitly excludes a
+server whose match is still `configuring` or `live`, which is exactly the
+state the match is in right after a bare `sm_pug_abort` and before this
+update runs. Do the update first, always.
+
+The `reapOrphanedMatches` / `reapNoShowMatches` pair in `src/liveView.ts`
+and `src/noShow.ts` are the correct pattern this scoped update imitates:
+update one specific match row to `aborted`, then let the release path
+(directly via the reaper, or via `reconcileServers` on next boot) clear
+`sv_password` and free the server. Never skip straight to touching
+`servers.status` by hand; go through a match-state change and let a
+reaper or `reconcileServers` do the release, so the release logic only
+ever lives in one place.
 
 **Never run a blanket update.** Do not, under any circumstance, run:
 
@@ -322,13 +382,14 @@ kicks, roster mismatch, whatever), the fix is:
 
 This has already killed a match the owner had just started, on a previous
 occasion. It touches every live match on the box, not just the one that's
-broken. Always target a specific match id, and always go through
-`sm_pug_abort <token>` first so the plugin's own state (and the server's
-`sv_password`, via the release path) gets cleaned up too, rather than editing
-the database out from under a plugin that still thinks it owns that match.
+broken. Always target a specific match id, exactly as the scoped statement
+above does.
 
-After an abort, confirm the server actually freed:
+After Path A or Path B, confirm the server actually freed:
 
-    sqlite3 data/pug.db "SELECT status FROM servers WHERE id = <id>;"
+    sqlite3 data/pug.db "SELECT status FROM servers WHERE id = <server id>;"
 
-Expected: `idle`. If not, fall back to Step 1.3's stranded-row handling.
+Expected: `idle`. If Path B's restart still leaves this non-idle, re-check
+that the `UPDATE matches` statement actually ran (`SELECT state FROM matches
+WHERE id = <match id>;` should read `aborted`) before assuming
+`reconcileServers` itself is broken.
