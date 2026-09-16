@@ -1858,8 +1858,8 @@ public Action Cmd_Status(int args)
 		g_iRound1Logical, g_iRound1SurvPug, g_iLogicalOfPugA, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
 	DumpLine("STATUS half a=%d b=%d pendingFinalize=%d readyup=%d",
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
-	DumpLine("STATUS selfStarted=%d enforceRoster=%d recordDemos=%d",
-		g_bSelfStarted ? 1 : 0, g_bSelfStarted ? 0 : 1, g_cvRecordDemos.BoolValue ? 1 : 0);
+	DumpLine("STATUS selfStarted=%d teamLock=%d recordDemos=%d",
+		g_bSelfStarted ? 1 : 0, TeamLockActive() ? 1 : 0, g_cvRecordDemos.BoolValue ? 1 : 0);
 
 	int straight, inverted;
 	OrientationVote(straight, inverted);
@@ -2153,6 +2153,22 @@ void OrientationVote(int &straight, int &inverted)
 	inverted = onSide[1][TEAM_INFECTED] + onSide[2][TEAM_SURVIVOR];
 }
 
+/** Whether Timer_TeamLock will actually move anyone right now, independent of
+ *  the orientation vote. Shared with Cmd_Status so the STATUS line can never
+ *  drift from the gate it is reporting on. */
+bool TeamLockActive()
+{
+	// Testing switch: the vote still tracks orientation for scoring, but
+	// nobody is moved. Never leave this off for a real ranked match.
+	if (!g_cvTeamLock.BoolValue) return false;
+	// Auto-track implies no team lock only for the matches auto-track itself
+	// starts, which have no authority: their "roster" is just whoever happened
+	// to be on each side. A backend-issued roster is authoritative and must be
+	// enforced even while auto_track is on, which it always is on the live box.
+	if (g_cvAutoTrack.BoolValue && g_bSelfStarted) return false;
+	return true;
+}
+
 /** Observation-based cohesion lock. Every tick:
  *  1. Adopt the pug-team<->side mapping from where rostered players actually sit,
  *     via a single JOINT orientation vote (not two independent per-team votes, because
@@ -2205,14 +2221,7 @@ public Action Timer_TeamLock(Handle timer)
 	// vote ties at straight == inverted, so gating on confirmation would stall
 	// enforcement forever.
 	if (straight == 0 && inverted == 0) return Plugin_Continue;
-	// Testing switch: the vote above still tracks orientation for scoring, but
-	// nobody is moved. Never leave this off for a real ranked match.
-	if (!g_cvTeamLock.BoolValue) return Plugin_Continue;
-	// Auto-track implies no team lock only for the matches auto-track itself
-	// starts, which have no authority: their "roster" is just whoever happened
-	// to be on each side. A backend-issued roster is authoritative and must be
-	// enforced even while auto_track is on, which it always is on the live box.
-	if (g_cvAutoTrack.BoolValue && g_bSelfStarted) return Plugin_Continue;
+	if (!TeamLockActive()) return Plugin_Continue;
 
 	for (int c = 1; c <= MaxClients; c++)
 	{
