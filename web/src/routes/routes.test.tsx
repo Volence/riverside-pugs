@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { StatTable, EventFeed } from '../components/StatTable';
 import type { StatDef } from '../api';
 import { statGroupStarts } from '../format';
-import { initialOrdinal, sideNote } from './MatchDetail';
+import { deepLinkFromQuery, initialOrdinal, sideNote } from './MatchDetail';
 import type { MatchDetail } from '../api';
 
 /* Deliberately shallow. These assert that each route reaches its loaded state
@@ -1142,6 +1142,46 @@ describe('initialOrdinal', () => {
     expect(initialOrdinal(maps, '#map-3')).toBe(0);
     expect(initialOrdinal(maps, '#other')).toBe(0);
     expect(initialOrdinal([], '#map-1')).toBeNull();
+  });
+});
+
+describe('deepLinkFromQuery', () => {
+  const maps = [{ ordinal: 0 }, { ordinal: 1 }];
+  const rounds = [{ ordinal: 1, half: 1 }, { ordinal: 1, half: 2 }];
+
+  it('honours ordinal, half and t when all three name a round the match actually has', () => {
+    expect(deepLinkFromQuery('?ordinal=1&half=2&t=12000', maps, rounds))
+      .toEqual({ ordinal: 1, half: 2, seekMs: 12000 });
+  });
+
+  it('reads an ordinary visit with no query string as no deep link at all', () => {
+    // Number(null) is 0, not NaN, and ordinal 0 is a real map on almost every
+    // match: a naive parse would misread a plain /match/:id as "ordinal 0".
+    expect(deepLinkFromQuery('', maps, rounds)).toEqual({ ordinal: null, half: null, seekMs: undefined });
+  });
+
+  it('drops the half when it names no round this match has, even though the map is real', () => {
+    // ordinal 0 exists but has no rounds in the fixture, so half is rejected
+    // for it even though "1" alone looks like a perfectly good round number.
+    expect(deepLinkFromQuery('?ordinal=0&half=1&t=500', maps, rounds))
+      .toEqual({ ordinal: 0, half: null, seekMs: 500 });
+  });
+
+  it('drops the ordinal when it names no map this match has, and the half with it', () => {
+    expect(deepLinkFromQuery('?ordinal=9&half=1&t=500', maps, rounds))
+      .toEqual({ ordinal: null, half: null, seekMs: 500 });
+  });
+
+  it('rejects a non-integer ordinal and a half outside 1/2, falling back rather than crashing', () => {
+    expect(deepLinkFromQuery('?ordinal=1.5&half=1', maps, rounds))
+      .toEqual({ ordinal: null, half: null, seekMs: undefined });
+    expect(deepLinkFromQuery('?ordinal=1&half=3', maps, rounds))
+      .toEqual({ ordinal: 1, half: null, seekMs: undefined });
+  });
+
+  it('ignores a non-numeric t instead of seeking to NaN', () => {
+    expect(deepLinkFromQuery('?ordinal=1&half=1&t=soon', maps, rounds))
+      .toEqual({ ordinal: 1, half: 1, seekMs: undefined });
   });
 });
 

@@ -19,9 +19,16 @@ import { Viewer } from '../replay/Viewer';
  * called from inside a plain array-map callback.
  */
 function MapReplay(
-  { matchId, ordinal, names }: { matchId: number; ordinal: number; names: Record<string, string> },
+  { matchId, ordinal, names, initialHalf, seekMs }: {
+    matchId: number; ordinal: number; names: Record<string, string>;
+    /** The round a deep link asked for, already validated by the caller
+     *  against this match's own rounds. Undefined for an ordinary visit. */
+    initialHalf?: number;
+    /** Only meaningful for `initialHalf`'s own round: see the seek prop below. */
+    seekMs?: number;
+  },
 ) {
-  const [half, setHalf] = useState(1);
+  const [half, setHalf] = useState(initialHalf ?? 1);
   const timeline = useFetch(
     (s) => api.replayTimeline(matchId, ordinal, half, s),
     [matchId, ordinal, half],
@@ -40,6 +47,12 @@ function MapReplay(
         spec={{ kind: 'match', matchId, ordinal, half }}
         names={names}
         timeline={timeline.data?.entries}
+        // The clip's timestamp belongs to initialHalf's round alone. Once the
+        // round switch moves away from it this becomes undefined, so a stray
+        // seek effect firing on the OTHER round's own first frames (a real
+        // possibility: Viewer never remounts across a half switch, only its
+        // spec changes) never lands the wrong moment.
+        seekMs={initialHalf != null && half === initialHalf ? seekMs : undefined}
       />
     </>
   );
@@ -68,6 +81,47 @@ export function initialOrdinal(maps: { ordinal: number }[], hash: string): numbe
   const m = /^#map-(\d+)$/.exec(hash);
   const wanted = m ? Number(m[1]) - 1 : NaN;
   return maps.some((mp) => mp.ordinal === wanted) ? wanted : maps[0].ordinal;
+}
+
+/** A clip's deep link into a specific moment: `?ordinal=&half=&t=`.
+ *
+ * Every field is independently untrustworthy (typed by hand, or stale
+ * against a match that has since been reprocessed), so each is checked
+ * against what this match actually has before being honoured, and anything
+ * that fails falls back to `null`/`undefined` rather than ever selecting a
+ * round the match does not have or seeking to a non-number.
+ *
+ * `URLSearchParams.get` returns `null` for a missing key, and `Number(null)`
+ * is `0`, not `NaN` - a plain `Number(params.get(...))` would read an
+ * ordinary visit with no query string at all as "ordinal 0, half 0", and
+ * ordinal 0 is a real map on nearly every match. Missing keys are read as
+ * `NaN` explicitly to keep that from ever happening.
+ */
+export function deepLinkFromQuery(
+  search: string,
+  maps: { ordinal: number }[],
+  rounds: { ordinal: number; half: number }[],
+): { ordinal: number | null; half: number | null; seekMs: number | undefined } {
+  const params = new URLSearchParams(search);
+  const num = (key: string): number => {
+    const raw = params.get(key);
+    return raw === null ? NaN : Number(raw);
+  };
+
+  const qOrdinal = num('ordinal');
+  const ordinal = Number.isInteger(qOrdinal) && maps.some((mp) => mp.ordinal === qOrdinal) ? qOrdinal : null;
+
+  const qHalf = num('half');
+  // A round is asked for only in terms of a map it belongs to: half 2 of a
+  // map that never had one is never a target, even if half alone looks valid.
+  const half = ordinal !== null && (qHalf === 1 || qHalf === 2)
+    && rounds.some((r) => r.ordinal === ordinal && r.half === qHalf)
+    ? qHalf : null;
+
+  const qT = num('t');
+  const seekMs = Number.isFinite(qT) ? qT : undefined;
+
+  return { ordinal, half, seekMs };
 }
 
 /** A map's scoreline for the chip row and the heading, or the words "not
@@ -209,18 +263,31 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     ...r, name: players.find((p) => p.steamid === r.steamid)?.name ?? r.name,
   }));
 
+  // An admin integrity clip links here with `?ordinal=&half=&t=`, computed
+  // once: it names the round the link was ABOUT, not whatever round is on
+  // screen right now, so it must not be recomputed every render as `ordinal`
+  // state below moves around under the user's own navigation.
+  const deepLink = useState(() => deepLinkFromQuery(
+    typeof location === 'undefined' ? '' : location.search, maps, rounds,
+  ))[0];
+
   // One viewer, one map at a time. Four canvases each decoding a replay and
   // running an animation loop was the heaviest thing on the page, and nobody
   // watches four maps at once. The choice is in the URL hash so a link can
-  // open on map 3.
+  // open on map 3; a validated deep-link ordinal wins over that when present.
   const [ordinal, setOrdinal] = useState<number | null>(
-    () => initialOrdinal(maps, typeof location === 'undefined' ? '' : location.hash),
+    () => deepLink.ordinal ?? initialOrdinal(maps, typeof location === 'undefined' ? '' : location.hash),
   );
   const selectMap = (o: number) => {
     setOrdinal(o);
     if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}`);
   };
   const current = maps.find((mp) => mp.ordinal === ordinal) ?? maps[0];
+  // The deep link only still applies while its own map is the one on screen;
+  // navigating away and never seeing it re-applied (even back on the same
+  // map, since MapReplay remounts on ordinal change anyway) is what keeps a
+  // manual click from ever being fought by a link opened minutes earlier.
+  const linkedHere = deepLink.ordinal !== null && ordinal === deepLink.ordinal;
 
   return (
     <div class="page page--match">
@@ -312,7 +379,14 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
               </h3>
               {/* Keyed by map so the round switch inside resets to round 1
                   when the map changes, instead of carrying round 2 across. */}
-              <MapReplay key={mp.ordinal} matchId={match.id} ordinal={mp.ordinal} names={playerNames} />
+              <MapReplay
+                key={mp.ordinal}
+                matchId={match.id}
+                ordinal={mp.ordinal}
+                names={playerNames}
+                initialHalf={linkedHere ? deepLink.half ?? undefined : undefined}
+                seekMs={linkedHere ? deepLink.seekMs : undefined}
+              />
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (
                   <StatTable
