@@ -21,7 +21,9 @@ let fakeSeq = 0;
 export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promise<void> {
   const { db, matchmaker } = opts;
 
-  app.get('/api/dev/enabled', async () => ({ ok: true }));
+  // /api/dev/enabled is NOT here: it is registered unconditionally in
+  // server.ts so the dev panel's probe does not 404 in production. See the
+  // comment there.
 
   /** Log in as any steamid without Steam. */
   app.post('/api/dev/login', async (req, reply) => {

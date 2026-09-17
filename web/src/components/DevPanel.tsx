@@ -11,7 +11,10 @@ export function DevPanel({ refresh }: { refresh: () => void }) {
   const [steamid, setSteamid] = useState('76561198000000001');
 
   useEffect(() => {
-    api.dev.enabled().then(() => setEnabled(true), () => setEnabled(false));
+    // The route now answers in production too, so a 200 no longer means "dev
+    // mode is on" -- the flag in the body does. The rejection path stays for an
+    // older backend that still 404s this, and for an outright network failure.
+    api.dev.enabled().then((r) => setEnabled(r?.enabled === true), () => setEnabled(false));
   }, []);
 
   if (!enabled) return null;

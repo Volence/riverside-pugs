@@ -1,9 +1,9 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, orderLiveStatKeys } from '../format';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys } from '../format';
 import { useState } from 'preact/hooks';
-import { Bars, BarRow, Empty, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
+import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
 import { Figures, Figure, RankBadge } from '../components/PageHeader';
 import { DiscordLinkCard } from '../components/DiscordLink';
@@ -24,7 +24,7 @@ export function Profile(
       </div>
     );
   }
-  if (!data) return <div class="page page--profile" />;
+  if (!data) return <PageSkeleton variant="profile" panels={3} />;
 
   const byMap = data.byMap ?? [];
   // Only the stats that actually occur on some map, so a server without
@@ -34,6 +34,15 @@ export function Profile(
   );
 
   const { player, rating, totals, matches, history, privateStatTotals, statTotals } = data;
+
+  // Filtered here rather than at the render site so the panel itself can be
+  // dropped when nothing survives: a heading promising private numbers over an
+  // empty table is worse than no panel. times_deadstopped is the whole reason
+  // this is not just `privateStatTotals &&` -- it is permanently 0 on L4D1 and
+  // was, until now, the only row most players ever saw here.
+  const privateRows = Object.entries(privateStatTotals ?? {})
+    .filter(([k]) => !DEAD_STAT_KEYS.has(k));
+
   const peak = history.length ? Math.max(...history.map((h) => h.sr)) : null;
   const lastDelta = matches.length ? matches[0].srDelta : null;
 
@@ -132,7 +141,7 @@ export function Profile(
                 return (
                   <BarRow
                     key={r.map}
-                    name={r.map}
+                    name={mapName(r.map)}
                     href={`/map/${encodeURIComponent(r.map)}`}
                     value={wr === null ? 'n/a' : `${wr}%`}
                     detail={`(${r.wins}W ${r.losses}L)`}
@@ -163,7 +172,7 @@ export function Profile(
                   {byMap.map((r) => (
                     <tr key={r.map}>
                       <td class="lb__pcol pname">
-                        <a href={`/map/${encodeURIComponent(r.map)}`}>{r.map}</a>
+                        <a href={`/map/${encodeURIComponent(r.map)}`}>{mapName(r.map)}</a>
                       </td>
                       <td class="num">{r.games}</td>
                       <td class="num">{r.wins}</td>
@@ -184,7 +193,7 @@ export function Profile(
           </Panel>
         )}
 
-        {privateStatTotals && (
+        {privateRows.length > 0 && (
           <Panel>
             <h3>Only you can see this</h3>
             <p class="muted">
@@ -192,7 +201,7 @@ export function Profile(
             </p>
             <table>
               <tbody>
-                {Object.entries(privateStatTotals).map(([k, v]) => (
+                {privateRows.map(([k, v]) => (
                   <tr key={k}><td>{labelFor(k)}</td><td class="num">{v}</td></tr>
                 ))}
               </tbody>

@@ -5,9 +5,32 @@ import { buildServer } from '../src/server.js';
 import { stubOrchestrator } from './helpers.js';
 
 describe('dev routes', () => {
-  it('is 404 when dev mode is off', async () => {
+  it('reports dev mode off, without 404ing, when dev mode is off', async () => {
+    // The probe answers in both modes on purpose: when it existed only in dev
+    // mode, every production page load logged a 404 in the browser console.
     const app = await buildServer({ config: loadConfig({}), db: openDb(':memory:'), orchestrator: stubOrchestrator() });
-    expect((await app.inject({ method: 'GET', url: '/api/dev/enabled' })).statusCode).toBe(404);
+    const res = await app.inject({ method: 'GET', url: '/api/dev/enabled' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ enabled: false });
+  });
+
+  it('still registers no actual dev endpoint when dev mode is off', async () => {
+    // The part that must never regress. /api/dev/enabled became reachable in
+    // production; the endpoints that log you in as anyone and fabricate matches
+    // must not have come with it.
+    const app = await buildServer({ config: loadConfig({}), db: openDb(':memory:'), orchestrator: stubOrchestrator() });
+    for (const url of ['/api/dev/login', '/api/dev/fill', '/api/dev/ready-all',
+      '/api/dev/vote-all', '/api/dev/clear-matches', '/api/dev/simulate-match']) {
+      const res = await app.inject({ method: 'POST', url, payload: { steamid: '76561198000000001' } });
+      expect(res.statusCode, `${url} must not exist outside dev mode`).toBe(404);
+    }
+  });
+
+  it('reports dev mode on when it is on', async () => {
+    const app = await buildServer({ config: loadConfig({ DEV_MODE: '1' }), db: openDb(':memory:') });
+    const res = await app.inject({ method: 'GET', url: '/api/dev/enabled' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ enabled: true });
   });
 
   it('drives a full match with one real user + fakes', async () => {

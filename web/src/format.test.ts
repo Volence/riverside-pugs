@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
-  deriveLiveStats, fmtLatency,
+  deriveLiveStats, fmtLatency, mapName, survivalLabel, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
 } from './format';
 
 describe('campaignName', () => {
@@ -354,5 +354,73 @@ describe('campaignTint', () => {
     for (const slug of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
       expect(campaignTint(slug)).toMatch(/^oklch\(/);
     }
+  });
+});
+
+describe('mapName', () => {
+  it('names the stock L4D1 chapters', () => {
+    expect(mapName('l4d_vs_airport01_greenhouse')).toBe('The Greenhouse');
+    expect(mapName('l4d_vs_farm04_barn')).toBe('The Train Station');
+    expect(mapName('l4d_vs_hospital01_apartment')).toBe('The Apartments');
+    expect(mapName('l4d_vs_smalltown05_houseboat')).toBe('Boathouse Finale');
+  });
+
+  it('treats the coop and versus variants of a chapter as the same map', () => {
+    expect(mapName('l4d_farm01_hilltop')).toBe(mapName('l4d_vs_farm01_hilltop'));
+  });
+
+  it('names The Passing chapters, which carry no l4d_ prefix', () => {
+    expect(mapName('c6m1_riverbank')).toBe('The Riverbank');
+    expect(mapName('c6m2_bedlam')).toBe('Underground');
+  });
+
+  it('derives a readable name for a custom map it has never seen', () => {
+    expect(mapName('l4d_vs_dam03_spillway')).toBe('Spillway');
+    expect(mapName('l4d_vs_ravenholm02_mine_shaft')).toBe('Mine Shaft');
+  });
+
+  it('does not eat a custom name that has no campaign-and-chapter prefix', () => {
+    expect(mapName('l4d_deadbeforedawn')).toBe('Deadbeforedawn');
+  });
+
+  it('is case insensitive and survives an empty name', () => {
+    expect(mapName('L4D_VS_AIRPORT01_GREENHOUSE')).toBe('The Greenhouse');
+    expect(mapName('')).toBe('');
+  });
+});
+
+describe('survivalLabel', () => {
+  it('says n/a when nothing was measured', () => {
+    expect(survivalLabel(null, 0).value).toBe('n/a');
+    expect(survivalLabel(null, 0).thin).toBe(true);
+    // A percentage with a zero sample is contradictory; n/a wins.
+    expect(survivalLabel(100, 0).value).toBe('n/a');
+  });
+
+  it('reports the count, not a rate, below the minimum sample', () => {
+    const s = survivalLabel(100, 2);
+    expect(s.value).toBe('2 rounds');
+    expect(s.thin).toBe(true);
+    expect(s.value).not.toContain('%');
+    expect(survivalLabel(100, 1).value).toBe('1 round');
+  });
+
+  it('states the rate with its sample size once there is enough', () => {
+    const s = survivalLabel(75, MIN_SURVIVAL_SAMPLE);
+    expect(s.value).toBe('75%');
+    expect(s.sub).toBe(`of ${MIN_SURVIVAL_SAMPLE} measured`);
+    expect(s.thin).toBe(false);
+  });
+});
+
+describe('DEAD_STAT_KEYS', () => {
+  it('hides both halves of the deadstop pair, which L4D1 cannot produce', () => {
+    // Written by one skill_detect forward, so one being dead means both are.
+    expect(DEAD_STAT_KEYS.has('deadstops')).toBe(true);
+    expect(DEAD_STAT_KEYS.has('times_deadstopped')).toBe(true);
+  });
+
+  it('keeps the private stat that does work', () => {
+    expect(DEAD_STAT_KEYS.has('times_skeeted')).toBe(false);
   });
 });

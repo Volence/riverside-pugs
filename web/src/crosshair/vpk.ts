@@ -78,7 +78,7 @@ export interface VpkFile {
 }
 
 /** VPK v1, all data inline in the _dir file. */
-export function encodeVPK(files: VpkFile[]): Uint8Array {
+export function encodeVPK(files: VpkFile[]): Uint8Array<ArrayBuffer> {
   // ext -> dir -> name -> data
   const tree: Record<string, Record<string, Record<string, Uint8Array>>> = {};
   for (const f of files) {
@@ -146,7 +146,13 @@ function addonInfo(name: string): string {
 export function buildVPK(
   name: string, width: number, height: number,
   rgba: Uint8ClampedArray, hudlayout: string,
-): Uint8Array {
+  // Uint8Array<ArrayBuffer>, not a bare Uint8Array: TypeScript 7 made the
+  // backing-buffer parameter significant, and the default ArrayBufferLike (which
+  // admits SharedArrayBuffer) is not a BlobPart. Without this the one caller,
+  // the crosshair downloader, cannot put the bytes in a Blob and `npm run
+  // typecheck` fails. Every array here is built with `new Uint8Array(n)`, so the
+  // buffer genuinely is an ArrayBuffer; only the annotation was too loose.
+): Uint8Array<ArrayBuffer> {
   return encodeVPK([
     { path: 'materials/vgui/hud/altcrosshair.vtf', data: encodeVTF(width, height, rgba) },
     { path: 'materials/vgui/hud/altcrosshair.vmt', data: enc.encode(VMT) },

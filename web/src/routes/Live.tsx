@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type LiveEvent, type LiveMatch, type LivePlayer } from '../api';
 import {
-  campaignName, deriveLiveStats, fmtBytes, labelFor, liveGroupStarts, orderLiveStatKeys,
+  campaignName, deriveLiveStats, fmtBytes, labelFor, liveGroupStarts, mapName, orderLiveStatKeys,
 } from '../format';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { SpectatePanel } from '../components/SpectatePanel';
@@ -140,7 +140,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
           {m.maps.map((mp) => (
             <section class="live__section" key={mp.ordinal}>
               <h4>
-                Map {mp.ordinal + 1} · {mp.map}
+                Map {mp.ordinal + 1} · {mapName(mp.map)}
                 <span class="muted"> · {mp.teamAScore} - {mp.teamBScore}</span>
                 {(() => {
                   const demo = m.demos.find((d) => d.ordinal === mp.ordinal);

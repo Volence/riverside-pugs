@@ -121,3 +121,43 @@ export function Tabs(
     </div>
   );
 }
+
+/** The page-shaped placeholder shown while a route's first fetch is in flight.
+ *
+ *  Four routes used to return an empty `<div class="page">` here. On a cold
+ *  load of /match/:id that is a blank dark screen for about three seconds,
+ *  which reads as a broken page rather than a loading one, and it is the link
+ *  handed round in Discord after every match.
+ *
+ *  Deliberately not a spinner. The shapes match what is about to arrive (a
+ *  header block, then panels), so the layout does not jump when it does, and a
+ *  slow connection sees the structure of the page immediately.
+ *
+ *  `aria-busy` plus a polite live region, because to a screen reader the old
+ *  empty div and the loaded page were indistinguishable. */
+export function PageSkeleton(
+  { variant = 'list', panels = 2 }: { variant?: 'list' | 'match' | 'profile'; panels?: number },
+) {
+  return (
+    <div class={`page page--${variant}`} aria-busy="true">
+      <p class="sr-only" role="status">Loading</p>
+      <div class="skel skel--head">
+        <div class="skel__bar skel__bar--eyebrow" />
+        <div class="skel__bar skel__bar--title" />
+        <div class="skel__figures">
+          {[0, 1, 2, 3].map((i) => <div class="skel__bar skel__bar--figure" key={i} />)}
+        </div>
+      </div>
+      <div class="stack">
+        {Array.from({ length: panels }, (_, i) => (
+          <div class="panel skel__panel" key={i}>
+            <div class="skel__bar skel__bar--h3" />
+            <div class="skel__bar skel__bar--row" />
+            <div class="skel__bar skel__bar--row" />
+            <div class="skel__bar skel__bar--row" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

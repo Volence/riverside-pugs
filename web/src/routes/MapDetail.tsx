@@ -1,8 +1,8 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, fmtClock, labelFor, orderLiveStatKeys } from '../format';
+import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, survivalLabel } from '../format';
 import { useState } from 'preact/hooks';
-import { Bars, BarRow, Empty, Panel, PlayerLink, Tabs } from '../components/bits';
+import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 
 export function MapDetail({ map }: { map: string }) {
@@ -19,7 +19,7 @@ export function MapDetail({ map }: { map: string }) {
       </div>
     );
   }
-  if (!data) return <div class="page page--list" />;
+  if (!data) return <PageSkeleton variant="list" panels={2} />;
 
   const players: MapLeaderRow[] = data.players.map((p) => ({
     ...p,
@@ -36,7 +36,7 @@ export function MapDetail({ map }: { map: string }) {
 
   return (
     <div class="page page--list">
-      <PageHeader eyebrow="Map" title={data.map}>
+      <PageHeader eyebrow={data.campaign ? campaignName(data.campaign) : 'Map'} title={mapName(data.map)}>
         <Figures>
           <Figure label="Played" value={data.played} />
           {/* Null when no playing of this map has a real score: say so
@@ -48,12 +48,14 @@ export function MapDetail({ map }: { map: string }) {
           />
           <Figure label="Players" value={players.length} />
           {/* n/a, not 0%, when no round here was measured: survival only
-              started being recorded when the plugin began reporting it. */}
-          <Figure
-            label="Survived"
-            value={data.rounds.survivalPct === null ? 'n/a' : `${data.rounds.survivalPct}%`}
-            sub={data.rounds.attempts > 0 ? `${data.rounds.attempts} rounds` : undefined}
-          />
+              started being recorded when the plugin began reporting it. The
+              sub-label used to read `attempts`, which counts rounds with a
+              usable clock and is several times larger than the survival
+              sample, so this figure claimed far more measurements than it had. */}
+          {(() => {
+            const s = survivalLabel(data.rounds.survivalPct, data.rounds.measured);
+            return <Figure label="Survived" value={s.value} sub={s.sub} />;
+          })()}
           <Figure
             label="Avg round"
             value={data.rounds.avgSec === null ? 'n/a' : fmtClock(data.rounds.avgSec)}

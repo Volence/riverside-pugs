@@ -1,7 +1,7 @@
 import { api, type MapIndexRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, fmtClock } from '../format';
-import { Empty, Panel } from '../components/bits';
+import { campaignName, fmtClock, mapName, survivalLabel } from '../format';
+import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { CampaignTiles } from '../components/CampaignTiles';
 
@@ -15,7 +15,7 @@ export function Maps() {
       </div>
     );
   }
-  if (!data) return <div class="page page--list" />;
+  if (!data) return <PageSkeleton variant="list" panels={2} />;
 
   const maps = data.maps;
 
@@ -39,7 +39,7 @@ export function Maps() {
             <Figure
               label="Most played"
               value={maps.reduce((a, b) => (b.played > a.played ? b : a)).played}
-              sub={maps.reduce((a, b) => (b.played > a.played ? b : a)).map}
+              sub={mapName(maps.reduce((a, b) => (b.played > a.played ? b : a)).map)}
             />
           </Figures>
         )}
@@ -84,17 +84,21 @@ export function Maps() {
                     <tbody>
                       {rows.map((m) => (
                         <tr key={m.map}>
-                          <td><a href={`/map/${encodeURIComponent(m.map)}`}>{m.map}</a></td>
+                          <td><a href={`/map/${encodeURIComponent(m.map)}`}>{mapName(m.map)}</a></td>
                           <td class="num">{m.played}</td>
                           {m.avgScore === null
                             ? <td class="num muted">not recorded</td>
                             : <td class="num">{m.avgScore}</td>}
                           {/* Survival is null for every round played before
                               the plugin reported it, which is not the same as
-                              nobody surviving. Say so rather than print 0%. */}
-                          <td class={`num${m.rounds.survivalPct === null ? ' muted' : ''}`}>
-                            {m.rounds.survivalPct === null ? 'n/a' : `${m.rounds.survivalPct}%`}
-                          </td>
+                              nobody surviving. Say so rather than print 0%,
+                              and dim a sample too thin to state as a rate. */}
+                          {(() => {
+                            const s = survivalLabel(m.rounds.survivalPct, m.rounds.measured);
+                            return (
+                              <td class={`num${s.thin ? ' muted' : ''}`} title={s.sub}>{s.value}</td>
+                            );
+                          })()}
                           <RoundTime sec={m.rounds.fastestSec} />
                           <RoundTime sec={m.rounds.avgSec} />
                           <RoundTime sec={m.rounds.slowestSec} />

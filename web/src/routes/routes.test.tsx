@@ -203,7 +203,7 @@ describe('MatchDetail', () => {
     // heading rather than on the bare name.
     await waitFor(() => expect(
       screen.getByText((_t, el) => el?.tagName === 'H3'
-        && /Map 1 · l4d_hospital01_apartment/.test(el.textContent ?? '')),
+        && /Map 1 · The Apartments/.test(el.textContent ?? '')),
     ).toBeTruthy());
     expect(screen.getByText('Match totals')).toBeTruthy();
     // Totals table and the map table both render both teams.
@@ -248,13 +248,13 @@ describe('MatchDetail', () => {
     render(<MatchDetail id="7" me="1" />);
     const heading = (re: RegExp) => (_t: string, el: Element | null) =>
       el?.tagName === 'H3' && re.test(el.textContent ?? '');
-    await waitFor(() => expect(screen.getByText(heading(/Map 1 · l4d_vs_farm01_hilltop/))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(heading(/Map 1 · The Woods/))).toBeTruthy());
     // One viewer, not one per map: a single round switch on the page.
     expect(screen.getAllByText('Round 1')).toHaveLength(1);
-    expect(screen.queryByText(heading(/Map 2 · l4d_vs_farm02_traintunnel/))).toBeNull();
+    expect(screen.queryByText(heading(/Map 2 · The Tunnel/))).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /Map 2/ }));
-    await waitFor(() => expect(screen.getByText(heading(/Map 2 · l4d_vs_farm02_traintunnel/))).toBeTruthy());
-    expect(screen.queryByText(heading(/Map 1 · l4d_vs_farm01_hilltop/))).toBeNull();
+    await waitFor(() => expect(screen.getByText(heading(/Map 2 · The Tunnel/))).toBeTruthy());
+    expect(screen.queryByText(heading(/Map 1 · The Woods/))).toBeNull();
     expect(location.hash).toBe('#map-2');
   });
 
@@ -1156,7 +1156,7 @@ describe('Maps', () => {
       ],
     });
     render(<Maps />);
-    await waitFor(() => expect(screen.getByText('l4d_vs_airport02_offices')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('The Crane')).toBeTruthy());
     expect(screen.getByText('200')).toBeTruthy();
     expect(screen.getByText('not recorded')).toBeTruthy();
     expect(screen.queryByText(/null/)).toBeNull();
@@ -1211,5 +1211,48 @@ describe('Profile Discord card', () => {
     render(<Profile steamid="1" session={{ kind: 'active', me: { ...me, steamid: '2' } }} refresh={() => {}} />);
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
     expect(screen.queryByText('Connect Discord')).toBeNull();
+  });
+});
+
+describe('loading state', () => {
+  /* The four routes below used to render an empty <div class="page"> while
+   * their first fetch was in flight. On a cold load of /match/:id that is a
+   * blank dark screen for seconds, which reads as a broken page. Each must now
+   * put a busy skeleton on screen instead. */
+  const never = () => new Promise<never>(() => {});
+
+  it('MatchDetail shows a skeleton, not a blank page, before data arrives', async () => {
+    mockApi.match.mockImplementation(never);
+    const { container } = render(<MatchDetail id="1" me={null} />);
+    const page = container.querySelector('.page');
+    expect(page?.getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelectorAll('.skel__bar').length).toBeGreaterThan(0);
+    expect(screen.getByRole('status').textContent).toBe('Loading');
+  });
+
+  it('Profile shows a skeleton before data arrives', () => {
+    mockApi.profile.mockImplementation(never);
+    const { container } = render(<Profile steamid="76561198000000001" />);
+    expect(container.querySelector('.page')?.getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelectorAll('.skel__bar').length).toBeGreaterThan(0);
+  });
+
+  it('Maps shows a skeleton before data arrives', () => {
+    mockApi.maps.mockImplementation(never);
+    const { container } = render(<Maps />);
+    expect(container.querySelector('.page')?.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('MapDetail shows a skeleton before data arrives', () => {
+    mockApi.map.mockImplementation(never);
+    const { container } = render(<MapDetail map="l4d_vs_farm01_hilltop" />);
+    expect(container.querySelector('.page')?.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('drops the skeleton once data lands', async () => {
+    mockApi.maps.mockResolvedValue({ maps: [] });
+    const { container } = render(<Maps />);
+    await waitFor(() => expect(container.querySelector('[aria-busy="true"]')).toBeNull());
+    expect(container.querySelectorAll('.skel__bar').length).toBe(0);
   });
 });

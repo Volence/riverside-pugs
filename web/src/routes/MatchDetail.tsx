@@ -1,9 +1,9 @@
 import { useState } from 'preact/hooks';
 import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
-import { Empty, Panel } from '../components/bits';
+import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
@@ -88,7 +88,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       </div>
     );
   }
-  if (!data) return <div class="page page--match" />;
+  if (!data) return <PageSkeleton variant="match" panels={3} />;
 
   const { match, maps, players } = data;
   // Roster names for the viewer's follow row and timeline rail, keyed by
@@ -304,7 +304,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                 </div>
               )}
               <h3>
-                Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mp.map}</a>
+                Map {mp.ordinal + 1} · <a href={`/map/${encodeURIComponent(mp.map)}`}>{mapName(mp.map)}</a>
                 <span class="muted"> · {mapScoreLabel(mp)}</span>
                 {demo && <> · <a href={`/api/matches/${match.id}/demos/${demo.ordinal}`} download>
                   demo {fmtBytes(demo.bytes)}
@@ -343,7 +343,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
             <ul class="demos">
               {data.demos.map((d) => (
                 <li class="demos__row" key={d.ordinal}>
-                  <span class="demos__map">{d.map}</span>
+                  <span class="demos__map">{mapName(d.map)}</span>
                   <span class="demos__size muted num">{fmtBytes(d.bytes)}</span>
                   <a class="demos__link" href={`/api/matches/${match.id}/demos/${d.ordinal}`} download>Download</a>
                 </li>
