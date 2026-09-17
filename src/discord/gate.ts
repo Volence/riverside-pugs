@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import type { DiscordApi } from './api.js';
 import { activatePlayer, getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
+import { publishAdminEvent } from '../adminFeed.js';
 
 /**
  * Discord guild membership as the path to `active`.
@@ -31,5 +32,6 @@ export async function applyGate(db: DB, api: DiscordApi, steamid: string): Promi
   const role = getSetting(db, 'discord_required_role_id') ?? '';
   if (role && !member.roles.includes(role)) return false;
   activatePlayer(db, steamid);
+  publishAdminEvent({ kind: 'account', steamid, what: 'activated' });
   return true;
 }

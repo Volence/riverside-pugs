@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import type { VoiceHook } from './sync.js';
 import type { VoiceOps } from './transport.js';
 
@@ -64,6 +65,7 @@ export class VoiceChannels implements VoiceHook {
     } catch (err) {
       this.failed.add(matchId);
       console.error(`[discord] creating voice channels for match ${matchId} failed:`, err);
+      publishAdminEvent({ kind: 'problem', matchId, text: `Could not create team voice channels for match #${matchId}: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 

@@ -42,7 +42,7 @@ const text = (r: Awaited<ReturnType<typeof run>>) => JSON.stringify(r.payload);
 
 describe('slash commands', () => {
   it('defines profile, leaderboard, matches, queue and link', () => {
-    expect(COMMAND_DEFS.map((d) => d.name).sort()).toEqual(['leaderboard', 'link', 'matches', 'profile', 'queue']);
+    expect(COMMAND_DEFS.map((d) => d.name).sort()).toEqual(['leaderboard', 'link', 'matches', 'profile', 'queue', 'report']);
   });
 
   it('/profile shows your SR, record and recent matches as links, publicly', async () => {
@@ -96,5 +96,30 @@ describe('slash commands', () => {
   it('/link says who you are linked to, or hands out a link', async () => {
     expect(text(await run('link'))).toContain('player0');
     expect(text(await run('link', {}, '777'))).toContain('/link/discord?code=');
+  });
+});
+
+describe('/report', () => {
+  it('files against your latest match together, privately', async () => {
+    play('a');
+    const latest = play('b');
+    const r = await run('report', { player: '905', reason: 'afk', details: 'gone all of map 2' });
+    expect(r.ephemeral).toBe(true);
+    expect(text(r)).toContain(`match #${latest}`);
+    const row = db.prepare('SELECT match_id, reporter_id, target_id, category, text FROM reports').get();
+    expect(row).toEqual({ match_id: latest, reporter_id: IDS[0], target_id: IDS[5], category: 'afk', text: 'gone all of map 2' });
+  });
+
+  it('takes an explicit match, refuses a repeat, yourself, and unlinked targets', async () => {
+    const first = play('a');
+    play('b');
+    expect(text(await run('report', { player: '905', reason: 'cheating', match: String(first) }))).toContain(`match #${first}`);
+    expect(text(await run('report', { player: '905', reason: 'cheating', match: String(first) }))).toMatch(/already reported/);
+    expect(text(await run('report', { player: '900', reason: 'afk' }))).toMatch(/yourself/);
+    expect(text(await run('report', { player: '999', reason: 'afk' }))).toMatch(/not linked/);
+  });
+
+  it('says so when you have no recent match together', async () => {
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/last 48 hours/);
   });
 });

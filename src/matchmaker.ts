@@ -6,6 +6,7 @@ import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
 import { activeTimeout, recordPenalty } from './penalties.js';
+import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
 import type { Orchestrator } from './orchestrator.js';
 
 export interface MatchmakerDeps {
@@ -15,6 +16,8 @@ export interface MatchmakerDeps {
   rng?: () => number;
   /** Optional out-of-band notification hook (Discord). Must never throw. */
   notify?: (msg: string) => void;
+  /** The Discord requirement (linked + in the server). See queueGate.ts. */
+  queueGate?: (steamid: string) => QueueBlock | null;
 }
 
 /** Parse discord_queue_thresholds defensively. A malformed or non-array
@@ -55,6 +58,8 @@ export interface StateSnapshot {
   } | null;
   /** A queue timeout the viewer is serving, as an ISO time. */
   timeout: { until: string; offenses: number } | null;
+  /** What the viewer still has to do on Discord before they may queue. */
+  queueBlock: QueueBlock | null;
 }
 
 /** Lifecycle events the broadcast cannot carry, because it sends only an
@@ -111,6 +116,8 @@ export class Matchmaker {
   join(steamid: string): { ok: boolean; error?: string } {
     if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
     if (this.hasOpenMatch(steamid)) return { ok: false, error: 'already in an active match' };
+    const block = this.deps.queueGate?.(steamid) ?? null;
+    if (block) return { ok: false, error: QUEUE_BLOCK_MESSAGE[block] };
     const timeout = activeTimeout(this.db, steamid);
     if (timeout) {
       return { ok: false, error: `timed out for missed ready checks or no-shows until ${timeout.until.toISOString()}` };
@@ -310,6 +317,7 @@ export class Matchmaker {
         const t = activeTimeout(this.db, steamid);
         return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
       })(),
+      queueBlock: this.deps.queueGate?.(steamid) ?? null,
     };
   }
 

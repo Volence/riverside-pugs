@@ -1,0 +1,43 @@
+/**
+ * Things admins want to hear about as they happen, published from wherever
+ * they occur and delivered to the Discord admin channel by the bot.
+ *
+ * A process-wide bus rather than a dependency threaded through every call
+ * site: the sources (reapers, penalties, report filing, the audit log, Discord
+ * linking) are deep in modules that otherwise know nothing about Discord, and
+ * a missing subscriber must cost nothing. Publishing never throws.
+ */
+
+export type AdminEvent =
+  | { kind: 'report'; reportId: number }
+  | { kind: 'admin_action'; adminId: string; action: string; target: string; detail: Record<string, unknown> }
+  | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
+  | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
+  | { kind: 'problem'; text: string; matchId?: number };
+
+/** The settings toggle that silences each kind in the admin channel. */
+export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
+  report: 'admin_feed_reports',
+  admin_action: 'admin_feed_actions',
+  penalty: 'admin_feed_penalties',
+  account: 'admin_feed_accounts',
+  problem: 'admin_feed_problems',
+};
+
+type Listener = (e: AdminEvent) => void;
+const listeners = new Set<Listener>();
+
+export function publishAdminEvent(e: AdminEvent): void {
+  for (const fn of listeners) {
+    try {
+      fn(e);
+    } catch (err) {
+      console.error('[adminFeed] listener failed:', err);
+    }
+  }
+}
+
+export function subscribeAdminEvents(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}

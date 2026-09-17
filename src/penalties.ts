@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
+import { publishAdminEvent } from './adminFeed.js';
 
 export type PenaltyKind = 'ready_fail' | 'no_show';
 
@@ -27,6 +28,7 @@ export function recordPenalty(db: DB, steamid: string, kind: PenaltyKind, matchI
   if (!enabled(db)) return;
   db.prepare('INSERT INTO penalties (player_id, kind, match_id, created_at) VALUES (?, ?, ?, ?)')
     .run(steamid, kind, matchId, now.toISOString());
+  publishAdminEvent({ kind: 'penalty', steamid, penalty: kind, matchId });
 }
 
 /**

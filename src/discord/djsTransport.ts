@@ -207,9 +207,18 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           name: o.name,
           description: o.description,
           required: o.required ?? false,
-          type: o.type === 'user' ? ApplicationCommandOptionType.User : ApplicationCommandOptionType.String,
+          type: o.type === 'user' ? ApplicationCommandOptionType.User
+            : o.type === 'integer' ? ApplicationCommandOptionType.Integer : ApplicationCommandOptionType.String,
+          ...(o.choices ? { choices: o.choices } : {}),
         })) as never,
       })));
+    },
+    async watchMembers(h) {
+      client.on(Events.GuildMemberAdd, (m) => { if (m.guild.id === guild.id) h.add(m.id); });
+      client.on(Events.GuildMemberRemove, (m) => { if (m.guild.id === guild.id) h.remove(m.id); });
+      const all = await guild.members.fetch();
+      h.all([...all.keys()]);
+      console.log(`[discord] tracking ${all.size} server members`);
     },
     voice,
     async destroy() {

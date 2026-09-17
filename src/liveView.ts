@@ -1,3 +1,4 @@
+import { publishAdminEvent } from './adminFeed.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent } from './logParse.js';
@@ -448,6 +449,7 @@ export function reapOrphanedMatches(
     // the one whose sv_password nobody is left to clear by hand.
     if (r.server_id !== null) releaser.release(r.server_id);
     clearLive(db, r.id);
+    publishAdminEvent({ kind: 'problem', matchId: r.id, text: `Match #${r.id} aborted: the game server stopped reporting it.` });
     console.warn(`[liveView] reaped orphaned match ${r.id}: no heartbeat for ${olderThanMs}ms`);
   }
   return rows.map((r) => r.id);

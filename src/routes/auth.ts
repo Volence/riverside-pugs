@@ -8,6 +8,7 @@ import { activatePlayer, getPlayer, upsertPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
 import type { DiscordApi } from '../discord/api.js';
 import { applyGate } from '../discord/gate.js';
+import type { GuildMembership } from '../discord/membership.js';
 
 const NEXT_COOKIE = 'pug_next';
 
@@ -26,6 +27,7 @@ export interface AuthRouteOpts {
   verifyLogin: typeof VerifyFn;
   fetchPersona: typeof PersonaFn;
   discordApi: DiscordApi | null;
+  membership?: GuildMembership;
 }
 
 export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Promise<void> {
@@ -71,8 +73,17 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       isAdmin: player.is_admin === 1,
       discordEnabled: config.discord !== null,
       discord: player.discord_id ? { id: player.discord_id, name: player.discord_name ?? '' } : null,
+      // null: not linked, or the member list is not loaded yet.
+      discordMember: player.discord_id ? opts.membership?.isMember(player.discord_id) ?? null : null,
     };
   });
+
+  /** Public site facts the signup checklist and How to play need. */
+  app.get('/api/site', async () => ({
+    discordEnabled: config.discord !== null,
+    discordInviteUrl: getSetting(db, 'discord_invite_url') || null,
+    requireDiscord: config.discord !== null && getSetting(db, 'require_discord_to_queue') === '1',
+  }));
 
   app.post('/api/register', async (req, reply) => {
     const steamid = getSession(req);

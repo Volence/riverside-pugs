@@ -5,6 +5,7 @@ import type { Hub } from '../ws.js';
 import { handleButton, type ControllerDeps } from './controller.js';
 import { DiscordSync, type VoiceHook } from './sync.js';
 import type { BotInteraction, BotTransport, InteractionReply, SlashCommandDef } from './transport.js';
+import type { GuildMembership } from './membership.js';
 
 export interface BotDeps {
   config: Config;
@@ -16,6 +17,12 @@ export interface BotDeps {
   /** Extra controller hooks (bans, timeouts) supplied by later features. */
   controller?: Partial<Pick<ControllerDeps, 'queueBlock' | 'banMessage'>>;
   voice?: (transport: BotTransport) => VoiceHook;
+  /** Filled from the server's member list for the queue gate. */
+  membership?: GuildMembership;
+  /** Extra startup work that needs the connected transport (the admin feed). */
+  onConnected?: (transport: BotTransport) => void | Promise<void>;
+  /** Buttons outside the queue flow, by custom_id prefix (e.g. 'r:' for report cards). */
+  extraButtons?: Record<string, (i: Extract<BotInteraction, { kind: 'button' }>) => Promise<InteractionReply>>;
   commands?: {
     defs: SlashCommandDef[];
     handle: (i: Extract<BotInteraction, { kind: 'command' }>) => Promise<InteractionReply>;
@@ -47,7 +54,11 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
   };
 
   transport.onInteraction(async (i) => {
-    if (i.kind === 'button') return handleButton(controllerDeps, i);
+    if (i.kind === 'button') {
+      const prefix = Object.keys(deps.extraButtons ?? {}).find((p) => i.customId.startsWith(p));
+      if (prefix) return deps.extraButtons![prefix](i);
+      return handleButton(controllerDeps, i);
+    }
     if (deps.commands) return deps.commands.handle(i);
     return { ephemeral: true, payload: { content: 'Unknown command.', embeds: [], components: [] } };
   });
@@ -55,6 +66,13 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
     await transport.registerCommands(deps.commands.defs).catch((err) =>
       console.error('[discord] registering slash commands failed:', err));
   }
+
+  if (deps.membership) {
+    const m = deps.membership;
+    await transport.watchMembers({ all: (ids) => m.setAll(ids), add: (id) => m.add(id), remove: (id) => m.remove(id) })
+      .catch((err) => console.error('[discord] loading the member list failed; the queue gate allows everyone until it loads:', err));
+  }
+  await deps.onConnected?.(transport);
 
   const sync = new DiscordSync({
     db: deps.db,
@@ -72,6 +90,7 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
     transport,
     async stop() {
       sync.stop();
+      deps.membership?.reset();
       await transport.destroy?.();
     },
   };
