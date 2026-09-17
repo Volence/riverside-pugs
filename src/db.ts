@@ -304,6 +304,21 @@ CREATE TABLE IF NOT EXISTS penalties (
   cleared_by TEXT,
   cleared_at TEXT
 );
+-- Player reports, filed from a match page by someone who played in it.
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  reporter_id TEXT NOT NULL REFERENCES players(steamid),
+  target_id TEXT NOT NULL REFERENCES players(steamid),
+  category TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved', 'dismissed')),
+  resolved_by TEXT,
+  resolution_note TEXT,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  UNIQUE (match_id, reporter_id, target_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
