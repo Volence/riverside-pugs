@@ -71,6 +71,7 @@ describe('POST review', () => {
     expect(r.statusCode).toBe(200);
     expect(db.prepare('SELECT state, note FROM integrity_reviews').get()).toEqual({ state: 'dismissed', note: 'heard the spawn' });
     expect(db.prepare("SELECT COUNT(*) c FROM admin_actions WHERE action = 'integrity_review'").get()).toEqual({ c: 1 });
+    expect(db.prepare("SELECT admin_id FROM admin_actions WHERE action = 'integrity_review'").get()).toEqual({ admin_id: ADMIN });
   });
 
   it('rejects a state outside the allowed set', async () => {
