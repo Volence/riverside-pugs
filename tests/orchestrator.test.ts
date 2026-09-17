@@ -331,3 +331,13 @@ describe('RealOrchestrator', () => {
     expect(getServer(db, serverId)!.status).toBe('idle');
   });
 });
+
+describe('firstMapOf', () => {
+  // The plain l4d_ BSPs are co-op maps. The first web match shipped on one.
+  it('changelevels into the versus BSP for every campaign', async () => {
+    const { firstMapOf } = await import('../src/orchestrator.js');
+    const { CAMPAIGNS } = await import('../src/campaigns.js');
+    for (const c of Object.keys(CAMPAIGNS)) expect(firstMapOf(c)).toMatch(/^l4d_vs_/);
+    expect(firstMapOf('unknown')).toMatch(/^l4d_vs_/);
+  });
+});

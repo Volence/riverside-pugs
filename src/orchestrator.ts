@@ -271,13 +271,17 @@ async function expectPugOk(rcon: RconClient, cmd: string): Promise<string> {
 }
 
 /** First playable map of a campaign. Full per-campaign map lists live in the plugin;
- *  the backend only needs the entry map to changelevel into. */
-function firstMapOf(campaign: string): string {
+ *  the backend only needs the entry map to changelevel into.
+ *
+ *  These MUST be the l4d_vs_ BSPs. The plain l4d_ names are the co-op maps, which
+ *  load and even run versus rules, but with co-op layout and spawns. The first
+ *  web match (2026-09-16, Blood Harvest) went out on l4d_farm01_hilltop this way. */
+export function firstMapOf(campaign: string): string {
   const FIRST: Record<string, string> = {
-    no_mercy: 'l4d_hospital01_apartment',
-    death_toll: 'l4d_smalltown01_caves',
-    dead_air: 'l4d_airport01_greenhouse',
-    blood_harvest: 'l4d_farm01_hilltop',
+    no_mercy: 'l4d_vs_hospital01_apartment',
+    death_toll: 'l4d_vs_smalltown01_caves',
+    dead_air: 'l4d_vs_airport01_greenhouse',
+    blood_harvest: 'l4d_vs_farm01_hilltop',
   };
-  return FIRST[campaign] ?? 'l4d_hospital01_apartment';
+  return FIRST[campaign] ?? 'l4d_vs_hospital01_apartment';
 }
