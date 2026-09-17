@@ -23,13 +23,13 @@ describe('percentile', () => {
 });
 
 describe('aggregate', () => {
-  it('takes a player worst round for corrMax and their mean for the rest', () => {
+  it('takes a player worst round for fidMax and their mean for the rest', () => {
     const got = aggregate([
       { steamid: 'a', metrics: m({ fidMax: 0.4, occZ: 1 }) },
       { steamid: 'a', metrics: m({ fidMax: 0.9, occZ: 3 }) },
     ]);
     expect(got[0].rounds).toBe(2);
-    expect(got[0].corrMax).toBeCloseTo(0.9);
+    expect(got[0].fidMax).toBeCloseTo(0.9);
     expect(got[0].occZ).toBeCloseTo(2);
   });
 
@@ -41,8 +41,8 @@ describe('aggregate', () => {
 describe('scorePlayers', () => {
   it('composites only the metrics a player actually has', () => {
     const [a] = scorePlayers([
-      { steamid: 'a', rounds: 3, corrMax: 0.9, corrP95: 0.5, occZ: null, teamGap: null },
-      { steamid: 'b', rounds: 3, corrMax: 0.1, corrP95: 0.05, occZ: null, teamGap: null },
+      { steamid: 'a', rounds: 3, fidMax: 0.9, fidP95: 0.5, occZ: null, teamGap: null },
+      { steamid: 'b', rounds: 3, fidMax: 0.1, fidP95: 0.05, occZ: null, teamGap: null },
     ]);
     expect(a.pOcc).toBeNull();
     expect(a.composite).toBeCloseTo(1);
@@ -50,9 +50,9 @@ describe('scorePlayers', () => {
 
   it('ranks the tracking player above the rest', () => {
     const got = scorePlayers([
-      { steamid: 'clean1', rounds: 5, corrMax: 0.2, corrP95: 0.1, occZ: 0.1, teamGap: 0 },
-      { steamid: 'clean2', rounds: 5, corrMax: 0.3, corrP95: 0.12, occZ: -0.2, teamGap: -0.1 },
-      { steamid: 'sus', rounds: 5, corrMax: 0.95, corrP95: 0.8, occZ: 4.2, teamGap: 3.9 },
+      { steamid: 'clean1', rounds: 5, fidMax: 0.2, fidP95: 0.1, occZ: 0.1, teamGap: 0 },
+      { steamid: 'clean2', rounds: 5, fidMax: 0.3, fidP95: 0.12, occZ: -0.2, teamGap: -0.1 },
+      { steamid: 'sus', rounds: 5, fidMax: 0.95, fidP95: 0.8, occZ: 4.2, teamGap: 3.9 },
     ]);
     expect(got[0].steamid).toBe('sus');
     expect(got[0].composite).toBeGreaterThan(got[1].composite);
