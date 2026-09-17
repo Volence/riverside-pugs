@@ -8,8 +8,12 @@ import type { RoundMetrics } from './round.js';
  *
  *  2: eligiblePairs now counts unconditionally instead of reading 0 on every
  *  map without a prior, RoundMetrics carries the gate tally, and the occlusion
- *  guard gained a distance bound. Version 1 rows are not comparable to these. */
-export const ANALYZER_VERSION = 2;
+ *  guard gained a distance bound. Version 1 rows are not comparable to these.
+ *
+ *  3: the occlusion guard no longer lets an entity carrying the GHOST bit veto
+ *  a frame. AI controlled special infected are recorded as entities and can be
+ *  unspawned, so version 2 dropped frames because of something invisible. */
+export const ANALYZER_VERSION = 3;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
 export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[] }

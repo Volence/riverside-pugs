@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
+import { ENTITY_KIND, STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { bearing } from '../src/integrity/geometry.js';
 import { trackFidelity, trackWindows, pickClips, scanPairs, visibleOthers, type TrackWindow } from '../src/integrity/ghostTrack.js';
@@ -65,13 +65,17 @@ describe('visibleOthers', () => {
     return {
       tMs: TUNING.SPAWN_GRACE_MS, offset: 0, players,
       entities: [
-        { ref: 1, kind: 1, state: 1, x: 800, y: 0, z: 0, health: 50 },      // common ON the ghost's bearing
-        { ref: 2, kind: 1, state: 1, x: 0, y: -800, z: 0, health: 50 },     // common well off it
+        // Common ON the ghost's bearing.
+        { ref: 1, kind: ENTITY_KIND.COMMON, state: STATE.PRESENT, x: 800, y: 0, z: 0, health: 50 },
+        // Common well off it.
+        { ref: 2, kind: ENTITY_KIND.COMMON, state: STATE.PRESENT, x: 0, y: -800, z: 0, health: 50 },
+        // An AI hunter that has NOT spawned, sitting on the bearing. Invisible.
+        { ref: 3, kind: ENTITY_KIND.HUNTER_AI, state: STATE.PRESENT | STATE.GHOST, x: 1000, y: 5, z: 0, health: 250 },
       ],
     };
   }
 
-  it('returns the live teammate and the entities, and nothing else', () => {
+  it('returns the live teammate and the VISIBLE entities, and nothing else', () => {
     expect(visibleOthers(occludedFrame(), 0, 4)).toEqual([
       { x: 0, y: 500 },     // teammate slot 1
       { x: 800, y: 0 },     // common on the bearing
@@ -94,6 +98,41 @@ describe('visibleOthers', () => {
 
   it('excludes a player without PRESENT', () => {
     expect(visibleOthers(occludedFrame(), 0, 4)).not.toContainEqual({ x: 700, y: 0 });
+  });
+
+  it('excludes an ENTITY carrying the ghost bit, which an AI special infected does', () => {
+    // The gap this closes. AI controlled special infected are recorded as
+    // entities rather than player records, because the player block is the
+    // roster and a bot never joins it, and the frame writer stamps them with
+    // RplClientState(c, RplIsGhost(c)) at plugin/pug-match.sp:1351: the SAME
+    // ghost bit a human infected carries. A bot filling a disconnected SI's
+    // slot mid-round is the ordinary way this happens. The earlier version of
+    // these tests only ever built entities with kind 1 and never varied entity
+    // state, so an invisible entity vetoing a frame went unnoticed.
+    const f = occludedFrame();
+    expect(visibleOthers(f, 0, 4)).not.toContainEqual({ x: 1000, y: 5 });
+    const args = {
+      survivor: f.players[0], ghost: f.players[4],
+      others: visibleOthers(f, 0, 4).filter((o) => o.x !== 800), tMs: f.tMs, roundStartMs: 0,
+    };
+    // With the visible common removed, the unspawned hunter is the only thing
+    // left on the bearing, and it must not veto: a survivor cannot see it.
+    expect(pairEligible(args)).toBe(true);
+  });
+
+  it('includes that same AI special infected once it has SPAWNED, and it then occludes', () => {
+    // The sibling case, and the reason the filter is on state and not on kind:
+    // a spawned AI hunter is a perfectly good innocent explanation for where a
+    // crosshair is pointing.
+    const f = occludedFrame();
+    f.entities = f.entities
+      .filter((e) => e.kind === ENTITY_KIND.HUNTER_AI)
+      .map((e) => ({ ...e, state: STATE.PRESENT | STATE.ALIVE }));
+    expect(visibleOthers(f, 0, 4)).toContainEqual({ x: 1000, y: 5 });
+    expect(pairEligible({
+      survivor: f.players[0], ghost: f.players[4],
+      others: visibleOthers(f, 0, 4), tMs: f.tMs, roundStartMs: 0,
+    })).toBe(false);
   });
 
   it('feeds pairEligible an occluder that actually vetoes the frame', () => {
