@@ -4,8 +4,7 @@ import type { DB } from '../db.js';
 import { parseReplay, slotInfected, type ReplayHeader } from '../replayFormat.js';
 import { PriorBuilder, subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
-import { isLiveSurvivor } from './geometry.js';
-import { analyzeRound } from './round.js';
+import { analyzeRound, buildRoundPrior } from './round.js';
 import {
   loadPrior, loadRoundPrior, saveRound, saveRoundPrior, savePrior, type RoundKey,
 } from './store.js';
@@ -87,14 +86,14 @@ export function rebuildPriors(db: DB, dir: string): Map<string, number> {
     if (!replay) continue;
     const slots = survivorSlots(replay.header);
     const entry = pools.get(replay.header.map) ?? { builder: new PriorBuilder(), rounds: 0 };
-    const own = new PriorBuilder();
-    for (const frame of replay.frames) {
-      for (const p of frame.players) {
-        if (!slots.includes(p.slot) || !isLiveSurvivor(p)) continue;
-        entry.builder.addSurvivorFrame(p, p.yaw);
-        own.addSurvivorFrame(p, p.yaw);
-      }
-    }
+    // `buildRoundPrior` is the ONLY producer of a round's contribution. This
+    // pass used to compute it a second time, byte for byte identical, and
+    // `analyzeRound` then overwrote the row with its own copy. A drift between
+    // the two would not fail: subtractRound clamps a mismatch to zero, so the
+    // pool and the subtraction would silently disagree and every occupancy
+    // z-score would shift.
+    const own = buildRoundPrior(replay.frames, slots);
+    entry.builder.add(own);
     entry.rounds++;
     pools.set(replay.header.map, entry);
     saveRoundPrior(db, f.key, own);

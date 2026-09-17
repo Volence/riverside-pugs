@@ -1,16 +1,17 @@
 // tests/integrityRun.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import {
-  encodeFrame, encodeHeader, PLAYER_SLOTS, STATE, VERSION,
+  encodeFrame, encodeHeader, parseReplay, PLAYER_SLOTS, STATE, VERSION,
   type Frame, type PlayerSample, type ReplayHeader,
 } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { bearing } from '../src/integrity/geometry.js';
-import { analyzeOneRound, backfillAll } from '../src/integrity/run.js';
+import { buildRoundPrior } from '../src/integrity/round.js';
+import { analyzeOneRound, backfillAll, rebuildPriors } from '../src/integrity/run.js';
 
 const TOKEN = 'a'.repeat(32);
 let db: DB;
@@ -94,6 +95,30 @@ describe('backfillAll', () => {
     const p = db.prepare('SELECT rounds, frames FROM integrity_prior').get() as { rounds: number; frames: number };
     expect(p.rounds).toBe(1);
     expect(p.frames).toBe(60);
+  });
+
+  it('pools exactly what the scoring pass would subtract back out', () => {
+    // The two passes used to build a round's prior contribution independently,
+    // and the scoring pass overwrote what the pooling pass wrote. Byte for byte
+    // identical, but a drift would be SILENT: subtractRound clamps a mismatch
+    // to zero, so the pool and the subtraction would disagree, every occupancy
+    // z-score would shift, and nothing would fail. This asserts they agree.
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    rebuildPriors(db, dir);
+    const pooled = db.prepare('SELECT frames, counts FROM integrity_prior_rounds').get() as { frames: number; counts: string };
+    const map = db.prepare('SELECT frames FROM integrity_prior').get() as { frames: number };
+    // One round, so the pool IS that round.
+    expect(map.frames).toBe(pooled.frames);
+
+    analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, readFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`)));
+    const after = db.prepare('SELECT frames, counts FROM integrity_prior_rounds').get() as { frames: number; counts: string };
+    expect(after).toEqual(pooled);
+
+    // And directly: the builder both callers use is one function.
+    const replay = parseReplay(readFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`)))!;
+    const built = buildRoundPrior(replay.frames, [0]);
+    expect(built.frames).toBe(pooled.frames);
+    expect(JSON.stringify([...built.counts])).toBe(pooled.counts);
   });
 
   it('is idempotent: running twice leaves one row per player-round', () => {
