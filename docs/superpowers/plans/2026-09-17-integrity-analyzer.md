@@ -791,7 +791,12 @@ function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number): Pt[] 
  *  with how much of the motion needed to follow it they actually produced. */
 export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
   if (frames.length === 0) return [];
-  const roundStartMs = frames[0].tMs;
+  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
+  // opened, and the replay opens at round start, so the round starts at zero.
+  // Using the first sampled frame instead shifts the spawn grace window by one
+  // sample interval and, for a fixture whose first frame is already at
+  // SPAWN_GRACE_MS, swallows the whole round.
+  const roundStartMs = 0;
   const out: TrackWindow[] = [];
 
   const ghostSlots = new Set<number>();
@@ -988,7 +993,12 @@ export interface OccResult {
 export function occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null {
   if (!prior || prior.frames <= 0) return null;
   if (frames.length === 0) return null;
-  const roundStartMs = frames[0].tMs;
+  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
+  // opened, and the replay opens at round start, so the round starts at zero.
+  // Using the first sampled frame instead shifts the spawn grace window by one
+  // sample interval and, for a fixture whose first frame is already at
+  // SPAWN_GRACE_MS, swallows the whole round.
+  const roundStartMs = 0;
   let observed = 0, expected = 0, variance = 0, pairs = 0;
 
   for (const f of frames) {
