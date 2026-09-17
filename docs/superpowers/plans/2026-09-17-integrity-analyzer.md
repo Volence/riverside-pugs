@@ -201,7 +201,7 @@ export const TUNING = {
   /** A map with fewer player-rounds than this gets no occupancy score at all.
    *  Scoring against a thin prior is worse than not scoring. */
   MIN_PRIOR_ROUNDS: 20,
-  /** Correlation window length in frames. 20 frames is 2 seconds at 10 Hz. */
+  /** Fidelity window length in frames. 20 frames is 2 seconds at 10 Hz. */
   W: 20,
   /** A fidelity window requires the aim to stay inside this many degrees of
    *  the ghost for its whole length. */
@@ -1141,7 +1141,11 @@ const KEY = { matchId: 1, ordinal: 1, half: 1 };
 const M: RoundMetrics = { fidMax: 0.9, fidP95: 0.5, occZ: 2.5, teamRank: 1, teamGap: 1.2, eligiblePairs: 300 };
 const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, fidelity: 0.9, meanErr: 2, meanDist: 900 };
 
-beforeEach(() => { db = openDb(':memory:'); });
+beforeEach(() => {
+  db = openDb(':memory:');
+  // Foreign keys are ON, so insert a match to satisfy integrity_rounds/clips/reviews constraints
+  db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'no_mercy')").run();
+});
 
 describe('saveRound', () => {
   it('stores metrics and clips for a slot', () => {
@@ -2475,3 +2479,31 @@ git commit -m "Integrity: deep link a flagged clip to its moment in the viewer"
 **Constants.** The spec lists ten; this plan adds `R_MAX`, the wedge rasterisation range, which the spec's prior section implies but does not name. Eleven total.
 
 **Type consistency.** `RoundKey`, `PriorTable`, `TrackWindow`, `RoundMetrics`, `OccResult`, `PlayerAgg` and `ScoredPlayer` are each defined once and imported everywhere else. `priorAt` takes a `PriorTable` and a key string in every call site. `analyzeRound` returns `{ metrics, clips, roundPrior }` and Task 7 destructures exactly those three.
+
+## Amendments after the whole-branch review, 2026-09-17
+
+The eleven tasks above were each built and reviewed on their own. A review of the finished
+branch then found defects that no per-task review could see, and the fixes changed things
+the code blocks above still show in their pre-fix form. Read those blocks as the record of
+what each task was asked to build, and this section as what the branch actually holds.
+
+- **`src/integrity/ghostTrack.ts` was split into three modules.** `ghostTrack.ts` keeps
+  metric A and the shared frame-eligibility primitives, `occupancy.ts` holds metric B and
+  is now the only module that depends on `aimPrior.ts`, and `round.ts` holds `analyzeRound`,
+  `RoundMetrics` and metric C. Every exported name is unchanged. Import lines in the blocks
+  above that say `./ghostTrack.js` for `RoundMetrics` or `analyzeRound` now say
+  `./round.js`, and `occupancy` comes from `./occupancy.js`.
+- **`RoundMetrics` gained a `gates` tally** (`considered`, `notLive`, `notGhost`,
+  `inGrace`, `tooClose`, `occluded`, `passed`), and `eligiblePairs` is now `gates.passed`.
+  It used to be read off the occupancy result, which is null on every map under
+  `MIN_PRIOR_ROUNDS`, so every row the first backfill wrote read 0 and "zero clips" could
+  not be told from "the detector never ran". Every `RoundMetrics` literal in the blocks
+  above therefore needs a `gates` field to compile.
+- **`TUNING.OCCLUDE_MAX_DIST` (2000) was added**, bounding the occlusion guard at the aim
+  prior's own reach. Twelve constants now, not eleven. The reasoning is on the constant and
+  in the spec's frame eligibility section.
+- **`ANALYZER_VERSION` is 2.** Version 1 rows are not comparable.
+- **`buildRoundPrior` in `round.ts` is the single producer** of a round's contribution to
+  the map prior. Task 7's `rebuildPriors` used to compute it a second time inline.
+- **`integrityBoard` returns `name` and `clips`** alongside the scored fields, and the admin
+  board renders a rank rather than a percentage and dims itself when nothing is flagged.

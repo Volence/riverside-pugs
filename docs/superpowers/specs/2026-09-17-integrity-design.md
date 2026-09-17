@@ -69,9 +69,11 @@ automatic punishment. Nothing in this spec bans anyone or tells a player anythin
 
 ## 1. The analyzer
 
-Pure functions in `src/integrity/ghostTrack.ts`, buffers in and metrics out, tested the
-way `replayFormat.ts` is tested. No filesystem, no database. `src/integrity/run.ts` owns
-the IO.
+Pure functions under `src/integrity/`, buffers in and metrics out, tested the way
+`replayFormat.ts` is tested. No filesystem, no database. `src/integrity/run.ts` owns the
+IO. Three modules, split by concern: `ghostTrack.ts` holds metric A and the frame
+eligibility primitives it shares, `occupancy.ts` holds metric B and is the only thing that
+needs the aim prior, and `round.ts` holds the per-round pass and metric C.
 
 Input is one replay file, which is one match, ordinal and half. Frames decode through the
 existing `decodeFrames`.
@@ -103,11 +105,26 @@ false positive generator, not for tidiness.
 - The ghost has `PRESENT` and `GHOST` set.
 - Distance is above `D_MIN` (300 units). Very close coincidences are common and worthless.
 - The frame is at least `SPAWN_GRACE` (5 seconds) after the round's first frame.
-- No non-ghost target lies within `OCCLUDE_WINDOW` (15 degrees) of the same bearing. The
-  analyzer has no line of sight, so it cannot tell whether the survivor is looking at a
-  visible SI, a teammate being attacked or a common that happens to sit in the same
-  direction as the ghost. When something visible is in the way, the frame proves nothing
-  and is dropped.
+- No non-ghost target within `OCCLUDE_MAX_DIST` (2000 units) lies within `OCCLUDE_WINDOW`
+  (15 degrees) of the same bearing. The analyzer has no line of sight, so it cannot tell
+  whether the survivor is looking at a visible SI, a teammate being attacked or a common
+  that happens to sit in the same direction as the ghost. When something visible is in the
+  way, the frame proves nothing and is dropped.
+
+  **The distance bound is deliberate and was added on 2026-09-17**, after a whole-branch
+  review found the occluder list unbounded and undifferentiated. A veto covers 1/12 of the
+  circle and a fidelity window needs `W` consecutive surviving frames, so with k
+  independent occluders a window survives at roughly `(11/12)^(20k)`: about 0.5 percent
+  with three teammates and about one in a million with eight. Commons are entities and they
+  swarm, so an unbounded list makes the detector structurally blind exactly when a
+  wallhacker is most active. The bound is `R_MAX`, the aim prior's own reach, because past
+  it the analyzer already does not consider a cell to be looked at.
+
+  The list is deliberately NOT filtered by kind. Every kind the recorder writes is a
+  visible object: `RplWorldKind` in `plugin/pug-match.sp` admits only `infected`, `witch`
+  and `tank_rock`, plus survivor bots from the player block, and ghost infected are players
+  and are already excluded. Dropping a kind would discard a real alternative explanation
+  for the crosshair, which is the thing the guard exists to honour.
 
 ### The aim prior, which is what makes occupancy mean anything
 
@@ -181,6 +198,15 @@ more directly.
 Recorded per player-round: the maximum window fidelity and the 95th percentile of window
 fidelities.
 
+**Coverage, recorded alongside the metrics.** Every player-round also stores a gate tally:
+how many survivor-and-infected pairs were considered, and how many were dropped at each of
+`notLive`, `notGhost`, `inGrace`, `tooClose` and `occluded`, plus the count that passed
+everything. Without it "no clips" is unreadable, because "four hundred clean chances and
+never a tracking window" and "the gates dropped every frame and the detector never ran"
+produce the identical row. The first backfill over real history produced exactly that
+ambiguity. The `occluded` count is also the evidence by which the occlusion bound above
+gets revisited.
+
 **B. Prior-corrected occupancy.** The z-score defined above. Replaces the "relative aim
 share" and "near-miss dwell" metrics of the first draft, which measured map knowledge as
 much as anything else.
@@ -205,9 +231,9 @@ start and end `tMs`, the ghost's slot, the fidelity, the mean `|err|`, the mean
 distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows per
 player-round are kept.
 
-The ten constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `CELL`,
-`MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live in one
-exported object so tuning is a single edit and the tests can pin them.
+The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
+`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
+in one exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring
 
@@ -226,14 +252,28 @@ integrity_reviews  (match_id, ordinal, half, slot) PRIMARY KEY
                    state TEXT ('new'|'reviewed'|'dismissed'), note,
                    reviewed_by, reviewed_at
 
-integrity_aim_prior (map, cell_x, cell_y) PRIMARY KEY
-                   p REAL, frames INTEGER, rounds INTEGER, analyzer_version
+integrity_prior    map PRIMARY KEY
+                   frames INTEGER, rounds INTEGER, counts TEXT (JSON), analyzer_version
+
+integrity_prior_rounds (match_id, ordinal, half) PRIMARY KEY
+                   frames INTEGER, counts TEXT (JSON)
 ```
 
-`integrity_aim_prior` is the cached grid from section 1. It is derived, so it is rebuilt
-wholesale rather than updated incrementally, and it is rebuilt whenever new rounds land for
-a map or the analyzer version changes. A map spanning 16000 units each way is about 4000
-cells at 256 units, so the whole pool across every campaign is tens of thousands of rows.
+`integrity_prior` is the cached grid from section 1, one row per map with the whole cell
+grid as a JSON blob in `counts` rather than a row per cell. The first draft of this spec
+specified `integrity_aim_prior (map, cell_x, cell_y)` and reasoned about tens of thousands
+of rows; the blob is what was built and it is the better shape. The grid is read
+wholesale, written wholesale and never queried by cell, so a row per cell would buy an
+index nothing uses and pay for it on every rebuild. It stays derived, rebuilt whole rather
+than updated incrementally, whenever new rounds land for a map or the analyzer version
+changes.
+
+`integrity_prior_rounds` is what makes leave-one-round-out work, and it needs its own table
+rather than being recomputed on demand: scoring a round subtracts that round's own
+contribution from the pool, so the contribution has to survive as the exact number that was
+added, not as something re-derived later from a file that may no longer parse the same way.
+One producer writes it, `src/integrity/round.ts` `buildRoundPrior`, and both the pooling
+pass and the scoring pass use that one function.
 
 Order matters when recomputing: the prior must be rebuilt before any round is scored
 against it, because a player's own frames are excluded from their prior and the exclusion
@@ -273,7 +313,13 @@ at its start tick, shows the numbers that flagged it, and shows the `demo_gototi
 section 4 for review in game.
 
 The composite renders with its label stating plainly that it is theoretical and ranks
-rather than accuses. This is admin-only and never appears on a public page.
+rather than accuses. It renders as a RANK inside a stated population ("1 of 16"), never as
+a percentage: the percentile is `below/(n-1)`, so the leader reads exactly 100 percent by
+construction whatever they measured, and no disclaimer survives a reader's eye landing on
+that next to a real person's name. When no clips exist anywhere the board dims and says so,
+because a ranking with nothing flagged is a list of your best players by another name,
+which decision 5 names as the failure to avoid. This is admin-only and never appears on a
+public page.
 
 ## 4. Replay format version 4 and the demo tick
 
