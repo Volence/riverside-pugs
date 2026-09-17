@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, ApiError, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
+import { api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
 import { campaignName } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
@@ -16,7 +16,7 @@ export function Play(
 ) {
   if (session.kind === 'loading') return <div class="page page--play" />;
   if (session.kind === 'anonymous') return <SignIn />;
-  if (session.kind === 'pending') return <Register onDone={refresh} />;
+  if (session.kind === 'pending') return <Register me={session.me} onDone={refresh} />;
   if (!state) return <div class="page page--play" />;
 
   const wide = state.match !== null;
@@ -72,7 +72,7 @@ function SignIn() {
   );
 }
 
-function Register({ onDone }: { onDone: () => void }) {
+function Register({ me, onDone }: { me: Me; onDone: () => void }) {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -93,9 +93,26 @@ function Register({ onDone }: { onDone: () => void }) {
 
   return (
     <div class="page page--play">
+      {me.discordEnabled && !me.discord && (
+        <Panel class="hero-panel">
+          <p class="eyebrow">Members get in automatically</p>
+          <h2>Connect your Discord</h2>
+          <p class="muted">If you are in the Riverside Discord server, linking your account activates you straight away.</p>
+          <a class="btn" href="/auth/discord" target="_top" rel="noopener">Connect Discord</a>
+        </Panel>
+      )}
+      {me.discordEnabled && me.discord && (
+        <Panel>
+          <p class="eyebrow">Discord linked</p>
+          <p>
+            Linked to <strong>{me.discord.name}</strong>, but that account is not in the Riverside
+            Discord server. Join it and sign in again, or use an invite code below.
+          </p>
+        </Panel>
+      )}
       <Panel>
         <p class="eyebrow">Invite only</p>
-        <h2>You need an invite code</h2>
+        <h2>{me.discordEnabled ? 'Or use an invite code' : 'You need an invite code'}</h2>
         <form class="register" onSubmit={submit}>
           <input
             value={code}

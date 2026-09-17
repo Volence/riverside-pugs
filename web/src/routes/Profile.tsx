@@ -6,8 +6,12 @@ import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
 import { Figures, Figure, RankBadge } from '../components/PageHeader';
+import { DiscordLinkCard } from '../components/DiscordLink';
+import type { Session } from '../hooks/useLiveState';
 
-export function Profile({ steamid }: { steamid: string }) {
+export function Profile(
+  { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
+) {
   const { data, error } = useFetch((s) => api.profile(steamid, s), [steamid]);
   // Per map by default: a career total on the per-map table mostly reports
   // which maps come up most in the rotation, not how the player does on them.
@@ -48,6 +52,10 @@ export function Profile({ steamid }: { steamid: string }) {
             { label: 'Matches', value: totals.games },
           ] : []}
         />
+
+        {session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid && (
+          <Panel><DiscordLinkCard me={session.me} onChange={refresh} /></Panel>
+        )}
 
         <Panel>
           <h3>Rating over time</h3>
