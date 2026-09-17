@@ -221,6 +221,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // was advertised as claimable, players stayed connected, and the plugin
       // went on enforcing a roster and a token the backend had already binned.
       // A stale or unknown token just draws a PUGERR, which is a no-op.
+      // pug_match.cfg unloads l4d2_spec_stays_spec for the match; casual play
+      // wants it back. Loading an already-loaded plugin is a no-op.
+      try {
+        await rcon.exec('sm plugins load_unlock; sm plugins load l4d2_spec_stays_spec.smx; sm plugins load_lock');
+      } catch (err) {
+        console.error(`[serverRelease] spec_stays_spec reload failed on ${server.name} (non-fatal):`, err);
+      }
       if (token) {
         try {
           await rcon.exec(`sm_pug_abort ${token}`);
