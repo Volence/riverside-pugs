@@ -2158,8 +2158,10 @@ describe('AdminIntegrity', () => {
 
   it('opens a player to their clips with a link into the replay viewer', async () => {
     // Mock adminApi.integrityPlayer with one clip at startMs 12000, match 1,
-    // ordinal 1, half 1. Assert an anchor whose href contains /replay/ and the
-    // start time, so a reviewer lands on the moment rather than the round.
+    // ordinal 1, half 1. Assert an anchor to /match/1 and that the row shows the
+    // start time as text, so a reviewer knows which moment to scrub to. There is
+    // deliberately no /replay/ URL here: the viewer is a component inside the
+    // match page and Task 11 adds the deep link.
   });
 });
 ```
