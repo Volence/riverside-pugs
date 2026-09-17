@@ -1,7 +1,7 @@
-import { STATE, type Frame } from '../replayFormat.js';
+import { STATE, type Frame, type PlayerSample } from '../replayFormat.js';
 import { TUNING } from './constants.js';
 import {
-  aimError, bearing, dist2d, isGhost, isLiveSurvivor, pairEligible, wrapDeg, type Pt,
+  aimError, bearing, dist2d, isGhost, isLiveSurvivor, pairEligible, pairGate, wrapDeg, type Pt,
 } from './geometry.js';
 
 /**
@@ -128,6 +128,67 @@ function ghostSlotsOf(frames: Frame[]): Set<number> {
   const out = new Set<number>();
   for (const f of frames) for (const p of f.players) if (isGhost(p)) out.add(p.slot);
   return out;
+}
+
+/**
+ * Why the detector saw what it saw, one player-round.
+ *
+ * `passed` is the coverage number, and it is the whole point: without it a
+ * player-round with no clips could equally mean "four hundred clean chances
+ * and never a tracking window" or "the gates dropped every single frame and the
+ * detector never ran". The first backfill flagged zero clips across 724
+ * player-rounds and could not tell those two apart, which made the result
+ * uninterpretable. The breakdown says which gate did the dropping.
+ */
+export interface GateTally {
+  /** Survivor-and-infected pairs looked at, the denominator for the rest. */
+  considered: number;
+  notLive: number;
+  notGhost: number;
+  inGrace: number;
+  tooClose: number;
+  occluded: number;
+  /** Pairs that passed every gate. Counted unconditionally, with no reference
+   *  to whether a prior exists, because coverage is a property of the frames
+   *  and not of how much history the map happens to have. */
+  passed: number;
+}
+
+/**
+ * Walk every (frame, infected slot) pair for one survivor, tallying where each
+ * one fell and handing the survivors of every gate to `onPass`.
+ *
+ * The candidate set is the slots that were a ghost at some point this round,
+ * not every other player: counting a teammate as `notGhost` would bury the one
+ * number that matters under the survivor roster.
+ */
+export function scanPairs(
+  frames: Frame[],
+  slot: number,
+  onPass?: (survivor: PlayerSample, ghost: PlayerSample, frame: Frame) => void,
+): GateTally {
+  const t: GateTally = { considered: 0, notLive: 0, notGhost: 0, inGrace: 0, tooClose: 0, occluded: 0, passed: 0 };
+  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
+  // opened, and the replay opens at round start, so the round starts at zero.
+  // The first SAMPLED frame is merely the first sample.
+  const roundStartMs = 0;
+  const ghostSlots = ghostSlotsOf(frames);
+  if (ghostSlots.size === 0) return t;
+
+  for (const f of frames) {
+    const s = f.players.find((p) => p.slot === slot);
+    for (const gs of ghostSlots) {
+      const g = f.players.find((p) => p.slot === gs);
+      if (!g) continue;
+      t.considered++;
+      // Short-circuited rather than left to pairGate so a dead survivor does
+      // not pay for an occluder list nobody will look at.
+      if (!s || !isLiveSurvivor(s)) { t.notLive++; continue; }
+      const gate = pairGate({ survivor: s, ghost: g, others: visibleOthers(f, slot, gs), tMs: f.tMs, roundStartMs });
+      if (gate === 'pass') { t.passed++; onPass?.(s, g, f); } else t[gate]++;
+    }
+  }
+  return t;
 }
 
 /** The reviewable moments: strongest first, never overlapping, capped. A

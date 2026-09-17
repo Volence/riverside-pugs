@@ -3,7 +3,9 @@ import { percentile, aggregate, scorePlayers } from '../src/integrity/score.js';
 import type { RoundMetrics } from '../src/integrity/round.js';
 
 const m = (over: Partial<RoundMetrics> = {}): RoundMetrics => ({
-  fidMax: 0.2, fidP95: 0.1, occZ: 0, teamRank: 2, teamGap: 0, eligiblePairs: 100, ...over,
+  fidMax: 0.2, fidP95: 0.1, occZ: 0, teamRank: 2, teamGap: 0, eligiblePairs: 100,
+  gates: { considered: 400, notLive: 20, notGhost: 100, inGrace: 50, tooClose: 30, occluded: 100, passed: 100 },
+  ...over,
 });
 
 describe('percentile', () => {
