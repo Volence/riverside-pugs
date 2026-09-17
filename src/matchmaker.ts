@@ -5,6 +5,7 @@ import { balanceTeams } from './balance.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
+import { spectateFor, type SpectateInfo } from './spectate.js';
 import { activeTimeout, recordPenalty } from './penalties.js';
 import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -51,6 +52,8 @@ export interface StateSnapshot {
     teamB: NamedPlayer[];
     /** Only for a viewer on this roster, and only once the match is live. */
     connect: { host: string; port: number; password: string } | null;
+    /** How to watch this match on SourceTV, or null. */
+    spectate: SpectateInfo | null;
     /** True while the match is configuring and no server has been claimed
      *  yet, so it is queued behind another match. Never true once the match
      *  is live. */
@@ -351,6 +354,7 @@ export class Matchmaker {
         teamA: mps.filter((r) => r.team === 'a').map((r) => named(r.player_id)),
         teamB: mps.filter((r) => r.team === 'b').map((r) => named(r.player_id)),
         connect,
+        spectate: spectateFor(this.db, matchRow.server_id),
         waitingForServer: matchRow.state === 'configuring' && matchRow.server_id === null,
       };
     }

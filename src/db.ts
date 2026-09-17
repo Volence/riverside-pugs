@@ -416,6 +416,11 @@ export function openDb(path: string): DB {
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
   // A voided match: an admin decided the result must not count. It is also
   // set to 'aborted', which is what drops it from every stat query.
+  // SourceTV, per server: anyone can watch a live match, and the tv_delay is
+  // what keeps that from being ghosting.
+  ensureColumn(db, 'servers', 'tv_port', 'INTEGER');
+  ensureColumn(db, 'servers', 'tv_password', 'TEXT');
+  ensureColumn(db, 'servers', 'tv_enabled', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'matches', 'voided_at', 'TEXT');
   ensureColumn(db, 'matches', 'void_reason', 'TEXT');
   seed(db);

@@ -61,6 +61,8 @@ export interface StateSnapshot {
     teamB: NamedPlayer[];
     /** Only for a viewer on this roster, and only once the match is live. */
     connect: { host: string; port: number; password: string } | null;
+    /** How to watch on SourceTV, or null when that server has none. */
+    spectate?: SpectateInfo | null;
     /** True while the match is configuring and no server has been claimed
      *  yet, so it is queued behind another match. Never true once the match
      *  is live. */
@@ -70,6 +72,14 @@ export interface StateSnapshot {
   timeout?: { until: string; offenses: number } | null;
   /** The Discord step still missing before the viewer may queue. */
   queueBlock?: 'link_discord' | 'join_discord' | null;
+}
+
+export interface SpectateInfo {
+  host: string;
+  port: number;
+  password: string;
+  /** SourceTV broadcast delay in seconds. */
+  delay: number;
 }
 
 export interface Season {
@@ -186,6 +196,7 @@ export interface LiveMatch {
   /** Most recent first. Discrete things that happened, so a big deadly pounce
    *  is distinguishable from six small ones. */
   events: LiveEvent[];
+  spectate?: SpectateInfo | null;
 }
 
 export interface MatchDemo {
@@ -399,7 +410,7 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
 
 export interface AdminOverview {
   open: { id: number; campaign: string; state: string; serverId: number | null; createdAt: string; wentLiveAt: string | null; connected: number; rostered: number }[];
-  servers: { id: number; name: string; host: string; port: number; status: string }[];
+  servers: { id: number; name: string; host: string; port: number; status: string; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
@@ -443,6 +454,8 @@ export const adminApi = {
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
+  serverSourcetv: (id: number, enabled: boolean, port: string, password: string) =>
+    post(`/api/admin/servers/${id}/sourcetv`, { enabled, port, password }),
   queueRemove: (steamid: string) => post('/api/admin/queue/remove', { steamid }),
   reports: (status: string, signal?: AbortSignal) =>
     get<{ reports: AdminReport[] }>(`/api/admin/reports?status=${status}`, signal),

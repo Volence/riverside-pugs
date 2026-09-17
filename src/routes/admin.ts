@@ -177,6 +177,29 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true };
   });
 
+  app.post('/api/admin/servers/:id/sourcetv', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
+    const { enabled, port, password } = (req.body ?? {}) as { enabled?: unknown; port?: unknown; password?: unknown };
+    if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled must be true or false' });
+    let tvPort: number | null = null;
+    if (port !== undefined && port !== null && port !== '') {
+      tvPort = Number(port);
+      if (!Number.isInteger(tvPort) || tvPort < 1024 || tvPort > 65535) {
+        return reply.code(400).send({ error: 'port must be between 1024 and 65535' });
+      }
+    }
+    if (enabled && tvPort === null) return reply.code(400).send({ error: 'a port is needed to enable SourceTV' });
+    const pw = typeof password === 'string' ? password.trim().slice(0, 64) : '';
+    db.prepare('UPDATE servers SET tv_enabled = ?, tv_port = ?, tv_password = ? WHERE id = ?')
+      .run(enabled ? 1 : 0, tvPort, pw, id);
+    logAdmin(db, adminId, 'server_sourcetv', id, { enabled, port: tvPort });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
   app.post('/api/admin/queue/remove', async (req, reply) => {
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;

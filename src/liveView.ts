@@ -1,4 +1,5 @@
 import { publishAdminEvent } from './adminFeed.js';
+import { spectateFor, type SpectateInfo } from './spectate.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent } from './logParse.js';
@@ -59,6 +60,8 @@ export interface LiveMatch {
   /** Most recent first, capped. A summed total cannot tell you whether that
    *  was one big deadly pounce or six small ones; this can. */
   events: LiveEvent[];
+  /** How to watch on SourceTV, or null when that server has none. */
+  spectate: SpectateInfo | null;
 }
 
 /**
@@ -547,13 +550,13 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
 export function getLiveMatches(db: DB): LiveMatch[] {
   const matches = db
     .prepare(
-      `SELECT m.id, m.campaign, l.current_map AS currentMap, l.last_seen AS lastSeen
+      `SELECT m.id, m.campaign, m.server_id AS serverId, l.current_map AS currentMap, l.last_seen AS lastSeen
        FROM matches m
        LEFT JOIN match_live l ON l.match_id = m.id
        WHERE m.state = 'live'
        ORDER BY m.id DESC`,
     )
-    .all() as { id: number; campaign: string; currentMap: string | null; lastSeen: string | null }[];
+    .all() as { id: number; campaign: string; serverId: number | null; currentMap: string | null; lastSeen: string | null }[];
   if (matches.length === 0) return [];
 
   const playersOf = db.prepare(
@@ -598,6 +601,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
     return {
       id: m.id,
       campaign: m.campaign,
+      spectate: spectateFor(db, m.serverId),
       currentMap: m.currentMap ?? null,
       teamA: ps.filter((p) => p.team === 'a').map(named),
       teamB: ps.filter((p) => p.team === 'b').map(named),

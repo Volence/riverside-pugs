@@ -11,7 +11,10 @@ export function adminOverview(db: DB) {
      FROM matches m WHERE m.state IN ('configuring', 'live') ORDER BY m.id DESC`,
   ).all();
   // Never the rcon password: this goes to a browser.
-  const servers = db.prepare('SELECT id, name, host, port, status FROM servers ORDER BY id').all();
+  const servers = db.prepare(
+    `SELECT id, name, host, port, status, tv_port AS tvPort, tv_password AS tvPassword, tv_enabled AS tvEnabled
+     FROM servers ORDER BY id`,
+  ).all();
   const recent = db.prepare(
     `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
      FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT 30`,

@@ -168,6 +168,8 @@ export interface MatchView {
   voice: { teamAId: string; teamBId: string } | null;
   /** Names of rostered players with no linked Discord, who cannot be moved. */
   unlinked: string[];
+  /** True when the match's server has SourceTV, so anyone can watch it. */
+  canSpectate?: boolean;
 }
 
 const STATE_LINE: Record<MatchCardState, string> = {
@@ -190,6 +192,9 @@ export function renderMatch(v: MatchView): MessagePayload {
   const open = v.state === 'configuring' || v.state === 'waiting' || v.state === 'live';
   const row: Button[] = [];
   if (v.state === 'live') row.push({ kind: 'button', customId: `m:${v.matchId}:connect`, label: 'Connect', style: 'success' });
+  if (v.state === 'live' && v.canSpectate) {
+    row.push({ kind: 'button', customId: `m:${v.matchId}:spectate`, label: 'Watch', style: 'secondary' });
+  }
   row.push(link(`${v.publicUrl}/match/${v.matchId}`, 'Match page'));
   return {
     embeds: [{
