@@ -2018,7 +2018,10 @@ Add these routes inside `adminRoutes`, immediately after the reports routes:
   });
 
   app.post('/api/admin/integrity/:matchId/:ordinal/:half/:slot/review', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
+    // requireAdmin RETURNS the acting admin steamid (src/routes/guards.ts:47), or
+    // null having already sent the 401/403. That id is what the audit log needs.
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
     const p = req.params as { matchId: string; ordinal: string; half: string; slot: string };
     const body = (req.body ?? {}) as { state?: string; note?: string };
     const state = String(body.state ?? '');
@@ -2029,14 +2032,13 @@ Add these routes inside `adminRoutes`, immediately after the reports routes:
       return reply.code(400).send({ error: 'bad round' });
     }
     const note = String(body.note ?? '').slice(0, 500);
-    const adminId = (req as { adminId?: string }).adminId ?? '';
     setReview(db, key, slot, state, note, adminId);
     logAdmin(db, adminId, 'integrity_review', `${key.matchId}/${key.ordinal}/${key.half}/${slot}`, { state, note });
     return { ok: true };
   });
 ```
 
-Note: read how the neighbouring routes obtain the acting admin's steamid (the reports and ban routes already do this) and use the same expression rather than the placeholder above.
+Note: the audit row must carry the real admin steamid, not an empty string. Verify after implementing: `SELECT admin_id FROM admin_actions` in the test should be the admin's id.
 
 - [ ] **Step 5: Run test to verify it passes**
 
