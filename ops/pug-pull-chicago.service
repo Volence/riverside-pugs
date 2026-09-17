@@ -1,0 +1,7 @@
+[Unit]
+Description=Pull PUG demos and replays from the Chicago game server
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pug-pull-chicago
+Nice=10

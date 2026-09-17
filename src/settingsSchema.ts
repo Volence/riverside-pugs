@@ -51,6 +51,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'discord_webhook_url', group: 'Discord', label: 'Webhook URL', help: 'Legacy announcements. Unused while the bot is running.', type: { kind: 'string', maxLength: 300, allowEmpty: true }, secret: true },
   { key: 'discord_queue_thresholds', group: 'Discord', label: 'Webhook queue thresholds', help: 'Queue sizes the legacy webhook announces.', type: { kind: 'intList', min: 1, max: 8, maxItems: 8 } },
   { key: 'replay_retention_days', group: 'Replays', label: 'Replay retention days', help: 'Replays older than this are pruned.', type: { kind: 'int', min: 7, max: 3650 } },
+  { key: 'demo_retention_days', group: 'Replays', label: 'Match demo retention (days)', help: 'Match demos are deleted after this, and the download disappears from the match page.', type: { kind: 'int', min: 7, max: 3650 } },
+  { key: 'demo_autorecord_days', group: 'Replays', label: 'Casual demo retention (days)', help: "SourceTV's own recordings of ordinary play, which nothing links to.", type: { kind: 'int', min: 1, max: 365 } },
   { key: 'replay_free_floor_gb', group: 'Replays', label: 'Free disk floor (GB)', help: 'Prune the oldest replays early when free space drops below this.', type: { kind: 'int', min: 1, max: 500 } },
 ];
 

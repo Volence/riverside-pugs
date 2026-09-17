@@ -1,3 +1,5 @@
+import { pruneDemos } from './demoPrune.js';
+import { reindexRecentMatches } from './reindex.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { playerByDiscordId } from './players.js';
@@ -522,6 +524,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       console.error('[liveView] reaper failed:', err);
     }
     try {
+      // Files pulled from a second game server land after that match ended.
+      reindexRecentMatches(deps.db, deps.config.demoDir, deps.config.replayDir);
+    } catch (err) {
+      console.error('[reindex] sweep failed:', err);
+    }
+    try {
       liftExpiredBans(deps.db);
     } catch (err) {
       console.error('[admin] ban expiry sweep failed:', err);
@@ -537,7 +545,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Daily replay prune. Interval rather than cron because there is no
   // scheduler here and the exact hour does not matter: the window is 90 days.
   // unref so the timer never holds the process open in tests.
-  const pruneTimer = setInterval(() => pruneReplays(deps.db, deps.config.replayDir), 24 * 60 * 60 * 1000);
+  const pruneTimer = setInterval(() => {
+    pruneReplays(deps.db, deps.config.replayDir);
+    pruneDemos(deps.db, deps.config.demoDir);
+  }, 24 * 60 * 60 * 1000);
   pruneTimer.unref();
 
   // Plus one run shortly after boot. The interval alone means a box that is
@@ -550,6 +561,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const pruneOnBoot = setTimeout(() => {
     try {
       pruneReplays(deps.db, deps.config.replayDir);
+      pruneDemos(deps.db, deps.config.demoDir);
     } catch (err) {
       console.error('[replay] startup prune failed:', err);
     }

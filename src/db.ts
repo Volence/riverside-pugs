@@ -354,6 +354,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   admin_feed_accounts: '1',
   admin_feed_problems: '1',
   replay_retention_days: '90',
+  demo_retention_days: '90',
+  demo_autorecord_days: '7',
   replay_free_floor_gb: '10',
   noshow_minutes: '10',
   noshow_min_connected: '6',
