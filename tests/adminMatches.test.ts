@@ -1,0 +1,125 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { openDb, type DB } from '../src/db.js';
+import { loadConfig } from '../src/config.js';
+import { buildServer } from '../src/server.js';
+import { completeMatch } from '../src/matchResult.js';
+import { recomputeSeasonRatings } from '../src/rating.js';
+import { addServer } from '../src/serverPool.js';
+import type { Dump } from '../src/dumpParse.js';
+import { authedCookie, stubOrchestrator } from './helpers.js';
+
+const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
+const ADMIN = IDS[0];
+
+let db: DB;
+let app: FastifyInstance;
+let admin: Record<string, string>;
+
+function play(winner: 'a' | 'b', order: string[] = IDS): number {
+  const matchId = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'dead_air')").run().lastInsertRowid);
+  const ins = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
+  order.forEach((id, i) => ins.run(matchId, id, i < 4 ? 'a' : 'b'));
+  const dump: Dump = {
+    matchId, maps: [{ map: 'm1', a: winner === 'a' ? 300 : 200, b: winner === 'b' ? 300 : 200 }],
+    players: order.map((steamid, i) => ({ steamid, team: i < 4 ? 'a' : 'b', sidmg: 1, sikill: 1, ck: 1, ff: 0, rev: 0 })),
+    skillDetect: false, skills: [], winner, totalA: winner === 'a' ? 300 : 200, totalB: winner === 'b' ? 300 : 200,
+  };
+  completeMatch(db, matchId, dump);
+  return matchId;
+}
+
+const ratings = () => db.prepare('SELECT player_id, mu, sigma, wins, losses FROM player_ratings ORDER BY player_id').all();
+const history = () => db.prepare('SELECT player_id, match_id, mu_before, mu_after FROM rating_history ORDER BY match_id, player_id').all();
+
+beforeEach(async () => {
+  db = openDb(':memory:');
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  for (const id of IDS) authedCookie(app, db, id);
+  admin = authedCookie(app, db, ADMIN);
+  db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+});
+afterEach(async () => { await app.close(); });
+
+const post = (url: string, payload: object = {}) => app.inject({ method: 'POST', url, cookies: admin, payload });
+
+describe('recomputeSeasonRatings', () => {
+  it('reproduces the incremental ratings exactly', () => {
+    play('a');
+    play('b', [...IDS].reverse());
+    play('a', [IDS[0], IDS[5], IDS[2], IDS[7], IDS[4], IDS[1], IDS[6], IDS[3]]);
+    const r = ratings();
+    const h = history();
+    recomputeSeasonRatings(db, 1);
+    expect(ratings()).toEqual(r);
+    expect(history()).toEqual(h);
+  });
+});
+
+describe('admin matches', () => {
+  it('overview lists open matches, servers, the queue and recent completed', async () => {
+    addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'idle' });
+    const done = play('a');
+    await app.inject({ method: 'POST', url: '/api/queue/join', cookies: authedCookie(app, db, IDS[3]) });
+    const o = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin })).json();
+    expect(o.servers[0]).toMatchObject({ name: 's1', status: 'idle' });
+    expect(o.recent[0]).toMatchObject({ id: done });
+    expect(o.queue.map((p: { steamid: string }) => p.steamid)).toEqual([IDS[3]]);
+    expect(o.open).toEqual([]);
+    expect(JSON.stringify(o)).not.toContain('rcon');
+  });
+
+  it('void needs a reason, drops the match, recomputes later ratings, and is audited', async () => {
+    const first = play('a');
+    play('b');
+    const withBoth = ratings();
+    expect((await post(`/api/admin/matches/${first}/void`, {})).statusCode).toBe(400);
+    expect((await post(`/api/admin/matches/${first}/void`, { reason: 'wrong teams' })).statusCode).toBe(200);
+    const m = db.prepare('SELECT state, voided_at, void_reason FROM matches WHERE id = ?').get(first) as { state: string; voided_at: string; void_reason: string };
+    expect(m.state).toBe('aborted');
+    expect(m.void_reason).toBe('wrong teams');
+    expect(m.voided_at).toBeTruthy();
+    expect(ratings()).not.toEqual(withBoth);
+    expect(history().some((x: any) => x.match_id === first)).toBe(false);
+    // Player 0 now has exactly one result: the loss.
+    expect(db.prepare('SELECT wins, losses FROM player_ratings WHERE player_id = ?').get(IDS[0])).toEqual({ wins: 0, losses: 1 });
+    const audit = (await app.inject({ method: 'GET', url: '/api/admin/audit', cookies: admin })).json();
+    expect(audit.actions[0]).toMatchObject({ action: 'void_match', target: String(first) });
+  });
+
+  it('only a completed match can be voided', async () => {
+    const id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'dead_air')").run().lastInsertRowid);
+    expect((await post(`/api/admin/matches/${id}/void`, { reason: 'x' })).statusCode).toBe(409);
+  });
+
+  it('abort ends an open match, frees its server and clears live scratch', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    const id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (1, 'live', 'dead_air', ?, 'tok')").run(serverId).lastInsertRowid);
+    db.prepare("INSERT INTO match_live (match_id, last_seen) VALUES (?, datetime('now'))").run(id);
+    expect((await post(`/api/admin/matches/${id}/abort`)).statusCode).toBe(200);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(id) as { state: string }).state).toBe('aborted');
+    expect((db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId) as { status: string }).status).toBe('idle');
+    expect(db.prepare('SELECT 1 FROM match_live WHERE match_id = ?').get(id)).toBeUndefined();
+    expect((await post(`/api/admin/matches/${id}/abort`)).statusCode).toBe(409);
+  });
+
+  it('set a server idle', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'reserved' });
+    expect((await post(`/api/admin/servers/${serverId}/idle`)).statusCode).toBe(200);
+    expect((db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId) as { status: string }).status).toBe('idle');
+  });
+
+  it('remove a player from the queue', async () => {
+    await app.inject({ method: 'POST', url: '/api/queue/join', cookies: authedCookie(app, db, IDS[3]) });
+    expect((await post('/api/admin/queue/remove', { steamid: IDS[3] })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/queue' })).json().count).toBe(0);
+  });
+
+  it('non-admins are refused', async () => {
+    const user = authedCookie(app, db, IDS[5]);
+    for (const url of ['/api/admin/matches/1/void', '/api/admin/matches/1/abort', '/api/admin/servers/1/idle', '/api/admin/queue/remove']) {
+      expect((await app.inject({ method: 'POST', url, cookies: user, payload: {} })).statusCode, url).toBe(403);
+    }
+    expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: user })).statusCode).toBe(403);
+  });
+});

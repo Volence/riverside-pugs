@@ -363,6 +363,10 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // A voided match: an admin decided the result must not count. It is also
+  // set to 'aborted', which is what drops it from every stat query.
+  ensureColumn(db, 'matches', 'voided_at', 'TEXT');
+  ensureColumn(db, 'matches', 'void_reason', 'TEXT');
   seed(db);
   return db;
 }
