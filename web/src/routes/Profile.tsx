@@ -1,11 +1,11 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import type { Profile as ProfileData } from '../api';
-import { campaignName, campaignTint, deriveLiveStats, fmtDate, labelFor, orderLiveStatKeys } from '../format';
+import type { Profile as ProfileData, Standing } from '../api';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, orderLiveStatKeys } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
-import { Figures, Figure } from '../components/PageHeader';
+import { Figures, Figure, RankBadge } from '../components/PageHeader';
 
 export function Profile({ steamid }: { steamid: string }) {
   const { data, error } = useFetch((s) => api.profile(steamid, s), [steamid]);
@@ -54,7 +54,10 @@ export function Profile({ steamid }: { steamid: string }) {
           <Sparkline values={history.map((h) => h.sr)} />
         </Panel>
 
-        <ProfileFigures totals={totals} statTotals={statTotals} rating={rating} />
+        <ProfileFigures
+          totals={totals} statTotals={statTotals} rating={rating}
+          standings={data.standings ?? {}} statDefs={data.statDefs}
+        />
 
         <div class="profile-grid">
           <Panel>
@@ -137,7 +140,7 @@ export function Profile({ steamid }: { steamid: string }) {
               onSelect={(k) => setMapMode(k as 'avg' | 'total')}
               tabs={[{ key: 'avg', label: 'Per map' }, { key: 'total', label: 'Totals' }]}
             />
-            <div class="table-wrap lb">
+            <div class="table-wrap lb lb--norank">
               <table>
                 <thead>
                   <tr>
@@ -202,10 +205,12 @@ export function Profile({ steamid }: { steamid: string }) {
  * "never played boomer" reads as absent rather than as 0%.
  */
 function ProfileFigures(
-  { totals, statTotals, rating }: {
+  { totals, statTotals, rating, standings, statDefs }: {
     totals: ProfileData['totals'];
     statTotals: ProfileData['statTotals'];
     rating: ProfileData['rating'];
+    standings: Record<string, Standing>;
+    statDefs: ProfileData['statDefs'];
   },
 ) {
   const games = totals.games || 0;
@@ -215,10 +220,13 @@ function ProfileFigures(
   const st = statTotals ?? {};
   const derived = deriveLiveStats(st);
 
-  const tiles: { label: string; value: string | number; sub?: string }[] = [];
+  // `key` names the standing the tile shows a badge for, so a tile and its
+  // badge always measure the same thing: a per-match tile, a per-match rank.
+  const tiles: { key?: string; label: string; value: string | number; sub?: string }[] = [];
   if (rating) {
     const decided = rating.wins + rating.losses;
     tiles.push({
+      key: 'winrate',
       label: 'Win rate',
       value: decided > 0 ? `${Math.round((rating.wins / decided) * 100)}%` : 'n/a',
       sub: `${rating.wins}W ${rating.losses}L`,
@@ -226,24 +234,60 @@ function ProfileFigures(
   }
   tiles.push({ label: 'Matches', value: games });
   const sid = per(totals.siDamage);
-  if (sid !== null) tiles.push({ label: 'SI dmg / match', value: sid });
+  if (sid !== null) tiles.push({ key: 'sidmg', label: 'SI dmg / match', value: sid });
   const ck = per(totals.commonKills);
-  if (ck !== null) tiles.push({ label: 'Commons / match', value: ck });
+  if (ck !== null) tiles.push({ key: 'ck', label: 'Commons / match', value: ck });
   if (derived.boomer_rate !== undefined) {
     tiles.push({
+      key: 'boomer_rate',
       label: 'Boomer %',
       value: `${derived.boomer_rate}%`,
       sub: `${st.boom_successes ?? 0}/${st.boomer_spawns ?? 0}`,
     });
   }
-  if (st.tank_damage) tiles.push({ label: 'Tank damage', value: st.tank_damage });
-  if (st.skeets) tiles.push({ label: 'Skeets', value: st.skeets });
+  // Per match, like the tiles before them, so the rank badge beside them is
+  // for the number actually shown. The career total rides along underneath.
+  if (st.tank_damage && games > 0) {
+    tiles.push({ key: 'tank_damage', label: 'Tank dmg / match', value: Math.round(st.tank_damage / games), sub: `${st.tank_damage} total` });
+  }
+  if (st.skeets && games > 0) {
+    tiles.push({ key: 'skeets', label: 'Skeets / match', value: (st.skeets / games).toFixed(1), sub: `${st.skeets} total` });
+  }
+
+  // Every other top-five place, best first, so a #1 in crowns is not lost
+  // just because crowns has no tile.
+  const onTiles = new Set(tiles.map((t) => t.key));
+  const labelOf = (k: string) =>
+    STANDING_LABELS[k] ?? statDefs.find((d) => d.key === k)?.label ?? labelFor(k);
+  const others = Object.entries(standings)
+    .filter(([k]) => !onTiles.has(k) && !DEAD_STAT_KEYS.has(k))
+    .sort(([ka, a], [kb, b]) => a.rank - b.rank || labelOf(ka).localeCompare(labelOf(kb)));
 
   return (
     <Panel>
       <Figures>
-        {tiles.map((t) => <Figure key={t.label} label={t.label} value={t.value} sub={t.sub} />)}
+        {tiles.map((t) => (
+          <Figure
+            key={t.label} label={t.label} value={t.value} sub={t.sub}
+            standing={t.key ? standings[t.key] : undefined}
+          />
+        ))}
       </Figures>
+      {others.length > 0 && (
+        <div class="standings" aria-label="Other top five places this season">
+          {others.map(([k, sd]) => (
+            <span class="standings__item" key={k}>
+              <RankBadge standing={sd} what={`${labelOf(k).toLowerCase()} per match`} />
+              {labelOf(k)} / match
+            </span>
+          ))}
+        </div>
+      )}
     </Panel>
   );
 }
+
+/** Labels for the standings that are not registry stats. */
+const STANDING_LABELS: Record<string, string> = {
+  sidmg: 'SI damage', sikill: 'SI kills', ck: 'Commons', rev: 'Revives',
+};

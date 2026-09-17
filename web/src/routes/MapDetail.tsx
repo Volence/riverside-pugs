@@ -127,7 +127,7 @@ export function MapDetail({ map }: { map: string }) {
           onSelect={(k) => setMode(k as 'avg' | 'total')}
           tabs={[{ key: 'avg', label: 'Per map' }, { key: 'total', label: 'Totals' }]}
         />
-        <div class="table-wrap lb">
+        <div class="table-wrap lb lb--norank">
           <table>
             <thead>
               <tr>

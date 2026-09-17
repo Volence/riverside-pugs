@@ -14,14 +14,12 @@ import { displaySr } from '../rating.js';
 import { getPlayer, currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
+import { playerStandings, RANKED_MIN_GAMES } from '../standings.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string }
 
 const RECENT_MATCH_LIMIT = 50;
 const PROFILE_MATCH_LIMIT = 20;
-/** Games before a player holds a rank. Under this they are listed as
- *  provisional: one lucky night at high sigma should not top the board. */
-const RANKED_MIN_GAMES = 3;
 
 /** Strip self-only stats unless the requester IS the subject.
  *
@@ -204,6 +202,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
       totals, matches, history,
       statTotals,
+      // Top-5 places this season, per match, among ranked players. Keyed like
+      // the stat bag plus `winrate` and `boomer_rate`.
+      standings: playerStandings(db, seasonId, steamid),
       // How this player does on each map, across every match. Only meaningful
       // once per-map capture exists, so older matches contribute win/loss with
       // an empty stat bag rather than being omitted.

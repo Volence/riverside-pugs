@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { LiveEvent, StatDef } from '../api';
-import { labelFor, liveGroupStarts } from '../format';
+import { deriveLiveStats, labelFor, liveGroupStarts } from '../format';
 import { PlayerLink } from './bits';
 import { markColumn, directionOf, type Mark } from '../outliers';
 import { EVENT_KINDS, valueText } from '../replay/eventText';
@@ -75,6 +75,15 @@ export function StatTable(
     for (const k of cols) {
       const vals = counted.map((p) => p.stats?.[k]).filter((v): v is number => v !== undefined);
       if (vals.length > 0) out[k] = vals.reduce((a, b) => a + b, 0);
+    }
+    // A rate cannot be summed: four 100% boomers are a 100% team, not 400%.
+    // Re-derive it from the team's summed inputs, which are summed here even
+    // when their own columns are not shown.
+    if ('boomer_rate' in out) {
+      const sum = (key: string) => counted.reduce((a, p) => a + (p.stats?.[key] ?? 0), 0);
+      const rate = deriveLiveStats({ boomer_spawns: sum('boomer_spawns'), boom_successes: sum('boom_successes') }).boomer_rate;
+      if (rate === undefined) delete out.boomer_rate;
+      else out.boomer_rate = rate;
     }
     return out;
   };

@@ -283,7 +283,14 @@ export interface Profile {
   /** Per-map performance across every completed match. `stats` can be empty
    *  for matches played before per-map capture existed, while `games` is not. */
   byMap?: MapBreakdownRow[];
+  /** Top-five places this season among ranked players, ranked per match.
+   *  Keyed like the stat bag, plus `winrate` and `boomer_rate`. Empty for a
+   *  provisional player. */
+  standings?: Record<string, Standing>;
 }
+
+/** A place on this season's board: `rank` of `of` ranked players. Ties share. */
+export interface Standing { rank: number; of: number }
 
 /** Thrown for any non-OK response, carrying the status so callers can tell
  *  "not logged in" (401/403) and "no such thing" (404) apart from a real fault. */

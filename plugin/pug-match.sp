@@ -3393,6 +3393,7 @@ public void Event_Pounce(Event event, const char[] name, bool dontBroadcast)
 	}
 	PugDebug("pin set (pounce): victim=%d pinner=%d", victim, hunter);
 	EmitClientEvent("pinned", hunter, victim, 0);
+	CheckQuadCap();
 }
 
 /** tongue_grab: a smoker pins a survivor. */
@@ -3408,6 +3409,45 @@ public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
 	}
 	PugDebug("pin set (tongue): victim=%d pinner=%d", victim, smoker);
 	EmitClientEvent("pinned", smoker, victim, 0);
+	CheckQuadCap();
+}
+
+/** True when `pinner` is really holding `survivor` right now.
+ *
+ *  g_iPinnedBy alone is not enough to call a quad: a survivor who died pinned
+ *  keeps a stale link until the next map, so a quad counted off the links
+ *  could include somebody who is not there. The engine's own victim props are
+ *  the authority; a prop this engine lacks falls back to trusting the link. */
+bool IsHoldingNow(int pinner, int survivor)
+{
+	if (pinner < 1 || pinner > MaxClients || !IsClientInGame(pinner)) return false;
+	if (GetClientTeam(pinner) != TEAM_INFECTED || !IsPlayerAlive(pinner)) return false;
+	if (!IsClientInGame(survivor) || GetClientTeam(survivor) != TEAM_SURVIVOR || !IsPlayerAlive(survivor)) return false;
+	if (GetEntProp(survivor, Prop_Send, "m_isIncapacitated") != 0) return false;
+	char prop[20];
+	strcopy(prop, sizeof(prop), g_bPinIsTongue[survivor] ? "m_tongueVictim" : "m_pounceVictim");
+	if (!HasEntProp(pinner, Prop_Send, prop)) return true;
+	return GetEntPropEnt(pinner, Prop_Send, prop) == survivor;
+}
+
+/** A quad cap: all four survivors pinned at once. Checked on every new pin,
+ *  so it triggers on the pin that completes the set, and every infected
+ *  player holding someone at that moment is credited once. A survivor freed
+ *  and re-pinned while the other three stay held is a second quad, on purpose:
+ *  the team had to land it again. */
+void CheckQuadCap()
+{
+	int pinners[MAXPLAYERS + 1];
+	int held = 0;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (g_iPinnedBy[i] == 0 || !IsHoldingNow(g_iPinnedBy[i], i)) continue;
+		pinners[held++] = g_iPinnedBy[i];
+	}
+	if (held < 4) return;
+	PugDebug("quad cap: %d survivors held", held);
+	for (int i = 0; i < held; i++)
+		AddStat(pinners[i], PS_QuadCaps);
 }
 
 /** Forget both the live link and any pending release for one client. */
