@@ -120,11 +120,18 @@ false positive generator, not for tidiness.
   wallhacker is most active. The bound is `R_MAX`, the aim prior's own reach, because past
   it the analyzer already does not consider a cell to be looked at.
 
-  The list is deliberately NOT filtered by kind. Every kind the recorder writes is a
-  visible object: `RplWorldKind` in `plugin/pug-match.sp` admits only `infected`, `witch`
-  and `tank_rock`, plus survivor bots from the player block, and ghost infected are players
-  and are already excluded. Dropping a kind would discard a real alternative explanation
-  for the crosshair, which is the thing the guard exists to honour.
+  The list is deliberately NOT filtered by kind, but it IS filtered on state. Visibility is
+  a property of state: an AI hunter is a good alternative explanation for a crosshair once
+  it has spawned and no explanation at all while it is still a ghost. Entities really can
+  carry the ghost bit, because the frame writer has two loops feeding one entity array:
+  `RplWorldKind` (`plugin/pug-match.sp:852`) supplies the always-visible `infected`,
+  `witch` and `tank_rock`, while a second loop (`plugin/pug-match.sp:1341`) writes
+  non-rostered CLIENTS through `RplBotKind` (survivor bots, AI specials, the AI tank) and
+  stamps them with `RplClientState(c, RplIsGhost(c))`, the same GHOST bit a human infected
+  carries. A bot filling a disconnected SI's slot mid-round is the ordinary way an
+  invisible entity appears, so `visibleOthers` drops any entity with `STATE.GHOST`.
+  Dropping a whole KIND would be different and wrong: it would discard a real alternative
+  explanation for the crosshair, which is the thing the guard exists to honour.
 
 ### The aim prior, which is what makes occupancy mean anything
 

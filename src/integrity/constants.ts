@@ -31,11 +31,23 @@ export const TUNING = {
    *  occluders the survival odds run about (11/12)^(20k). Eight of them is
    *  about one in a million. That is structural blindness, not strictness.
    *
-   *  NOT filtered by kind. Every kind the recorder writes is a VISIBLE object:
-   *  `RplWorldKind` in plugin/pug-match.sp admits only `infected`, `witch` and
-   *  `tank_rock`, plus survivor bots from the player block. Ghost infected are
-   *  players and are already excluded by `visibleOthers`, so no invisible thing
-   *  ever reaches this list. Dropping a kind would therefore be discarding a
+   *  NOT filtered by kind, but filtered on STATE. An occluder has to be a thing
+   *  the survivor could actually have been looking at, and visibility is a
+   *  property of state rather than of kind: an AI hunter is a perfectly good
+   *  alternative explanation for a crosshair once it has spawned, and no
+   *  explanation at all while it is still a ghost.
+   *
+   *  Entities really can carry the ghost bit. The frame writer has two loops
+   *  feeding one entity array. `RplWorldKind` (plugin/pug-match.sp:852) supplies
+   *  `infected`, `witch` and `tank_rock`, which are always visible. The second
+   *  loop (plugin/pug-match.sp:1341) writes non-rostered CLIENTS through
+   *  `RplBotKind` (survivor bots, AI specials, the AI tank) and stamps them with
+   *  `RplClientState(c, RplIsGhost(c))`, the same GHOST bit a human infected
+   *  carries. A bot filling a disconnected SI's slot mid-round is the ordinary
+   *  way an invisible entity appears. `visibleOthers` therefore drops any entity
+   *  with `STATE.GHOST`, mirroring what the players loop already does.
+   *
+   *  Dropping a whole KIND would be different, and wrong: it would discard a
    *  real alternative explanation for the crosshair, which is exactly what the
    *  guard exists to honour.
    *

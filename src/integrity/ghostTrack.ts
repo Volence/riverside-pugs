@@ -68,7 +68,18 @@ export function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number)
     if ((p.state & STATE.PRESENT) === 0) continue;
     out.push({ x: p.x, y: p.y });
   }
-  for (const e of f.entities) out.push({ x: e.x, y: e.y });
+  for (const e of f.entities) {
+    // An invisible thing must never occlude, whoever is driving it. AI
+    // controlled special infected are recorded as ENTITIES rather than player
+    // records (the player block is the roster and a bot never joins it), and
+    // the frame writer stamps them with the same GHOST bit a human infected
+    // carries: plugin/pug-match.sp:1351 writes RplClientState(c, RplIsGhost(c))
+    // and RplIsGhost reads m_isGhost for any TEAM_INFECTED client, bot or
+    // human. A bot filling a disconnected SI's slot mid-round is the ordinary
+    // way this happens.
+    if ((e.state & STATE.GHOST) !== 0) continue;
+    out.push({ x: e.x, y: e.y });
+  }
   return out;
 }
 
