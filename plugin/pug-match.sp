@@ -2807,7 +2807,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 		EmitRoundEnd(half, survEnd, mine, alive);
 
-		if (second) FinalizeMap();
+		if (second) FinishSecondHalf();
 		return;
 	}
 
@@ -2977,7 +2977,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// readings are independent, and a round whose score never landed
 			// still tells us truthfully whether anyone survived it.
 			EmitRoundEnd(half, survEnd, -1, alive);
-			if (second) FinalizeMap();
+			if (second) FinishSecondHalf();
 		}
 		return Plugin_Stop;
 	}
@@ -2985,17 +2985,28 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	AttributeScore(survPug, score, second);
 	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 	EmitRoundEnd(half, survEnd, mine, alive);
-	if (second)
-	{
-		FinalizeMap();
-		// The finale is never scored, so the match is over the moment the map
-		// before it finishes. Ending here instead of when the finale loads puts
-		// the result kick on screen before the map 5 load, not after it, and
-		// lets the backend's rcon land before srcds starts the changelevel.
-		// OnMapStart's finale check stays as the backstop if this misses.
-		if (NextMapIsFinale()) EndMatchNow("last scored map done");
-	}
+	if (second) FinishSecondHalf();
 	return Plugin_Stop;
+}
+
+/** A map's second half has been scored at round_end: record the map, and end
+ *  the match if the next map is the finale.
+ *
+ *  The finale is never scored, so the match is over the moment the map before
+ *  it finishes. Ending here instead of when the finale loads puts the result
+ *  kick on screen before the map 5 load, not after it, and lets the backend's
+ *  rcon land before srcds starts the changelevel. OnMapStart's finale check
+ *  stays as the backstop if this misses.
+ *
+ *  Every round_end scoring path must come through here. The first version put
+ *  the check in the retry timer only, which runs just when the synchronous
+ *  score read fails, so match 34 (2026-09-17) never reached it. Not called from
+ *  the OnMapStart failsafe or EndMatchNow: by then the map has changed or the
+ *  match is already ending. */
+void FinishSecondHalf()
+{
+	FinalizeMap();
+	if (g_State == MS_Live && NextMapIsFinale()) EndMatchNow("last scored map done");
 }
 
 /** True when the map that just finished is the one right before the finale.
