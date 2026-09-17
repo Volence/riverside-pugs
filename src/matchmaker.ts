@@ -115,7 +115,7 @@ export class Matchmaker {
         id,
         players,
         {
-          readySeconds: Number(getSetting(this.db, 'ready_seconds') ?? 60),
+          readySeconds: Number(getSetting(this.db, 'ready_seconds') ?? 120),
           voteSeconds: Number(getSetting(this.db, 'vote_seconds') ?? 30),
           mapPool: getJsonSetting<string[]>(this.db, 'map_pool'),
           rng: this.deps.rng,

@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 const DEFAULT_SETTINGS: Record<string, string> = {
   invite_code: 'change-me',
-  ready_seconds: '60',
+  ready_seconds: '120',
   vote_seconds: '30',
   map_pool: JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
   discord_webhook_url: '',

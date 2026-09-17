@@ -24,7 +24,7 @@ describe('openDb', () => {
     const seasons = db.prepare('SELECT * FROM seasons').all();
     expect(seasons).toHaveLength(1);
     expect(getSetting(db, 'invite_code')).toBe('change-me');
-    expect(getSetting(db, 'ready_seconds')).toBe('60');
+    expect(getSetting(db, 'ready_seconds')).toBe('120');
     expect(getSetting(db, 'vote_seconds')).toBe('30');
     expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual([
       'no_mercy', 'death_toll', 'dead_air', 'blood_harvest',
