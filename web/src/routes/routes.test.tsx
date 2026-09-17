@@ -1179,6 +1179,14 @@ describe('deepLinkFromQuery', () => {
       .toEqual({ ordinal: 1, half: null, seekMs: undefined });
   });
 
+  it('treats a key that is present but EMPTY as absent, not as zero', () => {
+    // Same bug class as the one above, and the one the comment in num() claims
+    // cannot happen: Number('') is 0, so `?ordinal=` used to read as a valid
+    // ordinal 0 and pick the first map of a match the reader never asked about.
+    expect(deepLinkFromQuery('?ordinal=&half=&t=', maps, rounds))
+      .toEqual({ ordinal: null, half: null, seekMs: undefined });
+  });
+
   it('ignores a non-numeric t instead of seeking to NaN', () => {
     expect(deepLinkFromQuery('?ordinal=1&half=1&t=soon', maps, rounds))
       .toEqual({ ordinal: 1, half: 1, seekMs: undefined });

@@ -14,8 +14,17 @@ describe('percentile', () => {
     expect(percentile([1, 2, 3], 3)).toBe(1);
   });
 
-  it('is the fraction of the population at or below the value', () => {
+  it('is the fraction STRICTLY below the value, over n-1 rather than n', () => {
+    // Two of the four are below 3, and the denominator is 3, so 2/3. Over n it
+    // would be 1/2. The description used to say "at or below", which would be
+    // 3/4 and is not what any of these assertions show.
     expect(percentile([1, 2, 3, 4], 3)).toBeCloseTo(2 / 3);
+  });
+
+  it('returns exactly 1 for the top of the population, by construction', () => {
+    // Why the admin board renders a rank and not this number: the leader always
+    // reads 100%, whatever they actually measured.
+    expect(percentile([0.1, 0.2, 0.62], 0.62)).toBe(1);
   });
 
   it('is 0 for an empty or single-member population rather than NaN', () => {
@@ -25,7 +34,7 @@ describe('percentile', () => {
 });
 
 describe('aggregate', () => {
-  it('takes a player worst round for fidMax and their mean for the rest', () => {
+  it('takes a player HIGHEST round for fidMax and their mean for the rest', () => {
     const got = aggregate([
       { steamid: 'a', metrics: m({ fidMax: 0.4, occZ: 1 }) },
       { steamid: 'a', metrics: m({ fidMax: 0.9, occZ: 3 }) },
