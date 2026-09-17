@@ -96,6 +96,9 @@ describe('RealOrchestrator', () => {
     expect(srv.cmds.filter((c) => c.startsWith('sm_pug_roster'))).toHaveLength(8);
     expect(srv.cmds.some((c) => c.startsWith(`sm_pug_match ${mid} ${m.token} no_mercy`))).toBe(true);
     expect(srv.cmds.some((c) => c.startsWith('changelevel'))).toBe(true);
+    // Shown on the ready-up panel; must follow pug_match, which sets the generic one.
+    const notice = srv.cmds.indexOf(`l4d_ready_league_notice "Riverside PUG #${mid}"`);
+    expect(notice).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
   });
 
   it('stamps went_live_at when the match goes live', async () => {
