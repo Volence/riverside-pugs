@@ -55,16 +55,32 @@ export interface PairArgs {
   roundStartMs: number;
 }
 
-/** Whether one survivor and one ghost in one frame may contribute at all.
+/** Why a pair did or did not contribute. `pass` is the only value that counts.
+ *
+ *  Named rather than boolean because "zero windows" and "zero eligible frames"
+ *  are indistinguishable without it, and the first backfill produced exactly
+ *  that ambiguity: no clips, and no way to tell whether the detector had a
+ *  thousand clean chances or never ran at all. */
+export type PairGate = 'notLive' | 'notGhost' | 'inGrace' | 'tooClose' | 'occluded' | 'pass';
+
+/** Which gate a pair fell at, in evaluation order.
  *  Each clause is here because it generates false positives, not for tidiness. */
-export function pairEligible(a: PairArgs): boolean {
-  if (!isLiveSurvivor(a.survivor)) return false;
-  if (!isGhost(a.ghost)) return false;
-  if (a.tMs - a.roundStartMs < TUNING.SPAWN_GRACE_MS) return false;
-  if (dist2d(a.survivor, a.ghost) <= TUNING.D_MIN) return false;
+export function pairGate(a: PairArgs): PairGate {
+  if (!isLiveSurvivor(a.survivor)) return 'notLive';
+  if (!isGhost(a.ghost)) return 'notGhost';
+  if (a.tMs - a.roundStartMs < TUNING.SPAWN_GRACE_MS) return 'inGrace';
+  if (dist2d(a.survivor, a.ghost) <= TUNING.D_MIN) return 'tooClose';
   const toGhost = bearing(a.survivor, a.ghost);
   for (const o of a.others) {
-    if (Math.abs(wrapDeg(bearing(a.survivor, o) - toGhost)) < TUNING.OCCLUDE_WINDOW) return false;
+    // Bounded by OCCLUDE_MAX_DIST, and deliberately NOT filtered by kind. See
+    // that constant for the reasoning on both halves of this decision.
+    if (dist2d(a.survivor, o) > TUNING.OCCLUDE_MAX_DIST) continue;
+    if (Math.abs(wrapDeg(bearing(a.survivor, o) - toGhost)) < TUNING.OCCLUDE_WINDOW) return 'occluded';
   }
-  return true;
+  return 'pass';
+}
+
+/** Whether one survivor and one ghost in one frame may contribute at all. */
+export function pairEligible(a: PairArgs): boolean {
+  return pairGate(a) === 'pass';
 }

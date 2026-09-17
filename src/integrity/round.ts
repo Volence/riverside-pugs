@@ -1,7 +1,7 @@
 import type { Frame } from '../replayFormat.js';
 import { isLiveSurvivor } from './geometry.js';
-import { pickClips, trackWindows, type TrackWindow } from './ghostTrack.js';
-import { occupancy, type OccResult } from './occupancy.js';
+import { pickClips, trackWindows, type GateTally, type TrackWindow } from './ghostTrack.js';
+import { occupancyWithGates, type OccResult } from './occupancy.js';
 import { PriorBuilder, type PriorTable } from './aimPrior.js';
 
 /**
@@ -21,7 +21,14 @@ export interface RoundMetrics {
   teamRank: number | null;
   /** This player's z minus the mean of their teammates'. Null without a prior. */
   teamGap: number | null;
+  /** Pairs that cleared every gate. Always `gates.passed`; kept as its own
+   *  field because it is the one coverage number every consumer wants and
+   *  because it predates the tally. It used to be read off the occupancy
+   *  result, which made it 0 on every map under MIN_PRIOR_ROUNDS, which in the
+   *  first backfill meant all 724 player-rounds. */
   eligiblePairs: number;
+  /** Where the frames went. The diagnosable half of "no clips". */
+  gates: GateTally;
 }
 
 function p95(xs: number[]): number {
@@ -54,15 +61,17 @@ export function analyzeRound(
   for (const slot of survivorSlots) {
     const windows = trackWindows(frames, slot);
     clips.set(slot, pickClips(windows));
-    occ.set(slot, occupancy(frames, slot, prior));
+    const { occ: o, gates } = occupancyWithGates(frames, slot, prior);
+    occ.set(slot, o);
     const fids = windows.map((w) => w.fidelity);
     metrics.set(slot, {
       fidMax: fids.length ? Math.max(...fids) : 0,
       fidP95: p95(fids),
-      occZ: occ.get(slot)?.z ?? null,
+      occZ: o?.z ?? null,
       teamRank: null,
       teamGap: null,
-      eligiblePairs: occ.get(slot)?.pairs ?? 0,
+      eligiblePairs: gates.passed,
+      gates,
     });
   }
 

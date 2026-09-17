@@ -201,7 +201,10 @@ describe('AdminIntegrity', () => {
     mockAdmin.integrityPlayer.mockResolvedValue({
       rounds: [{
         matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
-        metrics: { fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10 },
+        metrics: {
+          fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10,
+          gates: { considered: 40, notLive: 5, notGhost: 10, inGrace: 5, tooClose: 5, occluded: 5, passed: 10 },
+        },
         computedAt: '2026-09-17T00:00:00Z', reviewState: 'dismissed', reviewNote: 'heard the spawn',
       }],
       clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],

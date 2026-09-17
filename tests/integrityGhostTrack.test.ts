@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { bearing } from '../src/integrity/geometry.js';
-import { trackFidelity, trackWindows, pickClips, type TrackWindow } from '../src/integrity/ghostTrack.js';
+import { trackFidelity, trackWindows, pickClips, scanPairs, visibleOthers, type TrackWindow } from '../src/integrity/ghostTrack.js';
+import { pairEligible } from '../src/integrity/geometry.js';
 import { occupancy } from '../src/integrity/occupancy.js';
 import { analyzeRound } from '../src/integrity/round.js';
 import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
@@ -43,6 +44,85 @@ function round(
   }
   return frames;
 }
+
+/**
+ * The occlusion guard is the binding constraint on the whole detector: a frame
+ * is vetoed by anything within OCCLUDE_WINDOW of the ghost's bearing, and a
+ * window needs W consecutive surviving frames. Every other fixture in this file
+ * hands `visibleOthers` a frame with no entities and all-zero player states, so
+ * it returns an empty list and the guard is never exercised at all. These tests
+ * build the list for real.
+ */
+describe('visibleOthers', () => {
+  /** Survivor slot 0 at the origin, ghost slot 4 due east at 1200 units. */
+  function occludedFrame(): Frame {
+    const players = Array.from({ length: PLAYER_SLOTS }, (_, s) => blank(s));
+    players[0] = { ...blank(0), state: STATE.PRESENT | STATE.ALIVE };
+    players[1] = { ...blank(1), state: STATE.PRESENT | STATE.ALIVE, x: 0, y: 500 };    // live teammate
+    players[4] = { ...blank(4), state: STATE.PRESENT | STATE.GHOST, x: 1200, y: 0 };   // the subject ghost
+    players[5] = { ...blank(5), state: STATE.PRESENT | STATE.GHOST, x: 900, y: 10 };   // ANOTHER ghost
+    players[6] = { ...blank(6), state: 0, x: 700, y: 0 };                              // not present
+    return {
+      tMs: TUNING.SPAWN_GRACE_MS, offset: 0, players,
+      entities: [
+        { ref: 1, kind: 1, state: 1, x: 800, y: 0, z: 0, health: 50 },      // common ON the ghost's bearing
+        { ref: 2, kind: 1, state: 1, x: 0, y: -800, z: 0, health: 50 },     // common well off it
+      ],
+    };
+  }
+
+  it('returns the live teammate and the entities, and nothing else', () => {
+    expect(visibleOthers(occludedFrame(), 0, 4)).toEqual([
+      { x: 0, y: 500 },     // teammate slot 1
+      { x: 800, y: 0 },     // common on the bearing
+      { x: 0, y: -800 },    // common off the bearing
+    ]);
+  });
+
+  it('excludes the OTHER ghost, because a ghost is invisible to everyone', () => {
+    // Slot 5 sits at (900, 10), inside OCCLUDE_WINDOW of the subject ghost's
+    // bearing. If ghosts were occluders, one infected shadowing another would
+    // veto every frame of the thing the detector exists to catch.
+    expect(visibleOthers(occludedFrame(), 0, 4)).not.toContainEqual({ x: 900, y: 10 });
+  });
+
+  it('excludes the survivor themselves and the ghost under test', () => {
+    const got = visibleOthers(occludedFrame(), 0, 4);
+    expect(got).not.toContainEqual({ x: 0, y: 0 });
+    expect(got).not.toContainEqual({ x: 1200, y: 0 });
+  });
+
+  it('excludes a player without PRESENT', () => {
+    expect(visibleOthers(occludedFrame(), 0, 4)).not.toContainEqual({ x: 700, y: 0 });
+  });
+
+  it('feeds pairEligible an occluder that actually vetoes the frame', () => {
+    // The point of the previous assertions: the list is not merely built, it is
+    // load bearing. The common at (800, 0) is on the ghost's bearing exactly.
+    const f = occludedFrame();
+    const args = {
+      survivor: f.players[0], ghost: f.players[4],
+      others: visibleOthers(f, 0, 4), tMs: f.tMs, roundStartMs: 0,
+    };
+    expect(pairEligible(args)).toBe(false);
+    // Remove only that one, and the same frame passes: nothing else in the list
+    // is within OCCLUDE_WINDOW of the bearing.
+    expect(pairEligible({ ...args, others: args.others.filter((o) => o.x !== 800) })).toBe(true);
+  });
+
+  it('does not let an occluder beyond OCCLUDE_MAX_DIST veto the frame', () => {
+    // The deliberate half of the semantics. Commons swarm, and an unbounded
+    // list let one on the far side of the map veto a frame it had nothing to do
+    // with. The bound is the aim prior's own reach: past R_MAX the analyzer
+    // already does not consider a cell to be looked at.
+    const f = occludedFrame();
+    const far = { x: TUNING.OCCLUDE_MAX_DIST + 100, y: 0 };
+    const near = { x: TUNING.OCCLUDE_MAX_DIST - 100, y: 0 };
+    const args = { survivor: f.players[0], ghost: f.players[4], tMs: f.tMs, roundStartMs: 0 };
+    expect(pairEligible({ ...args, others: [far] })).toBe(true);
+    expect(pairEligible({ ...args, others: [near] })).toBe(false);
+  });
+});
 
 describe('trackFidelity', () => {
   it('is 1 when the crosshair moved exactly as needed to follow the target', () => {
@@ -113,6 +193,83 @@ describe('trackWindows', () => {
     const w = trackWindows(round(40, (_i, b) => b), 0);
     expect(w[0].ghostSlot).toBe(4);
     expect(w[0].endMs).toBeGreaterThan(w[0].startMs);
+  });
+});
+
+/**
+ * Coverage, which is the difference between "four hundred clean chances and
+ * never a tracking window" and "the gates dropped every frame and the detector
+ * never ran". The first backfill over real history could not tell those apart.
+ */
+describe('scanPairs', () => {
+  it('counts every pair that cleared every gate', () => {
+    const t = scanPairs(round(40, (_i, b) => b), 0);
+    expect(t.considered).toBe(40);
+    expect(t.passed).toBe(40);
+    expect(t.notLive + t.notGhost + t.inGrace + t.tooClose + t.occluded).toBe(0);
+  });
+
+  it('counts pairs even when the player never tracked anything, which is the whole point', () => {
+    // Looking 90 degrees away produces no window at all, and the old
+    // eligiblePairs read 0 here as well, so a clean player and a blind
+    // detector looked identical.
+    const t = scanPairs(round(40, (_i, b) => b + 90), 0);
+    expect(trackWindows(round(40, (_i, b) => b + 90), 0)).toEqual([]);
+    expect(t.passed).toBe(40);
+  });
+
+  it('attributes the spawn grace window', () => {
+    const frames = round(40, (_i, b) => b);
+    for (const f of frames) f.tMs -= TUNING.SPAWN_GRACE_MS;
+    const t = scanPairs(frames, 0);
+    expect(t.inGrace).toBe(40);
+    expect(t.passed).toBe(0);
+  });
+
+  it('attributes a ghost that is too close', () => {
+    const t = scanPairs(round(40, (_i, b) => b, TUNING.D_MIN - 50), 0);
+    expect(t.tooClose).toBe(40);
+    expect(t.passed).toBe(0);
+  });
+
+  it('attributes a survivor who is down', () => {
+    const frames = round(40, (_i, b) => b);
+    for (let i = 0; i < 10; i++) frames[i].players[0] = { ...frames[i].players[0], state: STATE.PRESENT };
+    const t = scanPairs(frames, 0);
+    expect(t.notLive).toBe(10);
+    expect(t.passed).toBe(30);
+  });
+
+  it('attributes an infected that has already spawned', () => {
+    const frames = round(40, (_i, b) => b);
+    for (let i = 0; i < 10; i++) {
+      frames[i].players[4] = { ...frames[i].players[4], state: STATE.PRESENT | STATE.ALIVE };
+    }
+    const t = scanPairs(frames, 0);
+    expect(t.notGhost).toBe(10);
+    expect(t.passed).toBe(30);
+  });
+
+  it('attributes occlusion, which is what makes the guard reviewable against evidence', () => {
+    const frames = round(40, (_i, b) => b);
+    for (const f of frames) {
+      const g = f.players[4];
+      // A common sitting between the survivor and the ghost, on the bearing.
+      f.entities = [{ ref: 1, kind: 1, state: 1, x: Math.round(g.x / 2), y: Math.round(g.y / 2), z: 0, health: 50 }];
+    }
+    const t = scanPairs(frames, 0);
+    expect(t.occluded).toBe(40);
+    expect(t.passed).toBe(0);
+  });
+
+  it('ignores teammates when counting notGhost, so the number is not buried', () => {
+    const frames = round(40, (_i, b) => b);
+    for (const f of frames) {
+      f.players[1] = { ...f.players[1], state: STATE.PRESENT | STATE.ALIVE, x: 0, y: 3000 };
+    }
+    // One infected slot ever went ghost, so one pair per frame and no more.
+    expect(scanPairs(frames, 0).considered).toBe(40);
+    expect(scanPairs(frames, 0).notGhost).toBe(0);
   });
 });
 
@@ -214,6 +371,19 @@ describe('analyzeRound', () => {
     const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
     expect(metrics.get(0)!.occZ).toBeNull();
     expect(metrics.get(0)!.fidMax).toBeGreaterThan(0.9);
+  });
+
+  it('reports eligiblePairs and the gate tally even with no prior at all', () => {
+    // The defect this closes: eligiblePairs was read off the occupancy result,
+    // occupancy returns null without a prior, and no map in the real history
+    // had reached MIN_PRIOR_ROUNDS, so all 724 stored rows read 0 and "zero
+    // clips" was unreadable.
+    const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
+    const m = metrics.get(0)!;
+    expect(m.occZ).toBeNull();
+    expect(m.eligiblePairs).toBe(40);
+    expect(m.gates.passed).toBe(40);
+    expect(m.gates.considered).toBe(40);
   });
 
   it('builds a round prior from the survivors it saw, for leave-one-round-out', () => {

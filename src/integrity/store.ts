@@ -4,8 +4,12 @@ import type { TrackWindow } from './ghostTrack.js';
 import type { RoundMetrics } from './round.js';
 
 /** Bump whenever a metric changes MEANING, so stale rows are identifiable
- *  without guessing from computed_at. */
-export const ANALYZER_VERSION = 1;
+ *  without guessing from computed_at.
+ *
+ *  2: eligiblePairs now counts unconditionally instead of reading 0 on every
+ *  map without a prior, RoundMetrics carries the gate tally, and the occlusion
+ *  guard gained a distance bound. Version 1 rows are not comparable to these. */
+export const ANALYZER_VERSION = 2;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
 export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[] }

@@ -473,7 +473,18 @@ export interface IntegrityRound {
   half: number;
   slot: number;
   campaign: string | null;
-  metrics: { fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null; teamGap: number | null; eligiblePairs: number };
+  metrics: {
+    fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null;
+    teamGap: number | null;
+    /** Pairs that cleared every eligibility gate: how many chances the
+     *  detector actually had. Zero here means it never ran, which is a very
+     *  different statement from a clean round. */
+    eligiblePairs: number;
+    gates: {
+      considered: number; notLive: number; notGhost: number;
+      inGrace: number; tooClose: number; occluded: number; passed: number;
+    };
+  };
   computedAt: string;
   reviewState: string;
   reviewNote: string;

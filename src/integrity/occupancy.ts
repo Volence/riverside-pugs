@@ -1,7 +1,7 @@
 import type { Frame } from '../replayFormat.js';
 import { TUNING } from './constants.js';
-import { aimError, isGhost, isLiveSurvivor, pairEligible } from './geometry.js';
-import { visibleOthers } from './ghostTrack.js';
+import { aimError } from './geometry.js';
+import { scanPairs, type GateTally } from './ghostTrack.js';
 import { cellKey, cellOf, priorAt, type PriorTable } from './aimPrior.js';
 
 export interface OccResult {
@@ -26,30 +26,42 @@ export interface OccResult {
  * from the metric A primitives in `ghostTrack.ts`.
  */
 export function occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null {
-  if (!prior || prior.frames <= 0) return null;
-  if (frames.length === 0) return null;
-  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
-  // opened, and the replay opens at round start, so the round starts at zero.
-  // Using the first sampled frame instead shifts the spawn grace window by one
-  // sample interval and, for a fixture whose first frame is already at
-  // SPAWN_GRACE_MS, swallows the whole round.
-  const roundStartMs = 0;
-  let observed = 0, expected = 0, variance = 0, pairs = 0;
+  return occupancyWithGates(frames, slot, prior).occ;
+}
 
-  for (const f of frames) {
-    const s = f.players.find((p) => p.slot === slot);
-    if (!s || !isLiveSurvivor(s)) continue;
-    for (const g of f.players) {
-      if (!isGhost(g)) continue;
-      if (!pairEligible({ survivor: s, ghost: g, others: visibleOthers(f, slot, g.slot), tMs: f.tMs, roundStartMs })) continue;
-      const c = cellOf(g.x, g.y);
-      const p = priorAt(prior, cellKey(c.cx, c.cy));
-      pairs++;
-      expected += p;
-      variance += p * (1 - p);
-      if (Math.abs(aimError(s.yaw, s, g)) <= TUNING.E_DWELL) observed++;
-    }
-  }
-  if (pairs === 0 || variance <= 1e-9) return null;
-  return { z: (observed - expected) / Math.sqrt(variance), observed, expected, pairs };
+/**
+ * Occupancy plus the gate breakdown from the same single pass.
+ *
+ * One scan, one answer. The round pass needs both numbers and the scan is the
+ * expensive part of the analyzer, so splitting them into two entry points that
+ * each walk the frames would double the backfill for nothing, and two
+ * implementations of the same gating is how the two quietly drift apart.
+ *
+ * The tally is produced whether or not a prior exists, which is the point: a
+ * map under MIN_PRIOR_ROUNDS still gets a truthful coverage count even though
+ * it gets no z-score.
+ */
+export function occupancyWithGates(
+  frames: Frame[], slot: number, prior: PriorTable | null,
+): { occ: OccResult | null; gates: GateTally } {
+  let observed = 0, expected = 0, variance = 0;
+
+  const gates = scanPairs(frames, slot, (s, g) => {
+    if (!prior) return;
+    const c = cellOf(g.x, g.y);
+    const p = priorAt(prior, cellKey(c.cx, c.cy));
+    expected += p;
+    variance += p * (1 - p);
+    if (Math.abs(aimError(s.yaw, s, g)) <= TUNING.E_DWELL) observed++;
+  });
+
+  // Null, never zero. No prior means the map has too little history to say
+  // anything, and a thin prior is worse than no score at all. Zero variance
+  // means the prior asserts certainty about every cell the ghost was in, and
+  // dividing by that would manufacture a number out of nothing.
+  if (!prior || prior.frames <= 0 || gates.passed === 0 || variance <= 1e-9) return { occ: null, gates };
+  return {
+    occ: { z: (observed - expected) / Math.sqrt(variance), observed, expected, pairs: gates.passed },
+    gates,
+  };
 }

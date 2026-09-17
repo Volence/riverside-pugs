@@ -15,7 +15,10 @@ let adminCookie: Record<string, string>;
 let userCookie: Record<string, string>;
 
 const metrics = (fidMax: number, occZ: number | null) =>
-  JSON.stringify({ fidMax, fidP95: fidMax / 2, occZ, teamRank: 1, teamGap: occZ, eligiblePairs: 200 });
+  JSON.stringify({
+    fidMax, fidP95: fidMax / 2, occZ, teamRank: 1, teamGap: occZ, eligiblePairs: 200,
+    gates: { considered: 600, notLive: 50, notGhost: 150, inGrace: 100, tooClose: 50, occluded: 50, passed: 200 },
+  });
 
 beforeEach(async () => {
   db = openDb(':memory:');
