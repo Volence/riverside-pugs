@@ -1,5 +1,6 @@
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
 import { createDjsTransport } from './discord/djsTransport.js';
+import { VoiceChannels } from './discord/voice.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -524,6 +525,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       matchmaker,
       hub,
       connect: () => createDjsTransport(deps.config.discord!),
+      voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
     })
       .then((b) => { bot = b; })
       .catch((err) => console.error('[discord] bot failed to start; the website carries on without it:', err));

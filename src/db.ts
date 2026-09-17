@@ -256,6 +256,16 @@ CREATE TABLE IF NOT EXISTS discord_messages (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (kind, ref)
 );
+-- Team voice channels the bot made for a match. ended_at is when the sweep
+-- first saw the match finished; deleted_at when the channels were removed.
+CREATE TABLE IF NOT EXISTS discord_voice (
+  match_id INTEGER PRIMARY KEY,
+  category_id TEXT NOT NULL,
+  team_a_id TEXT NOT NULL,
+  team_b_id TEXT NOT NULL,
+  ended_at TEXT,
+  deleted_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -272,6 +282,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // Empty: guild membership alone activates a linked player. A role id: the
   // member must also hold that role.
   discord_required_role_id: '',
+  // 1: the bot makes Team A / Team B voice channels per match and moves players in.
+  discord_voice_enabled: '1',
   replay_retention_days: '90',
   replay_free_floor_gb: '10',
   noshow_minutes: '10',
