@@ -24,14 +24,14 @@ export const TUNING = {
   /** A map with fewer player-rounds than this gets no occupancy score at all.
    *  Scoring against a thin prior is worse than not scoring. */
   MIN_PRIOR_ROUNDS: 20,
-  /** Correlation window length in frames. 20 frames is 2 seconds at 10 Hz. */
+  /** Fidelity window length in frames. 20 frames is 2 seconds at 10 Hz. */
   W: 20,
-  /** A correlation window requires the aim to stay inside this many degrees of
+  /** A fidelity window requires the aim to stay inside this many degrees of
    *  the ghost for its whole length. */
   E_TRACK: 12,
   /** "On target" for the occupancy metric, in degrees. */
   E_DWELL: 5,
-  /** Windows above this correlation become reviewable clips. */
+  /** Windows above this fidelity become reviewable clips. */
   CLIP_MIN: 0.7,
   /** Most clips kept per player-round. */
   CLIPS_PER_ROUND: 5,
