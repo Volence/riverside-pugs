@@ -120,6 +120,10 @@ export class RealOrchestrator implements Orchestrator {
       rcon = await this.connectRcon(server);
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
       await rcon.exec('exec pug_match');
+      // The first line of the in-game ready-up panel. After pug_match, whose
+      // rotoblin_pug_4v4.cfg sets the generic "Riverside PUG"; nothing on the
+      // per-map config path resets it, so the number holds for the whole match.
+      await rcon.exec(`l4d_ready_league_notice "Riverside PUG #${matchId}"`);
       await rcon.exec(`sv_password "pug_${token.slice(0, 8)}"`);
       await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}`);
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
