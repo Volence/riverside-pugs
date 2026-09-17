@@ -1,0 +1,7 @@
+[Unit]
+Description=Snapshot the PUG database
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pug-db-backup
+Nice=10
