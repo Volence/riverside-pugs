@@ -74,3 +74,11 @@ the bottom.
 ## Deploy
 
 See the end of this file for what happened.
+
+### Result
+
+Overnight background deploy watchers were killed by the host twice. Deployed on
+request 2026-09-17 12:53 UTC with no match open (one idle player dropped from the
+queue by the restart). Bot logged in as Riverside Pug Bot#8281; queue panel posted
+in #queue-here with its four buttons; /admin and /link/discord serve, admin and
+Discord auth APIs answer 401 anonymously.
