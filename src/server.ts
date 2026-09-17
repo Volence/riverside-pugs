@@ -1,3 +1,5 @@
+import { botEnabled, startBot, type RunningBot } from './discord/index.js';
+import { createDjsTransport } from './discord/djsTransport.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -216,7 +218,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const hub = deps.hub ?? new Hub();
   await app.register(wsRoutes, { hub });
 
-  const notify = (msg: string) => notifyDiscord(deps.db, msg);
+  // With the bot running, the bot's own cards say everything the webhook did
+  // (and more), so the webhook would only duplicate them.
+  const notify = botEnabled(deps.config) ? () => {} : (msg: string) => notifyDiscord(deps.db, msg);
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
@@ -510,7 +514,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 30_000);
   pruneOnBoot.unref();
 
+  // The Discord bot. Not awaited: logging in takes seconds and the website
+  // must never wait on, or fail because of, Discord.
+  let bot: RunningBot | null = null;
+  if (botEnabled(deps.config)) {
+    startBot({
+      config: deps.config,
+      db: deps.db,
+      matchmaker,
+      hub,
+      connect: () => createDjsTransport(deps.config.discord!),
+    })
+      .then((b) => { bot = b; })
+      .catch((err) => console.error('[discord] bot failed to start; the website carries on without it:', err));
+  }
+
   app.addHook('onClose', async () => {
+    await bot?.stop();
     clearInterval(reaper);
     clearInterval(pruneTimer);
     clearTimeout(pruneOnBoot);
