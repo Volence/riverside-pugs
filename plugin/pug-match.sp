@@ -418,6 +418,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	HookEvent("player_death", Event_PlayerDeath);
 	HookEvent("infected_death", Event_InfectedDeath);
 	HookEvent("revive_success", Event_ReviveSuccess);
+	LeaveInit();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -2033,6 +2034,7 @@ public Action Cmd_Status(int args)
 	{
 		DumpLine("STATUS map ordinal=%d map=%s a=%d b=%d", i, g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
 	}
+	LeaveStatus();
 	DumpLine("STATUS end");
 	return Plugin_Handled;
 }
@@ -2109,6 +2111,7 @@ void ResetMatchState()
 	g_bReplayFailed = false;
 	g_iRplMapSeq = 0;
 	g_bRplFirstMapSeen = false;
+	LeaveReset();
 	g_State = MS_None;
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
@@ -2169,6 +2172,7 @@ void ResetMatchState()
 public Action Timer_Heartbeat(Handle timer)
 {
 	if (g_State != MS_None) EmitPug("HEARTBEAT");
+	LeaveHeartbeat();
 	return Plugin_Continue;
 }
 
@@ -2273,6 +2277,7 @@ public void OnClientPostAdminCheck(int client)
 	}
 	g_iClientRoster[client] = slot;
 	EmitPug("PLAYER steamid=%s event=connect", id);
+	LeaveOnReturn(slot);
 }
 
 /** NOTE: SourceMod re-fires OnClientPostAdminCheck/OnClientDisconnect for every
@@ -3604,3 +3609,5 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 	if (GetEntProp(victim, Prop_Send, "m_isIncapacitated") != 0) return;
 	EmitClientEvent("cleared", stopper, victim, 0);
 }
+
+#include "pug-leave.inc"

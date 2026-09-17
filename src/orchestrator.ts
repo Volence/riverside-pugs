@@ -1,3 +1,5 @@
+import { statusShowsAbandoner } from './abandon.js';
+import { getSetting } from './settings.js';
 import type { DB } from './db.js';
 import type { RconClient, RconOpts } from './rcon.js';
 import { RconClient as RealRcon } from './rcon.js';
@@ -124,6 +126,9 @@ export class RealOrchestrator implements Orchestrator {
       // rotoblin_pug_4v4.cfg sets the generic "Riverside PUG"; nothing on the
       // per-map config path resets it, so the number holds for the whole match.
       await rcon.exec(`l4d_ready_league_notice "Riverside PUG #${matchId}"`);
+      // The leaver rules for this match, from the admin settings.
+      await rcon.exec(`sm_pug_leave_budget ${settingInt(this.db, 'leave_budget_seconds', 300)}`);
+      await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
       await rcon.exec(`sv_password "pug_${token.slice(0, 8)}"`);
       await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}`);
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
@@ -179,6 +184,20 @@ export class RealOrchestrator implements Orchestrator {
    *  Keyed on serverId and token rather than a match id because the caller has
    *  already flipped that match out of 'live'. Throws on failure; the caller
    *  must not let that stop the release. */
+  /** Whether the plugin itself records `steamid` as having abandoned the match. */
+  async confirmAbandon(serverId: number, steamid: string): Promise<boolean> {
+    const server = getServer(this.db, serverId);
+    if (!server) return false;
+    let rcon: RconClient | null = null;
+    try {
+      rcon = await this.connectRcon(server);
+      const body = await rcon.exec('sm_pug_status');
+      return statusShowsAbandoner(body, steamid);
+    } finally {
+      rcon?.close();
+    }
+  }
+
   async pullDump(serverId: number, token: string): Promise<string> {
     const server = getServer(this.db, serverId);
     if (!server) throw new Error(`pullDump: no server row ${serverId}`);
@@ -288,4 +307,9 @@ export function firstMapOf(campaign: string): string {
     blood_harvest: 'l4d_vs_farm01_hilltop',
   };
   return FIRST[campaign] ?? 'l4d_vs_hospital01_apartment';
+}
+
+function settingInt(db: DB, key: string, fallback: number): number {
+  const n = Number(getSetting(db, key));
+  return Number.isInteger(n) && n >= 0 ? n : fallback;
 }

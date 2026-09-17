@@ -127,6 +127,11 @@ export class AdminFeedPoster {
         };
       case 'problem':
         return { text: `⚠️ ${e.text}`, color: COLOR.problem };
+      case 'abandon':
+        return {
+          text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
+          color: COLOR.problem,
+        };
     }
   }
 

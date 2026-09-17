@@ -99,7 +99,11 @@ describe('RealOrchestrator', () => {
     // Shown on the ready-up panel; must follow pug_match, which sets the generic one.
     const notice = srv.cmds.indexOf(`l4d_ready_league_notice "Riverside PUG #${mid}"`);
     expect(notice).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
+    // The leaver rules come from the settings, after pug_match.
+    expect(srv.cmds.indexOf('sm_pug_leave_budget 300')).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
+    expect(srv.cmds).toContain('sm_pug_leave_autounpause 1');
   });
+
 
   it('stamps went_live_at when the match goes live', async () => {
     const srv = await fakeServer('');

@@ -358,6 +358,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   noshow_minutes: '10',
   noshow_min_connected: '6',
   no_round_minutes: '30',
+  // Reconnect allowance per player per match, and whether the game unpauses
+  // itself once everyone is back. Pushed to the plugin at match setup.
+  leave_budget_seconds: '300',
+  leave_auto_unpause: '1',
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),

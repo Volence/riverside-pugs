@@ -4,6 +4,9 @@ export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
   | { kind: 'heartbeat'; token: string }
+  | { kind: 'leave'; token: string; steamid: string; remaining: number }
+  | { kind: 'return'; token: string; steamid: string; remaining: number }
+  | { kind: 'abandon'; token: string; steamid: string }
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
   | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
   // Emitted by !load_4v4p for a match started in-game rather than by us. The
@@ -123,6 +126,15 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
     }
     case 'HEARTBEAT':
       return { kind: 'heartbeat', token };
+    case 'LEAVE':
+    case 'RETURN': {
+      const remaining = intOf(rest.remaining);
+      if (!/^\d{17}$/.test(rest.steamid ?? '') || remaining === null) return null;
+      return { kind: verb === 'LEAVE' ? 'leave' : 'return', token, steamid: rest.steamid, remaining };
+    }
+    case 'ABANDON':
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      return { kind: 'abandon', token, steamid: rest.steamid };
     case 'PLAYER': {
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       if (rest.event !== 'connect' && rest.event !== 'disconnect') return null;

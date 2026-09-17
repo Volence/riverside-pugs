@@ -23,7 +23,9 @@ export function Play(
         <Panel>
           <p class="eyebrow">Banned</p>
           <h2>You are banned from the PUG</h2>
-          <p class="muted">If you think this is a mistake, talk to an admin in the Discord.</p>
+          {session.me.ban && <p>Reason: <strong>{session.me.ban.reason}</strong></p>}
+          {session.me.ban?.expiresAt && <p>Ends {new Date(session.me.ban.expiresAt).toLocaleString()}.</p>}
+          <p class="muted">To appeal, message an admin in the Discord.</p>
         </Panel>
       </div>
     );
