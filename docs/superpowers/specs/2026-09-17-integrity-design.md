@@ -40,7 +40,7 @@ over every match already on disk.
    landing exactly on an event the player could not have known about. A good player is
    aimed at the right place early and continuously because they predicted it. A cheater
    is aimed at the wrong place and becomes correct the instant information arrives.
-6. **Correlation, not proximity.** The backbone statistic is whether the survivor's yaw
+6. **Motion, not proximity.** The backbone statistic is whether the survivor's yaw
    rate tracks the rate needed to follow the ghost. A pre-aimed corner is a static
    crosshair, has no variance, and scores near zero.
 7. **Occupancy is scored against an empirical aim prior, never raw.** Spawns are not
@@ -83,7 +83,7 @@ no crouch state. Pitch is stored at whole-degree resolution. Together that makes
 vertical axis unreliable at the scale we care about: a 30 unit eye-height error is about 3
 degrees at 600 units, which is the same size as the effect being measured.
 
-**So yaw is the primary axis and pitch is a loose secondary gate only.** The correlation
+**So yaw is the primary axis and pitch is a loose secondary gate only.** The fidelity
 metric is defined on yaw alone, which is unaffected by eye height entirely. This is a
 deliberate limitation of the 10 Hz retrospective pass; the plugin phase has real eye
 positions and real traces and does not inherit it.
@@ -146,7 +146,7 @@ arithmetic without a second mechanism: rare cells have a low prior, so they carr
 the excess.
 
 **Data sufficiency.** A map with fewer than `MIN_PRIOR_ROUNDS` (20 player-rounds) gets no
-occupancy score at all, only correlation. With roughly 35 matches in hand, several maps
+occupancy score at all, only fidelity. With roughly 35 matches in hand, several maps
 will not qualify, and scoring them off a thin prior is worse than not scoring them. The
 analyzer records which maps were skipped and why.
 
@@ -157,19 +157,29 @@ The plugin phase has real traces and does not inherit it.
 
 ### The metrics
 
-**A. Tracking correlation.** The backbone, and the one the owner's spawn-knowledge
-objection does not touch at all. Over a sliding window of `W` frames (20, which is 2
-seconds at 10 Hz) in which the same ghost stays eligible throughout and `|err|` stays under
-`E_TRACK` (12 degrees) throughout, the Pearson correlation between the survivor's
-frame-to-frame yaw delta and the frame-to-frame delta of `bearing(s, g)`.
+**A. Tracking fidelity.** The backbone, and the one the owner's spawn-knowledge objection
+does not touch at all. Over a sliding window of `W` frames (20, which is 2 seconds at 10 Hz)
+in which the same ghost stays eligible throughout and `|err|` stays under `E_TRACK` (12
+degrees) throughout, how much of the motion needed to follow the ghost the crosshair actually
+produced: `max(0, 1 - RMS(dYaw - dBearing) / RMS(dBearing))`, where the deltas are
+frame to frame. 1 is exact tracking, 0 is none of the required motion.
 
-Pre-aiming a spawn spot is a static crosshair. It has no variance, so it cannot correlate
-with anything, and it scores near zero no matter how well chosen the spot was. Following an
-invisible target that is moving scores high, and the more the ghost moves the harder the
+Pre-aiming a spawn spot is a static crosshair. It produces none of the motion needed to
+follow a moving target, so it scores zero no matter how well chosen the spot was. Following
+an invisible target that is moving scores high, and the more the ghost moves the harder the
 result is to produce by accident.
 
-Recorded per player-round: the maximum window correlation and the 95th percentile of window
-correlations.
+This started as a Pearson correlation between the two delta series and was changed on
+2026-09-17, before implementation, because Pearson has a degenerate case that fails at
+exactly the wrong moment. A ghost moving at a constant angular rate, tracked perfectly,
+produces two CONSTANT delta series; neither has any variance, so the correlation is
+undefined and the most blatant possible cheat scores zero. Pearson is also scale invariant,
+so a crosshair producing half the required motion, perfectly proportioned, would score a
+perfect 1. The normalised residual above has neither problem and expresses the same intent
+more directly.
+
+Recorded per player-round: the maximum window fidelity and the 95th percentile of window
+fidelities.
 
 **B. Prior-corrected occupancy.** The z-score defined above. Replaces the "relative aim
 share" and "near-miss dwell" metrics of the first draft, which measured map knowledge as
@@ -190,8 +200,8 @@ admin UI as context next to a flagged clip. They must never enter the composite.
 
 ### Clips
 
-A window qualifying under metric A above `CLIP_MIN` correlation becomes a candidate clip:
-start and end `tMs`, the ghost's slot, the correlation, the mean `|err|`, the mean
+A window qualifying under metric A above `CLIP_MIN` fidelity becomes a candidate clip:
+start and end `tMs`, the ghost's slot, the fidelity, the mean `|err|`, the mean
 distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows per
 player-round are kept.
 
@@ -391,6 +401,6 @@ re-assert `sm_pug_auto_track` and `sm_pug_roster_at_live`.
   disagree, and the players who fall furthest when the prior is applied are the ones whose
   raw score was map knowledge.
 - **Prior coverage.** How many maps clear `MIN_PRIOR_ROUNDS` against the current history.
-  If it is only two or three, occupancy is not yet a usable metric and correlation carries
+  If it is only two or three, occupancy is not yet a usable metric and fidelity carries
   the whole retrospective pass until more matches accumulate. That is an acceptable
   outcome and should be reported rather than worked around by lowering the threshold.
