@@ -61,3 +61,27 @@ export function applyMatchRatings(db: DB, matchId: number): void {
     apply(teamB, newB, match.winner === 'b', match.winner === 'a');
   })();
 }
+
+/**
+ * Rebuild a season's ratings from scratch by replaying every completed match
+ * in the order they finished.
+ *
+ * What makes voiding a match honest: ratings are sequential, so removing one
+ * result changes every rating computed after it, not just the ratings of the
+ * eight people in it. Replaying through applyMatchRatings rather than a second
+ * implementation means the rebuilt numbers are the ones the incremental path
+ * would have produced had the voided match never been played.
+ */
+export function recomputeSeasonRatings(db: DB, seasonId: number): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM rating_history WHERE season_id = ?').run(seasonId);
+    const fresh = rating();
+    db.prepare('UPDATE player_ratings SET mu = ?, sigma = ?, wins = 0, losses = 0 WHERE season_id = ?')
+      .run(fresh.mu, fresh.sigma, seasonId);
+    const matches = db.prepare(
+      `SELECT id FROM matches WHERE season_id = ? AND state = 'completed'
+       ORDER BY COALESCE(ended_at, created_at), id`,
+    ).all(seasonId) as { id: number }[];
+    for (const m of matches) applyMatchRatings(db, m.id);
+  })();
+}

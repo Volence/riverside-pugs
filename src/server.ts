@@ -22,7 +22,7 @@ import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
-import { ServerReleaser, reconcileServers } from './serverRelease.js';
+import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
@@ -51,6 +51,8 @@ export interface ServerDeps {
   orchestrator?: Orchestrator;
   /** Injected in tests; built from config.discord otherwise. */
   discordApi?: DiscordApi;
+  /** Injected in tests so releasing a server never dials rcon. */
+  serverCleaner?: ServerCleaner;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -228,7 +230,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
-  const releaser = new ServerReleaser(deps.db, async (server, token) => {
+  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
       await rcon.connect();
@@ -278,7 +280,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
-  });
+  }));
 
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
@@ -552,7 +554,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
-  await app.register(adminRoutes, { db: deps.db, matchmaker });
+  await app.register(adminRoutes, { db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e) });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
 

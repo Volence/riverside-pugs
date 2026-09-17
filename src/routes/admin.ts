@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin } from './guards.js';
+import type { ServerReleaser } from '../serverRelease.js';
+import { getServer } from '../serverPool.js';
+import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
 import { logAdmin, recentActions } from '../admin/audit.js';
 import {
   activeBan, addNote, banPlayer, playerDetail, searchPlayers, unbanPlayer,
@@ -11,12 +14,14 @@ import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 export interface AdminRouteOpts {
   db: DB;
   matchmaker: Matchmaker;
+  releaser: ServerReleaser;
+  broadcast: (event: string) => void;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker } = opts;
+  const { db, matchmaker, releaser, broadcast } = opts;
   const requireAdmin = makeRequireAdmin(db);
 
   app.get('/api/admin/players', async (req, reply) => {
@@ -113,6 +118,58 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     }
     addNote(db, t.steamid, t.adminId, text.trim());
     logAdmin(db, t.adminId, 'note', t.steamid);
+    return { ok: true };
+  });
+
+  app.get('/api/admin/overview', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return { ...adminOverview(db), queue: matchmaker.publicQueue().players };
+  });
+
+  app.post('/api/admin/matches/:id/abort', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const r = abortMatch(db, releaser, id);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, adminId, 'abort_match', id);
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  app.post('/api/admin/matches/:id/void', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const { reason } = (req.body ?? {}) as { reason?: unknown };
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) {
+      return reply.code(400).send({ error: 'a reason is required (up to 500 characters)' });
+    }
+    const r = voidMatch(db, id, reason.trim());
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, adminId, 'void_match', id, { reason: reason.trim() });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  app.post('/api/admin/servers/:id/idle', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
+    releaser.release(id);
+    logAdmin(db, adminId, 'server_idle', id);
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  app.post('/api/admin/queue/remove', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { steamid } = (req.body ?? {}) as { steamid?: unknown };
+    if (typeof steamid !== 'string') return reply.code(400).send({ error: 'steamid required' });
+    matchmaker.leave(steamid);
+    logAdmin(db, adminId, 'queue_remove', steamid);
     return { ok: true };
   });
 
