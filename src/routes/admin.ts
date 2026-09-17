@@ -5,11 +5,14 @@ import { makeRequireAdmin } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer } from '../serverPool.js';
 import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
+import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
+import { getSetting, setSetting } from '../settings.js';
 import { logAdmin, recentActions } from '../admin/audit.js';
 import {
   activeBan, addNote, banPlayer, playerDetail, searchPlayers, unbanPlayer,
 } from '../admin/players.js';
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
+import { CAMPAIGNS } from '../campaigns.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -171,6 +174,28 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     matchmaker.leave(steamid);
     logAdmin(db, adminId, 'queue_remove', steamid);
     return { ok: true };
+  });
+
+  app.get('/api/admin/settings', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return {
+      settings: SETTINGS_SCHEMA.map((d) => ({ ...d, value: getSetting(db, d.key) ?? '' })),
+      campaigns: Object.entries(CAMPAIGNS).map(([slug, c]) => ({ slug, name: c.name })),
+    };
+  });
+
+  app.put('/api/admin/settings/:key', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { key } = req.params as { key: string };
+    const def = settingDef(key);
+    if (!def) return reply.code(404).send({ error: 'unknown setting' });
+    const v = validateSetting(key, (req.body as { value?: unknown } | undefined)?.value);
+    if (!v.ok) return reply.code(400).send({ error: `${def.label} ${v.error}` });
+    const from = getSetting(db, key) ?? '';
+    setSetting(db, key, v.value);
+    logAdmin(db, adminId, 'setting', key, def.secret ? { changed: true } : { from, to: v.value });
+    return { ok: true, value: v.value };
   });
 
   app.get('/api/admin/audit', async (req, reply) => {
