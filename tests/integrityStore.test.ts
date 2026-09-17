@@ -4,7 +4,7 @@ import { openDb, type DB } from '../src/db.js';
 import {
   ANALYZER_VERSION, saveRound, savePrior, loadPrior, saveRoundPrior, loadRoundPrior, setReview,
 } from '../src/integrity/store.js';
-import type { RoundMetrics } from '../src/integrity/ghostTrack.js';
+import type { RoundMetrics } from '../src/integrity/round.js';
 
 let db: DB;
 const KEY = { matchId: 1, ordinal: 1, half: 1 };

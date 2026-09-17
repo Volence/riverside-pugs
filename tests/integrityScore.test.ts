@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { percentile, aggregate, scorePlayers } from '../src/integrity/score.js';
-import type { RoundMetrics } from '../src/integrity/ghostTrack.js';
+import type { RoundMetrics } from '../src/integrity/round.js';
 
 const m = (over: Partial<RoundMetrics> = {}): RoundMetrics => ({
   fidMax: 0.2, fidP95: 0.1, occZ: 0, teamRank: 2, teamGap: 0, eligiblePairs: 100, ...over,

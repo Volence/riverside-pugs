@@ -5,7 +5,7 @@ import { parseReplay, slotInfected, type ReplayHeader } from '../replayFormat.js
 import { PriorBuilder, subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
 import { isLiveSurvivor } from './geometry.js';
-import { analyzeRound } from './ghostTrack.js';
+import { analyzeRound } from './round.js';
 import {
   loadPrior, loadRoundPrior, saveRound, saveRoundPrior, savePrior, type RoundKey,
 } from './store.js';

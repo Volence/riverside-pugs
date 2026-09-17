@@ -1,9 +1,8 @@
-import type { Frame } from '../replayFormat.js';
+import { STATE, type Frame } from '../replayFormat.js';
 import { TUNING } from './constants.js';
 import {
   aimError, bearing, dist2d, isGhost, isLiveSurvivor, pairEligible, wrapDeg, type Pt,
 } from './geometry.js';
-import { PriorBuilder, cellKey, cellOf, priorAt, type PriorTable } from './aimPrior.js';
 
 /**
  * Metric A, the backbone: did the crosshair MOVE with an invisible target.
@@ -14,6 +13,11 @@ import { PriorBuilder, cellKey, cellOf, priorAt, type PriorTable } from './aimPr
  * Producing that motion, against something you cannot see, is what has no
  * innocent explanation, and the more the ghost moves the harder it is to do by
  * accident.
+ *
+ * This module is metric A and the frame-eligibility primitives it shares with
+ * metric B. Metric B lives in `occupancy.ts` and the round-level orchestration
+ * in `round.ts`, which is what keeps this file free of any dependency on the
+ * aim prior.
  */
 
 /**
@@ -56,12 +60,12 @@ export interface TrackWindow {
 
 /** Positions of everything that is not this ghost and not the survivor: what
  *  the occlusion guard checks against. */
-function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number): Pt[] {
+export function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number): Pt[] {
   const out: Pt[] = [];
   for (const p of f.players) {
     if (p.slot === survivorSlot || p.slot === ghostSlot) continue;
     if (isGhost(p)) continue;
-    if ((p.state & 1) === 0) continue; // not present
+    if ((p.state & STATE.PRESENT) === 0) continue;
     out.push({ x: p.x, y: p.y });
   }
   for (const e of f.entities) out.push({ x: e.x, y: e.y });
@@ -75,10 +79,7 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
   const roundStartMs = 0;
   const out: TrackWindow[] = [];
 
-  const ghostSlots = new Set<number>();
-  for (const f of frames) for (const p of f.players) if (isGhost(p)) ghostSlots.add(p.slot);
-
-  for (const gs of ghostSlots) {
+  for (const gs of ghostSlotsOf(frames)) {
     // A run is consecutive frames where this pair is eligible AND on target.
     // Windows never straddle a break, because a break means the pair stopped
     // being comparable, not that nothing happened.
@@ -120,6 +121,15 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
   return out;
 }
 
+/** Slots that were a ghost at any point this round: the infected roster as the
+ *  frames themselves report it. The header's side mask is not consulted here so
+ *  that the primitives stay decodable from a frame buffer alone. */
+function ghostSlotsOf(frames: Frame[]): Set<number> {
+  const out = new Set<number>();
+  for (const f of frames) for (const p of f.players) if (isGhost(p)) out.add(p.slot);
+  return out;
+}
+
 /** The reviewable moments: strongest first, never overlapping, capped. A
  *  reviewer's time is the scarce resource, so five separate moments beat fifty
  *  slices of the same one. */
@@ -131,121 +141,4 @@ export function pickClips(windows: TrackWindow[]): TrackWindow[] {
     kept.push(w);
   }
   return kept;
-}
-
-export interface OccResult {
-  z: number;
-  observed: number;
-  expected: number;
-  pairs: number;
-}
-
-/**
- * Metric B: how much more often this player was on a ghost than the map's own
- * looking habits predict.
- *
- * `expected` is what map knowledge alone accounts for, summed cell by cell from
- * the prior. `observed` is what they actually did. Only the excess counts, as a
- * z-score against the binomial spread, so a player whose whole edge is knowing
- * where SI spawn scores zero by construction: the prior already contains that
- * knowledge. Rare cells carry most of the signal because their prior is low,
- * which is the behaviour we want without a second mechanism for it.
- */
-export function occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null {
-  if (!prior || prior.frames <= 0) return null;
-  if (frames.length === 0) return null;
-  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
-  // opened, and the replay opens at round start, so the round starts at zero.
-  // Using the first sampled frame instead shifts the spawn grace window by one
-  // sample interval and, for a fixture whose first frame is already at
-  // SPAWN_GRACE_MS, swallows the whole round.
-  const roundStartMs = 0;
-  let observed = 0, expected = 0, variance = 0, pairs = 0;
-
-  for (const f of frames) {
-    const s = f.players.find((p) => p.slot === slot);
-    if (!s || !isLiveSurvivor(s)) continue;
-    for (const g of f.players) {
-      if (!isGhost(g)) continue;
-      if (!pairEligible({ survivor: s, ghost: g, others: visibleOthers(f, slot, g.slot), tMs: f.tMs, roundStartMs })) continue;
-      const c = cellOf(g.x, g.y);
-      const p = priorAt(prior, cellKey(c.cx, c.cy));
-      pairs++;
-      expected += p;
-      variance += p * (1 - p);
-      if (Math.abs(aimError(s.yaw, s, g)) <= TUNING.E_DWELL) observed++;
-    }
-  }
-  if (pairs === 0 || variance <= 1e-9) return null;
-  return { z: (observed - expected) / Math.sqrt(variance), observed, expected, pairs };
-}
-
-export interface RoundMetrics {
-  fidMax: number;
-  fidP95: number;
-  occZ: number | null;
-  /** 1 is the highest occupancy z on this side this round. Null without a prior. */
-  teamRank: number | null;
-  /** This player's z minus the mean of their teammates'. Null without a prior. */
-  teamGap: number | null;
-  eligiblePairs: number;
-}
-
-function p95(xs: number[]): number {
-  if (xs.length === 0) return 0;
-  const sorted = [...xs].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
-}
-
-/**
- * One round, every survivor.
- *
- * Also returns the round's own contribution to the aim prior, which the caller
- * subtracts before scoring so nobody is measured against a baseline they helped
- * build. See `subtractRound`.
- */
-export function analyzeRound(
-  frames: Frame[], survivorSlots: number[], prior: PriorTable | null,
-): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; roundPrior: PriorBuilder } {
-  const metrics = new Map<number, RoundMetrics>();
-  const clips = new Map<number, TrackWindow[]>();
-  const occ = new Map<number, OccResult | null>();
-  const roundPrior = new PriorBuilder();
-
-  for (const f of frames) {
-    for (const s of f.players) {
-      if (survivorSlots.includes(s.slot) && isLiveSurvivor(s)) roundPrior.addSurvivorFrame(s, s.yaw);
-    }
-  }
-
-  for (const slot of survivorSlots) {
-    const windows = trackWindows(frames, slot);
-    clips.set(slot, pickClips(windows));
-    occ.set(slot, occupancy(frames, slot, prior));
-    const fids = windows.map((w) => w.fidelity);
-    metrics.set(slot, {
-      fidMax: fids.length ? Math.max(...fids) : 0,
-      fidP95: p95(fids),
-      occZ: occ.get(slot)?.z ?? null,
-      teamRank: null,
-      teamGap: null,
-      eligiblePairs: occ.get(slot)?.pairs ?? 0,
-    });
-  }
-
-  // Metric C. A second control on a different axis from the prior: the prior
-  // removes what is normal for this MAP across all history, this removes what
-  // was normal for this ROUND, including whatever the director happened to do.
-  const scored = survivorSlots.filter((s) => occ.get(s) != null);
-  if (scored.length > 1) {
-    const byZ = [...scored].sort((a, b) => (occ.get(b)!.z) - (occ.get(a)!.z));
-    for (const slot of scored) {
-      const mine = occ.get(slot)!.z;
-      const others = scored.filter((s) => s !== slot).map((s) => occ.get(s)!.z);
-      const m = metrics.get(slot)!;
-      m.teamRank = byZ.indexOf(slot) + 1;
-      m.teamGap = mine - (others.reduce((a, b) => a + b, 0) / others.length);
-    }
-  }
-  return { metrics, clips, roundPrior };
 }
