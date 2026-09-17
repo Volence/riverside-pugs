@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { adminApi } from '../../api';
+import { adminApi, type AdminOverview } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
@@ -45,12 +45,13 @@ export function AdminMatches() {
           <h3>Servers</h3>
           {data.servers.length === 0 ? <Empty>No servers.</Empty> : (
             <table class="admin-table">
-              <thead><tr><th>Server</th><th>Status</th><th /></tr></thead>
+              <thead><tr><th>Server</th><th>Status</th><th>SourceTV</th><th /></tr></thead>
               <tbody>
                 {data.servers.map((s) => (
                   <tr key={s.id}>
                     <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span></td>
                     <td><span class={`admin-status admin-status--${s.status}`}>{s.status}</span></td>
+                    <td><SourceTvCell server={s} busy={busy} run={run} /></td>
                     <td>{s.status !== 'idle' && (
                       <button class="chip" disabled={busy}
                         onClick={() => run(() => adminApi.serverIdle(s.id), `Set ${s.name} idle? Only do this when no match is really running on it.`)}>Set idle</button>
@@ -120,5 +121,39 @@ export function AdminMatches() {
         )}
       </Panel>
     </div>
+  );
+}
+
+/** Per-server SourceTV: the port people spectate on, and its password.
+ *  Public once enabled: the broadcast delay is what keeps it fair. */
+function SourceTvCell(
+  { server, busy, run }: {
+    server: AdminOverview['servers'][number];
+    busy: boolean;
+    run: (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
+  },
+) {
+  const [port, setPort] = useState(server.tvPort ? String(server.tvPort) : '27020');
+  const [password, setPassword] = useState(server.tvPassword ?? '');
+  return (
+    <form
+      class="admin-form"
+      onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.serverSourcetv(server.id, true, port, password)); }}
+    >
+      <input value={port} aria-label={`SourceTV port for ${server.name}`} placeholder="port"
+        onInput={(e) => setPort((e.target as HTMLInputElement).value)} />
+      <input value={password} aria-label={`SourceTV password for ${server.name}`} placeholder="password"
+        onInput={(e) => setPassword((e.target as HTMLInputElement).value)} />
+      {server.tvEnabled === 1 ? (
+        <>
+          <span class="admin-status admin-status--active">on</span>
+          <button class="btn" type="submit" disabled={busy}>Save</button>
+          <button class="chip" type="button" disabled={busy}
+            onClick={() => run(() => adminApi.serverSourcetv(server.id, false, port, password))}>Turn off</button>
+        </>
+      ) : (
+        <button class="btn" type="submit" disabled={busy}>Enable</button>
+      )}
+    </form>
   );
 }

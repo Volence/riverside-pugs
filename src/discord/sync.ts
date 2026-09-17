@@ -4,6 +4,7 @@ import type { Hub } from '../ws.js';
 import { QUEUE_SIZE } from '../queue.js';
 import { CAMPAIGNS } from '../campaigns.js';
 import { displaySr } from '../rating.js';
+import { spectateFor } from '../spectate.js';
 import { currentSeasonId } from '../players.js';
 import {
   getMessage, messagesInState, rekeyMessage, saveMessage, setMessageState,
@@ -215,6 +216,7 @@ export class DiscordSync {
         teamB: teamB.map((p) => this.player(p)),
         voice: this.deps.voice?.channelsFor(matchId) ?? null,
         unlinked: [...teamA, ...teamB].map((p) => this.player(p)).filter((p) => !p.discordId).map((p) => p.name),
+        canSpectate: spectateFor(db, row.server_id) !== null,
       });
       await this.upsert('match', m.ref, payload);
 

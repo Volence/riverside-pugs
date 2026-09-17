@@ -8,6 +8,9 @@ export interface ServerRow {
   rcon_port: number;
   rcon_password: string;
   status: 'idle' | 'reserved' | 'live' | 'offline';
+  tv_port: number | null;
+  tv_password: string | null;
+  tv_enabled: number;
 }
 
 export function addServer(

@@ -1503,3 +1503,6 @@ body.is-theater { overflow: hidden; }
 .faq details p { margin: var(--sp-2) 0 0; color: var(--text); }
 
 .season-picker { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.12em; }
+
+.spectate__open { margin-bottom: var(--sp-3); }
+.spectate { margin-bottom: var(--sp-4); }

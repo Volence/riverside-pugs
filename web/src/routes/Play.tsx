@@ -6,6 +6,7 @@ import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel } from '../components/bits';
 import { CampaignTiles } from '../components/CampaignTiles';
 import { ConnectPanel } from '../components/ConnectPanel';
+import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
 import type { Session } from '../hooks/useLiveState';
@@ -171,6 +172,7 @@ function Live(
           })}
         </div>
         {match.connect && <ConnectPanel connect={match.connect} />}
+        {match.spectate && <SpectatePanel spectate={match.spectate} />}
         {match.waitingForServer && (
           <Empty>Waiting for a free server. The match starts as soon as one opens up.</Empty>
         )}

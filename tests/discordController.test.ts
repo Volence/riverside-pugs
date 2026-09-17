@@ -127,3 +127,19 @@ describe('discord queue timeout', () => {
     expect(mm.publicQueue().count).toBe(0);
   });
 });
+
+describe('spectate button', () => {
+  it('is public and gives the SourceTV line for a live match', async () => {
+    const serverId = addServer(db, { name: 's', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    db.prepare("UPDATE servers SET tv_enabled = 1, tv_port = 27020, tv_password = 'dunged' WHERE id = ?").run(serverId);
+    const matchId = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (1, 'live', 'dead_air', ?, 'abcdef1234567890')",
+    ).run(serverId).lastInsertRowid);
+    // Nobody from the roster: anyone may watch.
+    const r = await press(7, `m:${matchId}:spectate`);
+    expect(JSON.stringify(r.payload)).toContain('connect 1.2.3.4:27020');
+    expect(JSON.stringify(r.payload)).toContain('30 seconds behind');
+    db.prepare('UPDATE servers SET tv_enabled = 0 WHERE id = ?').run(serverId);
+    expect(JSON.stringify(await press(7, `m:${matchId}:spectate`))).toMatch(/no SourceTV/);
+  });
+});

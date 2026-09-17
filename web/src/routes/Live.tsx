@@ -4,6 +4,7 @@ import {
   campaignName, deriveLiveStats, fmtBytes, labelFor, liveGroupStarts, orderLiveStatKeys,
 } from '../format';
 import { Empty, Panel, PlayerLink } from '../components/bits';
+import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed } from '../components/StatTable';
@@ -113,6 +114,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
           </>
         }
       />
+      {m.spectate && <SpectatePanel spectate={m.spectate} />}
       <Viewer spec={{ kind: 'live-match', matchId: m.id }} live names={namesFor(m)} />
 
       {cols.length === 0 ? (

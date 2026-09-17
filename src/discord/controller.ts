@@ -3,6 +3,7 @@ import type { Matchmaker } from '../matchmaker.js';
 import { QUEUE_SIZE } from '../queue.js';
 import { CAMPAIGNS } from '../campaigns.js';
 import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js';
+import { spectateFor } from '../spectate.js';
 import type { BotInteraction, InteractionReply, MessagePayload } from './transport.js';
 
 export interface ControllerDeps {
@@ -62,7 +63,7 @@ export async function handleButton(
   const parts = i.customId.split(':');
   const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave'))
     || (parts[0] === 'l' && parts.length >= 3)
-    || (parts[0] === 'm' && parts[2] === 'connect');
+    || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate'));
   if (!known) return say('That button no longer does anything.');
 
   const who = resolve(deps, i);
@@ -107,8 +108,19 @@ export async function handleButton(
     return say('That button no longer does anything.');
   }
 
-  // m:<matchId>:connect
   const matchId = Number(parts[1]);
+  if (parts[2] === 'spectate') {
+    // Public: the SourceTV delay is what makes watching safe, so this needs no
+    // roster check. Still ephemeral, to keep the channel tidy.
+    const tv = spectateFor(deps.db, serverOfMatch(deps.db, matchId));
+    if (!tv) return say('That match has no SourceTV to watch.');
+    const line = tv.password ? `password ${tv.password}; connect ${tv.host}:${tv.port}` : `connect ${tv.host}:${tv.port}`;
+    return say(
+      `Watch in game, ${tv.delay} seconds behind live:\n\`\`\`\n${line}\n\`\`\`Spectator slots are limited, so it can be full.`,
+    );
+  }
+
+  // m:<matchId>:connect
   const match = mm.stateFor(steamid).match;
   if (!match || match.id !== matchId) return say('You are not on this match.');
   if (!match.connect) return say('The server is not ready yet. Try again in a moment.');
@@ -117,4 +129,11 @@ export async function handleButton(
     `Paste this into the L4D console (password first, or it fails):\n\`\`\`\npassword ${c.password}; connect ${c.host}:${c.port}\n\`\`\`Keep the password to yourself.`,
     { components: [[{ kind: 'link', url: `${deps.publicUrl}/`, label: 'Open on the website' }]] },
   );
+}
+
+/** The server a match is on, for the public spectate button. */
+function serverOfMatch(db: ControllerDeps['db'], matchId: number): number | null {
+  const row = db.prepare("SELECT server_id FROM matches WHERE id = ? AND state = 'live'")
+    .get(matchId) as { server_id: number | null } | undefined;
+  return row?.server_id ?? null;
 }
