@@ -442,6 +442,65 @@ export interface ReportEligibility {
   targets?: { steamid: string; name: string; alreadyReported: boolean }[];
 }
 
+/** One row of the integrity board. occZ, teamGap, pOcc and pGap are nullable:
+ *  a map with too little recorded history gets no occupancy score at all, and
+ *  that must never be confused with an average (0) score. composite is a sort
+ *  key, not a verdict. */
+export interface IntegrityPlayerRow {
+  steamid: string;
+  /** Resolved name, or the SteamID when the server has never seen one. */
+  name: string;
+  rounds: number;
+  /** Clips in existence for this player. Zero on every row means nothing has
+   *  been flagged at all, and a ranking with nothing flagged is a list of your
+   *  best players by another name. */
+  clips: number;
+  fidMax: number;
+  fidP95: number;
+  occZ: number | null;
+  teamGap: number | null;
+  pFid: number;
+  pOcc: number | null;
+  pGap: number | null;
+  composite: number;
+}
+
+export interface IntegrityClip {
+  id: number;
+  matchId: number;
+  ordinal: number;
+  half: number;
+  slot: number;
+  startMs: number;
+  endMs: number;
+  kind: string;
+  score: number;
+  detail: Record<string, unknown>;
+}
+
+export interface IntegrityRound {
+  matchId: number;
+  ordinal: number;
+  half: number;
+  slot: number;
+  campaign: string | null;
+  metrics: {
+    fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null;
+    teamGap: number | null;
+    /** Pairs that cleared every eligibility gate: how many chances the
+     *  detector actually had. Zero here means it never ran, which is a very
+     *  different statement from a clean round. */
+    eligiblePairs: number;
+    gates: {
+      considered: number; notLive: number; notGhost: number;
+      inGrace: number; tooClose: number; occluded: number; passed: number;
+    };
+  };
+  computedAt: string;
+  reviewState: string;
+  reviewNote: string;
+}
+
 export const adminApi = {
   players: (q: string, signal?: AbortSignal) =>
     get<{ players: AdminPlayerRow[] }>(`/api/admin/players?q=${encodeURIComponent(q)}`, signal),
@@ -472,6 +531,12 @@ export const adminApi = {
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
+  integrity: (season: string, signal?: AbortSignal) =>
+    get<{ players: IntegrityPlayerRow[] }>(`/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
+  integrityPlayer: (steamid: string, signal?: AbortSignal) =>
+    get<{ rounds: IntegrityRound[]; clips: IntegrityClip[] }>(`/api/admin/integrity/${steamid}`, signal),
+  integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
+    post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
 };
 
 export const api = {

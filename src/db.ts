@@ -233,6 +233,68 @@ CREATE TABLE IF NOT EXISTS match_replays (
   pruned_at TEXT,
   PRIMARY KEY (match_id, ordinal, half)
 );
+-- Integrity measurements. Written by the analyzer, never by the game server.
+-- These hold MEASUREMENTS, not verdicts: rankings are computed at read time in
+-- src/integrity/score.ts so a threshold change re-scores the whole history
+-- without a migration.
+CREATE TABLE IF NOT EXISTS integrity_rounds (
+  match_id         INTEGER NOT NULL REFERENCES matches(id),
+  ordinal          INTEGER NOT NULL,
+  half             INTEGER NOT NULL,
+  slot             INTEGER NOT NULL,
+  steamid          TEXT    NOT NULL,
+  analyzer_version INTEGER NOT NULL,
+  metrics          TEXT    NOT NULL,
+  computed_at      TEXT    NOT NULL,
+  PRIMARY KEY (match_id, ordinal, half, slot)
+);
+-- Derived and disposable: a re-analysis deletes and rewrites these. Nothing an
+-- admin types may live here, which is why integrity_reviews is separate.
+CREATE TABLE IF NOT EXISTS integrity_clips (
+  id               INTEGER PRIMARY KEY,
+  match_id         INTEGER NOT NULL REFERENCES matches(id),
+  ordinal          INTEGER NOT NULL,
+  half             INTEGER NOT NULL,
+  slot             INTEGER NOT NULL,
+  steamid          TEXT    NOT NULL,
+  start_ms         INTEGER NOT NULL,
+  end_ms           INTEGER NOT NULL,
+  kind             TEXT    NOT NULL,
+  score            REAL    NOT NULL,
+  detail           TEXT    NOT NULL,
+  analyzer_version INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS integrity_clips_player ON integrity_clips (steamid);
+-- Survives every re-analysis. Keyed by the player-round because that is stable
+-- no matter how the clips inside it are recomputed.
+CREATE TABLE IF NOT EXISTS integrity_reviews (
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  ordinal     INTEGER NOT NULL,
+  half        INTEGER NOT NULL,
+  slot        INTEGER NOT NULL,
+  state       TEXT    NOT NULL DEFAULT 'new',
+  note        TEXT    NOT NULL DEFAULT '',
+  reviewed_by TEXT,
+  reviewed_at TEXT,
+  PRIMARY KEY (match_id, ordinal, half, slot)
+);
+-- The pooled aim prior per map, and each round's own contribution to it so a
+-- round can be subtracted before it is scored (leave-one-round-out).
+CREATE TABLE IF NOT EXISTS integrity_prior (
+  map              TEXT PRIMARY KEY,
+  frames           INTEGER NOT NULL,
+  rounds           INTEGER NOT NULL,
+  counts           TEXT    NOT NULL,
+  analyzer_version INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS integrity_prior_rounds (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  ordinal  INTEGER NOT NULL,
+  half     INTEGER NOT NULL,
+  frames   INTEGER NOT NULL,
+  counts   TEXT    NOT NULL,
+  PRIMARY KEY (match_id, ordinal, half)
+);
 -- One-time codes a Discord user follows to link their Steam account from
 -- Discord (the bot hands them out). Single use, 15 minutes; created_at is an
 -- ISO string written by the app so expiry can be tested with an injected clock.

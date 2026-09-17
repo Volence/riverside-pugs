@@ -201,14 +201,14 @@ export const TUNING = {
   /** A map with fewer player-rounds than this gets no occupancy score at all.
    *  Scoring against a thin prior is worse than not scoring. */
   MIN_PRIOR_ROUNDS: 20,
-  /** Correlation window length in frames. 20 frames is 2 seconds at 10 Hz. */
+  /** Fidelity window length in frames. 20 frames is 2 seconds at 10 Hz. */
   W: 20,
-  /** A correlation window requires the aim to stay inside this many degrees of
+  /** A fidelity window requires the aim to stay inside this many degrees of
    *  the ghost for its whole length. */
   E_TRACK: 12,
   /** "On target" for the occupancy metric, in degrees. */
   E_DWELL: 5,
-  /** Windows above this correlation become reviewable clips. */
+  /** Windows above this fidelity become reviewable clips. */
   CLIP_MIN: 0.7,
   /** Most clips kept per player-round. */
   CLIPS_PER_ROUND: 5,
@@ -539,17 +539,27 @@ git commit -m "Integrity: empirical aim prior over a map cell grid"
 
 ---
 
-### Task 3: Tracking correlation and clips
+### Task 3: Tracking fidelity and clips
 
 **Files:**
 - Create: `src/integrity/ghostTrack.ts`
 - Test: `tests/integrityGhostTrack.test.ts`
 
 **Interfaces:**
-- Consumes: `TUNING`; `aimError`, `bearing`, `wrapDeg`, `pairEligible`, `isLiveSurvivor`, `isGhost` from `./geometry.js`; `Frame`, `PlayerSample` from `../replayFormat.js`
-- Produces: `pearson(a: number[], b: number[]): number`; `interface TrackWindow { startMs: number; endMs: number; ghostSlot: number; corr: number; meanErr: number; meanDist: number }`; `trackWindows(frames: Frame[], slot: number): TrackWindow[]`; `pickClips(windows: TrackWindow[]): TrackWindow[]`
+- Consumes: `TUNING`; `aimError`, `bearing`, `wrapDeg`, `dist2d`, `pairEligible`, `isLiveSurvivor`, `isGhost` from `./geometry.js`; `Frame`, `PlayerSample` from `../replayFormat.js`
+- Produces: `trackFidelity(dYaw: number[], dBearing: number[]): number`; `interface TrackWindow { startMs: number; endMs: number; ghostSlot: number; fidelity: number; meanErr: number; meanDist: number }`; `trackWindows(frames: Frame[], slot: number): TrackWindow[]`; `pickClips(windows: TrackWindow[]): TrackWindow[]`
 
-**Note on the correlation guard.** A pre-aimed corner is a crosshair that does not move. Its yaw deltas have no variance, so Pearson is undefined. It must read as 0, not NaN: "held still while a ghost happened to be there" is the single most common innocent case and it has to score nothing.
+**Why fidelity and not Pearson correlation.** The spec originally specified Pearson
+correlation between the survivor's yaw deltas and the bearing deltas. That has a degenerate
+case which fails at the detector's primary job: when a ghost moves at a constant angular
+rate and the survivor tracks it perfectly, BOTH delta series are constant, so neither has
+any variance and Pearson is undefined. The most blatant possible cheat scores zero. Pearson
+is also scale invariant, so a crosshair moving at half the required rate but perfectly
+proportionally would score a perfect 1.
+
+Tracking fidelity has neither flaw. It asks directly: how much of the motion needed to
+follow this target did the crosshair actually produce? Perfect tracking scores 1, a held
+angle scores 0, and moving at the wrong rate is penalised in proportion.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -559,7 +569,7 @@ import { describe, it, expect } from 'vitest';
 import { STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { bearing } from '../src/integrity/geometry.js';
-import { pearson, trackWindows, pickClips } from '../src/integrity/ghostTrack.js';
+import { trackFidelity, trackWindows, pickClips } from '../src/integrity/ghostTrack.js';
 
 function blank(slot: number): PlayerSample {
   return {
@@ -568,12 +578,25 @@ function blank(slot: number): PlayerSample {
   };
 }
 
-/** A round where survivor slot 0 stands at the origin and ghost slot 4 walks a
- *  circle around them at `radius`. `yawOf` decides where the survivor looks. */
-function round(n: number, yawOf: (i: number, trueBearing: number) => number, radius = 1200): Frame[] {
+/**
+ * A round where survivor slot 0 stands at the origin and ghost slot 4 walks an
+ * arc around them at `radius`, `stepDeg` of bearing per frame, starting at
+ * `startDeg`. `yawOf` decides where the survivor looks.
+ *
+ * `stepDeg` matters: the ghost has to stay inside E_TRACK of the survivor's aim
+ * for W consecutive frames or no window forms at all and a test asserting over
+ * the windows passes vacuously.
+ */
+function round(
+  n: number,
+  yawOf: (i: number, trueBearing: number) => number,
+  radius = 1200,
+  stepDeg = 6,
+  startDeg = 0,
+): Frame[] {
   const frames: Frame[] = [];
   for (let i = 0; i < n; i++) {
-    const a = (i * 6) * Math.PI / 180;
+    const a = (startDeg + i * stepDeg) * Math.PI / 180;
     const gx = Math.cos(a) * radius;
     const gy = Math.sin(a) * radius;
     const trueB = bearing({ x: 0, y: 0 }, { x: gx, y: gy });
@@ -585,21 +608,37 @@ function round(n: number, yawOf: (i: number, trueBearing: number) => number, rad
   return frames;
 }
 
-describe('pearson', () => {
-  it('is 1 for identical series', () => {
-    expect(pearson([1, 2, 3, 4], [1, 2, 3, 4])).toBeCloseTo(1);
+describe('trackFidelity', () => {
+  it('is 1 when the crosshair moved exactly as needed to follow the target', () => {
+    expect(trackFidelity([2, 3, 4], [2, 3, 4])).toBeCloseTo(1);
   });
 
-  it('is -1 for inverted series', () => {
-    expect(pearson([1, 2, 3, 4], [4, 3, 2, 1])).toBeCloseTo(-1);
+  it('is 1 for perfect tracking of a target moving at a CONSTANT rate', () => {
+    // The case that defeats Pearson: constant deltas have no variance, so a
+    // correlation is undefined exactly when the tracking is most blatant.
+    expect(trackFidelity([6, 6, 6, 6], [6, 6, 6, 6])).toBeCloseTo(1);
   });
 
-  it('is 0, not NaN, when one series never moves', () => {
-    expect(pearson([1, 1, 1, 1], [1, 2, 3, 4])).toBe(0);
+  it('is 0 for a crosshair that never moved while the target did', () => {
+    expect(trackFidelity([0, 0, 0], [5, 5, 5])).toBeCloseTo(0);
   });
 
-  it('is 0 for series shorter than two samples', () => {
-    expect(pearson([1], [1])).toBe(0);
+  it('is 0, not negative, for a crosshair moving opposite to the target', () => {
+    expect(trackFidelity([-5, -5, -5], [5, 5, 5])).toBe(0);
+  });
+
+  it('penalises moving at the wrong rate in proportion', () => {
+    const half = trackFidelity([3, 3, 3], [6, 6, 6]);
+    expect(half).toBeGreaterThan(0.4);
+    expect(half).toBeLessThan(0.6);
+  });
+
+  it('is 0 when the target never moved, so there was nothing to track', () => {
+    expect(trackFidelity([1, 2, 3], [0, 0, 0])).toBe(0);
+  });
+
+  it('is 0 for series shorter than one delta', () => {
+    expect(trackFidelity([], [])).toBe(0);
   });
 });
 
@@ -607,14 +646,17 @@ describe('trackWindows', () => {
   it('scores near 1 when the crosshair follows the ghost exactly', () => {
     const w = trackWindows(round(40, (_i, b) => b), 0);
     expect(w.length).toBeGreaterThan(0);
-    expect(Math.max(...w.map((x) => x.corr))).toBeGreaterThan(0.9);
+    expect(Math.max(...w.map((x) => x.fidelity))).toBeGreaterThan(0.9);
   });
 
   it('scores near 0 for a held angle, which is what pre-aiming a spawn looks like', () => {
-    // Survivor stares at one fixed yaw. The ghost drifts through that line, so
-    // the aim error stays small for a stretch, but the crosshair never moves.
-    const frames = round(40, () => 0, 8000);
-    for (const w of trackWindows(frames, 0)) expect(Math.abs(w.corr)).toBeLessThan(0.2);
+    // The ghost drifts slowly across a held crosshair: slow enough that a window
+    // DOES form (a quarter degree per frame keeps it inside E_TRACK for all 40),
+    // so this asserts over real windows rather than passing vacuously.
+    const frames = round(40, () => 0, 1200, 0.25, -5);
+    const windows = trackWindows(frames, 0);
+    expect(windows.length).toBeGreaterThan(0);
+    for (const w of windows) expect(w.fidelity).toBeLessThan(0.2);
   });
 
   it('produces no window when the aim never stays inside E_TRACK', () => {
@@ -639,8 +681,8 @@ describe('trackWindows', () => {
 });
 
 describe('pickClips', () => {
-  const win = (startMs: number, endMs: number, corr: number): ReturnType<typeof trackWindows>[number] =>
-    ({ startMs, endMs, ghostSlot: 4, corr, meanErr: 1, meanDist: 900 });
+  const win = (startMs: number, endMs: number, fidelity: number): TrackWindow =>
+    ({ startMs, endMs, ghostSlot: 4, fidelity, meanErr: 1, meanDist: 900 });
 
   it('drops anything under CLIP_MIN', () => {
     expect(pickClips([win(0, 2000, TUNING.CLIP_MIN - 0.01)])).toEqual([]);
@@ -649,12 +691,12 @@ describe('pickClips', () => {
   it('keeps the highest scoring window and drops ones overlapping it', () => {
     const got = pickClips([win(0, 2000, 0.8), win(1000, 3000, 0.95)]);
     expect(got).toHaveLength(1);
-    expect(got[0].corr).toBeCloseTo(0.95);
+    expect(got[0].fidelity).toBeCloseTo(0.95);
   });
 
   it('keeps non-overlapping windows, best first', () => {
     const got = pickClips([win(0, 2000, 0.8), win(5000, 7000, 0.95)]);
-    expect(got.map((g) => g.corr)).toEqual([0.95, 0.8]);
+    expect(got.map((g) => g.fidelity)).toEqual([0.95, 0.8]);
   });
 
   it('keeps at most CLIPS_PER_ROUND', () => {
@@ -663,6 +705,9 @@ describe('pickClips', () => {
   });
 });
 ```
+
+Add `import type { TrackWindow } from '../src/integrity/ghostTrack.js';` alongside the other
+import from that module so the `win` helper can be typed.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -673,45 +718,57 @@ Expected: FAIL, cannot find module `../src/integrity/ghostTrack.js`
 
 ```ts
 // src/integrity/ghostTrack.ts
-import type { Frame, PlayerSample } from '../replayFormat.js';
+import type { Frame } from '../replayFormat.js';
 import { TUNING } from './constants.js';
 import {
   aimError, bearing, dist2d, isGhost, isLiveSurvivor, pairEligible, wrapDeg, type Pt,
 } from './geometry.js';
 
 /**
- * Metric A, the backbone: does the crosshair MOVE with an invisible target.
+ * Metric A, the backbone: did the crosshair MOVE with an invisible target.
  *
  * Proximity alone is not evidence, because the good spawn spots are known and
- * people pre-aim them. A held angle has no variance and therefore cannot
- * correlate with anything, so it scores zero however well chosen the spot was.
- * Following something invisible that is moving is what has no innocent
- * explanation, and the more the ghost moves the harder the result is to produce
- * by accident.
+ * people pre-aim them. A held angle produces none of the motion needed to
+ * follow a moving target, so it scores zero however well chosen the spot was.
+ * Producing that motion, against something you cannot see, is what has no
+ * innocent explanation, and the more the ghost moves the harder it is to do by
+ * accident.
  */
 
-export function pearson(a: number[], b: number[]): number {
-  const n = Math.min(a.length, b.length);
-  if (n < 2) return 0;
-  let sa = 0, sb = 0;
-  for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
-  const ma = sa / n, mb = sb / n;
-  let num = 0, da = 0, db = 0;
+/**
+ * How much of the motion needed to follow the target the crosshair actually
+ * produced. 1 is exact, 0 is none of it.
+ *
+ * This replaces the Pearson correlation the design spec first called for.
+ * Pearson has a degenerate case that fails at precisely the wrong moment: a
+ * ghost moving at a constant angular rate, tracked perfectly, gives two
+ * CONSTANT delta series, neither of which has any variance, so the correlation
+ * is undefined and the most blatant possible cheat scores zero. Pearson is also
+ * scale invariant, so half the required motion, perfectly proportioned, would
+ * score a perfect 1. A normalised residual has neither problem.
+ */
+export function trackFidelity(dYaw: number[], dBearing: number[]): number {
+  const n = Math.min(dYaw.length, dBearing.length);
+  if (n < 1) return 0;
+  let residual = 0, total = 0;
   for (let i = 0; i < n; i++) {
-    const x = a[i] - ma, y = b[i] - mb;
-    num += x * y; da += x * x; db += y * y;
+    const d = dYaw[i] - dBearing[i];
+    residual += d * d;
+    total += dBearing[i] * dBearing[i];
   }
-  // A motionless crosshair is the commonest innocent case in the game. It must
-  // read as no evidence, not as NaN leaking into a score.
-  if (da <= 1e-9 || db <= 1e-9) return 0;
-  return num / Math.sqrt(da * db);
+  // The target never moved, so following it required nothing and holding still
+  // proves nothing. No evidence, not perfect evidence.
+  if (total <= 1e-9) return 0;
+  // Clamped: moving opposite to the target is not worse than useless evidence,
+  // it is simply no evidence of tracking.
+  return Math.max(0, 1 - Math.sqrt(residual / total));
 }
 
 export interface TrackWindow {
   startMs: number;
   endMs: number;
   ghostSlot: number;
-  corr: number;
+  fidelity: number;
   meanErr: number;
   meanDist: number;
 }
@@ -731,10 +788,15 @@ function visibleOthers(f: Frame, survivorSlot: number, ghostSlot: number): Pt[] 
 }
 
 /** Every window in which this survivor held aim on one ghost for W frames,
- *  with the correlation between how they turned and how the ghost moved. */
+ *  with how much of the motion needed to follow it they actually produced. */
 export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
   if (frames.length === 0) return [];
-  const roundStartMs = frames[0].tMs;
+  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
+  // opened, and the replay opens at round start, so the round starts at zero.
+  // Using the first sampled frame instead shifts the spawn grace window by one
+  // sample interval and, for a fixture whose first frame is already at
+  // SPAWN_GRACE_MS, swallows the whole round.
+  const roundStartMs = 0;
   const out: TrackWindow[] = [];
 
   const ghostSlots = new Set<number>();
@@ -758,7 +820,7 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
           startMs: w[0].tMs,
           endMs: w[w.length - 1].tMs,
           ghostSlot: gs,
-          corr: pearson(dy, db),
+          fidelity: trackFidelity(dy, db),
           meanErr: w.reduce((s, x) => s + Math.abs(x.err), 0) / w.length,
           meanDist: w.reduce((s, x) => s + x.dist, 0) / w.length,
         });
@@ -787,7 +849,7 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
  *  slices of the same one. */
 export function pickClips(windows: TrackWindow[]): TrackWindow[] {
   const kept: TrackWindow[] = [];
-  for (const w of [...windows].filter((x) => x.corr >= TUNING.CLIP_MIN).sort((a, b) => b.corr - a.corr)) {
+  for (const w of [...windows].filter((x) => x.fidelity >= TUNING.CLIP_MIN).sort((a, b) => b.fidelity - a.fidelity)) {
     if (kept.length >= TUNING.CLIPS_PER_ROUND) break;
     if (kept.some((k) => w.startMs <= k.endMs && k.startMs <= w.endMs)) continue;
     kept.push(w);
@@ -805,7 +867,7 @@ Expected: PASS
 
 ```bash
 git add src/integrity/ghostTrack.ts tests/integrityGhostTrack.test.ts
-git commit -m "Integrity: ghost tracking correlation and clip selection"
+git commit -m "Integrity: ghost tracking fidelity and clip selection"
 ```
 
 ---
@@ -818,7 +880,7 @@ git commit -m "Integrity: ghost tracking correlation and clip selection"
 
 **Interfaces:**
 - Consumes: everything from Task 3, plus `PriorTable`, `priorAt`, `cellOf`, `cellKey`, `PriorBuilder` from `./aimPrior.js`
-- Produces: `interface OccResult { z: number; observed: number; expected: number; pairs: number }`; `occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null`; `interface RoundMetrics { corrMax: number; corrP95: number; occZ: number | null; teamRank: number | null; teamGap: number | null; eligiblePairs: number }`; `analyzeRound(frames: Frame[], survivorSlots: number[], prior: PriorTable | null): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; roundPrior: PriorBuilder }`
+- Produces: `interface OccResult { z: number; observed: number; expected: number; pairs: number }`; `occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null`; `interface RoundMetrics { fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null; teamGap: number | null; eligiblePairs: number }`; `analyzeRound(frames: Frame[], survivorSlots: number[], prior: PriorTable | null): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; roundPrior: PriorBuilder }`
 
 - [ ] **Step 1: Write the failing test (append to the same file)**
 
@@ -827,11 +889,23 @@ git commit -m "Integrity: ghost tracking correlation and clip selection"
 import { occupancy, analyzeRound } from '../src/integrity/ghostTrack.js';
 import { PriorBuilder, cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 
-/** A prior in which the cell the ghost occupies is stared at `p` of the time. */
+/** A prior in which every cell the ghost passes through is stared at `p` of the
+ *  time.
+ *
+ *  It must cover the ghost's WHOLE path, not just its starting cell. Seed only
+ *  frame 0 and any test whose early frames get dropped (the occlusion guard
+ *  drops them whenever a teammate stands on the ghost's bearing) leaves every
+ *  surviving pair with a prior of 0, which collapses the variance to 0 and
+ *  makes `occupancy` correctly return null, failing the assertion for a reason
+ *  that has nothing to do with the behaviour under test. */
 function priorWhereGhostIs(frames: Frame[], p: number): PriorTable {
-  const g = frames[0].players[4];
-  const c = cellOf(g.x, g.y);
-  return { frames: 1000, counts: new Map([[cellKey(c.cx, c.cy), Math.round(1000 * p)]]) };
+  const counts = new Map<string, number>();
+  for (const f of frames) {
+    const g = f.players[4];
+    const c = cellOf(g.x, g.y);
+    counts.set(cellKey(c.cx, c.cy), Math.round(1000 * p));
+  }
+  return { frames: 1000, counts };
 }
 
 describe('occupancy', () => {
@@ -849,14 +923,12 @@ describe('occupancy', () => {
   it('is near zero when the player is on a ghost that sits where everyone stares', () => {
     // This is the owner's objection made into a test: a famous spawn spot must
     // earn almost nothing, because the prior already contains it.
+    // 0.99, not 1.0. A prior of exactly 1 asserts the cell is stared at with
+    // CERTAINTY, which has zero variance, and `occupancy` correctly returns null
+    // rather than dividing by it. Near-certainty is what a famous doorway
+    // actually looks like in real data, and it leaves the variance real.
     const frames = round(40, (_i, b) => b);
-    const cells = new Map<string, number>();
-    for (const f of frames) {
-      const g = f.players[4];
-      const c = cellOf(g.x, g.y);
-      cells.set(cellKey(c.cx, c.cy), 1000);
-    }
-    const r = occupancy(frames, 0, { frames: 1000, counts: cells });
+    const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.99));
     expect(r).not.toBeNull();
     expect(Math.abs(r!.z)).toBeLessThan(1);
   });
@@ -872,7 +944,7 @@ describe('analyzeRound', () => {
   it('returns metrics and clips per survivor slot', () => {
     const frames = round(40, (_i, b) => b);
     const { metrics, clips } = analyzeRound(frames, [0], priorWhereGhostIs(frames, 0.01));
-    expect(metrics.get(0)!.corrMax).toBeGreaterThan(0.9);
+    expect(metrics.get(0)!.fidMax).toBeGreaterThan(0.9);
     expect(clips.get(0)!.length).toBeGreaterThan(0);
   });
 
@@ -886,10 +958,10 @@ describe('analyzeRound', () => {
     expect(metrics.get(0)!.teamGap!).toBeGreaterThan(0);
   });
 
-  it('leaves occupancy null and still reports correlation when there is no prior', () => {
+  it('leaves occupancy null and still reports fidelity when there is no prior', () => {
     const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
     expect(metrics.get(0)!.occZ).toBeNull();
-    expect(metrics.get(0)!.corrMax).toBeGreaterThan(0.9);
+    expect(metrics.get(0)!.fidMax).toBeGreaterThan(0.9);
   });
 
   it('builds a round prior from the survivors it saw, for leave-one-round-out', () => {
@@ -931,7 +1003,12 @@ export interface OccResult {
 export function occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null {
   if (!prior || prior.frames <= 0) return null;
   if (frames.length === 0) return null;
-  const roundStartMs = frames[0].tMs;
+  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
+  // opened, and the replay opens at round start, so the round starts at zero.
+  // Using the first sampled frame instead shifts the spawn grace window by one
+  // sample interval and, for a fixture whose first frame is already at
+  // SPAWN_GRACE_MS, swallows the whole round.
+  const roundStartMs = 0;
   let observed = 0, expected = 0, variance = 0, pairs = 0;
 
   for (const f of frames) {
@@ -953,8 +1030,8 @@ export function occupancy(frames: Frame[], slot: number, prior: PriorTable | nul
 }
 
 export interface RoundMetrics {
-  corrMax: number;
-  corrP95: number;
+  fidMax: number;
+  fidP95: number;
   occZ: number | null;
   /** 1 is the highest occupancy z on this side this round. Null without a prior. */
   teamRank: number | null;
@@ -994,10 +1071,10 @@ export function analyzeRound(
     const windows = trackWindows(frames, slot);
     clips.set(slot, pickClips(windows));
     occ.set(slot, occupancy(frames, slot, prior));
-    const corrs = windows.map((w) => w.corr);
+    const fids = windows.map((w) => w.fidelity);
     metrics.set(slot, {
-      corrMax: corrs.length ? Math.max(...corrs) : 0,
-      corrP95: p95(corrs),
+      fidMax: fids.length ? Math.max(...fids) : 0,
+      fidP95: p95(fids),
       occZ: occ.get(slot)?.z ?? null,
       teamRank: null,
       teamGap: null,
@@ -1061,16 +1138,20 @@ import type { RoundMetrics } from '../src/integrity/ghostTrack.js';
 
 let db: DB;
 const KEY = { matchId: 1, ordinal: 1, half: 1 };
-const M: RoundMetrics = { corrMax: 0.9, corrP95: 0.5, occZ: 2.5, teamRank: 1, teamGap: 1.2, eligiblePairs: 300 };
-const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, corr: 0.9, meanErr: 2, meanDist: 900 };
+const M: RoundMetrics = { fidMax: 0.9, fidP95: 0.5, occZ: 2.5, teamRank: 1, teamGap: 1.2, eligiblePairs: 300 };
+const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, fidelity: 0.9, meanErr: 2, meanDist: 900 };
 
-beforeEach(() => { db = openDb(':memory:'); });
+beforeEach(() => {
+  db = openDb(':memory:');
+  // Foreign keys are ON, so insert a match to satisfy integrity_rounds/clips/reviews constraints
+  db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'no_mercy')").run();
+});
 
 describe('saveRound', () => {
   it('stores metrics and clips for a slot', () => {
     saveRound(db, KEY, [{ slot: 0, steamid: '765', metrics: M, clips: [clip] }]);
     const r = db.prepare('SELECT * FROM integrity_rounds').get() as { metrics: string; analyzer_version: number };
-    expect(JSON.parse(r.metrics).corrMax).toBeCloseTo(0.9);
+    expect(JSON.parse(r.metrics).fidMax).toBeCloseTo(0.9);
     expect(r.analyzer_version).toBe(ANALYZER_VERSION);
     expect(db.prepare('SELECT COUNT(*) c FROM integrity_clips').get()).toEqual({ c: 1 });
   });
@@ -1241,7 +1322,7 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       for (const c of r.clips) {
         insClip.run(
           key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
-          'ghost_track', c.corr, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist }),
+          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist }),
           ANALYZER_VERSION,
         );
       }
@@ -1311,7 +1392,7 @@ git commit -m "Integrity: schema and store, with review state outliving re-analy
 
 **Interfaces:**
 - Consumes: `RoundMetrics` from `./ghostTrack.js`
-- Produces: `percentile(values: number[], v: number): number`; `interface PlayerAgg { steamid: string; rounds: number; corrMax: number; corrP95: number; occZ: number | null; teamGap: number | null }`; `aggregate(rows: { steamid: string; metrics: RoundMetrics }[]): PlayerAgg[]`; `interface ScoredPlayer extends PlayerAgg { pCorr: number; pOcc: number | null; pGap: number | null; composite: number }`; `scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[]`
+- Produces: `percentile(values: number[], v: number): number`; `interface PlayerAgg { steamid: string; rounds: number; fidMax: number; fidP95: number; occZ: number | null; teamGap: number | null }`; `aggregate(rows: { steamid: string; metrics: RoundMetrics }[]): PlayerAgg[]`; `interface ScoredPlayer extends PlayerAgg { pFid: number; pOcc: number | null; pGap: number | null; composite: number }`; `scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[]`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1322,7 +1403,7 @@ import { percentile, aggregate, scorePlayers } from '../src/integrity/score.js';
 import type { RoundMetrics } from '../src/integrity/ghostTrack.js';
 
 const m = (over: Partial<RoundMetrics> = {}): RoundMetrics => ({
-  corrMax: 0.2, corrP95: 0.1, occZ: 0, teamRank: 2, teamGap: 0, eligiblePairs: 100, ...over,
+  fidMax: 0.2, fidP95: 0.1, occZ: 0, teamRank: 2, teamGap: 0, eligiblePairs: 100, ...over,
 });
 
 describe('percentile', () => {
@@ -1342,13 +1423,13 @@ describe('percentile', () => {
 });
 
 describe('aggregate', () => {
-  it('takes a player worst round for corrMax and their mean for the rest', () => {
+  it('takes a player worst round for fidMax and their mean for the rest', () => {
     const got = aggregate([
-      { steamid: 'a', metrics: m({ corrMax: 0.4, occZ: 1 }) },
-      { steamid: 'a', metrics: m({ corrMax: 0.9, occZ: 3 }) },
+      { steamid: 'a', metrics: m({ fidMax: 0.4, occZ: 1 }) },
+      { steamid: 'a', metrics: m({ fidMax: 0.9, occZ: 3 }) },
     ]);
     expect(got[0].rounds).toBe(2);
-    expect(got[0].corrMax).toBeCloseTo(0.9);
+    expect(got[0].fidMax).toBeCloseTo(0.9);
     expect(got[0].occZ).toBeCloseTo(2);
   });
 
@@ -1360,8 +1441,8 @@ describe('aggregate', () => {
 describe('scorePlayers', () => {
   it('composites only the metrics a player actually has', () => {
     const [a] = scorePlayers([
-      { steamid: 'a', rounds: 3, corrMax: 0.9, corrP95: 0.5, occZ: null, teamGap: null },
-      { steamid: 'b', rounds: 3, corrMax: 0.1, corrP95: 0.05, occZ: null, teamGap: null },
+      { steamid: 'a', rounds: 3, fidMax: 0.9, fidP95: 0.5, occZ: null, teamGap: null },
+      { steamid: 'b', rounds: 3, fidMax: 0.1, fidP95: 0.05, occZ: null, teamGap: null },
     ]);
     expect(a.pOcc).toBeNull();
     expect(a.composite).toBeCloseTo(1);
@@ -1369,9 +1450,9 @@ describe('scorePlayers', () => {
 
   it('ranks the tracking player above the rest', () => {
     const got = scorePlayers([
-      { steamid: 'clean1', rounds: 5, corrMax: 0.2, corrP95: 0.1, occZ: 0.1, teamGap: 0 },
-      { steamid: 'clean2', rounds: 5, corrMax: 0.3, corrP95: 0.12, occZ: -0.2, teamGap: -0.1 },
-      { steamid: 'sus', rounds: 5, corrMax: 0.95, corrP95: 0.8, occZ: 4.2, teamGap: 3.9 },
+      { steamid: 'clean1', rounds: 5, fidMax: 0.2, fidP95: 0.1, occZ: 0.1, teamGap: 0 },
+      { steamid: 'clean2', rounds: 5, fidMax: 0.3, fidP95: 0.12, occZ: -0.2, teamGap: -0.1 },
+      { steamid: 'sus', rounds: 5, fidMax: 0.95, fidP95: 0.8, occZ: 4.2, teamGap: 3.9 },
     ]);
     expect(got[0].steamid).toBe('sus');
     expect(got[0].composite).toBeGreaterThan(got[1].composite);
@@ -1413,8 +1494,8 @@ export function percentile(values: number[], v: number): number {
 export interface PlayerAgg {
   steamid: string;
   rounds: number;
-  corrMax: number;
-  corrP95: number;
+  fidMax: number;
+  fidP95: number;
   occZ: number | null;
   teamGap: number | null;
 }
@@ -1426,7 +1507,7 @@ function meanOrNull(xs: (number | null)[]): number | null {
 
 /** Roll a player's rounds into one row.
  *
- *  corrMax is a MAXIMUM across rounds, not a mean: one round of following an
+ *  fidMax is a MAXIMUM across rounds, not a mean: one round of following an
  *  invisible target is the thing worth looking at, and averaging it away with
  *  twenty clean rounds is how a detector misses. The rest are means, because a
  *  single high occupancy round really can be luck. */
@@ -1440,15 +1521,15 @@ export function aggregate(rows: { steamid: string; metrics: RoundMetrics }[]): P
   return [...by.values()].map((list) => ({
     steamid: list[0].steamid,
     rounds: list.length,
-    corrMax: Math.max(...list.map((r) => r.metrics.corrMax)),
-    corrP95: meanOrNull(list.map((r) => r.metrics.corrP95)) ?? 0,
+    fidMax: Math.max(...list.map((r) => r.metrics.fidMax)),
+    fidP95: meanOrNull(list.map((r) => r.metrics.fidP95)) ?? 0,
     occZ: meanOrNull(list.map((r) => r.metrics.occZ)),
     teamGap: meanOrNull(list.map((r) => r.metrics.teamGap)),
   }));
 }
 
 export interface ScoredPlayer extends PlayerAgg {
-  pCorr: number;
+  pFid: number;
   pOcc: number | null;
   pGap: number | null;
   /** Mean of whichever percentiles this player has. A sort key, not a claim. */
@@ -1456,16 +1537,16 @@ export interface ScoredPlayer extends PlayerAgg {
 }
 
 export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
-  const corrs = aggs.map((a) => a.corrMax);
+  const fids = aggs.map((a) => a.fidMax);
   const occs = aggs.map((a) => a.occZ).filter((x): x is number => x != null);
   const gaps = aggs.map((a) => a.teamGap).filter((x): x is number => x != null);
 
   return aggs.map((a) => {
-    const pCorr = percentile(corrs, a.corrMax);
+    const pFid = percentile(fids, a.fidMax);
     const pOcc = a.occZ == null ? null : percentile(occs, a.occZ);
     const pGap = a.teamGap == null ? null : percentile(gaps, a.teamGap);
-    const parts = [pCorr, pOcc, pGap].filter((x): x is number => x != null);
-    return { ...a, pCorr, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
+    const parts = [pFid, pOcc, pGap].filter((x): x is number => x != null);
+    return { ...a, pFid, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
   }).sort((x, y) => y.composite - x.composite);
 }
 ```
@@ -1557,11 +1638,11 @@ beforeEach(() => {
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe('analyzeOneRound', () => {
-  it('writes a row per survivor slot with a high correlation', () => {
+  it('writes a row per survivor slot with a high fidelity', () => {
     expect(analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, replayBytes(60))).toBe(true);
     const row = db.prepare('SELECT steamid, metrics FROM integrity_rounds WHERE slot = 0').get() as { steamid: string; metrics: string };
     expect(row.steamid).toBe('76561198000000001');
-    expect(JSON.parse(row.metrics).corrMax).toBeGreaterThan(0.9);
+    expect(JSON.parse(row.metrics).fidMax).toBeGreaterThan(0.9);
   });
 
   it('writes clips for a tracked ghost', () => {
@@ -1647,7 +1728,7 @@ function survivorSlots(header: ReturnType<typeof parseReplay> extends null ? nev
  * The prior handed to the metrics is the map pool MINUS this round, so nobody
  * is measured against a baseline they helped build. A map that has not yet
  * reached MIN_PRIOR_ROUNDS gets no prior at all and therefore no occupancy
- * score, only correlation. That is the honest answer for a thin map and it is
+ * score, only fidelity. That is the honest answer for a thin map and it is
  * reported rather than papered over.
  */
 export function analyzeOneRound(db: DB, key: RoundKey, buf: Uint8Array): boolean {
@@ -1828,8 +1909,8 @@ let app: FastifyInstance;
 let adminCookie: Record<string, string>;
 let userCookie: Record<string, string>;
 
-const metrics = (corrMax: number, occZ: number | null) =>
-  JSON.stringify({ corrMax, corrP95: corrMax / 2, occZ, teamRank: 1, teamGap: occZ, eligiblePairs: 200 });
+const metrics = (fidMax: number, occZ: number | null) =>
+  JSON.stringify({ fidMax, fidP95: fidMax / 2, occZ, teamRank: 1, teamGap: occZ, eligiblePairs: 200 });
 
 beforeEach(async () => {
   db = openDb(':memory:');
@@ -2018,7 +2099,10 @@ Add these routes inside `adminRoutes`, immediately after the reports routes:
   });
 
   app.post('/api/admin/integrity/:matchId/:ordinal/:half/:slot/review', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
+    // requireAdmin RETURNS the acting admin steamid (src/routes/guards.ts:47), or
+    // null having already sent the 401/403. That id is what the audit log needs.
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
     const p = req.params as { matchId: string; ordinal: string; half: string; slot: string };
     const body = (req.body ?? {}) as { state?: string; note?: string };
     const state = String(body.state ?? '');
@@ -2029,14 +2113,13 @@ Add these routes inside `adminRoutes`, immediately after the reports routes:
       return reply.code(400).send({ error: 'bad round' });
     }
     const note = String(body.note ?? '').slice(0, 500);
-    const adminId = (req as { adminId?: string }).adminId ?? '';
     setReview(db, key, slot, state, note, adminId);
     logAdmin(db, adminId, 'integrity_review', `${key.matchId}/${key.ordinal}/${key.half}/${slot}`, { state, note });
     return { ok: true };
   });
 ```
 
-Note: read how the neighbouring routes obtain the acting admin's steamid (the reports and ban routes already do this) and use the same expression rather than the placeholder above.
+Note: the audit row must carry the real admin steamid, not an empty string. Verify after implementing: `SELECT admin_id FROM admin_actions` in the test should be the admin's id.
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -2079,8 +2162,10 @@ describe('AdminIntegrity', () => {
 
   it('opens a player to their clips with a link into the replay viewer', async () => {
     // Mock adminApi.integrityPlayer with one clip at startMs 12000, match 1,
-    // ordinal 1, half 1. Assert an anchor whose href contains /replay/ and the
-    // start time, so a reviewer lands on the moment rather than the round.
+    // ordinal 1, half 1. Assert an anchor to /match/1 and that the row shows the
+    // start time as text, so a reviewer knows which moment to scrub to. There is
+    // deliberately no /replay/ URL here: the viewer is a component inside the
+    // match page and Task 11 adds the deep link.
   });
 });
 ```
@@ -2100,11 +2185,11 @@ In `web/src/api.ts`, add these types near the other admin types and the three me
 export interface IntegrityPlayerRow {
   steamid: string;
   rounds: number;
-  corrMax: number;
-  corrP95: number;
+  fidMax: number;
+  fidP95: number;
   occZ: number | null;
   teamGap: number | null;
-  pCorr: number;
+  pFid: number;
   pOcc: number | null;
   pGap: number | null;
   composite: number;
@@ -2129,7 +2214,7 @@ export interface IntegrityRound {
   half: number;
   slot: number;
   campaign: string | null;
-  metrics: { corrMax: number; corrP95: number; occZ: number | null; teamRank: number | null; teamGap: number | null; eligiblePairs: number };
+  metrics: { fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null; teamGap: number | null; eligiblePairs: number };
   computedAt: string;
   reviewState: string;
   reviewNote: string;
@@ -2186,10 +2271,10 @@ export function AdminIntegrity() {
             return (
               <li key={c.id}>
                 <p>
-                  <a href={`/replay/${c.matchId}/${c.ordinal}/${c.half}?t=${c.startMs}`}>
-                    Match #{c.matchId} map {c.ordinal} round {c.half}
-                  </a>
-                  <span class="muted"> · correlation {c.score.toFixed(2)} · {(c.endMs - c.startMs) / 1000}s</span>
+                  <a href={`/match/${c.matchId}`}>Match #{c.matchId}</a>
+                  {' '}map {c.ordinal} round {c.half}
+                  {' '}at <strong>{(c.startMs / 1000).toFixed(1)}s</strong>
+                  <span class="muted"> · fidelity {c.score.toFixed(2)} · {(c.endMs - c.startMs) / 1000}s</span>
                 </p>
                 <div class="admin-form">
                   <input value={notes[key] ?? ''} placeholder="Review note" aria-label="Review note"
@@ -2231,7 +2316,7 @@ export function AdminIntegrity() {
               <td><button class="linklike" onClick={() => setSteamid(p.steamid)}>{p.steamid}</button></td>
               <td>{p.rounds}</td>
               <td>{pct(p.composite)}</td>
-              <td>{num(p.corrMax)} <span class="muted">({pct(p.pCorr)})</span></td>
+              <td>{num(p.fidMax)} <span class="muted">({pct(p.pFid)})</span></td>
               <td>{num(p.occZ)} <span class="muted">({pct(p.pOcc)})</span></td>
               <td>{num(p.teamGap)} <span class="muted">({pct(p.pGap)})</span></td>
             </tr>
@@ -2279,7 +2364,7 @@ Expected: a per-map line saying how many rounds each map has and whether it clea
 
 Open the Integrity tab and look at the top of the board. **Does the top of the list look like the best players rather than a suspicious one?** If it does, the metric is measuring aim quality and not information, and the fix goes in the prior and in metric C, not in the thresholds. Write down what you saw and stop. Do not tune constants to make the list look better.
 
-Also record how many maps cleared `MIN_PRIOR_ROUNDS`. If it is only two or three, occupancy is not yet usable and correlation carries the retrospective pass alone. That is an acceptable outcome and it gets reported, not worked around by lowering the threshold.
+Also record how many maps cleared `MIN_PRIOR_ROUNDS`. If it is only two or three, occupancy is not yet usable and fidelity carries the retrospective pass alone. That is an acceptable outcome and it gets reported, not worked around by lowering the threshold.
 
 - [ ] **Step 4: Commit any fixes and report**
 
@@ -2290,6 +2375,101 @@ git commit -m "Integrity: fixes from the first backfill"
 
 ---
 
+---
+
+### Task 11: Deep link a clip into the viewer
+
+Added during the pre-flight scan. The original Task 9 linked to
+`/replay/${matchId}/${ordinal}/${half}?t=`, which is not a route: the real routes are
+`/match/:id` and `/replay/file/:name`, and the viewer is a component inside MatchDetail that
+takes `spec={{ kind: 'match', matchId, ordinal, half }}` as a prop. Task 9 therefore links to
+the match page with the round and timestamp as text, and this task adds the real deep link.
+
+**Files:**
+- Modify: `web/src/routes/MatchDetail.tsx`
+- Modify: `web/src/replay/Viewer.tsx`
+- Modify: `web/src/routes/admin/AdminIntegrity.tsx` (use the deep link once it exists)
+- Test: the nearest existing viewer test file (`web/src/replay/renderRate.test.tsx` shows the render patterns)
+
+**Interfaces:**
+- Consumes: `playback.seek(t: number)` from `usePlayback` (`web/src/replay/playback.ts:84`); `AdminIntegrity` from Task 9
+- Produces: `Viewer` gains an optional prop `seekMs?: number`
+
+- [ ] **Step 1: Write the failing test**
+
+Add to the viewer test file, following its existing render patterns:
+
+```tsx
+it('seeks once to seekMs when the frames arrive, and not again on later renders', () => {
+  // Render Viewer with a stub source whose frames span 0..20000 and seekMs 12000.
+  // Assert the playhead lands at 12000. Re-render with the same props and assert
+  // no second seek: a viewer the user has since scrubbed must not be yanked back.
+});
+```
+
+Replace the comment with the concrete arrange/act/assert in the style the file already uses.
+Read the file first: `renderRate.test.tsx` and `usePlaybackLoop.test.ts` show how playback is
+driven in tests and how a stub replay source is supplied.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run web/src/replay/`
+Expected: FAIL, `seekMs` is not a prop of `Viewer`
+
+- [ ] **Step 3: Add the prop to Viewer**
+
+In `web/src/replay/Viewer.tsx`, add `seekMs` to the props type and the destructuring, then
+after `const playback = usePlayback(endMs, { live });` add:
+
+```tsx
+  /** A deep link lands on a moment, not the start of the round. Fires once, when
+   *  the frames first arrive: a viewer the user has since scrubbed must not be
+   *  yanked back to the link's timestamp on every later render. */
+  const seeked = useRef(false);
+  useEffect(() => {
+    if (seeked.current || seekMs == null || frames.length === 0) return;
+    seeked.current = true;
+    playback.seek(seekMs);
+  }, [seekMs, frames.length, playback]);
+```
+
+Import `useEffect` and `useRef` from `preact/hooks` if the file does not already.
+
+- [ ] **Step 4: Read the query params in MatchDetail**
+
+`MatchDetail` already owns the ordinal and half state for its round switch. Give that state an
+initial value from the URL when present, and pass `seekMs` through to `Viewer`:
+
+```tsx
+const params = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+const qOrdinal = Number(params.get('ordinal'));
+const qHalf = Number(params.get('half'));
+const qT = Number(params.get('t'));
+```
+
+Use `qOrdinal` and `qHalf` as the initial round selection only when both are integers matching
+a map and round the page actually has, and pass `seekMs={Number.isFinite(qT) ? qT : undefined}`.
+A malformed or out-of-range param must fall back to the existing default, never render an empty
+page.
+
+- [ ] **Step 5: Point the admin clips at it**
+
+In `AdminIntegrity.tsx`, change the clip link to
+`` `/match/${c.matchId}?ordinal=${c.ordinal}&half=${c.half}&t=${c.startMs}` `` and drop the
+now-redundant "map N round N at Xs" text, keeping the fidelity and the duration.
+
+- [ ] **Step 6: Run tests and typecheck**
+
+Run: `npx vitest run web/src && npm run typecheck`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add web/src/replay/Viewer.tsx web/src/routes/MatchDetail.tsx web/src/routes/admin/AdminIntegrity.tsx
+git commit -m "Integrity: deep link a flagged clip to its moment in the viewer"
+```
+
 ## Self-Review
 
 **Spec coverage.** Section 1 geometry maps to Task 1; the aim prior to Task 2; metric A and clips to Task 3; metrics B and C to Task 4; anti-metrics are enforced by a comment in `score.ts` and the absence of those fields anywhere; section 2 storage and scoring to Tasks 5 and 6; section 3 admin tab to Tasks 8 and 9; section 6 order of work is the task order; section 7's first and second verification items are Task 10. Section 4 (format v4) and section 5 (the plugin) are explicitly out of this plan and get their own. The third and fourth verification items in section 7 belong to the plugin plan.
@@ -2299,3 +2479,31 @@ git commit -m "Integrity: fixes from the first backfill"
 **Constants.** The spec lists ten; this plan adds `R_MAX`, the wedge rasterisation range, which the spec's prior section implies but does not name. Eleven total.
 
 **Type consistency.** `RoundKey`, `PriorTable`, `TrackWindow`, `RoundMetrics`, `OccResult`, `PlayerAgg` and `ScoredPlayer` are each defined once and imported everywhere else. `priorAt` takes a `PriorTable` and a key string in every call site. `analyzeRound` returns `{ metrics, clips, roundPrior }` and Task 7 destructures exactly those three.
+
+## Amendments after the whole-branch review, 2026-09-17
+
+The eleven tasks above were each built and reviewed on their own. A review of the finished
+branch then found defects that no per-task review could see, and the fixes changed things
+the code blocks above still show in their pre-fix form. Read those blocks as the record of
+what each task was asked to build, and this section as what the branch actually holds.
+
+- **`src/integrity/ghostTrack.ts` was split into three modules.** `ghostTrack.ts` keeps
+  metric A and the shared frame-eligibility primitives, `occupancy.ts` holds metric B and
+  is now the only module that depends on `aimPrior.ts`, and `round.ts` holds `analyzeRound`,
+  `RoundMetrics` and metric C. Every exported name is unchanged. Import lines in the blocks
+  above that say `./ghostTrack.js` for `RoundMetrics` or `analyzeRound` now say
+  `./round.js`, and `occupancy` comes from `./occupancy.js`.
+- **`RoundMetrics` gained a `gates` tally** (`considered`, `notLive`, `notGhost`,
+  `inGrace`, `tooClose`, `occluded`, `passed`), and `eligiblePairs` is now `gates.passed`.
+  It used to be read off the occupancy result, which is null on every map under
+  `MIN_PRIOR_ROUNDS`, so every row the first backfill wrote read 0 and "zero clips" could
+  not be told from "the detector never ran". Every `RoundMetrics` literal in the blocks
+  above therefore needs a `gates` field to compile.
+- **`TUNING.OCCLUDE_MAX_DIST` (2000) was added**, bounding the occlusion guard at the aim
+  prior's own reach. Twelve constants now, not eleven. The reasoning is on the constant and
+  in the spec's frame eligibility section.
+- **`ANALYZER_VERSION` is 2.** Version 1 rows are not comparable.
+- **`buildRoundPrior` in `round.ts` is the single producer** of a round's contribution to
+  the map prior. Task 7's `rebuildPriors` used to compute it a second time inline.
+- **`integrityBoard` returns `name` and `clips`** alongside the scored fields, and the admin
+  board renders a rank rather than a percentage and dims itself when nothing is flagged.
