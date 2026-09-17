@@ -1,0 +1,120 @@
+import type { DB } from '../db.js';
+import type { Matchmaker } from '../matchmaker.js';
+import { QUEUE_SIZE } from '../queue.js';
+import { CAMPAIGNS } from '../campaigns.js';
+import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js';
+import type { BotInteraction, InteractionReply, MessagePayload } from './transport.js';
+
+export interface ControllerDeps {
+  db: DB;
+  matchmaker: Matchmaker;
+  publicUrl: string;
+  /** Refusal layered on by no-show timeouts: a message, or null to allow. */
+  queueBlock?: (steamid: string) => string | null;
+  /** The ban explanation (reason, expiry) when bans carry one. */
+  banMessage?: (steamid: string) => string;
+}
+
+const say = (content: string, extra: Partial<MessagePayload> = {}): InteractionReply => ({
+  ephemeral: true,
+  payload: { content, embeds: [], components: [], mentionUserIds: [], ...extra },
+});
+
+/** The reply an unlinked Discord user gets from anything that needs a player. */
+export function linkPrompt(deps: ControllerDeps, userId: string, userName: string): InteractionReply {
+  const code = createLinkCode(deps.db, userId, userName);
+  return say(
+    'Your Discord is not linked to a Steam account yet. Press the button, sign in with Steam once, and you are set. The link works for 15 minutes.',
+    { components: [[{ kind: 'link', url: `${deps.publicUrl}/link/discord?code=${code}`, label: 'Link Steam account' }]] },
+  );
+}
+
+/** Resolve the presser to an active player, or the reply that explains why not. */
+function resolve(
+  deps: ControllerDeps, i: { userId: string; userName: string },
+): { player: PlayerRow } | { reply: InteractionReply } {
+  const player = playerByDiscordId(deps.db, i.userId);
+  if (!player) return { reply: linkPrompt(deps, i.userId, i.userName) };
+  if (player.status === 'banned') {
+    return { reply: say(deps.banMessage?.(player.steamid) ?? 'You are banned from the PUG.') };
+  }
+  if (player.status !== 'active') {
+    return {
+      reply: say(
+        'Your account is not active yet. Make sure your linked Discord account is in the Riverside server, then sign in on the website again, or use an invite code there.',
+        { components: [[{ kind: 'link', url: `${deps.publicUrl}/`, label: 'Website' }]] },
+      ),
+    };
+  }
+  return { player };
+}
+
+/**
+ * Every button the bot posts. Each calls exactly what the website's HTTP route
+ * calls, so the two surfaces cannot disagree about who may do what.
+ *
+ * custom_id scheme: q:join, q:leave, l:<lobbyId>:ready,
+ * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect.
+ */
+export async function handleButton(
+  deps: ControllerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
+): Promise<InteractionReply> {
+  const parts = i.customId.split(':');
+  const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave'))
+    || (parts[0] === 'l' && parts.length >= 3)
+    || (parts[0] === 'm' && parts[2] === 'connect');
+  if (!known) return say('That button no longer does anything.');
+
+  const who = resolve(deps, i);
+  if ('reply' in who) return who.reply;
+  const steamid = who.player.steamid;
+  const mm = deps.matchmaker;
+
+  if (parts[0] === 'q' && parts[1] === 'join') {
+    const block = deps.queueBlock?.(steamid);
+    if (block) return say(block);
+    if (mm.stateFor(steamid).queue.joined) return say(`You are already in the queue (${mm.publicQueue().count}/${QUEUE_SIZE}).`);
+    const r = mm.join(steamid);
+    if (!r.ok) return say(`Could not join: ${r.error}.`);
+    const st = mm.stateFor(steamid);
+    // Joining can be the eighth player, which pops the queue straight into a lobby.
+    if (st.lobby) return say('You are in! The queue just popped, ready up on the match card.');
+    return say(`You are in the queue (${st.queue.count}/${QUEUE_SIZE}).`);
+  }
+
+  if (parts[0] === 'q' && parts[1] === 'leave') {
+    if (!mm.stateFor(steamid).queue.joined) return say('You are not in the queue.');
+    mm.leave(steamid);
+    return say('You left the queue.');
+  }
+
+  if (parts[0] === 'l') {
+    const lobbyId = parts[1];
+    const lobby = mm.stateFor(steamid).lobby;
+    if (!lobby || lobby.id !== lobbyId) return say('That ready check is over, or it is not yours.');
+    if (parts[2] === 'ready') {
+      if (lobby.phase !== 'ready_check') return say('Everyone is ready already. Vote a campaign.');
+      mm.ready(steamid);
+      return say('You are ready.');
+    }
+    if (parts[2] === 'vote' && parts[3]) {
+      const campaign = parts[3];
+      if (lobby.phase !== 'map_vote') return say('Voting has not started yet. Ready up first.');
+      if (!lobby.options.includes(campaign)) return say('That campaign is not an option in this vote.');
+      mm.vote(steamid, campaign);
+      return say(`You voted ${CAMPAIGNS[campaign]?.name ?? campaign}.`);
+    }
+    return say('That button no longer does anything.');
+  }
+
+  // m:<matchId>:connect
+  const matchId = Number(parts[1]);
+  const match = mm.stateFor(steamid).match;
+  if (!match || match.id !== matchId) return say('You are not on this match.');
+  if (!match.connect) return say('The server is not ready yet. Try again in a moment.');
+  const c = match.connect;
+  return say(
+    `Paste this into the L4D console (password first, or it fails):\n\`\`\`\npassword ${c.password}; connect ${c.host}:${c.port}\n\`\`\`Keep the password to yourself.`,
+    { components: [[{ kind: 'link', url: `${deps.publicUrl}/`, label: 'Open on the website' }]] },
+  );
+}
