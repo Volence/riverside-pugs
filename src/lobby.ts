@@ -24,6 +24,22 @@ export interface LobbyEvents {
   onFail(ready: string[], notReady: string[]): void;
 }
 
+/** Everything needed to rebuild a lobby after a restart. Unlike the snapshot,
+ *  votes are kept per player, since counts cannot be turned back into votes. */
+export interface PersistedLobby {
+  id: string;
+  players: string[];
+  phase: LobbyPhase;
+  ready: string[];
+  votes: [string, string][];
+  deadline: number;
+  mapPool: string[];
+}
+
+/** Time a restored lobby is given at least, so a ready check that ran out
+ *  while the site was down does not fail everyone the instant it comes back. */
+export const RESTORE_GRACE_MS = 30_000;
+
 export interface LobbySnapshot {
   id: string;
   phase: LobbyPhase;
@@ -55,6 +71,35 @@ export class Lobby {
     this.players = [...players];
     this.rng = opts.rng ?? Math.random;
     this.startTimer(opts.readySeconds, () => this.failReadyCheck());
+  }
+
+  /** Rebuild a lobby from persist(). The timer resumes where it was, but with
+   *  at least RESTORE_GRACE_MS left. */
+  static restore(p: PersistedLobby, opts: LobbyOpts, events: LobbyEvents, sched: Scheduler = realScheduler): Lobby {
+    const lobby = new Lobby(p.id, p.players, { ...opts, mapPool: p.mapPool }, events, sched);
+    lobby.phase = p.phase;
+    lobby.ready = new Set(p.ready);
+    lobby.votes = new Map(p.votes);
+    const remaining = Math.max(p.deadline - Date.now(), RESTORE_GRACE_MS);
+    lobby.stopTimer();
+    lobby.deadline = Date.now() + remaining;
+    lobby.timer = sched.set(
+      p.phase === 'map_vote' ? () => lobby.tally() : () => lobby.failReadyCheck(),
+      remaining,
+    );
+    return lobby;
+  }
+
+  persist(): PersistedLobby {
+    return {
+      id: this.id,
+      players: [...this.players],
+      phase: this.phase,
+      ready: [...this.ready],
+      votes: [...this.votes.entries()],
+      deadline: this.deadline,
+      mapPool: [...this.opts.mapPool],
+    };
   }
 
   private startTimer(seconds: number, onFire: () => void): void {

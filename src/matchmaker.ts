@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
-import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase } from './lobby.js';
+import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase, type PersistedLobby } from './lobby.js';
 import { balanceTeams } from './balance.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
@@ -87,6 +87,73 @@ export class Matchmaker {
 
   constructor(private db: DB, private deps: MatchmakerDeps) {}
 
+  /**
+   * Save the queue and open lobbies, then tell every surface.
+   *
+   * Both live only in memory, so a deploy used to drop the queue and cancel a
+   * ready check in progress. Written on every change (a handful of rows' worth
+   * of JSON, a few times a minute at most), and read back by restore() at boot.
+   */
+  private changed(): void {
+    try {
+      const state = {
+        queue: this.queue.list(),
+        lobbies: [...this.lobbyMap.values()]
+          .map((l) => l.persist())
+          .filter((l) => l.phase === 'ready_check' || l.phase === 'map_vote'),
+      };
+      this.db.prepare(
+        `INSERT INTO matchmaker_state (id, json, updated_at) VALUES (1, ?, datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`,
+      ).run(JSON.stringify(state));
+    } catch (err) {
+      console.error('[matchmaker] could not save queue state:', err);
+    }
+    this.deps.broadcast('refresh');
+  }
+
+  /** Bring back the queue and lobbies saved by the previous process. Call once
+   *  at boot, before any surface starts reading state. */
+  restore(): void {
+    const row = this.db.prepare('SELECT json FROM matchmaker_state WHERE id = 1').get() as { json: string } | undefined;
+    if (!row) return;
+    let state: { queue: string[]; lobbies: PersistedLobby[] };
+    try {
+      state = JSON.parse(row.json);
+    } catch {
+      return;
+    }
+    for (const p of state.lobbies ?? []) {
+      const lobby = Lobby.restore(p, this.lobbyOpts(), this.lobbyEvents(p.id), this.deps.scheduler ?? realScheduler);
+      this.lobbyMap.set(p.id, lobby);
+      for (const player of p.players) this.playerLobby.set(player, p.id);
+    }
+    for (const id of state.queue ?? []) {
+      if (!this.playerLobby.has(id)) this.queue.join(id);
+    }
+    if (state.queue?.length || state.lobbies?.length) {
+      console.log(`[matchmaker] restored ${state.queue?.length ?? 0} queued and ${state.lobbies?.length ?? 0} lobbies`);
+    }
+    this.changed();
+  }
+
+  private lobbyOpts() {
+    return {
+      readySeconds: Number(getSetting(this.db, 'ready_seconds') ?? 120),
+      voteSeconds: Number(getSetting(this.db, 'vote_seconds') ?? 30),
+      mapPool: getJsonSetting<string[]>(this.db, 'map_pool'),
+      rng: this.deps.rng,
+    };
+  }
+
+  private lobbyEvents(id: string) {
+    return {
+      onEvent: () => this.changed(),
+      onComplete: (result: { players: string[]; campaign: string }) => this.onLobbyComplete(id, result),
+      onFail: (ready: string[], notReady: string[]) => this.onLobbyFail(id, ready, notReady),
+    };
+  }
+
   on(listener: MatchmakerListener): void {
     this.listeners.push(listener);
   }
@@ -128,13 +195,13 @@ export class Matchmaker {
       this.deps.notify?.(`🧟 ${this.queue.count()}/${QUEUE_SIZE} in queue`);
     }
     this.maybeStartLobby();
-    this.deps.broadcast('refresh');
+    this.changed();
     return { ok: true };
   }
 
   leave(steamid: string): void {
     this.queue.leave(steamid);
-    this.deps.broadcast('refresh');
+    this.changed();
   }
 
   ready(steamid: string): boolean {
@@ -168,22 +235,7 @@ export class Matchmaker {
     while (this.queue.count() >= QUEUE_SIZE) {
       const players = this.queue.takeBatch(QUEUE_SIZE);
       const id = `${this.idPrefix}${++this.lobbySeq}`;
-      const lobby = new Lobby(
-        id,
-        players,
-        {
-          readySeconds: Number(getSetting(this.db, 'ready_seconds') ?? 120),
-          voteSeconds: Number(getSetting(this.db, 'vote_seconds') ?? 30),
-          mapPool: getJsonSetting<string[]>(this.db, 'map_pool'),
-          rng: this.deps.rng,
-        },
-        {
-          onEvent: () => this.deps.broadcast('refresh'),
-          onComplete: (result) => this.onLobbyComplete(id, result),
-          onFail: (ready, notReady) => this.onLobbyFail(id, ready, notReady),
-        },
-        this.deps.scheduler ?? realScheduler,
-      );
+      const lobby = new Lobby(id, players, this.lobbyOpts(), this.lobbyEvents(id), this.deps.scheduler ?? realScheduler);
       this.lobbyMap.set(id, lobby);
       this.deps.notify?.('🔔 Queue popped, ready check started!');
       for (const p of players) this.playerLobby.set(p, id);
@@ -214,7 +266,7 @@ export class Matchmaker {
     } catch (err) {
       console.error(`lobby ${id} fail handler error:`, err);
     } finally {
-      this.deps.broadcast('refresh');
+      this.changed();
     }
   }
 
@@ -249,7 +301,7 @@ export class Matchmaker {
     } catch (err) {
       console.error(`lobby ${id} complete handler error:`, err);
     } finally {
-      this.deps.broadcast('refresh');
+      this.changed();
     }
   }
 

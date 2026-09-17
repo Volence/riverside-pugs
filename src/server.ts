@@ -493,6 +493,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     notify,
     queueGate: makeQueueGate(deps.db, deps.config.discord !== null, membership),
   });
+  // Before the bot starts, so restored lobbies keep their Discord cards.
+  matchmaker.restore();
   app.decorate('matchmaker', matchmaker);
   // Sweep matches the game server has forgotten. Without it a plugin reload,
   // an srcds restart or a crash leaves a match 'live' forever: permanently

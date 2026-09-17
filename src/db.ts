@@ -319,6 +319,12 @@ CREATE TABLE IF NOT EXISTS reports (
   resolved_at TEXT,
   UNIQUE (match_id, reporter_id, target_id)
 );
+-- The queue and open lobbies, saved on every change so a restart resumes them.
+CREATE TABLE IF NOT EXISTS matchmaker_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
