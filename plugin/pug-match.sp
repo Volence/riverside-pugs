@@ -2985,8 +2985,34 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	AttributeScore(survPug, score, second);
 	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 	EmitRoundEnd(half, survEnd, mine, alive);
-	if (second) FinalizeMap();
+	if (second)
+	{
+		FinalizeMap();
+		// The finale is never scored, so the match is over the moment the map
+		// before it finishes. Ending here instead of when the finale loads puts
+		// the result kick on screen before the map 5 load, not after it, and
+		// lets the backend's rcon land before srcds starts the changelevel.
+		// OnMapStart's finale check stays as the backstop if this misses.
+		if (NextMapIsFinale()) EndMatchNow("last scored map done");
+	}
 	return Plugin_Stop;
+}
+
+/** True when the map that just finished is the one right before the finale.
+ *
+ *  left4dhooks 1.168 on L4D1 reads the chapter from the director and counts
+ *  the mode's maps from the mission file. Both are sanity checked, because a
+ *  bad read here ends a live match early: anything implausible answers false
+ *  and leaves the finale-loaded path to end it as before. Logged either way so
+ *  the values can be checked against a real night. */
+bool NextMapIsFinale()
+{
+	int chapter = L4D_GetCurrentChapter();
+	int chapters = L4D_GetMaxChapters();
+	LogMessage("[pug] half-2 end on %s: chapter %d of %d, maps scored %d",
+		g_sCurrentMap, chapter, chapters, g_iMapCount);
+	if (chapters < 3 || chapter < 2 || chapter >= chapters) return false;
+	return chapter == chapters - 1;
 }
 
 void FinalizeMap()

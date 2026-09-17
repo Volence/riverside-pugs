@@ -221,6 +221,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // was advertised as claimable, players stayed connected, and the plugin
       // went on enforcing a roster and a token the backend had already binned.
       // A stale or unknown token just draws a PUGERR, which is a no-op.
+      if (token) {
+        try {
+          await rcon.exec(`sm_pug_abort ${token}`);
+        } catch (err) {
+          console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
+        }
+      }
       // RESTORE the configured password, never blank it. This box carries a
       // standing sv_password from secrets.cfg (exec'd by local.cfg) which is
       // how strangers are kept off it; local.cfg's own comment records them
@@ -233,17 +240,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // the single source of truth, it lives on the box, it is gitignored, and
       // the backend has no business knowing the value. Re-exec is idempotent
       // and only re-asserts rcon_password to what it already is.
+      //
+      // And it goes LAST. secrets.cfg re-sets rcon_password, and on 2026-09-17
+      // this exec timed out on every release and took the sm_pug_abort queued
+      // behind it on the same connection down with it. The likeliest cause is
+      // srcds dropping rcon sessions when rcon_password is set, so nothing may
+      // follow it on this connection.
       try {
         await rcon.exec('exec secrets.cfg');
       } catch (err) {
         console.error(`[serverRelease] sv_password restore failed on ${server.name} (non-fatal):`, err);
-      }
-      if (token) {
-        try {
-          await rcon.exec(`sm_pug_abort ${token}`);
-        } catch (err) {
-          console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
-        }
       }
     } finally {
       rcon.close();
