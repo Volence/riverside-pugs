@@ -12,6 +12,7 @@ describe('openDb', () => {
     expect(names).toEqual([
       'admin_actions', 'bans',
       'discord_link_codes', 'discord_messages', 'discord_voice',
+      'integrity_clips', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps',
       'match_player_stats', 'match_players', 'match_replays', 'match_rounds',

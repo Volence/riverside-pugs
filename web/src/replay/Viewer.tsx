@@ -70,12 +70,28 @@ const NO_NAMES: Record<string, string> = {};
 const NO_TIMELINE: TimelineEntry[] = [];
 
 export function Viewer(
-  { spec, live = false, names = NO_NAMES, timeline }:
-  { spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[] },
+  { spec, live = false, names = NO_NAMES, timeline, seekMs }:
+  {
+    spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[];
+    seekMs?: number;
+  },
 ) {
   const { header, frames, closed, tooNew, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live });
+
+  /** A deep link lands on a moment, not the start of the round. Fires once,
+   *  when the frames first arrive: a viewer the user has since scrubbed must
+   *  not be yanked back to the link's timestamp on a later render. Depends on
+   *  `playback.seek` rather than the whole `playback` object (a fresh object
+   *  every render, see usePlayback) so an unrelated re-render, e.g. a hover
+   *  change, does not re-invoke this at all once past the guard. */
+  const seeked = useRef(false);
+  useEffect(() => {
+    if (seeked.current || seekMs == null || frames.length === 0) return;
+    seeked.current = true;
+    playback.seek(seekMs);
+  }, [seekMs, frames.length, playback.seek]);
   const [toggles, toggle, setToggle] = useToggles();
   const show: ShowFlags = { ci: toggles.ci, entities: toggles.entities, names: toggles.names };
   const portraits = usePortraits();

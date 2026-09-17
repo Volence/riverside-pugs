@@ -1451,6 +1451,12 @@ body.is-theater { overflow: hidden; }
 .admin-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-dense); }
 .admin-list li { padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 
+/* Clips nested inside one player-round. The round is the reviewable unit, so
+   the clips inside it read as a list of moments and not as separate rows with
+   their own rules. */
+.integrity-clips { list-style: none; margin: 0; padding: 0; }
+.admin-list .integrity-clips li { padding: 0; border-bottom: 0; }
+
 .admin-reports { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
 .admin-report { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); }
 .admin-report p { margin: 0 0 var(--sp-2); }
