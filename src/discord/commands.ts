@@ -139,7 +139,7 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
 }
 
 function leaderboard(deps: CommandDeps): InteractionReply {
-  const data = leaderboardData(deps.db);
+  const data = leaderboardData(deps.db)!;
   const ranked = data.rows.filter((r) => r.ranked).slice(0, 10);
   const url = `${deps.publicUrl}/leaderboard`;
   const body = ranked.length

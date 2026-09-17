@@ -15,6 +15,7 @@ import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { CAMPAIGNS } from '../campaigns.js';
 import { clearPenalties } from '../penalties.js';
 import { listReports, resolveReport } from '../reports.js';
+import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -225,6 +226,38 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!resolveReport(db, id, adminId, status, text)) return reply.code(404).send({ error: 'no such report' });
     logAdmin(db, adminId, 'resolve_report', id, { status, note: text });
     return { ok: true };
+  });
+
+  const seasonName = (raw: unknown): string | null =>
+    typeof raw === 'string' && raw.trim() && raw.trim().length <= 60 ? raw.trim() : null;
+
+  app.get('/api/admin/seasons', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return { seasons: listSeasons(db) };
+  });
+
+  app.post('/api/admin/seasons/:id/rename', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const name = seasonName((req.body as { name?: unknown } | undefined)?.name);
+    if (!name) return reply.code(400).send({ error: 'a season name of up to 60 characters is required' });
+    if (!renameSeason(db, id, name)) return reply.code(404).send({ error: 'no such season' });
+    logAdmin(db, adminId, 'rename_season', id, { name });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  app.post('/api/admin/seasons/new', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const name = seasonName((req.body as { name?: unknown } | undefined)?.name);
+    if (!name) return reply.code(400).send({ error: 'a season name of up to 60 characters is required' });
+    const r = startNewSeason(db, name);
+    if (!r.ok) return reply.code(409).send({ error: r.error });
+    logAdmin(db, adminId, 'new_season', r.id, { name });
+    broadcast('refresh');
+    return { ok: true, id: r.id };
   });
 
   app.get('/api/admin/audit', async (req, reply) => {

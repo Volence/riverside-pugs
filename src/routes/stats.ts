@@ -15,6 +15,7 @@ import { currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
+import { listSeasons } from '../seasons.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string }
 
@@ -51,7 +52,14 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   // routes/api.ts.
   const viewerOf = makeOptionalViewer(db);
 
-  app.get('/api/leaderboard', async () => leaderboardData(db));
+  app.get('/api/leaderboard', async (req, reply) => {
+    const raw = (req.query as { season?: string }).season;
+    const data = leaderboardData(db, raw === undefined ? undefined : Number(raw));
+    if (!data) return reply.code(404).send({ error: 'no such season' });
+    return data;
+  });
+
+  app.get('/api/seasons', async () => ({ seasons: listSeasons(db) }));
 
   /** Per-stat ladder. `self`-visibility stats are refused here rather than
    *  filtered later: a "most skeeted" board is exactly what the private
