@@ -16,6 +16,17 @@ export function Play(
 ) {
   if (session.kind === 'loading') return <div class="page page--play" />;
   if (session.kind === 'anonymous') return <SignIn />;
+  if (session.kind === 'pending' && session.me.status === 'banned') {
+    return (
+      <div class="page page--play">
+        <Panel>
+          <p class="eyebrow">Banned</p>
+          <h2>You are banned from the PUG</h2>
+          <p class="muted">If you think this is a mistake, talk to an admin in the Discord.</p>
+        </Panel>
+      </div>
+    );
+  }
   if (session.kind === 'pending') return <Register me={session.me} onDone={refresh} />;
   if (!state) return <div class="page page--play" />;
 
