@@ -63,6 +63,8 @@ export interface StateSnapshot {
      *  is live. */
     waitingForServer: boolean;
   } | null;
+  /** A queue timeout the viewer is serving (missed ready checks, no-shows). */
+  timeout?: { until: string; offenses: number } | null;
 }
 
 export interface LeaderboardRow {
@@ -328,6 +330,110 @@ async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
   return parsed as T;
 }
 
+async function put<T = unknown>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const parsed = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, (parsed as { error?: string }).error ?? `PUT ${path} → ${res.status}`);
+  return parsed as T;
+}
+
+// ---------- admin ----------
+
+export interface AdminPlayerRow {
+  steamid: string;
+  name: string;
+  avatar: string | null;
+  status: string;
+  isAdmin: boolean;
+  discordName: string | null;
+  sr: number | null;
+  games: number;
+  createdAt: string;
+  offenses: number;
+}
+
+export interface AdminBan {
+  id: number; reason: string; createdBy: string; createdAt: string;
+  expiresAt: string | null; liftedBy: string | null; liftedAt: string | null;
+}
+
+export interface AdminReport {
+  id: number; matchId: number; campaign: string | null;
+  reporterId: string; reporterName: string | null; targetId: string; targetName: string | null;
+  category: string; text: string; status: string;
+  resolvedBy: string | null; resolutionNote: string | null; createdAt: string; resolvedAt: string | null;
+}
+
+export interface AdminPlayerDetail extends AdminPlayerRow {
+  discordId: string | null;
+  activeBan: AdminBan | null;
+  bans: AdminBan[];
+  notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];
+  matches: { id: number; campaign: string; state: string; endedAt: string | null; winner: string | null; team: string; connectedAt: string | null }[];
+  penalties: { id: number; kind: string; matchId: number | null; createdAt: string; clearedBy: string | null; clearedAt: string | null }[];
+  timeout: { until: string; offenses: number } | null;
+  reportsAgainst: AdminReport[];
+}
+
+export interface AdminOverview {
+  open: { id: number; campaign: string; state: string; serverId: number | null; createdAt: string; wentLiveAt: string | null; connected: number; rostered: number }[];
+  servers: { id: number; name: string; host: string; port: number; status: string }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null }[];
+  voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
+  queue: NamedPlayer[];
+}
+
+export interface AdminSetting {
+  key: string; label: string; help: string; group: string; secret?: boolean; value: string;
+  type:
+    | { kind: 'int'; min: number; max: number }
+    | { kind: 'string'; maxLength: number; allowEmpty: boolean }
+    | { kind: 'campaigns' }
+    | { kind: 'bool' }
+    | { kind: 'intList'; min: number; max: number; maxItems: number };
+}
+
+export interface AuditEntry {
+  id: number; adminId: string; adminName: string | null; action: string; target: string;
+  targetName: string | null; detail: Record<string, unknown>; createdAt: string;
+}
+
+export interface ReportEligibility {
+  canReport: boolean;
+  reason?: string;
+  targets?: { steamid: string; name: string; alreadyReported: boolean }[];
+}
+
+export const adminApi = {
+  players: (q: string, signal?: AbortSignal) =>
+    get<{ players: AdminPlayerRow[] }>(`/api/admin/players?q=${encodeURIComponent(q)}`, signal),
+  player: (steamid: string, signal?: AbortSignal) =>
+    get<AdminPlayerDetail>(`/api/admin/players/${encodeURIComponent(steamid)}`, signal),
+  ban: (steamid: string, reason: string, minutes: number | null) =>
+    post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
+  unban: (steamid: string) => post(`/api/admin/players/${steamid}/unban`),
+  activate: (steamid: string) => post(`/api/admin/players/${steamid}/activate`),
+  setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
+  unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
+  clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
+  note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
+  overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
+  abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
+  voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
+  serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
+  queueRemove: (steamid: string) => post('/api/admin/queue/remove', { steamid }),
+  reports: (status: string, signal?: AbortSignal) =>
+    get<{ reports: AdminReport[] }>(`/api/admin/reports?status=${status}`, signal),
+  resolveReport: (id: number, status: 'resolved' | 'dismissed', note: string) =>
+    post(`/api/admin/reports/${id}/resolve`, { status, note }),
+  settings: (signal?: AbortSignal) =>
+    get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[] }>('/api/admin/settings', signal),
+  saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
+  audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
+};
+
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
@@ -351,6 +457,10 @@ export const api = {
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),
+  reportEligibility: (matchId: number, signal?: AbortSignal) =>
+    get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
+  report: (matchId: number, targetId: string, category: string, text: string) =>
+    post(`/api/matches/${matchId}/reports`, { targetId, category, text }),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   ready: () => post('/api/lobby/ready'),

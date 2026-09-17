@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
-import { campaignName } from '../format';
+import { campaignName, fmtClock } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel } from '../components/bits';
@@ -171,12 +171,16 @@ function Live(
 
   if (lobby && lobby.phase === 'ready_check') return <ReadyCheck lobby={lobby} me={me} refresh={refresh} />;
   if (lobby && lobby.phase === 'map_vote') return <MapVote lobby={lobby} refresh={refresh} />;
-  return <QueuePanel count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh} />;
+  return <QueuePanel count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh} timeout={state.timeout ?? null} />;
 }
 
 export function QueuePanel(
-  { count, joined, players, refresh }:
-    { count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void },
+  { count, joined, players, refresh, timeout = null }:
+    {
+      count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void;
+      /** A queue timeout being served; the join button is disabled until it ends. */
+      timeout?: { until: string; offenses: number } | null;
+    },
 ) {
   const [error, setError] = useState('');
 
@@ -200,6 +204,11 @@ export function QueuePanel(
       <Slots players={players} />
       {joined ? (
         <button class="btn btn--block btn--ghost" onClick={() => act(api.leaveQueue)}>Leave queue</button>
+      ) : timeout && Date.parse(timeout.until) > Date.now() ? (
+        <>
+          <button class="btn btn--block" disabled>Join queue</button>
+          <TimeoutNotice until={Date.parse(timeout.until)} onDone={refresh} />
+        </>
       ) : (
         <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
       )}
@@ -288,5 +297,21 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
       />
       {total === 0 && <Empty>No votes yet. A random campaign is picked if nobody votes.</Empty>}
     </Panel>
+  );
+}
+
+/** "You can queue again in 12:04", ticking, then a refresh when it runs out so
+ *  the join button comes back without a reload. */
+function TimeoutNotice({ until, onDone }: { until: number; onDone: () => void }) {
+  const left = useSecondsLeft(until);
+  useEffect(() => {
+    if (left === 0) onDone();
+  }, [left === 0]);
+  const h = Math.floor(left / 3600);
+  const clock = h > 0 ? `${h}h ${String(Math.floor((left % 3600) / 60)).padStart(2, '0')}m` : fmtClock(left);
+  return (
+    <p class="queue-timeout">
+      Queue timeout for missed ready checks or no-shows. You can queue again in {clock}.
+    </p>
   );
 }
