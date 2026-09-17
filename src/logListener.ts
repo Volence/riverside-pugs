@@ -18,8 +18,11 @@ export class LogListener {
   private sock: dgram.Socket | null = null;
   private tokens = new Set<string>();
   private matchCreateSources = new Set<string>();
+  private matchCreateCheck: ((address: string) => boolean) | null = null;
 
-  constructor(private onEvent: (ev: LogEvent) => void) {}
+  /** `source` is the datagram's sender address, which self-started matches use
+   *  to tell which game server they are on. */
+  constructor(private onEvent: (ev: LogEvent, source: string) => void) {}
 
   listen(port: number, address = '0.0.0.0'): Promise<number> {
     return new Promise((resolve, reject) => {
@@ -29,13 +32,14 @@ export class LogListener {
       sock.on('message', (msg, rinfo) => {
         const ev = parseLogDatagram(msg);
         if (!ev) return;
-        if (this.tokens.has(ev.token)) return this.onEvent(ev);
+        if (this.tokens.has(ev.token)) return this.onEvent(ev, rinfo.address);
         // MATCH_CREATE is the first line that can cause database writes, and
         // UDP source addresses are trivially spoofable off-path but not from
         // the open internet against a localhost-only feed. Admission is
         // therefore pinned to the configured game server's address.
-        if (SELF_START_KINDS.has(ev.kind) && this.matchCreateSources.has(rinfo.address)) {
-          return this.onEvent(ev);
+        if (SELF_START_KINDS.has(ev.kind)
+          && (this.matchCreateSources.has(rinfo.address) || this.matchCreateCheck?.(rinfo.address))) {
+          return this.onEvent(ev, rinfo.address);
         }
       });
       sock.bind(port, address, () => {
@@ -50,6 +54,10 @@ export class LogListener {
   /** Permit the in-game match-create burst from this source address. Call once
    *  per known game server. Without it, self-started matches are ignored. */
   allowMatchCreateFrom(address: string): void { this.matchCreateSources.add(address); }
+
+  /** Also admit sources this predicate accepts, checked per datagram, so a game
+   *  server added to the database later is admitted without a restart. */
+  allowMatchCreateWhen(check: (address: string) => boolean): void { this.matchCreateCheck = check; }
 
   close(): Promise<void> {
     return new Promise((resolve) => {

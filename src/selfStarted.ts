@@ -13,9 +13,10 @@ export interface SelfStartedDeps {
   /** Only `register` is used; typed narrowly so tests need no real socket. */
   listener: { register(token: string): void };
   /** Hand the allocated match id back to the plugin (rcon `sm_pug_setid`). */
-  setMatchId: (token: string, matchId: number) => Promise<void>;
-  /** Which server row this match belongs to. Null means "refuse to adopt". */
-  resolveServerId: () => number | null;
+  setMatchId: (token: string, matchId: number, serverId: number) => Promise<void>;
+  /** Which server row a match from this datagram source belongs to. Null
+   *  means "refuse to adopt". */
+  resolveServerId: (source: string) => number | null;
   adminSteamIds?: string[];
   notify?: (msg: string) => void;
 }
@@ -26,6 +27,8 @@ interface Pending {
   roster: Map<string, { team: 'a' | 'b'; name: string }>;
   timer: ReturnType<typeof setTimeout> | null;
   committed: boolean;
+  /** Sender of the first line seen for this token. */
+  source: string;
 }
 
 /**
@@ -47,10 +50,10 @@ export class SelfStartedMatches {
 
   constructor(private deps: SelfStartedDeps) {}
 
-  handle(ev: LogEvent): void {
+  handle(ev: LogEvent, source = ''): void {
     switch (ev.kind) {
       case 'match_create': {
-        const p = this.ensure(ev.token);
+        const p = this.ensure(ev.token, source);
         p.map = ev.map;
         p.expected = ev.players;
         this.arm(ev.token, p);
@@ -62,13 +65,13 @@ export class SelfStartedMatches {
         // a sub the plugin rostered at a go-live (RosterLateJoiners). Add
         // them to the match directly; there is no burst to wait for.
         if (this.addLateJoiner(ev)) break;
-        const p = this.ensure(ev.token);
+        const p = this.ensure(ev.token, source);
         p.roster.set(ev.steamid, { team: ev.team, name: ev.name });
         this.maybeCommit(ev.token);
         break;
       }
       case 'match_create_end': {
-        const p = this.ensure(ev.token);
+        const p = this.ensure(ev.token, source);
         p.expected = ev.players;
         this.commit(ev.token);
         break;
@@ -101,10 +104,10 @@ export class SelfStartedMatches {
     return true;
   }
 
-  private ensure(token: string): Pending {
+  private ensure(token: string, source: string): Pending {
     let p = this.pending.get(token);
     if (!p) {
-      p = { map: null, expected: 0, roster: new Map(), timer: null, committed: false };
+      p = { map: null, expected: 0, roster: new Map(), timer: null, committed: false, source };
       this.pending.set(token, p);
     }
     return p;
@@ -139,7 +142,7 @@ export class SelfStartedMatches {
       return;
     }
 
-    const serverId = this.deps.resolveServerId();
+    const serverId = this.deps.resolveServerId(p.source);
     if (serverId === null) {
       console.error(`[selfStarted] no server row resolved; refusing to adopt match ${token}`);
       this.finish(token, p);
@@ -214,7 +217,7 @@ export class SelfStartedMatches {
     // Fire and forget. If this fails the match is still recorded; the dump will
     // later mismatch on match id and finishMatch logs it rather than corrupting
     // anything. Losing the row entirely would be the worse outcome.
-    void this.deps.setMatchId(token, matchId).catch((err) => {
+    void this.deps.setMatchId(token, matchId, serverId).catch((err) => {
       console.error(`[selfStarted] sm_pug_setid failed for match ${matchId}:`, err);
     });
 

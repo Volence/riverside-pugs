@@ -49,3 +49,22 @@ function setStatus(db: DB, id: number, status: ServerRow['status']): void {
 export const release = (db: DB, id: number) => setStatus(db, id, 'idle');
 export const markLive = (db: DB, id: number) => setStatus(db, id, 'live');
 export const markOffline = (db: DB, id: number) => setStatus(db, id, 'offline');
+
+/**
+ * Which game server a log datagram came from, by sender address.
+ *
+ * A remote box sends from its own public IP, which is its servers.host. The
+ * box the backend shares sends to logPublicAddress; a loopback target is
+ * sourced from 127.0.0.1, so that and the feed host both mean the server whose
+ * host IS the feed host. With a single server row, anything admitted belongs to
+ * it (the original one-box behaviour).
+ */
+export function resolveServerBySource(db: DB, source: string, feedHost: string): number | null {
+  const rows = db.prepare('SELECT id, host FROM servers ORDER BY id').all() as { id: number; host: string }[];
+  const exact = rows.find((r) => r.host === source);
+  if (exact) return exact.id;
+  if (source === '127.0.0.1' || (feedHost && source === feedHost)) {
+    return rows.find((r) => r.host === feedHost)?.id ?? (rows.length === 1 ? rows[0].id : null);
+  }
+  return null;
+}
