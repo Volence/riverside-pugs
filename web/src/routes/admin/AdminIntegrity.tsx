@@ -25,6 +25,12 @@ export function AdminIntegrity() {
   const [notes, setNotes] = useState<Record<string, string>>({});
 
   if (steamid && detail.data) {
+    // Review state is keyed by player-round (matchId/ordinal/half/slot), and each
+    // clip carries those same four fields, so a clip's triage state is a lookup
+    // into `rounds`, not something the clip row carries itself.
+    const roundsByKey = new Map(
+      detail.data.rounds.map((r) => [`${r.matchId}/${r.ordinal}/${r.half}/${r.slot}`, r]),
+    );
     return (
       <Panel>
         <button class="chip" onClick={() => setSteamid(null)}>Back to board</button>
@@ -33,14 +39,21 @@ export function AdminIntegrity() {
         <ul class="admin-list">
           {detail.data.clips.map((c) => {
             const key = `${c.matchId}/${c.ordinal}/${c.half}/${c.slot}`;
+            const round = roundsByKey.get(key);
+            const reviewed = round && round.reviewState !== 'new';
             return (
-              <li key={c.id}>
+              <li key={c.id} class={reviewed ? 'muted' : ''}>
                 <p>
                   <a href={`/match/${c.matchId}`}>Match #{c.matchId}</a>
                   {' '}map {c.ordinal} round {c.half}
                   {' '}at <strong>{(c.startMs / 1000).toFixed(1)}s</strong>
-                  <span class="muted"> · fidelity {c.score.toFixed(2)} · {(c.endMs - c.startMs) / 1000}s</span>
+                  <span class="muted"> · fidelity {c.score.toFixed(2)} · {((c.endMs - c.startMs) / 1000).toFixed(1)}s</span>
                 </p>
+                {reviewed && round && (
+                  <p class="muted">
+                    {round.reviewState}{round.reviewNote ? `: ${round.reviewNote}` : ''}
+                  </p>
+                )}
                 <div class="admin-form">
                   <input value={notes[key] ?? ''} placeholder="Review note" aria-label="Review note"
                     onInput={(e) => setNotes({ ...notes, [key]: (e.target as HTMLInputElement).value })} />
