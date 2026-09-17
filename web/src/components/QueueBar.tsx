@@ -3,6 +3,7 @@ import type { StateSnapshot } from '../api';
 import { QUEUE_SIZE } from '../queueSize';
 import { campaignName, fmtClock, secondsLeft } from '../format';
 import { useSecondsLeft } from './Countdown';
+import { playPopSound } from '../popSound';
 
 const URGENT_AT = 10;
 
@@ -102,6 +103,14 @@ export function QueueBar({ state, path }: { state: StateSnapshot | null; path: s
   const left = useSecondsLeft(deadline ?? 0);
   const urgent = (status?.urgent ?? false) && (deadline === null || left <= URGENT_AT);
   const title = status?.title ?? null;
+
+  // Chime once per ready check, keyed on its deadline so a re-render or a
+  // refreshed snapshot of the same lobby does not replay it. Lives here because
+  // this component is mounted on every page, so the pop is heard from any tab.
+  const readyDeadline = status?.kind === 'ready_check' ? deadline : null;
+  useEffect(() => {
+    if (readyDeadline !== null) playPopSound();
+  }, [readyDeadline]);
 
   useEffect(() => {
     if (!urgent) return;
