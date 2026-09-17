@@ -243,6 +243,19 @@ CREATE TABLE IF NOT EXISTS discord_link_codes (
   created_at TEXT NOT NULL,
   used_at TEXT
 );
+-- The Discord bot's own messages (queue panel, match cards, result posts), so a
+-- restart edits them instead of posting duplicates. See src/discord/messageStore.ts.
+CREATE TABLE IF NOT EXISTS discord_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (kind, ref)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
