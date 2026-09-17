@@ -293,6 +293,17 @@ CREATE TABLE IF NOT EXISTS player_notes (
   text TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- No-show and missed-ready-check offenses. Each one lengthens the next queue
+-- timeout; see src/penalties.ts.
+CREATE TABLE IF NOT EXISTS penalties (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id TEXT NOT NULL REFERENCES players(steamid),
+  kind TEXT NOT NULL CHECK (kind IN ('ready_fail', 'no_show')),
+  match_id INTEGER,
+  created_at TEXT NOT NULL,
+  cleared_by TEXT,
+  cleared_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -316,6 +327,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   noshow_minutes: '10',
   noshow_min_connected: '6',
   no_round_minutes: '30',
+  penalties_enabled: '1',
+  penalty_window_days: '7',
+  penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
 };
 
 /** Add a column if the table lacks it. No-op when already present. */

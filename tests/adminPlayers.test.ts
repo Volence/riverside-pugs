@@ -36,7 +36,7 @@ describe('admin guard', () => {
       ['GET', '/api/admin/players'], ['GET', `/api/admin/players/${P3}`], ['POST', `/api/admin/players/${P3}/ban`],
       ['POST', `/api/admin/players/${P3}/unban`], ['POST', `/api/admin/players/${P3}/activate`],
       ['POST', `/api/admin/players/${P3}/admin`], ['POST', `/api/admin/players/${P3}/unlink-discord`],
-      ['POST', `/api/admin/players/${P3}/notes`], ['GET', '/api/admin/audit'],
+      ['POST', `/api/admin/players/${P3}/notes`], ['POST', `/api/admin/players/${P3}/clear-penalties`], ['GET', '/api/admin/audit'],
     ];
     for (const [method, url] of routes) {
       expect((await app.inject({ method: method as 'GET', url, cookies: user, payload: method === 'POST' ? {} : undefined })).statusCode, url).toBe(403);
@@ -111,6 +111,18 @@ describe('admin players', () => {
     expect(detail.notes[0]).toMatchObject({ text: 'smurf of bob?', authorId: ADMIN });
     const actions = (await get('/api/admin/audit', admin)).json().actions.map((a: { action: string }) => a.action);
     expect(actions).toEqual(expect.arrayContaining(['activate', 'set_admin', 'unlink_discord', 'note']));
+  });
+
+  it('shows penalties and clears them', async () => {
+    const { recordPenalty } = await import('../src/penalties.js');
+    recordPenalty(db, P2, 'no_show', null);
+    let d = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(d.penalties).toHaveLength(1);
+    expect(d.timeout).toBeTruthy();
+    expect((await get('/api/admin/players', admin)).json().players.find((p: { steamid: string }) => p.steamid === P2).offenses).toBe(1);
+    await post(`/api/admin/players/${P2}/clear-penalties`, admin);
+    d = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(d.timeout).toBeNull();
   });
 
   it('activate does not unban', async () => {

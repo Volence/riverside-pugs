@@ -5,6 +5,7 @@ import { balanceTeams } from './balance.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
+import { activeTimeout, recordPenalty } from './penalties.js';
 import type { Orchestrator } from './orchestrator.js';
 
 export interface MatchmakerDeps {
@@ -52,6 +53,8 @@ export interface StateSnapshot {
      *  is live. */
     waitingForServer: boolean;
   } | null;
+  /** A queue timeout the viewer is serving, as an ISO time. */
+  timeout: { until: string; offenses: number } | null;
 }
 
 /** Lifecycle events the broadcast cannot carry, because it sends only an
@@ -108,6 +111,10 @@ export class Matchmaker {
   join(steamid: string): { ok: boolean; error?: string } {
     if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
     if (this.hasOpenMatch(steamid)) return { ok: false, error: 'already in an active match' };
+    const timeout = activeTimeout(this.db, steamid);
+    if (timeout) {
+      return { ok: false, error: `timed out for missed ready checks or no-shows until ${timeout.until.toISOString()}` };
+    }
     this.queue.join(steamid);
     const thresholds = safeThresholds(getSetting(this.db, 'discord_queue_thresholds'));
     if (thresholds.includes(this.queue.count())) {
@@ -192,6 +199,7 @@ export class Matchmaker {
       // renders them within seconds.
       this.failures.set(id, { ready: [...ready], notReady: [...notReady] });
       if (this.failures.size > 20) this.failures.delete(this.failures.keys().next().value!);
+      for (const p of notReady) recordPenalty(this.db, p, 'ready_fail', null);
       this.emit('lobbyFailed', id, [...ready], [...notReady]);
       this.dissolveLobby(id);
       this.queue.requeueFront(ready);
@@ -298,6 +306,10 @@ export class Matchmaker {
         ? { ...snap, players: snap.players.map(named), myVote: lobby.myVote(steamid) }
         : null,
       match,
+      timeout: (() => {
+        const t = activeTimeout(this.db, steamid);
+        return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
+      })(),
     };
   }
 
