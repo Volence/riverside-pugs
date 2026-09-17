@@ -143,4 +143,75 @@ describe('AdminIntegrity', () => {
     expect(link.getAttribute('href')).toBe('/match/42');
     expect(screen.getByText(/12\.0s/)).toBeTruthy();
   });
+
+  it('marks a clip Reviewed with the typed note, in the exact (matchId, ordinal, half, slot, state, note) order', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({
+      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
+    });
+    mockAdmin.integrityPlayer.mockResolvedValue({
+      rounds: [],
+      clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+    });
+    mockAdmin.integrityReview.mockResolvedValue({ ok: true });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
+    fireEvent.click(screen.getByText('10'));
+    await waitFor(() => expect(screen.getByPlaceholderText('Review note')).toBeTruthy());
+
+    fireEvent.input(screen.getByPlaceholderText('Review note'), { target: { value: 'looked clean on rewatch' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reviewed' }));
+
+    // Literals here are independent of the fixture above (matchId 42, ordinal 2, half 1,
+    // slot 3 were typed fresh, not read back from a mock call), so a positional swap in
+    // the component would show up as a mismatch here rather than trivially pass.
+    await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 3, 'reviewed', 'looked clean on rewatch'));
+  });
+
+  it('marks a clip Dismissed with a different state string than Reviewed', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({
+      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
+    });
+    mockAdmin.integrityPlayer.mockResolvedValue({
+      rounds: [],
+      clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+    });
+    mockAdmin.integrityReview.mockResolvedValue({ ok: true });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
+    fireEvent.click(screen.getByText('10'));
+    await waitFor(() => expect(screen.getByPlaceholderText('Review note')).toBeTruthy());
+
+    fireEvent.input(screen.getByPlaceholderText('Review note'), { target: { value: 'heard the spawn' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 3, 'dismissed', 'heard the spawn'));
+  });
+
+  it('shows a clip whose round is already dismissed as visibly reviewed, with its note', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({
+      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
+    });
+    mockAdmin.integrityPlayer.mockResolvedValue({
+      rounds: [{
+        matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
+        metrics: { fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10 },
+        computedAt: '2026-09-17T00:00:00Z', reviewState: 'dismissed', reviewNote: 'heard the spawn',
+      }],
+      clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+    });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
+    fireEvent.click(screen.getByText('10'));
+
+    await waitFor(() => expect(screen.getByText('dismissed: heard the spawn')).toBeTruthy());
+    const row = container.querySelector('li.muted') as HTMLElement | null;
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+  });
 });
