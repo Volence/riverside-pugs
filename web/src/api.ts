@@ -19,6 +19,7 @@ export interface Me {
   discord?: { id: string; name: string } | null;
   /** In the Discord server; null when not linked or not known right now. */
   discordMember?: boolean | null;
+  ban?: { reason: string; expiresAt: string | null } | null;
 }
 
 export interface NamedPlayer {

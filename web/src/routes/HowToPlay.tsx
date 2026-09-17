@@ -25,6 +25,10 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>You get a queue timeout. Missing a ready check, or never connecting to a match that gets cancelled for no-shows, costs 5 minutes the first time, then 15 minutes, then an hour, then a day for each one after that. Offenses older than a week stop counting. If it was a genuine accident, ask an admin to clear it.</>,
   },
   {
+    q: 'What happens if I disconnect during a match?',
+    a: <>The game pauses and you get 5 minutes to reconnect. That 5 minutes is for the <strong>whole match</strong>, not each disconnect, so every time you drop it keeps counting down from where it was. When everyone is back the game unpauses on its own. If you run out, the match ends as an abandon: nobody's rating changes, and you are banned from queueing for a day (3 days for a second abandon within a month, then a week). If it was a genuine crash, message an admin to appeal.</>,
+  },
+  {
     q: 'I left the queue on purpose. Is that a penalty?',
     a: <>No. Leaving the queue before it pops is always fine. Only an ignored ready check or a no-show counts.</>,
   },

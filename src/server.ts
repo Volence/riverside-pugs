@@ -1,3 +1,4 @@
+import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
@@ -308,6 +309,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (ev.kind === 'match_end') {
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
           if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
+          return;
+        }
+        if (ev.kind === 'abandon') {
+          // Ends a match and bans someone, so it is handled here with the
+          // result path rather than in the cosmetic feed below. handleAbandon
+          // confirms over rcon before acting.
+          const orch = orchestrator as RealOrchestrator;
+          void handleAbandon(
+            { db: deps.db, releaser, confirm: (serverId, steamid) => orch.confirmAbandon(serverId, steamid) },
+            ev.token, ev.steamid,
+          ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
+            .catch((err) => console.error('[abandon] failed:', err));
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {

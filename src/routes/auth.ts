@@ -10,6 +10,7 @@ import type { DiscordApi } from '../discord/api.js';
 import { applyGate } from '../discord/gate.js';
 import type { GuildMembership } from '../discord/membership.js';
 import { publishAdminEvent } from '../adminFeed.js';
+import { activeBan } from '../admin/players.js';
 
 const NEXT_COOKIE = 'pug_next';
 
@@ -83,6 +84,10 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       isAdmin: player.is_admin === 1,
       discordEnabled: config.discord !== null,
       discord: player.discord_id ? { id: player.discord_id, name: player.discord_name ?? '' } : null,
+      ban: player.status === 'banned' ? (() => {
+        const b = activeBan(db, steamid);
+        return b ? { reason: b.reason, expiresAt: b.expiresAt } : null;
+      })() : null,
       // null: not linked, or the member list is not loaded yet.
       discordMember: player.discord_id ? opts.membership?.isMember(player.discord_id) ?? null : null,
     };

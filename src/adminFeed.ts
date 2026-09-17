@@ -13,7 +13,8 @@ export type AdminEvent =
   | { kind: 'admin_action'; adminId: string; action: string; target: string; detail: Record<string, unknown> }
   | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
-  | { kind: 'problem'; text: string; matchId?: number };
+  | { kind: 'problem'; text: string; matchId?: number }
+  | { kind: 'abandon'; steamid: string; matchId: number; minutes: number };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -22,6 +23,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   penalty: 'admin_feed_penalties',
   account: 'admin_feed_accounts',
   problem: 'admin_feed_problems',
+  abandon: 'admin_feed_penalties',
 };
 
 type Listener = (e: AdminEvent) => void;
