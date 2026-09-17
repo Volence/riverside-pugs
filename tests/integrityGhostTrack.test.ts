@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { bearing } from '../src/integrity/geometry.js';
-import { trackFidelity, trackWindows, pickClips, type TrackWindow } from '../src/integrity/ghostTrack.js';
+import { trackFidelity, trackWindows, pickClips, occupancy, analyzeRound, type TrackWindow } from '../src/integrity/ghostTrack.js';
+import { PriorBuilder, cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 
 function blank(slot: number): PlayerSample {
   return {
@@ -135,5 +136,76 @@ describe('pickClips', () => {
   it('keeps at most CLIPS_PER_ROUND', () => {
     const many = Array.from({ length: TUNING.CLIPS_PER_ROUND + 4 }, (_, i) => win(i * 5000, i * 5000 + 2000, 0.9));
     expect(pickClips(many)).toHaveLength(TUNING.CLIPS_PER_ROUND);
+  });
+});
+
+/** A prior in which the cell the ghost occupies is stared at `p` of the time. */
+function priorWhereGhostIs(frames: Frame[], p: number): PriorTable {
+  const g = frames[0].players[4];
+  const c = cellOf(g.x, g.y);
+  return { frames: 1000, counts: new Map([[cellKey(c.cx, c.cy), Math.round(1000 * p)]]) };
+}
+
+describe('occupancy', () => {
+  it('returns null when there is no usable prior', () => {
+    expect(occupancy(round(40, (_i, b) => b), 0, null)).toBeNull();
+  });
+
+  it('is strongly positive when the player is on a ghost nobody normally looks at', () => {
+    const frames = round(40, (_i, b) => b);
+    const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.01));
+    expect(r).not.toBeNull();
+    expect(r!.z).toBeGreaterThan(3);
+  });
+
+  it('is near zero when the player is on a ghost that sits where everyone stares', () => {
+    // This is the owner's objection made into a test: a famous spawn spot must
+    // earn almost nothing, because the prior already contains it.
+    const frames = round(40, (_i, b) => b);
+    const cells = new Map<string, number>();
+    for (const f of frames) {
+      const g = f.players[4];
+      const c = cellOf(g.x, g.y);
+      cells.set(cellKey(c.cx, c.cy), 1000);
+    }
+    const r = occupancy(frames, 0, { frames: 1000, counts: cells });
+    expect(r).not.toBeNull();
+    expect(Math.abs(r!.z)).toBeLessThan(1);
+  });
+
+  it('counts no observation when the player looks away from the ghost', () => {
+    const frames = round(40, (_i, b) => b + 90);
+    const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.01));
+    expect(r!.observed).toBe(0);
+  });
+});
+
+describe('analyzeRound', () => {
+  it('returns metrics and clips per survivor slot', () => {
+    const frames = round(40, (_i, b) => b);
+    const { metrics, clips } = analyzeRound(frames, [0], priorWhereGhostIs(frames, 0.01));
+    expect(metrics.get(0)!.fidMax).toBeGreaterThan(0.9);
+    expect(clips.get(0)!.length).toBeGreaterThan(0);
+  });
+
+  it('ranks a tracking survivor above a teammate who is not', () => {
+    const frames = round(40, (_i, b) => b);
+    for (const f of frames) {
+      f.players[1] = { ...f.players[1], slot: 1, state: STATE.PRESENT | STATE.ALIVE, yaw: 0 };
+    }
+    const { metrics } = analyzeRound(frames, [0, 1], priorWhereGhostIs(frames, 0.01));
+    expect(metrics.get(0)!.teamRank).toBe(1);
+    expect(metrics.get(0)!.teamGap!).toBeGreaterThan(0);
+  });
+
+  it('leaves occupancy null and still reports fidelity when there is no prior', () => {
+    const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
+    expect(metrics.get(0)!.occZ).toBeNull();
+    expect(metrics.get(0)!.fidMax).toBeGreaterThan(0.9);
+  });
+
+  it('builds a round prior from the survivors it saw, for leave-one-round-out', () => {
+    const { roundPrior } = analyzeRound(round(40, (_i, b) => b), [0], null);
+    expect(roundPrior.frames).toBe(40);
   });
 });
