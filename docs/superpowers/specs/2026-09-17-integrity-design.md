@@ -35,19 +35,26 @@ over every match already on disk.
 4. **The suspicion percentage is admin-only and labeled theoretical.** The owner asked for
    it and accepts that framing. Per-metric percentiles sit next to it; the composite is a
    sort key, not a claim.
-5. **Ghost tracking is scored relative to the other survivors in the same frame.** If
-   everyone is aiming at the chokepoint, nobody stands out. This is what keeps map
-   knowledge and pre-aiming out of the numbers.
-6. **Correlation, not proximity.** The statistic that matters is whether the survivor's
-   yaw rate tracks the rate needed to follow the ghost. A pre-aimed corner is a static
-   crosshair and scores near zero.
-7. **A separate plugin, not `pug-match.sp`.** That file runs ranked matches and is over
+5. **A cheat is impossible information or impossible motor output. Everything else is
+   skill.** The tell is a discontinuity at an information boundary: a behavior change
+   landing exactly on an event the player could not have known about. A good player is
+   aimed at the right place early and continuously because they predicted it. A cheater
+   is aimed at the wrong place and becomes correct the instant information arrives.
+6. **Correlation, not proximity.** The backbone statistic is whether the survivor's yaw
+   rate tracks the rate needed to follow the ghost. A pre-aimed corner is a static
+   crosshair, has no variance, and scores near zero.
+7. **Occupancy is scored against an empirical aim prior, never raw.** Spawns are not
+   uniform and good players pre-aim the obvious spots, so "aims where SI actually are" is
+   partly just map knowledge. The prior is what removes it. See section 1.
+8. **Relative to the other survivors in the same frame**, as a second control on top of
+   the prior. If everyone is watching the chokepoint, nobody stands out.
+9. **A separate plugin, not `pug-match.sp`.** That file runs ranked matches and is over
    three thousand lines. Per-tick work goes in its own plugin that can be unloaded
    instantly without touching match reporting.
-8. **Pistol: measure for the first week, clamp after.** Nobody knows what a real human
+10. **Pistol: measure for the first week, clamp after.** Nobody knows what a real human
    clicking interval looks like on this server. A guessed floor either misses the
    scripters or eats legitimate shots and feels like a broken gun.
-9. **Ceiling pouncing is deferred.** The fix depends on an unanswered question about
+11. **Ceiling pouncing is deferred.** The fix depends on an unanswered question about
    whether mid-air re-pounces off walls are legitimate in the ruleset.
 
 ## Scope
@@ -102,28 +109,84 @@ false positive generator, not for tidiness.
   direction as the ghost. When something visible is in the way, the frame proves nothing
   and is dropped.
 
-### The three metrics
+### The aim prior, which is what makes occupancy mean anything
 
-**A. Tracking correlation.** Over a sliding window of `W` frames (20, which is 2 seconds
-at 10 Hz) in which the same ghost stays eligible throughout and `|err|` stays under
+Spawns are not uniform. Some spots are obviously better than others, players learn them,
+and they pre-aim them. So "this player aims where SI actually are" is contaminated by map
+knowledge, and a raw occupancy number ranks the people who know the map best. Controlling
+for it is not a refinement, it is the difference between a working metric and a list of
+your good players.
+
+The control is empirical and comes out of the same replay files, so it costs no new data.
+
+Grid each map into `CELL` (256 unit) cells in XY, ignoring Z. Pooled over every round ever
+recorded on that map, compute `aimPrior(c)`: the fraction of survivor-frames in which some
+survivor's yaw wedge covers cell `c`. That grid is "the obvious spots", derived from
+behavior rather than hand-labeled, and it already contains every place people stare because
+SI tend to come from there.
+
+The prior is built **excluding the subject player's own frames**, so a cheater cannot
+inflate the baseline they are measured against.
+
+Occupancy then becomes a calibration test rather than a count. Over the eligible frames of
+a player-round, with the ghost in cell `c`:
+
+- `expected` is the sum of `aimPrior(c)` across those frames: what map knowledge alone
+  predicts.
+- `observed` is the count of frames where the player was actually within `E_DWELL` of the
+  ghost.
+- The statistic is the excess of observed over expected, as a z-score against the binomial
+  spread of `expected`.
+
+A player exploiting nothing but map knowledge scores zero excess **by construction**,
+because the prior already contains their map knowledge. Aiming at a ghost sitting in the
+famous doorway earns almost nothing, since everyone aims there. Being on a ghost that is
+somewhere nobody normally looks is worth a great deal, and that falls out of the same
+arithmetic without a second mechanism: rare cells have a low prior, so they carry most of
+the excess.
+
+**Data sufficiency.** A map with fewer than `MIN_PRIOR_ROUNDS` (20 player-rounds) gets no
+occupancy score at all, only correlation. With roughly 35 matches in hand, several maps
+will not qualify, and scoring them off a thin prior is worse than not scoring them. The
+analyzer records which maps were skipped and why.
+
+**Known weakness.** Without geometry the yaw wedge does not stop at walls, so the prior and
+the occupancy both include aim that is really into a wall. This inflates both sides of the
+comparison rather than one, so it costs sensitivity rather than creating false positives.
+The plugin phase has real traces and does not inherit it.
+
+### The metrics
+
+**A. Tracking correlation.** The backbone, and the one the owner's spawn-knowledge
+objection does not touch at all. Over a sliding window of `W` frames (20, which is 2
+seconds at 10 Hz) in which the same ghost stays eligible throughout and `|err|` stays under
 `E_TRACK` (12 degrees) throughout, the Pearson correlation between the survivor's
 frame-to-frame yaw delta and the frame-to-frame delta of `bearing(s, g)`.
 
-This is the metric that is hard to explain away. Holding an angle scores near zero because
-a static crosshair has no variance to correlate. Following an invisible target that is
-moving scores high, and the more the ghost moves the harder it is to fake.
+Pre-aiming a spawn spot is a static crosshair. It has no variance, so it cannot correlate
+with anything, and it scores near zero no matter how well chosen the spot was. Following an
+invisible target that is moving scores high, and the more the ghost moves the harder the
+result is to produce by accident.
 
-Recorded per player-round: the maximum window correlation and the 95th percentile of
-window correlations.
+Recorded per player-round: the maximum window correlation and the 95th percentile of window
+correlations.
 
-**B. Relative aim share.** Over eligible frames, the fraction in which this survivor has
-the smallest `|err|` to any ghost among all alive survivors, divided by `1 / N` where `N`
-is the number of alive survivors in that frame. A value near 1 is what chance looks like.
-This is the self-normalizing metric: a chokepoint lifts everyone's raw numbers and moves
-nobody's share.
+**B. Prior-corrected occupancy.** The z-score defined above. Replaces the "relative aim
+share" and "near-miss dwell" metrics of the first draft, which measured map knowledge as
+much as anything else.
 
-**C. Near-miss dwell.** Seconds with `|err|` under `E_DWELL` (5 degrees), divided by total
-eligible ghost-seconds, expressed as a ratio to the round's survivor mean.
+**C. Team-relative occupancy.** B computed for every alive survivor in the round, expressed
+as this player's rank and gap against their own team. A second control on a different axis
+from the prior: the prior removes what is normal for the map across all history, this
+removes what was normal for this specific round, including whatever the director happened
+to do that game.
+
+### Anti-metrics, written down so nobody adds them later
+
+Accuracy, headshot rate, kills, damage per shot, skeet rate, and every other measure of
+outcome quality. These measure skill. A list sorted by any of them is a list of your best
+players, which is the exact failure this design exists to avoid. They may appear in the
+admin UI as context next to a flagged clip. They must never enter the composite.
 
 ### Clips
 
@@ -132,9 +195,9 @@ start and end `tMs`, the ghost's slot, the correlation, the mean `|err|`, the me
 distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows per
 player-round are kept.
 
-The eight constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `W`, `E_TRACK`,
-`E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live in one exported object so tuning is a single
-edit and the tests can pin them.
+The ten constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `CELL`,
+`MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live in one
+exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring
 
@@ -152,7 +215,19 @@ integrity_clips    id PRIMARY KEY, match_id, ordinal, half, slot, steamid,
 integrity_reviews  (match_id, ordinal, half, slot) PRIMARY KEY
                    state TEXT ('new'|'reviewed'|'dismissed'), note,
                    reviewed_by, reviewed_at
+
+integrity_aim_prior (map, cell_x, cell_y) PRIMARY KEY
+                   p REAL, frames INTEGER, rounds INTEGER, analyzer_version
 ```
+
+`integrity_aim_prior` is the cached grid from section 1. It is derived, so it is rebuilt
+wholesale rather than updated incrementally, and it is rebuilt whenever new rounds land for
+a map or the analyzer version changes. A map spanning 16000 units each way is about 4000
+cells at 256 units, so the whole pool across every campaign is tens of thousands of rows.
+
+Order matters when recomputing: the prior must be rebuilt before any round is scored
+against it, because a player's own frames are excluded from their prior and the exclusion
+is computed at scoring time from `frames`.
 
 **Clips are derived and disposable; review state is not.** A re-analysis deletes and
 rewrites every row in `integrity_rounds` and `integrity_clips` for the rounds it covers.
@@ -241,6 +316,23 @@ What it measures, per tick in `OnPlayerRunCmd`:
 - On `weapon_fire` and `player_hurt`, the preceding N tick deltas are snapshotted so a shot
   carries its own approach profile.
 
+Two of those deltas matter more than the rest, and both are information-boundary metrics in
+the sense of decision 5. Neither is possible at 10 Hz, which is why they live here.
+
+- **Reaction after line of sight opens.** The tick at which an SI first becomes visible to a
+  survivor, and the delay until that survivor's crosshair arrives within `E_DWELL` or until
+  they fire. Human reaction has a biological floor around 150 to 200 ms. Consistently
+  landing inside 80 ms is not fast reaction, it is foreknowledge, and unlike every skill
+  metric this one is bounded by the human rather than by practice. Recorded as a
+  distribution per player, never as a single event: one fast reaction is a guess that paid
+  off.
+- **Silent aim, the one-tick excursion.** The view angle spikes onto a target for exactly
+  the tick of the shot and returns on the next tick. No human produces a one-tick angular
+  excursion synchronised to their own trigger pull. This is the strongest aimbot signature
+  available and it is strictly better than raw snap speed, which a good flick can imitate.
+  A related and weaker form: a flick with no settle. Humans overshoot and correct, so the
+  tell is the missing correction phase rather than the speed of the approach.
+
 Line of sight, which is the part the analyzer cannot do, extends the ghost metric to live
 SI tracked through walls. **Traces are not free and this server's tickrate history is a
 crash history** (`cfg/Reloadables/server_custom_convars.cfg` carries the 128 tick segfault
@@ -293,3 +385,12 @@ re-assert `sm_pug_auto_track` and `sm_pug_roster_at_live`.
   baseline.
 - **Eye height.** The analyzer assumes a fixed eye offset and no crouch state. Confirm the
   yaw-only design actually sidesteps this rather than merely reducing it.
+- **That the aim prior actually absorbs spawn knowledge.** The direct test: compute
+  occupancy with and without the prior correction over the same history. If the two
+  rankings agree, the prior is doing nothing and the correction is not working. They should
+  disagree, and the players who fall furthest when the prior is applied are the ones whose
+  raw score was map knowledge.
+- **Prior coverage.** How many maps clear `MIN_PRIOR_ROUNDS` against the current history.
+  If it is only two or three, occupancy is not yet a usable metric and correlation carries
+  the whole retrospective pass until more matches accumulate. That is an acceptable
+  outcome and should be reported rather than worked around by lowering the threshold.
