@@ -59,8 +59,10 @@ export interface InteractionReply {
 export interface SlashOption {
   name: string;
   description: string;
-  type: 'user' | 'string';
+  type: 'user' | 'string' | 'integer';
   required?: boolean;
+  /** Fixed choices, shown as a picker. */
+  choices?: { name: string; value: string }[];
 }
 
 export interface SlashCommandDef {
@@ -91,5 +93,7 @@ export interface BotTransport {
   remove(channelId: string, messageId: string): Promise<void>;
   onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>): void;
   registerCommands(defs: SlashCommandDef[]): Promise<void>;
+  /** Load the server's member list, then report joins and leaves. */
+  watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void>;
   voice: VoiceOps;
 }

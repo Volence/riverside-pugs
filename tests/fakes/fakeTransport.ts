@@ -48,6 +48,13 @@ export class FakeTransport implements BotTransport {
     this.commands = defs;
   }
 
+  guildMembers: string[] = [];
+  memberHandlers: { all(ids: string[]): void; add(id: string): void; remove(id: string): void } | null = null;
+  async watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void> {
+    this.memberHandlers = h;
+    h.all(this.guildMembers);
+  }
+
   /** Messages still present, oldest first. */
   live(): FakeMessage[] {
     return this.messages.filter((m) => !m.deleted);

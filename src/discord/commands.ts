@@ -5,6 +5,7 @@ import { CAMPAIGNS } from '../campaigns.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
+import { fileReport, reportEligibility } from '../reports.js';
 import { linkPrompt } from './controller.js';
 import { escapeName } from './presenter.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
@@ -29,6 +30,25 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   },
   { name: 'queue', description: 'Who is in the queue right now' },
   { name: 'link', description: 'Link your Discord to your Steam account' },
+  {
+    name: 'report',
+    description: 'Privately report a player from a match you played together',
+    options: [
+      { name: 'player', description: 'Who you are reporting', type: 'user', required: true },
+      {
+        name: 'reason', description: 'What happened', type: 'string', required: true,
+        choices: [
+          { name: 'Griefing / throwing', value: 'griefing' },
+          { name: 'Cheating', value: 'cheating' },
+          { name: 'Toxicity / harassment', value: 'toxicity' },
+          { name: 'AFK / left the game', value: 'afk' },
+          { name: 'Something else', value: 'other' },
+        ],
+      },
+      { name: 'details', description: 'When, which map, what they did', type: 'string' },
+      { name: 'match', description: 'Match number (default: your latest match together)', type: 'integer' },
+    ],
+  },
 ];
 
 const COLOR = 0xb3261e;
@@ -58,6 +78,7 @@ export async function handleCommand(deps: CommandDeps, i: Cmd): Promise<Interact
     case 'matches': return matches(deps, i);
     case 'queue': return queue(deps);
     case 'link': return link(deps, i);
+    case 'report': return report(deps, i);
     default: return priv({ content: 'Unknown command.' });
   }
 }
@@ -169,4 +190,34 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
     return priv({ content: `You are linked to **${escapeName(player.name)}**. Disconnect from your profile on the website if that is wrong.` });
   }
   return linkPrompt({ ...deps }, i.userId, i.userName);
+}
+
+/** Always private: nobody else in the channel learns who reported whom. */
+function report(deps: CommandDeps, i: Cmd): InteractionReply {
+  const reporter = playerByDiscordId(deps.db, i.userId);
+  if (!reporter) return linkPrompt({ ...deps }, i.userId, i.userName);
+  const target = playerByDiscordId(deps.db, i.options.player ?? '');
+  if (!target) {
+    return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report a player on the match page instead.' });
+  }
+  if (target.steamid === reporter.steamid) return priv({ content: 'You cannot report yourself.' });
+
+  let matchId: number | null = i.options.match ? Number(i.options.match) : null;
+  if (matchId === null) {
+    const shared = deps.db.prepare(
+      `SELECT m.id FROM matches m
+       JOIN match_players a ON a.match_id = m.id AND a.player_id = ?
+       JOIN match_players b ON b.match_id = m.id AND b.player_id = ?
+       WHERE m.state IN ('live', 'completed', 'aborted') ORDER BY m.id DESC LIMIT 10`,
+    ).all(reporter.steamid, target.steamid) as { id: number }[];
+    matchId = shared.find((m) => reportEligibility(deps.db, m.id, reporter.steamid).canReport)?.id ?? null;
+    if (matchId === null) {
+      return priv({ content: `You have not played a match with ${escapeName(target.name)} in the last 48 hours. Reports have to be about a match you were both in.` });
+    }
+  }
+  const r = fileReport(deps.db, matchId, reporter.steamid, {
+    targetId: target.steamid, category: i.options.reason, text: i.options.details ?? '',
+  });
+  if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
+  return priv({ content: `Reported ${escapeName(target.name)} for match #${matchId}. Thanks, an admin will look at it. They will not be told who reported them.` });
 }

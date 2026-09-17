@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import type { ServerReleaser } from './serverRelease.js';
 import { recordPenalty } from './penalties.js';
+import { publishAdminEvent } from './adminFeed.js';
 
 /**
  * Stamp the first time a rostered player is seen on the match server.
@@ -90,6 +91,12 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
         .all(r.id) as { player_id: string }[];
       for (const a of absent) recordPenalty(db, a.player_id, 'no_show', r.id);
     }
+    publishAdminEvent({
+      kind: 'problem', matchId: r.id,
+      text: r.rounds === 0 && r.connected >= minConnected
+        ? `Match #${r.id} aborted: nobody readied up in game after ${Math.round(r.age_min)} minutes.`
+        : `Match #${r.id} aborted for no-shows: only ${r.connected} connected after ${Math.round(r.age_min)} minutes.`,
+    });
     console.warn(
       `[noShow] aborted match ${r.id}: ${r.connected} connected, ${r.rounds} rounds, ${Math.round(r.age_min)} min live`,
     );

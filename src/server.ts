@@ -1,3 +1,9 @@
+import { AdminFeedPoster } from './discord/adminFeedPoster.js';
+import { playerByDiscordId } from './players.js';
+import { applyGate } from './discord/gate.js';
+import { GuildMembership } from './discord/membership.js';
+import { makeQueueGate } from './queueGate.js';
+import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
@@ -145,6 +151,10 @@ export async function finishWithRetry(
   // and the dump is the only copy. It is inlined below rather than left on the
   // box, so it survives in the log whether or not anyone reaches the server in
   // time, and whether or not the plugin is reloaded first.
+  publishAdminEvent({
+    kind: 'problem', matchId,
+    text: `Match #${matchId} was played but its result could not be collected, so it was aborted with no rating change. ${dump ? 'The dump is in the server log for scripts/recover-match.ts.' : 'The dump could not be collected either.'}`,
+  });
   console.error(
     `[orchestrator] INCIDENT: match ${matchId} was played but never collected after ` +
     `${delays.length} retries. It has been aborted and its server released so the queue can ` +
@@ -210,6 +220,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
   await app.register(fastifyStatic, { root: staticRoot });
 
+  const membership = new GuildMembership();
   const discordApi: DiscordApi | null = deps.config.discord
     ? deps.discordApi ?? fetchDiscordApi(deps.config.discord)
     : null;
@@ -219,6 +230,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     verifyLogin: deps.verifyLogin ?? realVerifyLogin,
     fetchPersona: deps.fetchPersona ?? realFetchPersona,
     discordApi,
+    membership,
   });
   await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
 
@@ -479,6 +491,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     broadcast: (event) => hub.broadcast(event),
     orchestrator,
     notify,
+    queueGate: makeQueueGate(deps.db, deps.config.discord !== null, membership),
   });
   app.decorate('matchmaker', matchmaker);
   // Sweep matches the game server has forgotten. Without it a plugin reload,
@@ -529,6 +542,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // The Discord bot. Not awaited: logging in takes seconds and the website
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
+  let adminFeed: AdminFeedPoster | null = null;
+  // Someone who linked before joining the server is let in the moment they join.
+  membership.onAdd((userId) => {
+    const p = playerByDiscordId(deps.db, userId);
+    if (p && p.status === 'invited' && discordApi) void applyGate(deps.db, discordApi, p.steamid);
+  });
   if (botEnabled(deps.config)) {
     startBot({
       config: deps.config,
@@ -546,6 +565,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         },
       },
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
+      membership,
+      onConnected: (t) => {
+        adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        adminFeed.start();
+      },
+      extraButtons: {
+        'r:': (i) => adminFeed!.handleButton(i),
+      },
       commands: {
         defs: COMMAND_DEFS,
         handle: (i) => handleCommand({ db: deps.db, matchmaker, publicUrl: deps.config.publicUrl }, i),
@@ -556,6 +583,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
 
   app.addHook('onClose', async () => {
+    adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(pruneTimer);

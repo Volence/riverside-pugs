@@ -64,3 +64,24 @@ describe('startBot', () => {
     await bot!.stop();
   });
 });
+
+describe('startBot extras', () => {
+  it('loads the member list and routes prefixed buttons', async () => {
+    const { GuildMembership } = await import('../src/discord/membership.js');
+    const s = setup(ENV);
+    s.t.guildMembers = ['1', '2'];
+    const membership = new GuildMembership();
+    let connected = false;
+    const bot = await startBot({
+      ...s, connect: async () => s.t, membership,
+      onConnected: () => { connected = true; },
+      extraButtons: { 'r:': async () => ({ ephemeral: true, payload: { content: 'report button', embeds: [], components: [] } }) },
+    });
+    expect(connected).toBe(true);
+    expect(membership.isMember('2')).toBe(true);
+    const r = await s.t.handler!({ kind: 'button', customId: 'r:1:resolve', userId: '1', userName: 'x' });
+    expect(r.payload.content).toBe('report button');
+    await bot!.stop();
+    expect(membership.isMember('2')).toBeNull();
+  });
+});

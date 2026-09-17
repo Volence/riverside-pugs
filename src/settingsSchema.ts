@@ -19,7 +19,7 @@ export interface SettingDef {
   key: string;
   label: string;
   help: string;
-  group: 'Queue' | 'Match' | 'Discord' | 'Penalties' | 'Replays';
+  group: 'Queue' | 'Match' | 'Discord' | 'Admin feed' | 'Penalties' | 'Replays';
   type: SettingType;
   /** Masked in the panel until revealed, and never written to the audit log. */
   secret?: boolean;
@@ -37,6 +37,14 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'penalty_window_days', group: 'Penalties', label: 'Penalty window (days)', help: 'Offenses older than this stop counting.', type: { kind: 'int', min: 1, max: 60 } },
   { key: 'penalty_minutes', group: 'Penalties', label: 'Timeout ladder (minutes)', help: 'Timeout for the 1st, 2nd, 3rd... offense in the window. The last value repeats.', type: { kind: 'intList', min: 1, max: 43200, maxItems: 8 } },
   { key: 'discord_voice_enabled', group: 'Discord', label: 'Team voice channels', help: 'Create Team A and Team B voice channels per match and move players in.', type: { kind: 'bool' } },
+  { key: 'require_discord_to_queue', group: 'Discord', label: 'Require Discord to queue', help: 'Players must have Discord linked and be in the Discord server to join the queue.', type: { kind: 'bool' } },
+  { key: 'discord_invite_url', group: 'Discord', label: 'Discord invite link', help: 'Permanent invite shown on How to play and the signup checklist.', type: { kind: 'string', maxLength: 200, allowEmpty: true } },
+  { key: 'discord_admin_channel_id', group: 'Discord', label: 'Admin channel id', help: 'Private channel for the admin feed. Empty turns the feed off.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'admin_feed_reports', group: 'Admin feed', label: 'Reports', help: 'Post new player reports with Resolve and Dismiss buttons.', type: { kind: 'bool' } },
+  { key: 'admin_feed_actions', group: 'Admin feed', label: 'Admin actions', help: 'Bans, unbans, voids, aborts, setting changes.', type: { kind: 'bool' } },
+  { key: 'admin_feed_penalties', group: 'Admin feed', label: 'Penalties', help: 'Missed ready checks and no-shows.', type: { kind: 'bool' } },
+  { key: 'admin_feed_accounts', group: 'Admin feed', label: 'Accounts', help: 'Players linking Discord and being activated.', type: { kind: 'bool' } },
+  { key: 'admin_feed_problems', group: 'Admin feed', label: 'Problems', help: 'Matches aborted by the reapers, lost results, voice channel failures.', type: { kind: 'bool' } },
   { key: 'discord_required_role_id', group: 'Discord', label: 'Required role id', help: 'Empty: any member of the Discord server is let in on linking. A role id: they must also have that role.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'discord_webhook_url', group: 'Discord', label: 'Webhook URL', help: 'Legacy announcements. Unused while the bot is running.', type: { kind: 'string', maxLength: 300, allowEmpty: true }, secret: true },
   { key: 'discord_queue_thresholds', group: 'Discord', label: 'Webhook queue thresholds', help: 'Queue sizes the legacy webhook announces.', type: { kind: 'intList', min: 1, max: 8, maxItems: 8 } },

@@ -4,6 +4,7 @@ import type { Config } from '../config.js';
 import type { DB } from '../db.js';
 import type { DiscordApi } from '../discord/api.js';
 import { applyGate } from '../discord/gate.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import { getSession } from '../session.js';
 import { consumeLinkCode, getPlayer, linkDiscord, unlinkDiscord } from '../players.js';
 
@@ -78,6 +79,7 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     }
     const linked = linkDiscord(db, steamid, user.id, user.globalName ?? user.username);
     if (!linked.ok) return back('taken');
+    publishAdminEvent({ kind: 'account', steamid, what: 'linked', discordName: user.globalName ?? user.username });
     await applyGate(db, api!, steamid);
     return back('linked');
   });
@@ -101,6 +103,7 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     if (!spent) return reply.code(400).send({ error: 'invalid_code' });
     const linked = linkDiscord(db, steamid, spent.discordId, spent.discordName);
     if (!linked.ok) return reply.code(409).send({ error: 'discord_taken' });
+    publishAdminEvent({ kind: 'account', steamid, what: 'linked', discordName: spent.discordName });
     const active = await applyGate(db, api!, steamid);
     return { ok: true, active, discordName: spent.discordName };
   });

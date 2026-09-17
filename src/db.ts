@@ -337,6 +337,16 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_required_role_id: '',
   // 1: the bot makes Team A / Team B voice channels per match and moves players in.
   discord_voice_enabled: '1',
+  // Queueing needs a linked Discord account that is in the guild.
+  require_discord_to_queue: '1',
+  discord_invite_url: '',
+  // Private channel the bot posts the admin feed to; empty turns the feed off.
+  discord_admin_channel_id: '',
+  admin_feed_reports: '1',
+  admin_feed_actions: '1',
+  admin_feed_penalties: '1',
+  admin_feed_accounts: '1',
+  admin_feed_problems: '1',
   replay_retention_days: '90',
   replay_free_floor_gb: '10',
   noshow_minutes: '10',

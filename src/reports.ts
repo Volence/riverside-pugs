@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { publishAdminEvent } from './adminFeed.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'other'] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -53,19 +54,20 @@ export function fileReport(
     `INSERT INTO reports (match_id, reporter_id, target_id, category, text, status, created_at)
      VALUES (?, ?, ?, ?, ?, 'open', ?)`,
   ).run(matchId, reporter, target.steamid, body.category, text, new Date().toISOString()).lastInsertRowid);
+  publishAdminEvent({ kind: 'report', reportId: id });
   return { ok: true, id };
 }
 
-export function listReports(db: DB, status: string) {
+export function listReports(db: DB, status: string, onlyId: number | null = null) {
   return (db.prepare(
     `SELECT r.*, pr.name AS reporter_name, pt.name AS target_name, m.campaign
      FROM reports r
      LEFT JOIN players pr ON pr.steamid = r.reporter_id
      LEFT JOIN players pt ON pt.steamid = r.target_id
      LEFT JOIN matches m ON m.id = r.match_id
-     WHERE (? = 'all' OR r.status = ?)
+     WHERE (? = 'all' OR r.status = ?) AND (? IS NULL OR r.id = ?)
      ORDER BY r.id DESC LIMIT 200`,
-  ).all(status, status) as {
+  ).all(status, status, onlyId, onlyId) as {
     id: number; match_id: number; reporter_id: string; target_id: string; category: string; text: string; status: string;
     resolved_by: string | null; resolution_note: string | null; created_at: string; resolved_at: string | null;
     reporter_name: string | null; target_name: string | null; campaign: string | null;
@@ -79,4 +81,8 @@ export function listReports(db: DB, status: string) {
 export function resolveReport(db: DB, id: number, by: string, status: 'resolved' | 'dismissed', note: string): boolean {
   return db.prepare('UPDATE reports SET status = ?, resolved_by = ?, resolution_note = ?, resolved_at = ? WHERE id = ?')
     .run(status, by, note, new Date().toISOString(), id).changes > 0;
+}
+
+export function getReport(db: DB, id: number) {
+  return listReports(db, 'all', id)[0] ?? null;
 }
