@@ -136,12 +136,14 @@ describe('AdminIntegrity', () => {
     fireEvent.click(screen.getByText('10'));
     await waitFor(() => expect(mockAdmin.integrityPlayer).toHaveBeenCalledWith('10', expect.anything()));
 
-    // Evidence, not a URL that doesn't exist: /match/:id is a real route and the
-    // replay viewer lives inside it, so the clip links there with the timestamp
-    // as plain text alongside it rather than a fabricated /replay/ deep link.
+    // Evidence, not a URL that doesn't exist: /match/:id is a real route, and
+    // the clip's ordinal, half and start time ride along as query params so
+    // MatchDetail can pick the round and seek the viewer straight to the
+    // flagged moment instead of a reviewer scrubbing to it by hand.
     const link = await screen.findByRole('link', { name: /Match #42/ });
-    expect(link.getAttribute('href')).toBe('/match/42');
-    expect(screen.getByText(/12\.0s/)).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/match/42?ordinal=1&half=1&t=12000');
+    expect(screen.getByText(/fidelity 0\.90/)).toBeTruthy();
+    expect(screen.getByText(/2\.0s/)).toBeTruthy();
   });
 
   it('marks a clip Reviewed with the typed note, in the exact (matchId, ordinal, half, slot, state, note) order', async () => {

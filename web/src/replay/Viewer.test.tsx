@@ -82,9 +82,9 @@ afterEach(() => {
   tooltipRenders = 0;
 });
 
-function mount(timeline: TimelineEntry[] = DEFAULT_TIMELINE) {
+function mount(timeline: TimelineEntry[] = DEFAULT_TIMELINE, seekMs?: number) {
   const r = render(
-    <Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={timeline} />,
+    <Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={timeline} seekMs={seekMs} />,
   );
   const stage = r.container.querySelector('.replay__stage') as HTMLElement;
   // happy-dom lays nothing out; give the stage a rect so clientX/Y map to
@@ -299,6 +299,33 @@ describe('Viewer key panel', () => {
     act(() => {
       window.dispatchEvent(new PointerEvent('pointerup', { clientX: 65, clientY: 75, bubbles: true }));
     });
+  });
+});
+
+describe('Viewer deep link seek', () => {
+  it('seeks once to seekMs when the frames arrive, and not again on later renders', () => {
+    // frames() carries an exact 8000 tMs entry, so a correct seek lands the
+    // playhead precisely there on mount, before anything else has driven it.
+    const { container, rerender } = mount(DEFAULT_TIMELINE, 8000);
+    const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
+    expect(scrub.value).toBe('8000');
+
+    // The viewer is scrubbed elsewhere. A deep link only sets the opening
+    // position, so a later render with the identical seekMs prop must not
+    // yank the viewer back to it.
+    fireEvent.input(scrub, { target: { value: '100' } });
+    expect(scrub.value).toBe('100');
+
+    rerender(
+      <Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={DEFAULT_TIMELINE} seekMs={8000} />,
+    );
+    expect(scrub.value).toBe('100');
+  });
+
+  it('does not seek at all when seekMs is absent, leaving the round at its own start', () => {
+    const { container } = mount(DEFAULT_TIMELINE, undefined);
+    const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
+    expect(scrub.value).toBe('0');
   });
 });
 

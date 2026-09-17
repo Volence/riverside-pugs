@@ -12,10 +12,10 @@ const num = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(2));
  *
  * The composite is a SORT KEY, not an accusation, and the copy says so. What it
  * opens is evidence: each clip links into the match page at the moment that
- * flagged it, because the unit of review is a clip and not a player. There is
- * no standalone deep link into the replay viewer yet, so the clip links to the
- * real match page and states the timestamp as plain text beside it rather than
- * inventing a URL that does not exist.
+ * flagged it, because the unit of review is a clip and not a player. The link
+ * carries ordinal, half and a start-time query param that MatchDetail reads to
+ * pick the round and seek the viewer there once its frames arrive, so a
+ * reviewer lands on the moment instead of scrubbing to it by hand.
  */
 export function AdminIntegrity() {
   const [steamid, setSteamid] = useState<string | null>(null);
@@ -44,9 +44,9 @@ export function AdminIntegrity() {
             return (
               <li key={c.id} class={reviewed ? 'muted' : ''}>
                 <p>
-                  <a href={`/match/${c.matchId}`}>Match #{c.matchId}</a>
-                  {' '}map {c.ordinal} round {c.half}
-                  {' '}at <strong>{(c.startMs / 1000).toFixed(1)}s</strong>
+                  <a href={`/match/${c.matchId}?ordinal=${c.ordinal}&half=${c.half}&t=${c.startMs}`}>
+                    Match #{c.matchId}
+                  </a>
                   <span class="muted"> · fidelity {c.score.toFixed(2)} · {((c.endMs - c.startMs) / 1000).toFixed(1)}s</span>
                 </p>
                 {reviewed && round && (
