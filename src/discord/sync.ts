@@ -153,6 +153,10 @@ export class DiscordSync {
         players: snapshot.players.map((p) => ({ ...this.player(p), ready: snapshot.ready.includes(p) })),
         options: snapshot.options.map((c) => ({ campaign: c, name: CAMPAIGNS[c]?.name ?? c, votes: snapshot.votes[c] ?? 0 })),
       });
+      // A pass awaits Discord between lobbies, and a lobby can complete in
+      // that gap. Posting a card for it then would orphan a second card, since
+      // the completion already re-keyed (or queued) the real one.
+      if (!getMessage(db, 'match', id) && !mm.lobbies().some((l) => l.id === id)) continue;
       if (await this.upsert('match', id, payload)) posted = true;
     }
 
