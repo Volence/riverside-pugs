@@ -54,13 +54,56 @@ export interface StateSnapshot {
   } | null;
 }
 
+/** Lifecycle events the broadcast cannot carry, because it sends only an
+ *  event name. The bot needs them to tie a lobby's message to the match it
+ *  became, and penalties need who failed a ready check. Every method optional. */
+export interface MatchmakerListener {
+  lobbyStarted?(lobbyId: string, players: string[]): void;
+  lobbyCompleted?(lobbyId: string, matchId: number): void;
+  lobbyFailed?(lobbyId: string, ready: string[], notReady: string[]): void;
+}
+
+/** Distinguishes this process's lobby ids from a previous run's, so a stored
+ *  Discord message for lob_1 before a restart is never mistaken for lob_1 after. */
+const BOOT = Date.now().toString(36);
+let instanceSeq = 0;
+
 export class Matchmaker {
   private queue = new Queue();
-  private lobbies = new Map<string, Lobby>();
+  private lobbyMap = new Map<string, Lobby>();
   private playerLobby = new Map<string, string>();
   private lobbySeq = 0;
+  private readonly idPrefix = `lob_${BOOT}${(instanceSeq++).toString(36)}_`;
+  private listeners: MatchmakerListener[] = [];
+  private failures = new Map<string, { ready: string[]; notReady: string[] }>();
 
   constructor(private db: DB, private deps: MatchmakerDeps) {}
+
+  on(listener: MatchmakerListener): void {
+    this.listeners.push(listener);
+  }
+
+  private emit<K extends keyof MatchmakerListener>(
+    event: K, ...args: Parameters<NonNullable<MatchmakerListener[K]>>
+  ): void {
+    for (const l of this.listeners) {
+      try {
+        (l[event] as ((...a: unknown[]) => void) | undefined)?.(...args);
+      } catch (err) {
+        console.error(`[matchmaker] listener ${event} failed:`, err);
+      }
+    }
+  }
+
+  /** Every open lobby, for surfaces that render all of them (the bot). */
+  lobbies(): { id: string; snapshot: LobbySnapshot }[] {
+    return [...this.lobbyMap.values()].map((l) => ({ id: l.id, snapshot: l.snapshot() }));
+  }
+
+  /** Who readied and who did not, for a lobby that failed in this process. */
+  lastFailure(lobbyId: string): { ready: string[]; notReady: string[] } | null {
+    return this.failures.get(lobbyId) ?? null;
+  }
 
   join(steamid: string): { ok: boolean; error?: string } {
     if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
@@ -95,7 +138,7 @@ export class Matchmaker {
 
   private lobbyFor(steamid: string): Lobby | undefined {
     const id = this.playerLobby.get(steamid);
-    return id ? this.lobbies.get(id) : undefined;
+    return id ? this.lobbyMap.get(id) : undefined;
   }
 
   private hasOpenMatch(steamid: string): boolean {
@@ -110,7 +153,7 @@ export class Matchmaker {
   private maybeStartLobby(): void {
     while (this.queue.count() >= QUEUE_SIZE) {
       const players = this.queue.takeBatch(QUEUE_SIZE);
-      const id = `lob_${++this.lobbySeq}`;
+      const id = `${this.idPrefix}${++this.lobbySeq}`;
       const lobby = new Lobby(
         id,
         players,
@@ -123,27 +166,33 @@ export class Matchmaker {
         {
           onEvent: () => this.deps.broadcast('refresh'),
           onComplete: (result) => this.onLobbyComplete(id, result),
-          onFail: (ready) => this.onLobbyFail(id, ready),
+          onFail: (ready, notReady) => this.onLobbyFail(id, ready, notReady),
         },
         this.deps.scheduler ?? realScheduler,
       );
-      this.lobbies.set(id, lobby);
+      this.lobbyMap.set(id, lobby);
       this.deps.notify?.('🔔 Queue popped, ready check started!');
       for (const p of players) this.playerLobby.set(p, id);
+      this.emit('lobbyStarted', id, [...players]);
     }
   }
 
   private dissolveLobby(id: string): string[] {
-    const lobby = this.lobbies.get(id);
+    const lobby = this.lobbyMap.get(id);
     if (!lobby) return [];
     lobby.destroy();
-    this.lobbies.delete(id);
+    this.lobbyMap.delete(id);
     for (const p of lobby.players) this.playerLobby.delete(p);
     return lobby.players;
   }
 
-  private onLobbyFail(id: string, ready: string[]): void {
+  private onLobbyFail(id: string, ready: string[], notReady: string[] = []): void {
     try {
+      // Bounded: only the most recent failures matter, to the message that
+      // renders them within seconds.
+      this.failures.set(id, { ready: [...ready], notReady: [...notReady] });
+      if (this.failures.size > 20) this.failures.delete(this.failures.keys().next().value!);
+      this.emit('lobbyFailed', id, [...ready], [...notReady]);
       this.dissolveLobby(id);
       this.queue.requeueFront(ready);
       this.maybeStartLobby();
@@ -178,6 +227,7 @@ export class Matchmaker {
         return id;
       })();
 
+      this.emit('lobbyCompleted', id, matchId);
       this.deps.orchestrator.setupMatch(matchId).catch((err) => {
         console.error(`orchestrator failed for match ${matchId}:`, err);
       });
@@ -259,7 +309,7 @@ export class Matchmaker {
    * meaningless anonymously. Carries no connect block and no match id.
    */
   publicQueue(): { count: number; players: NamedPlayer[]; phase: LobbyPhase | null } {
-    const anyLobby = [...this.lobbies.values()][0];
+    const anyLobby = [...this.lobbyMap.values()][0];
     return {
       count: this.queue.count(),
       players: this.queue.list().map((id) => this.named(id)),
