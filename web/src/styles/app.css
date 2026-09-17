@@ -1477,3 +1477,27 @@ body.is-theater { overflow: hidden; }
 .report__form textarea { min-height: 6rem; resize: vertical; }
 
 .queue-timeout { margin-top: var(--sp-3); color: var(--loss); }
+
+/* ---------- setup checklist, how to play ---------- */
+
+.checklist ol { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: grid; gap: var(--sp-4); }
+.checklist__step { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+.checklist__step p { margin: 0 0 var(--sp-1); }
+.checklist__step .btn { margin-top: var(--sp-2); }
+.checklist__mark {
+  display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem;
+  border: 1px solid var(--border-strong); font-family: var(--font-label); color: var(--text-muted);
+}
+.checklist__step.is-done .checklist__mark { border-color: var(--win); color: var(--win); }
+.checklist__step.is-done .checklist__title { color: var(--text-muted); }
+.checklist__step.is-unknown .checklist__mark { border-color: var(--rating); color: var(--rating); }
+.checklist__title { color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
+.checklist--compact ol { gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.checklist__ready { margin-top: var(--sp-4); color: var(--win); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.queue-block { margin-top: var(--sp-3); }
+
+.howto { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
+.faq details { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }
+.faq summary { cursor: pointer; color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
+.faq details p { margin: var(--sp-2) 0 0; color: var(--text); }

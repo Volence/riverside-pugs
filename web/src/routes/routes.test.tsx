@@ -21,6 +21,7 @@ const { mockApi } = vi.hoisted(() => ({
     profile: vi.fn(),
     queue: vi.fn(),
     linkDiscordCode: vi.fn(),
+    site: vi.fn(),
     unlinkDiscord: vi.fn(),
   },
 }));
@@ -519,13 +520,24 @@ describe('Play', () => {
     expect(screen.queryByPlaceholderText('invite code')).toBeNull();
   });
 
-  it('offers Discord first, and the invite code second, when Discord is configured', () => {
-    const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null };
+  it('shows the Discord checklist and no invite code when Discord is configured', async () => {
+    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true });
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null, discordMember: null };
     render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
+    const join = await waitFor(() => screen.getByText('Join the Discord') as HTMLAnchorElement);
+    expect(join.getAttribute('href')).toBe('https://discord.gg/x');
     const link = screen.getByText('Connect Discord') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('/auth/discord');
     expect(link.getAttribute('target')).toBe('_top');
-    expect(screen.getByPlaceholderText('invite code')).toBeTruthy();
+    expect(screen.queryByPlaceholderText('invite code')).toBeNull();
+  });
+
+  it('an active player missing a Discord step sees the checklist instead of Join queue', async () => {
+    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: null, requireDiscord: true });
+    render(<QueuePanel count={1} joined={false} players={[]} refresh={noop} queueBlock="link_discord"
+      me={{ steamid: '1', name: 'a', avatar: null, status: 'active', isAdmin: false, discordEnabled: true, discord: null }} />);
+    expect(screen.queryByRole('button', { name: 'Join queue' })).toBeNull();
+    await waitFor(() => expect(screen.getByText('Connect Discord')).toBeTruthy());
   });
 
   const active = {

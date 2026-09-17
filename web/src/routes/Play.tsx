@@ -7,6 +7,7 @@ import { Empty, Panel } from '../components/bits';
 import { CampaignTiles } from '../components/CampaignTiles';
 import { ConnectPanel } from '../components/ConnectPanel';
 import { PageHeader } from '../components/PageHeader';
+import { SetupChecklist } from '../components/SetupChecklist';
 import type { Session } from '../hooks/useLiveState';
 
 
@@ -34,7 +35,7 @@ export function Play(
   return (
     <div class={`page ${wide ? 'page--play-teams' : 'page--play'}`}>
       <PageHeader eyebrow="Riverside" title="Ranked 4v4" />
-      <Live state={state} me={session.me.steamid} refresh={refresh} />
+      <Live state={state} me={session.me.steamid} sessionMe={session.me} refresh={refresh} />
     </div>
   );
 }
@@ -68,6 +69,7 @@ function SignIn() {
             _top rather than _blank: the Steam redirect has to come back to
             this tab, not orphan itself in a new one. */}
         <a class="btn" href="/auth/steam" target="_top" rel="noopener">Sign in through Steam</a>
+        <p class="muted">First time? Read <a href="/how-to-play">How to play</a>.</p>
       </Panel>
       {q && (
         <Panel>
@@ -104,26 +106,20 @@ function Register({ me, onDone }: { me: Me; onDone: () => void }) {
 
   return (
     <div class="page page--play">
-      {me.discordEnabled && !me.discord && (
+      {me.discordEnabled && (
         <Panel class="hero-panel">
-          <p class="eyebrow">Members get in automatically</p>
-          <h2>Connect your Discord</h2>
-          <p class="muted">If you are in the Riverside Discord server, linking your account activates you straight away.</p>
-          <a class="btn" href="/auth/discord" target="_top" rel="noopener">Connect Discord</a>
-        </Panel>
-      )}
-      {me.discordEnabled && me.discord && (
-        <Panel>
-          <p class="eyebrow">Discord linked</p>
-          <p>
-            Linked to <strong>{me.discord.name}</strong>, but that account is not in the Riverside
-            Discord server. Join it and sign in again, or use an invite code below.
+          <p class="eyebrow">Almost there</p>
+          <h2>Two quick steps to play</h2>
+          <SetupChecklist me={me} />
+          <p class="muted">
+            Done both and still here? <button class="chip" type="button" onClick={onDone}>Check again</button>
+            {' '}New to this? Read <a href="/how-to-play">How to play</a>.
           </p>
         </Panel>
       )}
-      <Panel>
+      {!me.discordEnabled && <Panel>
         <p class="eyebrow">Invite only</p>
-        <h2>{me.discordEnabled ? 'Or use an invite code' : 'You need an invite code'}</h2>
+        <h2>You need an invite code</h2>
         <form class="register" onSubmit={submit}>
           <input
             value={code}
@@ -134,13 +130,13 @@ function Register({ me, onDone }: { me: Me; onDone: () => void }) {
           <button class="btn" type="submit" disabled={busy || code.trim() === ''}>Register</button>
         </form>
         {error && <p class="error">{error}</p>}
-      </Panel>
+      </Panel>}
     </div>
   );
 }
 
 function Live(
-  { state, me, refresh }: { state: StateSnapshot; me: string; refresh: () => void },
+  { state, me, sessionMe, refresh }: { state: StateSnapshot; me: string; sessionMe: Me; refresh: () => void },
 ) {
   const { queue, lobby, match } = state;
 
@@ -182,15 +178,23 @@ function Live(
 
   if (lobby && lobby.phase === 'ready_check') return <ReadyCheck lobby={lobby} me={me} refresh={refresh} />;
   if (lobby && lobby.phase === 'map_vote') return <MapVote lobby={lobby} refresh={refresh} />;
-  return <QueuePanel count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh} timeout={state.timeout ?? null} />;
+  return (
+    <QueuePanel
+      count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
+      timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
+    />
+  );
 }
 
 export function QueuePanel(
-  { count, joined, players, refresh, timeout = null }:
+  { count, joined, players, refresh, timeout = null, queueBlock = null, me = null }:
     {
       count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void;
       /** A queue timeout being served; the join button is disabled until it ends. */
       timeout?: { until: string; offenses: number } | null;
+      /** A Discord step still missing; replaces the join button with the checklist. */
+      queueBlock?: 'link_discord' | 'join_discord' | null;
+      me?: Me | null;
     },
 ) {
   const [error, setError] = useState('');
@@ -215,6 +219,16 @@ export function QueuePanel(
       <Slots players={players} />
       {joined ? (
         <button class="btn btn--block btn--ghost" onClick={() => act(api.leaveQueue)}>Leave queue</button>
+      ) : queueBlock ? (
+        <div class="queue-block">
+          <p class="queue-timeout">
+            {queueBlock === 'link_discord'
+              ? 'To queue you need your Discord linked and to be in the Riverside Discord server.'
+              : 'Your linked Discord account is not in the Riverside Discord server. Join it to queue.'}
+          </p>
+          <SetupChecklist me={me} compact />
+          <button class="chip" type="button" onClick={refresh}>Check again</button>
+        </div>
       ) : timeout && Date.parse(timeout.until) > Date.now() ? (
         <>
           <button class="btn btn--block" disabled>Join queue</button>

@@ -17,6 +17,8 @@ export interface Me {
   /** False when the server has no Discord app configured: hide every Discord control. */
   discordEnabled?: boolean;
   discord?: { id: string; name: string } | null;
+  /** In the Discord server; null when not linked or not known right now. */
+  discordMember?: boolean | null;
 }
 
 export interface NamedPlayer {
@@ -65,6 +67,14 @@ export interface StateSnapshot {
   } | null;
   /** A queue timeout the viewer is serving (missed ready checks, no-shows). */
   timeout?: { until: string; offenses: number } | null;
+  /** The Discord step still missing before the viewer may queue. */
+  queueBlock?: 'link_discord' | 'join_discord' | null;
+}
+
+export interface SiteInfo {
+  discordEnabled: boolean;
+  discordInviteUrl: string | null;
+  requireDiscord: boolean;
 }
 
 export interface LeaderboardRow {
@@ -436,6 +446,7 @@ export const adminApi = {
 
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
+  site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
   queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
   leaderboard: (signal?: AbortSignal) => get<Leaderboard>('/api/leaderboard', signal),
