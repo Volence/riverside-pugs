@@ -105,7 +105,10 @@ export function deepLinkFromQuery(
   const params = new URLSearchParams(search);
   const num = (key: string): number => {
     const raw = params.get(key);
-    return raw === null ? NaN : Number(raw);
+    // The empty string is as absent as a missing key, and it has to be said
+    // out loud: Number('') is 0, so `?ordinal=` would otherwise read as a
+    // perfectly valid ordinal 0 and pick a round nobody asked for.
+    return raw === null || raw === '' ? NaN : Number(raw);
   };
 
   const qOrdinal = num('ordinal');
