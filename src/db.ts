@@ -233,6 +233,16 @@ CREATE TABLE IF NOT EXISTS match_replays (
   pruned_at TEXT,
   PRIMARY KEY (match_id, ordinal, half)
 );
+-- One-time codes a Discord user follows to link their Steam account from
+-- Discord (the bot hands them out). Single use, 15 minutes; created_at is an
+-- ISO string written by the app so expiry can be tested with an injected clock.
+CREATE TABLE IF NOT EXISTS discord_link_codes (
+  code TEXT PRIMARY KEY,
+  discord_id TEXT NOT NULL,
+  discord_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  used_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -246,6 +256,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   map_pool: JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
+  // Empty: guild membership alone activates a linked player. A role id: the
+  // member must also hold that role.
+  discord_required_role_id: '',
   replay_retention_days: '90',
   replay_free_floor_gb: '10',
   noshow_minutes: '10',
@@ -292,6 +305,12 @@ export function openDb(path: string): DB {
   // would retroactively record every historic round as a wipe and drag
   // survival rate to nothing.
   ensureColumn(db, 'match_rounds', 'survivors_alive', 'INTEGER');
+  // Discord identity. Steam stays canonical; this is a link, and one Discord
+  // account maps to at most one player. Partial index so the many unlinked
+  // players do not collide on NULL.
+  ensureColumn(db, 'players', 'discord_id', 'TEXT');
+  ensureColumn(db, 'players', 'discord_name', 'TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
   seed(db);
   return db;
 }
