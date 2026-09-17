@@ -1,3 +1,15 @@
+/** Discord application + bot. Null when any required piece is missing, which
+ *  is the tested default: the site then behaves exactly as it did before
+ *  Discord existed. The lobby channel is optional here because linking works
+ *  without it; the bot itself additionally requires it. */
+export interface DiscordConfig {
+  clientId: string;
+  clientSecret: string;
+  botToken: string;
+  guildId: string;
+  lobbyChannelId: string | null;
+}
+
 export interface Config {
   port: number;
   publicUrl: string;
@@ -17,6 +29,7 @@ export interface Config {
    *  the backend can only see these files when it shares a filesystem with the
    *  game server. */
   replayDir: string;
+  discord: DiscordConfig | null;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -32,5 +45,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     logPublicAddress: env.LOG_PUBLIC_ADDRESS ?? '127.0.0.1:27500',
     demoDir: env.DEMO_DIR ?? '',
     replayDir: env.REPLAY_DIR ?? '',
+    discord: loadDiscord(env),
   };
+}
+
+function loadDiscord(env: Record<string, string | undefined>): DiscordConfig | null {
+  const clientId = env.DISCORD_CLIENT_ID?.trim();
+  const clientSecret = env.DISCORD_CLIENT_SECRET?.trim();
+  const botToken = env.DISCORD_BOT_TOKEN?.trim();
+  const guildId = env.DISCORD_GUILD_ID?.trim();
+  if (!clientId || !clientSecret || !botToken || !guildId) return null;
+  return { clientId, clientSecret, botToken, guildId, lobbyChannelId: env.DISCORD_LOBBY_CHANNEL_ID?.trim() || null };
 }
