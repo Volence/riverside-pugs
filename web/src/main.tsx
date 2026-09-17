@@ -17,13 +17,32 @@ import { ReplayPage } from './routes/ReplayPage';
 import { LinkDiscord } from './routes/LinkDiscord';
 import { Admin } from './routes/Admin';
 import { HowToPlay } from './routes/HowToPlay';
-import { Empty, Panel } from './components/bits';
+import { Panel } from './components/bits';
+import { PageHeader } from './components/PageHeader';
 import './styles/app.css';
 
+/** The 404.
+ *
+ *  It gets more traffic than a 404 normally would, because match and player
+ *  URLs get pasted into Discord and a typo'd or voided id lands here. A bare
+ *  "No such page." over an empty screen gave no way onward, so this offers the
+ *  three places someone who mistyped a link was most likely heading. */
 function NotFound() {
   return (
     <div class="page page--list">
-      <Panel><Empty>No such page.</Empty></Panel>
+      <PageHeader eyebrow="404" title="Page not found" />
+      <Panel>
+        <p class="muted">
+          That link does not point at anything. A match or player link can also
+          land here if the id was mistyped, or if the match was voided.
+        </p>
+        <nav class="notfound__links">
+          <a class="chip" href="/">Play</a>
+          <a class="chip" href="/matches">Recent matches</a>
+          <a class="chip" href="/leaderboard">Leaderboard</a>
+          <a class="chip" href="/how-to-play">How to play</a>
+        </nav>
+      </Panel>
     </div>
   );
 }

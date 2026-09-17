@@ -1506,3 +1506,49 @@ body.is-theater { overflow: hidden; }
 
 .spectate__open { margin-bottom: var(--sp-3); }
 .spectate { margin-bottom: var(--sp-4); }
+
+/* ---------- loading skeleton ---------- */
+
+/* Placeholder geometry for a route whose first fetch has not landed. Sized to
+   the real thing so the page does not jump when the data arrives. */
+.skel--head { padding: var(--sp-5) 0 var(--sp-4); }
+.skel__panel { display: flex; flex-direction: column; gap: var(--sp-3); }
+.skel__figures { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
+
+.skel__bar {
+  background: var(--surface-2);
+  border-radius: 2px;
+  /* The shimmer is a moving highlight over the bar's own colour, so a browser
+     that ignores the animation still shows a plain block rather than nothing. */
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--text) 7%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skel-shimmer 1.4s ease-in-out infinite;
+}
+
+.skel__bar--eyebrow { width: 7ch;  height: 0.7rem; margin-bottom: var(--sp-2); }
+.skel__bar--title   { width: min(22ch, 70%); height: 2.2rem; }
+.skel__bar--figure  { width: 9ch;  height: 2.4rem; }
+.skel__bar--h3      { width: 14ch; height: 1.1rem; }
+.skel__bar--row     { width: 100%; height: 0.85rem; }
+.skel__bar--row:nth-child(3) { width: 92%; }
+.skel__bar--row:nth-child(4) { width: 78%; }
+
+@keyframes skel-shimmer {
+  from { background-position: 150% 0; }
+  to   { background-position: -50% 0; }
+}
+
+/* Respect a reduced-motion preference: the shape still communicates loading,
+   and a looping shimmer is exactly the kind of thing the setting is for. */
+@media (prefers-reduced-motion: reduce) {
+  .skel__bar { animation: none; }
+}
+
+/* 404: the ways onward, as a row of chips that wraps on a phone. */
+.notfound__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }

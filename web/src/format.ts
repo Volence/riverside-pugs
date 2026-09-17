@@ -155,12 +155,20 @@ export const LIVE_STAT_ORDER = LIVE_STAT_GROUPS.flatMap((g) => g.keys);
  *  - `skeets_hurt`: a skeet on an already-damaged hunter. Marked neutral in the
  *    registry because it only means anything as a ratio against clean skeets,
  *    and a bare count of it is not something anyone acts on.
+ *  - `times_deadstopped`: the private counterpart of `deadstops`. Both are
+ *    written by the same skill_detect forward (pug-stats.inc's
+ *    OnSurvivorShoveHunter calls AddStat twice, once per side), so a dead
+ *    `deadstops` means a dead `times_deadstopped` by construction. It is listed
+ *    separately because it is the one `self`-visibility key here, and the
+ *    profile's private panel renders its bag directly rather than through the
+ *    ordering helpers, so omitting it from a group list would not have hidden
+ *    it. Live DB at the time of writing: times_skeeted 358, this one 0.
  *
  *  Every one of these is still captured in the end-of-match dump. Pointing this
  *  frontend at L4D2 is a matter of emptying this set, not of recapturing data. */
 export const DEAD_STAT_KEYS: ReadonlySet<string> = new Set([
   'skeets_melee', 'skeets_sniper', 'deadstops', 'tongue_cuts', 'survivors_biled',
-  'skeets_shotgun', 'skeets_hurt',
+  'skeets_shotgun', 'skeets_hurt', 'times_deadstopped',
 ]);
 
 /** Families, in reading order, that stat columns are grouped into.
@@ -322,4 +330,122 @@ export function deriveLiveStats(stats: Record<string, number>): Record<string, n
     out.boomer_rate = Math.round(((stats.boom_successes ?? 0) / spawns) * 100);
   }
   return out;
+}
+
+/** Fewest measured rounds a survival percentage may be computed from before
+ *  the UI will print it as a number.
+ *
+ *  A percentage carries no visible uncertainty: "100%" over two rounds and
+ *  "100%" over two hundred render identically, and the first is the one the
+ *  maps pages were showing. Four is one full playing of a map by both teams in
+ *  both halves, which is the smallest sample that is not a single team's good
+ *  night. Below it, `survivalLabel` reports the count instead of a rate. */
+export const MIN_SURVIVAL_SAMPLE = 4;
+
+/** How to render a survival rate, given how many rounds it is over.
+ *
+ *  Three distinct cases, and conflating any two of them is what made this
+ *  number misleading:
+ *   - nothing measured at all: "n/a", already the previous behaviour
+ *   - measured, but too thin to state as a rate: the raw count, so the reader
+ *     can see the sample is small rather than infer confidence from a round %
+ *   - enough to state: the percentage, with the sample size beside it
+ *
+ *  `measured` is deliberately a separate field from RoundAggregate.attempts.
+ *  attempts counts rounds with a usable clock, which is a much larger set, and
+ *  the map page used to label this figure with it. */
+export function survivalLabel(
+  survivalPct: number | null,
+  measured: number,
+): { value: string; sub?: string; thin: boolean } {
+  if (survivalPct === null || measured <= 0) return { value: 'n/a', thin: true };
+  if (measured < MIN_SURVIVAL_SAMPLE) {
+    return { value: `${measured} round${measured === 1 ? '' : 's'}`, sub: 'too few to rate', thin: true };
+  }
+  return {
+    value: `${survivalPct}%`,
+    sub: `of ${measured} measured`,
+    thin: false,
+  };
+}
+
+/** Display names for the chapters of every campaign that runs here.
+ *
+ *  Keyed on the map name with any `l4d_vs_` / `l4d_` prefix already stripped by
+ *  `mapName`, so the versus and co-op variants of a chapter share one entry
+ *  rather than needing two. The stock four campaigns are L4D1's own chapter
+ *  titles as the game's loading screen prints them; `river` and `c6m` are The
+ *  Sacrifice and The Passing, which run here as the "Passifice" campaign.
+ *
+ *  Not exhaustive on purpose. `mapName` falls back to deriving something
+ *  readable from the map name, so a custom campaign is legible the day it is
+ *  added and only needs an entry here to read exactly right. */
+export const MAP_NAMES: Record<string, string> = {
+  // No Mercy
+  hospital01_apartment: 'The Apartments',
+  hospital02_subway: 'The Subway',
+  hospital03_sewers: 'The Sewer',
+  hospital04_interior: 'The Hospital',
+  hospital05_rooftop: 'Rooftop Finale',
+  // Death Toll
+  smalltown01_caves: 'The Turnpike',
+  smalltown02_drainage: 'The Drains',
+  smalltown03_ranchhouse: 'The Church',
+  smalltown04_mainstreet: 'The Town',
+  smalltown05_houseboat: 'Boathouse Finale',
+  // Dead Air
+  airport01_greenhouse: 'The Greenhouse',
+  airport02_offices: 'The Crane',
+  airport03_garage: 'The Construction Site',
+  airport04_terminal: 'The Terminal',
+  airport05_runway: 'Runway Finale',
+  // Blood Harvest
+  farm01_hilltop: 'The Woods',
+  farm02_traintunnel: 'The Tunnel',
+  farm03_bridge: 'The Bridge',
+  farm04_barn: 'The Train Station',
+  farm05_cornfield: 'Farmhouse Finale',
+  // The Sacrifice
+  river01_docks: 'The Docks',
+  river02_barge: 'The Barge',
+  river03_port: 'Port Finale',
+};
+
+/** Display names for The Passing's chapters, which do not carry an `l4d_`
+ *  prefix at all: they are L4D2-style `c6m*` names, mounted from dlc4. Kept
+ *  separate from MAP_NAMES only because the prefix strip does not apply. */
+const C6M_NAMES: Record<string, string> = {
+  c6m1_riverbank: 'The Riverbank',
+  c6m2_bedlam: 'Underground',
+  c6m3_port: 'Port',
+};
+
+/** An engine map name as a human chapter title.
+ *
+ *  `l4d_vs_airport01_greenhouse` reads as "The Greenhouse". Six places used to
+ *  print the raw engine name, including the map page's own <h1>, which is the
+ *  single most prominent string on that page.
+ *
+ *  The fallback matters more than the table: custom campaigns are the whole
+ *  reason this is a function rather than a lookup. For an unknown map it drops
+ *  the `l4d_`/`l4d_vs_` prefix, drops the campaign word and chapter number that
+ *  L4D1 map names lead with, and title-cases what is left, so
+ *  `l4d_vs_dam03_spillway` reads as "Spillway" rather than as a filename. A map
+ *  whose name has no such structure is returned with underscores turned to
+ *  spaces and nothing else removed, which is still better than the raw key. */
+export function mapName(map: string): string {
+  if (!map) return '';
+  const lower = map.toLowerCase();
+  if (C6M_NAMES[lower]) return C6M_NAMES[lower];
+
+  const bare = lower.replace(/^l4d_(?:vs_)?/, '');
+  if (MAP_NAMES[bare]) return MAP_NAMES[bare];
+
+  // `airport01_greenhouse` -> `greenhouse`. Only when the leading segment
+  // actually looks like <word><digits>, so a custom name that is simply
+  // `deadbeforedawn` is not mistaken for a campaign prefix and eaten.
+  const stripped = bare.replace(/^[a-z]+\d+_/, '');
+  const words = (stripped || bare).split('_').filter(Boolean);
+  if (words.length === 0) return map;
+  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }

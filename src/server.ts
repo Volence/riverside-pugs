@@ -624,6 +624,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
 
+  // Registered whether or not dev mode is on, and deliberately NOT inside
+  // devRoutes. The dev panel probes this on every page load to decide whether
+  // to render itself; when the route existed only in dev mode, every single
+  // production page load logged a 404 in the browser console. Answering with
+  // the flag costs nothing and leaks nothing: devMode is already obvious from
+  // whether the dev endpoints below respond at all.
+  app.get('/api/dev/enabled', async () => ({ enabled: deps.config.devMode }));
+
   if (deps.config.devMode) {
     await app.register(devRoutes, { config: deps.config, db: deps.db, matchmaker, hub });
   }

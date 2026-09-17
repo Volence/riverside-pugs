@@ -67,10 +67,24 @@ export interface RoundAggregate {
    *  every round played before the plugin emitted it, and treating those as
    *  wipes would report the whole back catalogue as lethal. */
   survivalPct: number | null;
+  /** How many attempts that percentage is actually over.
+   *
+   *  Excluding the unmeasured rounds (above) was never the hard part; the
+   *  percentage has always been over measured rounds only. The problem is that
+   *  it then reads with the confidence of a full sample when it is not one.
+   *  survivors_alive only started being written recently, so at the time of
+   *  writing a map showing "6 played, survived 100%" had two measured rounds
+   *  behind it, and Blood Harvest's maps had four out of eighteen. A reader
+   *  cannot tell those apart from the percentage alone, so the count travels
+   *  with it and the UI refuses to print a percentage below MIN_SURVIVAL_SAMPLE.
+   *
+   *  This self-heals: every new match measures every round, so the ratio of
+   *  measured to closed rounds climbs on its own. */
+  measured: number;
 }
 
 const NO_ROUNDS: RoundAggregate = {
-  attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null,
+  attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null, measured: 0,
 };
 
 /**
@@ -128,6 +142,7 @@ function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
       slowestSec: a.secs.length ? Math.round(Math.max(...a.secs)) : null,
       avgSec: a.secs.length ? Math.round(a.secs.reduce((x, y) => x + y, 0) / a.secs.length) : null,
       survivalPct: a.measured === 0 ? null : Math.round((a.survived / a.measured) * 100),
+      measured: a.measured,
     });
   }
   return out;
@@ -226,6 +241,10 @@ export interface MapLeaderRow {
 
 export interface MapDetail {
   map: string;
+  /** Campaign slug, or null for a map the registry cannot place. The page
+   *  uses it as the eyebrow above the chapter title, the way the match page
+   *  already names the campaign above the score. */
+  campaign: string | null;
   played: number;
   /**
    * The average score a team puts up on this map, over RECORDED playings
@@ -331,6 +350,7 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
 
   return {
     map,
+    campaign: campaignForMap(map),
     played: rows.length,
     // Divided by 2 * recorded playings: each playing contributes two survivor
     // scores, one per team, and both are samples of the same quantity.

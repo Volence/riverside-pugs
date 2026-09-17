@@ -246,6 +246,9 @@ export interface RoundAggregate {
   /** Null, not 0, when no round was measured: survivors_alive is NULL for
    *  every round played before the plugin reported it. */
   survivalPct: number | null;
+  /** Rounds the percentage is over. NOT `attempts`, which counts rounds with a
+   *  usable clock and is typically several times larger. */
+  measured: number;
 }
 
 export interface MapIndexRow {
@@ -270,6 +273,8 @@ export interface MapLeaderRow {
 
 export interface MapDetail {
   map: string;
+  /** Campaign slug, or null for a map the registry cannot place. */
+  campaign: string | null;
   played: number;
   /** What a team typically scores here. One number, not a per-team pair:
    *  both teams hold survivor once per map, so A and B were two samples of
@@ -505,7 +510,7 @@ export const api = {
   vote: (campaign: string) => post('/api/lobby/vote', { campaign }),
 
   dev: {
-    enabled: () => get<unknown>('/api/dev/enabled'),
+    enabled: () => get<{ enabled: boolean }>('/api/dev/enabled'),
     login: (steamid: string) => post('/api/dev/login', { steamid }),
     fill: () => post('/api/dev/fill'),
     readyAll: () => post('/api/dev/ready-all'),
