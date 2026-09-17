@@ -139,11 +139,23 @@ describe('pickClips', () => {
   });
 });
 
-/** A prior in which the cell the ghost occupies is stared at `p` of the time. */
+/** A prior in which every cell the ghost passes through is stared at `p` of the
+ *  time.
+ *
+ *  It must cover the ghost's WHOLE path, not just its starting cell. Seed only
+ *  frame 0 and any test whose early frames get dropped (the occlusion guard
+ *  drops them whenever a teammate stands on the ghost's bearing) leaves every
+ *  surviving pair with a prior of 0, which collapses the variance to 0 and
+ *  makes `occupancy` correctly return null, failing the assertion for a reason
+ *  that has nothing to do with the behaviour under test. */
 function priorWhereGhostIs(frames: Frame[], p: number): PriorTable {
-  const g = frames[0].players[4];
-  const c = cellOf(g.x, g.y);
-  return { frames: 1000, counts: new Map([[cellKey(c.cx, c.cy), Math.round(1000 * p)]]) };
+  const counts = new Map<string, number>();
+  for (const f of frames) {
+    const g = f.players[4];
+    const c = cellOf(g.x, g.y);
+    counts.set(cellKey(c.cx, c.cy), Math.round(1000 * p));
+  }
+  return { frames: 1000, counts };
 }
 
 describe('occupancy', () => {
@@ -161,14 +173,12 @@ describe('occupancy', () => {
   it('is near zero when the player is on a ghost that sits where everyone stares', () => {
     // This is the owner's objection made into a test: a famous spawn spot must
     // earn almost nothing, because the prior already contains it.
+    // 0.99, not 1.0. A prior of exactly 1 asserts the cell is stared at with
+    // CERTAINTY, which has zero variance, and `occupancy` correctly returns null
+    // rather than dividing by it. Near-certainty is what a famous doorway
+    // actually looks like in real data, and it leaves the variance real.
     const frames = round(40, (_i, b) => b);
-    const cells = new Map<string, number>();
-    for (const f of frames) {
-      const g = f.players[4];
-      const c = cellOf(g.x, g.y);
-      cells.set(cellKey(c.cx, c.cy), 1000);
-    }
-    const r = occupancy(frames, 0, { frames: 1000, counts: cells });
+    const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.99));
     expect(r).not.toBeNull();
     expect(Math.abs(r!.z)).toBeLessThan(1);
   });

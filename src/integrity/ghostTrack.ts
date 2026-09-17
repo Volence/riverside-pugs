@@ -176,10 +176,7 @@ export function occupancy(frames: Frame[], slot: number, prior: PriorTable | nul
       if (Math.abs(aimError(s.yaw, s, g)) <= TUNING.E_DWELL) observed++;
     }
   }
-  if (pairs === 0) return null;
-  // When variance is 0 (all p=1), return z=0. Otherwise compute z-score, clamping
-  // variance to avoid division by zero on degenerate priors.
-  if (variance <= 0) return { z: 0, observed, expected, pairs };
+  if (pairs === 0 || variance <= 1e-9) return null;
   return { z: (observed - expected) / Math.sqrt(variance), observed, expected, pairs };
 }
 
