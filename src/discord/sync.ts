@@ -75,10 +75,11 @@ export class DiscordSync {
 
   async start(): Promise<void> {
     const { db } = this.deps;
-    // Lobbies live only in memory, so any lobby card still open belongs to a
-    // process that is gone.
+    // A lobby card whose lobby was not restored belongs to a process that is
+    // gone. Restored lobbies (Matchmaker.restore) keep their card.
+    const restored = new Set(this.deps.matchmaker.lobbies().map((l) => l.id));
     for (const m of messagesInState(db, 'match', 'open')) {
-      if (!m.ref.startsWith('lob_')) continue;
+      if (!m.ref.startsWith('lob_') || restored.has(m.ref)) continue;
       await this.safeEdit(m.channel_id, m.message_id, renderCancelled());
       setMessageState(db, 'match', m.ref, 'cancelled');
     }

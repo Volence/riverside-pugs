@@ -172,6 +172,24 @@ describe('DiscordSync', () => {
     expect(getMessage(db, 'match', 'lob_old_1')?.state).toBe('cancelled');
   });
 
+  it('a lobby restored after a restart keeps its card', async () => {
+    await build().start();
+    for (const id of IDS) mm.join(id);
+    await sync.pass();
+    const card = t.live()[0].id;
+    sync.stop();
+    const mm2 = new Matchmaker(db, {
+      broadcast: (e) => hub.broadcast(e),
+      orchestrator: { setupMatch: async () => {}, finishMatch: async () => {} },
+      scheduler: new FakeScheduler(), rng: () => 0,
+    });
+    mm2.restore();
+    mm = mm2;
+    await build().start();
+    expect(t.byId(card)!.payload.embeds[0].title).toMatch(/ready/i);
+    expect(t.live().filter((m) => m.payload.embeds[0]?.title?.match(/cancelled/i))).toHaveLength(0);
+  });
+
   it('hub broadcasts schedule a pass when auto scheduling is on', async () => {
     sync = new DiscordSync({ db, matchmaker: mm, hub, transport: t, publicUrl: 'https://pug.test', channelId: CH, debounceMs: 5 });
     await sync.start();
