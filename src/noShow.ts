@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import type { ServerReleaser } from './serverRelease.js';
+import { recordPenalty } from './penalties.js';
 
 /**
  * Stamp the first time a rostered player is seen on the match server.
@@ -82,6 +83,13 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
     db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
       .run(r.id);
     if (r.server_id !== null) releaser.release(r.server_id);
+    // Only the "nobody turned up" rule names culprits. The no-round rule means
+    // everyone connected and the game never started, which is nobody's no-show.
+    if (r.age_min >= noShowMin && r.connected < minConnected) {
+      const absent = db.prepare('SELECT player_id FROM match_players WHERE match_id = ? AND connected_at IS NULL')
+        .all(r.id) as { player_id: string }[];
+      for (const a of absent) recordPenalty(db, a.player_id, 'no_show', r.id);
+    }
     console.warn(
       `[noShow] aborted match ${r.id}: ${r.connected} connected, ${r.rounds} rounds, ${Math.round(r.age_min)} min live`,
     );

@@ -13,6 +13,7 @@ import {
 } from '../admin/players.js';
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { CAMPAIGNS } from '../campaigns.js';
+import { clearPenalties } from '../penalties.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -110,6 +111,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     unlinkDiscord(db, t.steamid);
     logAdmin(db, t.adminId, 'unlink_discord', t.steamid, { was: before });
     return { ok: true };
+  });
+
+  app.post('/api/admin/players/:steamid/clear-penalties', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const n = clearPenalties(db, t.steamid, t.adminId);
+    logAdmin(db, t.adminId, 'clear_penalties', t.steamid, { cleared: n });
+    return { ok: true, cleared: n };
   });
 
   app.post('/api/admin/players/:steamid/notes', async (req, reply) => {

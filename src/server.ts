@@ -1,3 +1,4 @@
+import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
@@ -535,7 +536,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       matchmaker,
       hub,
       connect: () => createDjsTransport(deps.config.discord!),
-      controller: { banMessage: (steamid) => banMessage(deps.db, steamid) },
+      controller: {
+        banMessage: (steamid) => banMessage(deps.db, steamid),
+        queueBlock: (steamid) => {
+          const t = activeTimeout(deps.db, steamid);
+          return t
+            ? `You are on a queue timeout for missed ready checks or no-shows. You can queue again <t:${Math.floor(t.until.getTime() / 1000)}:R>.`
+            : null;
+        },
+      },
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
       commands: {
         defs: COMMAND_DEFS,

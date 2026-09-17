@@ -113,3 +113,17 @@ describe('discord buttons', () => {
     expect(body(await press(0, 'zz:nope'))).toMatch(/no longer/i);
   });
 });
+
+describe('discord queue timeout', () => {
+  it('a timed-out player is refused with when they can queue again', async () => {
+    const { recordPenalty } = await import('../src/penalties.js');
+    const { activeTimeout } = await import('../src/penalties.js');
+    recordPenalty(db, IDS[0], 'no_show', null);
+    const r = await handleButton(
+      { db, matchmaker: mm, publicUrl: URL_, queueBlock: (s) => activeTimeout(db, s) ? 'timeout <t:1:R>' : null },
+      { kind: 'button', customId: 'q:join', userId: did(0), userName: 'd0' },
+    );
+    expect(JSON.stringify(r.payload)).toContain('timeout');
+    expect(mm.publicQueue().count).toBe(0);
+  });
+});

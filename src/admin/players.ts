@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { displaySr } from '../rating.js';
 import { currentSeasonId, getPlayer } from '../players.js';
+import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 
 export interface BanRow {
   id: number;
@@ -85,6 +86,8 @@ export interface AdminPlayerRow {
   sr: number | null;
   games: number;
   createdAt: string;
+  /** Uncleared no-show / ready-check offenses in the penalty window. */
+  offenses: number;
 }
 
 export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] {
@@ -104,6 +107,7 @@ export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] 
   return rows.map((r) => ({
     steamid: r.steamid, name: r.name, avatar: r.avatar, status: r.status, isAdmin: r.is_admin === 1,
     discordName: r.discord_name, sr: r.mu === null ? null : displaySr(r.mu, r.sigma!), games: r.games, createdAt: r.created_at,
+    offenses: recentOffenses(db, r.steamid),
   }));
 }
 
@@ -129,6 +133,11 @@ export function playerDetail(db: DB, steamid: string) {
     bans,
     notes,
     matches,
+    penalties: penaltyHistory(db, steamid),
+    timeout: (() => {
+      const t = activeTimeout(db, steamid);
+      return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
+    })(),
   };
 }
 
