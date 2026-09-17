@@ -16,6 +16,8 @@ import { CAMPAIGNS } from '../campaigns.js';
 import { clearPenalties } from '../penalties.js';
 import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
+import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
+import { setReview } from '../integrity/store.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -248,6 +250,42 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const text = typeof note === 'string' ? note.trim().slice(0, 1000) : '';
     if (!resolveReport(db, id, adminId, status, text)) return reply.code(404).send({ error: 'no such report' });
     logAdmin(db, adminId, 'resolve_report', id, { status, note: text });
+    return { ok: true };
+  });
+
+  const REVIEW_STATES = new Set(['new', 'reviewed', 'dismissed']);
+
+  app.get('/api/admin/integrity', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const raw = (req.query as { season?: string }).season;
+    const seasonId = raw === undefined || raw === '' ? null : Number(raw);
+    if (seasonId !== null && !Number.isInteger(seasonId)) return reply.code(400).send({ error: 'bad season' });
+    return { players: integrityBoard(db, seasonId) };
+  });
+
+  app.get('/api/admin/integrity/:steamid', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const { steamid } = req.params as { steamid: string };
+    return integrityPlayer(db, steamid);
+  });
+
+  app.post('/api/admin/integrity/:matchId/:ordinal/:half/:slot/review', async (req, reply) => {
+    // requireAdmin RETURNS the acting admin steamid (src/routes/guards.ts:47), or
+    // null having already sent the 401/403. That id is what the audit log needs.
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const p = req.params as { matchId: string; ordinal: string; half: string; slot: string };
+    const body = (req.body ?? {}) as { state?: string; note?: string };
+    const state = String(body.state ?? '');
+    if (!REVIEW_STATES.has(state)) return reply.code(400).send({ error: 'unknown review state' });
+    const key = { matchId: Number(p.matchId), ordinal: Number(p.ordinal), half: Number(p.half) };
+    const slot = Number(p.slot);
+    if (![key.matchId, key.ordinal, key.half, slot].every(Number.isInteger)) {
+      return reply.code(400).send({ error: 'bad round' });
+    }
+    const note = String(body.note ?? '').slice(0, 500);
+    setReview(db, key, slot, state, note, adminId);
+    logAdmin(db, adminId, 'integrity_review', `${key.matchId}/${key.ordinal}/${key.half}/${slot}`, { state, note });
     return { ok: true };
   });
 
