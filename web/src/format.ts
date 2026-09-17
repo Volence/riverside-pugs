@@ -100,6 +100,7 @@ export const STAT_LABELS: Record<string, string> = {
   dmg_as_hunter: 'As hunter', dmg_as_smoker: 'As smoker',
   dmg_as_boomer: 'As boomer', dmg_as_tank: 'As tank',
   dmg_to_incapped: 'On incapped',
+  quad_caps: 'Quad caps',
   // Not "DPs": the table upper-cases every header, so it rendered as DPS and
   // read as damage per second. The stat is skill_detect's high-damage pounce.
   dps_landed: 'High pounces', pounce_damage_high: 'Pounce dmg',
@@ -183,7 +184,7 @@ export const STAT_FAMILIES: { key: string; side: 'core' | 'survivor' | 'infected
     side: 'infected',
     keys: ['damage_as_si', 'dmg_as_hunter', 'dmg_as_smoker', 'dmg_as_boomer', 'dmg_as_tank', 'dmg_to_incapped'],
   },
-  { key: 'pounce', side: 'infected', keys: ['dps_landed', 'pounce_damage_high'] },
+  { key: 'pounce', side: 'infected', keys: ['dps_landed', 'pounce_damage_high', 'quad_caps'] },
   {
     key: 'boomer',
     side: 'infected',

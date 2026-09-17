@@ -1,3 +1,4 @@
+import type { Standing } from '../api';
 import type { ComponentChildren } from 'preact';
 
 /**
@@ -37,18 +38,37 @@ export function Figures({ children }: { children: ComponentChildren }) {
 /** One eyebrowed number. `tone` colors the number by role: gold for a
  *  rating, teal or red for a result. Untoned figures are bright bone. */
 export function Figure(
-  { label, value, sub, tone }: {
+  { label, value, sub, tone, standing }: {
     label: string;
     value: string | number;
     sub?: string;
     tone?: 'rating' | 'win' | 'loss';
+    /** A top-five place this season, shown as a badge beside the label. */
+    standing?: Standing;
   },
 ) {
   return (
     <div class="figure">
-      <p class="figure__label eyebrow">{label}</p>
+      <p class="figure__label eyebrow">
+        {label}
+        {standing && <RankBadge standing={standing} />}
+      </p>
       <p class={`figure__value num${tone ? ` figure__value--${tone}` : ''}`}>{value}</p>
       {sub && <p class="figure__sub">{sub}</p>}
     </div>
+  );
+}
+
+/** "#2" in a small medal. #1 is gold, the rest of the top five a quieter
+ *  bone, so the one that is actually first reads as first at a glance. */
+export function RankBadge({ standing, what }: { standing: Standing; what?: string }) {
+  const { rank, of } = standing;
+  return (
+    <span
+      class={`rankbadge${rank === 1 ? ' rankbadge--first' : ''}`}
+      title={`#${rank} of ${of} ranked players this season${what ? ` in ${what}` : ''}`}
+    >
+      #{rank}
+    </span>
   );
 }

@@ -122,6 +122,10 @@ export const STAT_DEFS: readonly StatDef[] = [
   // bleedout pool. Runs into the thousands and reflects no skill, which is why
   // it is separated out rather than left to inflate the total.
   def('dmg_to_incapped', 'infected', 'On incapped', 'neutral', false),
+  // All four survivors pinned at once. Credited to every infected player
+  // holding someone on the pin that completes the set, from pug-match's own
+  // pin tracking, so it needs no skill_detect.
+  def('quad_caps', 'infected', 'Quad caps', 'high_good', false),
 ];
 
 const BY_KEY = new Map(STAT_DEFS.map((d) => [d.key, d]));

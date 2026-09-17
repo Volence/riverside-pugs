@@ -281,6 +281,26 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .figure__value--win { color: var(--win); }
 .figure__value--loss { color: var(--loss); }
 .figure__sub { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); color: var(--text-muted); }
+.rankbadge {
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0 0.4em;
+  border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+  border-radius: 2px;
+  font-family: var(--font-label);
+  letter-spacing: 0.04em;
+  color: var(--text);
+  vertical-align: 0.05em;
+}
+.rankbadge--first {
+  border-color: var(--rating);
+  color: var(--bg);
+  background: var(--rating);
+}
+/* Other top-five places that have no tile of their own. */
+.standings { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+.standings__item { display: inline-flex; align-items: baseline; font-size: var(--fs-dense); color: var(--text-muted); }
+.standings__item .rankbadge { margin: 0 0.5em 0 0; }
 
 .panel {
   background: var(--surface);
@@ -1035,6 +1055,10 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   background: color-mix(in srgb, var(--rating) 8%, var(--surface));
 }
 .lb td.is-dim { opacity: 0.35; }
+/* A table with no rank column (profile by-map, map page players). Without
+   this the name pinned 3.25rem in, and the stats scrolled through the gap.
+   Out-specifies the phone override below, so it holds at every width. */
+.lb.lb--norank { --lb-rank-w: 0px; }
 @media (max-width: 480px) {
   .lb { --lb-rank-w: 2.75rem; --lb-name-w: 7.5rem; }
   .lb .lb__rank { padding-inline: var(--sp-2); }
@@ -1378,5 +1402,10 @@ body.is-theater { overflow: hidden; }
 
 /* Leaderboard: players under three games sit below the ranked rows, greyed,
    under one eyebrow row that names the group. */
-.lb tbody tr.is-provisional td { opacity: 0.55; }
+.lb tbody tr.is-provisional td:not(.lb__rank, .lb__pcol, .lb__sr) { opacity: 0.55; }
+/* Not opacity on the pinned cells: it made their opaque background
+   translucent, so the stats scrolled visibly underneath the name. Their
+   content is dimmed instead, leaving the background solid. */
+.lb tbody tr.is-provisional > :is(.lb__rank, .lb__pcol, .lb__sr) { color: color-mix(in srgb, currentColor 55%, var(--surface)); }
+.lb tbody tr.is-provisional > .lb__pcol a { opacity: 0.55; }
 .lb tbody tr.lb__group td { height: auto; padding-top: var(--sp-3); padding-bottom: var(--sp-1); border-bottom: 0; }

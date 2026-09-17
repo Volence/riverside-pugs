@@ -105,6 +105,34 @@ describe('stats routes', () => {
     expect(Object.keys(anon.json().statTotals)).not.toContain(selfKey);
   });
 
+  it('profile standings: top-5 places per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
+    const ids = [1, 2, 3].map(() => playCompletedMatch(db, 'b'));
+    // Skeets per match: IDS[1] 3, ME and IDS[2..5] 2 (tied), IDS[6..7] 1.
+    for (const m of ids) {
+      IDS.forEach((id, i) => seedStats(db, m, id, { skeets: i === 1 ? 3 : i <= 5 ? 2 : 1, tongue_cuts: 0 }));
+    }
+    seedStats(db, ids[0], ME, { times_skeeted: 50, boomer_spawns: 4, boom_successes: 4 });
+
+    const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
+    expect(body.standings.skeets).toEqual({ rank: 2, of: 8 });
+    // Every player has the same commons, so all eight share first.
+    expect(body.standings.ck).toEqual({ rank: 1, of: 8 });
+    expect(body.standings.boomer_rate).toEqual({ rank: 1, of: 1 });
+    expect(body.standings).not.toHaveProperty('tongue_cuts');
+    expect(body.standings).not.toHaveProperty('times_skeeted');
+    expect(body.standings).not.toHaveProperty('ff');
+    // Rank 7 of 8 in skeets is outside the top five.
+    const low = (await app.inject({ method: 'GET', url: `/api/players/${IDS[7]}` })).json();
+    expect(low.standings.skeets).toBeUndefined();
+  });
+
+  it('profile standings are empty for a provisional player', async () => {
+    const m = playCompletedMatch(db, 'b');
+    seedStats(db, m, ME, { skeets: 9 });
+    const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
+    expect(body.standings).toEqual({});
+  });
+
   it('leaderboard: SR-sorted current-season rows with games count', async () => {
     playCompletedMatch(db, 'b');
     const res = await app.inject({ method: 'GET', url: '/api/leaderboard', cookies });
