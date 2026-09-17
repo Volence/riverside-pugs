@@ -31,6 +31,7 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
+import { resolveServerBySource } from './serverPool.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
@@ -305,7 +306,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      logListener = new LogListener((ev) => {
+      logListener = new LogListener((ev, source) => {
         if (ev.kind === 'match_end') {
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
           if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
@@ -324,7 +325,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
-          selfStarted?.handle(ev);
+          selfStarted?.handle(ev, source);
           return;
         }
         // Spectator feed. Cosmetic by design, so a throw here must never take
@@ -488,12 +489,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       for (const s of servers) logListener.allowMatchCreateFrom(s.host);
       const feedHost = deps.config.logPublicAddress.split(':')[0];
       if (feedHost) logListener.allowMatchCreateFrom(feedHost);
+      logListener.allowMatchCreateWhen((address) => resolveServerBySource(deps.db, address, feedHost) !== null);
       selfStarted = new SelfStartedMatches({
         db: deps.db,
         listener: logListener,
-        resolveServerId: () => servers[0]?.id ?? null,
-        setMatchId: (token, matchId) =>
-          (orchestrator as RealOrchestrator).assignMatchId(servers[0].id, token, matchId),
+        resolveServerId: (source) => resolveServerBySource(deps.db, source, feedHost),
+        setMatchId: (token, matchId, serverId) =>
+          (orchestrator as RealOrchestrator).assignMatchId(serverId, token, matchId),
         adminSteamIds: deps.config.adminSteamIds,
         notify,
       });
