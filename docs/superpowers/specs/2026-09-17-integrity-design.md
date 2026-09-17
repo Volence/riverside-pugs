@@ -91,7 +91,7 @@ positions and real traces and does not inherit it.
 For a survivor `s` and ghost `g` in frame `f`:
 
 - `bearing(s, g, f)` is `atan2` of the XY offset, in degrees.
-- `err(s, g, f)` is the survivor's yaw minus that bearing, wrapped to [-180, 180].
+- `err(s, g, f)` is the bearing minus the survivor's yaw, wrapped to [-180, 180] (all metrics use its magnitude only).
 
 ### Frame eligibility
 

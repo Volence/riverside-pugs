@@ -20,7 +20,10 @@ export function bearing(from: Pt, to: Pt): number {
   return Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI;
 }
 
-/** Signed degrees between where a player is looking and where a target is. */
+/** Signed degrees from the yaw to the target bearing. Positive means the target
+ *  is counterclockwise of the current yaw, or equivalently the degrees to add to
+ *  yaw to face the target. Note: the design spec states the opposite sign; this
+ *  implementation is the corrected convention. All metrics use its magnitude only. */
 export function aimError(yaw: number, from: Pt, to: Pt): number {
   return wrapDeg(bearing(from, to) - yaw);
 }
