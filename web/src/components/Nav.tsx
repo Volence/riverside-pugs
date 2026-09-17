@@ -37,6 +37,9 @@ export function Nav({ session, state }: { session: Session; state: StateSnapshot
              rel={target ? 'noopener' : undefined}
              aria-current={path === href ? 'page' : undefined}>{label}</a>
         ))}
+        {me?.isAdmin && (
+          <a href="/admin" aria-current={path === '/admin' ? 'page' : undefined}>Admin</a>
+        )}
       </nav>
       {live && (
         <a class="nav__live" href="/live">

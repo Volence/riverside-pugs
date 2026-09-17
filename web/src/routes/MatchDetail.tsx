@@ -7,6 +7,7 @@ import { Empty, Panel } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
+import { ReportPlayer } from '../components/ReportPlayer';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
 
@@ -348,6 +349,12 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                 </li>
               ))}
             </ul>
+          </Panel>
+        )}
+
+        {me && (
+          <Panel>
+            <ReportPlayer matchId={match.id} />
           </Panel>
         )}
       </div>
