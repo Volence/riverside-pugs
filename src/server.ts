@@ -1,3 +1,5 @@
+import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
+import { discordAuthRoutes } from './routes/discordAuth.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -41,6 +43,8 @@ export interface ServerDeps {
   fetchPersona?: typeof realFetchPersona;
   hub?: Hub;
   orchestrator?: Orchestrator;
+  /** Injected in tests; built from config.discord otherwise. */
+  discordApi?: DiscordApi;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -197,12 +201,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
   await app.register(fastifyStatic, { root: staticRoot });
 
+  const discordApi: DiscordApi | null = deps.config.discord
+    ? deps.discordApi ?? fetchDiscordApi(deps.config.discord)
+    : null;
   await app.register(authRoutes, {
     config: deps.config,
     db: deps.db,
     verifyLogin: deps.verifyLogin ?? realVerifyLogin,
     fetchPersona: deps.fetchPersona ?? realFetchPersona,
+    discordApi,
   });
+  await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
 
   const hub = deps.hub ?? new Hub();
   await app.register(wsRoutes, { hub });
