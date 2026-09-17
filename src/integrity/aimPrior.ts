@@ -70,6 +70,16 @@ export class PriorBuilder implements PriorTable {
       this.counts.set(k, (this.counts.get(k) ?? 0) + 1);
     }
   }
+
+  /** Fold another table in. A map's pooled prior is exactly the sum of its
+   *  rounds' priors, so pooling is done by adding the SAME per-round table that
+   *  `subtractRound` later takes back out. Anything else is two producers of a
+   *  number that must agree, and `subtractRound` clamps a disagreement to zero
+   *  rather than failing, so the drift would be silent. */
+  add(other: PriorTable): void {
+    this.frames += other.frames;
+    for (const [k, v] of other.counts) this.counts.set(k, (this.counts.get(k) ?? 0) + v);
+  }
 }
 
 /** Probability a survivor on this map is looking at this cell. Zero for an

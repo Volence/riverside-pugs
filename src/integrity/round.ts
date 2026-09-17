@@ -31,6 +31,26 @@ export interface RoundMetrics {
   gates: GateTally;
 }
 
+/**
+ * One round's contribution to its map's aim prior.
+ *
+ * The single producer of this number, on purpose. The backfill's pooling pass
+ * and the scoring pass both need it, and they must agree exactly: the pool is
+ * the sum of these, and `subtractRound` takes one back out before a player is
+ * scored. If the two ever disagreed, `subtractRound` would clamp the mismatch
+ * to zero, the pool and the subtraction would quietly diverge, every occupancy
+ * z-score would shift, and nothing would fail.
+ */
+export function buildRoundPrior(frames: Frame[], survivorSlots: number[]): PriorBuilder {
+  const out = new PriorBuilder();
+  for (const f of frames) {
+    for (const s of f.players) {
+      if (survivorSlots.includes(s.slot) && isLiveSurvivor(s)) out.addSurvivorFrame(s, s.yaw);
+    }
+  }
+  return out;
+}
+
 function p95(xs: number[]): number {
   if (xs.length === 0) return 0;
   const sorted = [...xs].sort((a, b) => a - b);
@@ -50,13 +70,7 @@ export function analyzeRound(
   const metrics = new Map<number, RoundMetrics>();
   const clips = new Map<number, TrackWindow[]>();
   const occ = new Map<number, OccResult | null>();
-  const roundPrior = new PriorBuilder();
-
-  for (const f of frames) {
-    for (const s of f.players) {
-      if (survivorSlots.includes(s.slot) && isLiveSurvivor(s)) roundPrior.addSurvivorFrame(s, s.yaw);
-    }
-  }
+  const roundPrior = buildRoundPrior(frames, survivorSlots);
 
   for (const slot of survivorSlots) {
     const windows = trackWindows(frames, slot);
