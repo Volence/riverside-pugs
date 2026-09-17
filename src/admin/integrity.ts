@@ -27,15 +27,40 @@ export interface IntegrityClipRow {
   detail: Record<string, unknown>;
 }
 
+export interface IntegrityBoardRow extends ScoredPlayer {
+  /** The player's name, falling back to the SteamID when we have never seen
+   *  one. Every other admin surface resolves names for the same reason: a
+   *  17 digit number is not a person an admin can recognise. */
+  name: string;
+  /** Clips currently in existence for this player. A board with none anywhere
+   *  is a ranking over clean data, and the panel has to be able to say so. */
+  clips: number;
+}
+
 /** The board: one row per player, ranked. Scores are computed here, never read
  *  from a column, so changing a threshold changes the page and nothing else. */
-export function integrityBoard(db: DB, seasonId: number | null): ScoredPlayer[] {
+export function integrityBoard(db: DB, seasonId: number | null): IntegrityBoardRow[] {
   const rows = db.prepare(
-    `SELECT r.steamid, r.metrics
-     FROM integrity_rounds r JOIN matches m ON m.id = r.match_id
+    `SELECT r.steamid, r.metrics, p.name
+     FROM integrity_rounds r
+     JOIN matches m ON m.id = r.match_id
+     LEFT JOIN players p ON p.steamid = r.steamid
      WHERE (? IS NULL OR m.season_id = ?)`,
-  ).all(seasonId, seasonId) as { steamid: string; metrics: string }[];
-  return scorePlayers(aggregate(rows.map((r) => ({ steamid: r.steamid, metrics: JSON.parse(r.metrics) as RoundMetrics }))));
+  ).all(seasonId, seasonId) as { steamid: string; metrics: string; name: string | null }[];
+
+  const names = new Map(rows.map((r) => [r.steamid, r.name]));
+  const clips = new Map((db.prepare(
+    `SELECT c.steamid, COUNT(*) AS n
+     FROM integrity_clips c JOIN matches m ON m.id = c.match_id
+     WHERE (? IS NULL OR m.season_id = ?)
+     GROUP BY c.steamid`,
+  ).all(seasonId, seasonId) as { steamid: string; n: number }[]).map((r) => [r.steamid, r.n]));
+
+  // Names and clip counts are attached AFTER scoring rather than carried
+  // through it, so score.ts stays a pure function of the measurements and
+  // cannot start ranking on anything but them.
+  return scorePlayers(aggregate(rows.map((r) => ({ steamid: r.steamid, metrics: JSON.parse(r.metrics) as RoundMetrics }))))
+    .map((p) => ({ ...p, name: names.get(p.steamid) || p.steamid, clips: clips.get(p.steamid) ?? 0 }));
 }
 
 export function integrityPlayer(db: DB, steamid: string): { rounds: IntegrityRoundRow[]; clips: IntegrityClipRow[] } {

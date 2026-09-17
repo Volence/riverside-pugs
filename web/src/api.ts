@@ -443,7 +443,13 @@ export interface ReportEligibility {
  *  key, not a verdict. */
 export interface IntegrityPlayerRow {
   steamid: string;
+  /** Resolved name, or the SteamID when the server has never seen one. */
+  name: string;
   rounds: number;
+  /** Clips in existence for this player. Zero on every row means nothing has
+   *  been flagged at all, and a ranking with nothing flagged is a list of your
+   *  best players by another name. */
+  clips: number;
   fidMax: number;
   fidP95: number;
   occZ: number | null;
