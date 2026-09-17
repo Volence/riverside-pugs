@@ -512,6 +512,13 @@ describe('Play', () => {
     expect(screen.getByPlaceholderText('invite code')).toBeTruthy();
   });
 
+  it('tells a banned player they are banned instead of asking for an invite code', () => {
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'banned', isAdmin: false };
+    render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
+    expect(screen.getByText('You are banned from the PUG')).toBeTruthy();
+    expect(screen.queryByPlaceholderText('invite code')).toBeNull();
+  });
+
   it('offers Discord first, and the invite code second, when Discord is configured', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null };
     render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
