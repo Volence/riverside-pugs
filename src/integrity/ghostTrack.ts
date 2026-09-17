@@ -3,6 +3,7 @@ import { TUNING } from './constants.js';
 import {
   aimError, bearing, dist2d, isGhost, isLiveSurvivor, pairEligible, wrapDeg, type Pt,
 } from './geometry.js';
+import { PriorBuilder, cellKey, cellOf, priorAt, type PriorTable } from './aimPrior.js';
 
 /**
  * Metric A, the backbone: did the crosshair MOVE with an invisible target.
@@ -130,4 +131,124 @@ export function pickClips(windows: TrackWindow[]): TrackWindow[] {
     kept.push(w);
   }
   return kept;
+}
+
+export interface OccResult {
+  z: number;
+  observed: number;
+  expected: number;
+  pairs: number;
+}
+
+/**
+ * Metric B: how much more often this player was on a ghost than the map's own
+ * looking habits predict.
+ *
+ * `expected` is what map knowledge alone accounts for, summed cell by cell from
+ * the prior. `observed` is what they actually did. Only the excess counts, as a
+ * z-score against the binomial spread, so a player whose whole edge is knowing
+ * where SI spawn scores zero by construction: the prior already contains that
+ * knowledge. Rare cells carry most of the signal because their prior is low,
+ * which is the behaviour we want without a second mechanism for it.
+ */
+export function occupancy(frames: Frame[], slot: number, prior: PriorTable | null): OccResult | null {
+  if (!prior || prior.frames <= 0) return null;
+  if (frames.length === 0) return null;
+  // Zero, not frames[0].tMs: tMs is BY DEFINITION milliseconds since the replay
+  // opened, and the replay opens at round start, so the round starts at zero.
+  // Using the first sampled frame instead shifts the spawn grace window by one
+  // sample interval and, for a fixture whose first frame is already at
+  // SPAWN_GRACE_MS, swallows the whole round.
+  const roundStartMs = 0;
+  let observed = 0, expected = 0, variance = 0, pairs = 0;
+
+  for (const f of frames) {
+    const s = f.players.find((p) => p.slot === slot);
+    if (!s || !isLiveSurvivor(s)) continue;
+    for (const g of f.players) {
+      if (!isGhost(g)) continue;
+      if (!pairEligible({ survivor: s, ghost: g, others: visibleOthers(f, slot, g.slot), tMs: f.tMs, roundStartMs })) continue;
+      const c = cellOf(g.x, g.y);
+      const p = priorAt(prior, cellKey(c.cx, c.cy));
+      pairs++;
+      expected += p;
+      variance += p * (1 - p);
+      if (Math.abs(aimError(s.yaw, s, g)) <= TUNING.E_DWELL) observed++;
+    }
+  }
+  if (pairs === 0) return null;
+  // When variance is 0 (all p=1), return z=0. Otherwise compute z-score, clamping
+  // variance to avoid division by zero on degenerate priors.
+  if (variance <= 0) return { z: 0, observed, expected, pairs };
+  return { z: (observed - expected) / Math.sqrt(variance), observed, expected, pairs };
+}
+
+export interface RoundMetrics {
+  fidMax: number;
+  fidP95: number;
+  occZ: number | null;
+  /** 1 is the highest occupancy z on this side this round. Null without a prior. */
+  teamRank: number | null;
+  /** This player's z minus the mean of their teammates'. Null without a prior. */
+  teamGap: number | null;
+  eligiblePairs: number;
+}
+
+function p95(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+}
+
+/**
+ * One round, every survivor.
+ *
+ * Also returns the round's own contribution to the aim prior, which the caller
+ * subtracts before scoring so nobody is measured against a baseline they helped
+ * build. See `subtractRound`.
+ */
+export function analyzeRound(
+  frames: Frame[], survivorSlots: number[], prior: PriorTable | null,
+): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; roundPrior: PriorBuilder } {
+  const metrics = new Map<number, RoundMetrics>();
+  const clips = new Map<number, TrackWindow[]>();
+  const occ = new Map<number, OccResult | null>();
+  const roundPrior = new PriorBuilder();
+
+  for (const f of frames) {
+    for (const s of f.players) {
+      if (survivorSlots.includes(s.slot) && isLiveSurvivor(s)) roundPrior.addSurvivorFrame(s, s.yaw);
+    }
+  }
+
+  for (const slot of survivorSlots) {
+    const windows = trackWindows(frames, slot);
+    clips.set(slot, pickClips(windows));
+    occ.set(slot, occupancy(frames, slot, prior));
+    const fids = windows.map((w) => w.fidelity);
+    metrics.set(slot, {
+      fidMax: fids.length ? Math.max(...fids) : 0,
+      fidP95: p95(fids),
+      occZ: occ.get(slot)?.z ?? null,
+      teamRank: null,
+      teamGap: null,
+      eligiblePairs: occ.get(slot)?.pairs ?? 0,
+    });
+  }
+
+  // Metric C. A second control on a different axis from the prior: the prior
+  // removes what is normal for this MAP across all history, this removes what
+  // was normal for this ROUND, including whatever the director happened to do.
+  const scored = survivorSlots.filter((s) => occ.get(s) != null);
+  if (scored.length > 1) {
+    const byZ = [...scored].sort((a, b) => (occ.get(b)!.z) - (occ.get(a)!.z));
+    for (const slot of scored) {
+      const mine = occ.get(slot)!.z;
+      const others = scored.filter((s) => s !== slot).map((s) => occ.get(s)!.z);
+      const m = metrics.get(slot)!;
+      m.teamRank = byZ.indexOf(slot) + 1;
+      m.teamGap = mine - (others.reduce((a, b) => a + b, 0) / others.length);
+    }
+  }
+  return { metrics, clips, roundPrior };
 }
