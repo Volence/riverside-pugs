@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
+import type { IntegrityClip, IntegrityPlayerRow, IntegrityRound } from '../api';
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
@@ -95,23 +96,55 @@ describe('ReportPlayer', () => {
 });
 
 describe('AdminIntegrity', () => {
+  const row = (over: Partial<IntegrityPlayerRow> = {}): IntegrityPlayerRow => ({
+    steamid: '10', name: 'Tino', rounds: 5, clips: 2, fidMax: 0.9, fidP95: 0.4,
+    occZ: 3.1, teamGap: 2.2, pFid: 0.95, pOcc: 0.9, pGap: 0.8, composite: 0.98, ...over,
+  });
+
+  const clip = (over: Partial<IntegrityClip> = {}): IntegrityClip => ({
+    id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3,
+    startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {}, ...over,
+  });
+
+  const round = (over: Partial<IntegrityRound> = {}): IntegrityRound => ({
+    matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
+    metrics: {
+      fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10,
+      gates: { considered: 40, notLive: 5, notGhost: 10, inGrace: 5, tooClose: 5, occluded: 5, passed: 10 },
+    },
+    computedAt: '2026-09-17T00:00:00Z', reviewState: 'new', reviewNote: '', ...over,
+  });
+
+  const open = async (name = 'Tino') => {
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText(name)).toBeTruthy());
+    fireEvent.click(screen.getByText(name));
+    await waitFor(() => expect(mockAdmin.integrityPlayer).toHaveBeenCalled());
+  };
+
   it('ranks the higher composite first and calls the number theoretical, not a verdict', async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
       players: [
-        { steamid: '10', rounds: 5, fidMax: 0.9, fidP95: 0.4, occZ: 3.1, teamGap: 2.2, pFid: 0.95, pOcc: 0.9, pGap: 0.8, composite: 0.98 },
-        { steamid: '20', rounds: 5, fidMax: 0.2, fidP95: 0.1, occZ: null, teamGap: null, pFid: 0.1, pOcc: null, pGap: null, composite: 0.1 },
+        row(),
+        row({ steamid: '20', name: 'PowerMustache', occZ: null, teamGap: null, fidMax: 0.2, fidP95: 0.1, pFid: 0.1, pOcc: null, pGap: null, composite: 0.1 }),
       ],
     });
     const { container } = render(<Admin session={{ kind: 'active', me }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
 
     const rows = container.querySelectorAll('tbody tr');
     expect(rows.length).toBe(2);
-    // First row is the higher composite (98% beats 10%), and it must never read as flat 0/100.
-    expect(within(rows[0] as HTMLElement).getByText('98%')).toBeTruthy();
-    expect(within(rows[1] as HTMLElement).getByText('10%')).toBeTruthy();
+    // The composite renders as a RANK inside a stated population, never as a
+    // percentage. percentile() is below/(n-1), so the top row is exactly 1.0 by
+    // construction: "Composite 100%" next to a real person's SteamID is a
+    // number that reads as a verdict and is nothing of the kind.
+    expect(within(rows[0] as HTMLElement).getByText('1 of 2')).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText('2 of 2')).toBeTruthy();
+    expect(screen.queryByText('98%')).toBeNull();
+
     // A null occZ/pOcc/teamGap/pGap must render as "n/a", never as 0, since 0 would mean
     // "average" and null means "we don't know".
     expect(within(rows[1] as HTMLElement).getAllByText('n/a')).toHaveLength(2);
@@ -121,20 +154,49 @@ describe('AdminIntegrity', () => {
     expect(screen.getByText(/theoretical/i)).toBeTruthy();
   });
 
-  it('opens a player to a clip that links to its match and shows the flagged moment', async () => {
+  it('identifies people by name, falling back to the SteamID the server sent', async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
-      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
-    });
-    mockAdmin.integrityPlayer.mockResolvedValue({
-      rounds: [],
-      clips: [{ id: 1, matchId: 42, ordinal: 1, half: 1, slot: 0, startMs: 12000, endMs: 14000, kind: 'ghost_track', score: 0.9, detail: {} }],
+      players: [row(), row({ steamid: '76561198000000020', name: '76561198000000020' })],
     });
     render(<Admin session={{ kind: 'active', me }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
-    fireEvent.click(screen.getByText('10'));
-    await waitFor(() => expect(mockAdmin.integrityPlayer).toHaveBeenCalledWith('10', expect.anything()));
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
+    expect(screen.getByText('76561198000000020')).toBeTruthy();
+  });
+
+  it('says so and dims the board when nobody has a clip at all', async () => {
+    // A ranking with nothing flagged is a list of your best players by another
+    // name, which decision 5 of the design names as the failure to avoid.
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({
+      players: [row({ clips: 0 }), row({ steamid: '20', name: 'PowerMustache', clips: 0, composite: 0.1 })],
+    });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
+    expect(screen.getByText(/No clips have been flagged for anyone/)).toBeTruthy();
+    expect(container.querySelector('.table-wrap.muted')).toBeTruthy();
+  });
+
+  it('leaves the board undimmed once anything is flagged', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({ players: [row({ clips: 1 })] });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
+    expect(screen.queryByText(/No clips have been flagged for anyone/)).toBeNull();
+    expect(container.querySelector('.table-wrap.muted')).toBeNull();
+  });
+
+  it('opens a player to a clip that links to its match and shows the flagged moment', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({ players: [row()] });
+    mockAdmin.integrityPlayer.mockResolvedValue({
+      rounds: [],
+      clips: [clip({ ordinal: 1, slot: 0, startMs: 12000, endMs: 14000, score: 0.9 })],
+    });
+    await open();
 
     // Evidence, not a URL that doesn't exist: /match/:id is a real route, and
     // the clip's ordinal, half and start time ride along as query params so
@@ -146,24 +208,35 @@ describe('AdminIntegrity', () => {
     expect(screen.getByText(/2\.0s/)).toBeTruthy();
   });
 
-  it('marks a clip Reviewed with the typed note, in the exact (matchId, ordinal, half, slot, state, note) order', async () => {
+  it('puts ONE review control on a player-round, however many clips it holds', async () => {
+    // Review state is keyed by the player-round, so a control per clip meant
+    // clicking Reviewed on one six-second moment silently triaged up to five,
+    // and typing in one note box updated the others as you typed.
     mockAdmin.players.mockResolvedValue({ players: [] });
-    mockAdmin.integrity.mockResolvedValue({
-      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
-    });
+    mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({
-      rounds: [],
-      clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+      rounds: [round()],
+      clips: [clip({ id: 1 }), clip({ id: 2, startMs: 20000, endMs: 22000 }), clip({ id: 3, startMs: 30000, endMs: 32000 })],
     });
+    await open();
+    await waitFor(() => expect(screen.getAllByPlaceholderText('Review note')).toHaveLength(1));
+    expect(screen.getAllByRole('link', { name: /Match #42/ })).toHaveLength(3);
+    // And the label says what the button actually does, so nobody clicks it
+    // believing they settled only the clip they just watched.
+    expect(screen.getByRole('button', { name: 'Mark this round reviewed (3 clips)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Dismiss this round (3 clips)' })).toBeTruthy();
+  });
+
+  it('marks a round Reviewed with the typed note, in the exact (matchId, ordinal, half, slot, state, note) order', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({ players: [row()] });
+    mockAdmin.integrityPlayer.mockResolvedValue({ rounds: [], clips: [clip()] });
     mockAdmin.integrityReview.mockResolvedValue({ ok: true });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
-    fireEvent.click(screen.getByText('10'));
+    await open();
     await waitFor(() => expect(screen.getByPlaceholderText('Review note')).toBeTruthy());
 
     fireEvent.input(screen.getByPlaceholderText('Review note'), { target: { value: 'looked clean on rewatch' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Reviewed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark this round reviewed (1 clip)' }));
 
     // Literals here are independent of the fixture above (matchId 42, ordinal 2, half 1,
     // slot 3 were typed fresh, not read back from a mock call), so a positional swap in
@@ -171,52 +244,82 @@ describe('AdminIntegrity', () => {
     await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 3, 'reviewed', 'looked clean on rewatch'));
   });
 
-  it('marks a clip Dismissed with a different state string than Reviewed', async () => {
+  it('marks a round Dismissed with a different state string than Reviewed', async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });
-    mockAdmin.integrity.mockResolvedValue({
-      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
-    });
-    mockAdmin.integrityPlayer.mockResolvedValue({
-      rounds: [],
-      clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
-    });
+    mockAdmin.integrity.mockResolvedValue({ players: [row()] });
+    mockAdmin.integrityPlayer.mockResolvedValue({ rounds: [], clips: [clip()] });
     mockAdmin.integrityReview.mockResolvedValue({ ok: true });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
-    fireEvent.click(screen.getByText('10'));
+    await open();
     await waitFor(() => expect(screen.getByPlaceholderText('Review note')).toBeTruthy());
 
     fireEvent.input(screen.getByPlaceholderText('Review note'), { target: { value: 'heard the spawn' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss this round (1 clip)' }));
 
     await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 3, 'dismissed', 'heard the spawn'));
   });
 
   it('shows a clip whose round is already dismissed as visibly reviewed, with its note', async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });
-    mockAdmin.integrity.mockResolvedValue({
-      players: [{ steamid: '10', rounds: 1, fidMax: 0.9, fidP95: 0.4, occZ: 3, teamGap: 2, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8 }],
-    });
+    mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({
-      rounds: [{
-        matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
-        metrics: {
-          fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10,
-          gates: { considered: 40, notLive: 5, notGhost: 10, inGrace: 5, tooClose: 5, occluded: 5, passed: 10 },
-        },
-        computedAt: '2026-09-17T00:00:00Z', reviewState: 'dismissed', reviewNote: 'heard the spawn',
-      }],
-      clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+      rounds: [round({ reviewState: 'dismissed', reviewNote: 'heard the spawn' })],
+      clips: [clip()],
     });
     const { container } = render(<Admin session={{ kind: 'active', me }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
-    fireEvent.click(screen.getByText('10'));
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
+    fireEvent.click(screen.getByText('Tino'));
 
     await waitFor(() => expect(screen.getByText('dismissed: heard the spawn')).toBeTruthy());
-    const row = container.querySelector('li.muted') as HTMLElement | null;
-    expect(row).toBeTruthy();
-    expect(within(row as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+    const li = container.querySelector('li.muted') as HTMLElement | null;
+    expect(li).toBeTruthy();
+    expect(within(li as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+  });
+
+  it('does not bleed review state or notes between two rounds differing only in slot', async () => {
+    // The whole key is (matchId, ordinal, half, slot). A fixture with one round
+    // cannot detect a future partial-key lookup that drops half or slot: it
+    // would still match, and the test would still pass, while an admin was
+    // shown that a moment had already been cleared when it had not.
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({ players: [row()] });
+    mockAdmin.integrityPlayer.mockResolvedValue({
+      rounds: [
+        round({ slot: 3, reviewState: 'dismissed', reviewNote: 'heard the spawn' }),
+        round({ slot: 4, reviewState: 'new', reviewNote: '' }),
+        round({ ordinal: 2, half: 2, slot: 3, reviewState: 'reviewed', reviewNote: 'second half note' }),
+      ],
+      clips: [
+        clip({ id: 1, slot: 3 }),
+        clip({ id: 2, slot: 4 }),
+        clip({ id: 3, half: 2, slot: 3 }),
+      ],
+    });
+    mockAdmin.integrityReview.mockResolvedValue({ ok: true });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
+    fireEvent.click(screen.getByText('Tino'));
+    await waitFor(() => expect(screen.getAllByPlaceholderText('Review note')).toHaveLength(3));
+
+    // Exactly two of the three groups are triaged, and each carries its OWN note.
+    const groups = container.querySelectorAll('ul.admin-list > li');
+    expect(groups).toHaveLength(3);
+    expect((groups[0] as HTMLElement).className).toContain('muted');
+    expect((groups[1] as HTMLElement).className).not.toContain('muted');
+    expect((groups[2] as HTMLElement).className).toContain('muted');
+    expect(within(groups[0] as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+    expect(within(groups[2] as HTMLElement).getByText('reviewed: second half note')).toBeTruthy();
+    expect(within(groups[1] as HTMLElement).queryByText(/heard the spawn|second half note/)).toBeNull();
+
+    // Typing in the second group's note box leaves the others empty, and its
+    // button posts its own slot rather than the first group's.
+    const inputs = screen.getAllByPlaceholderText('Review note') as HTMLInputElement[];
+    fireEvent.input(inputs[1], { target: { value: 'slot 4 only' } });
+    expect(inputs[0].value).toBe('');
+    expect(inputs[2].value).toBe('');
+    fireEvent.click(within(groups[1] as HTMLElement).getByRole('button', { name: 'Mark this round reviewed (1 clip)' }));
+    await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 4, 'reviewed', 'slot 4 only'));
+    expect(mockAdmin.integrityReview).toHaveBeenCalledTimes(1);
   });
 });
