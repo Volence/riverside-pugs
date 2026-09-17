@@ -14,6 +14,9 @@ export interface Me {
   avatar: string | null;
   status: string;
   isAdmin: boolean;
+  /** False when the server has no Discord app configured: hide every Discord control. */
+  discordEnabled?: boolean;
+  discord?: { id: string; name: string } | null;
 }
 
 export interface NamedPlayer {
@@ -345,6 +348,9 @@ export const api = {
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 
   register: (code: string) => post('/api/register', { code }),
+  linkDiscordCode: (code: string) =>
+    post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
+  unlinkDiscord: () => post('/api/discord/unlink'),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   ready: () => post('/api/lobby/ready'),

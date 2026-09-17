@@ -14,6 +14,7 @@ import { Maps } from './routes/Maps';
 import { Profile } from './routes/Profile';
 import { Crosshair } from './routes/Crosshair';
 import { ReplayPage } from './routes/ReplayPage';
+import { LinkDiscord } from './routes/LinkDiscord';
 import { Empty, Panel } from './components/bits';
 import './styles/app.css';
 
@@ -53,7 +54,8 @@ function App() {
           <Route path="/crosshair" component={Crosshair} />
           <Route path="/replay/file/:name" component={ReplayPage} />
           <Route path="/map/:map" component={MapDetail} />
-          <Route path="/player/:steamid" component={Profile} />
+          <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
+          <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
           <Route default component={NotFound} />
         </Router>
       </main>

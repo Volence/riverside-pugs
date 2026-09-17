@@ -20,6 +20,8 @@ const { mockApi } = vi.hoisted(() => ({
     maps: vi.fn(),
     profile: vi.fn(),
     queue: vi.fn(),
+    linkDiscordCode: vi.fn(),
+    unlinkDiscord: vi.fn(),
   },
 }));
 
@@ -35,6 +37,8 @@ const { MapDetail } = await import('./MapDetail');
 const { Maps } = await import('./Maps');
 const { Profile } = await import('./Profile');
 const { Play, QueuePanel } = await import('./Play');
+const { LinkDiscord } = await import('./LinkDiscord');
+const { LocationProvider } = await import('preact-iso');
 
 // Auto-cleanup only runs when vitest exposes globals, which this config does
 // not; without it each render stacks another copy in document.body and every
@@ -505,6 +509,15 @@ describe('Play', () => {
   it('asks for an invite code when registered but not active', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false };
     render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
+    expect(screen.getByPlaceholderText('invite code')).toBeTruthy();
+  });
+
+  it('offers Discord first, and the invite code second, when Discord is configured', () => {
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null };
+    render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
+    const link = screen.getByText('Connect Discord') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/auth/discord');
+    expect(link.getAttribute('target')).toBe('_top');
     expect(screen.getByPlaceholderText('invite code')).toBeTruthy();
   });
 
@@ -1126,5 +1139,56 @@ describe('Maps', () => {
     expect(screen.getByText('200')).toBeTruthy();
     expect(screen.getByText('not recorded')).toBeTruthy();
     expect(screen.queryByText(/null/)).toBeNull();
+  });
+});
+
+describe('LinkDiscord', () => {
+  const at = (url: string) => { history.replaceState(null, '', url); };
+  const invited = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null };
+
+  it('sends a signed-out visitor through Steam and back with the code', () => {
+    at('/link/discord?code=abc123');
+    render(<LocationProvider><LinkDiscord session={{ kind: 'anonymous' }} refresh={() => {}} /></LocationProvider>);
+    const link = screen.getByText(/sign in through steam/i) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe(`/auth/steam?next=${encodeURIComponent('/link/discord?code=abc123')}`);
+    expect(mockApi.linkDiscordCode).not.toHaveBeenCalled();
+  });
+
+  it('spends the code once when signed in and shows the linked name', async () => {
+    at('/link/discord?code=abc123');
+    mockApi.linkDiscordCode.mockResolvedValue({ ok: true, active: true, discordName: 'Alice' });
+    const refresh = vi.fn();
+    render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: invited }} refresh={refresh} /></LocationProvider>);
+    await waitFor(() => expect(screen.getByText('Alice')).toBeTruthy());
+    expect(mockApi.linkDiscordCode).toHaveBeenCalledTimes(1);
+    expect(mockApi.linkDiscordCode).toHaveBeenCalledWith('abc123');
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it('explains a taken account', async () => {
+    at('/link/discord?code=abc123');
+    const { ApiError } = await import('../api');
+    mockApi.linkDiscordCode.mockRejectedValue(new ApiError(409, 'discord_taken'));
+    render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: invited }} refresh={() => {}} /></LocationProvider>);
+    await waitFor(() => expect(screen.getByText(/already linked to a different Steam account/)).toBeTruthy());
+  });
+});
+
+describe('Profile Discord card', () => {
+  const profile = {
+    player: { steamid: '1', name: 'alice', avatar: null, createdAt: '2026-01-01T00:00:00' },
+    rating: null, totals: { games: 0, siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0 },
+    matches: [], history: [], statTotals: {}, privateStatTotals: null, statDefs: [],
+  };
+  const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, discordEnabled: true, discord: null };
+
+  it('shows Connect Discord on your own profile only', async () => {
+    mockApi.profile.mockResolvedValue(profile);
+    const { unmount } = render(<Profile steamid="1" session={{ kind: 'active', me }} refresh={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Connect Discord')).toBeTruthy());
+    unmount();
+    render(<Profile steamid="1" session={{ kind: 'active', me: { ...me, steamid: '2' } }} refresh={() => {}} />);
+    await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
+    expect(screen.queryByText('Connect Discord')).toBeNull();
   });
 });

@@ -766,6 +766,9 @@ button.ctile:hover { border-color: var(--text-muted); }
 .hero-panel .btn { margin-top: var(--sp-4); }
 
 .register { display: flex; gap: var(--sp-3); margin-top: var(--sp-4); }
+.discordlink { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.discordlink__name { color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
+.discordlink .btn { margin-left: auto; }
 .register input { flex: 1; }
 
 /* ---------- play: countdown ---------- */
