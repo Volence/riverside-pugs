@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import type { PriorTable } from './aimPrior.js';
-import type { RoundMetrics, TrackWindow } from './ghostTrack.js';
+import type { TrackWindow } from './ghostTrack.js';
+import type { RoundMetrics } from './round.js';
 
 /** Bump whenever a metric changes MEANING, so stale rows are identifiable
  *  without guessing from computed_at. */

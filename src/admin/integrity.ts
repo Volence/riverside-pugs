@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import type { RoundMetrics } from '../integrity/ghostTrack.js';
+import type { RoundMetrics } from '../integrity/round.js';
 import { aggregate, scorePlayers, type ScoredPlayer } from '../integrity/score.js';
 
 export interface IntegrityRoundRow {

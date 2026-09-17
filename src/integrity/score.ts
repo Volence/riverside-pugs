@@ -1,4 +1,4 @@
-import type { RoundMetrics } from './ghostTrack.js';
+import type { RoundMetrics } from './round.js';
 
 /**
  * Rankings, computed fresh on every read.

@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { bearing } from '../src/integrity/geometry.js';
-import { trackFidelity, trackWindows, pickClips, occupancy, analyzeRound, type TrackWindow } from '../src/integrity/ghostTrack.js';
-import { PriorBuilder, cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
+import { trackFidelity, trackWindows, pickClips, type TrackWindow } from '../src/integrity/ghostTrack.js';
+import { occupancy } from '../src/integrity/occupancy.js';
+import { analyzeRound } from '../src/integrity/round.js';
+import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 
 function blank(slot: number): PlayerSample {
   return {
