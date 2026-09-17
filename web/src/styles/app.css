@@ -1419,7 +1419,7 @@ body.is-theater { overflow: hidden; }
 .admin-body { margin-top: var(--sp-4); }
 .admin-split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
 .admin-split--even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-@media (max-width: 900px) { .admin-split, .admin-split--even { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .admin-split, .admin-split--even { grid-template-columns: minmax(0, 1fr); } }
 
 .admin-search, .admin-form { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-3); }
 .admin-search input, .admin-form input { flex: 1 1 12rem; min-width: 0; }
@@ -1464,7 +1464,7 @@ body.is-theater { overflow: hidden; }
 .admin-setting__control input:not([type='checkbox']) { flex: 1 1 8rem; min-width: 0; }
 .admin-checks { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
 .admin-checks label, .admin-toggle { display: inline-flex; gap: var(--sp-2); align-items: center; }
-@media (max-width: 640px) { .admin-setting { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .admin-setting { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- report dialog (match page) ---------- */
 
