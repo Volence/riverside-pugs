@@ -89,6 +89,6 @@ describe('ReportPlayer', () => {
     mockApi.reportEligibility.mockResolvedValue({ canReport: false, reason: 'reports close 48 hours after a match ends' });
     render(<ReportPlayer matchId={7} />);
     fireEvent.click(screen.getByText('Report a player'));
-    await waitFor(() => expect(screen.getByText(/reports close 48 hours/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Reports close 48 hours/)).toBeTruthy());
   });
 });
