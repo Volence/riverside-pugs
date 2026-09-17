@@ -42,7 +42,10 @@ function valueOf(r: Row, key: string): number | null {
 }
 
 export function Leaderboard({ me }: { me: string | null }) {
-  const { data, error } = useFetch((s) => api.leaderboard(s), []);
+  const [season, setSeason] = useState<number | undefined>(undefined);
+  const { data, error } = useFetch((s) => api.leaderboard(s, season), [season]);
+  const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
+  const seasons = seasonList?.seasons ?? [];
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'sr', desc: true });
 
   const rows = (data?.rows ?? []) as Row[];
@@ -95,7 +98,21 @@ export function Leaderboard({ me }: { me: string | null }) {
 
   return (
     <div class="page page--list">
-      <PageHeader title="Leaderboard" aside={data ? data.season.name : undefined}>
+      <PageHeader
+        title="Leaderboard"
+        aside={seasons.length > 1 ? (
+          <select
+            class="season-picker" aria-label="Season"
+            value={String(season ?? seasons.find((s) => s.current)?.id ?? '')}
+            onChange={(e) => {
+              const id = Number((e.target as HTMLSelectElement).value);
+              setSeason(seasons.find((s) => s.id === id)?.current ? undefined : id);
+            }}
+          >
+            {seasons.map((s) => <option key={s.id} value={s.id}>{s.name}{s.current ? '' : ' (ended)'}</option>)}
+          </select>
+        ) : data ? data.season.name : undefined}
+      >
         {rows.length > 0 && (
           <Figures>
             <Figure label="Players" value={rows.length} />

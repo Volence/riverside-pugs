@@ -11,9 +11,10 @@ import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 const PROFILE_MATCH_LIMIT = 20;
 
 /** The season leaderboard, as GET /api/leaderboard returns it. */
-export function leaderboardData(db: DB) {
-  const seasonId = currentSeasonId(db);
-  const season = db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string };
+export function leaderboardData(db: DB, requestedSeason?: number) {
+  const seasonId = requestedSeason ?? currentSeasonId(db);
+  const season = db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string } | undefined;
+  if (!season) return null;
   const rows = db.prepare(
     `SELECT pr.player_id AS steamid, p.name, p.avatar, pr.mu, pr.sigma, pr.wins, pr.losses,
             (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = pr.player_id AND rh.season_id = pr.season_id) AS games

@@ -145,6 +145,8 @@ export class AdminFeedPoster {
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;
       case 'abort_match': return `${who} aborted match ${match}`;
       case 'void_match': return `${who} voided match ${match}: ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
+      case 'new_season': return `${who} started a new season: **${escapeName(String(d.name ?? ''))}**. Everyone's rating starts fresh.`;
+      case 'rename_season': return `${who} renamed season ${e.target} to **${escapeName(String(d.name ?? ''))}**`;
       case 'server_idle': return `${who} set server ${e.target} idle`;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
       case 'setting': return 'from' in d

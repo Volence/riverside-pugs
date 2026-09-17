@@ -14,6 +14,7 @@ import type { MatchDetail } from '../api';
 const { mockApi } = vi.hoisted(() => ({
   mockApi: {
     leaderboard: vi.fn(),
+    seasons: vi.fn(),
     matches: vi.fn(),
     match: vi.fn(),
     map: vi.fn(),
@@ -53,6 +54,7 @@ beforeEach(() => {
   // network the way "offers Steam sign-in when logged out" did before this
   // mock existed; tests that care about the queue panel override it.
   mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
+  mockApi.seasons.mockResolvedValue({ seasons: [] });
 });
 
 describe('Leaderboard', () => {

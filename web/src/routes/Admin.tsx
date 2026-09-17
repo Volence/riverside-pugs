@@ -7,11 +7,13 @@ import { AdminMatches } from './admin/AdminMatches';
 import { AdminReports } from './admin/AdminReports';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
+import { AdminSeasons } from './admin/AdminSeasons';
 
 const TABS = [
   { key: 'players', label: 'Players' },
   { key: 'matches', label: 'Matches' },
   { key: 'reports', label: 'Reports' },
+  { key: 'seasons', label: 'Seasons' },
   { key: 'settings', label: 'Settings' },
   { key: 'audit', label: 'Audit' },
 ];
@@ -36,6 +38,7 @@ export function Admin({ session }: { session: Session }) {
         {tab === 'players' && <AdminPlayers me={session.me.steamid} />}
         {tab === 'matches' && <AdminMatches />}
         {tab === 'reports' && <AdminReports />}
+        {tab === 'seasons' && <AdminSeasons />}
         {tab === 'settings' && <AdminSettings />}
         {tab === 'audit' && <AdminAudit />}
       </div>

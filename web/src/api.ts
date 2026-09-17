@@ -71,6 +71,15 @@ export interface StateSnapshot {
   queueBlock?: 'link_discord' | 'join_discord' | null;
 }
 
+export interface Season {
+  id: number;
+  name: string;
+  startedAt: string;
+  endedAt: string | null;
+  current: boolean;
+  matches: number;
+}
+
 export interface SiteInfo {
   discordEnabled: boolean;
   discordInviteUrl: string | null;
@@ -442,6 +451,8 @@ export const adminApi = {
     get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[] }>('/api/admin/settings', signal),
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
+  renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
+  newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
 };
 
 export const api = {
@@ -449,7 +460,9 @@ export const api = {
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
   queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
-  leaderboard: (signal?: AbortSignal) => get<Leaderboard>('/api/leaderboard', signal),
+  leaderboard: (signal?: AbortSignal, season?: number) =>
+    get<Leaderboard>(season === undefined ? '/api/leaderboard' : `/api/leaderboard?season=${season}`, signal),
+  seasons: (signal?: AbortSignal) => get<{ seasons: Season[] }>('/api/seasons', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[] }>('/api/maps', signal),
