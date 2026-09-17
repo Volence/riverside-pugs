@@ -2186,9 +2186,9 @@ export function AdminIntegrity() {
             return (
               <li key={c.id}>
                 <p>
-                  <a href={`/replay/${c.matchId}/${c.ordinal}/${c.half}?t=${c.startMs}`}>
-                    Match #{c.matchId} map {c.ordinal} round {c.half}
-                  </a>
+                  <a href={`/match/${c.matchId}`}>Match #{c.matchId}</a>
+                  {' '}map {c.ordinal} round {c.half}
+                  {' '}at <strong>{(c.startMs / 1000).toFixed(1)}s</strong>
                   <span class="muted"> · correlation {c.score.toFixed(2)} · {(c.endMs - c.startMs) / 1000}s</span>
                 </p>
                 <div class="admin-form">
@@ -2289,6 +2289,101 @@ git commit -m "Integrity: fixes from the first backfill"
 ```
 
 ---
+
+---
+
+### Task 11: Deep link a clip into the viewer
+
+Added during the pre-flight scan. The original Task 9 linked to
+`/replay/${matchId}/${ordinal}/${half}?t=`, which is not a route: the real routes are
+`/match/:id` and `/replay/file/:name`, and the viewer is a component inside MatchDetail that
+takes `spec={{ kind: 'match', matchId, ordinal, half }}` as a prop. Task 9 therefore links to
+the match page with the round and timestamp as text, and this task adds the real deep link.
+
+**Files:**
+- Modify: `web/src/routes/MatchDetail.tsx`
+- Modify: `web/src/replay/Viewer.tsx`
+- Modify: `web/src/routes/admin/AdminIntegrity.tsx` (use the deep link once it exists)
+- Test: the nearest existing viewer test file (`web/src/replay/renderRate.test.tsx` shows the render patterns)
+
+**Interfaces:**
+- Consumes: `playback.seek(t: number)` from `usePlayback` (`web/src/replay/playback.ts:84`); `AdminIntegrity` from Task 9
+- Produces: `Viewer` gains an optional prop `seekMs?: number`
+
+- [ ] **Step 1: Write the failing test**
+
+Add to the viewer test file, following its existing render patterns:
+
+```tsx
+it('seeks once to seekMs when the frames arrive, and not again on later renders', () => {
+  // Render Viewer with a stub source whose frames span 0..20000 and seekMs 12000.
+  // Assert the playhead lands at 12000. Re-render with the same props and assert
+  // no second seek: a viewer the user has since scrubbed must not be yanked back.
+});
+```
+
+Replace the comment with the concrete arrange/act/assert in the style the file already uses.
+Read the file first: `renderRate.test.tsx` and `usePlaybackLoop.test.ts` show how playback is
+driven in tests and how a stub replay source is supplied.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run web/src/replay/`
+Expected: FAIL, `seekMs` is not a prop of `Viewer`
+
+- [ ] **Step 3: Add the prop to Viewer**
+
+In `web/src/replay/Viewer.tsx`, add `seekMs` to the props type and the destructuring, then
+after `const playback = usePlayback(endMs, { live });` add:
+
+```tsx
+  /** A deep link lands on a moment, not the start of the round. Fires once, when
+   *  the frames first arrive: a viewer the user has since scrubbed must not be
+   *  yanked back to the link's timestamp on every later render. */
+  const seeked = useRef(false);
+  useEffect(() => {
+    if (seeked.current || seekMs == null || frames.length === 0) return;
+    seeked.current = true;
+    playback.seek(seekMs);
+  }, [seekMs, frames.length, playback]);
+```
+
+Import `useEffect` and `useRef` from `preact/hooks` if the file does not already.
+
+- [ ] **Step 4: Read the query params in MatchDetail**
+
+`MatchDetail` already owns the ordinal and half state for its round switch. Give that state an
+initial value from the URL when present, and pass `seekMs` through to `Viewer`:
+
+```tsx
+const params = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+const qOrdinal = Number(params.get('ordinal'));
+const qHalf = Number(params.get('half'));
+const qT = Number(params.get('t'));
+```
+
+Use `qOrdinal` and `qHalf` as the initial round selection only when both are integers matching
+a map and round the page actually has, and pass `seekMs={Number.isFinite(qT) ? qT : undefined}`.
+A malformed or out-of-range param must fall back to the existing default, never render an empty
+page.
+
+- [ ] **Step 5: Point the admin clips at it**
+
+In `AdminIntegrity.tsx`, change the clip link to
+`` `/match/${c.matchId}?ordinal=${c.ordinal}&half=${c.half}&t=${c.startMs}` `` and drop the
+now-redundant "map N round N at Xs" text, keeping the correlation and the duration.
+
+- [ ] **Step 6: Run tests and typecheck**
+
+Run: `npx vitest run web/src && npm run typecheck`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add web/src/replay/Viewer.tsx web/src/routes/MatchDetail.tsx web/src/routes/admin/AdminIntegrity.tsx
+git commit -m "Integrity: deep link a flagged clip to its moment in the viewer"
+```
 
 ## Self-Review
 
