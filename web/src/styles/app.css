@@ -722,6 +722,7 @@ button.ctile:hover { border-color: var(--text-muted); }
 .connect { margin-top: var(--sp-4); }
 .connect__line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-3);
   margin-top: var(--sp-2);
@@ -730,8 +731,11 @@ button.ctile:hover { border-color: var(--text-muted); }
   border: 1px solid var(--border);
 }
 .connect__line code {
-  flex: 1;
+  /* Own row. The block button is width:100%, so sharing a row squeezed this
+   * to one character wide on 2026-09-16. */
+  flex: 1 1 100%;
   min-width: 0;
+  user-select: all;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--fs-dense);
   white-space: normal;
