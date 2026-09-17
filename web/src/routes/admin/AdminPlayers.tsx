@@ -92,7 +92,7 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         {d.activeBan ? (
           <div class="admin-ban">
             <p>
-              Banned by {d.activeBan.createdBy} on {fmtTime(d.activeBan.createdAt)}: <strong>{d.activeBan.reason}</strong>
+              Banned by {d.activeBan.createdByName ?? d.activeBan.createdBy} on {fmtTime(d.activeBan.createdAt)}: <strong>{d.activeBan.reason}</strong>
               {d.activeBan.expiresAt ? `, until ${fmtTime(d.activeBan.expiresAt)}` : ', permanently'}.
             </p>
             <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.unban(d.steamid), `Unban ${d.name}?`)}>Unban</button>
@@ -118,7 +118,7 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
             {d.bans.map((b) => (
               <li key={b.id}>
                 {fmtTime(b.createdAt)}: {b.reason} ({b.expiresAt ? `until ${fmtTime(b.expiresAt)}` : 'permanent'})
-                {b.liftedAt && <span class="muted">, lifted by {b.liftedBy} {fmtTime(b.liftedAt)}</span>}
+                {b.liftedAt && <span class="muted">, lifted by {b.liftedByName ?? b.liftedBy} {fmtTime(b.liftedAt)}</span>}
               </li>
             ))}
           </ul>
@@ -172,7 +172,7 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
             {d.matches.map((m) => (
               <li key={m.id}>
                 <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} · {m.state} · team {m.team.toUpperCase()}
-                {m.state !== 'configuring' && !m.connectedAt && <span class="admin-warn"> · never connected</span>}
+                {m.state === 'aborted' && !m.connectedAt && <span class="admin-warn"> · never connected</span>}
               </li>
             ))}
           </ul>

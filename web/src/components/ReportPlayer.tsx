@@ -60,7 +60,7 @@ export function ReportPlayer({ matchId }: { matchId: number }) {
     <div class="report">
       <h3>Report a player</h3>
       {!elig && <p class="muted">Checking...</p>}
-      {elig && !elig.canReport && <p class="muted">{elig.reason}.</p>}
+      {elig && !elig.canReport && <p class="muted">{capitalise(elig.reason ?? 'You cannot report on this match')}.</p>}
       {elig?.canReport && (
         <form class="report__form" onSubmit={submit}>
           <select value={target} aria-label="Player" onChange={(e) => setTarget((e.target as HTMLSelectElement).value)}>
@@ -87,3 +87,5 @@ export function ReportPlayer({ matchId }: { matchId: number }) {
     </div>
   );
 }
+
+const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);

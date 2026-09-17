@@ -12,20 +12,25 @@ export interface BanRow {
   expiresAt: string | null;
   liftedBy: string | null;
   liftedAt: string | null;
+  createdByName?: string | null;
+  liftedByName?: string | null;
 }
 
 const toBan = (r: {
   id: number; reason: string; created_by: string; created_at: string; expires_at: string | null;
-  lifted_by: string | null; lifted_at: string | null;
+  lifted_by: string | null; lifted_at: string | null; created_by_name?: string | null; lifted_by_name?: string | null;
 }): BanRow => ({
   id: r.id, reason: r.reason, createdBy: r.created_by, createdAt: r.created_at, expiresAt: r.expires_at,
-  liftedBy: r.lifted_by, liftedAt: r.lifted_at,
+  liftedBy: r.lifted_by, liftedAt: r.lifted_at, createdByName: r.created_by_name ?? null, liftedByName: r.lifted_by_name ?? null,
 });
+
+const BAN_SELECT = `SELECT b.*, pc.name AS created_by_name, pl.name AS lifted_by_name FROM bans b
+  LEFT JOIN players pc ON pc.steamid = b.created_by LEFT JOIN players pl ON pl.steamid = b.lifted_by`;
 
 export function activeBan(db: DB, steamid: string, now = new Date()): BanRow | null {
   const r = db.prepare(
-    `SELECT * FROM bans WHERE player_id = ? AND lifted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
-     ORDER BY id DESC LIMIT 1`,
+    `${BAN_SELECT} WHERE b.player_id = ? AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?)
+     ORDER BY b.id DESC LIMIT 1`,
   ).get(steamid, now.toISOString()) as Parameters<typeof toBan>[0] | undefined;
   return r ? toBan(r) : null;
 }
@@ -116,7 +121,7 @@ export function playerDetail(db: DB, steamid: string) {
   const p = getPlayer(db, steamid);
   if (!p) return null;
   const [row] = searchPlayers(db, steamid, 1).filter((x) => x.steamid === steamid);
-  const bans = (db.prepare('SELECT * FROM bans WHERE player_id = ? ORDER BY id DESC').all(steamid) as Parameters<typeof toBan>[0][]).map(toBan);
+  const bans = (db.prepare(`${BAN_SELECT} WHERE b.player_id = ? ORDER BY b.id DESC`).all(steamid) as Parameters<typeof toBan>[0][]).map(toBan);
   const notes = (db.prepare(
     `SELECT n.id, n.author_id, a.name AS author_name, n.text, n.created_at FROM player_notes n
      LEFT JOIN players a ON a.steamid = n.author_id WHERE n.player_id = ? ORDER BY n.id DESC`,

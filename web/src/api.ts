@@ -355,8 +355,8 @@ export interface AdminPlayerRow {
 }
 
 export interface AdminBan {
-  id: number; reason: string; createdBy: string; createdAt: string;
-  expiresAt: string | null; liftedBy: string | null; liftedAt: string | null;
+  id: number; reason: string; createdBy: string; createdByName?: string | null; createdAt: string;
+  expiresAt: string | null; liftedBy: string | null; liftedByName?: string | null; liftedAt: string | null;
 }
 
 export interface AdminReport {
