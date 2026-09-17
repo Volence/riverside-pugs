@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive } from './guards.js';
+import { fileReport, reportEligibility } from '../reports.js';
 
 export interface ApiRouteOpts {
   db: DB;
@@ -48,6 +49,21 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     const steamid = requireActive(req, reply);
     if (!steamid) return;
     return matchmaker.stateFor(steamid);
+  });
+
+  app.get('/api/matches/:id/report-eligibility', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    const e = reportEligibility(db, Number((req.params as { id: string }).id), steamid);
+    return e.canReport ? e : { canReport: false, reason: e.reason };
+  });
+
+  app.post('/api/matches/:id/reports', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    const r = fileReport(db, Number((req.params as { id: string }).id), steamid, (req.body ?? {}) as object);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    return { ok: true };
   });
 
   // Public on purpose: the point is that people can watch the queue fill

@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { displaySr } from '../rating.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
+import { listReports } from '../reports.js';
 
 export interface BanRow {
   id: number;
@@ -134,6 +135,7 @@ export function playerDetail(db: DB, steamid: string) {
     notes,
     matches,
     penalties: penaltyHistory(db, steamid),
+    reportsAgainst: listReports(db, 'all').filter((r) => r.targetId === steamid),
     timeout: (() => {
       const t = activeTimeout(db, steamid);
       return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;

@@ -17,7 +17,7 @@ describe('openDb', () => {
       'match_player_stats', 'match_players', 'match_replays', 'match_rounds',
       'matches',
       'penalties', 'player_notes', 'player_ratings', 'players',
-      'rating_history', 'seasons', 'servers', 'settings',
+      'rating_history', 'reports', 'seasons', 'servers', 'settings',
     ]);
   });
 
