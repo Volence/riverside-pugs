@@ -21,6 +21,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/matches', 'Matches'],
   ['/maps', 'Campaigns'],
   ['/crosshair', 'Crosshair'],
+  ['/how-to-play', 'How to play'],
 ];
 
 export function Nav({ session, state }: { session: Session; state: StateSnapshot | null }) {

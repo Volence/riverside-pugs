@@ -9,6 +9,7 @@ import { getSetting } from '../settings.js';
 import type { DiscordApi } from '../discord/api.js';
 import { applyGate } from '../discord/gate.js';
 import type { GuildMembership } from '../discord/membership.js';
+import { publishAdminEvent } from '../adminFeed.js';
 
 const NEXT_COOKIE = 'pug_next';
 
@@ -63,8 +64,17 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
   app.get('/api/me', async (req, reply) => {
     const steamid = getSession(req);
     if (!steamid) return reply.code(401).send({ error: 'not logged in' });
-    const player = getPlayer(db, steamid);
+    let player = getPlayer(db, steamid);
     if (!player) return reply.code(401).send({ error: 'unknown player' });
+    // Self-heal: linked and in the server but still invited (the join event
+    // was missed while the site restarted). Only when no role is required,
+    // since roles are not in the member list.
+    if (player.status === 'invited' && player.discord_id && opts.membership?.isMember(player.discord_id)
+      && !(getSetting(db, 'discord_required_role_id') ?? '')) {
+      activatePlayer(db, steamid);
+      publishAdminEvent({ kind: 'account', steamid, what: 'activated' });
+      player = getPlayer(db, steamid)!;
+    }
     return {
       steamid: player.steamid,
       name: player.name,

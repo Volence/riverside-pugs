@@ -16,6 +16,7 @@ import { Crosshair } from './routes/Crosshair';
 import { ReplayPage } from './routes/ReplayPage';
 import { LinkDiscord } from './routes/LinkDiscord';
 import { Admin } from './routes/Admin';
+import { HowToPlay } from './routes/HowToPlay';
 import { Empty, Panel } from './components/bits';
 import './styles/app.css';
 
@@ -57,6 +58,7 @@ function App() {
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
           <Route path="/admin" component={Admin} session={session} />
+          <Route path="/how-to-play" component={HowToPlay} session={session} />
           <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
           <Route default component={NotFound} />
         </Router>

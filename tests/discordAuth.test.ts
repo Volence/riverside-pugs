@@ -158,6 +158,22 @@ describe('discord auth, configured', () => {
     expect(me.discord).toEqual({ id: '111', name: 'Alice' });
   });
 
+  it('/api/site reports the Discord requirement and invite link', async () => {
+    const { setSetting } = await import('../src/settings.js');
+    setSetting(db, 'discord_invite_url', 'https://discord.gg/abc');
+    expect((await app.inject({ method: 'GET', url: '/api/site' })).json())
+      .toEqual({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/abc', requireDiscord: true });
+  });
+
+  it('an active player without Discord linked cannot join the queue over HTTP', async () => {
+    const cookies = authedCookie(app, db, P1);
+    const res = await app.inject({ method: 'POST', url: '/api/queue/join', cookies });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('link your Discord account first');
+    linkDiscord(db, P1, '111', 'Alice');
+    expect((await app.inject({ method: 'POST', url: '/api/queue/join', cookies })).statusCode).toBe(200);
+  });
+
   it('steam login activates an invited player already linked to a guild member', async () => {
     upsertPlayer(db, { steamid: P1, name: 'alice', avatar: null }, []);
     linkDiscord(db, P1, '111', 'Alice');
