@@ -23,8 +23,8 @@ export function percentile(values: number[], v: number): number {
 export interface PlayerAgg {
   steamid: string;
   rounds: number;
-  corrMax: number;
-  corrP95: number;
+  fidMax: number;
+  fidP95: number;
   occZ: number | null;
   teamGap: number | null;
 }
@@ -36,7 +36,7 @@ function meanOrNull(xs: (number | null)[]): number | null {
 
 /** Roll a player's rounds into one row.
  *
- *  corrMax is a MAXIMUM across rounds, not a mean: one round of following an
+ *  fidMax is a MAXIMUM across rounds, not a mean: one round of following an
  *  invisible target is the thing worth looking at, and averaging it away with
  *  twenty clean rounds is how a detector misses. The rest are means, because a
  *  single high occupancy round really can be luck. */
@@ -50,15 +50,15 @@ export function aggregate(rows: { steamid: string; metrics: RoundMetrics }[]): P
   return [...by.values()].map((list) => ({
     steamid: list[0].steamid,
     rounds: list.length,
-    corrMax: Math.max(...list.map((r) => r.metrics.fidMax)),
-    corrP95: meanOrNull(list.map((r) => r.metrics.fidP95)) ?? 0,
+    fidMax: Math.max(...list.map((r) => r.metrics.fidMax)),
+    fidP95: meanOrNull(list.map((r) => r.metrics.fidP95)) ?? 0,
     occZ: meanOrNull(list.map((r) => r.metrics.occZ)),
     teamGap: meanOrNull(list.map((r) => r.metrics.teamGap)),
   }));
 }
 
 export interface ScoredPlayer extends PlayerAgg {
-  pCorr: number;
+  pFid: number;
   pOcc: number | null;
   pGap: number | null;
   /** Mean of whichever percentiles this player has. A sort key, not a claim. */
@@ -66,15 +66,15 @@ export interface ScoredPlayer extends PlayerAgg {
 }
 
 export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
-  const corrs = aggs.map((a) => a.corrMax);
+  const fids = aggs.map((a) => a.fidMax);
   const occs = aggs.map((a) => a.occZ).filter((x): x is number => x != null);
   const gaps = aggs.map((a) => a.teamGap).filter((x): x is number => x != null);
 
   return aggs.map((a) => {
-    const pCorr = percentile(corrs, a.corrMax);
+    const pFid = percentile(fids, a.fidMax);
     const pOcc = a.occZ == null ? null : percentile(occs, a.occZ);
     const pGap = a.teamGap == null ? null : percentile(gaps, a.teamGap);
-    const parts = [pCorr, pOcc, pGap].filter((x): x is number => x != null);
-    return { ...a, pCorr, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
+    const parts = [pFid, pOcc, pGap].filter((x): x is number => x != null);
+    return { ...a, pFid, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
   }).sort((x, y) => y.composite - x.composite);
 }
