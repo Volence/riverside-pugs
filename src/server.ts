@@ -1,3 +1,5 @@
+import { adminRoutes } from './routes/admin.js';
+import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
 import { createDjsTransport } from './discord/djsTransport.js';
 import { VoiceChannels } from './discord/voice.js';
@@ -487,6 +489,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       console.error('[liveView] reaper failed:', err);
     }
     try {
+      liftExpiredBans(deps.db);
+    } catch (err) {
+      console.error('[admin] ban expiry sweep failed:', err);
+    }
+    try {
       reapNoShowMatches(deps.db, releaser);
     } catch (err) {
       console.error('[noShow] reaper failed:', err);
@@ -526,6 +533,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       matchmaker,
       hub,
       connect: () => createDjsTransport(deps.config.discord!),
+      controller: { banMessage: (steamid) => banMessage(deps.db, steamid) },
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
       commands: {
         defs: COMMAND_DEFS,
@@ -544,6 +552,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
+  await app.register(adminRoutes, { db: deps.db, matchmaker });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
 

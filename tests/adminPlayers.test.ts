@@ -1,0 +1,124 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { openDb, type DB } from '../src/db.js';
+import { loadConfig } from '../src/config.js';
+import { buildServer } from '../src/server.js';
+import { getPlayer, linkDiscord } from '../src/players.js';
+import { liftExpiredBans, banMessage } from '../src/admin/players.js';
+import { authedCookie, stubOrchestrator } from './helpers.js';
+
+const ADMIN = '76561198000000001';
+const P2 = '76561198000000002';
+const P3 = '76561198000000003';
+
+let db: DB;
+let app: FastifyInstance;
+let admin: Record<string, string>;
+let user: Record<string, string>;
+
+beforeEach(async () => {
+  db = openDb(':memory:');
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+  admin = authedCookie(app, db, ADMIN);
+  db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+  user = authedCookie(app, db, P2);
+  authedCookie(app, db, P3);
+});
+afterEach(async () => { await app.close(); });
+
+const post = (url: string, cookies: Record<string, string>, payload: object = {}) =>
+  app.inject({ method: 'POST', url, cookies, payload });
+const get = (url: string, cookies: Record<string, string>) => app.inject({ method: 'GET', url, cookies });
+
+describe('admin guard', () => {
+  it('every admin route refuses a non-admin and an anonymous caller', async () => {
+    const routes: [string, string][] = [
+      ['GET', '/api/admin/players'], ['GET', `/api/admin/players/${P3}`], ['POST', `/api/admin/players/${P3}/ban`],
+      ['POST', `/api/admin/players/${P3}/unban`], ['POST', `/api/admin/players/${P3}/activate`],
+      ['POST', `/api/admin/players/${P3}/admin`], ['POST', `/api/admin/players/${P3}/unlink-discord`],
+      ['POST', `/api/admin/players/${P3}/notes`], ['GET', '/api/admin/audit'],
+    ];
+    for (const [method, url] of routes) {
+      expect((await app.inject({ method: method as 'GET', url, cookies: user, payload: method === 'POST' ? {} : undefined })).statusCode, url).toBe(403);
+      expect((await app.inject({ method: method as 'GET', url, payload: method === 'POST' ? {} : undefined })).statusCode, url).toBe(401);
+    }
+  });
+});
+
+describe('admin players', () => {
+  it('lists and searches players by name, steamid and discord name', async () => {
+    linkDiscord(db, P3, '333', 'carol_discord');
+    const all = (await get('/api/admin/players', admin)).json();
+    expect(all.players.map((p: { steamid: string }) => p.steamid).sort()).toEqual([ADMIN, P2, P3].sort());
+    const byDiscord = (await get('/api/admin/players?q=carol', admin)).json();
+    expect(byDiscord.players.map((p: { steamid: string }) => p.steamid)).toEqual([P3]);
+    const byId = (await get(`/api/admin/players?q=${P2}`, admin)).json();
+    expect(byId.players.map((p: { steamid: string }) => p.steamid)).toEqual([P2]);
+  });
+
+  it('ban needs a reason, sets status, removes from queue, and is audited', async () => {
+    await post('/api/queue/join', user);
+    expect((await post(`/api/admin/players/${P2}/ban`, admin, {})).statusCode).toBe(400);
+    const res = await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'griefing', minutes: 60 });
+    expect(res.statusCode).toBe(200);
+    expect(getPlayer(db, P2)?.status).toBe('banned');
+    expect((await get('/api/queue', user)).json().count).toBe(0);
+    const detail = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(detail.activeBan).toMatchObject({ reason: 'griefing' });
+    expect(detail.activeBan.expiresAt).toBeTruthy();
+    const audit = (await get('/api/admin/audit', admin)).json();
+    expect(audit.actions[0]).toMatchObject({ action: 'ban', target: P2, adminId: ADMIN });
+  });
+
+  it('you cannot ban yourself or remove your own admin', async () => {
+    expect((await post(`/api/admin/players/${ADMIN}/ban`, admin, { reason: 'x' })).statusCode).toBe(400);
+    expect((await post(`/api/admin/players/${ADMIN}/admin`, admin, { isAdmin: false })).statusCode).toBe(400);
+  });
+
+  it('unban lifts the ban and reactivates', async () => {
+    await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'x' });
+    await post(`/api/admin/players/${P2}/unban`, admin);
+    expect(getPlayer(db, P2)?.status).toBe('active');
+    expect((await get(`/api/admin/players/${P2}`, admin)).json().activeBan).toBeNull();
+  });
+
+  it('expired bans are lifted by the sweep, permanent ones are not', async () => {
+    await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'x', minutes: 5 });
+    await post(`/api/admin/players/${P3}/ban`, admin, { reason: 'y' });
+    liftExpiredBans(db, new Date(Date.now() + 10 * 60 * 1000));
+    expect(getPlayer(db, P2)?.status).toBe('active');
+    expect(getPlayer(db, P3)?.status).toBe('banned');
+  });
+
+  it('banMessage carries the reason and, for a timed ban, when it ends', async () => {
+    await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'toxic', minutes: 60 });
+    expect(banMessage(db, P2)).toMatch(/toxic/);
+    expect(banMessage(db, P2)).toMatch(/<t:\d+:R>/);
+  });
+
+  it('activate, grant admin, unlink discord and notes', async () => {
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(P3);
+    await post(`/api/admin/players/${P3}/activate`, admin);
+    expect(getPlayer(db, P3)?.status).toBe('active');
+    await post(`/api/admin/players/${P3}/admin`, admin, { isAdmin: true });
+    expect(getPlayer(db, P3)?.is_admin).toBe(1);
+    linkDiscord(db, P3, '333', 'c');
+    await post(`/api/admin/players/${P3}/unlink-discord`, admin);
+    expect(getPlayer(db, P3)?.discord_id).toBeNull();
+    expect((await post(`/api/admin/players/${P3}/notes`, admin, { text: '' })).statusCode).toBe(400);
+    await post(`/api/admin/players/${P3}/notes`, admin, { text: 'smurf of bob?' });
+    const detail = (await get(`/api/admin/players/${P3}`, admin)).json();
+    expect(detail.notes[0]).toMatchObject({ text: 'smurf of bob?', authorId: ADMIN });
+    const actions = (await get('/api/admin/audit', admin)).json().actions.map((a: { action: string }) => a.action);
+    expect(actions).toEqual(expect.arrayContaining(['activate', 'set_admin', 'unlink_discord', 'note']));
+  });
+
+  it('activate does not unban', async () => {
+    await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'x' });
+    expect((await post(`/api/admin/players/${P2}/activate`, admin)).statusCode).toBe(409);
+  });
+
+  it('/api/me says isAdmin for the admin', async () => {
+    expect((await get('/api/me', admin)).json().isAdmin).toBe(true);
+  });
+});

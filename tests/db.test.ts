@@ -10,12 +10,13 @@ describe('openDb', () => {
       .all()
       .map((r: any) => r.name);
     expect(names).toEqual([
+      'admin_actions', 'bans',
       'discord_link_codes', 'discord_messages', 'discord_voice',
       'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps',
       'match_player_stats', 'match_players', 'match_replays', 'match_rounds',
       'matches',
-      'player_ratings', 'players',
+      'player_notes', 'player_ratings', 'players',
       'rating_history', 'seasons', 'servers', 'settings',
     ]);
   });

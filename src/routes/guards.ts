@@ -40,3 +40,21 @@ export function makeRequireActive(db: DB) {
     return steamid;
   };
 }
+
+/** Per-route guard for the admin panel: an active admin's steamid, or the
+ *  401/403 reply sent and null. */
+export function makeRequireAdmin(db: DB) {
+  return function requireAdmin(req: FastifyRequest, reply: FastifyReply): string | null {
+    const steamid = getSession(req);
+    if (!steamid) {
+      reply.code(401).send({ error: 'not logged in' });
+      return null;
+    }
+    const player = getPlayer(db, steamid);
+    if (!player || player.status !== 'active' || player.is_admin !== 1) {
+      reply.code(403).send({ error: 'admins only' });
+      return null;
+    }
+    return steamid;
+  };
+}
