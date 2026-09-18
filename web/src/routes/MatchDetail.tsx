@@ -149,6 +149,12 @@ function ForecastPanel(
 ) {
   const pct = (p: number) => `${Math.round(p * 100)}%`;
   const favoured = f.srGap === 0 ? null : f.srGap > 0 ? 'a' : 'b';
+  // The odds follow mu, and SR subtracts twice the uncertainty, so the two can
+  // point different ways. A team leading on SR with no skill lead is leading
+  // because it is better understood, and saying that outright is the whole
+  // point of showing both.
+  const skillGap = Math.round(Math.abs(f.muGap) * 100);
+  const stronger = Math.abs(f.muGap) < 0.05 ? null : f.muGap > 0 ? 'A' : 'B';
   // Was the paper favourite actually beaten? The interesting rows in a
   // balance audit are the upsets, so the page names one rather than leaving
   // the reader to compare two percentages against a scoreline.
@@ -162,9 +168,13 @@ function ForecastPanel(
           <tr><th>Team A</th><td>{f.srA} SR, {pct(f.winProbA)} to win</td></tr>
           <tr><th>Team B</th><td>{f.srB} SR, {pct(f.winProbB)} to win</td></tr>
           <tr>
-            <th>Gap</th>
+            <th>Gap on SR</th>
+            <td>{f.srGap === 0 ? 'even' : `${Math.abs(f.srGap)} SR to Team ${favoured === 'a' ? 'A' : 'B'}`}</td>
+          </tr>
+          <tr>
+            <th>Gap on skill</th>
             <td>
-              {f.srGap === 0 ? 'even' : `${Math.abs(f.srGap)} SR to Team ${favoured === 'a' ? 'A' : 'B'}`}
+              {stronger === null ? 'even' : `${skillGap} to Team ${stronger}`}
               {upset && <span class="muted"> · the underdog won</span>}
             </td>
           </tr>
@@ -173,6 +183,10 @@ function ForecastPanel(
       <p class="muted">
         Mean SR of the rated players and the OpenSkill win probability, both from the ratings
         as they stood <strong>before</strong> this match rather than now.
+        {' '}SR subtracts <strong>twice</strong> each player's rating uncertainty, so a team can
+        lead on SR without being the stronger side: that is a team the system understands
+        better, not a better team. The odds follow skill, and the balancer optimises the
+        odds, so an even forecast next to a lopsided SR gap is the balancer working.
         {!full && ` Built from ${f.ratedA} v ${f.ratedB} players: a sub who played under half the maps is never rated, so they are not counted here either.`}
       </p>
     </Panel>

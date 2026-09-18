@@ -134,6 +134,26 @@ describe('matchForecast', () => {
     expect(f.srGap).toBe(1200);
   });
 
+  // The report that found this: match 40 read "1012 SR vs 1126 SR, 114 SR to
+  // Team B" next to "50% to win" each, which looks broken. It was not: team A
+  // had the HIGHER mu (25.564 vs 25.556) and the whole SR gap came from team
+  // B's lower sigma. SR subtracts twice the uncertainty; the forecast uses
+  // skill. The panel has to be able to say which is which.
+  it('reports the skill gap separately from the SR gap, because they can disagree', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    for (const id of IDS) ensureRating(db, id);
+    const up = db.prepare('UPDATE player_ratings SET mu = ?, sigma = ? WHERE player_id = ?');
+    // Equal skill. Team B is merely more certain of it.
+    for (const id of IDS.slice(0, 4)) up.run(25, 7.7, id);
+    for (const id of IDS.slice(4)) up.run(25, 7.1, id);
+    applyMatchRatings(db, matchId);
+
+    const f = matchForecast(db, matchId)!;
+    expect(f.srGap).toBeLessThan(-100);      // team B leads on SR
+    expect(f.muGap).toBeCloseTo(0, 6);       // and not at all on skill
+    expect(f.winProbA).toBeCloseTo(0.5, 2);
+  });
+
   it('gives the stronger team the higher win probability, and the two sum to one', () => {
     const matchId = seedLopsided();
     const f = matchForecast(db, matchId)!;

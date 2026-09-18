@@ -421,6 +421,10 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
  *  the two are the same thing because nothing updates until completion. */
 export interface Forecast {
   srA: number; srB: number; srGap: number;
+  /** Mean mu difference, A minus B. The skill gap the odds are built from,
+   *  with no uncertainty penalty. Near zero next to a large srGap means the
+   *  SR lead is confidence rather than skill. */
+  muGap: number;
   winProbA: number; winProbB: number;
   ratedA: number; ratedB: number;
   source: 'history' | 'current';
