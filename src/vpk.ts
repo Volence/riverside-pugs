@@ -147,9 +147,15 @@ export function readMissionFromVpk(vpkPath: string): { file: string; text: strin
         p += preloadBytes;
 
         if (ext === 'txt' && dir.toLowerCase() === 'missions') {
-          // 0x7fff means the bytes are in this file, after the tree. Anything
-          // else is a numbered archive this reader deliberately does not open.
-          if (archiveIndex !== 0x7fff && preloadBytes === 0) return null;
+          // 0x7fff means the bytes after the preload are in this file, right
+          // after the tree. Any other archive index means those bytes are in
+          // a numbered archive this reader deliberately does not open, so
+          // `length` (not preloadBytes) is what tells us whether any are
+          // actually missing. A short preload still tokenises into a
+          // complete-looking chapter list that just stops early, so handing
+          // it back as the whole file would silently ship a campaign missing
+          // its later chapters instead of rejecting the upload.
+          if (archiveIndex !== 0x7fff && length > 0) return null;
           const body = archiveIndex === 0x7fff
             ? Buffer.concat([preload, buf.subarray(dataStart + offset, dataStart + offset + length)])
             : preload;
