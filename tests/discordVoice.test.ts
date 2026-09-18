@@ -25,7 +25,7 @@ beforeEach(() => {
   IDS.forEach((id, i) => ins.run(matchId, id, i < 4 ? 'a' : 'b'));
   t = new FakeTransport();
   clock = Date.parse('2026-09-18T00:00:00Z');
-  v = new VoiceChannels({ db, voice: t.voice, now: () => clock });
+  v = new VoiceChannels({ db, voice: t.voice, now: () => clock, settleMs: 0 });
 });
 
 describe('VoiceChannels', () => {
@@ -85,6 +85,32 @@ describe('VoiceChannels', () => {
     expect(v.channelsFor(matchId)).toBeNull();
   });
 
+  // The hazard: discord.js builds its voice state cache from the gateway, so
+  // for the first moments after a restart every channel reads as having zero
+  // members. A sweep in that window sees "empty", skips the handback entirely
+  // (it only runs when the channels are NOT empty) and deletes channels with
+  // people sitting in them, dropping them out of voice. A restart is exactly
+  // when this is most likely, because a deploy is when people are told to
+  // expect a blip.
+  it('sweeps nothing until the bot has been up long enough to trust a member count', async () => {
+    await v.ensure(matchId);
+    const ids = v.channelsFor(matchId)!;
+    t.channels.get(ids.teamAId)!.members.add('900');
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(matchId);
+
+    // A fresh instance, as a restart produces, with a cache that has not
+    // filled in yet: every channel reports nobody.
+    const fresh = new VoiceChannels({ db, voice: t.voice, now: () => clock });
+    t.channels.get(ids.teamAId)!.members.clear();
+    await fresh.sweep();
+    expect(t.channels.has(ids.teamAId)).toBe(true);
+    expect(db.prepare('SELECT ended_at FROM discord_voice WHERE match_id = ?').get(matchId)).toMatchObject({ ended_at: null });
+
+    clock += 31_000;
+    await fresh.sweep();
+    expect(t.channels.has(ids.teamAId)).toBe(false);
+  });
+
   describe('handing players back before the channels go', () => {
     /** Park a real channel in the fake for someone to have come from. */
     const parkIn = (userId: string, channelId: string) => {
@@ -100,6 +126,19 @@ describe('VoiceChannels', () => {
       clock += 11 * 60 * 1000;
       await v.sweep();
     };
+
+    it('hands everyone back the moment the match ends, not ten minutes later', async () => {
+      setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
+      parkIn('900', 'general');
+      await v.ensure(matchId);
+      t.moves.length = 0;
+
+      db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(matchId);
+      await v.sweep(); // no clock advance at all
+
+      expect(t.moves).toEqual([{ userId: '900', channelId: 'general' }]);
+    });
 
     it('returns each player to the channel they were pulled out of', async () => {
       parkIn('900', 'general');
@@ -119,8 +158,11 @@ describe('VoiceChannels', () => {
       t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
       await v.ensure(matchId);
       // Walked into the team channel on their own, so nothing was remembered.
+      // voiceOf as well as members: that pair is what the fake keeps
+      // consistent when someone is moved out again.
       const ids = v.channelsFor(matchId)!;
       t.channels.get(ids.teamAId)!.members.add('901');
+      t.voiceOf.set('901', ids.teamAId);
 
       await endAndForce();
 

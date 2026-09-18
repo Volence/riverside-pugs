@@ -6,6 +6,22 @@ import type { VoiceOps } from './transport.js';
 
 const FORCE_DELETE_MS = 10 * 60 * 1000;
 
+/**
+ * How long after this process starts the sweep refuses to act.
+ *
+ * A member count is only as good as discord.js's voice state cache, and that
+ * cache is built from the gateway: for the first moments after a restart every
+ * channel truthfully reports nobody in it. A sweep in that window reads
+ * "empty", which skips the handback (it only runs for channels that are NOT
+ * empty) and deletes channels with people sitting in them, dropping them out
+ * of voice. A deploy is exactly when that would happen, which is exactly when
+ * people have been told to expect a brief blip and would blame the blip.
+ *
+ * Thirty seconds against a gateway handshake that takes two or three. The cost
+ * of waiting is a finished match's channels lingering half a minute longer.
+ */
+const SETTLE_MS = 30_000;
+
 interface VoiceRow {
   match_id: number;
   category_id: string;
@@ -30,10 +46,26 @@ export class VoiceChannels implements VoiceHook {
    *  pass: a permissions problem would otherwise spam the error log. */
   private failed = new Set<number>();
 
-  constructor(private deps: { db: DB; voice: VoiceOps; now?: () => number }) {}
+  /** Matches already reported as having stranded someone. Dispersal runs twice
+   *  for a match nobody could be moved out of, once when it ends and once when
+   *  the force-delete fires, and the admin feed does not need to hear about the
+   *  same failure twice. */
+  private reported = new Set<number>();
+
+  /** When this instance was built, which for the real one is process start. */
+  private readonly startedMs: number;
+
+  constructor(private deps: { db: DB; voice: VoiceOps; now?: () => number; settleMs?: number }) {
+    this.startedMs = this.now();
+  }
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+
+  /** Whether the voice state cache can be trusted yet. See SETTLE_MS. */
+  private settled(): boolean {
+    return this.now() - this.startedMs >= (this.deps.settleMs ?? SETTLE_MS);
   }
 
   async ensure(matchId: number): Promise<void> {
@@ -120,7 +152,8 @@ export class VoiceChannels implements VoiceHook {
         if (!moved) stranded++;
       }
     }
-    if (stranded > 0) {
+    if (stranded > 0 && !this.reported.has(r.match_id)) {
+      this.reported.add(r.match_id);
       publishAdminEvent({
         kind: 'problem',
         matchId: r.match_id,
@@ -131,6 +164,11 @@ export class VoiceChannels implements VoiceHook {
 
   async sweep(): Promise<void> {
     const { db, voice } = this.deps;
+    // Nothing at all, not even the ended_at stamp: that stamp starts the
+    // force-delete clock, and starting it from a sweep whose member counts
+    // are meaningless is how a cold cache would still end up deleting an
+    // occupied channel ten minutes later.
+    if (!this.settled()) return;
     const rows = db.prepare(
       `SELECT v.match_id, v.category_id, v.team_a_id, v.team_b_id, v.ended_at
        FROM discord_voice v JOIN matches m ON m.id = v.match_id
@@ -138,16 +176,29 @@ export class VoiceChannels implements VoiceHook {
     ).all() as VoiceRow[];
     const now = this.now();
     for (const r of rows) {
-      if (!r.ended_at) {
-        r.ended_at = new Date(now).toISOString();
-        db.prepare('UPDATE discord_voice SET ended_at = ? WHERE match_id = ?').run(r.ended_at, r.match_id);
+      const justEnded = !r.ended_at;
+      // Held in a local as well as on the row: the row's type is nullable and
+      // the narrowing that used to come from the `if` is gone now that the
+      // branch is keyed off `justEnded`.
+      const endedAt = r.ended_at ?? new Date(now).toISOString();
+      if (justEnded) {
+        r.ended_at = endedAt;
+        db.prepare('UPDATE discord_voice SET ended_at = ? WHERE match_id = ?').run(endedAt, r.match_id);
       }
       try {
+        // The match is over, so the teams go back where they came from now
+        // rather than whenever the channels happen to be cleaned up. Waiting
+        // left both teams sitting in separate channels after a game, which is
+        // the opposite of what anyone wants once the gg is due.
+        if (justEnded) await this.disperse(r);
         const a = await voice.channelMemberCount(r.team_a_id);
         const b = await voice.channelMemberCount(r.team_b_id);
         const empty = (a ?? 0) === 0 && (b ?? 0) === 0;
-        const overdue = now - Date.parse(r.ended_at) >= FORCE_DELETE_MS;
+        const overdue = now - Date.parse(endedAt) >= FORCE_DELETE_MS;
         if (!empty && !overdue) continue;
+        // Not redundant with the dispersal above: someone can rejoin a
+        // channel in the window before it is deleted, and the ten minute
+        // force is what catches anyone the first pass could not move.
         if (!empty) await this.disperse(r);
         for (const id of [r.team_a_id, r.team_b_id, r.category_id]) await voice.deleteChannel(id);
         db.prepare('UPDATE discord_voice SET deleted_at = ? WHERE match_id = ?').run(new Date(now).toISOString(), r.match_id);
