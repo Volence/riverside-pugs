@@ -110,6 +110,33 @@ describe('currentFileFor', () => {
     expect(got?.filename).toBe(`pug_${TOKEN_A}_1_2.rpl`);
   });
 
+  // A live viewer is held ten seconds behind, so the round it should be
+  // reading is the round that was live ten seconds ago. Pointing it at a
+  // round that started a moment ago throws away the tail of the one it is
+  // still playing and leaves it with nothing to show until the new round
+  // catches up.
+  it('stays on the previous round while the new one is still inside the delay', () => {
+    const tenMinutesAgo = Math.floor(NOW / 1000) - 600;
+    const threeSecondsAgo = Math.floor(NOW / 1000) - 3;
+    write(`pug_${TOKEN_A}_1_1.rpl`, header({ ordinal: 1, half: 1, startedUnix: tenMinutesAgo }));
+    write(`pug_${TOKEN_A}_1_2.rpl`, header({ ordinal: 1, half: 2, startedUnix: threeSecondsAgo }));
+    expect(currentFileFor(dir, TOKEN_A, NOW)?.filename).toBe(`pug_${TOKEN_A}_1_1.rpl`);
+  });
+
+  it('moves to the new round once it is past the delay', () => {
+    const tenMinutesAgo = Math.floor(NOW / 1000) - 600;
+    const elevenSecondsAgo = Math.floor(NOW / 1000) - 11;
+    write(`pug_${TOKEN_A}_1_1.rpl`, header({ ordinal: 1, half: 1, startedUnix: tenMinutesAgo }));
+    write(`pug_${TOKEN_A}_1_2.rpl`, header({ ordinal: 1, half: 2, startedUnix: elevenSecondsAgo }));
+    expect(currentFileFor(dir, TOKEN_A, NOW)?.filename).toBe(`pug_${TOKEN_A}_1_2.rpl`);
+  });
+
+  it('points at a just-started first round anyway, so the viewer can read its header', () => {
+    const twoSecondsAgo = Math.floor(NOW / 1000) - 2;
+    write(`pug_${TOKEN_A}_0_1.rpl`, header({ ordinal: 0, half: 1, startedUnix: twoSecondsAgo }));
+    expect(currentFileFor(dir, TOKEN_A, NOW)?.filename).toBe(`pug_${TOKEN_A}_0_1.rpl`);
+  });
+
   it('returns null for an unknown token', () => {
     expect(currentFileFor(dir, TOKEN_B, NOW)).toBeNull();
   });
