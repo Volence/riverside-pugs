@@ -229,6 +229,13 @@ export interface MatchDetail {
    *  STAT_LABELS in format.ts, deliberately, because they are shortened for
    *  narrow columns ("Chip", "Team", "Rocks shot"). */
   statDefs: StatDef[];
+  /** What the ratings said before the match. Admin only: the field is absent
+   *  entirely for anyone else, so the page has nothing to hide. */
+  forecast?: {
+    srA: number; srB: number; srGap: number;
+    winProbA: number; winProbB: number;
+    ratedA: number; ratedB: number;
+  };
   /** Per-round side attribution. An empty array means this match predates
    *  round capture, which is NOT the same as a match that had no rounds. */
   rounds: {
