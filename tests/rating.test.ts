@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { displaySr, applyMatchRatings, ratedForMaps } from '../src/rating.js';
+import { displaySr, applyMatchRatings, ratedForMaps, matchForecast } from '../src/rating.js';
 import { upsertPlayer, ensureRating } from '../src/players.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -106,5 +106,75 @@ describe('applyMatchRatings', () => {
     applyMatchRatings(db, matchId);
     const row = db.prepare('SELECT season_id FROM rating_history WHERE match_id = ? LIMIT 1').get(matchId) as any;
     expect(row.season_id).toBe(1);
+  });
+});
+
+describe('matchForecast', () => {
+  let db: DB;
+  beforeEach(() => { db = openDb(':memory:'); });
+
+  /** Give one team a real skill edge, then record the match so the forecast
+   *  has mu_before/sigma_before to read. */
+  const seedLopsided = (): number => {
+    const matchId = seedCompletedMatch(db, 'a');
+    for (const id of IDS) ensureRating(db, id);
+    const up = db.prepare('UPDATE player_ratings SET mu = ?, sigma = ? WHERE player_id = ?');
+    for (const id of IDS.slice(0, 4)) up.run(32, 3, id);
+    for (const id of IDS.slice(4)) up.run(20, 3, id);
+    applyMatchRatings(db, matchId);
+    return matchId;
+  };
+
+  it('reads the ratings as they stood before the match, not after it', () => {
+    const matchId = seedLopsided();
+    const f = matchForecast(db, matchId)!;
+    // mu 32 sigma 3 -> (32 - 6) * 100, and mu 20 sigma 3 -> (20 - 6) * 100.
+    expect(f.srA).toBe(2600);
+    expect(f.srB).toBe(1400);
+    expect(f.srGap).toBe(1200);
+  });
+
+  it('gives the stronger team the higher win probability, and the two sum to one', () => {
+    const matchId = seedLopsided();
+    const f = matchForecast(db, matchId)!;
+    expect(f.winProbA).toBeGreaterThan(0.5);
+    expect(f.winProbA).toBeGreaterThan(f.winProbB);
+    expect(f.winProbA + f.winProbB).toBeCloseTo(1, 6);
+  });
+
+  it('calls an even match even', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    for (const id of IDS) ensureRating(db, id);
+    applyMatchRatings(db, matchId);
+    const f = matchForecast(db, matchId)!;
+    expect(f.srGap).toBe(0);
+    expect(f.winProbA).toBeCloseTo(0.5, 6);
+  });
+
+  it('is null for a match with no rating history to read', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    expect(matchForecast(db, matchId)).toBeNull();
+  });
+
+  // A sub who played under half the maps is never rated, so they have no
+  // history row and must not be counted into their team's strength either.
+  it('counts only the players who were actually rated', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    const insMap = db.prepare('INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, ?, ?, 0, 0)');
+    for (let i = 0; i < 4; i++) insMap.run(matchId, i, `m${i}`);
+    for (const id of IDS) ensureRating(db, id);
+    const up = db.prepare('UPDATE player_ratings SET mu = ?, sigma = ? WHERE player_id = ?');
+    for (const id of IDS.slice(0, 4)) up.run(30, 3, id);
+    for (const id of IDS.slice(4)) up.run(30, 3, id);
+    // One team B player is a late sub on 30 mu, and one is a ringer nobody
+    // should credit team B for.
+    up.run(40, 3, IDS[7]);
+    db.prepare('UPDATE match_players SET joined_map = 3 WHERE match_id = ? AND player_id = ?').run(matchId, IDS[7]);
+    applyMatchRatings(db, matchId);
+    const f = matchForecast(db, matchId)!;
+    expect(f.ratedA).toBe(4);
+    expect(f.ratedB).toBe(3);
+    expect(f.srB).toBe(2400); // the 40 mu sub excluded, so the same as team A
+    expect(f.srGap).toBe(0);
   });
 });

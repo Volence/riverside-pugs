@@ -11,7 +11,7 @@ import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
  *  page, not to window anything a real match produces. */
 const MATCH_EVENT_LIMIT = 20_000;
 import { mapDetail, mapIndex } from '../playerStats.js';
-import { displaySr } from '../rating.js';
+import { displaySr, matchForecast } from '../rating.js';
 import { currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
@@ -52,6 +52,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   // the personal /api/state dashboard, stays behind requireActive in
   // routes/api.ts.
   const viewerOf = makeOptionalViewer(db);
+  /** Whether an already-resolved active viewer is an admin. */
+  const isAdminViewer = (steamid: string): boolean =>
+    (db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(steamid) as
+      { is_admin: number } | undefined)?.is_admin === 1;
 
   app.get('/api/leaderboard', async (req, reply) => {
     const raw = (req.query as { season?: string }).season;
@@ -198,7 +202,14 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       target: e.target ? { steamid: e.target, name: nameOf(e.target) } : null,
     }));
 
-    return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS };
+    // Admin only, for judging whether the balancer is any good. Withheld from
+    // players on purpose: "you were meant to lose" is not a thing anyone
+    // should be able to read off a match page, and the same number would be
+    // read as an excuse the moment it is public. Absent, not null, for a
+    // non-admin, so the client cannot tell a forecast exists at all.
+    const forecast = viewer && isAdminViewer(viewer) ? matchForecast(db, id) : undefined;
+
+    return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, ...(forecast ? { forecast } : {}) };
   });
 
   /**

@@ -229,6 +229,55 @@ describe('MatchDetail', () => {
     ).toBeTruthy());
   });
 
+  /** The fixture above, plus whatever this test needs. */
+  const matchWith = (over: Record<string, unknown>) => ({
+    match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
+    maps: [{ ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} }],
+    players: [
+      { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+    ],
+    demos: [], events: [],
+    ...over,
+  });
+
+  const FORECAST = { srA: 1400, srB: 1200, srGap: 200, winProbA: 0.62, winProbB: 0.38, ratedA: 4, ratedB: 4 };
+
+  it('shows the forecast when the server sent one, naming the favoured team', async () => {
+    mockApi.match.mockResolvedValue(matchWith({ forecast: FORECAST }));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText(/Forecast/)).toBeTruthy());
+    expect(screen.getByText('1400 SR, 62% to win')).toBeTruthy();
+    expect(screen.getByText('1200 SR, 38% to win')).toBeTruthy();
+    expect(screen.getByText(/200 SR to Team A/)).toBeTruthy();
+    expect(screen.queryByText(/the underdog won/)).toBeNull();
+  });
+
+  it('calls out an upset when the favoured team lost', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 800, teamBScore: 900, winner: 'b' },
+      forecast: FORECAST,
+    }));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText(/the underdog won/)).toBeTruthy());
+  });
+
+  // The server omits the field entirely for a non-admin, so there is nothing
+  // for the page to leak.
+  it('shows no forecast at all when the server sent none', async () => {
+    mockApi.match.mockResolvedValue(matchWith({}));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('Match totals')).toBeTruthy());
+    expect(screen.queryByText(/Forecast/)).toBeNull();
+  });
+
+  it('says a forecast built from fewer than eight rated players is exactly that', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      forecast: { ...FORECAST, ratedA: 4, ratedB: 3 },
+    }));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText(/Built from 4 v 3 players/)).toBeTruthy());
+  });
+
   it('shows a not-found message instead of blowing up on a bad id', async () => {
     mockApi.match.mockRejectedValue(new Error('404'));
     render(<MatchDetail id="999" me={null} />);

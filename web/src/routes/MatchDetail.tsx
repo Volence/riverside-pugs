@@ -135,6 +135,50 @@ export function mapScoreLabel(mp: { teamAScore: number; teamBScore: number; reco
   return mp.recorded === false ? 'not recorded' : `${mp.teamAScore} - ${mp.teamBScore}`;
 }
 
+/**
+ * What the ratings said before the match, against what happened.
+ *
+ * Only rendered when the server sent a forecast, which it does for admins
+ * only. Deliberately not shown to players: a number saying a team was meant
+ * to lose reads as an excuse, and it exists here to judge the balancer rather
+ * than to explain a result.
+ */
+function ForecastPanel(
+  { f, winner }:
+  { f: NonNullable<MatchDetailData['forecast']>; winner: 'a' | 'b' | 'draw' | null },
+) {
+  const pct = (p: number) => `${Math.round(p * 100)}%`;
+  const favoured = f.srGap === 0 ? null : f.srGap > 0 ? 'a' : 'b';
+  // Was the paper favourite actually beaten? The interesting rows in a
+  // balance audit are the upsets, so the page names one rather than leaving
+  // the reader to compare two percentages against a scoreline.
+  const upset = favoured !== null && winner !== null && winner !== 'draw' && winner !== favoured;
+  const full = f.ratedA === 4 && f.ratedB === 4;
+  return (
+    <Panel>
+      <h3>Forecast <span class="muted">(admin only)</span></h3>
+      <table class="forecast__kv">
+        <tbody>
+          <tr><th>Team A</th><td>{f.srA} SR, {pct(f.winProbA)} to win</td></tr>
+          <tr><th>Team B</th><td>{f.srB} SR, {pct(f.winProbB)} to win</td></tr>
+          <tr>
+            <th>Gap</th>
+            <td>
+              {f.srGap === 0 ? 'even' : `${Math.abs(f.srGap)} SR to Team ${favoured === 'a' ? 'A' : 'B'}`}
+              {upset && <span class="muted"> · the underdog won</span>}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted">
+        Mean SR of the rated players and the OpenSkill win probability, both from the ratings
+        as they stood <strong>before</strong> this match rather than now.
+        {!full && ` Built from ${f.ratedA} v ${f.ratedB} players: a sub who played under half the maps is never rated, so they are not counted here either.`}
+      </p>
+    </Panel>
+  );
+}
+
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
@@ -317,6 +361,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       />
 
       <div class="stack">
+        {data.forecast && <ForecastPanel f={data.forecast} winner={match.winner} />}
+
         <Panel>
           <h3>Match totals</h3>
           <StatTable teamA={totalsA} teamB={totalsB} cols={cols} statDefs={statDefs} groupStarts={statGroupStarts} showTotals />

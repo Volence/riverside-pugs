@@ -1,4 +1,4 @@
-import { rating, rate } from 'openskill';
+import { rating, rate, predictWin } from 'openskill';
 import type { DB } from './db.js';
 import { ensureRating } from './players.js';
 
@@ -8,6 +8,65 @@ export function displaySr(mu: number, sigma: number): number {
 }
 
 interface MpRow { player_id: string; team: 'a' | 'b'; joined_map: number }
+
+/** What the ratings said about a match before it was played. */
+export interface MatchForecast {
+  /** Mean SR of the rated players on each side, as the site shows SR. */
+  srA: number;
+  srB: number;
+  /** srA - srB. Positive means team A was favoured on paper. */
+  srGap: number;
+  /** Probability each team wins, from the same OpenSkill model that rates
+   *  them. The pair sums to 1: a draw is not forecast separately. */
+  winProbA: number;
+  winProbB: number;
+  /** How many players on each side the forecast is built from. Fewer than the
+   *  roster means subs who played too little to be rated. */
+  ratedA: number;
+  ratedB: number;
+}
+
+/**
+ * The paper odds for a completed match, for judging whether balance is any
+ * good after the fact.
+ *
+ * Read from `rating_history`, not from `player_ratings`, which is the whole
+ * point: history stores each player's mu and sigma BEFORE this match, so the
+ * forecast is what the system believed at the time rather than what it
+ * believes now, several matches later. Using current ratings would make every
+ * past match look like it was predicted by hindsight.
+ *
+ * Only rated players count. A sub who played under half the maps gets no
+ * history row (see `ratedForMaps`), and crediting their team for a ringer who
+ * played one map would misstate the very thing this is here to measure.
+ *
+ * Null when there is no history for the match: an old match from before
+ * ratings, a voided one, or one where a side had nobody ratable.
+ */
+export function matchForecast(db: DB, matchId: number): MatchForecast | null {
+  const rows = db.prepare(
+    `SELECT mp.team AS team, rh.mu_before AS mu, rh.sigma_before AS sigma
+     FROM rating_history rh
+     JOIN match_players mp ON mp.match_id = rh.match_id AND mp.player_id = rh.player_id
+     WHERE rh.match_id = ?`,
+  ).all(matchId) as { team: 'a' | 'b'; mu: number; sigma: number }[];
+
+  const a = rows.filter((r) => r.team === 'a');
+  const b = rows.filter((r) => r.team === 'b');
+  if (a.length === 0 || b.length === 0) return null;
+
+  const meanSr = (side: typeof a): number =>
+    Math.round(side.reduce((n, r) => n + displaySr(r.mu, r.sigma), 0) / side.length);
+  const srA = meanSr(a);
+  const srB = meanSr(b);
+
+  const [winProbA, winProbB] = predictWin([
+    a.map((r) => rating(r)),
+    b.map((r) => rating(r)),
+  ]);
+
+  return { srA, srB, srGap: srA - srB, winProbA, winProbB, ratedA: a.length, ratedB: b.length };
+}
 
 /** Whether a player who was rostered on map `joinedMap` of a `mapsPlayed`-map
  *  match played enough of it to be rated: at least half the maps. A sub who
