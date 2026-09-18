@@ -13,7 +13,8 @@ import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { clearLive } from './liveView.js';
 import { CAMPAIGNS } from './campaigns.js';
-import { firstMapOf } from './campaignRegistry.js';
+import { campaignRegistry, firstMapOf } from './campaignRegistry.js';
+import { isInstalledEverywhere } from './campaignInstall.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
 export interface Orchestrator {
@@ -137,6 +138,15 @@ export class RealOrchestrator implements Orchestrator {
       // the line, and then kick every player as non-rostered. Verified on the
       // live box 2026-08-29. The fake RCON server in tests does not tokenize.
       for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
+      // A custom campaign lives in a VPK that must actually be on this box.
+      // The pool gate already checks this when the campaign is enabled, but
+      // that answer can be stale: a server rebuilt or re-imaged between the
+      // vote and now has no addon, and changelevel into a map it does not have
+      // strands the match on a black screen with no error anyone sees.
+      const entry = campaignRegistry(this.db).get(match.campaign);
+      if (entry?.custom && !isInstalledEverywhere(this.db, match.campaign, [server.id])) {
+        throw new Error(`${entry.name} is not installed on ${server.name}`);
+      }
       await rcon.exec(`changelevel ${firstMapOf(this.db, match.campaign)}`);
       markLive(this.db, server.id);
       this.db.prepare("UPDATE matches SET state = 'live', went_live_at = datetime('now') WHERE id = ?")
