@@ -78,12 +78,32 @@ export const INCAP_POOL = 300;
 export const INCAP_ARC_MIN = 0.06;
 export const INCAP_ARC_MAX = 0.18;
 
+/**
+ * Recorded temp health at or below this means none at all.
+ *
+ * MEASURED, not guessed. The recorder floors `m_healthBuffer`, and that
+ * netprop has a resting baseline rather than sitting at zero. Across one real
+ * round, 6111 of 8860 alive-survivor samples (69%) read exactly 1, only 8 read
+ * 0, and at frame 0, 200ms in and before anyone can have taken pills, all four
+ * survivors read `hp=100 temp=1`.
+ *
+ * One point of temp health is also cosmetically meaningless: at
+ * pain_pills_decay_rate 0.25 it is gone in four seconds.
+ */
+export const TEMP_NOISE_FLOOR = 1;
+
 export interface HealthBar {
   /** Permanent health, as a fraction of the whole bar or ring. */
   perm: number;
   /** Temporary health, stacked on top of `perm` and clamped so the two
    *  together never exceed the whole. */
   temp: number;
+  /** Temporary health in POINTS, past the noise floor, before the bar's
+   *  clamping. The readout beside the bar needs this rather than `temp`: a
+   *  survivor at full permanent health with real temp has `temp` clamped to
+   *  0 for the bar while still having something worth printing. Reading the
+   *  raw record instead is what printed "+1" next to everyone. */
+  tempPoints: number;
   /** What to draw the permanent segment in. */
   color: string;
   /** Whether `perm` is a downed survivor's bleed-out sliver rather than a
@@ -107,7 +127,7 @@ export function healthBar(
   health: number, temp: number, max: number, state: number,
 ): HealthBar {
   const alive = (state & STATE.ALIVE) !== 0;
-  if (!alive) return { perm: 0, temp: 0, color: healthColor(0, false), downed: true };
+  if (!alive) return { perm: 0, temp: 0, tempPoints: 0, color: healthColor(0, false), downed: true };
   if ((state & (STATE.INCAP | STATE.LEDGED)) !== 0) {
     const pool = Math.max(0, Math.min(1, health / INCAP_POOL));
     return {
@@ -115,13 +135,16 @@ export function healthBar(
       // A downed survivor has no temporary health, and the record's `temp`
       // is whatever it was before they went down.
       temp: 0,
+      tempPoints: 0,
       // Not healthColor(health): that would ask "is 300 more than 40?".
       color: healthColor(0, alive),
       downed: true,
     };
   }
+  const real = temp > TEMP_NOISE_FLOOR ? temp : 0;
   return {
-    ...barSegments(health, temp, max),
+    ...barSegments(health, real, max),
+    tempPoints: real,
     // Normalised by max, so a tank's 8000 reads as full rather than as a
     // number far off the end of the 0-100 ramp.
     color: healthColor((health / max) * 100, alive),

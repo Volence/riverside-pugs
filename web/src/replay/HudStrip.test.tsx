@@ -44,6 +44,30 @@ describe('HudStrip', () => {
     expect(hp.querySelector('.hudp__hp-temp')!.textContent).toBe('+90');
   });
 
+  // The recorder's resting baseline. This printed "+1" beside every survivor
+  // on the live page, including at full health where the bar itself showed
+  // nothing, because the readout used the raw record and the bar did not.
+  it('prints nothing for the recorded baseline of 1', () => {
+    const ps = players();
+    ps[0] = { ...ps[0], health: 78, temp: 1 };
+    const { container } = render(
+      <HudStrip players={ps} header={HEADER} names={NAMES} showHp showGuns={false} />,
+    );
+    expect(container.querySelector('.hudp__hp')!.textContent).toBe('78');
+    expect(container.querySelector('.hudp__hp-temp')).toBeNull();
+  });
+
+  // Full permanent health clamps the BAR's temp segment to zero, but the
+  // number still has something to say.
+  it('still prints real temp at full permanent health', () => {
+    const ps = players();
+    ps[0] = { ...ps[0], health: 100, temp: 47 };
+    const { container } = render(
+      <HudStrip players={ps} header={HEADER} names={NAMES} showHp showGuns={false} />,
+    );
+    expect(container.querySelector('.hudp__hp')!.textContent).toBe('100+47');
+  });
+
   it('shows no temporary reading when there is none', () => {
     const { container } = render(
       <HudStrip players={players()} header={HEADER} names={NAMES} showHp showGuns={false} />,
