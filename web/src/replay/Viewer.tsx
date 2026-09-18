@@ -69,6 +69,26 @@ const NO_NAMES: Record<string, string> = {};
  *  NO_NAMES above, and renderRate.test.tsx). */
 const NO_TIMELINE: TimelineEntry[] = [];
 
+/**
+ * Where the theater's edge columns start, given the measured chrome height.
+ *
+ * They used to start at a hardcoded 150px, picked to clear the top chrome. But
+ * that chrome WRAPS: narrow the window until the toggle chips need two rows and
+ * it grows past 150, and the top survivor card renders underneath the
+ * HP/NAMES/GUNS buttons.
+ *
+ * A floor rather than a pure measurement, for two reasons. A zero reading is
+ * jsdom or a hidden element rather than a real measurement, and collapsing the
+ * columns to the top on that would be worse than the bug. And short chrome
+ * should keep the layout everyone is used to instead of creeping upward.
+ */
+export const EDGE_TOP_MIN = 150;
+const EDGE_TOP_GAP = 8;
+
+export function edgeTop(chromeHeight: number): number {
+  return Math.max(EDGE_TOP_MIN, Math.round(chromeHeight) + EDGE_TOP_GAP);
+}
+
 export function Viewer(
   { spec, live = false, names = NO_NAMES, timeline, seekMs }:
   {
@@ -99,6 +119,24 @@ export function Viewer(
   // Theater is a layout state of this component (spec 7.1), never a route.
   const rootRef = useRef<HTMLDivElement>(null);
   const { theater, toggle: toggleTheater } = useTheater(rootRef);
+  // Measured, not assumed: see edgeTop. Same shape as useCanvasSize, including
+  // the ResizeObserver guard, because jsdom has neither the observer nor any
+  // layout to read.
+  const chromeRef = useRef<HTMLDivElement>(null);
+  const [chromeH, setChromeH] = useState(0);
+  useEffect(() => {
+    const el = chromeRef.current;
+    if (!el) return undefined;
+    const read = () => {
+      const h = el.offsetHeight;
+      setChromeH((prev) => (prev === h ? prev : h));
+    };
+    read();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [theater]);
   const { idle, wake } = useIdle(theater);
 
   /**
@@ -384,14 +422,17 @@ export function Viewer(
       <div
         class={rootClass}
         ref={rootRef}
-        style={{ '--rail-w': `${railOn ? RAIL_W : 0}px` } as Record<string, string>}
+        style={{
+          '--rail-w': `${railOn ? RAIL_W : 0}px`,
+          '--edge-top': `${edgeTop(chromeH)}px`,
+        } as Record<string, string>}
         onPointerMove={wake}
         onFocusIn={wake}
       >
         <div class="replay__frame">{canvas}</div>
         {/* Spec 7.1, Hidden chrome: the toolbar along the top fades when idle.
             Toggles join it because the in-stage HUD is not drawn here. */}
-        <div class="theater__top">
+        <div class="theater__top" ref={chromeRef}>
           {controls}
           {filters}
           <div class="theater__toggles">
