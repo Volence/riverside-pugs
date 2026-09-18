@@ -10,10 +10,13 @@ function gb(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
-/** Every enabled server must have the VPK before a campaign can be voted for.
- *  The orchestrator re-checks this at match start too, because this answer can
- *  go stale, but refusing here is what keeps it out of the vote in the first
- *  place. */
+/** Every enabled server must have the VPK before a campaign is eligible to
+ *  enter the pool at all: GET /api/admin/settings (src/routes/admin.ts) only
+ *  offers a custom campaign as a pool candidate once this and `enabled` both
+ *  hold, and validateSetting enforces the same rule against a direct PUT.
+ *  This is the eligibility check, not the pool itself; a campaign that was
+ *  already pooled and later fails this stays selectable there rather than
+ *  disappearing (see poolableCampaigns's alsoAllow). */
 function installedEverywhere(c: AdminCampaign, serverIds: number[]): boolean {
   const ok = new Set(c.installs.filter((i) => i.state === 'installed').map((i) => i.server_id));
   return serverIds.length > 0 && serverIds.every((id) => ok.has(id));
@@ -96,12 +99,12 @@ function PublishedCard(
         <label>
           <input
             type="checkbox"
-            aria-label="In the pool"
+            aria-label="Available for the pool"
             checked={c.enabled === 1}
             disabled={!ok}
             onChange={(e) => run(() => adminApi.setCampaignEnabled(c.slug, (e.target as HTMLInputElement).checked))}
           />
-          In the pool
+          Available for the pool
         </label>
         <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
           Reinstall
@@ -114,7 +117,12 @@ function PublishedCard(
           Delete
         </button>
       </div>
-      {!ok && <p class="muted">Not on every server yet, so it cannot be voted for.</p>}
+      {/* This toggle is a precondition, not the pool itself: it also gates the
+          public download page. Actually adding or removing the campaign from
+          the vote is a separate step on the Settings tab. */}
+      {!ok
+        ? <p class="muted">Not on every server yet, so this cannot be turned on, and the campaign cannot be added to the pool.</p>
+        : <p class="muted">Makes the campaign downloadable and eligible for the pool; add or remove it from the vote on the Settings tab.</p>}
     </Panel>
   );
 }
