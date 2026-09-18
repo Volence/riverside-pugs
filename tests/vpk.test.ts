@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeVpk } from './fixtures/makeVpk.js';
@@ -111,5 +111,31 @@ describe('missionFromVpk', () => {
       preloadBytes: Buffer.byteLength(MISSION.slice(0, cut), 'utf8'),
     });
     expect(missionFromVpk(p)).toBeNull();
+  });
+
+  // Buffer.subarray clamps a past-the-end index instead of throwing, so a
+  // file that got cut short in transit, while its entry still claims the
+  // original length, must be caught by an explicit bounds check rather than
+  // silently handing back whatever bytes happen to be physically present.
+  it('returns null when the file is physically shorter than the entry claims', () => {
+    const p = join(dir, 'truncated.vpk');
+    makeVpk(p, { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION });
+    const full = readFileSync(p);
+    const bodyLength = Buffer.byteLength(MISSION, 'utf8');
+    const headerAndTree = full.length - bodyLength; // default fixture has no preload
+    const cut = MISSION.indexOf('"10"');
+    const keepBytes = Buffer.byteLength(MISSION.slice(0, cut), 'utf8');
+    // The tree's entry still says `length` covers the whole mission; only
+    // the physical file is cut short, right after chapter "2".
+    writeFileSync(p, full.subarray(0, headerAndTree + keepBytes));
+    expect(missionFromVpk(p)).toBeNull();
+  });
+
+  // Nothing exercised the v2 header's extra 16 bytes before this: both real
+  // files checked against were v1, and the fixture builder defaulted to v1.
+  it('parses a v2 header (28-byte) VPK the same as v1', () => {
+    const p = join(dir, 'dbd_v2.vpk');
+    makeVpk(p, { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION, version: 2 });
+    expect(missionFromVpk(p)).toEqual(parseMission(MISSION));
   });
 });
