@@ -1299,6 +1299,22 @@ describe('Maps', () => {
     expect(screen.getByText('not recorded')).toBeTruthy();
     expect(screen.queryByText(/null/)).toBeNull();
   });
+
+  // The confusion this fixes: "Played 7" and "Survived 50%" sat side by side
+  // with different denominators and neither shown, so 50% read as 3.5 of 7
+  // rather than 2 of the 4 rounds that actually have a survival reading. The
+  // sample size used to be a hover title, which is invisible.
+  it('prints the survival sample size beside the percentage, not only on hover', async () => {
+    mockApi.maps.mockResolvedValue({
+      maps: [
+        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 7, avgScore: 373,
+          rounds: { attempts: 7, fastestSec: 83, avgSec: 208, slowestSec: 300, survivalPct: 50, measured: 4 } },
+      ],
+    });
+    render(<Maps />);
+    await waitFor(() => expect(screen.getByText('50%')).toBeTruthy());
+    expect(screen.getByText(/of 4/)).toBeTruthy();
+  });
 });
 
 describe('LinkDiscord', () => {
