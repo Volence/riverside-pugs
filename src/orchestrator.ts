@@ -4,7 +4,7 @@ import type { DB } from './db.js';
 import type { RconClient, RconOpts } from './rcon.js';
 import { RconClient as RealRcon } from './rcon.js';
 import type { LogListener } from './logListener.js';
-import { newToken } from './matchToken.js';
+import { newToken, serverPasswordFor } from './matchToken.js';
 import { parseDump, type Dump } from './dumpParse.js';
 import { claimIdle, markLive, getServer, type ServerRow } from './serverPool.js';
 import type { ServerReleaser } from './serverRelease.js';
@@ -129,7 +129,7 @@ export class RealOrchestrator implements Orchestrator {
       // The leaver rules for this match, from the admin settings.
       await rcon.exec(`sm_pug_leave_budget ${settingInt(this.db, 'leave_budget_seconds', 300)}`);
       await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
-      await rcon.exec(`sv_password "pug_${token.slice(0, 8)}"`);
+      await rcon.exec(`sv_password "${serverPasswordFor(token)}"`);
       await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}`);
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
       // unquoted args on ':', so the plugin would receive a bare steamid, reject

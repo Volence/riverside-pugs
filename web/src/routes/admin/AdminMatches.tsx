@@ -1,9 +1,32 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type AdminOverview } from '../../api';
+import { adminApi, type AdminOverview, type Forecast } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
+
+/**
+ * Team SR gap and the paper odds, in one table cell.
+ *
+ * For a live match this is built from current ratings, which while a match is
+ * in flight ARE the pre-match ratings. For a completed one it is read from the
+ * ratings as they stood before it, so it is a forecast rather than hindsight.
+ */
+function Odds({ f, winner }: { f: Forecast | null; winner?: string | null }) {
+  if (!f) return <span class="muted">n/a</span>;
+  const favoured = f.srGap === 0 ? null : f.srGap > 0 ? 'A' : 'B';
+  const upset = favoured !== null && winner != null && winner !== 'draw'
+    && winner.toUpperCase() !== favoured;
+  return (
+    <>
+      <span>{Math.round(Math.max(f.winProbA, f.winProbB) * 100)}%</span>{' '}
+      <span class="muted">
+        {favoured === null ? 'even' : `${Math.abs(f.srGap)} SR to ${favoured}`}
+      </span>
+      {upset && <span class="admin-tag"> upset</span>}
+    </>
+  );
+}
 
 export function AdminMatches() {
   const { data, reload } = useFetch((s) => adminApi.overview(s), []);
@@ -21,7 +44,7 @@ export function AdminMatches() {
         {data.open.length === 0 ? <Empty>No match is configuring or live.</Empty> : (
           <div class="table-wrap">
             <table class="admin-table">
-              <thead><tr><th>Match</th><th>State</th><th>Server</th><th class="num">Connected</th><th>Live since</th><th /></tr></thead>
+              <thead><tr><th>Match</th><th>State</th><th>Server</th><th class="num">Connected</th><th>Odds</th><th>Join</th><th>Live since</th><th /></tr></thead>
               <tbody>
                 {data.open.map((m) => (
                   <tr key={m.id}>
@@ -29,6 +52,13 @@ export function AdminMatches() {
                     <td>{m.state}{m.state === 'configuring' && m.serverId === null ? ' (waiting for a server)' : ''}</td>
                     <td>{m.serverId ?? <span class="muted">none</span>}</td>
                     <td class="num">{m.connected}/{m.rostered}</td>
+                    <td><Odds f={m.forecast} /></td>
+                    {/* The real game server, not SourceTV. An admin watching a
+                        match they are not in has no Connect button anywhere,
+                        because the match card is the roster's. */}
+                    <td>{m.connect
+                      ? <code class="mono">{`password ${m.connect.password}; connect ${m.connect.host}:${m.connect.port}`}</code>
+                      : <span class="muted">no server yet</span>}</td>
                     <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
                     <td><button class="chip" disabled={busy}
                       onClick={() => run(() => adminApi.abortMatch(m.id), `Abort match #${m.id}? The server is freed and nothing is rated.`)}>Abort</button></td>
@@ -44,7 +74,8 @@ export function AdminMatches() {
         <Panel class="panel--table">
           <h3>Servers</h3>
           {data.servers.length === 0 ? <Empty>No servers.</Empty> : (
-            <table class="admin-table">
+            <div class="table-wrap">
+            <table class="admin-table admin-table--servers">
               <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>SourceTV</th><th /></tr></thead>
               <tbody>
                 {data.servers.map((s) => (
@@ -78,11 +109,13 @@ export function AdminMatches() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Panel>
         <Panel class="panel--table">
           <h3>Queue</h3>
           {data.queue.length === 0 ? <Empty>The queue is empty.</Empty> : (
+            <div class="table-wrap">
             <table class="admin-table">
               <tbody>
                 {data.queue.map((p) => (
@@ -93,6 +126,7 @@ export function AdminMatches() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Panel>
       </div>
@@ -103,12 +137,16 @@ export function AdminMatches() {
         {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
           <div class="table-wrap">
             <table class="admin-table">
-              <thead><tr><th>Match</th><th class="num">Score</th><th>Ended</th><th /></tr></thead>
+              <thead><tr><th>Match</th><th class="num">Score</th><th>Odds</th><th>Ended</th><th /></tr></thead>
               <tbody>
                 {data.recent.map((m) => (
                   <tr key={m.id}>
                     <td><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</td>
                     <td class="num">{m.teamAScore} - {m.teamBScore}</td>
+                    {/* Was the result the odds expected? The upset marker is
+                        the point of the column: a run of them is what tells
+                        you the balancer needs looking at. */}
+                    <td><Odds f={m.forecast} winner={m.winner} /></td>
                     <td>{fmtTime(m.endedAt)}</td>
                     <td>
                       {voiding === m.id ? (

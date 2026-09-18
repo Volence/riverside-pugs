@@ -24,6 +24,11 @@ export interface MatchForecast {
    *  roster means subs who played too little to be rated. */
   ratedA: number;
   ratedB: number;
+  /** `history`: each player's rating as it stood before this match, which is
+   *  the honest forecast for a finished one. `current`: today's ratings, used
+   *  only for a match still in flight, where nothing has updated yet and the
+   *  two are the same thing. */
+  source: 'history' | 'current';
 }
 
 /**
@@ -44,12 +49,34 @@ export interface MatchForecast {
  * ratings, a voided one, or one where a side had nobody ratable.
  */
 export function matchForecast(db: DB, matchId: number): MatchForecast | null {
-  const rows = db.prepare(
+  const match = db.prepare('SELECT state, season_id FROM matches WHERE id = ?').get(matchId) as
+    { state: string; season_id: number } | undefined;
+  if (!match) return null;
+
+  let source: 'history' | 'current' = 'history';
+  let rows = db.prepare(
     `SELECT mp.team AS team, rh.mu_before AS mu, rh.sigma_before AS sigma
      FROM rating_history rh
      JOIN match_players mp ON mp.match_id = rh.match_id AND mp.player_id = rh.player_id
      WHERE rh.match_id = ?`,
   ).all(matchId) as { team: 'a' | 'b'; mu: number; sigma: number }[];
+
+  // A match still in flight has no history: applyMatchRatings runs at
+  // completion. Its players' current ratings ARE their pre-match ratings,
+  // which is what someone watching it live wants to know.
+  //
+  // Only while in flight. For a match completed long ago, current ratings are
+  // several matches of hindsight later, and no forecast beats a confident
+  // wrong one.
+  if (rows.length === 0 && match.state !== 'completed' && match.state !== 'aborted') {
+    source = 'current';
+    rows = db.prepare(
+      `SELECT mp.team AS team, pr.mu AS mu, pr.sigma AS sigma
+       FROM match_players mp
+       JOIN player_ratings pr ON pr.player_id = mp.player_id AND pr.season_id = ?
+       WHERE mp.match_id = ?`,
+    ).all(match.season_id, matchId) as { team: 'a' | 'b'; mu: number; sigma: number }[];
+  }
 
   const a = rows.filter((r) => r.team === 'a');
   const b = rows.filter((r) => r.team === 'b');
@@ -65,7 +92,7 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
     b.map((r) => rating(r)),
   ]);
 
-  return { srA, srB, srGap: srA - srB, winProbA, winProbB, ratedA: a.length, ratedB: b.length };
+  return { srA, srB, srGap: srA - srB, winProbA, winProbB, ratedA: a.length, ratedB: b.length, source };
 }
 
 /** Whether a player who was rostered on map `joinedMap` of a `mapsPlayed`-map

@@ -231,11 +231,7 @@ export interface MatchDetail {
   statDefs: StatDef[];
   /** What the ratings said before the match. Admin only: the field is absent
    *  entirely for anyone else, so the page has nothing to hide. */
-  forecast?: {
-    srA: number; srB: number; srGap: number;
-    winProbA: number; winProbB: number;
-    ratedA: number; ratedB: number;
-  };
+  forecast?: Forecast;
   /** Per-round side attribution. An empty array means this match predates
    *  round capture, which is NOT the same as a match that had no rounds. */
   rounds: {
@@ -420,10 +416,27 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   reportsAgainst: AdminReport[];
 }
 
+/** Team SR, the gap and the paper odds. `source` says which ratings it came
+ *  from: `history` for a finished match, `current` for one in flight, where
+ *  the two are the same thing because nothing updates until completion. */
+export interface Forecast {
+  srA: number; srB: number; srGap: number;
+  winProbA: number; winProbB: number;
+  ratedA: number; ratedB: number;
+  source: 'history' | 'current';
+}
+
 export interface AdminOverview {
-  open: { id: number; campaign: string; state: string; serverId: number | null; createdAt: string; wentLiveAt: string | null; connected: number; rostered: number }[];
+  open: {
+    id: number; campaign: string; state: string; serverId: number | null; createdAt: string;
+    wentLiveAt: string | null; connected: number; rostered: number;
+    /** The real game server, admin only, for joining a match you are not in.
+     *  Null until the match is live and has a server. Not SourceTV. */
+    connect: { host: string; port: number; password: string } | null;
+    forecast: Forecast | null;
+  }[];
   servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
 }
