@@ -11,7 +11,7 @@ import {
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
 import { pugReply } from './helpers.js';
-import { insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
+import { deleteCampaign, insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache } from '../src/campaignRegistry.js';
 
 function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
@@ -408,6 +408,25 @@ describe('custom campaign availability', () => {
 
     expect(cmds).toContain('changelevel l4d_vs_airport01_greenhouse');
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
+  });
+
+  // A deleted campaign has no registry entry at all, so entry?.custom used
+  // to read as undefined and skip the guard entirely: firstMapOf then fell
+  // back to No Mercy while the match row still said 'dbd'. map_pool pruning
+  // is supposed to keep this from ever being voted for, but this match row
+  // already exists (queued before the delete, say), so the guard has to
+  // catch it on its own rather than trust the pool was kept clean.
+  it('refuses a campaign the registry has lost, not just an uninstalled custom one', async () => {
+    const { orch, cmds, serverId } = await setup();
+    publishCustom(serverId, true);
+    const mid = seedMatch(db, 'dbd');
+    deleteCampaign(db, 'dbd');
+    invalidateCampaignCache();
+
+    await orch.setupMatch(mid);
+
+    expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
   });
 });
 

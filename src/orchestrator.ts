@@ -143,8 +143,20 @@ export class RealOrchestrator implements Orchestrator {
       // that answer can be stale: a server rebuilt or re-imaged between the
       // vote and now has no addon, and changelevel into a map it does not have
       // strands the match on a black screen with no error anyone sees.
+      //
+      // A campaign missing from the registry entirely is refused outright,
+      // not just an uninstalled custom one: the stock four are always in the
+      // registry, so this only ever catches a campaign that was deleted (map
+      // pool pruning is supposed to prevent that being voted for at all, but
+      // this guard does not get to assume that held). Without this, a
+      // deleted campaign's entry?.custom read is undefined, which is falsy,
+      // and the check below would be skipped entirely, letting
+      // firstMapOf fall back to No Mercy under the deleted campaign's name.
       const entry = campaignRegistry(this.db).get(match.campaign);
-      if (entry?.custom && !isInstalledEverywhere(this.db, match.campaign, [server.id])) {
+      if (!entry) {
+        throw new Error(`${match.campaign} is not a known campaign`);
+      }
+      if (entry.custom && !isInstalledEverywhere(this.db, match.campaign, [server.id])) {
         throw new Error(`${entry.name} is not installed on ${server.name}`);
       }
       await rcon.exec(`changelevel ${firstMapOf(this.db, match.campaign)}`);
