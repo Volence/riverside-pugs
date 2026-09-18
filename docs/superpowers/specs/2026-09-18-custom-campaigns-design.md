@@ -148,17 +148,45 @@ write it against real campaign VPKs rather than only a synthetic fixture.
 
 ### 4. Mission generation
 
-From the included chapters in admin-chosen order, generate a mission file. Two rules:
+From the included chapters in admin-chosen order, generate a mission file listing exactly those
+chapters and nothing else. Two rules:
 
-- The **last listed chapter is the finale** as far as the engine is concerned, and the plugin
-  ends the match when the finale map *loads* (`plugin/pug-match.sp:2574`). So the generated
-  mission is `[included chapters] + [terminal chapter]`, where the terminal chapter is the
-  campaign's own finale. Included means played.
+- **Included means played**, including the last one. No terminal padding chapter. What ends the
+  match is the plugin, not the engine's idea of a finale — see below.
 - Per-chapter versus tuning (`VersusModifier`, `versus_boss_spawning`, `VersusConvertPills`) is
   copied verbatim from the source chapter. Passifice's header records what happens otherwise:
   copying the wrong source silently undid a deliberate competitive setting.
 
 Delivery of the generated file is the open spike — see below.
+
+### 4b. Match end moves to the last included map
+
+Owner decision, 2026-09-18: **the last enabled map in the list is the last map.**
+
+Today the plugin ends when the engine reports the finale map has *loaded*
+(`plugin/pug-match.sp:2574`, `L4D_IsMissionFinalMap(true)`). That definition cannot express "play
+this campaign's finale", and it makes the end condition a property of the mission file rather
+than of the match.
+
+The new rule: the backend tells the plugin which map is the last one, and the plugin ends the
+match when that map *completes*.
+
+This is a smaller change than it sounds, because the plugin already has this exact path. `!endpug`
+is documented at `plugin/pug-match.sp:1730` as "finish the match here, without loading the
+finale", and it already mirrors the finale branch including the pending-finalize failsafe. The
+change is to fire that same `EndMatchNow()` automatically once the designated last map is
+finalized, rather than only on command.
+
+Two things it improves for stock campaigns as well, and neither should be treated as a
+regression to guard against:
+
+- The finale map no longer loads at all. Today chapter 5 loads and is immediately thrown away.
+- The end is triggered by a map completing, which is a moment the plugin already fully owns
+  (`FinalizeMap`, `g_bPendingFinalize`), rather than by a subsequent level load.
+
+Delivery: extend `sm_pug_match` with the ordered included map list, so the plugin knows both
+which map is last and that it is in a backend-driven match. Keep the finale-load trigger as a
+failsafe for self-started and auto-tracked matches, which have no backend-supplied list.
 
 ### 5. Upload and install
 
@@ -216,7 +244,9 @@ the admin panel rather than serving a surprise.
 ### 9. Testing
 
 - `vpk.ts` against real campaign VPKs, not only a synthetic fixture.
-- Mission generation: chapter order, terminal chapter, verbatim tuning copy.
+- Mission generation: chapter order, no padding chapter, verbatim tuning copy.
+- Match end on the last included map, including the case where it *is* the campaign's finale,
+  and the failsafe still firing for a self-started match with no backend-supplied list.
 - Registry merge; `campaignForMap()` on custom maps; cache invalidation on edit.
 - `map_pool` validation accepting custom slugs and rejecting uninstalled ones.
 - Upload: disk-space refusal, hash mismatch, traversal refusal.
@@ -225,18 +255,18 @@ the admin panel rather than serving a surprise.
 
 ## Constraints, measured 2026-09-18
 
-**Disk is the binding constraint.** The box is at 33G used of 47G, 12G free, with `/home/l4d`
-alone at 20G — and that is alongside known demo pressure (`tv_autorecord` writing ~1.7 GB/day
-with root cause still open, 7.76 GB pruned on 2026-09-10). Campaign VPKs are 50-500 MB each and
-live in `addons/` permanently. Three or four campaigns is comfortable; a dozen large ones plus a
-bad week of demos fills the partition and takes the game server down with it.
+**Disk was measured at 33G used of 47G, 12G free**, with `/home/l4d` alone at 20G. Most of that
+is demos, and demos are moving to R2 (owner, 2026-09-18), which reclaims the bulk of it. So disk
+is no longer expected to bind.
 
-R2 does not help. The server must have the VPK in `addons/` to run the map at all, so offloading
-the download copy saves nothing.
+It is still the resource this feature consumes, and R2 cannot relieve it: the server must have
+the VPK in `addons/` to run the map at all, so offloading the download copy saves nothing. VPKs
+are 50-500 MB each and permanent.
 
-Therefore: the uploader checks headroom and refuses below a floor, the panel shows current free
-space rather than letting an admin discover it at 100%, and disabling a campaign is distinct
-from deleting it — deleting reclaims the VPK from every server.
+So the guards stay, sized as prudence rather than as a crisis: the uploader checks headroom and
+refuses below a floor, the panel shows current free space rather than letting an admin discover
+it at 100%, and disabling a campaign is distinct from deleting it — deleting reclaims the VPK
+from every server. Re-measure once the demo offload has actually run before setting the floor.
 
 **Bandwidth is not a constraint.** 95.1 GB used is 3% of the allowance, so roughly 3 TB/month
 with ~3 TB of headroom. A full rollout (8 players × 300 MB) is 2.4 GB, 0.08% of a cycle. Daily
@@ -269,11 +299,8 @@ live, and no plugin work depends on the result.
 
 ## Open questions
 
-- **Playing the finale as a scored map.** The plugin ends the match when the finale loads, and
-  the engine calls the last listed chapter the finale. A campaign whose finale should be
-  *played* has no chapter to follow it. Not solved here. It affects short campaigns most, and
-  the honest options are a terminal dummy chapter or a plugin end-trigger change — the latter
-  reopening the live-match-flow risk this design otherwise avoids.
+- ~~Playing the finale as a scored map.~~ **Resolved 2026-09-18** by the owner: the last enabled
+  map is the last map, and the plugin ends when it completes. See 4b.
 - **File consistency is out of scope,** deferred by the owner on 2026-09-18. `consistency/`
   force-exacts files to block content swaps, and a custom VPK adds hundreds of files installed
   by hand. That interaction is its own design problem and would hold up a feature that is useful
@@ -288,6 +315,7 @@ live, and no plugin work depends on the result.
 | Automatic install to both servers | Owner, 2026-09-18. The two servers are identical besides ping, so no per-server pool gating is needed, only install status and a warning if they drift |
 | Parse the VPK, admin confirms | Authoritative source with a human check. Mission files vary and a hand-typed BSP name is a silent failure |
 | Chapter selection via generated mission file | Passifice proved the engine scores an arbitrary chapter list as one campaign with no plugin. The alternative revived dead code inside live match flow |
+| Last enabled map ends the match | Owner, 2026-09-18. Lets a finale be played, moves the end condition off the mission file, and reuses the proven `!endpug` path rather than the finale-load trigger |
 | Serve downloads from `addons/` | One copy, so the installed file and the downloaded file cannot drift. Bandwidth measured as a non-issue and `fq` handles the latency case |
 | No R2 | The server needs the VPK locally regardless, so it saves neither disk nor correctness |
 | `/custom-campaigns`, nav "Custom" | `/maps` is stats about maps played; this is installation. Merging muddles both and breaks bookmarks |
