@@ -70,4 +70,8 @@ for row in "${WANTED[@]}"; do
   fi
 done
 
-python3 "$REPO/tools/gen-overviews.py" "$SRC" "$REPO/src/mapOverviews.ts" --override "$OVERRIDE"
+# Where the browser fetches layers from. Unset serves them from web/public, which
+# is right for a dev checkout; production sets it to the R2 public URL plus
+# /overviews, because the 4x set is nearly a gigabyte and is not committed.
+python3 "$REPO/tools/gen-overviews.py" "$SRC" "$REPO/src/mapOverviews.ts" --override "$OVERRIDE" \
+  ${OVERVIEW_BASE_URL:+--base-url "$OVERVIEW_BASE_URL"}

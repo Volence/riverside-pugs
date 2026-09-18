@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { offloadMatchDemos, sweepDemos, friendlyName, type R2Ops } from '../src/demoOffload.js';
-import { r2FromEnv, encodeKey, demoKey, signRequest, type R2Config } from '../src/r2.js';
+import { r2FromEnv, encodeKey, demoKey, overviewKey, OVERVIEW_CACHE_CONTROL, signRequest, type R2Config } from '../src/r2.js';
 
 const CFG: R2Config = {
   endpoint: 'https://acct.r2.cloudflarestorage.com',
@@ -331,5 +331,21 @@ describe('sweepDemos', () => {
     const r = await sweepDemos(db, CFG, dir, { ops: f.ops });
     expect(r.failed).toBe(1);
     expect(r.uploaded).toBe(1);
+  });
+});
+
+describe('overview objects', () => {
+  it('keys a layer under its own prefix, clear of demos/', () => {
+    expect(overviewKey('l4d_vs_farm01_hilltop_z+0326.16x.webp'))
+      .toBe('overviews/l4d_vs_farm01_hilltop_z+0326.16x.webp');
+  });
+
+  it('encodes the + in a cut height without eating the prefix slash', () => {
+    expect(encodeKey(overviewKey('l4d_vs_farm01_hilltop_z+0326.16x.webp')))
+      .toBe('overviews/l4d_vs_farm01_hilltop_z%2B0326.16x.webp');
+  });
+
+  it('caches hard, because a name never changes meaning', () => {
+    expect(OVERVIEW_CACHE_CONTROL).toContain('immutable');
   });
 });
