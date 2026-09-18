@@ -221,6 +221,21 @@ describe('AdminIntegrity', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
   };
 
+  /** The column key shipped live and invisible for a day: it used `class="key"`,
+   *  which the replay viewer's floating legend styles `position: absolute`, so
+   *  the whole <details> was pulled out of its panel and left an empty box with
+   *  no summary to click. Nothing failed; two stylesheets simply agreed on a
+   *  name. This asserts the name stays distinct, since the symptom is invisible
+   *  by construction and would not be noticed again. */
+  it('keeps the column key off the replay viewer\'s .key class', async () => {
+    await openTab();
+    const summary = await waitFor(() => screen.getByText('What these columns mean'));
+    const details = summary.closest('details');
+    expect(details).toBeTruthy();
+    expect(details!.classList.contains('key')).toBe(false);
+    expect(details!.classList.contains('colkey')).toBe(true);
+  });
+
   it('runs the analysis from the panel', async () => {
     mockAdmin.integrityJob.mockResolvedValue(jobInfo());
     mockAdmin.integrityRun.mockResolvedValue({});

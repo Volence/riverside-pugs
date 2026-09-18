@@ -202,9 +202,9 @@ export function AdminIntegrity() {
     <>
       <BackfillControl />
       <Panel>
-        <details class="key">
+        <details class="colkey">
           <summary>What these columns mean</summary>
-          <dl class="key__list">
+          <dl class="colkey__list">
             <dt>Tracking</dt>
             <dd>
               Did the crosshair <strong>move with</strong> an invisible infected. 1 is exactly the
