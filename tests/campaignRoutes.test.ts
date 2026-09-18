@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -7,9 +7,14 @@ import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
-import { insertDraft, publishCampaign, setEnabled } from '../src/customCampaigns.js';
+import {
+  getCampaign, insertDraft, installsOf, publishCampaign, setEnabled, setInstall,
+} from '../src/customCampaigns.js';
+import { campaignRegistry, invalidateCampaignCache } from '../src/campaignRegistry.js';
+import type { InstallTarget } from '../src/campaignInstall.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { makeVpk } from './fixtures/makeVpk.js';
+import { fakeAddonsTransport } from './fakes/fakeAddonsTransport.js';
 
 const MISSION = `
 "mission"
@@ -30,7 +35,10 @@ const MISSION = `
 let db: DB;
 let addons: string;
 
-const buildTestApp = (o: { db: DB; addonsDir: string; freeBytes?: number }): Promise<FastifyInstance> =>
+const buildTestApp = (o: {
+  db: DB; addonsDir: string; freeBytes?: number;
+  installTargets?: () => InstallTarget[]; maxUploadBytes?: number;
+}): Promise<FastifyInstance> =>
   buildServer({
     config: loadConfig({ ADDONS_DIR: o.addonsDir }),
     db: o.db,
@@ -40,11 +48,18 @@ const buildTestApp = (o: { db: DB; addonsDir: string; freeBytes?: number }): Pro
     // real one calls statfs, so the disk-floor test would pass or fail based
     // on how full the machine running it happens to be.
     freeBytes: o.freeBytes === undefined ? undefined : async () => o.freeBytes!,
+    installTargets: o.installTargets,
+    maxUploadBytes: o.maxUploadBytes,
   });
 
 beforeEach(() => {
   db = openDb(':memory:');
   addons = mkdtempSync(join(tmpdir(), 'addons-'));
+  // campaignRegistry's cache is module-level and keyed on nothing but "has
+  // anyone invalidated it since", so a previous test's warm cache would
+  // otherwise leak into this one's fresh, unrelated db. Same guard
+  // tests/campaignRegistry.test.ts uses.
+  invalidateCampaignCache();
 });
 afterEach(() => { rmSync(addons, { recursive: true, force: true }); });
 
@@ -54,6 +69,17 @@ const adminCookie = (app: FastifyInstance, steamid: string): Record<string, stri
   const cookie = authedCookie(app, db, steamid);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(steamid);
   return cookie;
+};
+
+/** custom_campaign_installs.server_id is a real foreign key into servers(id),
+ *  so any test that writes an install row (directly, or indirectly through a
+ *  route that fires installCampaign) needs a real server row to point at,
+ *  even when installTargets bypasses the servers-table query that would
+ *  otherwise have produced it. */
+const seedServer1 = () => {
+  db.prepare(
+    "INSERT INTO servers (id, name, host, port, rcon_port, rcon_password, status) VALUES (1,'A','h',1,1,'p','idle')",
+  ).run();
 };
 
 describe('GET /api/campaigns/custom', () => {
@@ -198,6 +224,64 @@ describe('POST /api/admin/campaigns', () => {
     expect(res.statusCode).toBe(507);
   });
 
+  // The floor is 2 GB of headroom PLUS the incoming file, not a flat 2 GB.
+  // Free space just over the flat floor, but under floor-plus-this-upload,
+  // must still be refused: otherwise a large-enough upload can land and
+  // leave the partition (which srcds also runs on) nearly full.
+  //
+  // light-my-request's FormData support streams the multipart body without
+  // ever computing a Content-Length (see node_modules/light-my-request/lib/
+  // form-data.js), unlike a real browser upload, which does send one for a
+  // FormData made of already-sized Blobs. The header is set explicitly here
+  // to stand in for that, exactly as a real upload's request would arrive.
+  it('refuses when free disk clears the flat floor but not floor-plus-upload-size', async () => {
+    const big = 'x'.repeat(1_000_000); // ~1 MB declared via content-length
+    const justOverFlatFloor = 2 * 1024 * 1024 * 1024 + 1024;
+    const app = await buildTestApp({ db, addonsDir: addons, freeBytes: justOverFlatFloor });
+    const form = new FormData();
+    form.set('file', new Blob([big]), 'c.vpk');
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+      headers: { 'content-length': String(big.length) },
+      payload: form,
+    });
+    expect(res.statusCode).toBe(507);
+  });
+
+  // Same declared size, but with ample free space: the upload clears the
+  // floor and proceeds to the ordinary mission-parsing checks.
+  it('accepts when free disk clears floor-plus-upload-size', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons, freeBytes: 100 * 1024 * 1024 * 1024 });
+    const vpkPath = join(addons, 'source.vpk');
+    makeVpk(vpkPath, { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION });
+    const bytes = readFileSync(vpkPath);
+    const form = new FormData();
+    form.set('file', new Blob([bytes]), 'dbd.vpk');
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+      headers: { 'content-length': String(bytes.length) },
+      payload: form,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  // 413, not the 500 a thrown error would surface as: a file that exceeds
+  // the configured limit is a rejected upload, not a server bug.
+  it('413s a file over the size limit instead of 500ing', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons, maxUploadBytes: 10 });
+    const form = new FormData();
+    form.set('file', new Blob(['this body is longer than ten bytes']), 'c.vpk');
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: form,
+    });
+    expect(res.statusCode).toBe(413);
+    expect(res.json().error).toMatch(/size limit/i);
+  });
+
   it('refuses a non-admin', async () => {
     const app = await buildTestApp({ db, addonsDir: addons });
     const form = new FormData();
@@ -208,5 +292,297 @@ describe('POST /api/admin/campaigns', () => {
       payload: form,
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('GET /api/admin/campaigns', () => {
+  it('lists every campaign with its chapters and installs', async () => {
+    seedServer1();
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: 'Alley', isFinale: true }]);
+    setInstall(db, 'dbd', 1, 'installed', { sha256: 'a'.repeat(64) });
+
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'GET', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.campaigns).toHaveLength(1);
+    expect(body.campaigns[0].slug).toBe('dbd');
+    expect(body.campaigns[0].chapters.map((c: { map: string }) => c.map)).toEqual(['dbd1_alley']);
+    expect(body.campaigns[0].installs).toEqual([
+      expect.objectContaining({ server_id: 1, state: 'installed' }),
+    ]);
+  });
+
+  // statfs('') throws; that must not take the whole panel down, since the
+  // list itself has nothing to do with whether addonsDir is configured.
+  it('degrades to a null free-space figure rather than 500ing when addonsDir is unconfigured', async () => {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
+
+    const app = await buildTestApp({ db, addonsDir: '' });
+    const res = await app.inject({
+      method: 'GET', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.free).toBeNull();
+    expect(body.campaigns.map((c: { slug: string }) => c.slug)).toEqual(['dbd']);
+  });
+
+  it('refuses a non-admin', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'GET', url: '/api/admin/campaigns',
+      cookies: authedCookie(app, db, '76561198000000009'),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('POST /api/admin/campaigns/:slug/publish', () => {
+  // sizeBytes 9 matches fakeAddonsTransport's hardcoded landed size, the same
+  // convention tests/campaignInstall.test.ts uses, so installCampaign's own
+  // size check passes and the row lands as 'installed' rather than 'failed'.
+  const draftDbd = () => {
+    seedServer1();
+    writeFileSync(join(addons, 'dbd.vpk'), 'vpk bytes');
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
+  };
+
+  it('publishes a draft, logs the action, invalidates the cache, and kicks the install', async () => {
+    draftDbd();
+    const fake = fakeAddonsTransport();
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+
+    // Warm the cache on the pre-publish state (draft campaigns aren't in it),
+    // so a stale answer after publish would prove invalidateCampaignCache was
+    // skipped rather than just never having been exercised.
+    expect(campaignRegistry(db).has('dbd')).toBe(false);
+
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/publish',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: { name: 'Dead Before Dawn' },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const row = getCampaign(db, 'dbd')!;
+    expect(row.state).toBe('published');
+    expect(row.name).toBe('Dead Before Dawn');
+
+    expect(campaignRegistry(db).has('dbd')).toBe(true);
+    expect(db.prepare("SELECT admin_id FROM admin_actions WHERE action = 'campaign_publish'").all())
+      .toEqual([{ admin_id: '76561198000000001' }]);
+
+    // The install itself is fired without being awaited by the route, so
+    // this is checking a background job's result, not a response body. It
+    // is not racy here specifically because fakeAddonsTransport never touches
+    // a real timer or the filesystem: every step is a plain microtask, and
+    // Node drains the whole microtask queue (including this fire-and-forget
+    // chain) before control returns past Fastify's own reply pipeline to this
+    // await. A transport doing real disk or network I/O would not offer that
+    // guarantee, which is exactly why the route never awaits it either.
+    expect(installsOf(db, 'dbd')).toEqual([
+      expect.objectContaining({ server_id: 1, state: 'installed' }),
+    ]);
+    expect(fake.files.has('dbd.vpk')).toBe(true);
+  });
+
+  it('refuses a non-admin', async () => {
+    draftDbd();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/publish',
+      cookies: authedCookie(app, db, '76561198000000009'),
+      payload: { name: 'Dead Before Dawn' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('404s for a campaign that does not exist', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/nope/publish',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: { name: 'x' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('POST /api/admin/campaigns/:slug/enabled', () => {
+  const draftAndPublishDbd = () => {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+  };
+
+  it('flips enabled on', async () => {
+    draftAndPublishDbd();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/enabled',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: { enabled: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getCampaign(db, 'dbd')!.enabled).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) c FROM admin_actions WHERE action = 'campaign_enabled'").get())
+      .toEqual({ c: 1 });
+  });
+
+  it('flips enabled back off', async () => {
+    draftAndPublishDbd();
+    setEnabled(db, 'dbd', true);
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/enabled',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: { enabled: false },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getCampaign(db, 'dbd')!.enabled).toBe(0);
+  });
+
+  it('refuses a non-admin', async () => {
+    draftAndPublishDbd();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/enabled',
+      cookies: authedCookie(app, db, '76561198000000009'),
+      payload: { enabled: true },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('POST /api/admin/campaigns/:slug/reinstall', () => {
+  const publishedDbd = () => {
+    seedServer1();
+    writeFileSync(join(addons, 'dbd.vpk'), 'vpk bytes');
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+  };
+
+  it('re-fires the install and logs the action', async () => {
+    publishedDbd();
+    const fake = fakeAddonsTransport();
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/reinstall',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) c FROM admin_actions WHERE action = 'campaign_reinstall'").get())
+      .toEqual({ c: 1 });
+    // See the comment in the publish test: safe to assert synchronously here
+    // because fakeAddonsTransport never leaves the microtask queue.
+    expect(installsOf(db, 'dbd')).toEqual([
+      expect.objectContaining({ server_id: 1, state: 'installed' }),
+    ]);
+  });
+
+  it('refuses a non-admin', async () => {
+    publishedDbd();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/dbd/reinstall',
+      cookies: authedCookie(app, db, '76561198000000009'),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('404s for a campaign that does not exist', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns/nope/reinstall',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('DELETE /api/admin/campaigns/:slug', () => {
+  const installedDbd = (fake: ReturnType<typeof fakeAddonsTransport>) => {
+    seedServer1();
+    writeFileSync(join(addons, 'dbd.vpk'), 'vpk bytes');
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+    setEnabled(db, 'dbd', true);
+    setInstall(db, 'dbd', 1, 'installed', { sha256: 'a'.repeat(64) });
+    fake.files.set('dbd.vpk', 9);
+  };
+
+  it('removes the install rows, removes the local file, and stops serving downloads', async () => {
+    const fake = fakeAddonsTransport();
+    installedDbd(fake);
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+
+    const before = await app.inject({ method: 'GET', url: '/download/campaign/dbd' });
+    expect(before.statusCode).toBe(200);
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/dbd',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+
+    expect(installsOf(db, 'dbd')).toEqual([]);
+    expect(getCampaign(db, 'dbd')).toBeUndefined();
+    expect(existsSync(join(addons, 'dbd.vpk'))).toBe(false);
+    expect(fake.files.has('dbd.vpk')).toBe(false);
+    expect(db.prepare("SELECT COUNT(*) c FROM admin_actions WHERE action = 'campaign_delete'").get())
+      .toEqual({ c: 1 });
+
+    const after = await app.inject({ method: 'GET', url: '/download/campaign/dbd' });
+    expect(after.statusCode).toBe(404);
+  });
+
+  it('refuses a non-admin', async () => {
+    const fake = fakeAddonsTransport();
+    installedDbd(fake);
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/dbd',
+      cookies: authedCookie(app, db, '76561198000000009'),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('404s for a campaign that does not exist', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/nope',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(404);
   });
 });

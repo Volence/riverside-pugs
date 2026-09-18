@@ -32,6 +32,17 @@ export interface CampaignRouteOpts {
    *  which would otherwise make the disk-floor test pass or fail depending on
    *  how full the machine running it happens to be. */
   freeBytes?: () => Promise<number>;
+  /** Servers to push a published campaign to, or pull a deleted one from.
+   *  Injectable for tests, so a background install's per-server results can
+   *  be asserted against a fake transport instead of a real servers table and
+   *  transportFor (which would mean touching a real filesystem or FTP config
+   *  per test). Defaults to every enabled server, resolved through
+   *  transportFor exactly as production does. */
+  installTargets?: () => InstallTarget[];
+  /** Overrides the multipart file-size limit. Production leaves this at 2 GB;
+   *  tests inject a small number to exercise the truncation path without
+   *  uploading gigabytes of data. */
+  maxUploadBytes?: number;
 }
 
 export async function campaignRoutes(
@@ -41,12 +52,21 @@ export async function campaignRoutes(
   const requireAdmin = makeRequireAdmin(db);
   const freeBytes = opts.freeBytes
     ?? (async () => { const s = await statfs(addonsDir); return s.bsize * s.bavail; });
+  const maxUploadBytes = opts.maxUploadBytes ?? 2 * 1024 * 1024 * 1024;
 
-  await app.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 1 } });
+  // throwFileSizeLimit: false keeps a too-large upload as a plain
+  // part.file.truncated flag once the pipeline below settles, rather than an
+  // exception thrown mid-stream that would otherwise have to be caught around
+  // the pipeline call and turned back into the same 413.
+  await app.register(multipart, {
+    throwFileSizeLimit: false,
+    limits: { fileSize: maxUploadBytes, files: 1 },
+  });
 
-  const targets = (): InstallTarget[] =>
+  const defaultTargets = (): InstallTarget[] =>
     (db.prepare('SELECT * FROM servers WHERE enabled = 1').all() as ServerRow[])
       .map((s) => ({ id: s.id, transport: transportFor(s) }));
+  const targets = opts.installTargets ?? defaultTargets;
 
   app.get('/api/campaigns/custom', async () => ({
     campaigns: listCampaigns(db, { state: 'published', enabledOnly: true }).map((c) => ({
@@ -85,8 +105,18 @@ export async function campaignRoutes(
 
   app.get('/api/admin/campaigns', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
+    // statfs('') throws when addonsDir is unconfigured, and a real directory
+    // can also vanish or become unreadable. The list itself doesn't depend on
+    // any of that, so degrade to "can't report free space" rather than 500ing
+    // the whole panel over a number nobody strictly needs to see it.
+    let free: number | null = null;
+    try {
+      free = await freeBytes();
+    } catch (err) {
+      req.log.error({ err }, 'could not read free disk space for the campaigns panel');
+    }
     return {
-      free: await freeBytes(),
+      free,
       campaigns: listCampaigns(db).map((c) => ({
         ...c, chapters: chaptersOf(db, c.slug), installs: installsOf(db, c.slug),
       })),
@@ -101,8 +131,16 @@ export async function campaignRoutes(
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: 'no file' });
 
+    // part.file has no length up front (multipart doesn't declare one per
+    // part), but the whole request's content-length is a fair upper bound on
+    // the file it carries, boundary overhead included. Without it, a 1.9 GB
+    // upload onto a disk with 2.1 GB free would clear a flat 2 GB floor and
+    // then nearly fill the partition that srcds also runs on. When the
+    // header is missing, fall back to the flat floor rather than guessing.
+    const declaredSize = Number(req.headers['content-length']);
+    const floor = DISK_FLOOR_BYTES + (Number.isFinite(declaredSize) ? declaredSize : 0);
     const free = await freeBytes();
-    if (free < DISK_FLOOR_BYTES) {
+    if (free < floor) {
       return reply.code(507).send({ error: 'not enough free disk space on the server' });
     }
 
@@ -126,7 +164,12 @@ export async function campaignRoutes(
         },
       });
       await pipeline(part.file, meter, createWriteStream(tmp));
-      if (part.file.truncated) throw new Error('file too large');
+      // throwFileSizeLimit: false above means this is a flag to check, not an
+      // exception the pipeline would have thrown. 413 is the honest status
+      // for "your file exceeded the limit", not a 500.
+      if (part.file.truncated) {
+        return reply.code(413).send({ error: 'file exceeded the upload size limit' });
+      }
 
       const mission = missionFromVpk(tmp);
       if (!mission) {
