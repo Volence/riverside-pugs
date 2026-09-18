@@ -99,13 +99,21 @@ export class FakeTransport implements BotTransport {
     },
     memberVoiceChannel: async (userId) => this.voiceOf.get(userId) ?? null,
     move: async (userId, channelId) => {
+      // Discord rejects a move into a channel that is not there, which is how
+      // a remembered origin that has since been deleted behaves.
+      const dest = this.channels.get(channelId);
+      if (!dest) throw new Error('Unknown Channel');
       this.moves.push({ userId, channelId });
       const prev = this.voiceOf.get(userId);
       if (prev) this.channels.get(prev)?.members.delete(userId);
       this.voiceOf.set(userId, channelId);
-      this.channels.get(channelId)?.members.add(userId);
+      dest.members.add(userId);
     },
     channelMemberCount: async (channelId) => this.channels.get(channelId)?.members.size ?? null,
+    channelMemberIds: async (channelId) => {
+      const ch = this.channels.get(channelId);
+      return ch ? [...ch.members] : null;
+    },
     deleteChannel: async (channelId) => { this.channels.delete(channelId); },
   };
 }
