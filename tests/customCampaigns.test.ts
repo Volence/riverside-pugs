@@ -43,6 +43,22 @@ describe('custom campaign store', () => {
     expect(chaptersOf(db, 'dbd').map((c) => c.is_finale)).toEqual([0, 0, 1]);
   });
 
+  // The real case: L4D1 mission files rarely mark which chapter is the finale,
+  // so most uploads arrive with isFinale: false on every chapter. The fallback
+  // ensures the last chapter is still marked as the finale. This test catches
+  // refactors that would drop the fallback logic.
+  it('marks the last chapter as the finale even when caller passes false for all', () => {
+    insertDraft(db, {
+      slug: 'cc', name: 'Custom Campaign', vpkFilename: 'cc.vpk',
+      sizeBytes: 5000, sha256: 'b'.repeat(64), uploadedBy: '76561198000000002',
+    }, [
+      { map: 'cc1_start', display: 'Start', isFinale: false },
+      { map: 'cc2_mid', display: 'Middle', isFinale: false },
+      { map: 'cc3_end', display: 'End', isFinale: false },
+    ]);
+    expect(chaptersOf(db, 'cc').map((c) => c.is_finale)).toEqual([0, 0, 1]);
+  });
+
   // A draft is half-uploaded and must never reach the pool or the public page.
   it('lists only published campaigns when asked', () => {
     draft('dbd');
