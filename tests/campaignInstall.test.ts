@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
-import { insertDraft, installsOf } from '../src/customCampaigns.js';
+import { deleteCampaign, insertDraft, installsOf } from '../src/customCampaigns.js';
 import { fakeAddonsTransport } from './fakes/fakeAddonsTransport.js';
 import { installCampaign, uninstallCampaign, isInstalledEverywhere } from '../src/campaignInstall.js';
+import type { AddonsTransport } from '../src/addonsTransport.js';
 
 let db: DB;
 let dir: string;
@@ -82,6 +83,51 @@ describe('installCampaign', () => {
     t.state.failPut = false;
     await installCampaign(db, 'dbd', { sourcePath: src, servers: [{ id: 1, transport: t.transport }] });
     expect(installsOf(db, 'dbd')[0].state).toBe('installed');
+  });
+
+  // custom_campaign_installs.slug is a real foreign key, so writing an
+  // install row for a slug that no longer exists throws rather than no-oping.
+  // An admin deleting a campaign while its own upload is still transferring
+  // to a server is exactly the "the install failed, delete it" reflex, and
+  // the window is wide: a few hundred megabytes over FTP is slow.
+  it('does not throw when the campaign is deleted while a server is still installing', async () => {
+    const a = fakeAddonsTransport({
+      // Fires inside the awaited put call, standing in for the delete
+      // landing while server 1's transfer is still in flight.
+      onPut: () => deleteCampaign(db, 'dbd'),
+    });
+    const b = fakeAddonsTransport();
+
+    await expect(installCampaign(db, 'dbd', {
+      sourcePath: src,
+      servers: [{ id: 1, transport: a.transport }, { id: 2, transport: b.transport }],
+    })).resolves.toBeUndefined();
+
+    // Nothing left to show: deleteCampaign cascades away every install row
+    // for the slug, including the 'pending' one just written for server 1.
+    expect(installsOf(db, 'dbd')).toEqual([]);
+    // Server 2 is never reached: once the campaign is gone there is nothing
+    // left to install anywhere, so the loop stops rather than plowing on.
+    expect(b.state.puts).toBe(0);
+  });
+
+  it('does not throw when the campaign disappears between two writes in the same iteration', async () => {
+    // Unlike the test above, put() itself succeeds (the transfer already
+    // landed) and the delete lands only in the gap before the final
+    // setInstall('installed') write, which is the write that would then hit
+    // the foreign key. This exercises the catch block's own re-check rather
+    // than the top-of-loop one.
+    const t: AddonsTransport = {
+      async put() {
+        deleteCampaign(db, 'dbd');
+      },
+      async size() { return 9; },
+      async remove() {},
+    };
+    await expect(installCampaign(db, 'dbd', {
+      sourcePath: src, servers: [{ id: 1, transport: t }],
+    })).resolves.toBeUndefined();
+    expect(installsOf(db, 'dbd')).toEqual([]);
   });
 });
 
