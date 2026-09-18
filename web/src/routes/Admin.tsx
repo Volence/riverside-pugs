@@ -9,12 +9,14 @@ import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
 import { AdminSeasons } from './admin/AdminSeasons';
 import { AdminIntegrity } from './admin/AdminIntegrity';
+import { AdminCampaigns } from './admin/AdminCampaigns';
 
 const TABS = [
   { key: 'players', label: 'Players' },
   { key: 'matches', label: 'Matches' },
   { key: 'reports', label: 'Reports' },
   { key: 'integrity', label: 'Integrity' },
+  { key: 'campaigns', label: 'Campaigns' },
   { key: 'seasons', label: 'Seasons' },
   { key: 'settings', label: 'Settings' },
   { key: 'audit', label: 'Audit' },
@@ -41,6 +43,7 @@ export function Admin({ session }: { session: Session }) {
         {tab === 'matches' && <AdminMatches />}
         {tab === 'reports' && <AdminReports />}
         {tab === 'integrity' && <AdminIntegrity />}
+        {tab === 'campaigns' && <AdminCampaigns />}
         {tab === 'seasons' && <AdminSeasons />}
         {tab === 'settings' && <AdminSettings />}
         {tab === 'audit' && <AdminAudit />}

@@ -8,6 +8,8 @@ const { mockAdmin, mockApi } = vi.hoisted(() => ({
     reports: vi.fn(), audit: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
+    campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
+    setCampaignEnabled: vi.fn(), reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
 }));
@@ -499,5 +501,68 @@ describe('AdminIntegrity', () => {
     fireEvent.click(within(groups[1] as HTMLElement).getByRole('button', { name: 'Mark this round reviewed (1 clip)' }));
     await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 4, 'reviewed', 'slot 4 only'));
     expect(mockAdmin.integrityReview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AdminCampaigns', () => {
+  // Every test here mounts <Admin>, which always mounts AdminPlayers first
+  // (the default tab) and AdminCampaigns asks the same /api/admin/overview
+  // the Matches tab does for its server list, so both need an answer before
+  // the Campaigns tab is even reachable, whether or not a given test cares
+  // about either response.
+  const twoServers = [
+    { id: 1, name: 'Dallas', host: 'h', port: 1, status: 'live', enabled: 1, tvPort: null, tvPassword: null, tvEnabled: 0 },
+    { id: 2, name: 'Backup', host: 'h', port: 1, status: 'live', enabled: 1, tvPort: null, tvPassword: null, tvEnabled: 0 },
+  ];
+  beforeEach(() => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.overview.mockResolvedValue({ open: [], recent: [], voided: [], queue: [], servers: twoServers });
+  });
+
+  it('shows free disk space so an admin sees headroom before uploading', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [] });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    expect(await waitFor(() => screen.getByText(/11(\.0)? GB free/i))).toBeTruthy();
+  });
+
+  it('shows a per-server install state, and the error when one failed', async () => {
+    mockAdmin.campaigns.mockResolvedValue({
+      free: 11 * 1024 ** 3,
+      campaigns: [{
+        slug: 'dbd', name: 'DBD', state: 'published', enabled: 1,
+        size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'dbd.vpk',
+        uploaded_by: null, uploaded_at: 0, notes: null,
+        chapters: [{ slug: 'dbd', ordinal: 1, map: 'dbd1', display: 'One', is_finale: 1, included: 1, play_order: 1 }],
+        installs: [
+          { slug: 'dbd', server_id: 1, state: 'installed', sha256: null, error: null, updated_at: 0 },
+          { slug: 'dbd', server_id: 2, state: 'failed', sha256: null, error: 'connection refused', updated_at: 0 },
+        ],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    expect(await waitFor(() => screen.getByText(/connection refused/))).toBeTruthy();
+  });
+
+  // Enabling a campaign that is not on every server is how a match ends up
+  // voting for a map a box cannot load.
+  it('will not let a campaign with a failed install be enabled', async () => {
+    mockAdmin.campaigns.mockResolvedValue({
+      free: 11 * 1024 ** 3,
+      campaigns: [{
+        slug: 'dbd', name: 'DBD', state: 'published', enabled: 0,
+        size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'dbd.vpk',
+        uploaded_by: null, uploaded_at: 0, notes: null, chapters: [],
+        installs: [{ slug: 'dbd', server_id: 2, state: 'failed', sha256: null, error: 'x', updated_at: 0 }],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const toggle = await waitFor(() => screen.getByRole('checkbox', { name: /in the pool/i }));
+    // No jest-dom matchers are wired into this project's vitest config (see
+    // the Integrity tests above using the same pattern), so this checks the
+    // DOM property directly rather than via toBeDisabled().
+    expect(toggle).toHaveProperty('disabled', true);
   });
 });
