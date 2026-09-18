@@ -39,16 +39,33 @@ const def = (
 ): StatDef => ({ key, side, label, needsSkillDetect, visibility, direction });
 
 export const STAT_DEFS: readonly StatDef[] = [
-  // Survivor, from skill_detect. A team skeet is not also a skeet.
+  // THE SKEET RULESET (owner, 2026-09-18). Every skeet is claimed by exactly
+  // one survivor, and falls into exactly one of two buckets:
   //
-  // Invariant, intended, not a bug: skeets_shotgun + skeets_sniper + skeets_melee
-  // can exceed skeets. A team skeet credits team_skeets and the weapon key but
-  // NOT skeets, so summing the weapon columns counts team skeets that the
-  // skeets column itself excludes.
+  //   skeets       only that survivor damaged the hunter. How many shots it
+  //                took does not matter, and neither does damage from
+  //                non-survivor sources.
+  //   team_skeets  the survivor who got the kill, where OTHER SURVIVORS had
+  //                damaged the hunter first.
+  //
+  // Between them these cover every case, which gives the invariant the page is
+  // read against:
+  //
+  //   skeets + team_skeets == times_skeeted
+  //
+  // It holds per match on everything except 15, 17 and 22, which predate the
+  // skill_detect fork. Chip skeets (skeets_hurt) joined it on 2026-09-18; before
+  // that they credited nobody and sat outside it, which is why the columns
+  // could not be made to add up.
+  //
+  // Separate invariant, intended, not a bug: skeets_shotgun + skeets_sniper +
+  // skeets_melee can exceed skeets, because a team skeet credits team_skeets
+  // and the weapon key but never skeets.
   def('skeets', 'survivor', 'Skeets', 'high_good'),
   def('team_skeets', 'survivor', 'Team skeets', 'high_good'),
-  // A chip skeet only means something as a ratio against clean skeets; on its
-  // own it says nothing, so it stays neutral rather than good.
+  // NOT a third bucket: a breakdown of how many of the above were on a hunter
+  // that was already damaged. Neutral because on its own it says nothing, and
+  // it is already counted in skeets or team_skeets.
   def('skeets_hurt', 'survivor', 'Hurt skeets', 'neutral'),
   def('skeet_assists', 'survivor', 'Skeet assists', 'high_good'),
   // Subsets of `skeets`, not independent achievements. Marking the total and
