@@ -44,3 +44,10 @@ directory writable, so every prune silently deleted nothing. The fix is
 `/etc/systemd/system/pug-web.service.d/gamedir.conf` (SupplementaryGroups=l4d,
 ReadWritePaths for the game dir and replays) plus `g+w` on those two
 directories.
+
+## Custom campaigns
+
+Uploading and installing custom campaign VPKs reuses this same write access,
+but needs `ADDONS_DIR` and per-server addons columns configured before any of
+it works. See `docs/CUSTOM_CAMPAIGNS.md` for the environment variable, the
+exact SQL for both servers' rows, deploy order, and how to verify an install.
