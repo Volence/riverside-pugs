@@ -1,6 +1,7 @@
 # File consistency for L4D1: killing the content-swap class
 
-Status: design, not started. Spec written 2026-09-18.
+Status: **Phase 1 PASSED 2026-09-17**. ForceExactFile enforces on L4D1, confirmed with a real
+client. Phase 2 (the file list) is not started. Spec written 2026-09-18.
 
 Related: `docs/superpowers/specs/2026-09-17-integrity-design.md` (the replay analyzer,
 which targets a different class of cheating entirely and does not touch this one).
@@ -58,6 +59,49 @@ and applies it on map start; the file list itself; a documented on/off switch.
 
 **Out:** anything that bans, kicks by our own hand, or reports. The engine either disconnects
 a mismatched client or it does not. We add no policy on top in this version.
+
+## Phase 1 result: it works
+
+Confirmed 2026-09-17 on the local test server with a real client running a real hunter skin.
+
+**Q1, does the L4D1 client enforce and disconnect? YES.** The client was rejected at connect
+with:
+
+> Server is enforcing consistency for this file:
+> materials/models/infected/hunter/hunter_01.vmt
+
+Better than expected in one respect: the message **names the offending file**. The prediction
+was the generic "Your string table differs from the server's.", which tells a player nothing.
+Naming the file means a legitimate player who trips this can see exactly what to remove, which
+materially changes how safe this is to enable.
+
+**The mismatch that finally tested it was the `.vmt`, not the `.vtf`.** Three attempts were
+needed and the first two proved nothing, which is worth recording because the same trap will
+catch anyone extending this:
+
+| forced | client copy | result |
+|---|---|---|
+| `models/infected/hunter.mdl` | stock | no mismatch, correctly silent |
+| `materials/.../hunter_01.vtf` | stock, still in the VPK | no mismatch, correctly silent |
+| `materials/.../hunter_01.vmt` | modified | **rejected** |
+
+The skin in question does not replace a texture in place. It ships a loose `hunter_02.vtf` and
+has you edit the `$baseTexture` line **inside `pak01_dir.vpk`** to point at it, because the
+`.vmt` is stored as plain text in the archive's preload section. So the file that differs is
+the material definition, not the texture.
+
+That has a direct consequence for the Phase 2 list: **force the `.vmt` as well as the `.vtf`**.
+Forcing only textures misses every skin installed this way, which appears to be the common way.
+
+**`sv_pure` did NOT catch the same client.** The test server logged `Server using sv_pure 2`
+with `sv_pure_kick_clients 1` and cached CRCs, and a client with a modified `pak01_dir.vpk`
+AND an extra loose file connected untouched. Caveat: that server runs `sv_lan 1`, and
+`sv_pure 2` means "force all client files to come from Steam", which plausibly cannot run
+without Steam auth. Untested on an authenticating server. Either way the received wisdom that
+sv_pure is unreliable on L4D1 held, and ForceExactFile is the mechanism that demonstrably works.
+
+**Q2, does it cover sounds? STILL UNANSWERED.** Silenced weapons are a sound swap and a third
+of the stated problem. Test before claiming this solves it.
 
 ## The two questions this must answer before it is worth building out
 
