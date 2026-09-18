@@ -56,6 +56,7 @@ import { statsRoutes } from './routes/stats.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
+import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
 
 export interface ServerDeps {
@@ -73,6 +74,14 @@ export interface ServerDeps {
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
   freeBytes?: () => Promise<number>;
+  /** Servers a published or reinstalled campaign is pushed to, or a deleted
+   *  one is pulled from. Injected in tests so a fake transport's per-server
+   *  results can be asserted without a real servers table. Defaults to every
+   *  enabled server, resolved through transportFor. */
+  installTargets?: () => InstallTarget[];
+  /** Overrides the campaign upload's multipart file-size limit. Injected in
+   *  tests to exercise the truncation path without a multi-gigabyte body. */
+  maxUploadBytes?: number;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -687,6 +696,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
+    installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
   });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
