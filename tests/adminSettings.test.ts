@@ -74,3 +74,24 @@ describe('settings routes', () => {
     expect((await put('ready_seconds', '90', user)).statusCode).toBe(403);
   });
 });
+
+describe('map_pool with custom campaigns', () => {
+  it('rejects a slug no campaign claims', () => {
+    const v = validateSetting('map_pool', ['no_mercy', 'not_a_campaign']);
+    expect(v).toEqual({ ok: false, error: 'unknown campaign: not_a_campaign' });
+  });
+
+  // The pool is validated against the registry, not the stock const, or a
+  // custom campaign could never be put in it.
+  it('accepts a custom slug when it is passed as known', () => {
+    const v = validateSetting('map_pool', ['no_mercy', 'dbd'], {
+      campaignSlugs: new Set(['no_mercy', 'dbd']),
+    });
+    expect(v).toEqual({ ok: true, value: JSON.stringify(['no_mercy', 'dbd']) });
+  });
+
+  // Default behaviour is unchanged for every caller that does not care.
+  it('falls back to the stock campaigns when given no set', () => {
+    expect(validateSetting('map_pool', ['dbd']).ok).toBe(false);
+  });
+});

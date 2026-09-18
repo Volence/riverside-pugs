@@ -67,8 +67,15 @@ export function settingDef(key: string): SettingDef | undefined {
 
 export type Validated = { ok: true; value: string } | { ok: false; error: string };
 
-/** Turn a submitted value into the stored string, or say why not. */
-export function validateSetting(key: string, raw: unknown): Validated {
+/** Turn a submitted value into the stored string, or say why not.
+ *
+ *  `campaignSlugs` is how a custom campaign becomes selectable: the pool is
+ *  validated against whatever the registry currently holds, not against the
+ *  stock four. Callers without a registry to hand get the stock four, which is
+ *  the correct answer for every caller that predates custom campaigns. */
+export function validateSetting(
+  key: string, raw: unknown, opts: { campaignSlugs?: Set<string> } = {},
+): Validated {
   const def = BY_KEY.get(key);
   if (!def) return { ok: false, error: 'unknown setting' };
   const t = def.type;
@@ -93,7 +100,8 @@ export function validateSetting(key: string, raw: unknown): Validated {
       return { ok: false, error: 'must be on or off' };
     case 'campaigns': {
       if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: 'pick at least one campaign' };
-      const unknown = raw.filter((c) => typeof c !== 'string' || !CAMPAIGNS[c]);
+      const known = opts.campaignSlugs ?? new Set(Object.keys(CAMPAIGNS));
+      const unknown = raw.filter((c) => typeof c !== 'string' || !known.has(c));
       if (unknown.length) return { ok: false, error: `unknown campaign: ${unknown.join(', ')}` };
       return { ok: true, value: JSON.stringify([...new Set(raw as string[])]) };
     }
