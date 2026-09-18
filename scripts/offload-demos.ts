@@ -97,7 +97,9 @@ if (!upload) {
 
 console.log(`\nUploading${deleteLocal ? ' and deleting local copies' : ' (local copies kept)'}...`);
 const started = Date.now();
-const r = await sweepDemos(db, r2, cfg.demoDir, { limit, deleteLocal });
+// --delete also reclaims demos uploaded by an earlier pass, which is the
+// whole point of running it as a second step.
+const r = await sweepDemos(db, r2, cfg.demoDir, { limit, deleteLocal, includeUploaded: deleteLocal });
 const secs = ((Date.now() - started) / 1000).toFixed(1);
 
 console.log(`\nuploaded  : ${r.uploaded}`);
