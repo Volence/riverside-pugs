@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent, act } from '@testing-library/preact';
-import { Viewer, isDefaultCamera } from './Viewer';
+import { Viewer, isDefaultCamera, edgeTop, EDGE_TOP_MIN } from './Viewer';
 import { FREE, TEAM } from './camera';
 import { STATE, type Frame, type ReplayHeader } from '../../../src/replayFormat';
 import type { HitItem } from './hitTest';
@@ -340,5 +340,27 @@ describe('isDefaultCamera', () => {
 
   it('is false when following, even at fit zoom', () => {
     expect(isDefaultCamera({ cam: { zoom: 1, panX: 0, panY: 0 }, follow: TEAM })).toBe(false);
+  });
+});
+
+describe('edgeTop', () => {
+  // The bug: .hud-edge and .theater__rail started at a hardcoded top: 150px,
+  // chosen to clear the theater chrome. But that chrome wraps. Narrow the
+  // window enough that the toggle chips take two rows and it grows past
+  // 150px, so the top survivor card renders UNDER the HP/NAMES/GUNS buttons.
+  it('keeps the established offset for chrome that fits on one row', () => {
+    expect(edgeTop(0)).toBe(EDGE_TOP_MIN);
+    expect(edgeTop(120)).toBe(EDGE_TOP_MIN);
+  });
+
+  // A zero measurement is jsdom or a hidden element, not a real reading, so
+  // the floor has to hold rather than collapsing the columns to the top.
+  it('falls back to the floor when there is no measurement', () => {
+    expect(edgeTop(0)).toBe(EDGE_TOP_MIN);
+  });
+
+  it('pushes the columns clear when the chrome has wrapped', () => {
+    expect(edgeTop(190)).toBeGreaterThan(190);
+    expect(edgeTop(260)).toBeGreaterThan(260);
   });
 });
