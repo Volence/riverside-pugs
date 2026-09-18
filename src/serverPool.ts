@@ -96,3 +96,10 @@ export function setEnabled(db: DB, id: number, enabled: boolean): void {
 export function listServers(db: DB): ServerRow[] {
   return db.prepare('SELECT * FROM servers ORDER BY id').all() as ServerRow[];
 }
+
+/** The servers a custom campaign must be on before it can be pooled: every
+ *  server actually in play, matching campaignInstall's own install targets. */
+export function enabledServerIds(db: DB): number[] {
+  return (db.prepare('SELECT id FROM servers WHERE enabled = 1').all() as { id: number }[])
+    .map((s) => s.id);
+}

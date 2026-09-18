@@ -545,8 +545,10 @@ describe('AdminCampaigns', () => {
     expect(await waitFor(() => screen.getByText(/connection refused/))).toBeTruthy();
   });
 
-  // Enabling a campaign that is not on every server is how a match ends up
-  // voting for a map a box cannot load.
+  // Enabling here does not itself add the campaign to the vote (that is a
+  // separate Settings-tab step), but it is the precondition GET
+  // /api/admin/settings checks before offering it as a pool candidate at
+  // all, so a campaign missing from a server must not be enabled either.
   it('will not let a campaign with a failed install be enabled', async () => {
     mockAdmin.campaigns.mockResolvedValue({
       free: 11 * 1024 ** 3,
@@ -559,7 +561,7 @@ describe('AdminCampaigns', () => {
     });
     render(<Admin session={{ kind: 'active', me }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
-    const toggle = await waitFor(() => screen.getByRole('checkbox', { name: /in the pool/i }));
+    const toggle = await waitFor(() => screen.getByRole('checkbox', { name: /available for the pool/i }));
     // No jest-dom matchers are wired into this project's vitest config (see
     // the Integrity tests above using the same pattern), so this checks the
     // DOM property directly rather than via toBeDisabled().

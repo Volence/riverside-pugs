@@ -3,9 +3,12 @@ import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
-import { getSetting } from '../src/settings.js';
+import { getSetting, setSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA, validateSetting } from '../src/settingsSchema.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
+import { insertDraft, publishCampaign, setEnabled, setInstall } from '../src/customCampaigns.js';
+import { invalidateCampaignCache } from '../src/campaignRegistry.js';
+import { addServer } from '../src/serverPool.js';
 
 const ADMIN = '76561198000000001';
 let db: DB;
@@ -14,6 +17,11 @@ let admin: Record<string, string>;
 
 beforeEach(async () => {
   db = openDb(':memory:');
+  // campaignRegistry's cache is module-level and keyed on nothing but "has
+  // anyone invalidated it since", so a previous test's warm cache would
+  // otherwise leak into this one's fresh, unrelated db. Same guard
+  // tests/campaignRoutes.test.ts uses.
+  invalidateCampaignCache();
   app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
   admin = authedCookie(app, db, ADMIN);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
@@ -93,5 +101,80 @@ describe('map_pool with custom campaigns', () => {
   // Default behaviour is unchanged for every caller that does not care.
   it('falls back to the stock campaigns when given no set', () => {
     expect(validateSetting('map_pool', ['dbd']).ok).toBe(false);
+  });
+});
+
+// "enabled" on a custom campaign used to mean only one thing (whether it
+// shows up on the public download page). GET /api/admin/settings pulled
+// the raw registry for its campaign list instead, so an admin could pool an
+// uninstalled campaign through the ordinary Settings UI with no gate at
+// all. These exercise the real routes end to end, not validateSetting in
+// isolation, since the bug was specifically that the route ignored it.
+describe('the settings pool candidate list is gated the same as the panel', () => {
+  const publishDbd = (serverId: number, { enabled, installed }: { enabled: boolean; installed: boolean }) => {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1', display: null, isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+    if (enabled) setEnabled(db, 'dbd', true);
+    if (installed) setInstall(db, 'dbd', serverId, 'installed');
+    invalidateCampaignCache();
+  };
+
+  const poolSlugs = async (): Promise<string[]> => {
+    const res = (await app.inject({ method: 'GET', url: '/api/admin/settings', cookies: admin })).json();
+    return res.campaigns.map((c: { slug: string }) => c.slug);
+  };
+
+  it('always offers the stock four, which have no install to gate on', async () => {
+    expect(await poolSlugs()).toEqual(
+      expect.arrayContaining(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
+    );
+  });
+
+  it('withholds an uninstalled custom campaign even though it is enabled', async () => {
+    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    publishDbd(serverId, { enabled: true, installed: false });
+    expect(await poolSlugs()).not.toContain('dbd');
+    // The direct PUT is refused the same way, not just the candidate list.
+    expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(400);
+  });
+
+  it('withholds a fully installed custom campaign that is not enabled', async () => {
+    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    publishDbd(serverId, { enabled: false, installed: true });
+    expect(await poolSlugs()).not.toContain('dbd');
+    expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(400);
+  });
+
+  it('offers it once both hold, and the PUT accepts it', async () => {
+    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    publishDbd(serverId, { enabled: true, installed: true });
+    expect(await poolSlugs()).toContain('dbd');
+    expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(200);
+  });
+
+  // Judgement call: an admin should not be locked out of their own settings
+  // page by a campaign that was fine when it was pooled and has since gone
+  // stale (a server re-imaged, or someone flipped it back off on the
+  // Campaigns tab). It stays offered, and a save that still includes it
+  // keeps working, until someone deliberately removes it from the pool.
+  it('keeps an already-pooled campaign selectable after it stops qualifying', async () => {
+    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    publishDbd(serverId, { enabled: true, installed: true });
+    setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'dbd']));
+
+    // Now it goes stale: disabled on the Campaigns tab.
+    setEnabled(db, 'dbd', false);
+    invalidateCampaignCache();
+
+    expect(await poolSlugs()).toContain('dbd');
+    // Saving the pool as it stands, dbd included, must not be rejected by
+    // the very setting it is already the value of.
+    expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(200);
+    // But it is not a backdoor to add anything else uninstalled or
+    // disabled: only the slug already in the pool gets the pass.
+    expect((await put('map_pool', ['dbd', 'not_a_campaign'])).statusCode).toBe(400);
   });
 });

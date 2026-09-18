@@ -1,6 +1,8 @@
 import type { DB } from './db.js';
 import { CAMPAIGNS, campaignForMap } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
+import { isInstalledEverywhere } from './campaignInstall.js';
+import { enabledServerIds } from './serverPool.js';
 
 /**
  * Every campaign the site can run: the stock four, plus published custom ones.
@@ -92,4 +94,34 @@ export function resolveCampaignForMap(db: DB, map: string): string | null {
 export function firstMapOf(db: DB, campaign: string): string {
   const entry = campaignRegistry(db).get(campaign);
   return entry?.firstMap ?? STOCK_FIRST.no_mercy;
+}
+
+/**
+ * Campaigns an admin may put in map_pool: the stock four (no VPK, always
+ * eligible), plus published custom campaigns that are `enabled` and
+ * installed on every enabled server. "In the pool" is meant to gate both the
+ * public download and the vote; this is the vote half, kept as its own
+ * lookup rather than filtered on the client so a direct PUT to the setting
+ * (validateSetting) enforces exactly the same rule the panel displays.
+ *
+ * `alsoAllow` keeps an admin from being locked out of their own settings
+ * page: a campaign already sitting in map_pool that later loses its install
+ * (a server re-imaged, an admin flipping it back to disabled) should not
+ * make the pool unsavable or vanish from the list out from under whatever
+ * else is being edited. It stays offered until someone deliberately removes
+ * it from the pool.
+ */
+export function poolableCampaigns(
+  db: DB, opts: { alsoAllow?: Iterable<string> } = {},
+): CampaignEntry[] {
+  const serverIds = enabledServerIds(db);
+  const enabledCustomSlugs = new Set(
+    listCampaigns(db, { state: 'published', enabledOnly: true }).map((c) => c.slug),
+  );
+  const already = new Set(opts.alsoAllow ?? []);
+  return [...campaignRegistry(db).values()].filter((c) => (
+    !c.custom
+    || already.has(c.slug)
+    || (enabledCustomSlugs.has(c.slug) && isInstalledEverywhere(db, c.slug, serverIds))
+  ));
 }
