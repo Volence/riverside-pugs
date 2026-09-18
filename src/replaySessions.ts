@@ -1,6 +1,7 @@
 import { readdirSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { decodeHeader, HEADER_BYTES } from './replayFormat.js';
+import { DEFAULT_DELAY_MS } from './replayTail.js';
 import { campaignForMap } from './campaigns.js';
 import type { ReplayFileInfo, ReplaySession } from './replaySessionTypes.js';
 
@@ -115,18 +116,42 @@ export function listSessions(dir: string, nowMs: number): ReplaySession[] {
   return out;
 }
 
-/** The file a live viewer should be reading for this token: the newest round.
+/**
+ * The file a live viewer should be reading for this token.
  *
- *  Ordinal then half, not mtime. A map change writes a new file while the old
- *  one may still be flushing, and ordering by modification time would flip
- *  back to the previous round for as long as that takes. */
+ * Not simply the newest round. A live viewer is held `delayMs` behind, so the
+ * round it should be reading is the round that was live `delayMs` ago. The
+ * newest file is the right answer only once it is older than the delay.
+ *
+ * Answering "newest" unconditionally is what made a round change cut the
+ * viewer off mid-round: the client re-resolves the session every poll and
+ * resets when the round changes, so the moment the next round's file appeared
+ * it discarded the last `delayMs` of the round being watched, which the
+ * server had been holding back and had not sent yet, and then sat empty until
+ * the new round aged past the delay. Holding the pointer here gives the old
+ * round exactly the time it needs to play out, and by then its file is closed
+ * and served whole.
+ *
+ * Ordinal then half, not mtime. A map change writes a new file while the old
+ * one may still be flushing, and ordering by modification time would flip
+ * back to the previous round for as long as that takes.
+ *
+ * A session whose every file is newer than the delay still answers with its
+ * first file rather than nothing: the client needs the header's map name and
+ * slot roster before it can render at all, and the header carries no
+ * positions, so there is nothing to hold back.
+ */
 export function currentFileFor(
-  dir: string, token: string, nowMs: number,
+  dir: string, token: string, nowMs: number, delayMs: number = DEFAULT_DELAY_MS,
 ): ReplayFileInfo | null {
   if (!dir || !TOKEN_RE.test(token)) return null;
   const session = listSessions(dir, nowMs).find((s) => s.token === token);
   if (!session || session.files.length === 0) return null;
-  return session.files[session.files.length - 1];
+  const cutoffUnixMs = nowMs - Math.max(0, delayMs);
+  for (let i = session.files.length - 1; i >= 0; i--) {
+    if (session.files[i].startedUnix * 1000 <= cutoffUnixMs) return session.files[i];
+  }
+  return session.files[0];
 }
 
 /**
