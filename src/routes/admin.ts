@@ -12,7 +12,7 @@ import {
   activeBan, addNote, banPlayer, playerDetail, searchPlayers, unbanPlayer,
 } from '../admin/players.js';
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
-import { CAMPAIGNS } from '../campaigns.js';
+import { campaignRegistry } from '../campaignRegistry.js';
 import { clearPenalties } from '../penalties.js';
 import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
@@ -239,7 +239,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!requireAdmin(req, reply)) return reply;
     return {
       settings: SETTINGS_SCHEMA.map((d) => ({ ...d, value: getSetting(db, d.key) ?? '' })),
-      campaigns: Object.entries(CAMPAIGNS).map(([slug, c]) => ({ slug, name: c.name })),
+      campaigns: [...campaignRegistry(db).values()]
+        .map((c) => ({ slug: c.slug, name: c.name, custom: c.custom })),
     };
   });
 
@@ -249,7 +250,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { key } = req.params as { key: string };
     const def = settingDef(key);
     if (!def) return reply.code(404).send({ error: 'unknown setting' });
-    const v = validateSetting(key, (req.body as { value?: unknown } | undefined)?.value);
+    const v = validateSetting(key, (req.body as { value?: unknown } | undefined)?.value, {
+      campaignSlugs: new Set(campaignRegistry(db).keys()),
+    });
     if (!v.ok) return reply.code(400).send({ error: `${def.label} ${v.error}` });
     const from = getSetting(db, key) ?? '';
     setSetting(db, key, v.value);
