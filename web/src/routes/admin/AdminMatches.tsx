@@ -15,8 +15,12 @@ import { fmtTime, useAction } from './useAction';
 function Odds({ f, winner }: { f: Forecast | null; winner?: string | null }) {
   if (!f) return <span class="muted">n/a</span>;
   const favoured = f.srGap === 0 ? null : f.srGap > 0 ? 'A' : 'B';
-  const upset = favoured !== null && winner != null && winner !== 'draw'
-    && winner.toUpperCase() !== favoured;
+  const decided = favoured !== null && winner != null && winner !== 'draw';
+  const upset = decided && winner!.toUpperCase() !== favoured;
+  // The counterpart tag. Without it a row with no tag is ambiguous between
+  // "the favourite won" and "we have no result to compare against", and a run
+  // of expecteds is as much of a balance signal as a run of upsets.
+  const expected = decided && !upset;
   return (
     <>
       <span>{Math.round(Math.max(f.winProbA, f.winProbB) * 100)}%</span>{' '}
@@ -24,6 +28,7 @@ function Odds({ f, winner }: { f: Forecast | null; winner?: string | null }) {
         {favoured === null ? 'even' : `${Math.abs(f.srGap)} SR to ${favoured}`}
       </span>
       {upset && <span class="admin-tag"> upset</span>}
+      {expected && <span class="muted"> expected</span>}
     </>
   );
 }

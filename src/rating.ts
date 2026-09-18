@@ -27,6 +27,14 @@ export interface MatchForecast {
    *  built from, with no uncertainty penalty in it. Near zero alongside a
    *  large `srGap` means the SR lead is confidence, not skill. */
   muGap: number;
+  /** Mean skill and mean uncertainty per side, unfolded. SR is
+   *  `mu - 2*sigma`, so on its own it cannot show who was favoured: a team can
+   *  trail on SR purely by being less well understood. These are the two
+   *  halves it is made of. */
+  muA: number;
+  muB: number;
+  sigmaA: number;
+  sigmaB: number;
   /** Probability each team wins, from the same OpenSkill model that rates
    *  them. The pair sums to 1: a draw is not forecast separately. */
   winProbA: number;
@@ -97,6 +105,8 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
     Math.round(side.reduce((n, r) => n + displaySr(r.mu, r.sigma), 0) / side.length);
   const meanMu = (side: typeof a): number =>
     side.reduce((n, r) => n + r.mu, 0) / side.length;
+  const meanSigma = (side: typeof a): number =>
+    side.reduce((n, r) => n + r.sigma, 0) / side.length;
   const srA = meanSr(a);
   const srB = meanSr(b);
 
@@ -105,8 +115,11 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
     b.map((r) => rating(r)),
   ]);
 
+  const muA = meanMu(a);
+  const muB = meanMu(b);
   return {
-    srA, srB, srGap: srA - srB, muGap: meanMu(a) - meanMu(b),
+    srA, srB, srGap: srA - srB, muGap: muA - muB,
+    muA, muB, sigmaA: meanSigma(a), sigmaB: meanSigma(b),
     winProbA, winProbB, ratedA: a.length, ratedB: b.length, source,
   };
 }

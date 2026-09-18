@@ -139,6 +139,23 @@ describe('matchForecast', () => {
   // had the HIGHER mu (25.564 vs 25.556) and the whole SR gap came from team
   // B's lower sigma. SR subtracts twice the uncertainty; the forecast uses
   // skill. The panel has to be able to say which is which.
+  // SR alone cannot show who was favoured, because it folds skill and
+  // uncertainty into one number. The panel needs both halves separately.
+  it('reports mean skill and mean uncertainty per team', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    for (const id of IDS) ensureRating(db, id);
+    const up = db.prepare('UPDATE player_ratings SET mu = ?, sigma = ? WHERE player_id = ?');
+    for (const id of IDS.slice(0, 4)) up.run(25, 7.7, id);
+    for (const id of IDS.slice(4)) up.run(25, 7.1, id);
+    applyMatchRatings(db, matchId);
+
+    const f = matchForecast(db, matchId)!;
+    expect(f.muA).toBeCloseTo(25, 6);
+    expect(f.muB).toBeCloseTo(25, 6);
+    expect(f.sigmaA).toBeCloseTo(7.7, 6);
+    expect(f.sigmaB).toBeCloseTo(7.1, 6);
+  });
+
   it('reports the skill gap separately from the SR gap, because they can disagree', () => {
     const matchId = seedCompletedMatch(db, 'a');
     for (const id of IDS) ensureRating(db, id);

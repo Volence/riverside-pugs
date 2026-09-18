@@ -1452,6 +1452,14 @@ body.is-theater { overflow: hidden; }
   font-family: var(--font-mono, monospace); font-size: var(--fs-label); line-height: 1.5;
   white-space: pre;
 }
+/* The integrity board's column key. A <details> so it explains itself once and
+ * then stays out of the way, rather than a paragraph nobody rereads. */
+.key summary { cursor: pointer; font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--fs-label); color: var(--text-muted); }
+.key__list { margin: var(--sp-3) 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); }
+.key__list dt { font-weight: 600; white-space: nowrap; }
+.key__list dd { margin: 0; color: var(--text-muted); }
+@media (max-width: 640px) { .key__list { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } .key__list dd { margin-bottom: var(--sp-2); } }
+
 .admin-table { width: 100%; }
 /* The SourceTV cell holds a whole form, and .admin-form inputs are sized for a
  * full-width one (flex: 1 1 12rem). Two of those plus Save and Turn off cannot

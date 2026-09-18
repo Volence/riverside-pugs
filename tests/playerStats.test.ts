@@ -376,16 +376,19 @@ describe('a player who joined partway through a match', () => {
 
 describe('map round aggregates', () => {
   /** A closed half with an explicit duration and survival reading. */
+  /** `at` defaults to after SURVIVAL_TRUSTED_FROM, so a round counts towards
+   *  survival unless a test deliberately backdates it. */
   function seedHalf(
     id: number, ordinal: number, half: number,
-    opts: { seconds: number; alive: number | null; reliable?: boolean },
+    opts: { seconds: number; alive: number | null; reliable?: boolean; at?: string },
   ): void {
+    const at = opts.at ?? '2026-09-20 00:00:00';
     db.prepare(
       `INSERT INTO match_rounds
          (match_id, ordinal, half, surv_team, score, reliable, started_at, ended_at, survivors_alive)
-       VALUES (?, ?, ?, 'a', 100, ?, '2026-09-14 00:00:00',
-               datetime('2026-09-14 00:00:00', '+' || ? || ' seconds'), ?)`,
-    ).run(id, ordinal, half, opts.reliable === false ? 0 : 1, opts.seconds, opts.alive);
+       VALUES (?, ?, ?, 'a', 100, ?, ?,
+               datetime(?, '+' || ? || ' seconds'), ?)`,
+    ).run(id, ordinal, half, opts.reliable === false ? 0 : 1, at, at, opts.seconds, opts.alive);
   }
 
   it('reports fastest, average and slowest round in seconds', () => {
@@ -413,6 +416,30 @@ describe('map round aggregates', () => {
     expect(d.rounds.survivalPct).toBeNull();
     // Timing is independent and still known.
     expect(d.rounds.avgSec).toBe(100);
+  });
+
+  // Before the 2026-09-18 plugin fix, survivors_alive counted INCAPACITATED
+  // players as alive, so a wipe recorded 1 to 3 survivors and read as a
+  // survival. Those rows cannot be repaired and are dropped from survival.
+  it('ignores rounds recorded before survivors_alive was trustworthy', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 100, alive: 3, at: '2026-09-14 00:00:00' });
+    seedHalf(1, 0, 2, { seconds: 100, alive: 4, at: '2026-09-14 00:00:00' });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds.survivalPct).toBeNull();
+    expect(d.rounds.measured).toBe(0);
+    // Timing is untouched: an old round's clock is still a real clock.
+    expect(d.rounds.avgSec).toBe(100);
+    expect(d.rounds.attempts).toBe(2);
+  });
+
+  it('counts a trustworthy round even when older ones sit beside it', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 100, alive: 4, at: '2026-09-14 00:00:00' });
+    seedHalf(1, 0, 2, { seconds: 100, alive: 0 });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds.measured).toBe(1);
+    expect(d.rounds.survivalPct).toBe(0);
   });
 
   it('counts only the rounds it could measure towards survival', () => {

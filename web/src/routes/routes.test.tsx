@@ -240,7 +240,11 @@ describe('MatchDetail', () => {
     ...over,
   });
 
-  const FORECAST = { srA: 1400, srB: 1200, srGap: 200, muGap: 2, winProbA: 0.62, winProbB: 0.38, ratedA: 4, ratedB: 4, source: 'history' as const };
+  const FORECAST = {
+    srA: 1400, srB: 1200, srGap: 200, muGap: 2,
+    muA: 27, muB: 25, sigmaA: 6.5, sigmaB: 6.5,
+    winProbA: 0.62, winProbB: 0.38, ratedA: 4, ratedB: 4, source: 'history' as const,
+  };
 
   it('shows the forecast when the server sent one, naming the favoured team', async () => {
     mockApi.match.mockResolvedValue(matchWith({ forecast: FORECAST }));

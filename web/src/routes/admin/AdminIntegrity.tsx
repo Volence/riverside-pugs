@@ -201,6 +201,57 @@ export function AdminIntegrity() {
   return (
     <>
       <BackfillControl />
+      <Panel>
+        <details class="key">
+          <summary>What these columns mean</summary>
+          <dl class="key__list">
+            <dt>Tracking</dt>
+            <dd>
+              Did the crosshair <strong>move with</strong> an invisible infected. 1 is exactly the
+              motion needed to follow it, 0 is none of it. This is the backbone: sitting still
+              aimed at a known spawn spot scores <strong>zero</strong> however good the spot was,
+              because a held angle produces none of the motion. Shown as a player's single
+              highest round, not an average, since one round of following something you cannot
+              see is the thing worth looking at and twenty clean rounds should not average it away.
+            </dd>
+            <dt>Occupancy</dt>
+            <dd>
+              How much more often they were aimed at a ghost than <em>this map's own looking
+              habits</em> predict, as a z-score. The baseline is built from everyone's rounds on
+              that map, so a player whose whole edge is knowing where infected spawn scores zero
+              by construction: that knowledge is already in the baseline. Only the excess counts.
+            </dd>
+            <dt>Team gap</dt>
+            <dd>
+              Their occupancy minus their own teammates' average, which controls for the round
+              itself. A round where everyone was staring at the same doorway lifts all four
+              players, and this is what cancels that out.
+            </dd>
+            <dt>The percentage after each</dt>
+            <dd>
+              Where that number sits among the players on this board. Not a probability of
+              anything.
+            </dd>
+            <dt>Rank</dt>
+            <dd>
+              Position by the composite, which is the mean of whichever percentiles a player has.
+              It is a <strong>sort key, not a claim</strong>, and it only ranks within the
+              population listed here.
+            </dd>
+            <dt>Clips</dt>
+            <dd>
+              Moments that crossed the review threshold and can be watched. Clips are the
+              evidence; the columns are only a way of deciding what to watch first.
+            </dd>
+            <dt>n/a</dt>
+            <dd>
+              Occupancy and team gap need a baseline for that map, and a map needs enough
+              recorded rounds before it has one. Maps below that threshold are measured but not
+              scored, so their rows read n/a rather than 0.
+            </dd>
+          </dl>
+        </details>
+      </Panel>
     <Panel>
       <p class="muted">
         Theoretical only. These numbers rank who is worth watching a clip of; they are not
