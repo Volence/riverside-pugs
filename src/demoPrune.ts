@@ -24,6 +24,21 @@ function days(db: DB, key: string, fallback: number): number {
  * days, while a match demo is linked from its match page and kept as long as
  * replays are. Rows in match_demos for files that go are removed too, so the
  * match page stops offering a download that would 404.
+ *
+ * EXCEPT when the demo is in R2. Since the offload, a match_demos row can
+ * outlive its local file on purpose: the row carries `r2_key`, and the download
+ * route reads that to redirect. Deleting such a row would orphan a perfectly
+ * good object in the bucket and break a link that still worked, so a row with a
+ * key keeps its row and only loses the local copy.
+ *
+ * This matters most in the state the first migration leaves behind. The
+ * documented safe first pass uploads WITHOUT deleting local files, so for a
+ * while every demo exists in both places; without this check the pruner would
+ * quietly delete those rows at 90 days and take the R2 links with them.
+ *
+ * Nothing here ever deletes from R2. Storage there is cheap enough that
+ * keeping every demo indefinitely costs about a dollar a month, and a demo
+ * nobody can lose is worth more than the saving.
  */
 export function pruneDemos(db: DB, dir: string, now = Date.now()): DemoPruneResult {
   const out: DemoPruneResult = { deleted: 0, bytes: 0 };
@@ -47,7 +62,9 @@ export function pruneDemos(db: DB, dir: string, now = Date.now()): DemoPruneResu
       unlinkSync(path);
       out.deleted += 1;
       out.bytes += st.size;
-      if (isPug) db.prepare('DELETE FROM match_demos WHERE filename = ?').run(name);
+      if (isPug) {
+        db.prepare('DELETE FROM match_demos WHERE filename = ? AND r2_key IS NULL').run(name);
+      }
     } catch (err) {
       console.error(`[demo] could not prune ${name}:`, err);
     }
