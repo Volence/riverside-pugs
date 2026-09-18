@@ -151,6 +151,78 @@ describe('DiscordSync', () => {
     expect(lastLive().id).toBe(panelId());
   });
 
+  /** Drive a queue through to a live match and return its id. */
+  const toLive = async () => {
+    for (const id of IDS) mm.join(id);
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    await sync.pass();
+    const match = db.prepare('SELECT id FROM matches').get() as { id: number };
+    db.prepare("INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('s','1.2.3.4',27015,27015,'x','live')").run();
+    db.prepare("UPDATE matches SET state = 'live', server_id = 1, token = 'abcdef1234567890' WHERE id = ?").run(match.id);
+    await sync.pass();
+    await sync.pass();
+    return match.id;
+  };
+
+  const finish = async (matchId: number) => {
+    db.prepare("UPDATE matches SET state = 'completed', winner = 'a', team_a_score = 900, team_b_score = 700, ended_at = datetime('now') WHERE id = ?").run(matchId);
+    await sync.pass();
+    await sync.pass();
+  };
+
+  const resultMsg = () => t.live().find((m) => m.payload.embeds[0]?.title?.includes('result'));
+
+  it('the live ping carries no button of its own, since the match card has Connect', async () => {
+    await build().start();
+    await toLive();
+    const ping = t.live().find((m) => JSON.stringify(m.payload).includes('server is ready'))!;
+    expect(ping.payload.components).toEqual([]);
+  });
+
+  it('sends the result to the results channel and clears the match card and ping from the queue channel', async () => {
+    setSetting(db, 'discord_results_channel_id', 'results');
+    await build().start();
+    const matchId = await toLive();
+    const card = getMessage(db, 'match', String(matchId))!.message_id;
+    const ping = getMessage(db, 'live', String(matchId))!.message_id;
+
+    await finish(matchId);
+
+    expect(resultMsg()!.channelId).toBe('results');
+    expect(t.byId(card)!.deleted).toBe(true);
+    expect(t.byId(ping)!.deleted).toBe(true);
+    // Nothing of the finished match is left where people queue.
+    expect(t.live().filter((m) => m.channelId === CH).map((m) => m.id)).toEqual([panelId()]);
+  });
+
+  it('with no results channel configured the result stays in the queue channel, and the card still goes', async () => {
+    await build().start();
+    const matchId = await toLive();
+    const card = getMessage(db, 'match', String(matchId))!.message_id;
+
+    await finish(matchId);
+
+    expect(resultMsg()!.channelId).toBe(CH);
+    expect(t.byId(card)!.deleted).toBe(true);
+  });
+
+  it('an aborted match keeps its card, which is the only trace, but still drops the ping', async () => {
+    setSetting(db, 'discord_results_channel_id', 'results');
+    await build().start();
+    const matchId = await toLive();
+    const card = getMessage(db, 'match', String(matchId))!.message_id;
+    const ping = getMessage(db, 'live', String(matchId))!.message_id;
+
+    db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
+    await sync.pass();
+    await sync.pass();
+
+    expect(t.byId(card)!.deleted).toBe(false);
+    expect(JSON.stringify(t.byId(card)!.payload)).toContain('aborted');
+    expect(t.byId(ping)!.deleted).toBe(true);
+  });
+
   it('an aborted match marks its card aborted and posts no result', async () => {
     await build().start();
     for (const id of IDS) mm.join(id);
