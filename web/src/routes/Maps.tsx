@@ -1,6 +1,6 @@
 import { api, type MapIndexRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, fmtClock, mapName, survivalLabel } from '../format';
+import { campaignName, chapterName, fmtClock, mapName, survivalLabel } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { CampaignTiles } from '../components/CampaignTiles';
@@ -59,7 +59,10 @@ export function Maps() {
             <Figure
               label="Most played"
               value={maps.reduce((a, b) => (b.played > a.played ? b : a)).played}
-              sub={mapName(maps.reduce((a, b) => (b.played > a.played ? b : a)).map)}
+              sub={(() => {
+                const top = maps.reduce((a, b) => (b.played > a.played ? b : a));
+                return chapterName(top.display ?? null, mapName(top.map));
+              })()}
             />
           </Figures>
         )}
@@ -108,7 +111,7 @@ export function Maps() {
                     <tbody>
                       {rows.map((m) => (
                         <tr key={m.map}>
-                          <td><a href={`/map/${encodeURIComponent(m.map)}`}>{mapName(m.map)}</a></td>
+                          <td><a href={`/map/${encodeURIComponent(m.map)}`}>{chapterName(m.display ?? null, mapName(m.map))}</a></td>
                           <td class="num">{m.played}</td>
                           {m.avgScore === null
                             ? <td class="num muted">not recorded</td>

@@ -401,6 +401,12 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
 export interface MapIndexRow {
   map: string;
   campaign: string | null;
+  /** The chapter's own name from its mission file, where we have one. Null for
+   *  stock maps, whose names mapName() derives from the map string. A custom
+   *  campaign needs this: mapName strips a <word><digits>_ prefix to turn
+   *  airport01_greenhouse into Greenhouse, which for l4d_vs_city17_01 eats the
+   *  campaign and leaves "01". Real names beat derived ones. */
+  display: string | null;
   played: number;
   /** Average score a team puts up here, over RECORDED playings only. See
    *  MapDetail.avgScore for why this is one number and not a per-team pair. */
@@ -453,9 +459,19 @@ export function mapIndex(db: DB): MapIndexRow[] {
   }
 
   const rounds = roundAggregates(db, [...acc.keys()]);
+  const displays = chapterDisplays(db);
   return [...acc.entries()].map(([map, r]) => ({
     map, campaign: resolveCampaignForMap(db, map), played: r.played,
+    display: displays.get(map.toLowerCase()) ?? null,
     avgScore: avgOrNull(r.sumA + r.sumB, r.n * 2),
     rounds: rounds.get(map) ?? NO_ROUNDS,
   }));
+}
+
+/** Chapter display names from every uploaded campaign, keyed by map. */
+function chapterDisplays(db: DB): Map<string, string> {
+  const rows = db
+    .prepare('SELECT map, display FROM custom_campaign_chapters WHERE display IS NOT NULL')
+    .all() as { map: string; display: string }[];
+  return new Map(rows.map((r) => [r.map.toLowerCase(), r.display]));
 }

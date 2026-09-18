@@ -1337,6 +1337,37 @@ describe('Maps', () => {
     expect(headings[harvest]).not.toContain('In the vote');
   });
 
+  // mapName turns airport01_greenhouse into Greenhouse by stripping a
+  // <word><digits>_ prefix, which for l4d_vs_city17_01 eats the campaign and
+  // leaves "01". A custom campaign carries its real chapter names, so use them.
+  it('uses a custom chapter name instead of deriving one from the map', async () => {
+    mockApi.maps.mockResolvedValue({
+      pool: [],
+      maps: [
+        { map: 'l4d_vs_city17_01', campaign: 'city17_v2_8', display: '1: Tunnels', played: 0, avgScore: null,
+          rounds: { attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null } },
+      ],
+    });
+    render(<Maps />);
+    // Appears in the table and in the header's "most played" line, both of
+    // which used to say "01".
+    await waitFor(() => expect(screen.getAllByText('Tunnels').length).toBeGreaterThan(0));
+    expect(screen.queryByText('01')).toBeNull();
+  });
+
+  // A stock map has no stored display name and must keep deriving one.
+  it('still derives a name for a stock map', async () => {
+    mockApi.maps.mockResolvedValue({
+      pool: [],
+      maps: [
+        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', display: null, played: 3, avgScore: 200,
+          rounds: { attempts: 3, fastestSec: 100, avgSec: 200, slowestSec: 300, survivalPct: 50, measured: 3 } },
+      ],
+    });
+    render(<Maps />);
+    await waitFor(() => expect(screen.getAllByText('The Greenhouse').length).toBeGreaterThan(0));
+  });
+
   // An unplayed campaign reaches this page now that the API includes registry
   // maps, and must read as an honest zero rather than be missing entirely.
   it('lists a campaign nobody has played yet', async () => {
