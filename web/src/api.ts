@@ -264,6 +264,8 @@ export interface CustomCampaignRow {
 export interface MapIndexRow {
   map: string;
   campaign: string | null;
+  /** The chapter's real name from its mission file, when we have one. */
+  display?: string | null;
   played: number;
   /** Mean over the recorded playings only; null when none has a real score. */
   avgScore: number | null;
