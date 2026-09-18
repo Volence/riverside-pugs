@@ -44,7 +44,7 @@ enum PugStat
 	PS_BoomSuccesses, PS_BoomedVomit, PS_BoomedProxy,
 	PS_TongueClears,
 	PS_DmgAsHunter, PS_DmgAsSmoker, PS_DmgAsBoomer, PS_DmgAsTank, PS_DmgToIncapped,
-	PS_QuadCaps,
+	PS_QuadCaps, PS_TimesQuadded,
 	PS_MAX
 };
 
@@ -62,7 +62,7 @@ static const char g_sStatKey[PS_MAX][24] = {
 	"boom_successes", "boomed_vomit", "boomed_proxy",
 	"tongue_clears",
 	"dmg_as_hunter", "dmg_as_smoker", "dmg_as_boomer", "dmg_as_tank", "dmg_to_incapped",
-	"quad_caps"
+	"quad_caps", "times_quadded"
 };
 
 /** True for stats that come from skill_detect and must be omitted (not zeroed)
@@ -80,7 +80,7 @@ static bool StatNeedsSkillDetect(PugStat s)
 		case PS_TankDamage, PS_DamageAsSi, PS_TankPunches, PS_BoomerSpawns,
 			PS_BoomSuccesses, PS_BoomedVomit, PS_BoomedProxy, PS_TongueClears,
 			PS_DmgAsHunter, PS_DmgAsSmoker, PS_DmgAsBoomer, PS_DmgAsTank,
-			PS_DmgToIncapped, PS_QuadCaps:
+			PS_DmgToIncapped, PS_QuadCaps, PS_TimesQuadded:
 			return false;
 	}
 	return true;

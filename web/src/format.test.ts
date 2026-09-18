@@ -3,6 +3,7 @@ import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
+  STAT_FAMILIES,
   FEATURED_STAT_KEYS, statLeaders,
 } from './format';
 
@@ -550,5 +551,24 @@ describe('sortMapRows', () => {
     const rows = [row('b', { wins: 9, losses: 1 }), row('a', { wins: 1, losses: 9 })];
     sortMapRows(rows, 'winrate');
     expect(rows.map((r) => r.map)).toEqual(['b', 'a']);
+  });
+});
+
+describe('quad cap columns', () => {
+  it('puts times_quadded with the other things that happen TO a survivor', () => {
+    const fam = STAT_FAMILIES.find((f) => f.key === 'pins')!;
+    expect(fam.side).toBe('survivor');
+    expect(fam.keys).toContain('times_quadded');
+  });
+
+  it('keeps quad_caps on the infected side, where landing one belongs', () => {
+    const fam = STAT_FAMILIES.find((f) => f.key === 'pounce')!;
+    expect(fam.side).toBe('infected');
+    expect(fam.keys).toContain('quad_caps');
+  });
+
+  it('labels both, so neither falls back to a raw key', () => {
+    expect(labelFor('quad_caps')).toBe('Quad caps');
+    expect(labelFor('times_quadded')).toBe('Times quadded');
   });
 });

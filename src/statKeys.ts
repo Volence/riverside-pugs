@@ -126,10 +126,19 @@ export const STAT_DEFS: readonly StatDef[] = [
   // bleedout pool. Runs into the thousands and reflects no skill, which is why
   // it is separated out rather than left to inflate the total.
   def('dmg_to_incapped', 'infected', 'On incapped', 'neutral', false),
-  // All four survivors pinned at once. Credited to every infected player
-  // holding someone on the pin that completes the set, from pug-match's own
-  // pin tracking, so it needs no skill_detect.
+  // All four survivors pinned at once AND nobody gets back up before the round
+  // ends. From pug-match's own pin tracking, so it needs no skill_detect.
+  //
+  // The second half of that is load-bearing, not a refinement. PINNED goes true
+  // the instant a smoker tongue CONNECTS, while the victim can still shoot, so
+  // a set of four pins is not yet proof of anything: one observed case had a
+  // survivor clear a team mate mid-pull, and ten seconds later all three
+  // hunters were dead and all four survivors were up. Measured over 237
+  // recorded rounds, requiring that nobody recovers rejects 2 of 15 candidates.
   def('quad_caps', 'infected', 'Quad caps', 'high_good', false),
+  // The same event from the other side. A shaming stat, in the main list on
+  // purpose like times_skeeted; high_bad keeps it off every leaderboard.
+  def('times_quadded', 'survivor', 'Times quadded', 'high_bad', false),
 ];
 
 const BY_KEY = new Map(STAT_DEFS.map((d) => [d.key, d]));
