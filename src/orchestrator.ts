@@ -13,6 +13,7 @@ import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { clearLive } from './liveView.js';
 import { CAMPAIGNS } from './campaigns.js';
+import { firstMapOf } from './campaignRegistry.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
 export interface Orchestrator {
@@ -136,7 +137,7 @@ export class RealOrchestrator implements Orchestrator {
       // the line, and then kick every player as non-rostered. Verified on the
       // live box 2026-08-29. The fake RCON server in tests does not tokenize.
       for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
-      await rcon.exec(`changelevel ${firstMapOf(match.campaign)}`);
+      await rcon.exec(`changelevel ${firstMapOf(this.db, match.campaign)}`);
       markLive(this.db, server.id);
       this.db.prepare("UPDATE matches SET state = 'live', went_live_at = datetime('now') WHERE id = ?")
         .run(matchId);
@@ -291,22 +292,6 @@ async function expectPugOk(rcon: RconClient, cmd: string): Promise<string> {
   const res = await rcon.exec(cmd);
   if (!res.includes('PUGOK')) throw new Error(`${cmd.split(' ')[0]} rejected: ${res.trim() || '(no response)'}`);
   return res;
-}
-
-/** First playable map of a campaign. Full per-campaign map lists live in the plugin;
- *  the backend only needs the entry map to changelevel into.
- *
- *  These MUST be the l4d_vs_ BSPs. The plain l4d_ names are the co-op maps, which
- *  load and even run versus rules, but with co-op layout and spawns. The first
- *  web match (2026-09-16, Blood Harvest) went out on l4d_farm01_hilltop this way. */
-export function firstMapOf(campaign: string): string {
-  const FIRST: Record<string, string> = {
-    no_mercy: 'l4d_vs_hospital01_apartment',
-    death_toll: 'l4d_vs_smalltown01_caves',
-    dead_air: 'l4d_vs_airport01_greenhouse',
-    blood_harvest: 'l4d_vs_farm01_hilltop',
-  };
-  return FIRST[campaign] ?? 'l4d_vs_hospital01_apartment';
 }
 
 function settingInt(db: DB, key: string, fallback: number): number {

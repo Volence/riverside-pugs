@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import type { LogEvent } from './logParse.js';
-import { campaignForMap } from './campaigns.js';
+import { resolveCampaignForMap } from './campaignRegistry.js';
 import { currentSeasonId } from './players.js';
 
 /** How long to wait after MATCH_CREATE before committing with whatever roster
@@ -133,7 +133,7 @@ export class SelfStartedMatches {
     if (!p || p.committed) return;
     if (!p.map || p.roster.size === 0) return;
 
-    const campaign = campaignForMap(p.map);
+    const campaign = resolveCampaignForMap(this.deps.db, p.map);
     if (!campaign) {
       // Better to drop the match than to file a custom or L4D2 map under a
       // real campaign and pollute that campaign's history.

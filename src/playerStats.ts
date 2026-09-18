@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { mapStatsFor } from './liveView.js';
-import { campaignForMap } from './campaigns.js';
+import { resolveCampaignForMap } from './campaignRegistry.js';
 import { unrecordedOrdinals } from './roundStats.js';
 
 /** Which of a match's maps have a real score. Same rule as the match page's
@@ -387,7 +387,7 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
 
   return {
     map,
-    campaign: campaignForMap(map),
+    campaign: resolveCampaignForMap(db, map),
     played: rows.length,
     // Divided by 2 * recorded playings: each playing contributes two survivor
     // scores, one per team, and both are samples of the same quantity.
@@ -441,7 +441,7 @@ export function mapIndex(db: DB): MapIndexRow[] {
 
   const rounds = roundAggregates(db, [...acc.keys()]);
   return [...acc.entries()].map(([map, r]) => ({
-    map, campaign: campaignForMap(map), played: r.played,
+    map, campaign: resolveCampaignForMap(db, map), played: r.played,
     avgScore: avgOrNull(r.sumA + r.sumB, r.n * 2),
     rounds: rounds.get(map) ?? NO_ROUNDS,
   }));
