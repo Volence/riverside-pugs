@@ -54,6 +54,47 @@ beforeEach(() => {
 });
 
 describe('playerMapBreakdown', () => {
+  /** A round of `id` on map `ordinal`, with `surv` playing survivors. */
+  function seedRound(
+    id: number, ordinal: number, half: number, surv: 'a' | 'b', alive: number | null,
+  ): void {
+    db.prepare(
+      `INSERT INTO match_rounds
+         (match_id, ordinal, half, surv_team, score, reliable, started_at, ended_at, survivors_alive)
+       VALUES (?, ?, ?, ?, 100, 1, '2026-09-20 00:00:00', '2026-09-20 00:02:00', ?)`,
+    ).run(id, ordinal, half, surv, alive);
+  }
+
+  // Worst first: the reason to read this list is to find the maps you lose on,
+  // and putting those at the top is the whole point of sorting it at all.
+  it('orders maps by win rate, weakest first, rather than by games played', () => {
+    seedMatch(1, [{ map: 'strong', a: 9, b: 1 }, { map: 'weak', a: 1, b: 9 }], {});
+    seedMatch(2, [{ map: 'strong', a: 9, b: 1 }], {});
+    const rows = playerMapBreakdown(db, ME);
+    expect(rows.map((r) => r.map)).toEqual(['weak', 'strong']);
+    // and not by games, which would have put `strong` (2) ahead of `weak` (1)
+    expect(rows[0].wins).toBe(0);
+    expect(rows[1].games).toBe(2);
+  });
+
+  it('counts survival only for the halves this player played as survivor', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {}, 'a');
+    seedRound(1, 0, 1, 'a', 3);  // mine, survived
+    seedRound(1, 0, 2, 'b', 4);  // the other team's half, not mine
+    const row = playerMapBreakdown(db, ME).find((r) => r.map === 'airport01')!;
+    expect(row.survivalMeasured).toBe(1);
+    expect(row.survived).toBe(1);
+  });
+
+  it('counts a wipe against you and ignores an unmeasured round', () => {
+    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {}, 'a');
+    seedRound(1, 0, 1, 'a', 0);     // mine, wiped
+    seedRound(1, 0, 2, 'a', null);  // mine, never measured
+    const row = playerMapBreakdown(db, ME).find((r) => r.map === 'airport01')!;
+    expect(row.survivalMeasured).toBe(1);
+    expect(row.survived).toBe(0);
+  });
+
   it('returns nothing for a player with no completed matches', () => {
     expect(playerMapBreakdown(db, ME)).toEqual([]);
   });

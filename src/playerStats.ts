@@ -156,6 +156,12 @@ export interface MapBreakdownRow {
   /** Summed across every playing of this map. Keys absent entirely when never
    *  measured, so the page can distinguish "never happened" from zero. */
   stats: Record<string, number>;
+  /** Halves this player played AS SURVIVOR on this map that have a survival
+   *  reading, and how many of those their team came out of alive. Separate
+   *  from `games`, which counts maps: a map is two halves and only one of them
+   *  is yours on survivors. */
+  survivalMeasured: number;
+  survived: number;
   /** The same keys divided by `games`, to one decimal. What a player usually
    *  gets here, which is the comparable number: a total just says who has
    *  played the most. */
@@ -189,22 +195,43 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
     `SELECT ordinal, map, team_a_score AS a, team_b_score AS b
      FROM match_maps WHERE match_id = ? ORDER BY ordinal`,
   );
+  // Only the halves this player's side played survivors, and only those with a
+  // reading. reliable = 1 is the same gate the map pages use.
+  const roundsOf = db.prepare(
+    `SELECT ordinal, surv_team AS surv, survivors_alive AS alive
+     FROM match_rounds
+     WHERE match_id = ? AND reliable = 1 AND ended_at IS NOT NULL
+       AND survivors_alive IS NOT NULL`,
+  );
 
   const recorded = recordedFor(db);
   const acc = new Map<string, MapBreakdownRow>();
   for (const { id, team, joinedMap } of played) {
     const maps = mapsOf.all(id) as { ordinal: number; map: string; a: number; b: number }[];
     const byOrdinal = mapStatsFor(db, id);
+    const myRounds = new Map<number, { measured: number; survived: number }>();
+    for (const r of roundsOf.all(id) as { ordinal: number; surv: 'a' | 'b'; alive: number }[]) {
+      if (r.surv !== team) continue;
+      const cur = myRounds.get(r.ordinal) ?? { measured: 0, survived: 0 };
+      cur.measured++;
+      if (r.alive > 0) cur.survived++;
+      myRounds.set(r.ordinal, cur);
+    }
 
     for (const mp of maps) {
       // A sub did not play the maps that happened before they were rostered.
       if (!playedMap(joinedMap, mp.ordinal)) continue;
       let row = acc.get(mp.map);
       if (!row) {
-        row = { map: mp.map, games: 0, wins: 0, losses: 0, stats: {}, avgStats: {} };
+        row = { map: mp.map, games: 0, wins: 0, losses: 0, survivalMeasured: 0, survived: 0, stats: {}, avgStats: {} };
         acc.set(mp.map, row);
       }
       row.games++;
+      const mine = myRounds.get(mp.ordinal);
+      if (mine) {
+        row.survivalMeasured += mine.measured;
+        row.survived += mine.survived;
+      }
       // A drawn map counts as neither, and so does an unrecorded one. Scores
       // are per map, so a player can win maps inside a match they lost
       // overall, which is the point of this view.
@@ -225,7 +252,17 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
   }
 
   for (const row of acc.values()) row.avgStats = perMapAverages(row.stats, row.games);
-  return [...acc.values()].sort((x, y) => y.games - x.games || x.map.localeCompare(y.map));
+  // Weakest first. The reason to read this list is to find the maps you lose
+  // on, so the answer belongs at the top rather than at the bottom of a list
+  // ordered by how often you happened to draw each map. A map with no decided
+  // result has no rate and sorts last, since it says nothing either way.
+  const rate = (r: MapBreakdownRow): number => {
+    const decided = r.wins + r.losses;
+    return decided === 0 ? Number.POSITIVE_INFINITY : r.wins / decided;
+  };
+  return [...acc.values()].sort(
+    (x, y) => rate(x) - rate(y) || y.games - x.games || x.map.localeCompare(y.map),
+  );
 }
 
 export interface MapLeaderRow {

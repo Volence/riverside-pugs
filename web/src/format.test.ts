@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
-  deriveLiveStats, fmtLatency, mapName, survivalLabel, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
+  deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   FEATURED_STAT_KEYS, statLeaders,
 } from './format';
 
@@ -477,5 +477,22 @@ describe('statLeaders', () => {
 
   it('honours the limit', () => {
     expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['bob', 'carol']);
+  });
+});
+
+describe('survivalNote', () => {
+  it('carries its own denominator, which is not the one beside it', () => {
+    // 4 halves as survivor, 2 survived. The W/L count next to this is over
+    // MAPS, a different and larger number, so the count has to travel.
+    expect(survivalNote({ survivalMeasured: 4, survived: 2 })).toContain('50% survived of 4');
+  });
+
+  it('says nothing at all when no half was measured', () => {
+    expect(survivalNote({ survivalMeasured: 0, survived: 0 })).toBe('');
+    expect(survivalNote({})).toBe('');
+  });
+
+  it('reports a clean wipe record as 0%, not as nothing', () => {
+    expect(survivalNote({ survivalMeasured: 3, survived: 0 })).toContain('0% survived of 3');
   });
 });

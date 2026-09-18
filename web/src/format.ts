@@ -492,3 +492,18 @@ export function statLeaders(
     .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
     .slice(0, limit);
 }
+
+/**
+ * Survival on one map, as a suffix to a win/loss detail on the profile.
+ *
+ * Counted over the halves the player played AS SURVIVOR, which is a different
+ * and smaller denominator than maps played, so it carries its own count rather
+ * than letting a reader assume it shares the W/L one. Winning and surviving are
+ * genuinely different questions: a team can lose a map on points having reached
+ * the saferoom both times, and can win one having been wiped.
+ */
+export function survivalNote(r: { survivalMeasured?: number; survived?: number }): string {
+  const measured = r.survivalMeasured ?? 0;
+  if (measured === 0) return '';
+  return `  ${Math.round(((r.survived ?? 0) / measured) * 100)}% survived of ${measured}`;
+}
