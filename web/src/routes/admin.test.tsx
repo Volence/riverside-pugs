@@ -565,4 +565,50 @@ describe('AdminCampaigns', () => {
     // DOM property directly rather than via toBeDisabled().
     expect(toggle).toHaveProperty('disabled', true);
   });
+
+  // A draft is a parsed-but-unpublished upload: its name came back from the
+  // VPK's own mission data, and publish is the one step between it and every
+  // enabled server getting a real install attempt.
+  const draft = (over: Record<string, unknown> = {}) => ({
+    slug: 'dbd', name: 'DBD', state: 'draft', enabled: 0,
+    size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'dbd.vpk',
+    uploaded_by: null, uploaded_at: 0, notes: null,
+    chapters: [{ slug: 'dbd', ordinal: 1, map: 'dbd1', display: 'One', is_finale: 0, included: 1, play_order: 1 }],
+    installs: [],
+    ...over,
+  });
+
+  it('renders a draft with its parsed name editable and its chapters listed', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const input = await waitFor(() => screen.getByLabelText('Campaign name') as HTMLInputElement);
+    expect(input.value).toBe('DBD');
+    expect(screen.getByText('One')).toBeTruthy();
+  });
+
+  // The regression this guards against would not fail loudly: a swapped
+  // argument or a stale closure over the edited name would still call
+  // publishCampaign, just with the wrong pairing, and the wrong VPK name would
+  // roll out to every enabled server as if nothing had gone wrong.
+  it('publishes with the slug and the current, possibly edited, name', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
+    mockAdmin.publishCampaign.mockResolvedValue({ ok: true });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const input = await waitFor(() => screen.getByLabelText('Campaign name'));
+    fireEvent.input(input, { target: { value: 'Dead Before Dawn' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(mockAdmin.publishCampaign).toHaveBeenCalledWith('dbd', 'Dead Before Dawn'));
+  });
+
+  it('disables Publish when the name is empty or whitespace, so an empty-name publish cannot be submitted', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const input = await waitFor(() => screen.getByLabelText('Campaign name'));
+    fireEvent.input(input, { target: { value: '   ' } });
+    // Same toBeDisabled() unavailability as the pool-gate checkbox above.
+    expect(screen.getByRole('button', { name: 'Publish' })).toHaveProperty('disabled', true);
+  });
 });
