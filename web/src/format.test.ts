@@ -4,7 +4,7 @@ import {
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
-  FEATURED_STAT_KEYS, statLeaders,
+  FEATURED_STAT_KEYS, statLeaders, chapterName,
 } from './format';
 
 describe('campaignName', () => {
@@ -584,5 +584,37 @@ describe('quad cap columns', () => {
   it('labels both, so neither falls back to a raw key', () => {
     expect(labelFor('quad_caps')).toBe('Quad caps');
     expect(labelFor('times_quadded')).toBe('Times quadded');
+  });
+});
+
+describe('chapterName', () => {
+  // City 17 v2.8's real values, which is what surfaced this.
+  it.each([
+    ['1: Tunnels', 'Tunnels'],
+    ['2: To the surface', 'To the surface'],
+    ['5: Trainstation', 'Trainstation'],
+    ['1. Tunnels', 'Tunnels'],
+    ['3 - Streets', 'Streets'],
+    ['4) Hospital', 'Hospital'],
+  ])('strips a self-numbered prefix: %s', (raw, want) => {
+    expect(chapterName(raw, 'ignored')).toBe(want);
+  });
+
+  // A number that is part of the name, with no separator after it, stays.
+  it.each([
+    ['2 Fort', '2 Fort'],
+    ['Tunnels', 'Tunnels'],
+    ['28 Days Later', '28 Days Later'],
+  ])('leaves a name that merely starts with a number: %s', (raw, want) => {
+    expect(chapterName(raw, 'ignored')).toBe(want);
+  });
+
+  it('falls back to the map name when there is no display name', () => {
+    expect(chapterName(null, 'c17m1_tunnels')).toBe('c17m1_tunnels');
+  });
+
+  // Stripping must never leave an empty label.
+  it('keeps the raw value when stripping would empty it', () => {
+    expect(chapterName('1:', 'ignored')).toBe('1:');
   });
 });

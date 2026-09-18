@@ -571,3 +571,21 @@ export function sortMapRows<T extends {
     (x, y) => rate(x) - rate(y) || y.games - x.games || x.map.localeCompare(y.map),
   );
 }
+
+/**
+ * A chapter's name for display inside a numbered list.
+ *
+ * Mission files often number their own chapters. City 17 v2.8 ships
+ * "1: Tunnels", "2: To the surface" and so on, and both places this site shows
+ * chapters use an <ol> that numbers them too, so the raw value renders as
+ * "1. 1: Tunnels".
+ *
+ * A separator is required before the text, so a campaign whose chapter is
+ * genuinely called "2 Fort" keeps its number. Falls back to the untouched
+ * string if stripping would leave nothing.
+ */
+export function chapterName(display: string | null, map: string): string {
+  const raw = (display ?? map).trim();
+  const stripped = raw.replace(/^\d+\s*[:.)\-]\s*/, '').trim();
+  return stripped || raw;
+}

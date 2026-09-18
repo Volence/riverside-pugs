@@ -1686,3 +1686,13 @@ body.is-theater { overflow: hidden; }
  * player cannot join, so this is the difference between "optional download" and
  * "install this or sit out". */
 .ccamp__pool { margin-left: var(--sp-2); padding: 2px 7px; border: 1px solid var(--accent); border-radius: 2px; font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); vertical-align: middle; }
+
+/* Campaign upload progress. These files run to hundreds of megabytes and the
+ * first real upload read as a frozen page, so the number matters more than the
+ * bar: the indeterminate state is for when the browser will not report a total
+ * rather than a decorative default. */
+.upprog { margin-top: var(--sp-2); display: grid; gap: var(--sp-1); }
+.upprog__bar { height: 6px; background: var(--panel-2, rgba(255,255,255,0.08)); overflow: hidden; }
+.upprog__fill { height: 100%; background: var(--accent); transition: width 120ms linear; }
+.upprog__fill.is-indeterminate { width: 35%; animation: upprog-slide 1.1s ease-in-out infinite; }
+@keyframes upprog-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }

@@ -631,12 +631,47 @@ export const adminApi = {
     post('/api/admin/integrity/backfill', { mode, force }),
   campaigns: (signal?: AbortSignal) =>
     get<{ free: number | null; campaigns: AdminCampaign[] }>('/api/admin/campaigns', signal),
-  uploadCampaign: (file: File) => {
+  /** Upload a campaign VPK, reporting progress as the bytes go out.
+   *
+   *  XMLHttpRequest rather than fetch, which cannot report upload progress at
+   *  all: `xhr.upload.onprogress` is the only way a browser will tell you how
+   *  many bytes have been sent. These files run to hundreds of megabytes, and
+   *  without a number on screen the page looks frozen for minutes, which is
+   *  exactly what the first real upload felt like.
+   *
+   *  `onProgress` receives a 0..1 fraction, or null when the browser cannot
+   *  say how big the body is (no `lengthComputable`), so the caller can show
+   *  an indeterminate state rather than a fake percentage. */
+  uploadCampaign: (
+    file: File,
+    onProgress?: (fraction: number | null) => void,
+  ): Promise<{ slug: string; name: string; sizeBytes: number; chapters: AdminChapter[] }> => {
     const form = new FormData();
     form.set('file', file);
-    return post<{ slug: string; name: string; sizeBytes: number; chapters: AdminChapter[] }>(
-      '/api/admin/campaigns', form,
-    );
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/admin/campaigns');
+      xhr.upload.onprogress = (e) => {
+        onProgress?.(e.lengthComputable ? e.loaded / e.total : null);
+      };
+      xhr.onload = () => {
+        let parsed: unknown = {};
+        try { parsed = JSON.parse(xhr.responseText); } catch { /* keep {} */ }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(parsed as { slug: string; name: string; sizeBytes: number; chapters: AdminChapter[] });
+          return;
+        }
+        // Same contract as post(): surface the backend's own error string, so
+        // the 507, 409, 413 and 400 cases each say what they mean.
+        const msg = (parsed as { error?: string }).error ?? `POST /api/admin/campaigns → ${xhr.status}`;
+        reject(new ApiError(xhr.status, msg));
+      };
+      // A dropped connection mid-upload is the likeliest failure on a 300 MB
+      // body, and it must not leave the caller waiting forever.
+      xhr.onerror = () => reject(new ApiError(0, 'the upload failed to reach the server'));
+      xhr.onabort = () => reject(new ApiError(0, 'the upload was cancelled'));
+      xhr.send(form);
+    });
   },
   publishCampaign: (slug: string, name: string) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/publish`, { name }),
