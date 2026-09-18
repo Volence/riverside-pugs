@@ -346,7 +346,21 @@ export function deriveLiveStats(stats: Record<string, number>): Record<string, n
  *  maps pages were showing. Four is one full playing of a map by both teams in
  *  both halves, which is the smallest sample that is not a single team's good
  *  night. Below it, `survivalLabel` reports the count instead of a rate. */
-export const MIN_SURVIVAL_SAMPLE = 4;
+/**
+ * Rounds needed before a survival figure is stated as a percentage.
+ *
+ * Raised from 4 to 6 on 2026-09-18. Four is two coin flips: The Greenhouse sat
+ * at exactly 4 measured and printed a confident "50%", which is what prompted
+ * this. Six is not statistically comfortable either, and nothing about this
+ * data will be for a while, which is why the sample size is PRINTED beside the
+ * figure rather than left to a tooltip. This threshold only decides when to
+ * stop showing a raw count instead.
+ *
+ * Deliberately not higher. The best-covered maps currently have 8 measured
+ * rounds and most have 6, so 8 would blank almost every map on the site. Worth
+ * revisiting upward as the history fills in.
+ */
+export const MIN_SURVIVAL_SAMPLE = 6;
 
 /** How to render a survival rate, given how many rounds it is over.
  *

@@ -1308,12 +1308,12 @@ describe('Maps', () => {
     mockApi.maps.mockResolvedValue({
       maps: [
         { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 7, avgScore: 373,
-          rounds: { attempts: 7, fastestSec: 83, avgSec: 208, slowestSec: 300, survivalPct: 50, measured: 4 } },
+          rounds: { attempts: 7, fastestSec: 83, avgSec: 208, slowestSec: 300, survivalPct: 50, measured: 6 } },
       ],
     });
     render(<Maps />);
     await waitFor(() => expect(screen.getByText('50%')).toBeTruthy());
-    expect(screen.getByText(/of 4/)).toBeTruthy();
+    expect(screen.getByText(/of 6/)).toBeTruthy();
   });
 });
 
