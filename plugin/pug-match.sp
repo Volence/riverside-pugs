@@ -3474,13 +3474,23 @@ public void Event_TongueGrab(Event event, const char[] name, bool dontBroadcast)
  *  g_iPinnedBy alone is not enough to call a quad: a survivor who died pinned
  *  keeps a stale link until the next map, so a quad counted off the links
  *  could include somebody who is not there. The engine's own victim props are
- *  the authority; a prop this engine lacks falls back to trusting the link. */
+ *  the authority; a prop this engine lacks falls back to trusting the link.
+ *
+ *  INCAPACITATED IS NOT EXCLUDED, and used to be. That cost a real quad:
+ *  match 38 map 1 half 2 had three survivors pinned on 1 and 2 health with the
+ *  fourth incapped AND pinned, and the plugin counted three and recorded
+ *  nothing. Being incapped while held is the NORMAL shape of a quad, because
+ *  the first victims are often put down by the pounce before the fourth cap
+ *  lands. Excluding them means the commonest form can never register.
+ *
+ *  Recovery is still judged on incap: Timer_QuadWatch cancels a candidate only
+ *  when a survivor is up AND not incapped AND not held, which is the right
+ *  place for that test. */
 bool IsHoldingNow(int pinner, int survivor)
 {
 	if (pinner < 1 || pinner > MaxClients || !IsClientInGame(pinner)) return false;
 	if (GetClientTeam(pinner) != TEAM_INFECTED || !IsPlayerAlive(pinner)) return false;
 	if (!IsClientInGame(survivor) || GetClientTeam(survivor) != TEAM_SURVIVOR || !IsPlayerAlive(survivor)) return false;
-	if (GetEntProp(survivor, Prop_Send, "m_isIncapacitated") != 0) return false;
 	char prop[20];
 	strcopy(prop, sizeof(prop), g_bPinIsTongue[survivor] ? "m_tongueVictim" : "m_pounceVictim");
 	if (!HasEntProp(pinner, Prop_Send, prop)) return true;
