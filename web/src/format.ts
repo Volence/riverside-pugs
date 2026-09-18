@@ -449,3 +449,46 @@ export function mapName(map: string): string {
   if (words.length === 0) return map;
   return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
+
+/** Stats that get a "season leader" card above the leaderboard table.
+ *
+ *  Hand-picked rather than derived, because most stat keys make a nonsense
+ *  card. A leader board for `boomer_spawns` would crown whoever drew boomer
+ *  most often, and one for `dmg_as_hunter` would crown a share of a total that
+ *  already has its own card. What belongs here is a stat where being top of it
+ *  is an actual claim: something you did well, not something that happened to
+ *  you or a slice of something else.
+ *
+ *  Order is display order. A key whose leader scores zero is dropped at render
+ *  time, so a fresh season shows the cards it has earned and no empty shells.
+ *  Nothing here may be in DEAD_STAT_KEYS; a test enforces that, since adding a
+ *  dead key would produce a permanently empty card rather than an error. */
+export const FEATURED_STAT_KEYS: readonly string[] = [
+  'skeets', 'crowns', 'tank_damage', 'damage_as_si', 'clears', 'boomer_pops',
+];
+
+export interface StatLeader { steamid: string; name: string; value: number }
+
+/**
+ * Top `limit` players for one stat, from rows already loaded.
+ *
+ * Computed client-side on purpose. /api/leaderboard/stat/:key exists and does
+ * this properly for one key, but the leaderboard payload already carries every
+ * player's stat bag for the selected season, so calling it once per card would
+ * be six requests for arithmetic over data in memory. The endpoint stays the
+ * right tool for a standalone page that has not loaded the board.
+ *
+ * Players with no value, or zero, are excluded rather than filling the podium:
+ * "third best, with none" is not a standing.
+ */
+export function statLeaders(
+  rows: { steamid: string; name: string; stats?: Record<string, number> }[],
+  key: string,
+  limit = 3,
+): StatLeader[] {
+  return rows
+    .map((r) => ({ steamid: r.steamid, name: r.name, value: r.stats?.[key] ?? 0 }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .slice(0, limit);
+}

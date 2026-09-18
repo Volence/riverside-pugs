@@ -3,6 +3,7 @@ import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
+  FEATURED_STAT_KEYS, statLeaders,
 } from './format';
 
 describe('campaignName', () => {
@@ -422,5 +423,59 @@ describe('DEAD_STAT_KEYS', () => {
 
   it('keeps the private stat that does work', () => {
     expect(DEAD_STAT_KEYS.has('times_skeeted')).toBe(false);
+  });
+});
+
+describe('FEATURED_STAT_KEYS', () => {
+  it('features no stat that L4D1 cannot produce', () => {
+    // A dead key here is not an error anywhere, it is a card that reads zero
+    // forever, so the check has to live in a test.
+    for (const k of FEATURED_STAT_KEYS) {
+      expect(DEAD_STAT_KEYS.has(k), `${k} is a dead stat and would render an empty card`).toBe(false);
+    }
+  });
+
+  it('features only stats the table has a label for', () => {
+    for (const k of FEATURED_STAT_KEYS) expect(labelFor(k)).not.toBe(k);
+  });
+
+  it('features no self-visibility stat, which must never be ranked', () => {
+    for (const k of ['times_skeeted', 'times_deadstopped']) {
+      expect(FEATURED_STAT_KEYS.includes(k)).toBe(false);
+    }
+  });
+});
+
+describe('statLeaders', () => {
+  const rows: { steamid: string; name: string; stats?: Record<string, number> }[] = [
+    { steamid: '1', name: 'alice', stats: { skeets: 10, crowns: 0 } },
+    { steamid: '2', name: 'bob', stats: { skeets: 25, crowns: 3 } },
+    { steamid: '3', name: 'carol', stats: { skeets: 25 } },
+    { steamid: '4', name: 'dave' },
+  ];
+
+  it('ranks by value, highest first', () => {
+    expect(statLeaders(rows, 'skeets').map((r) => r.name)).toEqual(['bob', 'carol', 'alice']);
+  });
+
+  it('breaks a tie by name so the order is stable across renders', () => {
+    const [a, b] = statLeaders(rows, 'skeets');
+    expect(a.value).toBe(b.value);
+    expect(a.name).toBe('bob');
+    expect(b.name).toBe('carol');
+  });
+
+  it('excludes zero and missing values rather than padding the podium', () => {
+    // alice has crowns: 0 and dave has no bag at all. Neither is third best.
+    expect(statLeaders(rows, 'crowns').map((r) => r.name)).toEqual(['bob']);
+    expect(statLeaders(rows, 'skeets').some((r) => r.name === 'dave')).toBe(false);
+  });
+
+  it('returns nothing for a stat nobody has scored', () => {
+    expect(statLeaders(rows, 'tank_damage')).toEqual([]);
+  });
+
+  it('honours the limit', () => {
+    expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['bob', 'carol']);
   });
 });

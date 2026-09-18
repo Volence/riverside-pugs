@@ -483,6 +483,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'servers', 'tv_port', 'INTEGER');
   ensureColumn(db, 'servers', 'tv_password', 'TEXT');
   ensureColumn(db, 'servers', 'tv_enabled', 'INTEGER NOT NULL DEFAULT 0');
+  // Whether the matchmaker may claim this box at all, which is a separate
+  // question from whether it is idle right now. Defaults to 1 so every existing
+  // row stays claimable across this migration; taking a server out of rotation
+  // has to be a deliberate act, never a side effect of upgrading.
+  ensureColumn(db, 'servers', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'matches', 'voided_at', 'TEXT');
   ensureColumn(db, 'matches', 'void_reason', 'TEXT');
   seed(db);

@@ -415,7 +415,7 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
 
 export interface AdminOverview {
   open: { id: number; campaign: string; state: string; serverId: number | null; createdAt: string; wentLiveAt: string | null; connected: number; rostered: number }[];
-  servers: { id: number; name: string; host: string; port: number; status: string; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
+  servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
@@ -518,6 +518,7 @@ export const adminApi = {
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
+  serverEnabled: (id: number, enabled: boolean) => post(`/api/admin/servers/${id}/enabled`, { enabled }),
   serverSourcetv: (id: number, enabled: boolean, port: string, password: string) =>
     post(`/api/admin/servers/${id}/sourcetv`, { enabled, port, password }),
   queueRemove: (steamid: string) => post('/api/admin/queue/remove', { steamid }),

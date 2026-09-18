@@ -2,7 +2,7 @@ import { Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { api, type LeaderboardRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, labelFor, orderLiveStatKeys } from '../format';
+import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders } from '../format';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
@@ -129,6 +129,8 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
+      <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />
+
       <div class="lb-layout">
         <Panel class="panel--table">
           {error ? (
@@ -219,6 +221,66 @@ export function Leaderboard({ me }: { me: string | null }) {
           );
         })()}
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * Who leads the season in each of a few stats, as a row of cards.
+ *
+ * The table below already carries every one of these numbers and sorts by any
+ * of them, so this adds no data. What it adds is glanceability: the table is
+ * twenty-odd numeric columns wide and answers "who is best at skeets" only if
+ * you already know to scroll sideways and click that header. A reader who does
+ * not know the table is sortable never finds it at all.
+ *
+ * So each card is also the control: clicking it sorts the table by that stat,
+ * which is the discoverability the column headers were missing.
+ */
+function StatLeaders(
+  { rows, sortKey, onPick }: {
+    rows: Row[];
+    sortKey: string;
+    onPick: (key: string) => void;
+  },
+) {
+  const cards = useMemo(
+    () => FEATURED_STAT_KEYS
+      .map((key) => ({ key, leaders: statLeaders(rows, key) }))
+      // A stat nobody has scored in yet gets no card, rather than a card
+      // reading "nobody, 0". Keeps a fresh season honest.
+      .filter((c) => c.leaders.length > 0),
+    [rows],
+  );
+  if (cards.length === 0) return null;
+
+  return (
+    <div class="statleaders">
+      {cards.map(({ key, leaders }) => {
+        const [first, ...rest] = leaders;
+        return (
+          <button
+            key={key}
+            type="button"
+            class={`statleader${sortKey === key ? ' is-active' : ''}`}
+            aria-pressed={sortKey === key}
+            title={`Sort the table by ${labelFor(key)}`}
+            onClick={() => onPick(key)}
+          >
+            <span class="statleader__label eyebrow">{labelFor(key)}</span>
+            <span class="statleader__name">{first.name}</span>
+            <span class="statleader__value num">{first.value.toLocaleString()}</span>
+            {rest.length > 0 && (
+              <span class="statleader__rest muted">
+                {rest.map((r, i) => (
+                  <span key={r.steamid}>{i > 0 ? ' · ' : ''}{r.name} {r.value.toLocaleString()}</span>
+                ))}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

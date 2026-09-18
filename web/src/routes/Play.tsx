@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
-import { campaignName, fmtClock } from '../format';
+import { campaignName, fmtClock, winnerLabel } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
-import { Empty, Panel } from '../components/bits';
+import { Empty, Panel, PlayerLink } from '../components/bits';
+import { useFetch } from '../hooks/useFetch';
 import { CampaignTiles } from '../components/CampaignTiles';
 import { ConnectPanel } from '../components/ConnectPanel';
 import { SpectatePanel } from '../components/SpectatePanel';
@@ -84,7 +85,84 @@ function SignIn() {
           <Slots players={q.players} />
         </Panel>
       )}
+      <Landing />
     </div>
+  );
+}
+
+/**
+ * What a signed-out visitor sees below the sign-in box.
+ *
+ * Before this the front door was a title, a Steam button and an empty 0 / 8,
+ * which says nothing about whether the thing is alive. Almost everyone arriving
+ * here has followed a link from Discord and has never seen the site, so the job
+ * of this block is to show that matches actually happen and that other people
+ * play them, using data that is already public on three endpoints.
+ *
+ * Every section omits itself when it has no data rather than rendering an empty
+ * shell, so a brand new install shows the hero alone instead of three headings
+ * over nothing.
+ */
+function Landing() {
+  const { data: live } = useFetch((s) => api.live(s), []);
+  const { data: recent } = useFetch((s) => api.matches(s), []);
+  const { data: board } = useFetch((s) => api.leaderboard(s), []);
+
+  const liveMatch = live?.matches?.[0] ?? null;
+  const matches = (recent?.matches ?? []).slice(0, 5);
+  // Ranked only: a provisional player at the top of an empty board would
+  // misrepresent the ladder to the one audience with no context for it.
+  const top = (board?.rows ?? []).filter((r) => r.ranked).slice(0, 5);
+
+  return (
+    <>
+      {liveMatch && (
+        <Panel class="landing__live">
+          <p class="eyebrow">Live now</p>
+          <p class="landing__liveline">
+            <a href="/live">{campaignName(liveMatch.campaign)}</a>
+            {' · '}
+            <span class="num">{liveMatch.teamAScore} - {liveMatch.teamBScore}</span>
+          </p>
+          <p class="muted">Anyone can watch. No account needed.</p>
+        </Panel>
+      )}
+
+      {matches.length > 0 && (
+        <Panel class="panel--table">
+          <div class="panel__head"><h3>Recent matches</h3><a class="eyebrow" href="/matches">All</a></div>
+          <table class="landing__table">
+            <tbody>
+              {matches.map((m) => (
+                <tr key={m.id}>
+                  <td class="campaign-cell"><a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a></td>
+                  <td class="num">{m.teamAScore} - {m.teamBScore}</td>
+                  <td class="num muted">{m.winner ? winnerLabel(m.winner) : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
+
+      {top.length > 0 && (
+        <Panel class="panel--table">
+          <div class="panel__head"><h3>Top rated</h3><a class="eyebrow" href="/leaderboard">Full ladder</a></div>
+          <table class="landing__table">
+            <tbody>
+              {top.map((r, i) => (
+                <tr key={r.steamid}>
+                  <td class="num muted">{i + 1}</td>
+                  <td class="pname"><PlayerLink steamid={r.steamid} name={r.name} /></td>
+                  <td class="num">{r.sr}</td>
+                  <td class="num muted">{r.wins}W {r.losses}L</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
+    </>
   );
 }
 
