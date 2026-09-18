@@ -3,6 +3,7 @@ import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
 import { makeOptionalViewer } from './guards.js';
 import { resolveDemoPath } from '../demos.js';
+import { publicUrlFor, type R2Config } from '../r2.js';
 import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
 
 /** Every event a finished match can have. A four map night records around a
@@ -17,7 +18,7 @@ import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
 import { listSeasons } from '../seasons.js';
 
-export interface StatsRouteOpts { db: DB; demoDir?: string }
+export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
 const RECENT_MATCH_LIMIT = 50;
 
@@ -212,6 +213,19 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    */
   app.get('/api/matches/:id/demos/:ordinal', async (req, reply) => {
     const { id, ordinal } = req.params as { id: string; ordinal: string };
+
+    // R2 first. Once a demo is up there the bytes never come through this
+    // process again: the redirect hands the browser straight to Cloudflare, the
+    // friendly filename rides on the object's Content-Disposition, and the game
+    // server's network is left for the game. The local branch below stays for
+    // demos not yet swept and for an install with no R2 configured at all.
+    const stored = db
+      .prepare('SELECT r2_key AS r2Key FROM match_demos WHERE match_id = ? AND ordinal = ?')
+      .get(Number(id), Number(ordinal)) as { r2Key: string | null } | undefined;
+    if (stored?.r2Key && opts.r2) {
+      return reply.redirect(publicUrlFor(opts.r2, stored.r2Key), 302);
+    }
+
     const found = resolveDemoPath(db, Number(id), Number(ordinal), demoDir);
     if (!found) return reply.code(404).send({ error: 'no such demo' });
     reply.header('Content-Type', 'application/octet-stream');

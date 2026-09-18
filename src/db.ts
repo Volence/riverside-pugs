@@ -488,6 +488,12 @@ export function openDb(path: string): DB {
   // row stays claimable across this migration; taking a server out of rotation
   // has to be a deliberate act, never a side effect of upgrading.
   ensureColumn(db, 'servers', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
+  // Object key once a demo has been copied to R2, NULL while it is still only
+  // on disk. The row carries both states on purpose: the local file is deleted
+  // only after the upload is verified, so for a moment a demo is in both places
+  // and the key is what says which copy the download route should serve.
+  ensureColumn(db, 'match_demos', 'r2_key', 'TEXT');
+  ensureColumn(db, 'match_demos', 'r2_at', 'TEXT');
   ensureColumn(db, 'matches', 'voided_at', 'TEXT');
   ensureColumn(db, 'matches', 'void_reason', 'TEXT');
   seed(db);
