@@ -102,30 +102,6 @@ const NO_ROUNDS: RoundAggregate = {
  * clock and no survival reading (an older plugin), and dropping it from the
  * timing stats too would throw away data we have for the sake of data we do not.
  */
-/**
- * Rounds recorded before this are excluded from survival, though NOT from
- * timing.
- *
- * Until the plugin fix on 2026-09-18, `survivors_alive` came from
- * `IsPlayerAlive`, which is true for an INCAPACITATED survivor. A versus wipe
- * normally ends with the last players downed rather than dead, so a wipe was
- * recorded as 1 to 3 survivors and counted as a survival. Measured on the live
- * data: rounds recording 0, 1 or 2 alive averaged 78, 95 and 70 points,
- * indistinguishable from one another, while rounds recording 4 averaged 420.
- * Only 2 of 89 measured rounds recorded a zero, which is why every map page
- * read 100%.
- *
- * Those rows are wrong in one direction and cannot be repaired: nothing stored
- * distinguishes "three reached the saferoom" from "three were lying on the
- * floor". Mixing them with corrected rows would produce a number wrong by an
- * unknown amount, so they are dropped and the figure rebuilds from real
- * readings. Every new match measures every round, so this self-heals.
- *
- * MUST match the moment the fixed plugin was staged. Rounds recorded by the
- * old plugin after this timestamp would be silently trusted.
- */
-export const SURVIVAL_TRUSTED_FROM = '2026-09-18 10:00:00';
-
 function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
   const out = new Map<string, RoundAggregate>();
   if (maps.length === 0) return out;
@@ -133,9 +109,7 @@ function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
     .prepare(
       `SELECT mm.map AS map,
               (julianday(r.ended_at) - julianday(r.started_at)) * 86400 AS secs,
-              -- Survival only, and only from trustworthy rows. Timing is
-              -- unaffected: an old round's clock is still a real clock.
-              CASE WHEN r.ended_at >= ? THEN r.survivors_alive END AS alive
+              r.survivors_alive AS alive
        FROM match_rounds r
        JOIN match_maps mm ON mm.match_id = r.match_id AND mm.ordinal = r.ordinal
        JOIN matches m ON m.id = r.match_id
@@ -145,7 +119,7 @@ function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
          AND r.started_at IS NOT NULL
          AND mm.map IN (${maps.map(() => '?').join(',')})`,
     )
-    .all(SURVIVAL_TRUSTED_FROM, ...maps) as { map: string; secs: number | null; alive: number | null }[];
+    .all(...maps) as { map: string; secs: number | null; alive: number | null }[];
 
   const acc = new Map<string, { secs: number[]; measured: number; survived: number }>();
   for (const r of rows) {
