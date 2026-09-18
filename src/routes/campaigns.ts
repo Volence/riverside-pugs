@@ -214,11 +214,13 @@ export async function campaignRoutes(
     logAdmin(db, adminId, 'campaign_publish', slug, { from: c.name, to: name });
     // Not awaited: a 300 MB FTP upload must not hold the request open, and
     // every result is recorded per server (setInstall) for the panel to show.
-    // installCampaign never throws, so this never fails the match or the
-    // request that kicked it off.
+    // installCampaign is contracted not to throw, but this process also runs
+    // the matchmaker queue and match orchestration, and Node exits on an
+    // unhandled rejection: the .catch is a backstop against that contract
+    // ever being violated, not an expectation that it will be.
     void installCampaign(db, slug, {
       sourcePath: join(addonsDir, c.vpk_filename), servers: targets(),
-    });
+    }).catch((err) => req.log.error({ err, slug }, 'installCampaign rejected unexpectedly'));
     return { ok: true };
   });
 
@@ -246,9 +248,11 @@ export async function campaignRoutes(
     // unconditionally rather than each one reasoning about whether it needs to.
     invalidateCampaignCache();
     logAdmin(db, adminId, 'campaign_reinstall', slug);
+    // See the .catch note on the publish route above: same backstop, same
+    // reason.
     void installCampaign(db, slug, {
       sourcePath: join(addonsDir, c.vpk_filename), servers: targets(),
-    });
+    }).catch((err) => req.log.error({ err, slug }, 'installCampaign rejected unexpectedly'));
     return { ok: true };
   });
 

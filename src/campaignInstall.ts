@@ -19,18 +19,24 @@ export interface InstallTarget { id: number; transport: AddonsTransport | null }
 export async function installCampaign(
   db: DB, slug: string, opts: { sourcePath: string; servers: InstallTarget[] },
 ): Promise<void> {
-  const campaign = getCampaign(db, slug);
-  if (!campaign) return;
-
   for (const server of opts.servers) {
-    setInstall(db, slug, server.id, 'pending');
-    if (!server.transport) {
-      setInstall(db, slug, server.id, 'failed', {
-        error: 'server is not configured with an addons transport',
-      });
-      continue;
-    }
+    // Re-read every iteration, not once at entry: a 300 MB transfer to one
+    // server can take minutes, and an admin can delete the campaign while
+    // that transfer is in flight. custom_campaign_installs.slug is a real
+    // foreign key, so once the row is gone, writing another install row for
+    // it throws rather than silently doing nothing. If the campaign is gone,
+    // there is nothing left to install; stop rather than let that throw
+    // reach the caller.
+    const campaign = getCampaign(db, slug);
+    if (!campaign) return;
     try {
+      setInstall(db, slug, server.id, 'pending');
+      if (!server.transport) {
+        setInstall(db, slug, server.id, 'failed', {
+          error: 'server is not configured with an addons transport',
+        });
+        continue;
+      }
       await server.transport.put(opts.sourcePath, campaign.vpk_filename);
       const landed = await server.transport.size(campaign.vpk_filename);
       if (landed !== campaign.size_bytes) {
@@ -41,9 +47,19 @@ export async function installCampaign(
       }
       setInstall(db, slug, server.id, 'installed', { sha256: campaign.sha256, error: null });
     } catch (err) {
-      setInstall(db, slug, server.id, 'failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      // A delete can land in the gap between the getCampaign check above and
+      // any of the writes in this iteration (including the one about to
+      // happen below), so check again before assuming there is still a row
+      // to record a failure against.
+      if (!getCampaign(db, slug)) return;
+      try {
+        setInstall(db, slug, server.id, 'failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } catch {
+        // Deleted in the time it took to get here. Nothing left to record.
+        return;
+      }
     }
   }
 }
