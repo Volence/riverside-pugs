@@ -529,6 +529,20 @@ button.ctile:hover { border-color: var(--text-muted); }
 }
 .ctiles + .stack { margin-top: var(--sp-5); }
 
+/* ---------- custom campaigns ---------- */
+
+/* Tinted like a campaign tile (border-mix off campaignTint), but a panel
+ * rather than a poster: this page is read top to bottom for the download and
+ * chapter list, not scanned as a grid. */
+.ccamp__head {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  gap: var(--sp-3); border-bottom: 1px solid color-mix(in srgb, var(--campaign) 40%, var(--border));
+  padding-bottom: var(--sp-2); margin-bottom: var(--sp-3);
+}
+.ccamp__head h3 { margin: 0; }
+.ccamp__chapters { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-1); color: var(--text); }
+.ccamp__hash { margin-top: var(--sp-3); word-break: break-all; }
+
 /* ---------- versus scoreboard ---------- */
 
 .versus {
@@ -1554,6 +1568,8 @@ body.is-theater { overflow: hidden; }
 .queue-block { margin-top: var(--sp-3); }
 
 .howto { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
+.steps { margin: var(--sp-3) 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
+.steps code { word-break: break-all; }
 .faq details { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }
 .faq summary { cursor: pointer; color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
 .faq details p { margin: var(--sp-2) 0 0; color: var(--text); }
