@@ -42,9 +42,9 @@ function Panel(
                   bar's temp segment so the two read as one thing. Suppressed
                   while downed, where `healthBar` zeroes temp on purpose and
                   the number is a bleed-out reading rather than health. */}
-              {alive && !bar.downed && p.temp > 0 && (
+              {alive && bar.tempPoints > 0 && (
                 <span class="hudp__hp-temp" style={{ color: TEMP_HEALTH_COLOR }}>
-                  +{Math.round(p.temp)}
+                  +{Math.round(bar.tempPoints)}
                 </span>
               )}
             </span>

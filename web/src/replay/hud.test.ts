@@ -208,3 +208,30 @@ describe('healthBar', () => {
     }
   });
 });
+
+describe('temp health noise floor', () => {
+  // MEASURED, not guessed. The recorder stores m_healthBuffer floored, and
+  // that netprop has a resting baseline rather than sitting at zero: across
+  // one real round, 6111 of 8860 alive-survivor samples (69%) read exactly 1,
+  // only 8 read 0, and at frame 0 (200ms in, before anyone can have taken
+  // pills) all four survivors read hp=100 temp=1.
+  //
+  // So a recorded 1 means "none". Zeroing it here rather than at each call
+  // site is the same reason healthBar exists at all: the map ring and the HUD
+  // panel must not be able to disagree.
+  // Below max health, where barSegments no longer clamps the sliver away.
+  // This is the case in the report: a survivor on 78 showing "+1".
+  it('reads a recorded temp of 1 as no temporary health at all', () => {
+    const bar = healthBar(78, 1, 100, STATE.PRESENT | STATE.ALIVE);
+    expect(bar.temp).toBe(0);
+  });
+
+  it('still counts real temporary health', () => {
+    const bar = healthBar(50, 47, 100, STATE.PRESENT | STATE.ALIVE);
+    expect(bar.temp).toBeGreaterThan(0);
+  });
+
+  it('treats a recorded 0 as none, the same as 1', () => {
+    expect(healthBar(100, 0, 100, STATE.PRESENT | STATE.ALIVE).temp).toBe(0);
+  });
+});
