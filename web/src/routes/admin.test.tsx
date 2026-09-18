@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
-import type { IntegrityClip, IntegrityPlayerRow, IntegrityRound } from '../api';
+import type { AdminOverview, IntegrityClip, IntegrityPlayerRow, IntegrityRound } from '../api';
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
@@ -101,6 +101,76 @@ describe('ReportPlayer', () => {
     render(<ReportPlayer matchId={7} />);
     fireEvent.click(screen.getByText('Report a player'));
     await waitFor(() => expect(screen.getByText(/Reports close 48 hours/)).toBeTruthy());
+  });
+});
+
+describe('AdminMatches layout', () => {
+  const overview = (): AdminOverview => ({
+    open: [{
+      id: 40, campaign: 'death_toll', state: 'live', serverId: 1, connected: 8, rostered: 8,
+      createdAt: '2026-09-18T05:28:36Z', wentLiveAt: '2026-09-18T05:28:37Z',
+      connect: { host: '45.32.199.85', port: 27015, password: 'pug_ab12cd34' },
+      forecast: {
+        srA: 1400, srB: 1150, srGap: 250, winProbA: 0.64, winProbB: 0.36,
+        ratedA: 4, ratedB: 4, source: 'current',
+      },
+    }],
+    recent: [],
+    voided: [],
+    servers: [{
+      id: 1, name: 'Dallas', host: '45.32.199.85', port: 27015, status: 'live',
+      enabled: 1, tvEnabled: 1, tvPort: 27020, tvPassword: 'dunged',
+    }],
+    queue: [{ steamid: '1', name: 'alice', avatar: null }],
+  });
+
+  const openTab = async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.overview.mockResolvedValue(overview());
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+  };
+
+  it('shows the paper odds and the gap for a live match', async () => {
+    await openTab();
+    expect(screen.getByText('64%')).toBeTruthy();
+    expect(screen.getByText(/250 SR to A/)).toBeTruthy();
+  });
+
+  // The real game server, not SourceTV: an admin joining to watch needs the
+  // console line, and it is not on the match card because it is not theirs.
+  it('gives an admin the console line for the real server', async () => {
+    await openTab();
+    expect(screen.getByText('password pug_ab12cd34; connect 45.32.199.85:27015')).toBeTruthy();
+  });
+
+  it('shows no connect line for a match with no server yet', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.open[0] = { ...o.open[0], state: 'configuring', serverId: null, connect: null };
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.queryByText(/connect 45.32/)).toBeNull();
+  });
+
+  // The bug this pins: a wide table with nowrap cells, unwrapped, grows past
+  // its panel instead of scrolling inside it, and the last column renders
+  // outside the panel border. Already fixed twice in this codebase (.teams and
+  // .profile-grid both carry a comment about it) and missed on two of the
+  // three tables on this tab.
+  it('keeps every table inside a scroll wrapper so none can overflow its panel', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.overview.mockResolvedValue(overview());
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+
+    const tables = [...container.querySelectorAll('table.admin-table')];
+    expect(tables.length).toBeGreaterThanOrEqual(3);
+    for (const t of tables) expect(t.closest('.table-wrap')).not.toBeNull();
   });
 });
 

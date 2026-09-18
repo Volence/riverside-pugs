@@ -151,6 +151,38 @@ describe('matchForecast', () => {
     expect(f.winProbA).toBeCloseTo(0.5, 6);
   });
 
+  // A live match has no history yet: applyMatchRatings only runs at
+  // completion. Current ratings ARE the pre-match ratings while it is running,
+  // which is exactly what an admin watching it wants.
+  it('falls back to current ratings for a match still in flight', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    db.prepare("UPDATE matches SET state = 'live', winner = NULL WHERE id = ?").run(matchId);
+    for (const id of IDS) ensureRating(db, id);
+    const up = db.prepare('UPDATE player_ratings SET mu = ?, sigma = ? WHERE player_id = ?');
+    for (const id of IDS.slice(0, 4)) up.run(32, 3, id);
+    for (const id of IDS.slice(4)) up.run(20, 3, id);
+
+    const f = matchForecast(db, matchId)!;
+    expect(f.source).toBe('current');
+    expect(f.srA).toBe(2600);
+    expect(f.srB).toBe(1400);
+    expect(f.winProbA).toBeGreaterThan(0.5);
+  });
+
+  it('says which ratings a completed match was forecast from', () => {
+    const f = matchForecast(db, seedLopsided())!;
+    expect(f.source).toBe('history');
+  });
+
+  // The trap the fallback must not fall into: for a match completed long ago,
+  // current ratings are several matches of hindsight later, so no forecast is
+  // far better than a confident wrong one.
+  it('does not fall back to current ratings for a completed match', () => {
+    const matchId = seedCompletedMatch(db, 'a');
+    for (const id of IDS) ensureRating(db, id);
+    expect(matchForecast(db, matchId)).toBeNull();
+  });
+
   it('is null for a match with no rating history to read', () => {
     const matchId = seedCompletedMatch(db, 'a');
     expect(matchForecast(db, matchId)).toBeNull();

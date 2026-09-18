@@ -1,25 +1,49 @@
 import type { DB } from '../db.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { clearLive } from '../liveView.js';
-import { recomputeSeasonRatings } from '../rating.js';
+import { matchForecast, recomputeSeasonRatings } from '../rating.js';
+import { getServer } from '../serverPool.js';
+import { serverPasswordFor } from '../matchToken.js';
 
 export function adminOverview(db: DB) {
-  const open = db.prepare(
-    `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, m.created_at AS createdAt, m.went_live_at AS wentLiveAt,
+  const openRows = db.prepare(
+    `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, m.token, m.created_at AS createdAt,
+            m.went_live_at AS wentLiveAt,
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.connected_at IS NOT NULL) AS connected,
             (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id) AS rostered
      FROM matches m WHERE m.state IN ('configuring', 'live') ORDER BY m.id DESC`,
-  ).all();
+  ).all() as (Record<string, unknown> & { id: number; serverId: number | null; token: string | null })[];
+  // Two admin-only additions per open match.
+  //
+  // `connect` is the real game server, not SourceTV: an admin joining to see
+  // what is happening needs the address and the match's own sv_password, which
+  // is derived from the token and never stored. The token itself does not go
+  // out; the password derived from it does, which is the thing you can type
+  // into a console.
+  //
+  // `forecast` for a live match comes from current ratings, which while a
+  // match is in flight ARE the pre-match ratings, since nothing updates until
+  // completion.
+  const open = openRows.map(({ token, ...m }) => {
+    const server = m.serverId !== null ? getServer(db, m.serverId) : null;
+    return {
+      ...m,
+      connect: server && token && m.state === 'live'
+        ? { host: server.host, port: server.port, password: serverPasswordFor(token) }
+        : null,
+      forecast: matchForecast(db, m.id),
+    };
+  });
   // Never the rcon password: this goes to a browser.
   const servers = db.prepare(
     `SELECT id, name, host, port, status, enabled, tv_port AS tvPort,
             tv_password AS tvPassword, tv_enabled AS tvEnabled
      FROM servers ORDER BY id`,
   ).all();
-  const recent = db.prepare(
+  const recent = (db.prepare(
     `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
      FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT 30`,
-  ).all();
+  ).all() as { id: number }[]).map((m) => ({ ...m, forecast: matchForecast(db, m.id) }));
   const voided = db.prepare(
     `SELECT id, campaign, voided_at AS voidedAt, void_reason AS voidReason
      FROM matches WHERE voided_at IS NOT NULL ORDER BY voided_at DESC LIMIT 30`,

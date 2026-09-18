@@ -1450,6 +1450,14 @@ body.is-theater { overflow: hidden; }
   white-space: pre;
 }
 .admin-table { width: 100%; }
+/* The SourceTV cell holds a whole form, and .admin-form inputs are sized for a
+ * full-width one (flex: 1 1 12rem). Two of those plus Save and Turn off cannot
+ * fit in half a page, so the column's minimum width used to push the last
+ * column clean outside the panel. A port is five digits and the password is
+ * short: size them for what they hold. The .table-wrap around the table is the
+ * backstop, not the fix. */
+.admin-table--servers .admin-form { flex-wrap: nowrap; }
+.admin-table--servers .admin-form input { flex: 0 1 auto; width: 7rem; }
 .admin-table td, .admin-table th { white-space: nowrap; }
 .admin-table tr.is-clickable { cursor: pointer; }
 .admin-tag {

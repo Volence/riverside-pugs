@@ -1,3 +1,4 @@
+import { serverPasswordFor } from './matchToken.js';
 import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
 import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase, type PersistedLobby } from './lobby.js';
@@ -342,7 +343,7 @@ export class Matchmaker {
           connect = {
             host: server.host,
             port: server.port,
-            password: `pug_${matchRow.token.slice(0, 8)}`,
+            password: serverPasswordFor(matchRow.token),
           };
         }
       }
