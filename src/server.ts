@@ -1,7 +1,9 @@
+import { spawn } from 'node:child_process';
 import { pruneDemos } from './demoPrune.js';
 import { sweepDemos } from './demoOffload.js';
 import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
+import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { playerByDiscordId } from './players.js';
@@ -526,7 +528,38 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // an srcds restart or a crash leaves a match 'live' forever: permanently
   // "no signal" on the live page, and its server row stuck reserved so no new
   // match can ever claim it.
+  /**
+   * The integrity analysis, in its own process.
+   *
+   * Absent without a replay directory: there is nothing to analyse and the
+   * panel should say so rather than offer a button that cannot work.
+   *
+   * Spawned rather than called because the analysis is entirely synchronous
+   * and would block this loop, which is also serving HTTP, running the bot and
+   * taking the live feed. See src/integrity/job.ts.
+   */
+  const integrityJobs = deps.config.replayDir
+    ? new IntegrityJobs({
+      spawn: (mode) => spawn(
+        'node_modules/.bin/tsx',
+        ['scripts/backfill-integrity.ts', ...(mode === 'pending' ? ['--pending'] : [])],
+        { cwd: process.cwd(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] },
+      ),
+      busy: () => matchInFlight(deps.db),
+    })
+    : undefined;
+
   const reaper = setInterval(() => {
+    try {
+      // Measure rounds nothing has looked at. Until this existed the only
+      // caller of the analysis anywhere was a hand-run script, so the board
+      // went stale the moment a match was played and stayed that way.
+      // Refusals here are fine and need no handling: a match in flight or a
+      // run already going means the next sweep, a minute later, tries again.
+      if (integrityJobs && pendingRoundCount(deps.db) > 0) integrityJobs.start('pending');
+    } catch (err) {
+      console.error('[integrity] automatic pass failed:', err);
+    }
     try {
       reapOrphanedMatches(deps.db, releaser);
     } catch (err) {
@@ -644,7 +677,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
-  await app.register(adminRoutes, { db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e) });
+  await app.register(adminRoutes, { db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
 

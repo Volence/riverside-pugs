@@ -508,6 +508,25 @@ export interface IntegrityRound {
   reviewNote: string;
 }
 
+/** State of the analysis job, plus what pressing the button would achieve.
+ *  `available: false` is an install with no replay directory at all. */
+export type IntegrityJobInfo =
+  | { available: false }
+  | {
+    available: true;
+    job: {
+      status: 'idle' | 'running' | 'done' | 'failed';
+      mode: 'full' | 'pending' | null;
+      startedAt: string | null;
+      finishedAt: string | null;
+      exitCode: number | null;
+      output: string[];
+    };
+    /** Indexed rounds no current-version analysis has measured. */
+    pending: number;
+    matchInFlight: boolean;
+  };
+
 export const adminApi = {
   players: (q: string, signal?: AbortSignal) =>
     get<{ players: AdminPlayerRow[] }>(`/api/admin/players?q=${encodeURIComponent(q)}`, signal),
@@ -545,6 +564,10 @@ export const adminApi = {
     get<{ rounds: IntegrityRound[]; clips: IntegrityClip[] }>(`/api/admin/integrity/${steamid}`, signal),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
+  integrityJob: (signal?: AbortSignal) =>
+    get<IntegrityJobInfo>('/api/admin/integrity/backfill', signal),
+  integrityRun: (mode: 'full' | 'pending', force: boolean) =>
+    post('/api/admin/integrity/backfill', { mode, force }),
 };
 
 export const api = {

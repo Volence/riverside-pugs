@@ -18,18 +18,23 @@ import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { setReview } from '../integrity/store.js';
+import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 
 export interface AdminRouteOpts {
   db: DB;
   matchmaker: Matchmaker;
   releaser: ServerReleaser;
   broadcast: (event: string) => void;
+  /** Absent on an install with no replay directory, where there is nothing to
+   *  analyse and the panel says so rather than offering a button that cannot
+   *  work. */
+  integrityJobs?: IntegrityJobs;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs } = opts;
   const requireAdmin = makeRequireAdmin(db);
 
   app.get('/api/admin/players', async (req, reply) => {
@@ -279,6 +284,38 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const seasonId = raw === undefined || raw === '' ? null : Number(raw);
     if (seasonId !== null && !Number.isInteger(seasonId)) return reply.code(400).send({ error: 'bad season' });
     return { players: integrityBoard(db, seasonId) };
+  });
+
+  /**
+   * The analysis job: its state, and starting one.
+   *
+   * GET is safe to poll; the panel does while a run is going. `pending` is the
+   * count of indexed rounds nothing has measured, which is what tells an admin
+   * whether pressing the button would do anything.
+   */
+  app.get('/api/admin/integrity/backfill', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    if (!integrityJobs) return { available: false as const };
+    return {
+      available: true as const,
+      job: integrityJobs.snapshot(),
+      pending: pendingRoundCount(db),
+      matchInFlight: matchInFlight(db),
+    };
+  });
+
+  app.post('/api/admin/integrity/backfill', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    if (!integrityJobs) return reply.code(409).send({ error: 'no replay directory is configured' });
+    const body = (req.body ?? {}) as { mode?: string; force?: boolean };
+    const mode: JobMode = body.mode === 'pending' ? 'pending' : 'full';
+    const started = integrityJobs.start(mode, { force: body.force === true });
+    if (!started.ok) return reply.code(409).send({ error: started.reason });
+    // Logged with the force flag: overriding the in-flight guard is exactly
+    // the decision someone will later want to know was made deliberately.
+    logAdmin(db, adminId, 'integrity_backfill', mode, { force: body.force === true });
+    return { job: integrityJobs.snapshot() };
   });
 
   app.get('/api/admin/integrity/:steamid', async (req, reply) => {

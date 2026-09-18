@@ -6,7 +6,7 @@ import { PriorBuilder, subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
 import { analyzeRound, buildRoundPrior } from './round.js';
 import {
-  loadPrior, loadRoundPrior, saveRound, saveRoundPrior, savePrior, type RoundKey,
+  ANALYZER_VERSION, loadPrior, loadRoundPrior, saveRound, saveRoundPrior, savePrior, type RoundKey,
 } from './store.js';
 
 const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
@@ -114,6 +114,40 @@ export function rebuildPriors(db: DB, dir: string): Map<string, number> {
  * not contain it yet. Two passes over the files is the price of getting
  * leave-one-round-out right.
  */
+/**
+ * Analyse only the rounds nothing has measured yet.
+ *
+ * The counterpart to `backfillAll`, and the reason the board can stop going
+ * stale. This runs after a match finishes, so it must be cheap: it never
+ * touches the map priors, which would mean re-reading every replay on disk,
+ * and it reads only the files it is actually going to measure.
+ *
+ * "Not measured yet" includes a round measured by an older analyzer. The
+ * version is stored per row precisely so a change to the analyzer can be
+ * noticed, and mixing two analyzers' numbers on one board is worse than
+ * either of them alone.
+ *
+ * Scores from here are measured against whatever priors already exist, which
+ * for a map under MIN_PRIOR_ROUNDS means no occupancy score at all. That is
+ * the same answer `backfillAll` gives, and it improves for everyone the next
+ * time the priors are rebuilt.
+ */
+export function analyzePending(db: DB, dir: string): { rounds: number; skipped: number } {
+  const done = new Set(
+    (db.prepare(
+      'SELECT DISTINCT match_id, ordinal, half FROM integrity_rounds WHERE analyzer_version = ?',
+    ).all(ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
+      .map((r) => `${r.match_id}/${r.ordinal}/${r.half}`),
+  );
+  let rounds = 0, skipped = 0;
+  for (const f of findReplays(db, dir)) {
+    if (done.has(`${f.key.matchId}/${f.key.ordinal}/${f.key.half}`)) continue;
+    if (analyzeOneRound(db, f.key, readFileSync(f.path))) rounds++;
+    else skipped++;
+  }
+  return { rounds, skipped };
+}
+
 export function backfillAll(db: DB, dir: string): { rounds: number; skipped: number } {
   rebuildPriors(db, dir);
   let rounds = 0, skipped = 0;
