@@ -13,7 +13,7 @@ import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { clearLive } from './liveView.js';
 import { CAMPAIGNS } from './campaigns.js';
-import { campaignRegistry, firstMapOf } from './campaignRegistry.js';
+import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
@@ -174,7 +174,7 @@ export class RealOrchestrator implements Orchestrator {
     }
 
     if (live) {
-      this.notify(`🎮 Match #${matchId} is live: ${CAMPAIGNS[match.campaign]?.name ?? match.campaign} on ${server.name}`);
+      this.notify(`🎮 Match #${matchId} is live: ${campaignDisplayName(this.db, match.campaign)} on ${server.name}`);
     }
   }
 

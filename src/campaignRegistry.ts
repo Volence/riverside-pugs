@@ -99,10 +99,12 @@ export function firstMapOf(db: DB, campaign: string): string {
 /**
  * Campaigns an admin may put in map_pool: the stock four (no VPK, always
  * eligible), plus published custom campaigns that are `enabled` and
- * installed on every enabled server. "In the pool" is meant to gate both the
- * public download and the vote; this is the vote half, kept as its own
- * lookup rather than filtered on the client so a direct PUT to the setting
- * (validateSetting) enforces exactly the same rule the panel displays.
+ * installed on every enabled server. It gates the vote only: every published
+ * campaign is downloadable whether or not it is poolable, because a player
+ * should be able to get a campaign that is installed and the "In the vote"
+ * badge is what says which ones they need. Kept as its own lookup rather than
+ * filtered on the client so a direct PUT to the setting (validateSetting)
+ * enforces exactly the same rule the panel displays.
  *
  * `alsoAllow` keeps an admin from being locked out of their own settings
  * page: a campaign already sitting in map_pool that later loses its install
@@ -124,4 +126,15 @@ export function poolableCampaigns(
     || already.has(c.slug)
     || (enabledCustomSlugs.has(c.slug) && isInstalledEverywhere(db, c.slug, serverIds))
   ));
+}
+
+/** A campaign's display name, falling back to the slug.
+ *
+ *  The one place this is answered for anything a person reads. Callers used to
+ *  write `CAMPAIGNS[slug]?.name ?? slug` inline, which silently printed the raw
+ *  slug for every custom campaign: a Discord message announcing a live match
+ *  read "city17_v2_8" rather than "City 17 v2.8".
+ */
+export function campaignDisplayName(db: DB, slug: string): string {
+  return campaignRegistry(db).get(slug)?.name ?? slug;
 }

@@ -10,7 +10,7 @@ import type { DB } from '../db.js';
 import { makeRequireAdmin } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { CAMPAIGNS } from '../campaigns.js';
-import { invalidateCampaignCache } from '../campaignRegistry.js';
+import { campaignRegistry, invalidateCampaignCache } from '../campaignRegistry.js';
 import { transportFor } from '../addonsTransport.js';
 import { installCampaign, uninstallCampaign, type InstallTarget } from '../campaignInstall.js';
 import {
@@ -85,6 +85,15 @@ export async function campaignRoutes(
         })),
       })),
     };
+  });
+
+  // Every campaign's display name, for a client that has to render one
+  // synchronously in twenty places. Public and tiny: names are not secret and
+  // the page needs them before it can draw a match card.
+  app.get('/api/campaigns/names', async () => {
+    const names: Record<string, string> = {};
+    for (const c of campaignRegistry(db).values()) names[c.slug] = c.name;
+    return { names };
   });
 
   app.get('/download/campaign/:slug', async (req, reply) => {

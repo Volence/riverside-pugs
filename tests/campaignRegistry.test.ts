@@ -98,3 +98,24 @@ describe('stats attribute custom maps', () => {
     expect(row?.campaign).toBe('dbd');
   });
 });
+
+describe('campaignDisplayName', () => {
+  it('gives a stock campaign its name', async () => {
+    const { campaignDisplayName } = await import('../src/campaignRegistry.js');
+    expect(campaignDisplayName(db, 'dead_air')).toBe('Dead Air');
+  });
+
+  // The bug this guards: every display site used to write
+  // `CAMPAIGNS[slug]?.name ?? slug` inline, so a custom campaign printed its
+  // raw slug. A Discord message announcing a live match read "city17_v2_8".
+  it('gives a custom campaign its real name, not its slug', async () => {
+    const { campaignDisplayName } = await import('../src/campaignRegistry.js');
+    publish();
+    expect(campaignDisplayName(db, 'dbd')).toBe('Dead Before Dawn');
+  });
+
+  it('falls back to the slug for a campaign nothing knows about', async () => {
+    const { campaignDisplayName } = await import('../src/campaignRegistry.js');
+    expect(campaignDisplayName(db, 'never_heard_of_it')).toBe('never_heard_of_it');
+  });
+});

@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import type { Hub } from '../ws.js';
 import { QUEUE_SIZE } from '../queue.js';
-import { CAMPAIGNS } from '../campaigns.js';
+import { campaignDisplayName } from '../campaignRegistry.js';
 import { displaySr } from '../rating.js';
 import { spectateFor } from '../spectate.js';
 import { currentSeasonId } from '../players.js';
@@ -170,7 +170,7 @@ export class DiscordSync {
         phase: snapshot.phase,
         deadlineMs: snapshot.deadline,
         players: snapshot.players.map((p) => ({ ...this.player(p), ready: snapshot.ready.includes(p) })),
-        options: snapshot.options.map((c) => ({ campaign: c, name: CAMPAIGNS[c]?.name ?? c, votes: snapshot.votes[c] ?? 0 })),
+        options: snapshot.options.map((c) => ({ campaign: c, name: campaignDisplayName(this.deps.db, c), votes: snapshot.votes[c] ?? 0 })),
       });
       // A pass awaits Discord between lobbies, and a lobby can complete in
       // that gap. Posting a card for it then would orphan a second card, since
@@ -226,7 +226,7 @@ export class DiscordSync {
             : row.server_id === null ? 'waiting' : 'configuring';
       const payload = renderMatch({
         matchId,
-        campaignName: CAMPAIGNS[row.campaign]?.name ?? row.campaign,
+        campaignName: campaignDisplayName(this.deps.db, row.campaign),
         publicUrl: this.deps.publicUrl,
         state,
         teamA: teamA.map((p) => this.player(p)),
@@ -259,7 +259,7 @@ export class DiscordSync {
           const resultsChannel = getSetting(db, 'discord_results_channel_id') || channelId;
           const messageId = await this.deps.transport.send(resultsChannel, renderResult({
             matchId,
-            campaignName: CAMPAIGNS[row.campaign]?.name ?? row.campaign,
+            campaignName: campaignDisplayName(this.deps.db, row.campaign),
             publicUrl: this.deps.publicUrl,
             scoreA: row.team_a_score,
             scoreB: row.team_b_score,

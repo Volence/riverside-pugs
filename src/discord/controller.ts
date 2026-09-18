@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { QUEUE_SIZE } from '../queue.js';
-import { CAMPAIGNS } from '../campaigns.js';
+import { campaignDisplayName } from '../campaignRegistry.js';
 import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js';
 import { spectateFor } from '../spectate.js';
 import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from './transport.js';
@@ -112,7 +112,7 @@ export async function handleButton(
       if (lobby.phase !== 'map_vote') return say('Voting has not started yet. Ready up first.');
       if (!lobby.options.includes(campaign)) return say('That campaign is not an option in this vote.');
       mm.vote(steamid, campaign);
-      return say(`You voted ${CAMPAIGNS[campaign]?.name ?? campaign}.`);
+      return say(`You voted ${campaignDisplayName(deps.db, campaign)}.`);
     }
     return say('That button no longer does anything.');
   }

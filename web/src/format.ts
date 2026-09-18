@@ -7,8 +7,26 @@ export const CAMPAIGN_NAMES: Record<string, string> = {
   blood_harvest: 'Blood Harvest',
 };
 
+/**
+ * Names for campaigns this build does not know about, registered once at
+ * startup from the server's registry.
+ *
+ * campaignName is called from twenty-odd places, most of them deep in
+ * components that have no business fetching anything, and it has to stay
+ * synchronous for all of them. So the app hands the names over once and every
+ * existing call site keeps working untouched. Empty until that happens, which
+ * is why the slug remains the last resort rather than an error: a custom
+ * campaign rendered before the names land reads as its slug for one frame,
+ * which is what it did permanently before this existed.
+ */
+const REGISTERED: Map<string, string> = new Map();
+
+export function setCampaignNames(names: Record<string, string>): void {
+  for (const [slug, name] of Object.entries(names)) REGISTERED.set(slug, name);
+}
+
 export function campaignName(slug: string): string {
-  return CAMPAIGN_NAMES[slug] ?? slug;
+  return CAMPAIGN_NAMES[slug] ?? REGISTERED.get(slug) ?? slug;
 }
 
 /**
