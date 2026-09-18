@@ -40,8 +40,13 @@ export function CustomCampaigns() {
         <ol class="steps">
           <li>Download the <code>.vpk</code> below.</li>
           <li>
-            Put it in your <code>left4dead/addons</code> folder. On Windows that is usually{' '}
-            <code>C:\Program Files (x86)\Steam\steamapps\common\left 4 dead\left4dead\addons</code>.
+            Find your game folder: right click <strong>Left 4 Dead</strong> in your Steam library,
+            then <strong>Manage</strong>, then <strong>Browse local files</strong>. That opens the
+            folder Steam actually installed it to, which beats guessing the path.
+          </li>
+          <li>
+            From there, open <code>left4dead</code>, then <code>addons</code>, and put the
+            <code>.vpk</code> in it. Make the <code>addons</code> folder if it is not there.
           </li>
           <li>Restart Left 4 Dead. The campaign loads when a match starts on it.</li>
         </ol>

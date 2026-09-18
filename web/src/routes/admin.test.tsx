@@ -594,7 +594,7 @@ describe('AdminCampaigns', () => {
     });
     render(<Admin session={{ kind: 'active', me }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
-    const toggle = await waitFor(() => screen.getByRole('checkbox', { name: /available for the pool/i }));
+    const toggle = await waitFor(() => screen.getByRole('checkbox', { name: /show to players/i }));
     // No jest-dom matchers are wired into this project's vitest config (see
     // the Integrity tests above using the same pattern), so this checks the
     // DOM property directly rather than via toBeDisabled().
