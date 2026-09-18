@@ -210,6 +210,9 @@ void LeaveTryPause()
 	}
 	int c = LeaveAnyTeamClient(0);
 	if (c == -1) return;
+	// Exempt from the pause budget and the pause ceiling: this is a disconnect,
+	// not a team spending one of its pauses. See pug-pause.inc.
+	PauseAllowInternal();
 	FakeClientCommand(c, "sm_pause");
 	g_bLeavePaused = true;
 }

@@ -560,3 +560,98 @@ separate settings on separate sides of the box and nothing forces them to agree.
 `sm_pug_replay_dir` is relative to the game dir, so `replays` means
 `<gamedir>/left4dead/replays`, and `REPLAY_DIR` must be the absolute path to that
 same directory.
+
+## Pause limits verification
+
+There is no unit harness for SourcePawn in this repo, so this is the test for
+`pug-pause.inc`. Run it solo; two of the steps need a second client, noted
+where they do.
+
+Settings, both live-changeable over rcon:
+
+    R "sm_pug_pause_seconds"   # 120
+    R "sm_pug_pause_limit"     # 3
+
+Shorten the ceiling first so the whole thing takes a minute rather than ten:
+
+    R "sm_pug_pause_seconds 20"
+
+### 1. A pause is charged once, and announced with what is left
+
+With a match live, type `!pause` in chat as a rostered player.
+
+Expect chat: `Team A pause 0:20 max. 2 pauses left this campaign.`
+
+    R "sm_pug_status" | grep pause
+
+Expect `pause limit=3 seconds=20 used_a=1 used_b=0` and a `pause active` line.
+
+- [ ] Charged to the right team, count 1: ____
+
+### 2. The ceiling fires, with warnings
+
+Stay paused and watch chat. At 10 seconds left expect
+`Unpausing in 10 seconds`, then `Team A's pause has run out. Unpausing.` and
+the game resumes on Rotoblin's countdown.
+
+The warning marks are 30 and 10 seconds remaining, so with `seconds 20` only
+the 10 mark can fire. Set `seconds 60` if you want to see both.
+
+- [ ] Unpaused on its own, warning seen, game actually resumed: ____
+
+### 3. `!ready` still ends a pause early
+
+Pause again, then both teams `!ready` before the ceiling. Expect the normal
+Rotoblin unpause. The budget is not refunded: the pause happened.
+
+- [ ] Ended early, `used_a=2`: ____
+
+### 4. The budget runs out and the pause is refused
+
+Spend the third pause, let it expire, then try a fourth.
+
+Expect chat: `Team A has used all 3 pauses for this campaign.` and the game
+does NOT pause. `sm_pug_status` still shows `used_a=3`, not 4.
+
+- [ ] Refused, not charged, game unpaused: ____
+
+### 5. A refused pause does not block the other team
+
+As a Team B player, `!pause`. It must work: the budget is per team.
+
+- [ ] Team B still has its own 3: ____
+
+### 6. A disconnect pause is neither charged nor capped
+
+Needs a second client. With a match live, have a rostered player disconnect.
+The game pauses from `pug-leave.inc`.
+
+Expect: no `Team X pause` line, `used_a` and `used_b` unchanged, and the pause
+does NOT expire after `sm_pug_pause_seconds`. It ends when they reconnect.
+
+- [ ] Not charged, not capped: ____
+
+This is the case most likely to regress, because it depends on
+`PauseAllowInternal()` being called immediately before the leave module's own
+`sm_pause`. If a disconnect ever starts costing a team a pause, that call is
+what to look at.
+
+### 7. The ceiling clock stops while someone is away
+
+Needs a second client. Call a pause, then have a player disconnect while it is
+running. The ceiling must stop counting down until they are back, so a player
+pause cannot expire under someone still loading in.
+
+- [ ] Did not expire while a player was absent: ____
+
+### 8. The budget is per campaign, not per map
+
+Spend a pause, then finish the map and let the next one load. `used_a` must
+still show the pause. Then reset the match (`!load_4v4p` or a new match) and it
+must go back to 0.
+
+- [ ] Survived a map change, cleared on a new match: ____
+
+Put `sm_pug_pause_seconds` back to 120 when you are done:
+
+    R "sm_pug_pause_seconds 120"

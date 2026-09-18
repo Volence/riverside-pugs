@@ -419,6 +419,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	HookEvent("infected_death", Event_InfectedDeath);
 	HookEvent("revive_success", Event_ReviveSuccess);
 	LeaveInit();
+	PauseInit();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -2035,6 +2036,7 @@ public Action Cmd_Status(int args)
 		DumpLine("STATUS map ordinal=%d map=%s a=%d b=%d", i, g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
 	}
 	LeaveStatus();
+	PauseStatus();
 	DumpLine("STATUS end");
 	return Plugin_Handled;
 }
@@ -2112,6 +2114,7 @@ void ResetMatchState()
 	g_iRplMapSeq = 0;
 	g_bRplFirstMapSeen = false;
 	LeaveReset();
+	PauseReset();
 	g_State = MS_None;
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
@@ -3611,3 +3614,5 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 }
 
 #include "pug-leave.inc"
+// After pug-leave.inc: this module reads its pause state and its absence check.
+#include "pug-pause.inc"
