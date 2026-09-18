@@ -37,8 +37,16 @@ describe('match pipeline over HTTP', () => {
     expect(state.lobby.phase).toBe('ready_check');
 
     for (const id of IDS) expect((await post('/api/lobby/ready', id)).statusCode).toBe(200);
-    for (const id of IDS) {
+    // The vote ends the moment the winner cannot be caught, so with everyone
+    // picking the same campaign it is settled on the FIFTH vote: 5 beats the 3
+    // still outstanding. The last three arrive after the lobby has become a
+    // match and are refused, which is the correct answer to a vote in a vote
+    // that is over.
+    for (const id of IDS.slice(0, 5)) {
       expect((await post('/api/lobby/vote', id, { campaign: 'no_mercy' })).statusCode).toBe(200);
+    }
+    for (const id of IDS.slice(5)) {
+      expect((await post('/api/lobby/vote', id, { campaign: 'no_mercy' })).statusCode).toBe(409);
     }
 
     state = (await app.inject({ method: 'GET', url: '/api/state', cookies: cookies[IDS[0]] })).json();
