@@ -223,17 +223,38 @@ public void OnSkeetMagnum(int survivor, int victim, bool isTeamSkeet, bool isHun
 public void OnSkeetGL(int survivor, int victim, bool isTeamSkeet, bool isHunter, bool headshot)
 { CountSkeet(survivor, victim, isTeamSkeet, PS_MAX); }
 
+// A HURT skeet is one where the hunter had already taken damage, so the killing
+// shot did less than a full skeet's worth. It is still a hunter shot out of the
+// air by that survivor, and the owner's ruling (2026-09-18) is that it counts:
+// a skeet does not have to be one clean shot on a full-health hunter.
+//
+// So these now go through CountSkeet like any other, which means they credit
+// skeets or team_skeets, credit the VICTIM with times_skeeted, and emit a feed
+// entry. Before this they set PS_SkeetsHurt alone: no victim credit, no feed
+// entry, and the isTeamSkeet flag the forward provides was thrown away, so a
+// chip skeet shared by two survivors was recorded as neither a skeet nor a team
+// skeet by anyone.
+//
+// PS_SkeetsHurt is still counted alongside, as a breakdown of how many of your
+// skeets were chip ones rather than a separate achievement. Same relationship
+// the weapon columns have to the total.
+static void CountSkeetHurt(int survivor, int victim, bool isTeamSkeet, PugStat weaponStat)
+{
+	CountSkeet(survivor, victim, isTeamSkeet, weaponStat);
+	AddStat(survivor, PS_SkeetsHurt);
+}
+
 public void OnSkeetHurt(int survivor, int victim, int damage, bool isOverkill, bool isTeamSkeet, bool isHunter, bool headshot, int shots)
-{ AddStat(survivor, PS_SkeetsHurt); }
+{ CountSkeetHurt(survivor, victim, isTeamSkeet, PS_MAX); }
 
 public void OnSkeetShotgunHurt(int survivor, int victim, int damage, bool isOverkill, bool isTeamSkeet, bool isHunter, bool headshot, int shots)
-{ AddStat(survivor, PS_SkeetsHurt); }
+{ CountSkeetHurt(survivor, victim, isTeamSkeet, PS_SkeetsShotgun); }
 
 public void OnSkeetSniperHurt(int survivor, int victim, int damage, bool isOverkill, bool isTeamSkeet, bool isHunter, bool headshot, int shots)
-{ AddStat(survivor, PS_SkeetsHurt); }
+{ CountSkeetHurt(survivor, victim, isTeamSkeet, PS_SkeetsSniper); }
 
 public void OnSkeetMeleeHurt(int survivor, int victim, int damage, bool isOverkill, bool isTeamSkeet, bool isHunter, bool headshot)
-{ AddStat(survivor, PS_SkeetsHurt); }
+{ CountSkeetHurt(survivor, victim, isTeamSkeet, PS_SkeetsMelee); }
 
 public void OnTeamSkeetAssist(int victim, int assist, bool isHunter, int damage, int shots)
 { AddStat(assist, PS_SkeetAssists); }
