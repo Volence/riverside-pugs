@@ -93,10 +93,20 @@ export function Maps() {
                               the plugin reported it, which is not the same as
                               nobody surviving. Say so rather than print 0%,
                               and dim a sample too thin to state as a rate. */}
+                          {/* The sample size is PRINTED, not just a hover
+                              title. This column and "Played" have different
+                              denominators (played counts rounds with a usable
+                              clock, this counts rounds with a survival
+                              reading, and the second is much the smaller), so
+                              a bare percentage next to a bare count reads as
+                              a fraction of that count. It is not. */}
                           {(() => {
                             const s = survivalLabel(m.rounds.survivalPct, m.rounds.measured);
                             return (
-                              <td class={`num${s.thin ? ' muted' : ''}`} title={s.sub}>{s.value}</td>
+                              <td class={`num${s.thin ? ' muted' : ''}`}>
+                                {s.value}
+                                {s.sub && <span class="map-survived__sub">{s.sub}</span>}
+                              </td>
                             );
                           })()}
                           <RoundTime sec={m.rounds.fastestSec} />

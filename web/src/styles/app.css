@@ -1460,6 +1460,10 @@ body.is-theater { overflow: hidden; }
 .key__list dd { margin: 0; color: var(--text-muted); }
 @media (max-width: 640px) { .key__list { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } .key__list dd { margin-bottom: var(--sp-2); } }
 
+/* Sample size under a survival percentage. Its own line so a narrow column
+ * does not wrap the number away from what it is over. */
+.map-survived__sub { display: block; font-size: var(--fs-label); color: var(--text-muted); }
+
 .admin-table { width: 100%; }
 /* The SourceTV cell holds a whole form, and .admin-form inputs are sized for a
  * full-width one (flex: 1 1 12rem). Two of those plus Save and Turn off cannot
