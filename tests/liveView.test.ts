@@ -235,14 +235,14 @@ describe('liveView: per-player live stats', () => {
 
   // The live payload is public and has no per-viewer redaction step, so a
   // self-visibility stat must never be able to enter this table at all.
-  it('strips self-visibility stats at the write boundary', () => {
+  // times_skeeted went public on 2026-09-18, so the live table carries it like
+  // any other stat. The write-boundary filter itself is unchanged and still
+  // strips anything marked self-visibility; nothing is marked that way today.
+  it('carries a public stat through the write boundary', () => {
     seedLive();
-    recordLiveStat(db, TOKEN, A[0], { ck: 5, times_skeeted: 3, times_deadstopped: 1 });
+    recordLiveStat(db, TOKEN, A[0], { ck: 5, times_skeeted: 3 });
     const stats = getLiveMatches(db)[0].teamA.find((p) => p.steamid === A[0])!.stats;
-    expect(stats).toEqual({ ck: 5 });
-    // and not merely hidden on read
-    const raw = db.prepare('SELECT stats_json FROM match_live_players').get() as { stats_json: string };
-    expect(raw.stats_json).not.toContain('times_skeeted');
+    expect(stats).toEqual({ ck: 5, times_skeeted: 3 });
   });
 
   it('ignores live stats for a token that is not a live match', () => {

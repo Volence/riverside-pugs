@@ -13,13 +13,18 @@ describe('stat registry', () => {
     expect(statDef('nope')).toBeUndefined();
   });
 
-  it('marks the two negative stats self-only', () => {
-    expect(statDef('times_skeeted')!.visibility).toBe('self');
-    expect(statDef('times_deadstopped')!.visibility).toBe('self');
+  // Owner's call, 2026-09-18: getting skeeted is part of the match, not a
+  // private embarrassment, so it belongs in the main stat list like everything
+  // else. Being high_bad still keeps it off every leaderboard, which is what
+  // the visibility flag was really protecting against.
+  it('shows the negative stats to everyone, while keeping them off leaderboards', () => {
+    expect(statDef('times_skeeted')!.visibility).toBe('public');
+    expect(statDef('times_deadstopped')!.visibility).toBe('public');
+    expect(statDef('times_skeeted')!.direction).toBe('high_bad');
   });
 
-  it('publicStatKeys excludes self-only stats', () => {
-    expect(publicStatKeys()).not.toContain('times_skeeted');
+  it('publicStatKeys now carries them', () => {
+    expect(publicStatKeys()).toContain('times_skeeted');
     expect(publicStatKeys()).toContain('skeets');
   });
 

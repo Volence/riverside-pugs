@@ -72,7 +72,16 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   app.get('/api/leaderboard/stat/:key', async (req, reply) => {
     const { key } = req.params as { key: string };
     const def = statDef(key);
-    if (!def || def.visibility !== 'public') return reply.code(404).send({ error: 'unknown stat' });
+    // Rankability is about DIRECTION, not visibility. Those used to coincide,
+    // because the only high_bad stats were also the only self-visibility ones,
+    // so this gate read `visibility !== 'public'` and happened to be right.
+    // Making times_skeeted public (2026-09-18) separated them and opened a
+    // "most times skeeted" board at this URL. A stat where a high number is
+    // bad is not a ranking, and `standings.ts` already gates on high_good for
+    // the same reason.
+    if (!def || def.visibility !== 'public' || def.direction !== 'high_good') {
+      return reply.code(404).send({ error: 'unknown stat' });
+    }
 
     const q = req.query as { season?: string; limit?: string };
     const seasonId = q.season ? Number(q.season) : currentSeasonId(db);
