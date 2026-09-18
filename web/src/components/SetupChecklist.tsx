@@ -19,7 +19,10 @@ export function SetupChecklist({ me, compact = false }: { me: Me | null; compact
 }
 
 export function Checklist({ me, site, compact }: { me: Me | null; site: SiteInfo; compact?: boolean }) {
-  const member: StepState = !me?.discord ? 'todo' : me.discordMember === true ? 'done' : me.discordMember === false ? 'todo' : 'unknown';
+  // Membership is only knowable once an account is linked, so an unlinked
+  // player gets 'unknown' rather than a todo they cannot clear: telling
+  // someone already in the server to go join it is how this used to read.
+  const member: StepState = !me?.discord ? 'unknown' : me.discordMember === true ? 'done' : me.discordMember === false ? 'todo' : 'unknown';
   const steps: { title: string; body: string; state: StepState; action?: { href: string; label: string; external?: boolean } }[] = [
     {
       title: 'Sign in with Steam',
@@ -29,22 +32,23 @@ export function Checklist({ me, site, compact }: { me: Me | null; site: SiteInfo
     },
   ];
   if (site.discordEnabled) {
+    // Linking comes first: it is the step that makes the next one checkable.
     steps.push(
-      {
-        title: 'Join the Riverside Discord',
-        body: 'Queue pops, match cards and your team voice channel all happen there.',
-        state: member,
-        action: member === 'done' || !site.discordInviteUrl ? undefined : { href: site.discordInviteUrl, label: 'Join the Discord', external: true },
-      },
       {
         title: 'Link your Discord account',
         body: 'So the bot knows which Steam account is you. One click, and you can queue from Discord too.',
         state: me?.discord ? 'done' : 'todo',
         action: me && !me.discord ? { href: '/auth/discord', label: 'Connect Discord' } : undefined,
       },
+      {
+        title: 'Join the Riverside Discord',
+        body: 'Queue pops, match cards and your team voice channel all happen there. Already in it? This ticks itself once your account is linked.',
+        state: member,
+        action: member === 'done' || !site.discordInviteUrl ? undefined : { href: site.discordInviteUrl, label: 'Join the Discord', external: true },
+      },
     );
   }
-  const ready = steps.every((s) => s.state !== 'todo');
+  const ready = steps.every((s) => s.state === 'done');
   return (
     <div class={`checklist${compact ? ' checklist--compact' : ''}`}>
       <ol>
@@ -54,7 +58,13 @@ export function Checklist({ me, site, compact }: { me: Me | null; site: SiteInfo
             <div>
               <p class="checklist__title">{s.title}{s.state === 'done' && <span class="sr-only"> (done)</span>}</p>
               {!compact && <p class="muted">{s.body}</p>}
-              {s.state === 'unknown' && <p class="muted">Could not check the Discord server right now. If you are in it, you are fine.</p>}
+              {s.state === 'unknown' && (
+                <p class="muted">
+                  {me?.discord
+                    ? 'Could not check the Discord server right now. If you are in it, you are fine.'
+                    : 'Link your Discord above and this checks itself.'}
+                </p>
+              )}
               {me?.discord && s.title.startsWith('Link') && <p class="muted">Linked to {me.discord.name}.</p>}
               {s.action && (
                 <a class="btn" href={s.action.href} {...(s.action.external ? { target: '_blank', rel: 'noopener' } : OUT)}>{s.action.label}</a>

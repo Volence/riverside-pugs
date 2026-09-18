@@ -546,6 +546,18 @@ describe('Play', () => {
     expect(screen.queryByPlaceholderText('invite code')).toBeNull();
   });
 
+  it('puts linking before joining the server, and will not claim you are missing from a server it cannot check', async () => {
+    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true });
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null, discordMember: null };
+    const { container } = render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
+    await waitFor(() => screen.getByText('Connect Discord'));
+    const titles = [...container.querySelectorAll('.checklist__title')].map((el) => el.textContent);
+    expect(titles).toEqual(['Sign in with Steam (done)', 'Link your Discord account', 'Join the Riverside Discord']);
+    const server = container.querySelectorAll('.checklist__step')[2];
+    expect(server.classList.contains('is-unknown')).toBe(true);
+    expect(server.textContent).toContain('Link your Discord above');
+  });
+
   it('an active player missing a Discord step sees the checklist instead of Join queue', async () => {
     mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: null, requireDiscord: true });
     render(<QueuePanel count={1} joined={false} players={[]} refresh={noop} queueBlock="link_discord"

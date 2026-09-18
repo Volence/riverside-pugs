@@ -21,7 +21,9 @@ interface VoiceRow {
  * already in some voice channel are moved in; nobody is pulled into voice who
  * was not there. Channels go once the match is over and they are empty, or
  * ten minutes after the end regardless, so a post-game chat is not cut off
- * and an abandoned channel does not linger.
+ * and an abandoned channel does not linger. Anyone still in them at that
+ * point is handed back to where they came from, or to the lobby, rather than
+ * dropped out of voice with the channel.
  */
 export class VoiceChannels implements VoiceHook {
   /** Matches whose creation failed in this process. Not retried every 15 s
@@ -53,10 +55,15 @@ export class VoiceChannels implements VoiceHook {
       );
       db.prepare('INSERT INTO discord_voice (match_id, category_id, team_a_id, team_b_id) VALUES (?, ?, ?, ?)')
         .run(matchId, made.categoryId, made.teamAId, made.teamBId);
+      const remember = db.prepare('INSERT OR REPLACE INTO discord_voice_origin (match_id, user_id, channel_id) VALUES (?, ?, ?)');
       for (const [team, channel] of [['a', made.teamAId], ['b', made.teamBId]] as const) {
         for (const userId of ids(team)) {
           try {
-            if (await voice.memberVoiceChannel(userId)) await voice.move(userId, channel);
+            const from = await voice.memberVoiceChannel(userId);
+            if (!from) continue;
+            // Remembered before the move, so the sweep can hand them back.
+            remember.run(matchId, userId, from);
+            await voice.move(userId, channel);
           } catch (err) {
             console.error(`[discord] moving ${userId} into team voice failed:`, err);
           }
@@ -74,6 +81,52 @@ export class VoiceChannels implements VoiceHook {
       'SELECT team_a_id, team_b_id FROM discord_voice WHERE match_id = ? AND deleted_at IS NULL',
     ).get(matchId) as { team_a_id: string; team_b_id: string } | undefined;
     return row ? { teamAId: row.team_a_id, teamBId: row.team_b_id } : null;
+  }
+
+  /**
+   * Hand everyone still sitting in the team channels back before those
+   * channels vanish: the channel they were pulled out of, else the configured
+   * lobby. Discord drops anyone left in a deleted voice channel out of voice
+   * altogether, which is a rude way to end a post-game conversation.
+   *
+   * Never throws and never blocks the delete: a match whose channels outlive
+   * their cleanup is worse than a player who has to rejoin voice by hand.
+   */
+  private async disperse(r: VoiceRow): Promise<void> {
+    const { db, voice } = this.deps;
+    const lobby = getSetting(db, 'discord_lobby_channel_id') || null;
+    const origins = new Map(
+      (db.prepare('SELECT user_id, channel_id FROM discord_voice_origin WHERE match_id = ?').all(r.match_id) as
+        { user_id: string; channel_id: string }[]).map((o) => [o.user_id, o.channel_id] as const),
+    );
+    const doomed = new Set([r.team_a_id, r.team_b_id, r.category_id]);
+    let stranded = 0;
+    for (const channelId of [r.team_a_id, r.team_b_id]) {
+      const members = await voice.channelMemberIds(channelId).catch(() => null);
+      for (const userId of members ?? []) {
+        const origin = origins.get(userId);
+        // An origin inside this match is no help: it is about to go as well.
+        const targets = [origin && !doomed.has(origin) ? origin : null, lobby].filter((c): c is string => !!c);
+        let moved = false;
+        for (const target of targets) {
+          try {
+            await voice.move(userId, target);
+            moved = true;
+            break;
+          } catch (err) {
+            console.error(`[discord] returning ${userId} to ${target} failed:`, err);
+          }
+        }
+        if (!moved) stranded++;
+      }
+    }
+    if (stranded > 0) {
+      publishAdminEvent({
+        kind: 'problem',
+        matchId: r.match_id,
+        text: `Could not return ${stranded} player${stranded === 1 ? '' : 's'} to a voice channel when match #${r.match_id}'s channels were removed; they were dropped out of voice. Check the lobby channel id and the bot's Move Members permission.`,
+      });
+    }
   }
 
   async sweep(): Promise<void> {
@@ -95,8 +148,10 @@ export class VoiceChannels implements VoiceHook {
         const empty = (a ?? 0) === 0 && (b ?? 0) === 0;
         const overdue = now - Date.parse(r.ended_at) >= FORCE_DELETE_MS;
         if (!empty && !overdue) continue;
+        if (!empty) await this.disperse(r);
         for (const id of [r.team_a_id, r.team_b_id, r.category_id]) await voice.deleteChannel(id);
         db.prepare('UPDATE discord_voice SET deleted_at = ? WHERE match_id = ?').run(new Date(now).toISOString(), r.match_id);
+        db.prepare('DELETE FROM discord_voice_origin WHERE match_id = ?').run(r.match_id);
       } catch (err) {
         console.error(`[discord] cleaning up voice for match ${r.match_id} failed:`, err);
       }

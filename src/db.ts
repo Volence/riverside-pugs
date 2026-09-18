@@ -328,6 +328,15 @@ CREATE TABLE IF NOT EXISTS discord_voice (
   ended_at TEXT,
   deleted_at TEXT
 );
+-- Where each player was sitting when the bot pulled them into a team channel,
+-- so the sweep can put them back rather than dropping them out of voice when
+-- it deletes the channels.
+CREATE TABLE IF NOT EXISTS discord_voice_origin (
+  match_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  PRIMARY KEY (match_id, user_id)
+);
 -- Admin panel. Every mutation writes admin_actions. Ban and note timestamps
 -- are ISO strings written by the app, so expiry is testable with a clock.
 CREATE TABLE IF NOT EXISTS admin_actions (
@@ -406,6 +415,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_required_role_id: '',
   // 1: the bot makes Team A / Team B voice channels per match and moves players in.
   discord_voice_enabled: '1',
+  // Where the sweep drops anyone still in a team channel who was not pulled
+  // out of one of their own. Empty means leave them where they are, which
+  // Discord turns into being dropped out of voice when the channel goes.
+  discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
   require_discord_to_queue: '1',
   discord_invite_url: '',

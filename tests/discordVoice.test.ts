@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
@@ -82,6 +83,92 @@ describe('VoiceChannels', () => {
     expect(t.channels.has(ids.teamAId)).toBe(false);
     expect(t.channels.has(ids.teamBId)).toBe(false);
     expect(v.channelsFor(matchId)).toBeNull();
+  });
+
+  describe('handing players back before the channels go', () => {
+    /** Park a real channel in the fake for someone to have come from. */
+    const parkIn = (userId: string, channelId: string) => {
+      if (!t.channels.has(channelId)) t.channels.set(channelId, { name: channelId, members: new Set(), allowed: [] });
+      t.channels.get(channelId)!.members.add(userId);
+      t.voiceOf.set(userId, channelId);
+    };
+
+    /** Finish the match and run the sweep past the ten minute force. */
+    const endAndForce = async () => {
+      db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(matchId);
+      await v.sweep();
+      clock += 11 * 60 * 1000;
+      await v.sweep();
+    };
+
+    it('returns each player to the channel they were pulled out of', async () => {
+      parkIn('900', 'general');
+      parkIn('905', 'chill');
+      await v.ensure(matchId);
+      t.moves.length = 0;
+
+      await endAndForce();
+
+      expect(t.moves).toEqual([{ userId: '900', channelId: 'general' }, { userId: '905', channelId: 'chill' }]);
+      expect(t.channels.get('general')!.members.has('900')).toBe(true);
+      expect(t.channels.get('chill')!.members.has('905')).toBe(true);
+    });
+
+    it('sends a player with no remembered origin to the configured lobby', async () => {
+      setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
+      await v.ensure(matchId);
+      // Walked into the team channel on their own, so nothing was remembered.
+      const ids = v.channelsFor(matchId)!;
+      t.channels.get(ids.teamAId)!.members.add('901');
+
+      await endAndForce();
+
+      expect(t.moves).toEqual([{ userId: '901', channelId: 'main-lobby' }]);
+    });
+
+    it('falls back to the lobby when the channel they came from is gone', async () => {
+      setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
+      parkIn('900', 'general');
+      await v.ensure(matchId);
+      t.channels.delete('general');
+      t.moves.length = 0;
+
+      await endAndForce();
+
+      expect(t.moves).toEqual([{ userId: '900', channelId: 'main-lobby' }]);
+    });
+
+    it('deletes the channels anyway when nobody can be moved, and tells the admins once', async () => {
+      const events: AdminEvent[] = [];
+      const off = subscribeAdminEvents((e) => events.push(e));
+      try {
+        parkIn('900', 'general');
+        parkIn('901', 'general');
+        await v.ensure(matchId);
+        t.channels.delete('general'); // and no lobby configured
+        const ids = v.channelsFor(matchId)!;
+
+        await endAndForce();
+
+        expect(t.channels.has(ids.teamAId)).toBe(false);
+        expect(t.channels.has(ids.teamBId)).toBe(false);
+        expect(v.channelsFor(matchId)).toBeNull();
+        const problems = events.filter((e) => e.kind === 'problem');
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatchObject({ kind: 'problem', matchId });
+      } finally {
+        off();
+      }
+    });
+
+    it('moves nobody when the channels are already empty', async () => {
+      await v.ensure(matchId);
+      t.moves.length = 0;
+      await endAndForce();
+      expect(t.moves).toEqual([]);
+    });
   });
 
   it('deletes straight away when both are empty after the end, and treats hand-deleted channels as gone', async () => {

@@ -88,6 +88,8 @@ export interface VoiceOps {
   move(userId: string, channelId: string): Promise<void>;
   /** Members currently in the channel; null when the channel no longer exists. */
   channelMemberCount(channelId: string): Promise<number | null>;
+  /** Who is currently in the channel; null when it no longer exists. */
+  channelMemberIds(channelId: string): Promise<string[] | null>;
   deleteChannel(channelId: string): Promise<void>;
 }
 

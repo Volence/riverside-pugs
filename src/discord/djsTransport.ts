@@ -160,6 +160,11 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       if (!ch) return null;
       return 'members' in ch && ch.type === ChannelType.GuildVoice ? ch.members.size : 0;
     },
+    async channelMemberIds(channelId) {
+      const ch = await channelById(channelId);
+      if (!ch) return null;
+      return 'members' in ch && ch.type === ChannelType.GuildVoice ? [...ch.members.keys()] : [];
+    },
     async deleteChannel(channelId) {
       const ch = await channelById(channelId);
       await ch?.delete().catch((err: unknown) => {
