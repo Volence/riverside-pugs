@@ -19,6 +19,7 @@ const { mockApi } = vi.hoisted(() => ({
     match: vi.fn(),
     map: vi.fn(),
     maps: vi.fn(),
+    live: vi.fn(),
     profile: vi.fn(),
     queue: vi.fn(),
     linkDiscordCode: vi.fn(),
@@ -39,6 +40,7 @@ const { MapDetail } = await import('./MapDetail');
 const { Maps } = await import('./Maps');
 const { Profile } = await import('./Profile');
 const { Play, QueuePanel } = await import('./Play');
+const { Live } = await import('./Live');
 const { LinkDiscord } = await import('./LinkDiscord');
 const { LocationProvider } = await import('preact-iso');
 
@@ -484,6 +486,16 @@ describe('skill stats display', () => {
 
 describe('Play', () => {
   const noop = () => {};
+
+  // The signed-out landing block below the hero pulls live, matches and the
+  // leaderboard. These tests are about the sign-in box, so default them all to
+  // empty: Landing then renders nothing and the assertions below are unchanged
+  // by its presence. Its own behaviour is covered in the Landing block.
+  beforeEach(() => {
+    mockApi.live.mockResolvedValue({ matches: [] });
+    mockApi.matches.mockResolvedValue({ matches: [] });
+    mockApi.leaderboard.mockResolvedValue({ rows: [], seasonId: 1 });
+  });
 
   it('offers Steam sign-in when logged out', () => {
     render(<Play session={{ kind: 'anonymous' }} state={null} refresh={noop} />);
@@ -1302,5 +1314,160 @@ describe('loading state', () => {
     const { container } = render(<Maps />);
     await waitFor(() => expect(container.querySelector('[aria-busy="true"]')).toBeNull());
     expect(container.querySelectorAll('.skel__bar').length).toBe(0);
+  });
+});
+
+describe('signed-out landing', () => {
+  const anon = { kind: 'anonymous' } as const;
+  const noop = () => {};
+
+  beforeEach(() => {
+    mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
+    mockApi.live.mockResolvedValue({ matches: [] });
+    mockApi.matches.mockResolvedValue({ matches: [] });
+    mockApi.leaderboard.mockResolvedValue({ rows: [], seasonId: 1 });
+  });
+
+  it('shows recent results and the top of the ladder to a visitor who is not signed in', async () => {
+    mockApi.matches.mockResolvedValue({
+      matches: [
+        { id: 9, campaign: 'dead_air', endedAt: '2026-09-17T08:00:00Z', teamAScore: 1130, teamBScore: 1364, winner: 'b' },
+        { id: 8, campaign: 'no_mercy', endedAt: '2026-09-17T07:00:00Z', teamAScore: 900, teamBScore: 400, winner: 'a' },
+      ],
+    });
+    mockApi.leaderboard.mockResolvedValue({
+      seasonId: 1,
+      rows: [
+        { steamid: '1', name: 'Bone Breaker', avatar: null, sr: 1931, wins: 16, losses: 7, games: 23, ranked: true },
+        { steamid: '2', name: 'happy', avatar: null, sr: 1508, wins: 9, losses: 3, games: 12, ranked: true },
+      ],
+    });
+    render(<Play session={anon} state={null} refresh={noop} />);
+
+    await waitFor(() => expect(screen.getByText('Recent matches')).toBeTruthy());
+    expect(screen.getByText('1130 - 1364')).toBeTruthy();
+    expect(screen.getByText('Top rated')).toBeTruthy();
+    expect(screen.getByText('Bone Breaker')).toBeTruthy();
+    expect(screen.getByText('1931')).toBeTruthy();
+    // The sign-in box is still the main event.
+    expect(screen.getByText(/sign in through steam/i)).toBeTruthy();
+  });
+
+  it('keeps provisional players off the top-rated list', async () => {
+    mockApi.leaderboard.mockResolvedValue({
+      seasonId: 1,
+      rows: [
+        { steamid: '1', name: 'Newcomer', avatar: null, sr: 2400, wins: 2, losses: 0, games: 2, ranked: false },
+        { steamid: '2', name: 'Regular', avatar: null, sr: 1200, wins: 9, losses: 9, games: 18, ranked: true },
+      ],
+    });
+    render(<Play session={anon} state={null} refresh={noop} />);
+    await waitFor(() => expect(screen.getByText('Top rated')).toBeTruthy());
+    expect(screen.getByText('Regular')).toBeTruthy();
+    expect(screen.queryByText('Newcomer')).toBeNull();
+  });
+
+  it('renders no empty section headings on a brand new install', async () => {
+    render(<Play session={anon} state={null} refresh={noop} />);
+    await waitFor(() => expect(screen.getByText(/sign in through steam/i)).toBeTruthy());
+    expect(screen.queryByText('Recent matches')).toBeNull();
+    expect(screen.queryByText('Top rated')).toBeNull();
+    expect(screen.queryByText('Live now')).toBeNull();
+  });
+
+  it('leads with a live match when one is running', async () => {
+    mockApi.live.mockResolvedValue({
+      matches: [{ id: 12, campaign: 'blood_harvest', teamAScore: 300, teamBScore: 250, maps: [], players: [], events: [] }],
+    });
+    render(<Play session={anon} state={null} refresh={noop} />);
+    await waitFor(() => expect(screen.getByText('Live now')).toBeTruthy());
+    expect(screen.getByText('Blood Harvest')).toBeTruthy();
+    expect(screen.getByText('300 - 250')).toBeTruthy();
+  });
+});
+
+describe('Live with nothing running', () => {
+  beforeEach(() => {
+    mockApi.live.mockResolvedValue({ matches: [] });
+    mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
+    mockApi.matches.mockResolvedValue({ matches: [] });
+  });
+
+  it('offers the queue and the last match instead of dead-ending', async () => {
+    mockApi.queue.mockResolvedValue({ count: 5, players: [], phase: null });
+    mockApi.matches.mockResolvedValue({
+      matches: [{ id: 9, campaign: 'dead_air', endedAt: '2026-09-17T08:00:00Z', teamAScore: 1130, teamBScore: 1364, winner: 'b' }],
+    });
+    render(<Live me={null} />);
+    await waitFor(() => expect(screen.getByText(/nothing being played/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Last match')).toBeTruthy());
+    expect(screen.getByText('5 of 8')).toBeTruthy();
+    expect(screen.getByText('Dead Air')).toBeTruthy();
+    expect(screen.getByText(/how to play/i)).toBeTruthy();
+  });
+
+  it('says the queue is empty rather than showing 0 of 8', async () => {
+    render(<Live me={null} />);
+    await waitFor(() => expect(screen.getByText(/the queue is empty/i)).toBeTruthy());
+    expect(screen.queryByText('Last match')).toBeNull();
+  });
+});
+
+describe('leaderboard stat leaders', () => {
+  const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
+  const row = (steamid: string, name: string, stats: Record<string, number>) =>
+    ({ steamid, name, avatar: null, sr: 1200, wins: 5, losses: 5, games: 10, ranked: true, stats });
+
+  beforeEach(() => {
+    mockApi.seasons.mockResolvedValue({ seasons: [] });
+  });
+
+  it('names the leader of each featured stat above the table', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([
+      row('1', 'alice', { skeets: 10, tank_damage: 50000 }),
+      row('2', 'bob', { skeets: 25, tank_damage: 1000 }),
+    ]));
+    render(<Leaderboard me={null} />);
+    // By title, not by text: "Skeets" also appears as a header Figure and as a
+    // table column, so getByText finds three.
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Skeets')).toBeTruthy());
+
+    const card = screen.getByTitle('Sort the table by Skeets');
+    expect(within(card).getByText('bob')).toBeTruthy();
+    expect(within(card).getByText('25')).toBeTruthy();
+
+    const tank = screen.getByTitle('Sort the table by Tank damage');
+    expect(within(tank).getByText('alice')).toBeTruthy();
+    expect(within(tank).getByText('50,000')).toBeTruthy();
+  });
+
+  it('shows no card for a stat nobody has scored', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([row('1', 'alice', { skeets: 3 })]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Skeets')).toBeTruthy());
+    expect(screen.queryByTitle('Sort the table by Crowns')).toBeNull();
+    expect(screen.queryByTitle('Sort the table by Tank damage')).toBeNull();
+  });
+
+  it('shows no cards at all on a season with no stats', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([
+      { steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 1, losses: 0, games: 1, ranked: false },
+    ]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Leaderboard')).toBeTruthy());
+    expect(screen.queryByTitle('Sort the table by Skeets')).toBeNull();
+  });
+
+  it('clicking a card sorts the table by that stat', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([
+      row('1', 'alice', { skeets: 10 }),
+      row('2', 'bob', { skeets: 25 }),
+    ]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Skeets')).toBeTruthy());
+    const card = screen.getByTitle('Sort the table by Skeets');
+    expect(card.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(card);
+    await waitFor(() => expect(card.getAttribute('aria-pressed')).toBe('true'));
   });
 });

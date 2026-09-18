@@ -109,6 +109,29 @@ describe('admin matches', () => {
     expect((db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId) as { status: string }).status).toBe('idle');
   });
 
+  it('enable and disable a server, which the overview reports', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const flagOf = async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin });
+      return res.json().servers.find((s: { id: number }) => s.id === serverId).enabled;
+    };
+    expect(await flagOf()).toBe(1);
+
+    expect((await post(`/api/admin/servers/${serverId}/enabled`, { enabled: false })).statusCode).toBe(200);
+    expect(await flagOf()).toBe(0);
+    // Status is untouched: disabling is about eligibility, not lifecycle.
+    expect((db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId) as { status: string }).status).toBe('idle');
+
+    expect((await post(`/api/admin/servers/${serverId}/enabled`, { enabled: true })).statusCode).toBe(200);
+    expect(await flagOf()).toBe(1);
+  });
+
+  it('rejects a non-boolean enabled and an unknown server', async () => {
+    const serverId = addServer(db, { name: 's1', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    expect((await post(`/api/admin/servers/${serverId}/enabled`, { enabled: 'no' })).statusCode).toBe(400);
+    expect((await post('/api/admin/servers/9999/enabled', { enabled: false })).statusCode).toBe(404);
+  });
+
   it('remove a player from the queue', async () => {
     await app.inject({ method: 'POST', url: '/api/queue/join', cookies: authedCookie(app, db, IDS[3]) });
     expect((await post('/api/admin/queue/remove', { steamid: IDS[3] })).statusCode).toBe(200);
@@ -117,7 +140,7 @@ describe('admin matches', () => {
 
   it('non-admins are refused', async () => {
     const user = authedCookie(app, db, IDS[5]);
-    for (const url of ['/api/admin/matches/1/void', '/api/admin/matches/1/abort', '/api/admin/servers/1/idle', '/api/admin/queue/remove']) {
+    for (const url of ['/api/admin/matches/1/void', '/api/admin/matches/1/abort', '/api/admin/servers/1/idle', '/api/admin/servers/1/enabled', '/api/admin/queue/remove']) {
       expect((await app.inject({ method: 'POST', url, cookies: user, payload: {} })).statusCode, url).toBe(403);
     }
     expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: user })).statusCode).toBe(403);

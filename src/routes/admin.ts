@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
-import { getServer } from '../serverPool.js';
+import { getServer, setEnabled } from '../serverPool.js';
 import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
 import { getSetting, setSetting } from '../settings.js';
@@ -175,6 +175,24 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
     releaser.release(id);
     logAdmin(db, adminId, 'server_idle', id);
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /** Take a server in or out of the matchmaker's pool.
+   *
+   *  Separate from /idle, which changes where a box is in a match's lifecycle.
+   *  This changes whether it is eligible at all, and deliberately leaves a
+   *  running match alone: disabling mid-match lets that match finish. */
+  app.post('/api/admin/servers/:id/enabled', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
+    const { enabled } = (req.body ?? {}) as { enabled?: unknown };
+    if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled must be true or false' });
+    setEnabled(db, id, enabled);
+    logAdmin(db, adminId, enabled ? 'server_enable' : 'server_disable', id);
     broadcast('refresh');
     return { ok: true };
   });

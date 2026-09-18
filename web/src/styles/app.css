@@ -1558,3 +1558,59 @@ body.is-theater { overflow: hidden; }
 
 /* 404: the ways onward, as a row of chips that wraps on a phone. */
 .notfound__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
+
+/* The Live page with nothing running: the queue line and the last result. */
+.nothinglive__queue { margin: var(--sp-3) 0 0; }
+.nothinglive__last { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); }
+
+/* ---------- signed-out landing ---------- */
+
+/* Sections below the sign-in hero, showing a first-time visitor that matches
+   actually happen here. Compact on purpose: this is a trailer, not the page. */
+.landing__live { border-left: 3px solid var(--accent); }
+.landing__liveline { margin: var(--sp-2) 0; font-size: var(--fs-lg, 1.1rem); }
+.landing__table { font-size: var(--fs-dense); }
+.landing__table td { padding: var(--sp-2) var(--sp-3) var(--sp-2) 0; }
+.landing__table tr:last-child td { border-bottom: none; }
+
+/* ---------- season stat leaders ---------- */
+
+/* A row of cards above the leaderboard: who leads each featured stat. Each is
+   a button that sorts the table by that stat, which is how a reader discovers
+   the columns are sortable at all. */
+.statleaders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
+}
+
+.statleader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3);
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  cursor: pointer;
+}
+.statleader:hover { background: var(--surface-2); border-left-color: var(--accent); }
+.statleader:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.statleader.is-active { border-left-color: var(--accent); background: var(--surface-2); }
+
+.statleader__label { color: var(--text-muted); }
+.statleader__name {
+  font-family: var(--font-display, inherit);
+  font-size: 1.05rem;
+  /* One long name must not stretch the grid column. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.statleader__value { font-size: 1.35rem; line-height: 1.1; color: var(--rating, var(--text)); }
+.statleader__rest {
+  font-size: var(--fs-dense);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

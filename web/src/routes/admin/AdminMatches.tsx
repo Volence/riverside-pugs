@@ -45,12 +45,30 @@ export function AdminMatches() {
           <h3>Servers</h3>
           {data.servers.length === 0 ? <Empty>No servers.</Empty> : (
             <table class="admin-table">
-              <thead><tr><th>Server</th><th>Status</th><th>SourceTV</th><th /></tr></thead>
+              <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>SourceTV</th><th /></tr></thead>
               <tbody>
                 {data.servers.map((s) => (
-                  <tr key={s.id}>
+                  <tr key={s.id} class={s.enabled === 1 ? undefined : 'is-dim'}>
                     <td>{s.name} <span class="muted mono">{s.host}:{s.port}</span></td>
                     <td><span class={`admin-status admin-status--${s.status}`}>{s.status}</span></td>
+                    {/* Eligibility, not lifecycle. A disabled box keeps whatever
+                        status it has and simply stops being claimed, so a match
+                        already on it plays out untouched. */}
+                    <td>
+                      {s.enabled === 1 ? (
+                        <button class="chip" disabled={busy}
+                          onClick={() => run(
+                            () => adminApi.serverEnabled(s.id, false),
+                            `Take ${s.name} out of the pool? Any match already on it finishes normally; it just will not be picked for the next one.`,
+                          )}>Take out</button>
+                      ) : (
+                        <>
+                          <span class="admin-status admin-status--offline">out of pool</span>
+                          <button class="chip" disabled={busy}
+                            onClick={() => run(() => adminApi.serverEnabled(s.id, true))}>Put back</button>
+                        </>
+                      )}
+                    </td>
                     <td><SourceTvCell server={s} busy={busy} run={run} /></td>
                     <td>{s.status !== 'idle' && (
                       <button class="chip" disabled={busy}

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type LiveEvent, type LiveMatch, type LivePlayer } from '../api';
 import {
-  campaignName, deriveLiveStats, fmtBytes, labelFor, liveGroupStarts, mapName, orderLiveStatKeys,
+  campaignName, deriveLiveStats, fmtBytes, fmtDate, labelFor, liveGroupStarts, mapName,
+  orderLiveStatKeys, winnerLabel,
 } from '../format';
+import { useFetch } from '../hooks/useFetch';
+import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
@@ -53,7 +56,7 @@ export function Live({ me }: { me: string | null }) {
       <PageHeader eyebrow="Right now" title="Live" />
 
       {matches.length === 0 ? (
-        <Panel><Empty>Nothing being played right now.</Empty></Panel>
+        <NothingLive />
       ) : (
         <div class="stack">
           {matches.map((m) => <LiveCard key={m.id} m={m} me={me} />)}
@@ -171,3 +174,54 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
   );
 }
 
+
+
+/**
+ * What the Live page shows when no match is running, which is most of the time.
+ *
+ * "Nothing being played right now." was a dead end: true, and no reason to
+ * still be on the page. This is the same fact plus the two things a reader
+ * actually wants next, which is whether a game is close to starting and what
+ * the last one was.
+ *
+ * Fetched here rather than lifted into Live, so the polling loop above is not
+ * made to carry data it never uses while a match IS live.
+ */
+function NothingLive() {
+  const { data: queue } = useFetch((s) => api.queue(s), []);
+  const { data: recent } = useFetch((s) => api.matches(s), []);
+  const last = recent?.matches?.[0] ?? null;
+
+  return (
+    <div class="stack">
+      <Panel>
+        <Empty>Nothing being played right now.</Empty>
+        {queue && (
+          <p class="nothinglive__queue">
+            {queue.count === 0
+              ? <>The queue is empty. <a href="/">Join it</a> and it starts filling.</>
+              : <><strong>{queue.count} of {QUEUE_SIZE}</strong> in the queue right now. <a href="/">Join</a>{queue.count >= QUEUE_SIZE - 2 ? ' and it pops.' : '.'}</>}
+          </p>
+        )}
+        <p class="muted">
+          New here? <a href="/how-to-play">How to play</a> walks through linking your
+          account and joining your first game.
+        </p>
+      </Panel>
+
+      {last && (
+        <Panel>
+          <h3>Last match</h3>
+          <p class="nothinglive__last">
+            <a href={`/match/${last.id}`}>{campaignName(last.campaign)}</a>
+            {' · '}
+            <span class="num">{last.teamAScore} - {last.teamBScore}</span>
+            {last.winner ? <> · {winnerLabel(last.winner)}</> : null}
+            {last.endedAt ? <span class="muted"> · {fmtDate(last.endedAt)}</span> : null}
+          </p>
+          <p class="muted"><a href="/matches">All recent matches</a> · <a href="/leaderboard">Leaderboard</a></p>
+        </Panel>
+      )}
+    </div>
+  );
+}
