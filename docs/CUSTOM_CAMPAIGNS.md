@@ -87,6 +87,23 @@ the admin panel's install list shows for that server, so a missing column
 reads as a red row in the panel, not as a campaign that looks installed
 everywhere when it is not.
 
+**Confirm the actual server names before running anything below.** A SQLite
+`UPDATE ... WHERE name = 'Dallas'` that matches no row is a silent no-op: no
+error, no changed rows, and `addons_dir` stays `NULL` on whichever row you
+meant to fill in. That surfaces much later as a campaign that looks
+poolable everywhere else and simply never leaves `pending`, which is a much
+harder thing to trace back to a typo'd name than catching it here. Open the
+shell and check first:
+
+    ssh root@45.32.199.85 'sqlite3 /home/pug/app/data/pug.db'
+
+```sql
+SELECT id, name FROM servers;
+```
+
+Match the `WHERE name = '...'` clauses below against what that actually
+prints, not against the names used here as examples.
+
 ### Dallas (local filesystem)
 
 Dallas runs the web app itself, so its transport is a plain file copy into
