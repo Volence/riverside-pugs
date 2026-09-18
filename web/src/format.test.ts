@@ -413,6 +413,15 @@ describe('survivalLabel', () => {
     expect(survivalLabel(100, 1).value).toBe('1 round');
   });
 
+  // Raised from 4 to 6 on 2026-09-18. Four rounds of a coin flip is not a
+  // rate, and the Greenhouse sat at exactly 4 reading a confident "50%".
+  it('refuses to state a rate over four rounds, which reads far surer than it is', () => {
+    expect(survivalLabel(50, 4).thin).toBe(true);
+    expect(survivalLabel(50, 4).value).toBe('4 rounds');
+    expect(survivalLabel(50, 6).thin).toBe(false);
+    expect(survivalLabel(50, 6).value).toBe('50%');
+  });
+
   it('states the rate with its sample size once there is enough', () => {
     const s = survivalLabel(75, MIN_SURVIVAL_SAMPLE);
     expect(s.value).toBe('75%');
