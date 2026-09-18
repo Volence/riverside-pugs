@@ -5,7 +5,7 @@ import { getPlayer, playerByDiscordId } from '../players.js';
 import { getReport, resolveReport } from '../reports.js';
 import { activeTimeout } from '../penalties.js';
 import { logAdmin } from '../admin/audit.js';
-import { CAMPAIGNS } from '../campaigns.js';
+import { campaignDisplayName } from '../campaignRegistry.js';
 import { escapeName } from './presenter.js';
 import { getMessage, saveMessage } from './messageStore.js';
 import type { BotInteraction, BotTransport, InteractionReply, MessagePayload } from './transport.js';
@@ -78,7 +78,7 @@ export class AdminFeedPoster {
   private reportCard(id: number): MessagePayload | null {
     const r = getReport(this.deps.db, id);
     if (!r) return null;
-    const match = `[#${r.matchId}${r.campaign ? ` ${CAMPAIGNS[r.campaign]?.name ?? r.campaign}` : ''}](${this.deps.publicUrl}/match/${r.matchId})`;
+    const match = `[#${r.matchId}${r.campaign ? ` ${campaignDisplayName(this.deps.db, r.campaign)}` : ''}](${this.deps.publicUrl}/match/${r.matchId})`;
     const lines = [
       `**${escapeName(r.targetName ?? r.targetId)}** reported for **${r.category}** by ${escapeName(r.reporterName ?? r.reporterId)} in ${match}`,
     ];

@@ -1,4 +1,6 @@
 import { render } from 'preact';
+import { api } from './api';
+import { setCampaignNames } from './format';
 import { LocationProvider, Route, Router, useLocation } from 'preact-iso';
 import { useLiveState } from './hooks/useLiveState';
 import { Nav } from './components/Nav';
@@ -88,6 +90,15 @@ function App() {
     </>
   );
 }
+
+// Campaign display names, fetched once and registered before anything asks for
+// one. Not awaited: a slow or failed request must not stop the site rendering,
+// and campaignName already falls back to the slug, which is exactly what every
+// custom campaign showed before this existed. Failure is therefore a cosmetic
+// regression to the old behaviour rather than a broken page.
+api.campaignNames()
+  .then((r) => setCampaignNames(r.names))
+  .catch(() => { /* slugs it is */ });
 
 render(
   <LocationProvider>

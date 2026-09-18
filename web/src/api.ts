@@ -696,6 +696,8 @@ export const api = {
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[] }>('/api/maps', signal),
+  campaignNames: (signal?: AbortSignal) =>
+    get<{ names: Record<string, string> }>('/api/campaigns/names', signal),
   customCampaigns: (signal?: AbortSignal) =>
     get<{ campaigns: CustomCampaignRow[] }>('/api/campaigns/custom', signal),
   replayLive: (token: string, signal?: AbortSignal) =>

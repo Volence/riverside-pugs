@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { QUEUE_SIZE } from '../queue.js';
-import { CAMPAIGNS } from '../campaigns.js';
+import { campaignDisplayName } from '../campaignRegistry.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
@@ -67,7 +67,8 @@ const FIXED_LABELS: Record<string, string> = {
 };
 const standingLabel = (key: string) => FIXED_LABELS[key] ?? `${statDef(key)?.label ?? key} / match`;
 
-const campaign = (slug: string) => CAMPAIGNS[slug]?.name ?? slug;
+// Module scope, so it takes the db explicitly rather than closing over one.
+const campaign = (db: DB, slug: string) => campaignDisplayName(db, slug);
 
 type Cmd = Extract<BotInteraction, { kind: 'command' }>;
 
@@ -128,7 +129,7 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   const recentLines = recent.slice(0, 5).map((m) => {
     const r = m.result === 'win' ? 'W' : m.result === 'loss' ? 'L' : 'D';
     const sr = m.srDelta ? ` (${m.srDelta > 0 ? '+' : ''}${m.srDelta})` : '';
-    return `\`${r}\` [${campaign(m.campaign)} ${m.teamAScore}-${m.teamBScore}](${deps.publicUrl}/match/${m.id})${sr}`;
+    return `\`${r}\` [${campaign(deps.db, m.campaign)} ${m.teamAScore}-${m.teamBScore}](${deps.publicUrl}/match/${m.id})${sr}`;
   });
   if (recentLines.length) fields.push({ name: 'Recent matches', value: recentLines.join('\n') });
 
@@ -171,7 +172,7 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
       .map((m) => ({ ...m, extra: m.winner === 'draw' ? ' · draw' : ` · Team ${m.winner.toUpperCase()} won` }));
   }
   const body = rows.length
-    ? rows.map((m) => `[#${m.id} ${campaign(m.campaign)} ${m.teamAScore}-${m.teamBScore}](${deps.publicUrl}/match/${m.id})${m.extra}`).join('\n')
+    ? rows.map((m) => `[#${m.id} ${campaign(deps.db, m.campaign)} ${m.teamAScore}-${m.teamBScore}](${deps.publicUrl}/match/${m.id})${m.extra}`).join('\n')
     : 'No finished matches yet.';
   return pub({ embeds: [{ title, url: `${deps.publicUrl}/matches`, color: COLOR, description: body }] });
 }
