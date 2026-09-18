@@ -1,4 +1,6 @@
 import { pruneDemos } from './demoPrune.js';
+import { sweepDemos } from './demoOffload.js';
+import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
@@ -183,6 +185,13 @@ export async function finishWithRetry(
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+
+  // Null unless all five R2 variables are set, which turns the whole offload
+  // off: demos then stay on disk and are served from there, exactly as before.
+  // Read once here rather than per request so a half-edited .env cannot change
+  // behaviour mid-process.
+  const r2 = r2FromEnv();
+  if (r2) console.log(`[demoOffload] R2 configured: bucket ${r2.bucket}`);
 
   // logger: false above means Fastify's own default error handler is the only
   // thing that would otherwise put err.message on the wire in a 500 body. For
@@ -551,6 +560,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 24 * 60 * 60 * 1000);
   pruneTimer.unref();
 
+  // Demo offload to R2, when it is configured. Hourly rather than daily and on
+  // its own timer, because this one RECLAIMS space while the prunes above only
+  // stop it growing, and it wants to get ahead of the prune rather than run
+  // beside it: a demo already in R2 is one the prune can delete locally without
+  // destroying the recording. Bounded per sweep so a backlog does not hold the
+  // process; whatever is left is picked up an hour later.
+  if (r2) {
+    const offloadTimer = setInterval(() => {
+      void sweepDemos(deps.db, r2, deps.config.demoDir, { deleteLocal: true })
+        .catch((err) => console.error('[demoOffload] sweep failed:', err));
+    }, 60 * 60 * 1000);
+    offloadTimer.unref();
+    app.addHook('onClose', async () => { clearInterval(offloadTimer); });
+  }
+
   // Plus one run shortly after boot. The interval alone means a box that is
   // redeployed or restarted more often than once a day never prunes at all,
   // which is exactly the disk-fill this code exists to prevent. Delayed so it
@@ -621,7 +645,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
   await app.register(adminRoutes, { db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e) });
-  await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir });
+  await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
