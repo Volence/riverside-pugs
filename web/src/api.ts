@@ -367,9 +367,14 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method: 'POST',
+    // FormData sets its own content-type, including the multipart boundary
+    // that the browser generates. Setting it by hand produces a request the
+    // server cannot parse.
     ...(body === undefined
       ? {}
-      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+      : body instanceof FormData
+        ? { body }
+        : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   });
   const parsed = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -385,6 +390,13 @@ async function put<T = unknown>(path: string, body: unknown): Promise<T> {
   });
   const parsed = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, (parsed as { error?: string }).error ?? `PUT ${path} → ${res.status}`);
+  return parsed as T;
+}
+
+async function del<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(path, { method: 'DELETE' });
+  const parsed = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, (parsed as { error?: string }).error ?? `DELETE ${path} → ${res.status}`);
   return parsed as T;
 }
 
@@ -471,6 +483,24 @@ export interface AdminSetting {
 export interface AuditEntry {
   id: number; adminId: string; adminName: string | null; action: string; target: string;
   targetName: string | null; detail: Record<string, unknown>; createdAt: string;
+}
+
+/** These mirror the DB rows exactly, because the admin campaigns route
+ *  returns them unshaped. */
+export interface AdminChapter {
+  slug: string; ordinal: number; map: string; display: string | null;
+  is_finale: number; included: number; play_order: number | null;
+}
+export interface AdminInstall {
+  slug: string; server_id: number; state: 'pending' | 'installed' | 'failed';
+  sha256: string | null; error: string | null; updated_at: number;
+}
+export interface AdminCampaign {
+  slug: string; name: string; vpk_filename: string; size_bytes: number;
+  sha256: string; state: 'draft' | 'published'; enabled: number;
+  uploaded_by: string | null; uploaded_at: number; notes: string | null;
+  chapters: AdminChapter[];
+  installs: AdminInstall[];
 }
 
 export interface ReportEligibility {
@@ -598,6 +628,23 @@ export const adminApi = {
     get<IntegrityJobInfo>('/api/admin/integrity/backfill', signal),
   integrityRun: (mode: 'full' | 'pending', force: boolean) =>
     post('/api/admin/integrity/backfill', { mode, force }),
+  campaigns: (signal?: AbortSignal) =>
+    get<{ free: number | null; campaigns: AdminCampaign[] }>('/api/admin/campaigns', signal),
+  uploadCampaign: (file: File) => {
+    const form = new FormData();
+    form.set('file', file);
+    return post<{ slug: string; name: string; sizeBytes: number; chapters: AdminChapter[] }>(
+      '/api/admin/campaigns', form,
+    );
+  },
+  publishCampaign: (slug: string, name: string) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/publish`, { name }),
+  setCampaignEnabled: (slug: string, enabled: boolean) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/enabled`, { enabled }),
+  reinstallCampaign: (slug: string) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/reinstall`, {}),
+  deleteCampaign: (slug: string) =>
+    del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
 };
 
 export const api = {
