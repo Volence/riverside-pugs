@@ -32,6 +32,12 @@ rsync -az --delete --info=stats1 \
   --exclude '*.db' \
   --exclude '*.db-*' \
   --exclude '.superpowers/' \
+  `# The 4x overview layers: 182 files, 989 MB, served from R2 and not committed.
+   # Gitignoring them keeps them out of git, not out of rsync, and this box moved
+   # its demos off for disk in the first place. Excluding leaves the old 1x webp
+   # in place on the server, which nothing references once the manifest points at
+   # assets.riversidepug.com, and which are a free way back if it ever needs to.` \
+  --exclude 'web/public/overviews/' \
   "$HERE/" "root@$HOST:$REMOTE/"
 
 ssh "root@$HOST" "set -e
