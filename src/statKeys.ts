@@ -73,10 +73,14 @@ export const STAT_DEFS: readonly StatDef[] = [
   def('survivors_biled', 'infected', 'Survivors biled', 'high_good'),
   def('tank_rocks_landed', 'infected', 'Tank rocks landed', 'high_good'),
 
-  // Infected, private. High is bad, so shown only to the player themselves and
-  // never rankable. See the spec's "Stat visibility" section.
-  def('times_skeeted', 'infected', 'Times skeeted', 'high_bad', true, 'self'),
-  def('times_deadstopped', 'infected', 'Times deadstopped', 'high_bad', true, 'self'),
+  // Infected, and high is bad. These were self-visibility, shown only to the
+  // player they described, on the grounds that a bad number is embarrassing.
+  // Public since 2026-09-18, the owner's call: getting skeeted is part of the
+  // match like everything else on the page. Leaderboards are unaffected, since
+  // `standings.ts` ranks on `high_good` only, which is what that flag was
+  // really protecting against.
+  def('times_skeeted', 'infected', 'Times skeeted', 'high_bad', true),
+  def('times_deadstopped', 'infected', 'Times deadstopped', 'high_bad', true),
 
   // Captured by pug-match's own hooks, so always available even with no
   // skill_detect on the server.

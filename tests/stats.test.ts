@@ -7,7 +7,7 @@ import { authedCookie, stubOrchestrator } from './helpers.js';
 import { completeMatch } from '../src/matchResult.js';
 import { upsertPlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
-import { STAT_DEFS } from '../src/statKeys.js';
+import { statDef, STAT_DEFS } from '../src/statKeys.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -64,45 +64,31 @@ describe('stats routes', () => {
     }
   });
 
-  it('an anonymous reader never receives a self-only stat VALUE', async () => {
-    // The redaction must hold for a viewer with no session at all, not just
-    // for a logged-in non-subject. Asserting on values, not on a string search
-    // of the response: statDefs legitimately carries every stat KEY as schema,
-    // so a substring check would be testing the wrong thing.
+  // Was: "an anonymous reader never receives a self-only stat VALUE". No stat
+  // carries self visibility any more (owner's call, 2026-09-18: getting skeeted
+  // belongs in the match stats like everything else), so the redaction has
+  // nothing left to redact and privateStatTotals nothing to carry. The
+  // mechanism is still in place for a future stat; this pins that no stat uses
+  // it, which is the thing a reader would otherwise have to go and check.
+  it('has no self-visibility stats left, so nothing is redacted from anyone', async () => {
     playCompletedMatch(db, 'b');
-    const selfKeys = STAT_DEFS.filter((d) => d.visibility === 'self').map((d) => d.key);
-    expect(selfKeys.length).toBeGreaterThan(0);
-    for (const k of selfKeys) {
-      db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, 7)')
-        .run(ME, k);
-    }
+    expect(STAT_DEFS.filter((d) => d.visibility === 'self')).toHaveLength(0);
 
+    db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, 7)')
+      .run(ME, 'times_skeeted');
     const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
     expect(body.privateStatTotals).toBeNull();
-    for (const k of selfKeys) expect(Object.keys(body.statTotals)).not.toContain(k);
-
-    const detail = (await app.inject({ method: 'GET', url: '/api/matches/1' })).json();
-    for (const p of detail.players ?? []) {
-      for (const k of selfKeys) expect(Object.keys(p.stats ?? {})).not.toContain(k);
-    }
   });
 
-  it('the subject still sees their own self-only stats when logged in', async () => {
-    // Guards against "fix the leak by deleting the feature". privateStats is
-    // deliberately absent when there are none, so seed one to have something
-    // to see.
-    playCompletedMatch(db, 'b');
-    const selfKey = STAT_DEFS.find((d) => d.visibility === 'self')!.key;
-    db.prepare('INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (1, ?, ?, 3)')
-      .run(ME, selfKey);
+  it('shows a formerly private stat to everyone, logged in or not', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    seedStats(db, matchId, ME, { times_skeeted: 3 });
 
-    const mine = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
-    expect(mine.json().privateStatTotals).toMatchObject({ [selfKey]: 3 });
-
-    // ...and the same request without a session must not carry the value.
-    const anon = await app.inject({ method: 'GET', url: `/api/players/${ME}` });
-    expect(anon.json().privateStatTotals).toBeNull();
-    expect(Object.keys(anon.json().statTotals)).not.toContain(selfKey);
+    for (const opts of [{ cookies }, {}]) {
+      const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, ...opts });
+      const row = res.json().players.find((p: any) => p.steamid === ME);
+      expect(row.stats.times_skeeted).toBe(3);
+    }
   });
 
   it('profile standings: top-5 places per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
@@ -329,14 +315,14 @@ describe('stats routes', () => {
   });
 
   describe('stat visibility', () => {
-    it('hides self-only stats from other viewers on a match page', async () => {
+    it('shows another player their times skeeted, like any other stat', async () => {
       const matchId = playCompletedMatch(db);
       seedStats(db, matchId, IDS[1], { skeets: 2, times_skeeted: 5 });
       // `cookies` authenticates ME (IDS[0]), who is NOT IDS[1].
       const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies });
       const row = res.json().players.find((p: any) => p.steamid === IDS[1]);
       expect(row.stats.skeets).toBe(2);
-      expect(row.stats).not.toHaveProperty('times_skeeted');
+      expect(row.stats.times_skeeted).toBe(5);
     });
 
     it('shows self-only stats in your own row', async () => {
@@ -354,11 +340,13 @@ describe('stats routes', () => {
       expect(res.json().privateStatTotals).toBeNull();
     });
 
-    it('returns privateStatTotals on your own profile', async () => {
+    // privateStatTotals now has nothing to carry: no stat is self-visibility.
+    // The field and its plumbing remain for a future one.
+    it('returns privateStatTotals null on your own profile now nothing is private', async () => {
       const matchId = playCompletedMatch(db);
       seedStats(db, matchId, ME, { times_skeeted: 5 });
       const res = await app.inject({ method: 'GET', url: `/api/players/${ME}`, cookies });
-      expect(res.json().privateStatTotals.times_skeeted).toBe(5);
+      expect(res.json().privateStatTotals).toBeNull();
     });
 
     it('returns privateStatTotals null (not {}) on your own profile with no private stats recorded', async () => {
@@ -379,7 +367,11 @@ describe('stats routes', () => {
       expect(res.json().rows[0].total).toBe(9);
     });
 
-    it('refuses a self-only stat even though the key is valid', async () => {
+    // times_skeeted is public now, and must STILL not be rankable: a board of
+    // who got skeeted most is not a leaderboard. The gate is direction, not
+    // visibility, and those two stopped coinciding when this went public.
+    it('refuses a stat where a high number is bad, even though it is public', async () => {
+      expect(statDef('times_skeeted')!.visibility).toBe('public');
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/times_skeeted', cookies });
       expect(res.statusCode).toBe(404);
     });
