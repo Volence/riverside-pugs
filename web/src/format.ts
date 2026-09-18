@@ -100,7 +100,7 @@ export const STAT_LABELS: Record<string, string> = {
   dmg_as_hunter: 'As hunter', dmg_as_smoker: 'As smoker',
   dmg_as_boomer: 'As boomer', dmg_as_tank: 'As tank',
   dmg_to_incapped: 'On incapped',
-  quad_caps: 'Quad caps',
+  quad_caps: 'Quad caps', times_quadded: 'Times quadded',
   // Not "DPs": the table upper-cases every header, so it rendered as DPS and
   // read as damage per second. The stat is skill_detect's high-damage pounce.
   dps_landed: 'High pounces', pounce_damage_high: 'Pounce dmg',
@@ -188,8 +188,8 @@ export const DEAD_STAT_KEYS: ReadonlySet<string> = new Set([
  *  side because they are not skill-detect keys. */
 export const STAT_FAMILIES: { key: string; side: 'core' | 'survivor' | 'infected'; keys: string[] }[] = [
   { key: 'core', side: 'core', keys: ['hp', 'ck', 'sidmg', 'sikill', 'ff', 'rev'] },
-  { key: 'skeets', side: 'survivor', keys: ['skeets', 'team_skeets', 'skeet_assists'] },
-  { key: 'pins', side: 'survivor', keys: ['clears', 'insta_clears', 'self_clears', 'tongue_clears'] },
+  { key: 'skeets', side: 'survivor', keys: ['skeets', 'team_skeets', 'skeets_hurt', 'skeets_shotgun', 'skeet_assists'] },
+  { key: 'pins', side: 'survivor', keys: ['clears', 'insta_clears', 'self_clears', 'tongue_clears', 'times_quadded'] },
   { key: 'witch', side: 'survivor', keys: ['crowns', 'draw_crowns'] },
   { key: 'antitank', side: 'survivor', keys: ['tank_damage', 'rock_skeets'] },
   { key: 'survmisc', side: 'survivor', keys: ['boomer_pops'] },

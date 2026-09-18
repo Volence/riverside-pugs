@@ -209,6 +209,12 @@ int g_iFfPending[MAXPLAYERS + 1][MAXPLAYERS + 1];
 // Needed because a "cleared" event has to name the survivor who did the
 // clearing, which is not carried by any release event.
 int g_iPinnedBy[MAXPLAYERS + 1];
+// A quad cap candidate: all four held, waiting on the round to say whether it
+// stood. See CheckQuadCap for why it cannot be credited when it lands.
+bool g_bQuadPending;
+int g_iQuadPinners[4];
+int g_iQuadVictims[4];
+Handle g_hQuadTimer = null;
 
 // The smoker a survivor was released from, and when, in game time.
 //
@@ -660,6 +666,9 @@ int CountAliveSurvivors()
  *  the team lock timer may have flipped g_iPugSide by the time this is called. */
 void EmitRoundEnd(int half, const char[] surv, int score, int alive)
 {
+	// Before anything else: a pending quad is only answerable now, and the
+	// answer has to land in the stats this round's dump will carry.
+	QuadSettle();
 	if (surv[0] != '\0')
 	{
 		// map= rides along for the same reason ROUND_START carries it: the
@@ -2783,6 +2792,9 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 		g_iPinnedBy[i] = 0;
 		ClearPinRelease(i);
 	}
+	// A candidate cannot outlive the round it was set in: the pins it was
+	// built from are being cleared on the line above.
+	QuadReset();
 	// Anything still pending belongs to the round that just finished and has
 	// already been flushed by Event_RoundEnd. Dropping it here rather than
 	// carrying it forward keeps a stale pair from being stamped with the new
@@ -3475,24 +3487,90 @@ bool IsHoldingNow(int pinner, int survivor)
 	return GetEntPropEnt(pinner, Prop_Send, prop) == survivor;
 }
 
-/** A quad cap: all four survivors pinned at once. Checked on every new pin,
- *  so it triggers on the pin that completes the set, and every infected
- *  player holding someone at that moment is credited once. A survivor freed
- *  and re-pinned while the other three stay held is a second quad, on purpose:
- *  the team had to land it again. */
+/**
+ * A quad cap: all four survivors held at once, AND none of them gets back on
+ * their feet before the round ends.
+ *
+ * THE SECOND HALF IS NOT A REFINEMENT, it is what makes the stat mean
+ * anything. A survivor is marked pinned the instant a smoker tongue CONNECTS,
+ * while they can still shoot. So four simultaneous pins is not yet evidence of
+ * a quad: in one observed round a survivor, mid-pull, cleared a team mate off
+ * another survivor, and ten seconds later all three hunters were dead and all
+ * four survivors were up. Credited on the pin, that scored as a quad.
+ *
+ * Nothing observable at pin time separates that from the real thing, so the
+ * OUTCOME is the only honest disambiguator. Measured over 237 recorded rounds,
+ * requiring that nobody recovers rejects 2 of 15 candidates, and it rejects
+ * them for the right reason: both had a survivor back up seconds later.
+ *
+ * Duration deliberately plays no part. One real quad lasted 0.1 s and stood,
+ * because nobody got up and the round ended four seconds later. Being answered
+ * fast is not the same as not happening.
+ */
 void CheckQuadCap()
 {
-	int pinners[MAXPLAYERS + 1];
+	if (g_bQuadPending) return;
+	int pinners[4], victims[4];
 	int held = 0;
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (g_iPinnedBy[i] == 0 || !IsHoldingNow(g_iPinnedBy[i], i)) continue;
-		pinners[held++] = g_iPinnedBy[i];
+		if (held < 4) { pinners[held] = g_iPinnedBy[i]; victims[held] = i; }
+		held++;
 	}
 	if (held < 4) return;
-	PugDebug("quad cap: %d survivors held", held);
-	for (int i = 0; i < held; i++)
-		AddStat(pinners[i], PS_QuadCaps);
+
+	PugDebug("quad cap candidate: %d survivors held", held);
+	g_bQuadPending = true;
+	for (int i = 0; i < 4; i++)
+	{
+		g_iQuadPinners[i] = pinners[i];
+		g_iQuadVictims[i] = victims[i];
+	}
+	// Cheap, and only while a candidate is open. 0.2 s is twice the resolution
+	// the replay analysis used to derive this rule.
+	if (g_hQuadTimer == null)
+		g_hQuadTimer = CreateTimer(0.2, Timer_QuadWatch, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+}
+
+/** Any survivor back on their feet cancels the candidate. Same three states
+ *  CountAliveSurvivors excludes, for the same reason. */
+public Action Timer_QuadWatch(Handle timer)
+{
+	if (!g_bQuadPending) { g_hQuadTimer = null; return Plugin_Stop; }
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || GetClientTeam(i) != TEAM_SURVIVOR || !IsPlayerAlive(i)) continue;
+		if (GetEntProp(i, Prop_Send, "m_isIncapacitated") != 0) continue;
+		if (GetEntProp(i, Prop_Send, "m_isHangingFromLedge") != 0) continue;
+		if (g_iPinnedBy[i] > 0) continue;
+		PugDebug("quad cap cancelled: a survivor is back on their feet");
+		QuadReset();
+		return Plugin_Stop;
+	}
+	return Plugin_Continue;
+}
+
+/** Settle a pending candidate at round end: nobody got up, so it was a quad.
+ *  Called from the round-end path, which is the earliest moment the answer is
+ *  actually known. */
+void QuadSettle()
+{
+	if (!g_bQuadPending) return;
+	PugDebug("quad cap confirmed at round end");
+	for (int i = 0; i < 4; i++)
+	{
+		if (g_iQuadPinners[i] > 0) AddStat(g_iQuadPinners[i], PS_QuadCaps);
+		if (g_iQuadVictims[i] > 0) AddStat(g_iQuadVictims[i], PS_TimesQuadded);
+	}
+	QuadReset();
+}
+
+void QuadReset()
+{
+	g_bQuadPending = false;
+	for (int i = 0; i < 4; i++) { g_iQuadPinners[i] = 0; g_iQuadVictims[i] = 0; }
+	if (g_hQuadTimer != null) { KillTimer(g_hQuadTimer); g_hQuadTimer = null; }
 }
 
 /** Forget both the live link and any pending release for one client. */
