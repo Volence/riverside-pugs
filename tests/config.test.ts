@@ -47,6 +47,14 @@ describe('missingDirs', () => {
     expect(missingDirs(cfg)).toEqual([{ name: 'REPLAY_DIR', path: '/definitely/not/here' }]);
   });
 
+  // ADDONS_DIR fails the same way and worse: the campaign upload route reports
+  // free space as unknown and then the write fails, which reads as a broken
+  // uploader rather than a path that is not there.
+  it('names a missing ADDONS_DIR too', () => {
+    const cfg = loadConfig({ ADDONS_DIR: '/no/such/addons', REPLAY_DIR: '', DEMO_DIR: '' });
+    expect(missingDirs(cfg)).toEqual([{ name: 'ADDONS_DIR', path: '/no/such/addons' }]);
+  });
+
   it('says nothing when a directory is simply not configured', () => {
     expect(missingDirs(loadConfig({}))).toEqual([]);
   });

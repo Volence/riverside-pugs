@@ -46,10 +46,16 @@ export interface Config {
  * looks like missing data rather than misconfiguration. That cost an hour on
  * 2026-09-18, when a dev server inherited a stale REPLAY_DIR from an earlier
  * session's scratchpad and the viewer just said "Couldn't load that replay".
- * An empty value is not a mistake: it is how both features are turned off.
+ * ADDONS_DIR is here for the same reason and fails a third way: the upload
+ * route reports free space as unknown and then the write itself fails, so an
+ * admin sees a broken upload rather than a path that does not exist.
+ *
+ * An empty value is not a mistake: it is how each feature is turned off.
  */
 export function missingDirs(cfg: Config): { name: string; path: string }[] {
-  const pairs: [string, string][] = [['REPLAY_DIR', cfg.replayDir], ['DEMO_DIR', cfg.demoDir]];
+  const pairs: [string, string][] = [
+    ['REPLAY_DIR', cfg.replayDir], ['DEMO_DIR', cfg.demoDir], ['ADDONS_DIR', cfg.addonsDir],
+  ];
   return pairs
     .filter(([, path]) => path && !existsSync(path))
     .map(([name, path]) => ({ name, path }));
