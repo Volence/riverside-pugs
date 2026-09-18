@@ -84,7 +84,7 @@ const seedServer1 = () => {
 };
 
 describe('GET /api/campaigns/custom', () => {
-  it('lists only published, enabled campaigns', async () => {
+  it('lists published campaigns and hides drafts', async () => {
     insertDraft(db, {
       slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
       sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
@@ -100,6 +100,27 @@ describe('GET /api/campaigns/custom', () => {
     const res = await app.inject({ method: 'GET', url: '/api/campaigns/custom' });
     expect(res.statusCode).toBe(200);
     expect(res.json().campaigns.map((c: { slug: string }) => c.slug)).toEqual(['dbd']);
+  });
+
+  // Poolable and downloadable are different questions. If a campaign is
+  // installed on the servers a player should be able to get it, and the inPool
+  // badge is what says which ones they actually need. Filtering this list to
+  // poolable campaigns would leave the badge nothing to distinguish, which is
+  // how it shipped first: a published campaign was invisible until someone
+  // ticked a box labelled for the vote.
+  it('lists a published campaign that is not poolable', async () => {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1', display: 'One', isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+    // deliberately NOT setEnabled
+
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({ method: 'GET', url: '/api/campaigns/custom' });
+    const rows = res.json().campaigns;
+    expect(rows.map((c: { slug: string }) => c.slug)).toEqual(['dbd']);
+    expect(rows[0].inPool).toBe(false);
   });
 
   // The badge on the public page is driven by this flag, and it is the thing a
