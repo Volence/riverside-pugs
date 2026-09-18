@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys } from '../format';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, survivalNote } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
@@ -130,9 +130,11 @@ export function Profile(
               match you lost still counts as a map win.
             </p>
 
-            {/* Bar length is how often you have played the map, colour is
-                whether you tend to win it. The table below carries the exact
-                numbers; this is for seeing the shape at a glance. */}
+            {/* Ordered weakest first by the server: the reason to read this is
+                to find the maps you lose on, so they belong at the top rather
+                than buried in a list ordered by how often you drew each map.
+                Bar length is still how often you played it, colour whether you
+                tend to win it. */}
             <Bars label="Win rate by map">
               {byMap.map((r) => {
                 const decided = r.wins + r.losses;
@@ -144,7 +146,7 @@ export function Profile(
                     name={mapName(r.map)}
                     href={`/map/${encodeURIComponent(r.map)}`}
                     value={wr === null ? 'n/a' : `${wr}%`}
-                    detail={`(${r.wins}W ${r.losses}L)`}
+                    detail={`(${r.wins}W ${r.losses}L)${survivalNote(r)}`}
                     fraction={r.games / maxGames}
                     tone={wr === null ? 'neutral' : wr >= 50 ? 'good' : 'bad'}
                   />

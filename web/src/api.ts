@@ -290,6 +290,10 @@ export interface MapDetail {
 }
 
 export interface MapBreakdownRow {
+  /** Halves played as survivor on this map with a reading, and how many were
+   *  survived. A different denominator from `games`, which counts maps. */
+  survivalMeasured?: number;
+  survived?: number;
   map: string;
   games: number;
   wins: number;
