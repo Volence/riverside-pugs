@@ -11,6 +11,8 @@ import {
   SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE,
 } from '../src/rconPacket.js';
 import { pugReply } from './helpers.js';
+import { insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
+import { invalidateCampaignCache } from '../src/campaignRegistry.js';
 
 function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
   const cmds: string[] = [];
@@ -49,12 +51,12 @@ function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; c
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 
-function seedMatch(db: DB): number {
+function seedMatch(db: DB, campaign = 'no_mercy'): number {
   const season = currentSeasonId(db);
   for (const id of IDS) db.prepare('INSERT INTO players (steamid, name) VALUES (?, ?)').run(id, `p${id.slice(-1)}`);
   const mid = Number(
-    db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (?, 'configuring', 'no_mercy')")
-      .run(season).lastInsertRowid,
+    db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (?, 'configuring', ?)")
+      .run(season, campaign).lastInsertRowid,
   );
   IDS.forEach((id, i) => db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)')
     .run(mid, id, i < 4 ? 'a' : 'b'));
@@ -336,6 +338,76 @@ describe('RealOrchestrator', () => {
     expect(after.state).toBe('completed');
     expect(after.ended_at).toBe(before.ended_at);
     expect(getServer(db, serverId)!.status).toBe('idle');
+  });
+});
+
+describe('custom campaign availability', () => {
+  // Same rcon fake and orchestrator wiring as the RealOrchestrator suite
+  // above, factored out here because every test in this block needs it.
+  async function setup(): Promise<{ orch: RealOrchestrator; cmds: string[]; serverId: number }> {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener,
+      logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}),
+      makeRcon: (o) => o,
+    });
+    return { orch, cmds: srv.cmds, serverId };
+  }
+
+  function publishCustom(serverId: number, installed: boolean): void {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+    if (installed) setInstall(db, 'dbd', serverId, 'installed');
+    invalidateCampaignCache();
+  }
+
+  // The pool flag can be stale by exactly the window that matters: a server
+  // rebuilt between the vote and the changelevel has no VPK, and changelevel
+  // into a map it does not have strands the match on a black screen with no
+  // error anyone sees. Refusing the setup is the visible failure. setupMatch
+  // catches its own setup errors (see the "aborts" test above), so the
+  // observable result is an aborted match, not a rejected promise.
+  it('refuses a custom campaign the claimed server does not have', async () => {
+    const { orch, cmds, serverId } = await setup();
+    publishCustom(serverId, false);
+    const mid = seedMatch(db, 'dbd');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+
+  it('allows it once that server reports installed', async () => {
+    const { orch, cmds, serverId } = await setup();
+    publishCustom(serverId, true);
+    const mid = seedMatch(db, 'dbd');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds).toContain('changelevel dbd1_alley');
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
+  });
+
+  // Stock campaigns have no VPK to install, so they must not be gated by a
+  // table that will never have a row for them.
+  it('never gates a stock campaign on an install row', async () => {
+    const { orch, cmds } = await setup();
+    const mid = seedMatch(db, 'dead_air');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds).toContain('changelevel l4d_vs_airport01_greenhouse');
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
   });
 });
 
