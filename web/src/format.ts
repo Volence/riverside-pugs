@@ -507,3 +507,30 @@ export function survivalNote(r: { survivalMeasured?: number; survived?: number }
   if (measured === 0) return '';
   return `  ${Math.round(((r.survived ?? 0) / measured) * 100)}% survived of ${measured}`;
 }
+
+export type MapSort = 'winrate' | 'survival';
+
+/**
+ * Order the profile's per-map rows, weakest first.
+ *
+ * Weakest first either way, because the reason to read this list is to find
+ * what to work on. A row the chosen measure says nothing about sorts last
+ * rather than being treated as a zero: never having a survival reading on a
+ * map is not the same as never having survived it.
+ */
+export function sortMapRows<T extends {
+  map: string; wins: number; losses: number; games: number;
+  survivalMeasured?: number; survived?: number;
+}>(rows: readonly T[], by: MapSort): T[] {
+  const rate = (r: T): number => {
+    if (by === 'survival') {
+      const n = r.survivalMeasured ?? 0;
+      return n === 0 ? Number.POSITIVE_INFINITY : (r.survived ?? 0) / n;
+    }
+    const decided = r.wins + r.losses;
+    return decided === 0 ? Number.POSITIVE_INFINITY : r.wins / decided;
+  };
+  return [...rows].sort(
+    (x, y) => rate(x) - rate(y) || y.games - x.games || x.map.localeCompare(y.map),
+  );
+}

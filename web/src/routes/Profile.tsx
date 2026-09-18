@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, survivalNote } from '../format';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, survivalNote, sortMapRows, type MapSort } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
@@ -27,6 +27,11 @@ export function Profile(
   if (!data) return <PageSkeleton variant="profile" panels={3} />;
 
   const byMap = data.byMap ?? [];
+  // Which measure orders the bars. Both answer "what should I work on", and
+  // they genuinely disagree: a map you win while dying constantly looks fine
+  // on one and terrible on the other.
+  const [mapSort, setMapSort] = useState<MapSort>('winrate');
+  const sortedMaps = sortMapRows(byMap, mapSort);
   // Only the stats that actually occur on some map, so a server without
   // skill_detect shows no permanently empty columns.
   const mapCols = orderLiveStatKeys(
@@ -135,20 +140,30 @@ export function Profile(
                 than buried in a list ordered by how often you drew each map.
                 Bar length is still how often you played it, colour whether you
                 tend to win it. */}
-            <Bars label="Win rate by map">
-              {byMap.map((r) => {
+            <Tabs
+              active={mapSort}
+              onSelect={(k) => setMapSort(k as MapSort)}
+              tabs={[{ key: 'winrate', label: 'Win rate' }, { key: 'survival', label: 'Survival' }]}
+            />
+            <Bars label={mapSort === 'survival' ? 'Maps you die on most' : 'Maps you lose most'}>
+              {sortedMaps.map((r) => {
                 const decided = r.wins + r.losses;
                 const wr = decided > 0 ? Math.round((r.wins / decided) * 100) : null;
                 const maxGames = Math.max(...byMap.map((x) => x.games));
+                const sMeasured = r.survivalMeasured ?? 0;
+                const sPct = sMeasured > 0 ? Math.round(((r.survived ?? 0) / sMeasured) * 100) : null;
+                const lead = mapSort === 'survival' ? sPct : wr;
                 return (
                   <BarRow
                     key={r.map}
                     name={mapName(r.map)}
                     href={`/map/${encodeURIComponent(r.map)}`}
-                    value={wr === null ? 'n/a' : `${wr}%`}
-                    detail={`(${r.wins}W ${r.losses}L)${survivalNote(r)}`}
+                    value={lead === null ? 'n/a' : `${lead}%`}
+                    detail={mapSort === 'survival'
+                      ? `(survived ${r.survived ?? 0} of ${sMeasured})  ${wr === null ? 'n/a' : `${wr}%`} win rate`
+                      : `(${r.wins}W ${r.losses}L)${survivalNote(r)}`}
                     fraction={r.games / maxGames}
-                    tone={wr === null ? 'neutral' : wr >= 50 ? 'good' : 'bad'}
+                    tone={lead === null ? 'neutral' : lead >= 50 ? 'good' : 'bad'}
                   />
                 );
               })}

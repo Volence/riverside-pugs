@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
-  deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
+  deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   FEATURED_STAT_KEYS, statLeaders,
 } from './format';
 
@@ -494,5 +494,38 @@ describe('survivalNote', () => {
 
   it('reports a clean wipe record as 0%, not as nothing', () => {
     expect(survivalNote({ survivalMeasured: 3, survived: 0 })).toContain('0% survived of 3');
+  });
+});
+
+describe('sortMapRows', () => {
+  const row = (map: string, o: Partial<{ wins: number; losses: number; games: number; survivalMeasured: number; survived: number }> = {}) =>
+    ({ map, wins: 0, losses: 0, games: 1, survivalMeasured: 0, survived: 0, ...o });
+
+  it('puts your worst win rate first', () => {
+    const rows = [row('good', { wins: 9, losses: 1 }), row('bad', { wins: 1, losses: 9 })];
+    expect(sortMapRows(rows, 'winrate').map((r) => r.map)).toEqual(['bad', 'good']);
+  });
+
+  it('sorts by survival when asked, which can be a different order entirely', () => {
+    // Wins well, dies constantly. The two measures answer different questions,
+    // so the same list reorders.
+    const rows = [
+      row('winsButDies', { wins: 9, losses: 1, survivalMeasured: 10, survived: 1 }),
+      row('losesButLives', { wins: 1, losses: 9, survivalMeasured: 10, survived: 9 }),
+    ];
+    expect(sortMapRows(rows, 'winrate').map((r) => r.map)).toEqual(['losesButLives', 'winsButDies']);
+    expect(sortMapRows(rows, 'survival').map((r) => r.map)).toEqual(['winsButDies', 'losesButLives']);
+  });
+
+  it('sorts a row the measure says nothing about to the end, not to the front', () => {
+    const rows = [row('nodata'), row('bad', { wins: 1, losses: 9 })];
+    expect(sortMapRows(rows, 'winrate').map((r) => r.map)).toEqual(['bad', 'nodata']);
+    expect(sortMapRows(rows, 'survival').map((r) => r.map)[1]).toBe('nodata');
+  });
+
+  it('does not mutate the array it was given', () => {
+    const rows = [row('b', { wins: 9, losses: 1 }), row('a', { wins: 1, losses: 9 })];
+    sortMapRows(rows, 'winrate');
+    expect(rows.map((r) => r.map)).toEqual(['b', 'a']);
   });
 });
