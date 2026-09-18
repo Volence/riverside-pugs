@@ -3,6 +3,8 @@ import { basename, join, resolve } from 'node:path';
 import { decodeHeader, HEADER_BYTES } from './replayFormat.js';
 import { DEFAULT_DELAY_MS } from './replayTail.js';
 import { campaignForMap } from './campaigns.js';
+import { resolveCampaignForMap } from './campaignRegistry.js';
+import type { DB } from './db.js';
 import type { ReplayFileInfo, ReplaySession } from './replaySessionTypes.js';
 
 // Re-exported so every existing importer of these two types from this module
@@ -82,7 +84,7 @@ function readInfo(dir: string, filename: string, nowMs: number): ReplayFileInfo 
  *  Never throws. A missing or unreadable directory yields no sessions,
  *  because a browse page returning empty is a far better failure than a
  *  browse page returning 500. */
-export function listSessions(dir: string, nowMs: number): ReplaySession[] {
+export function listSessions(dir: string, nowMs: number, db?: DB): ReplaySession[] {
   if (!dir) return [];
   let names: string[];
   try {
@@ -107,7 +109,9 @@ export function listSessions(dir: string, nowMs: number): ReplaySession[] {
       token,
       startedUnix: Math.min(...files.map((f) => f.startedUnix)),
       // Sorted above, so files[0] is the first map played.
-      campaign: campaignForMap(files[0].map),
+      // Without a db this falls back to stock-only resolution, which is what
+      // every caller that does not have one actually wants.
+      campaign: db ? resolveCampaignForMap(db, files[0].map) : campaignForMap(files[0].map),
       files,
     });
   }
@@ -142,10 +146,10 @@ export function listSessions(dir: string, nowMs: number): ReplaySession[] {
  * positions, so there is nothing to hold back.
  */
 export function currentFileFor(
-  dir: string, token: string, nowMs: number, delayMs: number = DEFAULT_DELAY_MS,
+  dir: string, token: string, nowMs: number, db?: DB, delayMs: number = DEFAULT_DELAY_MS,
 ): ReplayFileInfo | null {
   if (!dir || !TOKEN_RE.test(token)) return null;
-  const session = listSessions(dir, nowMs).find((s) => s.token === token);
+  const session = listSessions(dir, nowMs, db).find((s) => s.token === token);
   if (!session || session.files.length === 0) return null;
   const cutoffUnixMs = nowMs - Math.max(0, delayMs);
   for (let i = session.files.length - 1; i >= 0; i--) {

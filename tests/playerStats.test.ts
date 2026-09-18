@@ -3,13 +3,18 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { playerMapBreakdown, mapDetail, mapIndex } from '../src/playerStats.js';
 
-const ME = '76561198000000001';
-const OTHER = '76561198000000002';
+export const ME = '76561198000000001';
+export const OTHER = '76561198000000002';
 
 let db: DB;
 
-/** A completed match with per-map scores and end-of-map stat snapshots. */
-function seedMatch(
+/** A completed match with per-map scores and end-of-map stat snapshots.
+ *  Exported so other test files (campaignRegistry.test.ts) can seed a
+ *  completed match without inventing a second way to do it; those callers
+ *  bring their own db and must upsertPlayer(ME) / upsertPlayer(OTHER)
+ *  themselves the way this file's own beforeEach does. */
+export function seedMatch(
+  db: DB,
   id: number,
   maps: { map: string; a: number; b: number }[],
   snapshots: Record<number, Record<string, Record<string, number>>>,
@@ -68,8 +73,8 @@ describe('playerMapBreakdown', () => {
   // Worst first: the reason to read this list is to find the maps you lose on,
   // and putting those at the top is the whole point of sorting it at all.
   it('orders maps by win rate, weakest first, rather than by games played', () => {
-    seedMatch(1, [{ map: 'strong', a: 9, b: 1 }, { map: 'weak', a: 1, b: 9 }], {});
-    seedMatch(2, [{ map: 'strong', a: 9, b: 1 }], {});
+    seedMatch(db, 1, [{ map: 'strong', a: 9, b: 1 }, { map: 'weak', a: 1, b: 9 }], {});
+    seedMatch(db, 2, [{ map: 'strong', a: 9, b: 1 }], {});
     const rows = playerMapBreakdown(db, ME);
     expect(rows.map((r) => r.map)).toEqual(['weak', 'strong']);
     // and not by games, which would have put `strong` (2) ahead of `weak` (1)
@@ -78,7 +83,7 @@ describe('playerMapBreakdown', () => {
   });
 
   it('counts survival only for the halves this player played as survivor', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {}, 'a');
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {}, 'a');
     seedRound(1, 0, 1, 'a', 3);  // mine, survived
     seedRound(1, 0, 2, 'b', 4);  // the other team's half, not mine
     const row = playerMapBreakdown(db, ME).find((r) => r.map === 'airport01')!;
@@ -87,7 +92,7 @@ describe('playerMapBreakdown', () => {
   });
 
   it('counts a wipe against you and ignores an unmeasured round', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {}, 'a');
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {}, 'a');
     seedRound(1, 0, 1, 'a', 0);     // mine, wiped
     seedRound(1, 0, 2, 'a', null);  // mine, never measured
     const row = playerMapBreakdown(db, ME).find((r) => r.map === 'airport01')!;
@@ -101,8 +106,8 @@ describe('playerMapBreakdown', () => {
 
   it('aggregates the same map across different matches', () => {
     // Snapshots are cumulative, so map 2's own stats are the difference.
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 10 } } });
-    seedMatch(2, [{ map: 'airport01', a: 200, b: 400 }], { 0: { [ME]: { ck: 4 } } });
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 10 } } });
+    seedMatch(db, 2, [{ map: 'airport01', a: 200, b: 400 }], { 0: { [ME]: { ck: 4 } } });
 
     const rows = playerMapBreakdown(db, ME);
     expect(rows).toHaveLength(1);
@@ -112,17 +117,17 @@ describe('playerMapBreakdown', () => {
 
   it('scores each map from the player own team perspective', () => {
     // Same scoreline, opposite team: a win for one is a loss for the other.
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], {}, 'b');
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], {}, 'b');
     expect(playerMapBreakdown(db, ME)[0]).toMatchObject({ wins: 0, losses: 1 });
   });
 
   it('counts a drawn map as neither a win nor a loss', () => {
-    seedMatch(1, [{ map: 'airport01', a: 200, b: 200 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 200, b: 200 }], {});
     expect(playerMapBreakdown(db, ME)[0]).toMatchObject({ games: 1, wins: 0, losses: 0 });
   });
 
   it('lets a player win maps inside a match they lost overall', () => {
-    seedMatch(1, [
+    seedMatch(db, 1, [
       { map: 'airport01', a: 400, b: 100 },
       { map: 'airport02', a: 50, b: 900 },
     ], {});
@@ -132,7 +137,7 @@ describe('playerMapBreakdown', () => {
   });
 
   it('derives per-map stats as the difference between consecutive snapshots', () => {
-    seedMatch(1, [
+    seedMatch(db, 1, [
       { map: 'airport01', a: 1, b: 0 },
       { map: 'airport02', a: 1, b: 0 },
     ], {
@@ -145,19 +150,19 @@ describe('playerMapBreakdown', () => {
   });
 
   it('excludes hp, since summing end-of-map health across maps is meaningless', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], { 0: { [ME]: { hp: 80, ck: 3 } } });
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], { 0: { [ME]: { hp: 80, ck: 3 } } });
     expect(playerMapBreakdown(db, ME)[0].stats).toEqual({ ck: 3 });
   });
 
   it('still counts games for a match with no stat snapshots at all', () => {
     // Matches played before per-map capture existed must not vanish from the
     // record; they contribute win/loss with an empty stat bag.
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], {});
     expect(playerMapBreakdown(db, ME)[0]).toMatchObject({ games: 1, wins: 1, stats: {} });
   });
 
   it('never attributes another player stats to this one', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 5 }, [OTHER]: { ck: 999 } },
     });
     expect(playerMapBreakdown(db, ME)[0].stats.ck).toBe(5);
@@ -166,7 +171,7 @@ describe('playerMapBreakdown', () => {
   it('counts an unrecorded map as played but as neither a win nor a loss', () => {
     // Match 18 shape: the stored 0 for one side is not a result, so the map
     // must not become a win for the other side.
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 0 }], { 0: { [ME]: { ck: 7 } } });
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 0 }], { 0: { [ME]: { ck: 7 } } });
     seedRounds(1, 0, false);
     const row = playerMapBreakdown(db, ME)[0];
     expect(row).toMatchObject({ games: 1, wins: 0, losses: 0 });
@@ -175,9 +180,9 @@ describe('playerMapBreakdown', () => {
   });
 
   it('orders by games played, most first', () => {
-    seedMatch(1, [{ map: 'rare', a: 1, b: 0 }], {});
-    seedMatch(2, [{ map: 'common', a: 1, b: 0 }], {});
-    seedMatch(3, [{ map: 'common', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'rare', a: 1, b: 0 }], {});
+    seedMatch(db, 2, [{ map: 'common', a: 1, b: 0 }], {});
+    seedMatch(db, 3, [{ map: 'common', a: 1, b: 0 }], {});
     expect(playerMapBreakdown(db, ME).map((r) => r.map)).toEqual(['common', 'rare']);
   });
 });
@@ -188,8 +193,8 @@ describe('mapDetail', () => {
   });
 
   it('aggregates everyone record on one map with average scores', () => {
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 10 } } });
-    seedMatch(2, [{ map: 'airport01', a: 100, b: 300 }], { 0: { [ME]: { ck: 6 } } });
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 10 } } });
+    seedMatch(db, 2, [{ map: 'airport01', a: 100, b: 300 }], { 0: { [ME]: { ck: 6 } } });
 
     const d = mapDetail(db, 'airport01')!;
     expect(d.played).toBe(2);
@@ -202,21 +207,21 @@ describe('mapDetail', () => {
   });
 
   it('includes both teams, scored from each side own perspective', () => {
-    seedMatch(1, [{ map: 'airport01', a: 400, b: 50 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 400, b: 50 }], {});
     const d = mapDetail(db, 'airport01')!;
     expect(d.players.find((p) => p.steamid === ME)).toMatchObject({ wins: 1, losses: 0 });
     expect(d.players.find((p) => p.steamid === OTHER)).toMatchObject({ wins: 0, losses: 1 });
   });
 
   it('ignores matches that are not completed', () => {
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], {});
     db.prepare("UPDATE matches SET state = 'aborted' WHERE id = 1").run();
     expect(mapDetail(db, 'airport01')).toBeNull();
   });
 
   it('leaves an unrecorded map out of the averages and the win/loss columns', () => {
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], {});
-    seedMatch(2, [{ map: 'airport01', a: 0, b: 900 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], {});
+    seedMatch(db, 2, [{ map: 'airport01', a: 0, b: 900 }], {});
     seedRounds(2, 0, false);
     const d = mapDetail(db, 'airport01')!;
     // Still played twice: the map happened, only its score is unknown.
@@ -227,7 +232,7 @@ describe('mapDetail', () => {
   });
 
   it('reports the average as unknown, not 0, when no playing of the map was recorded', () => {
-    seedMatch(1, [{ map: 'airport01', a: 0, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 0, b: 0 }], {});
     seedRounds(1, 0, false);
     const d = mapDetail(db, 'airport01')!;
     expect(d.played).toBe(1);
@@ -236,7 +241,7 @@ describe('mapDetail', () => {
 
   it('agrees with playerMapBreakdown for the same player and map', () => {
     // The two views share a source, so they must never disagree.
-    seedMatch(1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 12, sidmg: 300 } } });
+    seedMatch(db, 1, [{ map: 'airport01', a: 300, b: 100 }], { 0: { [ME]: { ck: 12, sidmg: 300 } } });
     const fromPlayer = playerMapBreakdown(db, ME).find((r) => r.map === 'airport01')!;
     const fromMap = mapDetail(db, 'airport01')!.players.find((p) => p.steamid === ME)!;
     expect(fromMap.stats).toEqual(fromPlayer.stats);
@@ -251,11 +256,11 @@ describe('mapIndex', () => {
   });
 
   it('lists each played map once with its campaign and averages', () => {
-    seedMatch(1, [
+    seedMatch(db, 1, [
       { map: 'l4d_vs_airport01_greenhouse', a: 300, b: 100 },
       { map: 'l4d_vs_airport02_offices', a: 100, b: 200 },
     ], {});
-    seedMatch(2, [{ map: 'l4d_vs_airport01_greenhouse', a: 100, b: 300 }], {});
+    seedMatch(db, 2, [{ map: 'l4d_vs_airport01_greenhouse', a: 100, b: 300 }], {});
 
     const idx = mapIndex(db);
     expect(idx).toHaveLength(2);
@@ -264,10 +269,10 @@ describe('mapIndex', () => {
   });
 
   it('averages only recorded playings, and says so with null when there are none', () => {
-    seedMatch(1, [{ map: 'l4d_vs_airport01_greenhouse', a: 300, b: 100 }], {});
-    seedMatch(2, [{ map: 'l4d_vs_airport01_greenhouse', a: 0, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'l4d_vs_airport01_greenhouse', a: 300, b: 100 }], {});
+    seedMatch(db, 2, [{ map: 'l4d_vs_airport01_greenhouse', a: 0, b: 0 }], {});
     seedRounds(2, 0, false);
-    seedMatch(3, [{ map: 'l4d_vs_airport02_offices', a: 0, b: 0 }], {});
+    seedMatch(db, 3, [{ map: 'l4d_vs_airport02_offices', a: 0, b: 0 }], {});
     seedRounds(3, 0, false);
 
     const idx = mapIndex(db);
@@ -280,12 +285,12 @@ describe('mapIndex', () => {
   it('leaves campaign null for a map the campaign table does not know', () => {
     // Better than guessing: an unknown map must not be filed under a real
     // campaign just because it was played.
-    seedMatch(1, [{ map: 'c5m1_waterfront', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'c5m1_waterfront', a: 1, b: 0 }], {});
     expect(mapIndex(db)[0].campaign).toBeNull();
   });
 
   it('ignores matches that never completed', () => {
-    seedMatch(1, [{ map: 'l4d_vs_airport01_greenhouse', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'l4d_vs_airport01_greenhouse', a: 1, b: 0 }], {});
     db.prepare("UPDATE matches SET state = 'aborted' WHERE id = 1").run();
     expect(mapIndex(db)).toEqual([]);
   });
@@ -297,28 +302,28 @@ describe('combined team averages', () => {
     // A and B are two samples of the same quantity, not two rivals. The old
     // avgTeamA/avgTeamB pair printed half the sample each and invited a
     // comparison between arbitrary labels that balanceTeams assigns.
-    seedMatch(1, [{ map: 'airport01', a: 200, b: 400 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 200, b: 400 }], {});
     seedRounds(1, 0);
     expect(mapDetail(db, 'airport01')!.avgScore).toBe(300);
   });
 
   it('averages over every half played, not every match', () => {
-    seedMatch(1, [{ map: 'airport01', a: 100, b: 200 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 100, b: 200 }], {});
     seedRounds(1, 0);
-    seedMatch(2, [{ map: 'airport01', a: 300, b: 400 }], {});
+    seedMatch(db, 2, [{ map: 'airport01', a: 300, b: 400 }], {});
     seedRounds(2, 0);
     // (100 + 200 + 300 + 400) / 4 halves
     expect(mapDetail(db, 'airport01')!.avgScore).toBe(250);
   });
 
   it('leaves the average null when no playing was recorded', () => {
-    seedMatch(1, [{ map: 'airport01', a: 0, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 0, b: 0 }], {});
     seedRounds(1, 0, false);
     expect(mapDetail(db, 'airport01')!.avgScore).toBeNull();
   });
 
   it('gives mapIndex the same combined average', () => {
-    seedMatch(1, [{ map: 'airport01', a: 200, b: 400 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 200, b: 400 }], {});
     seedRounds(1, 0);
     expect(mapIndex(db).find((r) => r.map === 'airport01')!.avgScore).toBe(300);
   });
@@ -327,7 +332,7 @@ describe('combined team averages', () => {
 describe('per-map averages', () => {
   it('divides a player total by the maps they played', () => {
     // Cumulative snapshots: 100 then 300 means the second map contributed 200.
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 100 } },
       1: { [ME]: { ck: 300 } },
     });
@@ -340,7 +345,7 @@ describe('per-map averages', () => {
   });
 
   it('averages every stat, not a chosen few', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 10, sidmg: 500, tank_damage: 40 } },
       1: { [ME]: { ck: 30, sidmg: 700, tank_damage: 60 } },
     });
@@ -354,13 +359,13 @@ describe('per-map averages', () => {
   it('omits an average for a stat that was never measured', () => {
     // Absent must stay absent: a zero average would claim the player did the
     // thing badly rather than that nobody recorded it.
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedRounds(1, 0);
     expect(playerMapBreakdown(db, ME)[0].avgStats).toEqual({});
   });
 
   it('gives the map page a per-player average too', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 100 } },
       1: { [ME]: { ck: 300 } },
     });
@@ -374,7 +379,7 @@ describe('per-map averages', () => {
   it('gives the map an overall average across everyone who played it', () => {
     // "What does anyone usually get here", the map's own baseline, as opposed
     // to any one player's.
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 100 }, [OTHER]: { ck: 200 } },
     });
     seedRounds(1, 0);
@@ -387,7 +392,7 @@ describe('a player who joined partway through a match', () => {
     // joined_map is the ordinal a sub was rostered on. Totals hid this,
     // because their contribution to the earlier maps really is zero; an
     // average exposes it by dividing by maps they never played.
-    seedMatch(1, [
+    seedMatch(db, 1, [
       { map: 'airport01', a: 1, b: 0 }, { map: 'airport02', a: 1, b: 0 },
       { map: 'airport03', a: 1, b: 0 }, { map: 'airport04', a: 1, b: 0 },
     ], { 2: { [ME]: { ck: 100 } }, 3: { [ME]: { ck: 200 } } });
@@ -400,7 +405,7 @@ describe('a player who joined partway through a match', () => {
   });
 
   it('is left off the map page for maps played before they arrived', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport02', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport02', a: 1, b: 0 }], {});
     seedRounds(1, 0);
     seedRounds(1, 1);
     db.prepare('UPDATE match_players SET joined_map = 1 WHERE match_id = 1 AND player_id = ?').run(ME);
@@ -409,7 +414,7 @@ describe('a player who joined partway through a match', () => {
   });
 
   it('still counts the map as played for everyone who was there from the start', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedRounds(1, 0);
     expect(mapDetail(db, 'airport01')!.played).toBe(1);
   });
@@ -433,7 +438,7 @@ describe('map round aggregates', () => {
   }
 
   it('reports fastest, average and slowest round in seconds', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 120, alive: 2 });
     seedHalf(1, 0, 2, { seconds: 300, alive: 0 });
     const d = mapDetail(db, 'airport01')!;
@@ -441,7 +446,7 @@ describe('map round aggregates', () => {
   });
 
   it('computes survival rate from the survivor count, counting a wipe as a loss', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 100, alive: 3 });
     seedHalf(1, 0, 2, { seconds: 100, alive: 0 });
     expect(mapDetail(db, 'airport01')!.rounds.survivalPct).toBe(50);
@@ -450,7 +455,7 @@ describe('map round aggregates', () => {
   it('leaves survival null when no round was measured, rather than calling it 0%', () => {
     // Every round played before the plugin emitted alive= has survivors_alive
     // NULL. Treating those as wipes would report every historic map as lethal.
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 100, alive: null });
     seedHalf(1, 0, 2, { seconds: 100, alive: null });
     const d = mapDetail(db, 'airport01')!;
@@ -466,7 +471,7 @@ describe('map round aggregates', () => {
   // measured round has a replay and the frames carry those states. So this
   // layer has no cutoff: whatever is stored is taken at face value.
   it('counts an old round the same as a new one, since the data is repaired in place', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 100, alive: 0, at: '2026-09-14 00:00:00' });
     seedHalf(1, 0, 2, { seconds: 100, alive: 2 });
     const d = mapDetail(db, 'airport01')!;
@@ -475,7 +480,7 @@ describe('map round aggregates', () => {
   });
 
   it('counts only the rounds it could measure towards survival', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 100, alive: 4 });
     seedHalf(1, 0, 2, { seconds: 100, alive: null });
     // One measured round, survived: 100%, not 50%.
@@ -485,7 +490,7 @@ describe('map round aggregates', () => {
   it('ignores an unreliable round entirely', () => {
     // Same rule the scores already use: a round the plugin could not attribute
     // is not an observation.
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 100, alive: 4 });
     seedHalf(1, 0, 2, { seconds: 9999, alive: 0, reliable: false });
     const d = mapDetail(db, 'airport01')!;
@@ -494,7 +499,7 @@ describe('map round aggregates', () => {
   });
 
   it('reports nulls rather than zeros for a map with no closed rounds', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     const d = mapDetail(db, 'airport01')!;
     expect(d.rounds).toMatchObject({
       attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null,
@@ -502,7 +507,7 @@ describe('map round aggregates', () => {
   });
 
   it('skips a round that never closed, so an open one cannot be a 0-second record', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 200, alive: 1 });
     db.prepare(
       "INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at) VALUES (1, 0, 2, 'b', 0, 1, '2026-09-14 00:00:00')",
@@ -511,7 +516,7 @@ describe('map round aggregates', () => {
   });
 
   it('carries the same aggregate on the campaign index', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedHalf(1, 0, 1, { seconds: 120, alive: 2 });
     seedHalf(1, 0, 2, { seconds: 300, alive: 0 });
     const row = mapIndex(db).find((r) => r.map === 'airport01')!;

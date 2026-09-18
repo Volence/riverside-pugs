@@ -247,7 +247,7 @@ export async function replayRoutes(
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(Number(id)) as { token: string | null } | undefined;
     if (!row?.token) return reply.code(404).send({ error: 'no replay for that match' });
-    const info = currentFileFor(replayDir, row.token, Date.now());
+    const info = currentFileFor(replayDir, row.token, Date.now(), db);
     if (!info) return reply.code(404).send({ error: 'no replay for that match' });
     return { ordinal: info.ordinal, half: info.half, closed: info.closed };
   });
@@ -259,7 +259,7 @@ export async function replayRoutes(
    *  campaign and are nobody's password. */
   app.get('/api/replays/live/:token', async (req, reply) => {
     const { token } = req.params as { token: string };
-    const info = currentFileFor(replayDir, token, Date.now());
+    const info = currentFileFor(replayDir, token, Date.now(), db);
     if (!info) return reply.code(404).send({ error: 'no replay for that token' });
     return { filename: info.filename, closed: info.closed };
   });
