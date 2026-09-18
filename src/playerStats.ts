@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { mapStatsFor } from './liveView.js';
-import { resolveCampaignForMap } from './campaignRegistry.js';
+import { campaignRegistry, resolveCampaignForMap } from './campaignRegistry.js';
 import { unrecordedOrdinals } from './roundStats.js';
 
 /** Which of a match's maps have a real score. Same rule as the match page's
@@ -437,6 +437,19 @@ export function mapIndex(db: DB): MapIndexRow[] {
     if (!row) { row = { played: 0, n: 0, sumA: 0, sumB: 0 }; acc.set(r.map, row); }
     row.played++;
     if (recorded(r.match_id, r.ordinal)) { row.n++; row.sumA += r.a; row.sumB += r.b; }
+  }
+
+  // A campaign nobody has played yet contributes no match_maps rows, so it
+  // would be missing from this page entirely. That is the wrong answer for a
+  // campaign that is installed and votable: a player looking it up should find
+  // it, with an honest zero, rather than conclude the site does not have it.
+  // Only custom campaigns can be enumerated this way, because the registry
+  // carries their chapter lists from the uploaded VPK; the stock four have all
+  // been played, so they lose nothing by being absent here.
+  for (const entry of campaignRegistry(db).values()) {
+    for (const map of entry.maps) {
+      if (!acc.has(map)) acc.set(map, { played: 0, n: 0, sumA: 0, sumB: 0 });
+    }
   }
 
   const rounds = roundAggregates(db, [...acc.keys()]);

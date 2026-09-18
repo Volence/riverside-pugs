@@ -8,6 +8,9 @@ export interface CampaignTileItem {
   active?: boolean;
   /** Unplayed or unavailable: rendered at reduced opacity. */
   muted?: boolean;
+  /** Short marker shown beside the name, e.g. that it is in the vote
+   *  rotation. Absent means no marker, not a blank one. */
+  badge?: string;
 }
 
 /**
@@ -30,6 +33,7 @@ export function CampaignTiles(
           <>
             <span class="ctile__sub eyebrow">{it.sub}</span>
             <span class="ctile__name">{campaignName(it.slug)}</span>
+            {it.badge && <span class="ctile__badge">{it.badge}</span>}
           </>
         );
         return onPick

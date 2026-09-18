@@ -1302,6 +1302,56 @@ describe('Maps', () => {
     expect(screen.queryByText(/null/)).toBeNull();
   });
 
+  // A player whose favourite campaign rotates out should still find its
+  // history, just not at the top. Sorted rather than hidden, and rather than
+  // filed under a heading that reads as a reject pile.
+  it('puts campaigns in the vote first and keeps the rest listed', async () => {
+    mockApi.maps.mockResolvedValue({
+      pool: ['dead_air'],
+      maps: [
+        // Blood Harvest is played far more, so only the rotation can put Dead
+        // Air above it. That is what makes this test about the pool and not
+        // about play counts.
+        { map: 'l4d_vs_farm01_hilltop', campaign: 'blood_harvest', played: 40, avgScore: 300,
+          rounds: { attempts: 40, fastestSec: 100, avgSec: 200, slowestSec: 300, survivalPct: 50, measured: 40 } },
+        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgScore: 200,
+          rounds: { attempts: 4, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50, measured: 4 } },
+      ],
+    });
+    render(<Maps />);
+    // Each campaign appears twice, as a tile and as a table heading, so scope
+    // the assertions to headings rather than matching the name anywhere.
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 3 }).length).toBeGreaterThan(1));
+
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent ?? '');
+
+    // Both still on the page: out of rotation is not out of sight.
+    expect(headings.some((t) => t.includes('Blood Harvest'))).toBe(true);
+    const air = headings.findIndex((t) => t.includes('Dead Air'));
+    const harvest = headings.findIndex((t) => t.includes('Blood Harvest'));
+    expect(air).toBeGreaterThanOrEqual(0);
+    expect(air).toBeLessThan(harvest);
+
+    // And the one in rotation says so, using the same words as the Custom page.
+    expect(headings[air]).toContain('In the vote');
+    expect(headings[harvest]).not.toContain('In the vote');
+  });
+
+  // An unplayed campaign reaches this page now that the API includes registry
+  // maps, and must read as an honest zero rather than be missing entirely.
+  it('lists a campaign nobody has played yet', async () => {
+    mockApi.maps.mockResolvedValue({
+      pool: [],
+      maps: [
+        { map: 'c17m1_tunnels', campaign: 'city17_v2_8', played: 0, avgScore: null,
+          rounds: { attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null } },
+      ],
+    });
+    render(<Maps />);
+    await waitFor(() => expect(screen.getByText('Unplayed')).toBeTruthy());
+    expect(screen.queryByText('No maps played yet.')).toBeNull();
+  });
+
   // The confusion this fixes: "Played 7" and "Survived 50%" sat side by side
   // with different denominators and neither shown, so 50% read as 3.5 of 7
   // rather than 2 of the 4 rounds that actually have a survival reading. The

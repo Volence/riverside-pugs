@@ -693,7 +693,7 @@ export const api = {
   seasons: (signal?: AbortSignal) => get<{ seasons: Season[] }>('/api/seasons', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
-  maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[] }>('/api/maps', signal),
+  maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[] }>('/api/maps', signal),
   customCampaigns: (signal?: AbortSignal) =>
     get<{ campaigns: CustomCampaignRow[] }>('/api/campaigns/custom', signal),
   replayLive: (token: string, signal?: AbortSignal) =>

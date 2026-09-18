@@ -1696,3 +1696,8 @@ body.is-theater { overflow: hidden; }
 .upprog__fill { height: 100%; background: var(--accent); transition: width 120ms linear; }
 .upprog__fill.is-indeterminate { width: 35%; animation: upprog-slide 1.1s ease-in-out infinite; }
 @keyframes upprog-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+
+/* Marks a campaign tile that is in the current vote rotation. Same wording and
+ * the same meaning as the badge on the Custom campaigns page: it is in
+ * map_pool, so it can come up tonight. */
+.ctile__badge { position: absolute; top: var(--sp-2); right: var(--sp-2); padding: 2px 6px; border: 1px solid var(--accent); border-radius: 2px; font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); background: rgba(5, 4, 3, 0.55); }
