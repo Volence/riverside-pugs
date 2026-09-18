@@ -3,7 +3,7 @@ import {
   campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
-  STAT_FAMILIES,
+  STAT_FAMILIES, SUBSET_STAT_KEYS,
   FEATURED_STAT_KEYS, statLeaders,
 } from './format';
 
@@ -156,10 +156,17 @@ describe('liveGroupStarts', () => {
 });
 
 describe('live columns: skeet variants and biles', () => {
-  it('includes the chipped and team skeet variants', () => {
+  it('includes the team skeet and assist variants', () => {
     expect(LIVE_STAT_ORDER).toContain('team_skeets');
-    expect(LIVE_STAT_ORDER).toContain('skeets_hurt');
     expect(LIVE_STAT_ORDER).toContain('skeet_assists');
+  });
+
+  // Ordering is one thing, showing is another. skeets_hurt keeps its place in
+  // the curated order so that restoring the column is a one-line change, but
+  // the filter drops it for the same reason it drops it on a match page: it is
+  // already counted inside skeets or team_skeets.
+  it('does not render the chip skeet column on the live page either', () => {
+    expect(orderLiveStatKeys(['skeets', 'skeets_hurt'])).toEqual(['skeets']);
   });
 
   it('uses the l4dcompstats boom counters rather than the skill_detect bile ones', () => {
@@ -307,10 +314,17 @@ describe('stat families within a side', () => {
   // Both of these ARE produced on L4D1: checked against the live data,
   // skeets_shotgun 462 and skeets_hurt 122 across 229 player-matches. Hiding a
   // populated stat is what made the skeet columns impossible to reconcile.
-  it('keeps the skeet breakdowns, which L4D1 does produce', () => {
-    const out = orderStatKeysBySide(['skeets', 'skeets_shotgun', 'skeets_hurt'], defs);
+  it('keeps the weapon breakdown, which L4D1 does produce', () => {
+    const out = orderStatKeysBySide(['skeets', 'skeets_shotgun'], defs);
     expect(out).toContain('skeets_shotgun');
-    expect(out).toContain('skeets_hurt');
+  });
+
+  // Populated, but already counted inside skeets or team_skeets, so showing it
+  // beside them reads as a third bucket and makes the totals look wrong.
+  it('drops the chip skeet column without calling it dead', () => {
+    expect(orderStatKeysBySide(['skeets', 'skeets_hurt'], defs)).toEqual(['skeets']);
+    expect(DEAD_STAT_KEYS.has('skeets_hurt')).toBe(false);
+    expect(SUBSET_STAT_KEYS.has('skeets_hurt')).toBe(true);
   });
 
   it('still drops the weapon classes skill_detect cannot tag here', () => {
@@ -444,7 +458,7 @@ describe('DEAD_STAT_KEYS', () => {
 
   // These two were in the dead set and are not dead. Pinned so a populated
   // stat cannot be hidden again by eye.
-  it('does not hide a stat the live data shows is populated', () => {
+  it('does not call a populated stat dead, whatever else is done with it', () => {
     expect(DEAD_STAT_KEYS.has('skeets_shotgun')).toBe(false);
     expect(DEAD_STAT_KEYS.has('skeets_hurt')).toBe(false);
   });
