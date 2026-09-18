@@ -198,6 +198,10 @@ export async function campaignRoutes(
     const { slug } = req.params as { slug: string };
     const c = getCampaign(db, slug);
     if (!c) return reply.code(404).send({ error: 'no such campaign' });
+    // Reinstall changes no row the registry reads (only install state, which
+    // the registry doesn't cache), but every admin mutation here invalidates
+    // unconditionally rather than each one reasoning about whether it needs to.
+    invalidateCampaignCache();
     logAdmin(db, adminId, 'campaign_reinstall', slug);
     void installCampaign(db, slug, {
       sourcePath: join(addonsDir, c.vpk_filename), servers: targets(),
