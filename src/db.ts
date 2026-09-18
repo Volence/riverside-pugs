@@ -424,6 +424,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_invite_url: '',
   // Private channel the bot posts the admin feed to; empty turns the feed off.
   discord_admin_channel_id: '',
+  // Where match results are posted. Empty keeps them in the queue channel.
+  discord_results_channel_id: '',
   admin_feed_reports: '1',
   admin_feed_actions: '1',
   admin_feed_penalties: '1',

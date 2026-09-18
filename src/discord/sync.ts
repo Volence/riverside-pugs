@@ -240,10 +240,13 @@ export class DiscordSync {
       if (state === 'live' && !getMessage(db, 'live', m.ref)) {
         const players = [...teamA, ...teamB].map((p) => this.player(p));
         const ids = players.filter((p) => p.discordId).map((p) => p.discordId!);
+        // No button of its own: the match card right above it already has
+        // Connect, and two of them a few lines apart is the clutter. This
+        // message exists purely to notify, because an edit never pings.
         const ping: MessagePayload = {
           content: `${ids.map((id) => `<@${id}>`).join(' ')}\nPUG #${matchId}: the server is ready. Press **Connect** on the match card above.`.trim(),
           embeds: [],
-          components: [[{ kind: 'button', customId: `m:${matchId}:connect`, label: 'Connect', style: 'success' }]],
+          components: [],
           mentionUserIds: ids,
         };
         const messageId = await this.deps.transport.send(channelId, ping);
@@ -253,7 +256,8 @@ export class DiscordSync {
 
       if (state === 'finished' && row.winner) {
         if (!getMessage(db, 'result', m.ref)) {
-          const messageId = await this.deps.transport.send(channelId, renderResult({
+          const resultsChannel = getSetting(db, 'discord_results_channel_id') || channelId;
+          const messageId = await this.deps.transport.send(resultsChannel, renderResult({
             matchId,
             campaignName: CAMPAIGNS[row.campaign]?.name ?? row.campaign,
             publicUrl: this.deps.publicUrl,
@@ -263,12 +267,20 @@ export class DiscordSync {
             teamA: teamA.map((p) => this.resultPlayer(p, matchId)),
             teamB: teamB.map((p) => this.resultPlayer(p, matchId)),
           }));
-          saveMessage(db, { kind: 'result', ref: m.ref, channelId, messageId, state: 'done' });
+          saveMessage(db, { kind: 'result', ref: m.ref, channelId: resultsChannel, messageId, state: 'done' });
           posted = true;
         }
         setMessageState(db, 'match', m.ref, 'done');
+        // The result card is the record from here on, and it links to the
+        // match page. What is left in the queue channel is a ready check, a
+        // vote and two dead buttons, so it goes.
+        await this.drop('live', m.ref);
+        await this.drop('match', m.ref);
       } else if (state === 'aborted') {
         setMessageState(db, 'match', m.ref, 'done');
+        // The card stays: with no result posted it is the only trace the
+        // match happened. The ping is spent either way.
+        await this.drop('live', m.ref);
       }
     }
 
@@ -383,6 +395,16 @@ export class DiscordSync {
     const messageId = await this.deps.transport.send(this.deps.channelId, payload);
     saveMessage(this.deps.db, { kind, ref, channelId: this.deps.channelId, messageId, state });
     this.hashes.set(messageId, JSON.stringify(payload));
+  }
+
+  /** Remove one of our messages from its channel. The row is kept, marked
+   *  'removed', so nothing reposts it and the history stays readable. */
+  private async drop(kind: string, ref: string): Promise<void> {
+    const stored = getMessage(this.deps.db, kind, ref);
+    if (!stored) return;
+    await this.deps.transport.remove(stored.channel_id, stored.message_id).catch(() => {});
+    this.hashes.delete(stored.message_id);
+    setMessageState(this.deps.db, kind, ref, 'removed');
   }
 
   private async safeEdit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean> {

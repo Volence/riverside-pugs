@@ -43,6 +43,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'require_discord_to_queue', group: 'Discord', label: 'Require Discord to queue', help: 'Players must have Discord linked and be in the Discord server to join the queue.', type: { kind: 'bool' } },
   { key: 'discord_invite_url', group: 'Discord', label: 'Discord invite link', help: 'Permanent invite shown on How to play and the signup checklist.', type: { kind: 'string', maxLength: 200, allowEmpty: true } },
   { key: 'discord_admin_channel_id', group: 'Discord', label: 'Admin channel id', help: 'Private channel for the admin feed. Empty turns the feed off.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'discord_results_channel_id', group: 'Discord', label: 'Results channel id', help: 'Where match results are posted. Empty keeps them in the queue channel. Set it and the queue channel is left for queueing: a finished match\'s card and server-ready ping are removed once its result is posted.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'admin_feed_reports', group: 'Admin feed', label: 'Reports', help: 'Post new player reports with Resolve and Dismiss buttons.', type: { kind: 'bool' } },
   { key: 'admin_feed_actions', group: 'Admin feed', label: 'Admin actions', help: 'Bans, unbans, voids, aborts, setting changes.', type: { kind: 'bool' } },
   { key: 'admin_feed_penalties', group: 'Admin feed', label: 'Penalties', help: 'Missed ready checks and no-shows.', type: { kind: 'bool' } },
