@@ -23,7 +23,7 @@ export interface MatchmakerDeps {
 
 /** Parse discord_queue_thresholds defensively. A malformed or non-array
  *  setting (admin typo, hand-edited sqlite row) must never break join(). */
-function safeThresholds(raw: string | undefined): number[] {
+export function safeThresholds(raw: string | undefined): number[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);

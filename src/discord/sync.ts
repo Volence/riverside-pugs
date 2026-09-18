@@ -10,9 +10,19 @@ import {
   getMessage, messagesInState, rekeyMessage, saveMessage, setMessageState,
 } from './messageStore.js';
 import {
-  renderCancelled, renderLobby, renderLobbyFailed, renderMatch, renderPanel, renderResult,
-  type MatchCardState, type PlayerView, type ResultPlayer,
+  renderCancelled, renderLobby, renderLobbyFailed, renderMatch, renderPanel, renderQueueAlert,
+  renderResult, type MatchCardState, type PlayerView, type ResultPlayer,
 } from './presenter.js';
+import { getSetting } from '../settings.js';
+import { safeThresholds } from '../matchmaker.js';
+
+/** Shortest gap between two queue alerts.
+ *
+ *  Not about rate limits. One filling queue can cross two thresholds a minute
+ *  apart, and two pings for the same fill is what teaches people to mute the
+ *  channel. The higher threshold is the more useful one, so it wins and the
+ *  lower is dropped rather than queued. */
+const ALERT_COOLDOWN_MS = 10 * 60 * 1000;
 import type { BotTransport, MessagePayload } from './transport.js';
 
 /** Team voice channels, plugged in by voice.ts. Kept as a narrow hook so this
@@ -71,6 +81,13 @@ export class DiscordSync {
   /** Matches born from a lobby whose card was never posted (the whole lobby
    *  ran between two passes). The next pass posts their card. */
   private needCard = new Set<number>();
+  /** The highest threshold already announced for the CURRENT filling of the
+   *  queue, reset when it empties out again. Without it, one person leaving and
+   *  rejoining at 6/8 re-announces every time, which is how a useful ping
+   *  becomes a muted channel. */
+  private announced = 0;
+  /** When the last alert went out, for the cooldown. */
+  private lastAlertMs = 0;
 
   constructor(private deps: DiscordSyncDeps) {}
 
@@ -257,13 +274,18 @@ export class DiscordSync {
 
     if (this.deps.voice) await this.deps.voice.sweep().catch((err) => console.error('[discord] voice sweep failed:', err));
 
-    // 4. The panel, kept last in the channel.
+    // 4. The queue-filling alert, before the panel so the panel still ends up
+    //    last in the channel.
     const q = mm.publicQueue();
+    if (await this.maybeAlert(q.count)) posted = true;
+
+    // 5. The panel, kept last in the channel.
     const panel = renderPanel({
       publicUrl: this.deps.publicUrl,
       size: QUEUE_SIZE,
       players: q.players.map((p) => this.player(p.steamid)),
       phase: q.phase,
+      alertRoleId: getSetting(db, 'discord_pug_role_id') || undefined,
     });
     const stored = getMessage(db, 'panel', 'queue');
     if (stored && posted) {
@@ -273,6 +295,66 @@ export class DiscordSync {
     } else {
       await this.upsert('panel', 'queue', panel);
     }
+  }
+
+  /**
+   * Announce that the queue is filling, at most once per threshold per fill.
+   *
+   * Three guards, and each exists for a different way this goes wrong:
+   *
+   * - `announced` stops the same threshold firing twice while the queue hovers
+   *   there. Somebody leaving and rejoining at 6/8 must not re-ping.
+   * - the reset at zero is what lets the NEXT fill announce again. Resetting on
+   *   any decrease instead would re-arm on ordinary churn.
+   * - the cooldown covers the case the other two cannot: two thresholds crossed
+   *   in quick succession, which is two pings a minute apart for one filling
+   *   queue. The higher one is worth more, so it wins and the lower is dropped.
+   *
+   * Returns whether a message was posted, so the caller knows to re-post the
+   * panel below it.
+   */
+  private async maybeAlert(count: number): Promise<boolean> {
+    const { db, channelId } = this.deps;
+    const roleId = getSetting(db, 'discord_pug_role_id');
+    if (!roleId) return false;
+
+    // An empty queue is a fresh start: re-arm every threshold.
+    if (count === 0) {
+      this.announced = 0;
+      return false;
+    }
+
+    const thresholds = safeThresholds(getSetting(db, 'discord_queue_thresholds'))
+      .filter((t) => t > 0 && t < QUEUE_SIZE)
+      .sort((a, b) => a - b);
+    // The highest threshold this queue has reached. Using the highest rather
+    // than an exact match means a pass that sees 4 -> 7 in one go announces 7,
+    // not nothing: the sync loop is periodic and does not see every join.
+    const reached = thresholds.filter((t) => count >= t).pop() ?? 0;
+    if (reached === 0 || reached <= this.announced) return false;
+
+    const now = this.deps.now?.() ?? Date.now();
+    if (now - this.lastAlertMs < ALERT_COOLDOWN_MS) {
+      // Still mark it announced. The point of the cooldown is to drop this
+      // ping, not to hold it until the cooldown expires and fire it late.
+      this.announced = reached;
+      return false;
+    }
+
+    const payload = renderQueueAlert({
+      count, size: QUEUE_SIZE, roleId, publicUrl: this.deps.publicUrl,
+    });
+    try {
+      const messageId = await this.deps.transport.send(channelId, payload);
+      saveMessage(db, { kind: 'alert', ref: String(now), channelId, messageId, state: 'done' });
+    } catch (err) {
+      // Never fatal, and deliberately still marked announced: a Discord outage
+      // must not turn into a retry on every pass for the rest of the evening.
+      console.error('[discord] queue alert failed:', err);
+    }
+    this.announced = reached;
+    this.lastAlertMs = now;
+    return true;
   }
 
   /** Send when there is no stored message, edit when the payload changed,

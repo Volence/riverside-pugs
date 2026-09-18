@@ -50,7 +50,8 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
   const channelId = deps.config.discord!.lobbyChannelId!;
   const transport = await deps.connect();
   const controllerDeps: ControllerDeps = {
-    db: deps.db, matchmaker: deps.matchmaker, publicUrl: deps.config.publicUrl, ...deps.controller,
+    db: deps.db, matchmaker: deps.matchmaker, publicUrl: deps.config.publicUrl,
+    roles: transport.roles, ...deps.controller,
   };
 
   transport.onInteraction(async (i) => {

@@ -4,7 +4,8 @@ import { QUEUE_SIZE } from '../queue.js';
 import { CAMPAIGNS } from '../campaigns.js';
 import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js';
 import { spectateFor } from '../spectate.js';
-import type { BotInteraction, InteractionReply, MessagePayload } from './transport.js';
+import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from './transport.js';
+import { getSetting } from '../settings.js';
 
 export interface ControllerDeps {
   db: DB;
@@ -14,6 +15,9 @@ export interface ControllerDeps {
   queueBlock?: (steamid: string) => string | null;
   /** The ban explanation (reason, expiry) when bans carry one. */
   banMessage?: (steamid: string) => string;
+  /** Add and remove the opt-in queue-alert role. Absent in tests that do not
+   *  exercise it, and when absent the toggle says so rather than lying. */
+  roles?: RoleOps;
 }
 
 const say = (content: string, extra: Partial<MessagePayload> = {}): InteractionReply => ({
@@ -61,10 +65,15 @@ export async function handleButton(
   deps: ControllerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
 ): Promise<InteractionReply> {
   const parts = i.customId.split(':');
-  const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave'))
+  const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave' || parts[1] === 'notify'))
     || (parts[0] === 'l' && parts.length >= 3)
     || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate'));
   if (!known) return say('That button no longer does anything.');
+
+  // Before resolve(), deliberately. Wanting to be told when games are filling
+  // is not the same as being ready to play one, and someone who has not linked
+  // their account yet is exactly who most needs the nudge to come back.
+  if (parts[0] === 'q' && parts[1] === 'notify') return toggleAlertRole(deps, i.userId);
 
   const who = resolve(deps, i);
   if ('reply' in who) return who.reply;
@@ -136,4 +145,38 @@ function serverOfMatch(db: ControllerDeps['db'], matchId: number): number | null
   const row = db.prepare("SELECT server_id FROM matches WHERE id = ? AND state = 'live'")
     .get(matchId) as { server_id: number | null } | undefined;
   return row?.server_id ?? null;
+}
+
+/**
+ * Toggle the opt-in queue-alert role.
+ *
+ * Reads the member's current roles rather than keeping our own record of who
+ * opted in: Discord is the source of truth for that, someone can be given or
+ * stripped of the role by hand, and a local copy would drift silently.
+ *
+ * A read that fails reports failure instead of guessing. Telling someone they
+ * have been removed from a role they still hold, or the reverse, is worse than
+ * asking them to try again.
+ */
+async function toggleAlertRole(deps: ControllerDeps, userId: string): Promise<InteractionReply> {
+  const roleId = getSetting(deps.db, 'discord_pug_role_id');
+  if (!roleId || !deps.roles) return say('Queue alerts are not set up on this server yet.');
+
+  const has = await deps.roles.has(userId, roleId).catch(() => null);
+  if (has === null) return say('Could not read your roles just now. Try that again in a moment.');
+
+  try {
+    if (has) {
+      await deps.roles.remove(userId, roleId);
+      return say('You will no longer be pinged when the queue fills up. Press it again to turn alerts back on.');
+    }
+    await deps.roles.add(userId, roleId);
+    return say('You will be pinged when the queue is close to popping. Press it again to stop.');
+  } catch (err) {
+    console.error('[discord] alert role toggle failed:', err);
+    // Almost always the bot's role sitting below the target role in the guild's
+    // role list, which no amount of retrying fixes, so say something an admin
+    // can act on rather than "try again".
+    return say('Could not change that. An admin may need to move the bot\'s role above the alert role.');
+  }
 }

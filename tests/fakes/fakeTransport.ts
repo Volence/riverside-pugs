@@ -1,5 +1,5 @@
 import type {
-  BotInteraction, BotTransport, InteractionReply, MessagePayload, SlashCommandDef, VoiceOps,
+  BotInteraction, BotTransport, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, VoiceOps,
 } from '../../src/discord/transport.js';
 
 export interface FakeMessage { channelId: string; id: string; payload: MessagePayload; deleted: boolean }
@@ -17,10 +17,19 @@ export class FakeTransport implements BotTransport {
   // Voice world.
   channels = new Map<string, { name: string; members: Set<string>; allowed: string[] }>();
   voiceOf = new Map<string, string>();
+  /** userId -> roles they hold. The queue-alert toggle is the only user. */
+  rolesOf = new Map<string, Set<string>>();
+  /** Set to make has() report "could not tell", the case that must not be
+   *  mistaken for "does not have it". */
+  rolesUnreadable = new Set<string>();
   moves: { userId: string; channelId: string }[] = [];
   failVoice = false;
 
+  /** Make the next N sends throw, for testing what a Discord outage does. */
+  failSends = 0;
+
   async send(channelId: string, payload: MessagePayload): Promise<string> {
+    if (this.failSends > 0) { this.failSends--; throw new Error('discord down'); }
     const id = `m${++this.seq}`;
     this.sends++;
     this.messages.push({ channelId, id, payload, deleted: false });
@@ -63,6 +72,19 @@ export class FakeTransport implements BotTransport {
   byId(id: string): FakeMessage | undefined {
     return this.messages.find((m) => m.id === id);
   }
+
+  roles: RoleOps = {
+    add: async (userId, roleId) => {
+      const set = this.rolesOf.get(userId) ?? new Set<string>();
+      set.add(roleId);
+      this.rolesOf.set(userId, set);
+    },
+    remove: async (userId, roleId) => { this.rolesOf.get(userId)?.delete(roleId); },
+    has: async (userId, roleId) => {
+      if (this.rolesUnreadable.has(userId)) return null;
+      return this.rolesOf.get(userId)?.has(roleId) ?? false;
+    },
+  };
 
   voice: VoiceOps = {
     createMatchChannels: async (name, teamA, teamB) => {

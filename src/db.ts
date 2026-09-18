@@ -400,6 +400,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   map_pool: JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
+  discord_pug_role_id: '',
   // Empty: guild membership alone activates a linked player. A role id: the
   // member must also hold that role.
   discord_required_role_id: '',
