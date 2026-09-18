@@ -86,4 +86,30 @@ describe('missionFromVpk', () => {
     writeFileSync(p, Buffer.from('this is not a vpk'));
     expect(missionFromVpk(p)).toBeNull();
   });
+
+  // The mission's bytes live entirely in a numbered archive (pak01_NNN.vpk)
+  // that this reader deliberately never opens.
+  it('returns null when the mission is entirely in an inaccessible numbered archive', () => {
+    const p = join(dir, 'archived.vpk');
+    makeVpk(p, { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION, archiveIndex: 0 });
+    expect(missionFromVpk(p)).toBeNull();
+  });
+
+  // A short preload still tokenises into a complete-looking, but short,
+  // chapter list: the KeyValues parser just stops at the last full block it
+  // can see instead of erroring. That must not be accepted as the whole
+  // mission, so assert the null itself, not merely that nothing threw.
+  it('returns null when the mission is truncated between the preload and a numbered archive', () => {
+    const p = join(dir, 'partial.vpk');
+    const cut = MISSION.indexOf('"10"');
+    makeVpk(p, {
+      ext: 'txt',
+      dir: 'missions',
+      name: 'dbd',
+      body: MISSION,
+      archiveIndex: 0,
+      preloadBytes: Buffer.byteLength(MISSION.slice(0, cut), 'utf8'),
+    });
+    expect(missionFromVpk(p)).toBeNull();
+  });
 });
