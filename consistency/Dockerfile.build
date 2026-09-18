@@ -1,0 +1,15 @@
+# Build environment for the L4D1 consistency extension.
+#
+# Ubuntu 22.04 for the same reason sourcetv/Dockerfile.build uses it: the Dallas
+# box is Ubuntu 24.04 (glibc 2.39), and building on anything newer produces a .so
+# requiring symbol versions the box does not have.
+#
+# i386 architecture and g++-multilib because the L4D1 dedicated server is 32-bit
+# (`file bin/engine.so` -> ELF 32-bit LSB, Intel i386).
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN dpkg --add-architecture i386 && apt-get update && \
+    apt-get install -y --no-install-recommends \
+      g++-multilib make binutils file ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /work
