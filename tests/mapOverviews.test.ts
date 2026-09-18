@@ -38,10 +38,17 @@ describe('OVERVIEWS', () => {
     }
   });
 
-  it('points every layer at a webp under /overviews/', () => {
+  // Either form is legitimate: a root-relative path serves the layers from
+  // web/public in a dev checkout, an absolute https URL serves them from the
+  // bucket, which is what production does because the set is nearly a gigabyte
+  // and is not committed. What must hold either way is the /overviews/ segment
+  // and the file name shape.
+  it('points every layer at a webp under an /overviews/ base', () => {
     for (const m of Object.values(OVERVIEWS)) {
       for (const l of m.layers) {
-        expect(l.image).toMatch(/^\/overviews\/[a-z0-9_+-]+(\.\d+x)?\.webp$/);
+        expect(l.image).toMatch(
+          /^(https:\/\/[a-z0-9.-]+)?\/overviews\/[a-z0-9_+-]+(\.\d+x)?\.webp$/,
+        );
       }
     }
   });
