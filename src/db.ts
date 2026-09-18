@@ -400,6 +400,38 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS custom_campaigns (
+  slug TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  vpk_filename TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('draft','published')),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  uploaded_by TEXT,
+  uploaded_at INTEGER NOT NULL,
+  notes TEXT
+);
+CREATE TABLE IF NOT EXISTS custom_campaign_chapters (
+  slug TEXT NOT NULL REFERENCES custom_campaigns(slug) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL,
+  map TEXT NOT NULL,
+  display TEXT,
+  is_finale INTEGER NOT NULL DEFAULT 0,
+  included INTEGER NOT NULL DEFAULT 1,
+  play_order INTEGER,
+  PRIMARY KEY (slug, ordinal)
+);
+CREATE TABLE IF NOT EXISTS custom_campaign_installs (
+  slug TEXT NOT NULL REFERENCES custom_campaigns(slug) ON DELETE CASCADE,
+  server_id INTEGER NOT NULL REFERENCES servers(id),
+  state TEXT NOT NULL CHECK (state IN ('pending','installed','failed')),
+  sha256 TEXT,
+  error TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (slug, server_id)
+);
+CREATE INDEX IF NOT EXISTS custom_chapter_map ON custom_campaign_chapters(map);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
@@ -512,6 +544,17 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'match_demos', 'r2_at', 'TEXT');
   ensureColumn(db, 'matches', 'voided_at', 'TEXT');
   ensureColumn(db, 'matches', 'void_reason', 'TEXT');
+  // How a campaign VPK reaches this box. 'local' is a filesystem copy, which
+  // is only correct when the web app runs on the same machine as the game
+  // server; anything else needs 'ftp'. Defaulted to 'local' with a NULL
+  // addons_dir so an existing row is inert until an admin configures it:
+  // a half-configured transport must no-op, never write to a guessed path.
+  ensureColumn(db, 'servers', 'addons_transport', "TEXT NOT NULL DEFAULT 'local'");
+  ensureColumn(db, 'servers', 'addons_dir', 'TEXT');
+  ensureColumn(db, 'servers', 'ftp_host', 'TEXT');
+  ensureColumn(db, 'servers', 'ftp_port', 'INTEGER');
+  ensureColumn(db, 'servers', 'ftp_user', 'TEXT');
+  ensureColumn(db, 'servers', 'ftp_password', 'TEXT');
   seed(db);
   return db;
 }
