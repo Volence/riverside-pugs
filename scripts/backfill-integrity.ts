@@ -5,11 +5,16 @@
  * are measurements, so a threshold change means re-measuring, and nothing else
  * has to be migrated.
  *
- *   npx tsx scripts/backfill-integrity.ts
+ *   npx tsx scripts/backfill-integrity.ts            # re-measure everything
+ *   npx tsx scripts/backfill-integrity.ts --pending  # only unmeasured rounds
+ *
+ * --pending is what the server runs by itself after a match, so it must stay
+ * cheap: it skips the prior rebuild, which is the pass that reads every file
+ * on disk, and measures only rounds no current-version analysis has touched.
  */
 import { loadConfig } from '../src/config.js';
 import { openDb } from '../src/db.js';
-import { backfillAll, rebuildPriors } from '../src/integrity/run.js';
+import { analyzePending, backfillAll, rebuildPriors } from '../src/integrity/run.js';
 import { TUNING } from '../src/integrity/constants.js';
 
 const config = loadConfig(process.env);
@@ -18,6 +23,12 @@ const dir = config.replayDir;
 if (!dir) {
   console.error('No REPLAY_DIR configured; nothing to analyse.');
   process.exit(1);
+}
+
+if (process.argv.includes('--pending')) {
+  const got = analyzePending(db, dir);
+  console.log(`Analysed ${got.rounds} pending round${got.rounds === 1 ? '' : 's'}, skipped ${got.skipped}.`);
+  process.exit(0);
 }
 
 const perMap = rebuildPriors(db, dir);

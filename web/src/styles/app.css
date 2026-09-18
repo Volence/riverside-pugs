@@ -1438,6 +1438,17 @@ body.is-theater { overflow: hidden; }
   padding: var(--sp-2); font: inherit; min-height: 40px;
 }
 
+/* Button plus its Force escape hatch, on one line. */
+.admin-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-3) 0; }
+/* The analysis script's own stdout. Scrolls in both directions rather than
+ * wrapping: the per-map prior lines are columnar and wrapping them makes the
+ * run unreadable at exactly the moment you are reading it to see what broke. */
+.admin-log {
+  max-height: 18rem; overflow: auto; margin: 0;
+  padding: var(--sp-3); background: var(--bg); border: 1px solid var(--border);
+  font-family: var(--font-mono, monospace); font-size: var(--fs-label); line-height: 1.5;
+  white-space: pre;
+}
 .admin-table { width: 100%; }
 .admin-table td, .admin-table th { white-space: nowrap; }
 .admin-table tr.is-clickable { cursor: pointer; }

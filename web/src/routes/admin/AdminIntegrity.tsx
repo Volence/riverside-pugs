@@ -1,8 +1,8 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { adminApi, type IntegrityClip } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
-import { useAction } from './useAction';
+import { fmtTime, useAction } from './useAction';
 
 const pct = (v: number | null): string => (v == null ? 'n/a' : `${Math.round(v * 100)}%`);
 const num = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(2));
@@ -42,6 +42,94 @@ export function groupByRound(clips: IntegrityClip[]): { key: string; clips: Inte
  * reads to pick the round and seek the viewer there once its frames arrive, so
  * a reviewer lands on the moment instead of scrubbing to it by hand.
  */
+/**
+ * Run the analysis from here.
+ *
+ * Until this existed the only caller of the integrity analysis anywhere was a
+ * script someone had to SSH in and run, so the board was empty until somebody
+ * remembered and stale again after the next match. The automatic per-match
+ * pass fixes the staleness; this button is for the other case, re-measuring
+ * everything against rebuilt priors or a changed threshold.
+ *
+ * The run happens in its own process (see src/integrity/job.ts) and this polls
+ * its state while it goes, showing the script's own output, which already
+ * reports per-map prior coverage and what it skipped.
+ */
+function BackfillControl() {
+  const { data, reload } = useFetch((s) => adminApi.integrityJob(s), []);
+  const { busy, error, run } = useAction(reload);
+  const running = data?.available === true && data.job.status === 'running';
+
+  // Only while a run is going: an idle panel has nothing to poll for.
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(reload, 2000);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  if (!data) return null;
+  if (!data.available) {
+    return (
+      <Panel>
+        <h3>Analysis</h3>
+        <p class="muted">No replay directory is configured on this server, so there is nothing to analyse.</p>
+      </Panel>
+    );
+  }
+
+  const { job, pending, matchInFlight } = data;
+  return (
+    <Panel>
+      <h3>Analysis</h3>
+      <p class="muted">
+        Rounds are measured automatically once a match finishes.
+        {pending > 0
+          ? ` ${pending} round${pending === 1 ? '' : 's'} waiting to be measured; the next pass picks ${pending === 1 ? 'it' : 'them'} up within a minute.`
+          : ' Everything on disk has been measured.'}
+        {' '}Re-analysing everything is for after a threshold change, or once more maps have
+        enough rounds to score against.
+      </p>
+      <div class="admin-row">
+        <button
+          class="btn"
+          disabled={busy || running || matchInFlight}
+          onClick={() => run(() => adminApi.integrityRun('full', false))}
+        >
+          {running ? 'Analysing…' : 'Re-analyse all replays'}
+        </button>
+        {matchInFlight && !running && (
+          <button
+            class="chip"
+            disabled={busy}
+            onClick={() => run(
+              () => adminApi.integrityRun('full', true),
+              'A match is in flight. This decodes every replay on disk and competes with the game server for CPU. Run it anyway?',
+            )}
+          >
+            Force
+          </button>
+        )}
+      </div>
+      {matchInFlight && (
+        <p class="muted">
+          A match is in flight. This reads every replay on disk on the same two cores holding
+          100 tick, so it is blocked until the box is quiet. Force it only if you know it is.
+        </p>
+      )}
+      {error && <p class="error">{error}</p>}
+      {job.status !== 'idle' && (
+        <p class="muted">
+          Last run: {job.mode === 'pending' ? 'new rounds' : 'everything'}, {job.status}
+          {job.startedAt && `, started ${fmtTime(job.startedAt)}`}
+          {job.finishedAt && `, finished ${fmtTime(job.finishedAt)}`}
+          {job.status === 'failed' && job.exitCode !== null && ` (exit ${job.exitCode})`}
+        </p>
+      )}
+      {job.output.length > 0 && <pre class="admin-log">{job.output.join('\n')}</pre>}
+    </Panel>
+  );
+}
+
 export function AdminIntegrity() {
   const [steamid, setSteamid] = useState<string | null>(null);
   const { data, reload } = useFetch((s) => adminApi.integrity('', s), []);
@@ -111,6 +199,8 @@ export function AdminIntegrity() {
   const noClips = players.length > 0 && players.every((p) => p.clips === 0);
 
   return (
+    <>
+      <BackfillControl />
     <Panel>
       <p class="muted">
         Theoretical only. These numbers rank who is worth watching a clip of; they are not
@@ -156,5 +246,6 @@ export function AdminIntegrity() {
         </div>
       )}
     </Panel>
+    </>
   );
 }

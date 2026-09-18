@@ -54,6 +54,32 @@ describe('GET /api/admin/integrity', () => {
     expect(r.statusCode).toBe(403);
   });
 
+  // /backfill sits under the same prefix as /:steamid, and a steamid is just
+  // a string. If the parametric route ever won, pressing the button would
+  // silently look up a player called "backfill" and report nothing.
+  it('resolves /integrity/backfill as the job route, not as a player id', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/admin/integrity/backfill', cookies: adminCookie });
+    expect(r.statusCode).toBe(200);
+    const body = r.json() as { available: boolean; job?: { status: string } };
+    // loadConfig({}) has no replay directory, so the honest answer is that
+    // there is nothing to analyse here.
+    expect(body).toHaveProperty('available');
+    expect(body).not.toHaveProperty('rounds');
+  });
+
+  it('refuses the job route to a non-admin', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/admin/integrity/backfill', cookies: userCookie });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('refuses to start a run with no replay directory rather than failing silently', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/admin/integrity/backfill', cookies: adminCookie, payload: { mode: 'full' },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toMatchObject({ error: expect.stringMatching(/replay directory/i) });
+  });
+
   it('returns players ranked by composite', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/admin/integrity', cookies: adminCookie });
     expect(r.statusCode).toBe(200);

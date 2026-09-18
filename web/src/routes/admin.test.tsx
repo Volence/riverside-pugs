@@ -7,6 +7,7 @@ const { mockAdmin, mockApi } = vi.hoisted(() => ({
     players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     reports: vi.fn(), audit: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
+    integrityJob: vi.fn(), integrityRun: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
 }));
@@ -23,6 +24,14 @@ const { ReportPlayer } = await import('../components/ReportPlayer');
 afterEach(cleanup);
 beforeEach(() => {
   for (const fn of [...Object.values(mockAdmin), ...Object.values(mockApi)]) fn.mockReset();
+  // The Integrity tab always asks for the analysis job's state, so every test
+  // that opens it needs an answer whether or not it cares about one.
+  mockAdmin.integrityJob.mockResolvedValue({
+    available: true,
+    job: { status: 'idle', mode: null, startedAt: null, finishedAt: null, exitCode: null, output: [] },
+    pending: 0,
+    matchInFlight: false,
+  });
 });
 
 const me = { steamid: '1', name: 'boss', avatar: null, status: 'active', isAdmin: true };
@@ -122,6 +131,88 @@ describe('AdminIntegrity', () => {
     fireEvent.click(screen.getByText(name));
     await waitFor(() => expect(mockAdmin.integrityPlayer).toHaveBeenCalled());
   };
+
+  const jobInfo = (over: Record<string, unknown> = {}) => ({
+    available: true,
+    job: { status: 'idle', mode: null, startedAt: null, finishedAt: null, exitCode: null, output: [] },
+    pending: 0,
+    matchInFlight: false,
+    ...over,
+  });
+
+  /** Open the Integrity tab with the board empty, which is where the run
+   *  controls matter most. */
+  const openTab = async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({ players: [] });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+  };
+
+  it('runs the analysis from the panel', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo());
+    mockAdmin.integrityRun.mockResolvedValue({});
+    await openTab();
+    const btn = await waitFor(() => screen.getByRole('button', { name: 'Re-analyse all replays' }));
+    fireEvent.click(btn);
+    await waitFor(() => expect(mockAdmin.integrityRun).toHaveBeenCalledWith('full', false));
+  });
+
+  it('says how many rounds are waiting and that they are picked up automatically', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ pending: 3 }));
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/3 rounds waiting to be measured/)).toBeTruthy());
+    expect(screen.getByText(/measured automatically once a match finishes/)).toBeTruthy();
+  });
+
+  // The guard that matters: this decodes every replay on disk on the same two
+  // cores holding 100 tick.
+  it('blocks the run while a match is in flight, and offers a deliberate force', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ matchInFlight: true }));
+    mockAdmin.integrityRun.mockResolvedValue({});
+    await openTab();
+    const btn = await waitFor(() => screen.getByRole('button', { name: 'Re-analyse all replays' }));
+    expect(btn).toHaveProperty('disabled', true);
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Force' }));
+    await waitFor(() => expect(mockAdmin.integrityRun).toHaveBeenCalledWith('full', true));
+    expect(confirm).toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('shows the running output and offers no force while a run is going', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({
+      matchInFlight: true,
+      job: {
+        status: 'running', mode: 'full', startedAt: '2026-09-18T05:00:00Z', finishedAt: null,
+        exitCode: null, output: ['Priors: 17 maps seen', 'Analysed 198 rounds, skipped 0.'],
+      },
+    }));
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/Analysed 198 rounds/)).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Analysing…' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Force' })).toBeNull();
+  });
+
+  it('says a failed run failed, with its exit code', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({
+      job: {
+        status: 'failed', mode: 'full', startedAt: '2026-09-18T05:00:00Z',
+        finishedAt: '2026-09-18T05:01:00Z', exitCode: 1, output: ['Error: ENOENT'],
+      },
+    }));
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/failed/)).toBeTruthy());
+    expect(screen.getByText(/exit 1/)).toBeTruthy();
+  });
+
+  it('says so rather than offering a button when no replay directory exists', async () => {
+    mockAdmin.integrityJob.mockResolvedValue({ available: false });
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/No replay directory is configured/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Re-analyse all replays' })).toBeNull();
+  });
 
   it('ranks the higher composite first and calls the number theoretical, not a verdict', async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });

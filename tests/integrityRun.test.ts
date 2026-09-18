@@ -9,9 +9,10 @@ import {
   type Frame, type PlayerSample, type ReplayHeader,
 } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
+import { ANALYZER_VERSION } from '../src/integrity/store.js';
 import { bearing } from '../src/integrity/geometry.js';
 import { buildRoundPrior } from '../src/integrity/round.js';
-import { analyzeOneRound, backfillAll, rebuildPriors } from '../src/integrity/run.js';
+import { analyzeOneRound, analyzePending, backfillAll, rebuildPriors } from '../src/integrity/run.js';
 
 const TOKEN = 'a'.repeat(32);
 let db: DB;
@@ -78,6 +79,45 @@ describe('analyzeOneRound', () => {
     analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, replayBytes(60));
     const row = db.prepare('SELECT metrics FROM integrity_rounds WHERE slot = 0').get() as { metrics: string };
     expect(JSON.parse(row.metrics).occZ).toBeNull();
+  });
+});
+
+describe('analyzePending', () => {
+  it('analyses a round nothing has looked at yet', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    expect(analyzePending(db, dir)).toEqual({ rounds: 1, skipped: 0 });
+    expect(db.prepare('SELECT COUNT(*) c FROM integrity_rounds').get()).toEqual({ c: 1 });
+  });
+
+  it('leaves a round alone the second time, so it is cheap to run often', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    analyzePending(db, dir);
+    const before = db.prepare('SELECT computed_at FROM integrity_rounds WHERE slot = 0').get();
+    expect(analyzePending(db, dir)).toEqual({ rounds: 0, skipped: 0 });
+    expect(db.prepare('SELECT computed_at FROM integrity_rounds WHERE slot = 0').get()).toEqual(before);
+  });
+
+  // The measurements carry the version of the analyzer that produced them, so
+  // a round measured by an older one is not done: leaving it would mix two
+  // analyzers' numbers on one board, which is worse than either alone.
+  it('re-analyses a round measured by an older analyzer', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    analyzePending(db, dir);
+    db.prepare('UPDATE integrity_rounds SET analyzer_version = ? WHERE match_id = 1').run(ANALYZER_VERSION - 1);
+    expect(analyzePending(db, dir)).toEqual({ rounds: 1, skipped: 0 });
+    const v = db.prepare('SELECT DISTINCT analyzer_version v FROM integrity_rounds').all();
+    expect(v).toEqual([{ v: ANALYZER_VERSION }]);
+  });
+
+  // Unlike backfillAll, which exists to re-measure everything against fresh
+  // priors. This one runs after every match and must not re-read 250 MB.
+  it('does not touch the map priors', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    rebuildPriors(db, dir);
+    const before = db.prepare('SELECT rounds, frames FROM integrity_prior').get();
+    db.prepare('DELETE FROM integrity_rounds').run();
+    analyzePending(db, dir);
+    expect(db.prepare('SELECT rounds, frames FROM integrity_prior').get()).toEqual(before);
   });
 });
 
