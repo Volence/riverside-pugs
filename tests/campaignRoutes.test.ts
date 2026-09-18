@@ -8,7 +8,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import {
-  getCampaign, insertDraft, installsOf, publishCampaign, setEnabled, setInstall,
+  getCampaign, insertDraft, installsOf, publishCampaign, setInstall,
 } from '../src/customCampaigns.js';
 import { campaignRegistry, invalidateCampaignCache } from '../src/campaignRegistry.js';
 import type { InstallTarget } from '../src/campaignInstall.js';
@@ -94,7 +94,6 @@ describe('GET /api/campaigns/custom', () => {
       sizeBytes: 9, sha256: 'b'.repeat(64), uploadedBy: null,
     }, [{ map: 'wip1', display: null, isFinale: true }]);
     publishCampaign(db, 'dbd', 'DBD');
-    setEnabled(db, 'dbd', true);
 
     const app = await buildTestApp({ db, addonsDir: addons });
     const res = await app.inject({ method: 'GET', url: '/api/campaigns/custom' });
@@ -108,13 +107,12 @@ describe('GET /api/campaigns/custom', () => {
   // poolable campaigns would leave the badge nothing to distinguish, which is
   // how it shipped first: a published campaign was invisible until someone
   // ticked a box labelled for the vote.
-  it('lists a published campaign that is not poolable', async () => {
+  it('lists a published campaign with no install anywhere', async () => {
     insertDraft(db, {
       slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
       sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
     }, [{ map: 'dbd1', display: 'One', isFinale: true }]);
     publishCampaign(db, 'dbd', 'DBD');
-    // deliberately NOT setEnabled
 
     const app = await buildTestApp({ db, addonsDir: addons });
     const res = await app.inject({ method: 'GET', url: '/api/campaigns/custom' });
@@ -137,7 +135,6 @@ describe('GET /api/campaigns/custom', () => {
     }, [{ map: 'other1', display: null, isFinale: true }]);
     for (const slug of ['dbd', 'other']) {
       publishCampaign(db, slug, slug);
-      setEnabled(db, slug, true);
     }
     setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'dbd']));
 
@@ -158,7 +155,6 @@ describe('GET /api/campaigns/custom', () => {
       sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
     }, [{ map: 'dbd1', display: 'One', isFinale: true }]);
     publishCampaign(db, 'dbd', 'DBD');
-    setEnabled(db, 'dbd', true);
     setSetting(db, 'map_pool', 'not json at all');
 
     const app = await buildTestApp({ db, addonsDir: addons });
@@ -178,7 +174,6 @@ describe('GET /download/campaign/:slug', () => {
       uploadedBy: null,
     }, [{ map: 'dbd1', display: null, isFinale: true }]);
     publishCampaign(db, 'dbd', 'DBD');
-    setEnabled(db, 'dbd', true);
   };
 
   it('streams the VPK', async () => {
@@ -490,54 +485,6 @@ describe('POST /api/admin/campaigns/:slug/publish', () => {
   });
 });
 
-describe('POST /api/admin/campaigns/:slug/enabled', () => {
-  const draftAndPublishDbd = () => {
-    insertDraft(db, {
-      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
-      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
-    }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
-    publishCampaign(db, 'dbd', 'DBD');
-  };
-
-  it('flips enabled on', async () => {
-    draftAndPublishDbd();
-    const app = await buildTestApp({ db, addonsDir: addons });
-    const res = await app.inject({
-      method: 'POST', url: '/api/admin/campaigns/dbd/enabled',
-      cookies: adminCookie(app, '76561198000000001'),
-      payload: { enabled: true },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(getCampaign(db, 'dbd')!.enabled).toBe(1);
-    expect(db.prepare("SELECT COUNT(*) c FROM admin_actions WHERE action = 'campaign_enabled'").get())
-      .toEqual({ c: 1 });
-  });
-
-  it('flips enabled back off', async () => {
-    draftAndPublishDbd();
-    setEnabled(db, 'dbd', true);
-    const app = await buildTestApp({ db, addonsDir: addons });
-    const res = await app.inject({
-      method: 'POST', url: '/api/admin/campaigns/dbd/enabled',
-      cookies: adminCookie(app, '76561198000000001'),
-      payload: { enabled: false },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(getCampaign(db, 'dbd')!.enabled).toBe(0);
-  });
-
-  it('refuses a non-admin', async () => {
-    draftAndPublishDbd();
-    const app = await buildTestApp({ db, addonsDir: addons });
-    const res = await app.inject({
-      method: 'POST', url: '/api/admin/campaigns/dbd/enabled',
-      cookies: authedCookie(app, db, '76561198000000009'),
-      payload: { enabled: true },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-});
-
 describe('POST /api/admin/campaigns/:slug/reinstall', () => {
   const publishedDbd = () => {
     seedServer1();
@@ -598,7 +545,6 @@ describe('DELETE /api/admin/campaigns/:slug', () => {
       sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
     }, [{ map: 'dbd1_alley', display: null, isFinale: true }]);
     publishCampaign(db, 'dbd', 'DBD');
-    setEnabled(db, 'dbd', true);
     setInstall(db, 'dbd', 1, 'installed', { sha256: 'a'.repeat(64) });
     fake.files.set('dbd.vpk', 9);
   };

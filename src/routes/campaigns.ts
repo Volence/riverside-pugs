@@ -15,7 +15,7 @@ import { transportFor } from '../addonsTransport.js';
 import { installCampaign, uninstallCampaign, type InstallTarget } from '../campaignInstall.js';
 import {
   chaptersOf, deleteCampaign, getCampaign, insertDraft, installsOf,
-  listCampaigns, publishCampaign, setEnabled,
+  listCampaigns, publishCampaign,
 } from '../customCampaigns.js';
 import { missionFromVpk } from '../vpk.js';
 import type { ServerRow } from '../serverPool.js';
@@ -239,19 +239,6 @@ export async function campaignRoutes(
     void installCampaign(db, slug, {
       sourcePath: join(addonsDir, c.vpk_filename), servers: targets(),
     }).catch((err) => req.log.error({ err, slug }, 'installCampaign rejected unexpectedly'));
-    return { ok: true };
-  });
-
-  app.post('/api/admin/campaigns/:slug/enabled', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
-    if (!adminId) return reply;
-    const { slug } = req.params as { slug: string };
-    const c = getCampaign(db, slug);
-    if (!c) return reply.code(404).send({ error: 'no such campaign' });
-    const enabled = (req.body as { enabled?: boolean } | undefined)?.enabled === true;
-    setEnabled(db, slug, enabled);
-    invalidateCampaignCache();
-    logAdmin(db, adminId, 'campaign_enabled', slug, { enabled });
     return { ok: true };
   });
 

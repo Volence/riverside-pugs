@@ -99,10 +99,11 @@ export function firstMapOf(db: DB, campaign: string): string {
 /**
  * Campaigns an admin may put in map_pool: the stock four (no VPK, always
  * eligible), plus published custom campaigns that are `enabled` and
- * installed on every enabled server. It gates the vote only: every published
- * campaign is downloadable whether or not it is poolable, because a player
- * should be able to get a campaign that is installed and the "In the vote"
- * badge is what says which ones they need. Kept as its own lookup rather than
+ * installed on every enabled server. That install check is the whole gate:
+ * there used to be a second `enabled` flag an admin had to tick first, but
+ * once downloads stopped depending on it its only remaining job was permitting
+ * another switch, which cost a click and confused people without adding any
+ * safety this does not already provide. Kept as its own lookup rather than
  * filtered on the client so a direct PUT to the setting (validateSetting)
  * enforces exactly the same rule the panel displays.
  *
@@ -117,14 +118,11 @@ export function poolableCampaigns(
   db: DB, opts: { alsoAllow?: Iterable<string> } = {},
 ): CampaignEntry[] {
   const serverIds = enabledServerIds(db);
-  const enabledCustomSlugs = new Set(
-    listCampaigns(db, { state: 'published', enabledOnly: true }).map((c) => c.slug),
-  );
   const already = new Set(opts.alsoAllow ?? []);
   return [...campaignRegistry(db).values()].filter((c) => (
     !c.custom
     || already.has(c.slug)
-    || (enabledCustomSlugs.has(c.slug) && isInstalledEverywhere(db, c.slug, serverIds))
+    || isInstalledEverywhere(db, c.slug, serverIds)
   ));
 }
 

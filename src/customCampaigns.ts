@@ -79,12 +79,11 @@ export function getCampaign(db: DB, slug: string): CustomCampaignRow | undefined
 }
 
 export function listCampaigns(
-  db: DB, opts: { state?: CampaignState; enabledOnly?: boolean } = {},
+  db: DB, opts: { state?: CampaignState } = {},
 ): CustomCampaignRow[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.state) { where.push('state = ?'); args.push(opts.state); }
-  if (opts.enabledOnly) where.push('enabled = 1');
   const sql = `SELECT * FROM custom_campaigns${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY name`;
   return db.prepare(sql).all(...args) as CustomCampaignRow[];
 }
@@ -98,10 +97,6 @@ export function chaptersOf(db: DB, slug: string): ChapterRow[] {
 export function publishCampaign(db: DB, slug: string, name: string): void {
   db.prepare("UPDATE custom_campaigns SET state = 'published', name = ? WHERE slug = ?")
     .run(name, slug);
-}
-
-export function setEnabled(db: DB, slug: string, enabled: boolean): void {
-  db.prepare('UPDATE custom_campaigns SET enabled = ? WHERE slug = ?').run(enabled ? 1 : 0, slug);
 }
 
 export function deleteCampaign(db: DB, slug: string): void {

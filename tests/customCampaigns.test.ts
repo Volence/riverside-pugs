@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
   insertDraft, getCampaign, listCampaigns, chaptersOf, publishCampaign,
-  setEnabled, deleteCampaign, installsOf, setInstall,
+  deleteCampaign, installsOf, setInstall,
 } from '../src/customCampaigns.js';
 
 let db: DB;
@@ -65,17 +65,6 @@ describe('custom campaign store', () => {
     draft('other');
     publishCampaign(db, 'dbd', 'Dead Before Dawn');
     expect(listCampaigns(db, { state: 'published' }).map((c) => c.slug)).toEqual(['dbd']);
-  });
-
-  // Publishing and enabling are separate acts: a published campaign can sit
-  // out of the pool indefinitely without being re-uploaded.
-  it('keeps enabled separate from published', () => {
-    draft();
-    publishCampaign(db, 'dbd', 'Dead Before Dawn');
-    expect(getCampaign(db, 'dbd')!.enabled).toBe(0);
-    setEnabled(db, 'dbd', true);
-    expect(listCampaigns(db, { state: 'published', enabledOnly: true }).map((c) => c.slug))
-      .toEqual(['dbd']);
   });
 
   it('records install state per server', () => {
