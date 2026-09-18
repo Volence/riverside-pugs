@@ -156,6 +156,12 @@ export function readMissionFromVpk(vpkPath: string): { file: string; text: strin
           // it back as the whole file would silently ship a campaign missing
           // its later chapters instead of rejecting the upload.
           if (archiveIndex !== 0x7fff && length > 0) return null;
+          // Buffer.subarray clamps a past-the-end index instead of throwing,
+          // so a physically truncated file would otherwise hand back
+          // whatever bytes happen to be there: a short but complete-looking
+          // Mission, not an error. Check the claimed range actually fits
+          // before trusting it.
+          if (archiveIndex === 0x7fff && dataStart + offset + length > buf.length) return null;
           const body = archiveIndex === 0x7fff
             ? Buffer.concat([preload, buf.subarray(dataStart + offset, dataStart + offset + length)])
             : preload;
