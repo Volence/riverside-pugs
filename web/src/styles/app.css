@@ -1680,3 +1680,9 @@ body.is-theater { overflow: hidden; }
   font-size: var(--fs-dense);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* Marks a custom campaign that can actually come up in a vote. The distinction
+ * matters more than it looks: an uninstalled campaign in the pool is a match a
+ * player cannot join, so this is the difference between "optional download" and
+ * "install this or sit out". */
+.ccamp__pool { margin-left: var(--sp-2); padding: 2px 7px; border: 1px solid var(--accent); border-radius: 2px; font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); vertical-align: middle; }
