@@ -526,6 +526,39 @@ describe('AdminCampaigns', () => {
     expect(await waitFor(() => screen.getByText(/11(\.0)? GB free/i))).toBeTruthy();
   });
 
+  // Every chapter of a campaign shares its slug, so a list keyed on ch.slug
+  // gives every <li> an identical, non-unique key; ch.ordinal is the thing
+  // that actually varies per chapter within one campaign. Preact's own
+  // reconciliation happens to still land on the right text here regardless
+  // of which of the two keys these plain text rows use (verified by hand:
+  // there is no per-node state or uncontrolled input for a stale key match
+  // to corrupt), so this cannot be a regression test for the collision
+  // itself. What it does check is the thing that is actually observable: a
+  // multi-chapter campaign renders every chapter, each with its own display
+  // name and ordinal-correct finale tag, in file order.
+  it('lists every chapter of a multi-chapter campaign with its own display name and finale tag', async () => {
+    mockAdmin.campaigns.mockResolvedValue({
+      free: 11 * 1024 ** 3,
+      campaigns: [{
+        slug: 'dbd', name: 'DBD', state: 'published', enabled: 1,
+        size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'dbd.vpk',
+        uploaded_by: null, uploaded_at: 0, notes: null,
+        chapters: [
+          { slug: 'dbd', ordinal: 1, map: 'dbd1', display: 'Alley', is_finale: 0, included: 1, play_order: 1 },
+          { slug: 'dbd', ordinal: 2, map: 'dbd2', display: 'Mall', is_finale: 0, included: 1, play_order: 2 },
+          { slug: 'dbd', ordinal: 3, map: 'dbd3', display: 'Docks', is_finale: 1, included: 1, play_order: 3 },
+        ],
+        installs: [],
+      }],
+    });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    await waitFor(() => screen.getByText('Alley'));
+
+    const rows = [...container.querySelectorAll('ol.admin-list li')].map((li) => li.textContent);
+    expect(rows).toEqual(['Alley', 'Mall', 'Docksfinale']);
+  });
+
   it('shows a per-server install state, and the error when one failed', async () => {
     mockAdmin.campaigns.mockResolvedValue({
       free: 11 * 1024 ** 3,

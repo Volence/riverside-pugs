@@ -30,7 +30,9 @@ function ChapterList({ chapters }: { chapters: AdminChapter[] }) {
   return (
     <ol class="admin-list">
       {included.map((ch) => (
-        <li key={ch.slug}>
+        // Every chapter of a campaign shares its slug; ordinal is what is
+        // actually unique per chapter.
+        <li key={ch.ordinal}>
           {ch.display ?? ch.map}
           {ch.is_finale === 1 && <span class="admin-tag">finale</span>}
         </li>
