@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 /** Discord application + bot. Null when any required piece is missing, which
  *  is the tested default: the site then behaves exactly as it did before
  *  Discord existed. The lobby channel is optional here because linking works
@@ -35,6 +36,23 @@ export interface Config {
    *  nothing reads it. */
   addonsDir: string;
   discord: DiscordConfig | null;
+}
+
+/**
+ * Configured directories that are not on disk, so startup can say so.
+ *
+ * A REPLAY_DIR or DEMO_DIR pointing somewhere that does not exist fails
+ * silently: every lookup simply finds no file and the browser gets a 404 that
+ * looks like missing data rather than misconfiguration. That cost an hour on
+ * 2026-09-18, when a dev server inherited a stale REPLAY_DIR from an earlier
+ * session's scratchpad and the viewer just said "Couldn't load that replay".
+ * An empty value is not a mistake: it is how both features are turned off.
+ */
+export function missingDirs(cfg: Config): { name: string; path: string }[] {
+  const pairs: [string, string][] = [['REPLAY_DIR', cfg.replayDir], ['DEMO_DIR', cfg.demoDir]];
+  return pairs
+    .filter(([, path]) => path && !existsSync(path))
+    .map(([name, path]) => ({ name, path }));
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
