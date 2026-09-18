@@ -162,19 +162,31 @@ export async function sweepDemos(
   db: DB,
   cfg: R2Config,
   demoDir: string,
-  opts: { limit?: number; deleteLocal?: boolean; ops?: R2Ops } = {},
+  opts: { limit?: number; deleteLocal?: boolean; includeUploaded?: boolean; ops?: R2Ops } = {},
 ): Promise<OffloadResult> {
   if (!demoDir) return EMPTY;
   const limit = opts.limit ?? 25;
+
+  // `includeUploaded` is what makes the documented two-pass migration work.
+  // The normal sweep looks only for demos with no key, because in steady state
+  // it uploads and reclaims in the same pass and a row with a key has no local
+  // file left to collect. After a first pass run WITHOUT --delete, though,
+  // every row has a key and every local file is still there, and the normal
+  // query matches none of them: the space would never be reclaimed and the
+  // second pass would report nothing to do. So the reclaim pass asks for the
+  // uploaded ones too.
+  //
+  // Not the default, because in steady state it would spend the sweep's whole
+  // budget re-checking finished matches and never reach the new ones.
   const matches = db.prepare(
     `SELECT DISTINCT d.match_id AS id
        FROM match_demos d
        JOIN matches m ON m.id = d.match_id
-      WHERE d.r2_key IS NULL
-        AND m.state IN ('completed', 'aborted')
+      WHERE m.state IN ('completed', 'aborted')
+        AND (d.r2_key IS NULL OR ?)
       ORDER BY d.match_id ASC
       LIMIT ?`,
-  ).all(limit) as { id: number }[];
+  ).all(opts.includeUploaded ? 1 : 0, limit) as { id: number }[];
 
   const total: OffloadResult = { ...EMPTY };
   for (const m of matches) {

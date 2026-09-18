@@ -269,6 +269,46 @@ describe('sweepDemos', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('ignores already-uploaded matches by default, so the budget reaches new ones', async () => {
+    seedMatch(1, 'completed', 1);
+    db.prepare("UPDATE match_demos SET r2_key = 'demos/1/x.dem' WHERE match_id = 1").run();
+    seedMatch(2, 'completed', 1);
+    const { ops, calls } = fakeOps({ storedBytes: () => 100 });
+
+    await sweepDemos(db, CFG, dir, { ops, deleteLocal: true });
+
+    // Only match 2 is touched: match 1 has a key, and in steady state a row
+    // with a key has no local file left to collect.
+    expect(calls.filter((c) => c.startsWith('put:'))).toHaveLength(1);
+    expect(calls.some((c) => c.includes('demos/2/'))).toBe(true);
+  });
+
+  it('reclaims already-uploaded demos when asked, which is the second migration pass', async () => {
+    // The state a first pass run WITHOUT --delete leaves behind: every row has
+    // a key and every local file is still there. Without includeUploaded the
+    // query matches nothing and the space is never reclaimed.
+    seedMatch(1, 'completed', 2, [100, 200]);
+    // The fake must report each object at its real local size, or the first
+    // pass refuses the mismatch and never records a key.
+    const sizeOf = (k: string) => (k.endsWith('_0_l4d_vs_airport01_x.dem') ? 100 : 200);
+    const first = fakeOps({ storedBytes: sizeOf });
+    await sweepDemos(db, CFG, dir, { ops: first.ops });
+    expect(existsSync(join(dir, `pug_${TOKEN}_0_l4d_vs_airport01_x.dem`))).toBe(true);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_demos WHERE r2_key IS NOT NULL').get()).toEqual({ n: 2 });
+
+    const second = fakeOps();
+    second.stored.set(`demos/1/pug_${TOKEN}_0_l4d_vs_airport01_x.dem`, 100);
+    second.stored.set(`demos/1/pug_${TOKEN}_1_l4d_vs_airport02_x.dem`, 200);
+
+    const r = await sweepDemos(db, CFG, dir, { ops: second.ops, deleteLocal: true, includeUploaded: true });
+
+    expect(r.bytes).toBe(300);
+    expect(existsSync(join(dir, `pug_${TOKEN}_0_l4d_vs_airport01_x.dem`))).toBe(false);
+    expect(existsSync(join(dir, `pug_${TOKEN}_1_l4d_vs_airport02_x.dem`))).toBe(false);
+    // Nothing was re-uploaded; each was verified and then removed.
+    expect(second.calls.filter((c) => c.startsWith('put:'))).toHaveLength(0);
+  });
+
   it('bounds one sweep so a backlog does not hold the process', async () => {
     for (let i = 1; i <= 5; i++) seedMatch(i, 'completed', 1);
     const { ops, calls } = fakeOps({ storedBytes: () => 100 });
