@@ -14,8 +14,19 @@ export interface MatchForecast {
   /** Mean SR of the rated players on each side, as the site shows SR. */
   srA: number;
   srB: number;
-  /** srA - srB. Positive means team A was favoured on paper. */
+  /** srA - srB. Positive means team A leads on the number players see.
+   *
+   *  NOT the same thing as being the stronger side, and the difference is not
+   *  academic: match 40 had team B leading by 114 SR while team A had the
+   *  higher mu, because the entire gap was team B's lower sigma. `displaySr`
+   *  subtracts TWICE a player's uncertainty, so a team can lead on SR purely
+   *  by being better understood. Compare `muGap` before reading anything into
+   *  this. */
   srGap: number;
+  /** Mean mu difference, A minus B: the skill gap the forecast is actually
+   *  built from, with no uncertainty penalty in it. Near zero alongside a
+   *  large `srGap` means the SR lead is confidence, not skill. */
+  muGap: number;
   /** Probability each team wins, from the same OpenSkill model that rates
    *  them. The pair sums to 1: a draw is not forecast separately. */
   winProbA: number;
@@ -84,6 +95,8 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
 
   const meanSr = (side: typeof a): number =>
     Math.round(side.reduce((n, r) => n + displaySr(r.mu, r.sigma), 0) / side.length);
+  const meanMu = (side: typeof a): number =>
+    side.reduce((n, r) => n + r.mu, 0) / side.length;
   const srA = meanSr(a);
   const srB = meanSr(b);
 
@@ -92,7 +105,10 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
     b.map((r) => rating(r)),
   ]);
 
-  return { srA, srB, srGap: srA - srB, winProbA, winProbB, ratedA: a.length, ratedB: b.length, source };
+  return {
+    srA, srB, srGap: srA - srB, muGap: meanMu(a) - meanMu(b),
+    winProbA, winProbB, ratedA: a.length, ratedB: b.length, source,
+  };
 }
 
 /** Whether a player who was rostered on map `joinedMap` of a `mapsPlayed`-map

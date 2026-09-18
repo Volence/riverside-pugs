@@ -111,7 +111,7 @@ describe('AdminMatches layout', () => {
       createdAt: '2026-09-18T05:28:36Z', wentLiveAt: '2026-09-18T05:28:37Z',
       connect: { host: '45.32.199.85', port: 27015, password: 'pug_ab12cd34' },
       forecast: {
-        srA: 1400, srB: 1150, srGap: 250, winProbA: 0.64, winProbB: 0.36,
+        srA: 1400, srB: 1150, srGap: 250, muGap: 2.5, winProbA: 0.64, winProbB: 0.36,
         ratedA: 4, ratedB: 4, source: 'current',
       },
     }],

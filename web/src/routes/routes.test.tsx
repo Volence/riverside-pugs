@@ -240,7 +240,7 @@ describe('MatchDetail', () => {
     ...over,
   });
 
-  const FORECAST = { srA: 1400, srB: 1200, srGap: 200, winProbA: 0.62, winProbB: 0.38, ratedA: 4, ratedB: 4 };
+  const FORECAST = { srA: 1400, srB: 1200, srGap: 200, muGap: 2, winProbA: 0.62, winProbB: 0.38, ratedA: 4, ratedB: 4, source: 'history' as const };
 
   it('shows the forecast when the server sent one, naming the favoured team', async () => {
     mockApi.match.mockResolvedValue(matchWith({ forecast: FORECAST }));
@@ -250,6 +250,19 @@ describe('MatchDetail', () => {
     expect(screen.getByText('1200 SR, 38% to win')).toBeTruthy();
     expect(screen.getByText(/200 SR to Team A/)).toBeTruthy();
     expect(screen.queryByText(/the underdog won/)).toBeNull();
+  });
+
+  // Match 40, the case that prompted this: a 114 SR gap next to 50/50 odds,
+  // which reads as broken until the panel says the SR lead is confidence
+  // rather than skill.
+  it('shows an SR lead with no skill lead as even on skill', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      forecast: { ...FORECAST, srA: 1012, srB: 1126, srGap: -114, muGap: 0.008, winProbA: 0.5, winProbB: 0.5 },
+    }));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText(/114 SR to Team B/)).toBeTruthy());
+    const rows = [...document.querySelectorAll('.forecast__kv tr')].map((r) => r.textContent ?? '');
+    expect(rows.find((r) => r.includes('Gap on skill'))).toMatch(/even/);
   });
 
   it('calls out an upset when the favoured team lost', async () => {
