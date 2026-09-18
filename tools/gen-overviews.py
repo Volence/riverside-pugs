@@ -20,8 +20,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument('src', help='the 1x capture directory')
 parser.add_argument('out', help='the TypeScript module to write')
 parser.add_argument('--override', help='a directory whose manifests replace same-named maps in src')
+parser.add_argument('--base-url', default='/overviews',
+                    help='where the browser fetches layers from. The default serves them from '
+                         'web/public. Point it at the R2 public URL plus /overviews to serve them '
+                         'from the bucket instead, which is what production does: the set is '
+                         'nearly a gigabyte and grows with every campaign, so it is not committed.')
 args = parser.parse_args()
 src, out = args.src, args.out
+base_url = args.base_url.rstrip('/')
 
 # The sizes a capture can legitimately be: a single 1x shot, or a 2x2 or 4x4
 # stitch of them. Asserting against the real file rather than taking it on trust is the
@@ -169,7 +175,7 @@ for map_name, layers, box in maps:
         img = l['image'].replace('.png', '.webp')
         lines.append(
             '      { '
-            f"image: '/overviews/{img}', "
+            f"image: '{base_url}/{img}', "
             f"cutHeight: {l['cut_height']:g}, "
             f"unitsPerPixel: {l['units_per_pixel']:.6f}, "
             f"originX: {ulx:g}, originY: {uly:g}, "

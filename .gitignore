@@ -14,3 +14,7 @@ design/**/riverside-pug-redesign.html
 
 # Screenshot passes from scripts/shoot-pages.mjs
 shots/
+
+# The 4x overview layers: 182 files and ~944 MB, served from R2 rather than git.
+# Regenerate with tools/convert-overviews.sh, upload with scripts/upload-overviews.ts.
+web/public/overviews/

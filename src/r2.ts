@@ -156,7 +156,7 @@ export async function put(
   cfg: R2Config,
   key: string,
   filePath: string,
-  opts: { contentType?: string; contentDisposition?: string } = {},
+  opts: { contentType?: string; contentDisposition?: string; cacheControl?: string } = {},
 ): Promise<{ bytes: number }> {
   const { size } = await stat(filePath);
   const headers: Record<string, string> = {
@@ -164,6 +164,7 @@ export async function put(
     'content-type': opts.contentType ?? 'application/octet-stream',
   };
   if (opts.contentDisposition) headers['content-disposition'] = opts.contentDisposition;
+  if (opts.cacheControl) headers['cache-control'] = opts.cacheControl;
 
   const signed = signRequest(cfg, {
     method: 'PUT', path: pathFor(cfg, key), headers, payloadHash: 'UNSIGNED-PAYLOAD',
@@ -217,3 +218,23 @@ export function publicUrlFor(cfg: R2Config, key: string): string {
 export function demoKey(matchId: number, filename: string): string {
   return `demos/${matchId}/${filename}`;
 }
+
+/** The object key for one map overview layer.
+ *
+ *  Sits beside `demos/` under its own prefix, so the two never interleave and
+ *  a prefix listing shows the whole art set. The file name already carries the
+ *  map and the cut height and is unique across campaigns, so it needs no
+ *  further grouping; it is also content-addressed in practice, because a
+ *  recapture of the same cut writes the same name and replaces the object. */
+export function overviewKey(file: string): string {
+  return `overviews/${file}`;
+}
+
+/** Overviews never change under a given name, so they may be cached hard.
+ *
+ *  A recapture of the same cut height overwrites the object rather than
+ *  producing a new name, which is the one case this gets wrong: after a
+ *  recapture a viewer holding the old copy keeps it until the year is out.
+ *  That is the right trade while the set is stable and recaptures are rare
+ *  events we control; if recaptures become routine, put a hash in the name. */
+export const OVERVIEW_CACHE_CONTROL = 'public, max-age=31536000, immutable';

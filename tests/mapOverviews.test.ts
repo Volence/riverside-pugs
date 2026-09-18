@@ -65,16 +65,25 @@ describe('OVERVIEWS', () => {
     }
   });
 
-  // Phase 1 of the recapture ships one map. Anything else tiled, or farm01 at
-  // 1x, means the converter took the wrong source.
-  it('ships Blood Harvest 1 at 4x4 tiles and every other map at 1x', () => {
+  // Every stock map is recaptured at 4x4 as of 2026-09-18. A 1x layer here means
+  // the converter took the wrong source for that map.
+  it('ships every map at 4x4 tiles', () => {
     for (const m of Object.values(OVERVIEWS)) {
-      const tiled = m.map === 'l4d_vs_farm01_hilltop';
       for (const l of m.layers) {
-        expect([l.width, l.height]).toEqual(tiled ? [8192, 5084] : [2048, 1271]);
-        expect(l.image.endsWith('.16x.webp')).toBe(tiled);
+        expect([l.width, l.height]).toEqual([8192, 5084]);
+        expect(l.image.endsWith('.16x.webp')).toBe(true);
       }
     }
+  });
+
+  // The layers are served from R2 in production and from web/public in a dev
+  // checkout, so the only thing that must hold is that a map's layers agree:
+  // a set split across two bases means the manifest was generated twice.
+  it('serves every layer of the set from one base', () => {
+    const bases = new Set(
+      Object.values(OVERVIEWS).flatMap((m) => m.layers.map((l) => l.image.replace(/[^/]+$/, ''))),
+    );
+    expect(bases.size).toBe(1);
   });
 });
 
