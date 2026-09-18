@@ -29,6 +29,11 @@ export interface Config {
    *  the backend can only see these files when it shares a filesystem with the
    *  game server. */
   replayDir: string;
+  /** The game server's addons directory. Empty turns campaign upload off
+   *  entirely, the same default and for the same reason as demoDir: a path
+   *  guessed from another path is how you write a 300 MB file somewhere
+   *  nothing reads it. */
+  addonsDir: string;
   discord: DiscordConfig | null;
 }
 
@@ -45,6 +50,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     logPublicAddress: env.LOG_PUBLIC_ADDRESS ?? '127.0.0.1:27500',
     demoDir: env.DEMO_DIR ?? '',
     replayDir: env.REPLAY_DIR ?? '',
+    addonsDir: env.ADDONS_DIR ?? '',
     discord: loadDiscord(env),
   };
 }
