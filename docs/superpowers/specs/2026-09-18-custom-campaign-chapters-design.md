@@ -19,7 +19,9 @@ and, on what ends a match:
 
 > the plugin should change to the last map in the list that's enabled should count as last map
 
-So: per-chapter include and exclude, chapter reordering, and a match that ends after the last chapter you kept rather than when the engine happens to load a finale. This applies to stock campaigns too, where excluding a finale is the same operation.
+So: per-chapter include and exclude, chapter reordering, and a match that ends after the last chapter you kept. This applies to stock campaigns too, where excluding a finale is the same operation.
+
+On that last point the plugin is already most of the way there, which section 3 covers: it ends after the last scored map completes, counting chapters from the mission file. Rewriting the mission may be the entire change.
 
 The database already carries `included` and `play_order` on `custom_campaign_chapters` from plan 1's first commit, so none of this reshapes what exists.
 
@@ -94,21 +96,52 @@ Constraints:
 - Mission files are a few kilobytes and live in the directory file, which plan 1's reader already relies on. A campaign whose mission is in a numbered archive is rejected at upload today and stays rejected.
 - The rewritten VPK is written to a temp name and renamed into place, for the same reason plan 1's transports do: srcds mounts whatever is in `addons/` at map load and must never see a half-written file.
 
-### 3. Match end moves to the last included map
+### 3. Match end: probably already correct
 
-Supersedes plan 1 spec section 4b, restated here because it is built now rather than then.
+**Corrected 2026-09-18 after reading the plugin rather than trusting an earlier reading of it.**
 
-Today the plugin ends when the engine reports the finale map loaded (`plugin/pug-match.sp:2574`, `L4D_IsMissionFinalMap(true)`). That cannot express "play this campaign's finale", and it makes the end condition a property of the mission file rather than of the match.
+Plan 1's spec, and the first draft of this one, said the plugin ends when the engine reports the
+finale map loaded, and that the finale therefore loads and is immediately discarded. That is
+wrong, and the correction matters because it removes most of this section.
 
-New rule: the backend tells the plugin which map is last, and the plugin ends the match when that map **completes**.
+There are two end triggers:
 
-This is smaller than it sounds because the path already exists. `!endpug` is documented at `plugin/pug-match.sp:1730` as "finish the match here, without loading the finale", and it already mirrors the finale branch including the pending-finalize failsafe. The change is to fire that same `EndMatchNow()` automatically once the designated last map is finalized.
+- `plugin/pug-match.sp:3066`, the normal path. `FinishSecondHalf()` calls `NextMapIsFinale()` and
+  ends with `"last scored map done"` when the map that just finished is the one before the
+  finale. The finale never loads.
+- `plugin/pug-match.sp:2574`, the older finale-loaded trigger, kept as a failsafe for when the
+  chapter read fails.
 
-Two things it improves for stock campaigns as well, neither a regression to guard against:
-- The finale map no longer loads at all. Today chapter 5 loads and is immediately discarded.
-- The end is triggered by a map completing, a moment the plugin already fully owns (`FinalizeMap`, `g_bPendingFinalize`), rather than by a subsequent level load.
+So the plugin already ends after the last scored map completes, which is exactly the behaviour
+the owner asked for. It is not a hardcoded count either: `NextMapIsFinale()` at
+`plugin/pug-match.sp:3076` asks left4dhooks for `L4D_GetCurrentChapter()` and
+`L4D_GetMaxChapters()`, the latter counting the mode's maps **from the mission file**.
 
-Delivery: extend `sm_pug_match` with the ordered included map list. Keep the finale-load trigger as a failsafe for self-started and auto-tracked matches, which have no backend-supplied list.
+That last detail is the whole point. Rewriting the mission to list only the included chapters
+changes what `L4D_GetMaxChapters()` returns, so the plugin's existing logic should follow the
+edited chapter list with no change at all.
+
+**Therefore: assume no plugin change, and test that assumption before writing any.** If it holds,
+plan 2 needs no plugin work, no staging on an empty server, and none of the live-match-flow risk
+that came with it. That is a materially smaller and safer piece of work than this spec first
+described.
+
+What still needs checking, in the same session as the client-mission test:
+
+- Does `L4D_GetMaxChapters()` read the rewritten mission, or something cached from load time? A
+  value cached before our rewrite would end the match at the wrong map.
+- `NextMapIsFinale()`'s guard rejects `chapters < 3`. A campaign cut to two included chapters
+  would fail that check and fall through to the finale-loaded failsafe, which for a rewritten
+  mission may never fire. Either forbid cutting below three chapters in the admin UI, or relax
+  the guard deliberately and say why.
+- The excluded-finale case: if an admin keeps every chapter including the finale, `chapter ==
+  chapters - 1` is never true on the last map and the match would not end. This is the one case
+  that may genuinely need the plugin taught something new, and it is precisely the case the owner
+  asked for ("the last map in the list that's enabled should count as last map").
+
+Only if those tests fail does the original plan apply: extend `sm_pug_match` with the ordered
+included map list and fire the existing `EndMatchNow()` path, which `!endpug` already uses at
+`plugin/pug-match.sp:1730`.
 
 ### 4. Stock campaigns get chapters
 
@@ -132,7 +165,11 @@ On the existing Campaigns tab:
 
 ## Testing
 
-**First, before building anything else:** the client mission question. Put a campaign on the local test server with a rewritten mission that drops a chapter, connect a real client running the pristine VPK, and confirm the match plays the server's chapter list without the client erroring or failing to load a map. If that fails, stop and revisit the two-copy split.
+**First, before building anything else**, two probes in one session on the local test server.
+
+**Probe one, the plugin question.** Rewrite a campaign's mission to drop a chapter and confirm `L4D_GetMaxChapters()` reflects the edited list rather than a cached value, and that the match ends on the new last map. The plugin logs both values at `plugin/pug-match.sp:3080` on every second-half end, so this is readable from the log without new instrumentation. Also exercise the two edge cases section 3 names: a campaign cut to two chapters, and one where every chapter including the finale is kept.
+
+**Probe two, the client mission question.** Put a campaign on the local test server with a rewritten mission that drops a chapter, connect a real client running the pristine VPK, and confirm the match plays the server's chapter list without the client erroring or failing to load a map. If that fails, stop and revisit the two-copy split.
 
 Then:
 - `vpkWrite.ts` round trip: rewrite a mission, read it back with `vpk.ts`, confirm every other entry is byte identical to the source.
@@ -157,6 +194,7 @@ Then:
 | Rewrite the mission inside the VPK | A custom campaign's mission exists only there, so there is no competing file and no precedence question. Sidesteps the trap Passifice measured |
 | Two copies: rewritten for servers, pristine for players | Otherwise every chapter toggle changes the download's hash and costs all eight players a re-download of up to 300 MB for one line of text |
 | Player copy may move to R2 | Owner, 2026-09-18. Plan 1's "R2 cannot help" reasoning assumed one copy and expires under this design |
+| Assume no plugin change until tested | The plugin already ends after the last scored map completes via NextMapIsFinale(), which counts chapters from the mission file, so rewriting the mission may be enough on its own |
 | Stock chapters read from `left4dead/missions/` | Hardcoding four lists lets them drift from what the server runs, and the files are already on disk |
 | Stock chapter control staged after custom | It is the only part that still needs the unmeasured precedence answer |
 | No checkbox before the rewrite works | `included` currently affects only `firstMap`, so a database-only checkbox would behave differently for the first chapter than for a middle one, with nothing telling the admin which they got |
