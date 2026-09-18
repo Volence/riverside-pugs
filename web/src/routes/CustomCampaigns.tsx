@@ -49,6 +49,10 @@ export function CustomCampaigns() {
           Everyone in the match needs the same file, and so does the server. If you join a match
           and the map never loads, this is almost always why.
         </p>
+        <p class="muted">
+          Anything marked <span class="ccamp__pool">In the vote</span> can come up in a real
+          match, so install those first. The rest are here to play with and cannot be voted for.
+        </p>
       </Panel>
 
       {campaigns.length === 0 ? (
@@ -62,7 +66,10 @@ export function CustomCampaigns() {
             <div key={c.slug} style={{ '--campaign': campaignTint(c.slug) } as Record<string, string>}>
               <Panel>
                 <div class="ccamp__head">
-                  <h3>{c.name}</h3>
+                  <h3>
+                    {c.name}
+                    {c.inPool && <span class="ccamp__pool">In the vote</span>}
+                  </h3>
                   <a class="btn" href={`/download/campaign/${encodeURIComponent(c.slug)}`}
                      target="_blank" rel="noopener">
                     Download {fileSize(c.sizeBytes)}

@@ -257,7 +257,8 @@ export interface RoundAggregate {
 export interface CustomCampaignChapter { map: string; display: string | null; included: boolean }
 export interface CustomCampaignRow {
   slug: string; name: string; sizeBytes: number; sha256: string;
-  filename: string; notes: string | null; chapters: CustomCampaignChapter[];
+  filename: string; notes: string | null; inPool: boolean;
+  chapters: CustomCampaignChapter[];
 }
 
 export interface MapIndexRow {

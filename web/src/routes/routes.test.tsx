@@ -1322,7 +1322,7 @@ describe('Maps', () => {
 describe('CustomCampaigns', () => {
   const campaign = {
     slug: 'dbd', name: 'Dead Before Dawn', sizeBytes: 314572800,
-    sha256: 'a'.repeat(64), filename: 'dbd.vpk', notes: null,
+    sha256: 'a'.repeat(64), filename: 'dbd.vpk', notes: null, inPool: true,
     chapters: [
       { map: 'dbd1_alley', display: 'Alley', included: true },
       { map: 'dbd2_mall', display: 'Mall', included: true },
@@ -1355,6 +1355,24 @@ describe('CustomCampaigns', () => {
 
   // A player arriving before any campaign is published must be told that,
   // not shown a blank page they assume is broken.
+  // The badge is this page's call to action: a campaign that can come up in a
+  // vote has to be installed before the match, one that cannot is optional.
+  it('marks a campaign that is in the vote pool', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
+    render(<CustomCampaigns />);
+    await waitFor(() => screen.getByText('Dead Before Dawn'));
+    // Two on the page: the explanatory line above, and this campaign's badge.
+    expect(screen.getAllByText('In the vote').length).toBe(2);
+  });
+
+  it('leaves a campaign that is not in the pool unmarked', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [{ ...campaign, inPool: false }] });
+    render(<CustomCampaigns />);
+    await waitFor(() => screen.getByText('Dead Before Dawn'));
+    // Only the explanatory line remains.
+    expect(screen.getAllByText('In the vote').length).toBe(1);
+  });
+
   it('renders an empty state when nothing is published', async () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [] });
     render(<CustomCampaigns />);

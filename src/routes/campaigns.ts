@@ -19,7 +19,7 @@ import {
 } from '../customCampaigns.js';
 import { missionFromVpk } from '../vpk.js';
 import type { ServerRow } from '../serverPool.js';
-import { getJsonSetting, setSetting } from '../settings.js';
+import { getCampaignPool, setSetting } from '../settings.js';
 
 /** Headroom the box must keep after an upload lands. A game server that fills
  *  its partition stops serving; a refused upload is a message, a full disk is
@@ -69,15 +69,21 @@ export async function campaignRoutes(
       .map((s) => ({ id: s.id, transport: transportFor(s) }));
   const targets = opts.installTargets ?? defaultTargets;
 
-  app.get('/api/campaigns/custom', async () => ({
-    campaigns: listCampaigns(db, { state: 'published', enabledOnly: true }).map((c) => ({
-      slug: c.slug, name: c.name, sizeBytes: c.size_bytes, sha256: c.sha256,
-      filename: c.vpk_filename, notes: c.notes,
-      chapters: chaptersOf(db, c.slug).map((ch) => ({
-        map: ch.map, display: ch.display, included: ch.included === 1,
+  app.get('/api/campaigns/custom', async () => {
+    // Whether a campaign can actually come up in a vote is the thing a player
+    // needs to know: it turns "here is a list of files" into "download this one
+    // or you will not be able to play". Read once rather than per campaign.
+    const pool = new Set(getCampaignPool(db));
+    return {
+      campaigns: listCampaigns(db, { state: 'published', enabledOnly: true }).map((c) => ({
+        slug: c.slug, name: c.name, sizeBytes: c.size_bytes, sha256: c.sha256,
+        filename: c.vpk_filename, notes: c.notes, inPool: pool.has(c.slug),
+        chapters: chaptersOf(db, c.slug).map((ch) => ({
+          map: ch.map, display: ch.display, included: ch.included === 1,
+        })),
       })),
-    })),
-  }));
+    };
+  });
 
   app.get('/download/campaign/:slug', async (req, reply) => {
     const { slug } = req.params as { slug: string };
@@ -273,7 +279,7 @@ export async function campaignRoutes(
     // falling back to the stock four: an admin who narrowed the pool on
     // purpose (a custom-only event, say) did not ask for four campaigns they
     // did not pick to reappear the moment they delete one file.
-    const pool = getJsonSetting<string[]>(db, 'map_pool');
+    const pool = getCampaignPool(db);
     if (pool.includes(slug)) {
       const pruned = pool.filter((s) => s !== slug);
       if (pruned.length === 0) {

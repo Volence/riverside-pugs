@@ -6,7 +6,7 @@ import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, setEnabled } from '../serverPool.js';
 import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
-import { getSetting, setSetting } from '../settings.js';
+import { getCampaignPool, getSetting, setSetting } from '../settings.js';
 import { logAdmin, recentActions } from '../admin/audit.js';
 import {
   activeBan, addNote, banPlayer, playerDetail, searchPlayers, unbanPlayer,
@@ -238,14 +238,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   // The map_pool value as it stands right now, tolerating anything that is
   // not a clean JSON string array rather than 500ing the settings page over
   // a setting no admin can otherwise see or fix from here.
-  const currentPool = (): string[] => {
-    try {
-      const parsed = JSON.parse(getSetting(db, 'map_pool') ?? '[]');
-      return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
-    } catch {
-      return [];
-    }
-  };
 
   app.get('/api/admin/settings', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
@@ -254,7 +246,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       // alsoAllow keeps an already-pooled campaign in the list even after it
       // stops qualifying on its own (disabled, or a server lost its VPK), so
       // the panel does not make its own already-saved setting look invalid.
-      campaigns: poolableCampaigns(db, { alsoAllow: currentPool() })
+      campaigns: poolableCampaigns(db, { alsoAllow: getCampaignPool(db) })
         .map((c) => ({ slug: c.slug, name: c.name, custom: c.custom })),
     };
   });
@@ -270,7 +262,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     // setting unrelated to this exact key could reject on a slug the panel
     // itself still shows as checked.
     const v = validateSetting(key, (req.body as { value?: unknown } | undefined)?.value, {
-      campaignSlugs: new Set(poolableCampaigns(db, { alsoAllow: currentPool() }).map((c) => c.slug)),
+      campaignSlugs: new Set(poolableCampaigns(db, { alsoAllow: getCampaignPool(db) }).map((c) => c.slug)),
     });
     if (!v.ok) return reply.code(400).send({ error: `${def.label} ${v.error}` });
     const from = getSetting(db, key) ?? '';

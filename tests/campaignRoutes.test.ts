@@ -101,6 +101,50 @@ describe('GET /api/campaigns/custom', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().campaigns.map((c: { slug: string }) => c.slug)).toEqual(['dbd']);
   });
+
+  // The badge on the public page is driven by this flag, and it is the thing a
+  // player acts on: a campaign that can come up in a vote has to be installed
+  // before the match, and one that cannot is optional.
+  it('reports whether each campaign is in the vote pool', async () => {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1', display: 'One', isFinale: true }]);
+    insertDraft(db, {
+      slug: 'other', name: 'Other', vpkFilename: 'other.vpk',
+      sizeBytes: 9, sha256: 'c'.repeat(64), uploadedBy: null,
+    }, [{ map: 'other1', display: null, isFinale: true }]);
+    for (const slug of ['dbd', 'other']) {
+      publishCampaign(db, slug, slug);
+      setEnabled(db, slug, true);
+    }
+    setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'dbd']));
+
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({ method: 'GET', url: '/api/campaigns/custom' });
+    const byslug = Object.fromEntries(
+      res.json().campaigns.map((c: { slug: string; inPool: boolean }) => [c.slug, c.inPool]),
+    );
+    expect(byslug).toEqual({ dbd: true, other: false });
+  });
+
+  // A hand-edited map_pool must not take the public page down with it. The
+  // whole point of the shared defensive read is that this degrades to "nothing
+  // is in the pool" rather than throwing out of a route players hit.
+  it('survives a malformed map_pool rather than erroring', async () => {
+    insertDraft(db, {
+      slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [{ map: 'dbd1', display: 'One', isFinale: true }]);
+    publishCampaign(db, 'dbd', 'DBD');
+    setEnabled(db, 'dbd', true);
+    setSetting(db, 'map_pool', 'not json at all');
+
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const res = await app.inject({ method: 'GET', url: '/api/campaigns/custom' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().campaigns[0].inPool).toBe(false);
+  });
 });
 
 describe('GET /download/campaign/:slug', () => {
