@@ -101,12 +101,12 @@ function PublishedCard(
         <label>
           <input
             type="checkbox"
-            aria-label="Show to players"
+            aria-label="Available for the pool"
             checked={c.enabled === 1}
             disabled={!ok}
             onChange={(e) => run(() => adminApi.setCampaignEnabled(c.slug, (e.target as HTMLInputElement).checked))}
           />
-          Show to players
+          Available for the pool
         </label>
         <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
           Reinstall
@@ -124,7 +124,7 @@ function PublishedCard(
           the vote is a separate step on the Settings tab. */}
       {!ok
         ? <p class="muted">Not on every server yet, so this cannot be turned on, and the campaign cannot be added to the pool.</p>
-        : <p class="muted">Lists it on the public Custom campaigns page so people can download it, and makes it eligible for the vote. It is not in the vote until you add it on the Settings tab.</p>}
+        : <p class="muted">Makes the campaign eligible for the vote. It is not in the vote until you add it on the Settings tab. Published campaigns are downloadable either way.</p>}
     </Panel>
   );
 }

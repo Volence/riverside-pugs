@@ -190,8 +190,10 @@ After deploying and filling in both servers' rows:
      (`enabled` in `custom_campaigns`) stays disabled until every enabled
      server shows `installed` (`installedEverywhere` in
      `web/src/routes/admin/AdminCampaigns.tsx`). Checking it makes the
-     campaign show up in `GET /api/campaigns/custom`, the public download
-     page, and makes it a *candidate* the Settings tab will offer.
+     campaign a *candidate* the Settings tab will offer. It does **not**
+     control whether players can download it: every published campaign is
+     listed on the public page whether or not it is poolable, and the
+     "In the vote" badge is what tells a player which ones they need.
    - The campaign only actually enters the vote once it is also checked on
      the Settings tab's Campaign pool control, which writes `map_pool`.
      `GET /api/admin/settings` only offers a custom campaign there once it
