@@ -19,6 +19,7 @@ import {
 } from '../customCampaigns.js';
 import { missionFromVpk } from '../vpk.js';
 import type { ServerRow } from '../serverPool.js';
+import { getJsonSetting, setSetting } from '../settings.js';
 
 /** Headroom the box must keep after an upload lands. A game server that fills
  *  its partition stops serving; a refused upload is a message, a full disk is
@@ -262,6 +263,27 @@ export async function campaignRoutes(
     const { slug } = req.params as { slug: string };
     const c = getCampaign(db, slug);
     if (!c) return reply.code(404).send({ error: 'no such campaign' });
+
+    // map_pool is a persisted setting nothing else prunes. Left alone, a
+    // deleted campaign stays a vote option: the orchestrator's own guard
+    // (src/orchestrator.ts) now refuses to changelevel into a campaign the
+    // registry has lost, but that guard is a last resort at match start, not
+    // a substitute for keeping the pool itself honest. Refusing the delete
+    // outright when this is the only pooled campaign, rather than silently
+    // falling back to the stock four: an admin who narrowed the pool on
+    // purpose (a custom-only event, say) did not ask for four campaigns they
+    // did not pick to reappear the moment they delete one file.
+    const pool = getJsonSetting<string[]>(db, 'map_pool');
+    if (pool.includes(slug)) {
+      const pruned = pool.filter((s) => s !== slug);
+      if (pruned.length === 0) {
+        return reply.code(409).send({
+          error: `${c.name} is the only campaign in the pool; add another to the pool before deleting it`,
+        });
+      }
+      setSetting(db, 'map_pool', JSON.stringify(pruned));
+    }
+
     await uninstallCampaign(db, slug, { servers: targets() });
     await rm(join(addonsDir, c.vpk_filename), { force: true });
     deleteCampaign(db, slug);

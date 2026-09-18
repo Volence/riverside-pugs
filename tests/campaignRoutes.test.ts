@@ -15,6 +15,7 @@ import type { InstallTarget } from '../src/campaignInstall.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { makeVpk } from './fixtures/makeVpk.js';
 import { fakeAddonsTransport } from './fakes/fakeAddonsTransport.js';
+import { getJsonSetting, setSetting } from '../src/settings.js';
 
 const MISSION = `
 "mission"
@@ -562,6 +563,65 @@ describe('DELETE /api/admin/campaigns/:slug', () => {
 
     const after = await app.inject({ method: 'GET', url: '/download/campaign/dbd' });
     expect(after.statusCode).toBe(404);
+  });
+
+  // Nothing else prunes map_pool. Left in it, the deleted slug stays a vote
+  // option even though the orchestrator will now refuse it at match start
+  // (tests/orchestrator.test.ts): this is what keeps it from ever reaching
+  // that guard in the first place.
+  it('prunes the deleted campaign out of map_pool', async () => {
+    const fake = fakeAddonsTransport();
+    installedDbd(fake);
+    setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'dbd', 'death_toll']));
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/dbd',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual(['no_mercy', 'death_toll']);
+  });
+
+  it('leaves map_pool untouched when the deleted campaign was never pooled', async () => {
+    const fake = fakeAddonsTransport();
+    installedDbd(fake);
+    setSetting(db, 'map_pool', JSON.stringify(['no_mercy']));
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/dbd',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual(['no_mercy']);
+  });
+
+  // Refusing rather than silently reintroducing the stock four: the admin
+  // chose a pool with only this campaign in it, and a delete should not get
+  // to override that choice on its own.
+  it('refuses to delete the only campaign left in the pool', async () => {
+    const fake = fakeAddonsTransport();
+    installedDbd(fake);
+    setSetting(db, 'map_pool', JSON.stringify(['dbd']));
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/dbd',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(409);
+    expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual(['dbd']);
+    // Refused before doing anything else: the campaign, its file and its
+    // install rows are all still there.
+    expect(getCampaign(db, 'dbd')).not.toBeUndefined();
+    expect(existsSync(join(addons, 'dbd.vpk'))).toBe(true);
   });
 
   it('refuses a non-admin', async () => {
