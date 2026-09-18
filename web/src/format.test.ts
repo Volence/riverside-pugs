@@ -303,10 +303,17 @@ describe('stat families within a side', () => {
     expect(Math.max(...boomer) - Math.min(...boomer)).toBe(boomer.length - 1);
   });
 
-  it('drops the two skeet columns that say nothing on L4D1', () => {
-    // Shotgun is the only weapon class skill_detect can tag here, and a chip
-    // skeet only means anything as a ratio.
+  // Both of these ARE produced on L4D1: checked against the live data,
+  // skeets_shotgun 462 and skeets_hurt 122 across 229 player-matches. Hiding a
+  // populated stat is what made the skeet columns impossible to reconcile.
+  it('keeps the skeet breakdowns, which L4D1 does produce', () => {
     const out = orderStatKeysBySide(['skeets', 'skeets_shotgun', 'skeets_hurt'], defs);
+    expect(out).toContain('skeets_shotgun');
+    expect(out).toContain('skeets_hurt');
+  });
+
+  it('still drops the weapon classes skill_detect cannot tag here', () => {
+    const out = orderStatKeysBySide(['skeets', 'skeets_sniper', 'skeets_melee'], defs);
     expect(out).toEqual(['skeets']);
   });
 });
@@ -423,6 +430,13 @@ describe('DEAD_STAT_KEYS', () => {
 
   it('keeps the private stat that does work', () => {
     expect(DEAD_STAT_KEYS.has('times_skeeted')).toBe(false);
+  });
+
+  // These two were in the dead set and are not dead. Pinned so a populated
+  // stat cannot be hidden again by eye.
+  it('does not hide a stat the live data shows is populated', () => {
+    expect(DEAD_STAT_KEYS.has('skeets_shotgun')).toBe(false);
+    expect(DEAD_STAT_KEYS.has('skeets_hurt')).toBe(false);
   });
 });
 

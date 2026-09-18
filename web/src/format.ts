@@ -166,9 +166,15 @@ export const LIVE_STAT_ORDER = LIVE_STAT_GROUPS.flatMap((g) => g.keys);
  *
  *  Every one of these is still captured in the end-of-match dump. Pointing this
  *  frontend at L4D2 is a matter of emptying this set, not of recapturing data. */
+/** Stats L4D1 cannot produce, hidden so the table is not a wall of zeroes.
+ *
+ *  Checked against the live data 2026-09-18: these six are 0 across all 229
+ *  recorded player-matches. `skeets_shotgun` (462) and `skeets_hurt` (122) were
+ *  in here too and are NOT dead, which is why the skeet columns could not be
+ *  reconciled by eye: a populated stat was being hidden as uncollectable. */
 export const DEAD_STAT_KEYS: ReadonlySet<string> = new Set([
   'skeets_melee', 'skeets_sniper', 'deadstops', 'tongue_cuts', 'survivors_biled',
-  'skeets_shotgun', 'skeets_hurt', 'times_deadstopped',
+  'times_deadstopped',
 ]);
 
 /** Families, in reading order, that stat columns are grouped into.
