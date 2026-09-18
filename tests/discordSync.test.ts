@@ -5,6 +5,7 @@ import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { Hub } from '../src/ws.js';
 import { DiscordSync } from '../src/discord/sync.js';
 import { getMessage, saveMessage } from '../src/discord/messageStore.js';
+import { setSetting } from '../src/settings.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import type { Scheduler } from '../src/lobby.js';
 
@@ -197,5 +198,142 @@ describe('DiscordSync', () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(JSON.stringify(t.byId(panelId())!.payload)).toContain('1/8');
     sync.stop();
+  });
+});
+
+describe('queue-filling alert', () => {
+  const ROLE = '55501';
+  const setRole = (id = ROLE) => setSetting(db, 'discord_pug_role_id', id);
+  /** Messages that ping the alert role. */
+  const alerts = () => t.live().filter((m) => (m.payload.mentionRoleIds ?? []).includes(ROLE));
+  const fill = async (n: number) => {
+    for (let i = 0; i < n; i++) mm.join(IDS[i]);
+    await sync.pass();
+  };
+
+  beforeEach(() => { setSetting(db, 'discord_queue_thresholds', JSON.stringify([4, 6])); });
+
+  it('says nothing at all when no role is configured', async () => {
+    await build().start();
+    await fill(6);
+    expect(alerts()).toHaveLength(0);
+    // And the panel offers no toggle that would do nothing.
+    const panel = t.live().find((m) => m.payload.components.length > 0)!;
+    const ids = panel.payload.components.flat().map((b) => ('customId' in b ? b.customId : ''));
+    expect(ids).not.toContain('q:notify');
+  });
+
+  it('pings the role once the queue reaches a threshold', async () => {
+    setRole();
+    await build().start();
+    await fill(4);
+
+    expect(alerts()).toHaveLength(1);
+    const a = alerts()[0];
+    expect(a.payload.content).toContain(`<@&${ROLE}>`);
+    expect(a.payload.content).toContain('4/8');
+    // Only the role. A queue alert must never mass-ping people by name.
+    expect(a.payload.mentionUserIds).toEqual([]);
+  });
+
+  it('does not re-announce the same threshold while the queue hovers there', async () => {
+    setRole();
+    await build().start();
+    await fill(4);
+    expect(alerts()).toHaveLength(1);
+
+    // Somebody leaves and comes back: the classic way a useful ping becomes a
+    // muted channel.
+    mm.leave(IDS[3]);
+    await sync.pass();
+    mm.join(IDS[3]);
+    await sync.pass();
+
+    expect(alerts()).toHaveLength(1);
+  });
+
+  it('announces the highest threshold reached, even if a pass skips one', async () => {
+    setRole();
+    await build().start();
+    // The sync loop is periodic and does not see every join, so a pass can go
+    // straight from empty to 6.
+    await fill(6);
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0].payload.content).toContain('6/8');
+  });
+
+  it('drops a second threshold inside the cooldown rather than firing twice', async () => {
+    setRole();
+    await build().start();
+    await fill(4);
+    expect(alerts()).toHaveLength(1);
+
+    for (let i = 4; i < 6; i++) mm.join(IDS[i]);
+    await sync.pass();
+    expect(alerts()).toHaveLength(1);
+  });
+
+  it('announces a higher threshold once the cooldown has passed', async () => {
+    setRole();
+    await build().start();
+    await fill(4);
+    clock += 11 * 60 * 1000;
+    for (let i = 4; i < 6; i++) mm.join(IDS[i]);
+    await sync.pass();
+
+    expect(alerts()).toHaveLength(2);
+    expect(alerts()[1].payload.content).toContain('6/8');
+  });
+
+  it('re-arms only once the queue has actually emptied', async () => {
+    setRole();
+    await build().start();
+    await fill(4);
+    clock += 11 * 60 * 1000;
+
+    // Down to 1, which is churn, not a new fill.
+    for (let i = 1; i < 4; i++) mm.leave(IDS[i]);
+    await sync.pass();
+    for (let i = 1; i < 4; i++) mm.join(IDS[i]);
+    await sync.pass();
+    expect(alerts()).toHaveLength(1);
+
+    // Empty: the next fill is a new one and may announce again.
+    for (let i = 0; i < 4; i++) mm.leave(IDS[i]);
+    await sync.pass();
+    await fill(4);
+    expect(alerts()).toHaveLength(2);
+  });
+
+  it('never announces a full queue, which pops on its own', async () => {
+    setRole();
+    setSetting(db, 'discord_queue_thresholds', JSON.stringify([4, 8]));
+    await build().start();
+    await fill(4);
+    const before = alerts().length;
+    clock += 11 * 60 * 1000;
+    for (let i = 4; i < 8; i++) mm.join(IDS[i]);
+    await sync.pass();
+    // 8 is the queue size: it pops into a lobby and everyone gets a real ping.
+    expect(alerts()).toHaveLength(before);
+  });
+
+  it('keeps the panel as the last message after an alert', async () => {
+    setRole();
+    await build().start();
+    await fill(4);
+    const live = t.live();
+    expect(live[live.length - 1].id).toBe(panelId());
+  });
+
+  it('a Discord failure does not retry on every pass for the rest of the evening', async () => {
+    setRole();
+    await build().start();
+    t.failSends = 1;
+    await fill(4);
+    // The send threw; the threshold is still marked done.
+    await sync.pass();
+    await sync.pass();
+    expect(alerts()).toHaveLength(0);
   });
 });

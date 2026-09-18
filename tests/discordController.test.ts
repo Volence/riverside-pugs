@@ -6,6 +6,8 @@ import { addServer } from '../src/serverPool.js';
 import { handleButton } from '../src/discord/controller.js';
 import type { Scheduler } from '../src/lobby.js';
 import type { InteractionReply } from '../src/discord/transport.js';
+import { setSetting } from '../src/settings.js';
+import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
 const did = (i: number) => `90${i}`;
@@ -141,5 +143,71 @@ describe('spectate button', () => {
     expect(JSON.stringify(r.payload)).toContain('30 seconds behind');
     db.prepare('UPDATE servers SET tv_enabled = 0 WHERE id = ?').run(serverId);
     expect(JSON.stringify(await press(7, `m:${matchId}:spectate`))).toMatch(/no SourceTV/);
+  });
+});
+
+describe('queue alert opt-in toggle', () => {
+  const ROLE = '55501';
+  let roles: FakeTransport['roles'];
+  let t: FakeTransport;
+
+  const toggle = (userId: string) => handleButton(
+    { db, matchmaker: mm, publicUrl: URL_, roles },
+    { kind: 'button', customId: 'q:notify', userId, userName: 'someone' },
+  );
+
+  beforeEach(() => {
+    t = new FakeTransport();
+    roles = t.roles;
+    setSetting(db, 'discord_pug_role_id', ROLE);
+  });
+
+  it('adds the role, then removes it on a second press', async () => {
+    const on = await toggle(did(0));
+    expect(on.ephemeral).toBe(true);
+    expect(body(on)).toMatch(/will be pinged/i);
+    expect(t.rolesOf.get(did(0))?.has(ROLE)).toBe(true);
+
+    const off = await toggle(did(0));
+    expect(body(off)).toMatch(/no longer be pinged/i);
+    expect(t.rolesOf.get(did(0))?.has(ROLE)).toBe(false);
+  });
+
+  it('works for someone who has not linked a Steam account', async () => {
+    // Wanting to know when games are filling is not the same as being ready to
+    // play one, and an unlinked person is exactly who the nudge is for.
+    const r = await toggle('never-seen-before');
+    expect(body(r)).toMatch(/will be pinged/i);
+    expect(t.rolesOf.get('never-seen-before')?.has(ROLE)).toBe(true);
+  });
+
+  it('says so instead of failing when no role is configured', async () => {
+    setSetting(db, 'discord_pug_role_id', '');
+    const r = await toggle(did(0));
+    expect(body(r)).toMatch(/not set up/i);
+  });
+
+  it('does not guess when it cannot read the member', async () => {
+    // "Could not tell" and "does not have it" lead to opposite replies, and
+    // guessing tells someone they were removed from a role they still hold.
+    t.rolesUnreadable.add(did(1));
+    const r = await toggle(did(1));
+    expect(body(r)).toMatch(/could not read your roles/i);
+    expect(t.rolesOf.get(did(1))?.has(ROLE)).toBeFalsy();
+  });
+
+  it('points at the real cause when Discord refuses the change', async () => {
+    const failing = {
+      has: async () => false,
+      add: async () => { throw new Error('Missing Permissions'); },
+      remove: async () => {},
+    };
+    const r = await handleButton(
+      { db, matchmaker: mm, publicUrl: URL_, roles: failing },
+      { kind: 'button', customId: 'q:notify', userId: did(2), userName: 'x' },
+    );
+    // Nearly always the bot's role sitting below the target role, which no
+    // amount of retrying fixes.
+    expect(body(r)).toMatch(/role above the alert role/i);
   });
 });

@@ -38,6 +38,11 @@ export interface MessagePayload {
   /** User ids the content may actually ping. Everything else is inert text,
    *  so a stray <@id> in a name can never mass-ping. */
   mentionUserIds?: string[];
+  /** Role ids the content may ping, under the same allowlist rule. Separate
+   *  from mentionUserIds because Discord treats them as different categories:
+   *  permitting a user never permits a role, and the queue alert is the one
+   *  message that needs a role and no users. */
+  mentionRoleIds?: string[];
 }
 
 export type BotInteraction =
@@ -86,6 +91,19 @@ export interface VoiceOps {
   deleteChannel(channelId: string): Promise<void>;
 }
 
+/** Adding and removing one opt-in role, for the queue-alert toggle.
+ *
+ *  Narrow on purpose: this is not general role management. The bot is given a
+ *  single configured role id and can only put a member in it or take them out,
+ *  so a bug here cannot hand anyone permissions. */
+export interface RoleOps {
+  add(userId: string, roleId: string): Promise<void>;
+  remove(userId: string, roleId: string): Promise<void>;
+  /** Whether the member currently holds it; null when the member or the role
+   *  cannot be read, which the caller reports rather than guessing. */
+  has(userId: string, roleId: string): Promise<boolean | null>;
+}
+
 export interface BotTransport {
   send(channelId: string, payload: MessagePayload): Promise<string>;
   /** False when the message no longer exists (deleted by hand). */
@@ -96,4 +114,5 @@ export interface BotTransport {
   /** Load the server's member list, then report joins and leaves. */
   watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void>;
   voice: VoiceOps;
+  roles: RoleOps;
 }

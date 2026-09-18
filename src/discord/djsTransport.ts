@@ -4,7 +4,7 @@ import {
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
 import type {
-  BotInteraction, BotTransport, Button, InteractionReply, MessagePayload, SlashCommandDef, VoiceOps,
+  BotInteraction, BotTransport, Button, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, VoiceOps,
 } from './transport.js';
 
 /**
@@ -37,7 +37,7 @@ function toMessage(p: MessagePayload) {
     })),
     components: p.components.map((row) => ({ type: 1, components: row.map(toButton) })),
     // Nothing pings unless explicitly listed: names are user-controlled text.
-    allowedMentions: { parse: [] as never[], users: p.mentionUserIds ?? [] },
+    allowedMentions: { parse: [] as never[], users: p.mentionUserIds ?? [], roles: p.mentionRoleIds ?? [] },
   };
 }
 
@@ -168,7 +168,31 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
   };
 
+  const roles: RoleOps = {
+    async add(userId, roleId) {
+      const member = await guild.members.fetch(userId);
+      await member.roles.add(roleId);
+    },
+    async remove(userId, roleId) {
+      const member = await guild.members.fetch(userId);
+      await member.roles.remove(roleId);
+    },
+    async has(userId, roleId) {
+      // Null rather than false when the member cannot be read: "we could not
+      // tell" and "they do not have it" lead to opposite replies, and guessing
+      // would tell someone they had been removed from a role they still hold.
+      try {
+        const member = await guild.members.fetch(userId);
+        return member.roles.cache.has(roleId);
+      } catch (err) {
+        console.error(`[discord] could not read roles for ${userId}:`, err);
+        return null;
+      }
+    },
+  };
+
   return {
+    roles,
     async send(channelId, payload) {
       const ch = await textChannel(channelId);
       const msg = await ch.send(toMessage(payload));

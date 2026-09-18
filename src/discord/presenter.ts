@@ -44,6 +44,9 @@ export interface PanelView {
   players: PlayerView[];
   /** A lobby is running, so the panel can say a game is being set up. */
   phase: 'ready_check' | 'map_vote' | 'done' | 'failed' | null;
+  /** The opt-in alert role, when one is configured. Drives whether the panel
+   *  offers a Notify me toggle at all. */
+  alertRoleId?: string;
 }
 
 export function renderPanel(v: PanelView): MessagePayload {
@@ -67,10 +70,52 @@ export function renderPanel(v: PanelView): MessagePayload {
     components: [[
       { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
       { kind: 'button', customId: 'q:leave', label: 'Leave Queue', style: 'danger' },
+      // Only when an alert role is configured. Offering a toggle that silently
+      // does nothing is worse than not offering it.
+      ...(v.alertRoleId
+        ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Notify me', style: 'secondary' as const }]
+        : []),
       link(`${v.publicUrl}/`, 'Website'),
       link(`${v.publicUrl}/leaderboard`, 'Leaderboard'),
     ]],
     mentionUserIds: [],
+  };
+}
+
+/**
+ * The "queue is filling up" announcement.
+ *
+ * This is the whole cold-start mechanism. A PUG queue that nobody can see does
+ * not fill: people will not sit at 6/8 waiting on the off chance, so somebody
+ * has to be told. The panel cannot do it, because it is edited in place and an
+ * edit never notifies anyone.
+ *
+ * Pings a role people opt into rather than @here, so it reaches exactly the
+ * people who want to be pulled into a game and nobody who is just chatting.
+ * That distinction is what makes it survivable to fire several times an
+ * evening; an @here at 6/8 twice a night gets the bot muted.
+ */
+export interface QueueAlertView {
+  count: number;
+  size: number;
+  roleId: string;
+  publicUrl: string;
+}
+
+export function renderQueueAlert(v: QueueAlertView): MessagePayload {
+  const need = Math.max(0, v.size - v.count);
+  return {
+    content: `<@&${v.roleId}> **${v.count}/${v.size}** in the queue`
+      + (need === 1 ? ', one more and it pops.' : `, ${need} more needed.`),
+    embeds: [],
+    components: [[
+      { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
+      link(`${v.publicUrl}/`, 'Website'),
+    ]],
+    // The role is the only thing this message may ping. Nothing else in it is
+    // user-controlled text, but the allowlist stays explicit either way.
+    mentionUserIds: [],
+    mentionRoleIds: [v.roleId],
   };
 }
 
