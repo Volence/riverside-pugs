@@ -20,6 +20,15 @@ describe('NAV_LINKS', () => {
       else expect(target).toBeUndefined();
     }
   });
+
+  it('offers Custom alongside Campaigns, at its own path', () => {
+    const paths = NAV_LINKS.map(([href]) => href);
+    expect(paths).toContain('/maps');
+    expect(paths).toContain('/custom-campaigns');
+    // /maps is stats about maps played; this is how to install one. Merging the
+    // two would break bookmarks and muddle both jobs.
+    expect(NAV_LINKS.find(([href]) => href === '/custom-campaigns')![1]).toBe('Custom');
+  });
 });
 
 import { render, cleanup } from '@testing-library/preact';

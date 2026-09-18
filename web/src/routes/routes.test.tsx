@@ -19,6 +19,7 @@ const { mockApi } = vi.hoisted(() => ({
     match: vi.fn(),
     map: vi.fn(),
     maps: vi.fn(),
+    customCampaigns: vi.fn(),
     live: vi.fn(),
     profile: vi.fn(),
     queue: vi.fn(),
@@ -38,6 +39,7 @@ const { Matches } = await import('./Matches');
 const { MatchDetail } = await import('./MatchDetail');
 const { MapDetail } = await import('./MapDetail');
 const { Maps } = await import('./Maps');
+const { CustomCampaigns } = await import('./CustomCampaigns');
 const { Profile } = await import('./Profile');
 const { Play, QueuePanel } = await import('./Play');
 const { Live } = await import('./Live');
@@ -1314,6 +1316,49 @@ describe('Maps', () => {
     render(<Maps />);
     await waitFor(() => expect(screen.getByText('50%')).toBeTruthy());
     expect(screen.getByText(/of 6/)).toBeTruthy();
+  });
+});
+
+describe('CustomCampaigns', () => {
+  const campaign = {
+    slug: 'dbd', name: 'Dead Before Dawn', sizeBytes: 314572800,
+    sha256: 'a'.repeat(64), filename: 'dbd.vpk', notes: null,
+    chapters: [
+      { map: 'dbd1_alley', display: 'Alley', included: true },
+      { map: 'dbd2_mall', display: 'Mall', included: true },
+    ],
+  };
+
+  it('renders a campaign with a download link to the file route', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
+    render(<CustomCampaigns />);
+    expect(await waitFor(() => screen.getByText('Dead Before Dawn'))).toBeTruthy();
+    const link = screen.getByRole('link', { name: /download/i }) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/download/campaign/dbd');
+  });
+
+  // preact-iso intercepts same-origin clicks whose target is absent or _self
+  // (router.js:45). The download is a real file, not a route, so without a
+  // target the click lands on the SPA's not-found instead of downloading.
+  it('opts the download link out of the SPA router', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
+    render(<CustomCampaigns />);
+    const link = await waitFor(() => screen.getByRole('link', { name: /download/i }));
+    expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  it('shows the file size in a human unit', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
+    render(<CustomCampaigns />);
+    expect(await waitFor(() => screen.getByText(/300 MB/i))).toBeTruthy();
+  });
+
+  // A player arriving before any campaign is published must be told that,
+  // not shown a blank page they assume is broken.
+  it('renders an empty state when nothing is published', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [] });
+    render(<CustomCampaigns />);
+    expect(await waitFor(() => screen.getByText(/no custom campaigns/i))).toBeTruthy();
   });
 });
 

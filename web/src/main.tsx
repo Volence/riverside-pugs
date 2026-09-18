@@ -11,6 +11,7 @@ import { Live } from './routes/Live';
 import { MatchDetail } from './routes/MatchDetail';
 import { MapDetail } from './routes/MapDetail';
 import { Maps } from './routes/Maps';
+import { CustomCampaigns } from './routes/CustomCampaigns';
 import { Profile } from './routes/Profile';
 import { Crosshair } from './routes/Crosshair';
 import { ReplayPage } from './routes/ReplayPage';
@@ -72,6 +73,7 @@ function App() {
           <Route path="/live" component={Live} me={me} />
           <Route path="/match/:id" component={MatchDetail} me={me} />
           <Route path="/maps" component={Maps} />
+          <Route path="/custom-campaigns" component={CustomCampaigns} />
           <Route path="/crosshair" component={Crosshair} />
           <Route path="/replay/file/:name" component={ReplayPage} />
           <Route path="/map/:map" component={MapDetail} />

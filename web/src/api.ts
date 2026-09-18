@@ -254,6 +254,12 @@ export interface RoundAggregate {
   measured: number;
 }
 
+export interface CustomCampaignChapter { map: string; display: string | null; included: boolean }
+export interface CustomCampaignRow {
+  slug: string; name: string; sizeBytes: number; sha256: string;
+  filename: string; notes: string | null; chapters: CustomCampaignChapter[];
+}
+
 export interface MapIndexRow {
   map: string;
   campaign: string | null;
@@ -605,6 +611,8 @@ export const api = {
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[] }>('/api/maps', signal),
+  customCampaigns: (signal?: AbortSignal) =>
+    get<{ campaigns: CustomCampaignRow[] }>('/api/campaigns/custom', signal),
   replayLive: (token: string, signal?: AbortSignal) =>
     get<{ filename: string; closed: boolean }>(`/api/replays/live/${encodeURIComponent(token)}`, signal),
   replayTimeline: (matchId: number, ordinal: number, half: number, signal?: AbortSignal) =>
