@@ -55,6 +55,7 @@ import { apiRoutes } from './routes/api.js';
 import { statsRoutes } from './routes/stats.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
+import { campaignRoutes } from './routes/campaigns.js';
 import { notifyDiscord } from './discord.js';
 
 export interface ServerDeps {
@@ -68,6 +69,10 @@ export interface ServerDeps {
   discordApi?: DiscordApi;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
+  /** Free bytes on the addons filesystem, for the campaign upload disk-floor
+   *  check. Injected in tests; built from a real statfs on config.addonsDir
+   *  otherwise, same as orchestrator and serverCleaner. */
+  freeBytes?: () => Promise<number>;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -680,6 +685,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminRoutes, { db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
+  await app.register(campaignRoutes, {
+    db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
+  });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
   // devRoutes. The dev panel probes this on every page load to decide whether
