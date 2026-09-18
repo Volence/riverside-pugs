@@ -677,8 +677,6 @@ export const adminApi = {
   },
   publishCampaign: (slug: string, name: string) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/publish`, { name }),
-  setCampaignEnabled: (slug: string, enabled: boolean) =>
-    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/enabled`, { enabled }),
   reinstallCampaign: (slug: string) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/reinstall`, {}),
   deleteCampaign: (slug: string) =>

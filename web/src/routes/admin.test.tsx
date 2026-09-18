@@ -9,7 +9,7 @@ const { mockAdmin, mockApi } = vi.hoisted(() => ({
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
-    setCampaignEnabled: vi.fn(), reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(),
+    reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
 }));
@@ -626,11 +626,11 @@ describe('AdminCampaigns', () => {
     expect(await waitFor(() => screen.getByText(/connection refused/))).toBeTruthy();
   });
 
-  // Enabling here does not itself add the campaign to the vote (that is a
-  // separate Settings-tab step), but it is the precondition GET
-  // /api/admin/settings checks before offering it as a pool candidate at
-  // all, so a campaign missing from a server must not be enabled either.
-  it('will not let a campaign with a failed install be enabled', async () => {
+  // There is no longer a checkbox here: installed-everywhere is the only
+  // precondition, and the Settings tab is where a campaign enters the vote. The
+  // panel still has to say which state it is in, because "cannot be voted for
+  // yet" is the thing an admin needs to know.
+  it('says a campaign with a failed install cannot be added to the vote', async () => {
     mockAdmin.campaigns.mockResolvedValue({
       free: 11 * 1024 ** 3,
       campaigns: [{
@@ -642,16 +642,12 @@ describe('AdminCampaigns', () => {
     });
     render(<Admin session={{ kind: 'active', me }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
-    const toggle = await waitFor(() => screen.getByRole('checkbox', { name: /available for the pool/i }));
-    // No jest-dom matchers are wired into this project's vitest config (see
-    // the Integrity tests above using the same pattern), so this checks the
-    // DOM property directly rather than via toBeDisabled().
-    expect(toggle).toHaveProperty('disabled', true);
+    expect(await waitFor(() => screen.getByText(/cannot be added to the vote/i))).toBeTruthy();
+    // It must not claim the download is blocked, because it is not.
+    expect(screen.getByText(/can still download/i)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
-  // A draft is a parsed-but-unpublished upload: its name came back from the
-  // VPK's own mission data, and publish is the one step between it and every
-  // enabled server getting a real install attempt.
   const draft = (over: Record<string, unknown> = {}) => ({
     slug: 'dbd', name: 'DBD', state: 'draft', enabled: 0,
     size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'dbd.vpk',
@@ -670,10 +666,6 @@ describe('AdminCampaigns', () => {
     expect(screen.getByText('One')).toBeTruthy();
   });
 
-  // The regression this guards against would not fail loudly: a swapped
-  // argument or a stale closure over the edited name would still call
-  // publishCampaign, just with the wrong pairing, and the wrong VPK name would
-  // roll out to every enabled server as if nothing had gone wrong.
   it('publishes with the slug and the current, possibly edited, name', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
     mockAdmin.publishCampaign.mockResolvedValue({ ok: true });

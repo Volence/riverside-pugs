@@ -6,7 +6,7 @@ import { buildServer } from '../src/server.js';
 import { getSetting, setSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA, validateSetting } from '../src/settingsSchema.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
-import { insertDraft, publishCampaign, setEnabled, setInstall } from '../src/customCampaigns.js';
+import { insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache } from '../src/campaignRegistry.js';
 import { addServer } from '../src/serverPool.js';
 
@@ -111,13 +111,12 @@ describe('map_pool with custom campaigns', () => {
 // all. These exercise the real routes end to end, not validateSetting in
 // isolation, since the bug was specifically that the route ignored it.
 describe('the settings pool candidate list is gated the same as the panel', () => {
-  const publishDbd = (serverId: number, { enabled, installed }: { enabled: boolean; installed: boolean }) => {
+  const publishDbd = (serverId: number, { installed }: { installed: boolean }) => {
     insertDraft(db, {
       slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
       sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
     }, [{ map: 'dbd1', display: null, isFinale: true }]);
     publishCampaign(db, 'dbd', 'DBD');
-    if (enabled) setEnabled(db, 'dbd', true);
     if (installed) setInstall(db, 'dbd', serverId, 'installed');
     invalidateCampaignCache();
   };
@@ -135,22 +134,15 @@ describe('the settings pool candidate list is gated the same as the panel', () =
 
   it('withholds an uninstalled custom campaign even though it is enabled', async () => {
     const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
-    publishDbd(serverId, { enabled: true, installed: false });
+    publishDbd(serverId, { installed: false });
     expect(await poolSlugs()).not.toContain('dbd');
     // The direct PUT is refused the same way, not just the candidate list.
     expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(400);
   });
 
-  it('withholds a fully installed custom campaign that is not enabled', async () => {
+  it('offers it once it is installed everywhere, and the PUT accepts it', async () => {
     const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
-    publishDbd(serverId, { enabled: false, installed: true });
-    expect(await poolSlugs()).not.toContain('dbd');
-    expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(400);
-  });
-
-  it('offers it once both hold, and the PUT accepts it', async () => {
-    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
-    publishDbd(serverId, { enabled: true, installed: true });
+    publishDbd(serverId, { installed: true });
     expect(await poolSlugs()).toContain('dbd');
     expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(200);
   });
@@ -162,11 +154,10 @@ describe('the settings pool candidate list is gated the same as the panel', () =
   // keeps working, until someone deliberately removes it from the pool.
   it('keeps an already-pooled campaign selectable after it stops qualifying', async () => {
     const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
-    publishDbd(serverId, { enabled: true, installed: true });
+    publishDbd(serverId, { installed: true });
     setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'dbd']));
 
     // Now it goes stale: disabled on the Campaigns tab.
-    setEnabled(db, 'dbd', false);
     invalidateCampaignCache();
 
     expect(await poolSlugs()).toContain('dbd');

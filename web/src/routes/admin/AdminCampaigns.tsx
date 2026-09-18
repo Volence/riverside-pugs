@@ -99,16 +99,6 @@ function PublishedCard(
       <ChapterList chapters={c.chapters} />
       <InstallList installs={c.installs} serverNames={serverNames} />
       <div class="admin-row">
-        <label>
-          <input
-            type="checkbox"
-            aria-label="Available for the pool"
-            checked={c.enabled === 1}
-            disabled={!ok}
-            onChange={(e) => run(() => adminApi.setCampaignEnabled(c.slug, (e.target as HTMLInputElement).checked))}
-          />
-          Available for the pool
-        </label>
         <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
           Reinstall
         </button>
@@ -120,12 +110,13 @@ function PublishedCard(
           Delete
         </button>
       </div>
-      {/* This toggle is a precondition, not the pool itself: it also gates the
-          public download page. Actually adding or removing the campaign from
-          the vote is a separate step on the Settings tab. */}
+      {/* Being installed everywhere is the only precondition now. There used to
+          be a checkbox here as well, but once downloads stopped depending on it
+          its only job was permitting the Settings tab to offer the campaign,
+          which cost a click and read as if it did the pooling itself. */}
       {!ok
-        ? <p class="muted">Not on every server yet, so this cannot be turned on, and the campaign cannot be added to the pool.</p>
-        : <p class="muted">Makes the campaign eligible for the vote. It is not in the vote until you add it on the Settings tab. Published campaigns are downloadable either way.</p>}
+        ? <p class="muted">Not on every server yet, so it cannot be added to the vote. Players can still download it.</p>
+        : <p class="muted">Installed everywhere and downloadable. Add it to the vote on the Settings tab.</p>}
     </Panel>
   );
 }

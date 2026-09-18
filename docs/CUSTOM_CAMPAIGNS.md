@@ -184,30 +184,24 @@ After deploying and filling in both servers' rows:
    `content-length`. This route independently re-checks that the file on
    disk still matches the recorded size, so it also catches a VPK that
    changed or vanished after publish.
-4. **Confirm the gating, in two steps.** Getting a campaign into the vote is
-   two separate switches, not one:
-   - The "Available for the pool" checkbox on the Campaigns tab
-     (`enabled` in `custom_campaigns`) stays disabled until every enabled
-     server shows `installed` (`installedEverywhere` in
-     `web/src/routes/admin/AdminCampaigns.tsx`). Checking it makes the
-     campaign a *candidate* the Settings tab will offer. It does **not**
-     control whether players can download it: every published campaign is
-     listed on the public page whether or not it is poolable, and the
-     "In the vote" badge is what tells a player which ones they need.
-   - The campaign only actually enters the vote once it is also checked on
-     the Settings tab's Campaign pool control, which writes `map_pool`.
-     `GET /api/admin/settings` only offers a custom campaign there once it
-     is both `enabled` and installed everywhere
-     (`poolableCampaigns` in `src/campaignRegistry.ts`); `validateSetting`
-     enforces the same rule against a direct `PUT`, so the check cannot be
-     bypassed from outside the panel either.
+4. **Confirm the gating.** A campaign enters the vote in one place: the
+   Settings tab's Campaign pool control, which writes `map_pool`. It is only
+   offered there once it reports `installed` on every enabled server
+   (`poolableCampaigns` in `src/campaignRegistry.ts`), and `validateSetting`
+   enforces the same rule, so a direct `PUT` cannot bypass the panel.
 
-   If a campaign is stuck un-checkable on the Campaigns tab, that is the
-   tell that one server is not actually done installing yet, not a bug to
-   chase in the UI. Deleting a campaign prunes it out of `map_pool`
-   automatically; disabling it on the Campaigns tab does not retroactively
-   remove an already-pooled campaign from `map_pool`, so pull it from the
-   Settings tab too if that is the intent.
+   Downloading is a separate question and is not gated. Every published
+   campaign is listed on the public page whether or not it is in the vote,
+   and the "In the vote" badge is what tells a player which ones they need.
+   There used to be an "Available for the pool" checkbox in front of all
+   this; it was removed once downloads stopped depending on it, because its
+   only remaining job was permitting another switch.
+
+   If a campaign never turns up in the Settings pool list, that is the tell
+   that one server is not done installing yet, not a bug to chase in the UI:
+   the Campaigns tab says which server and why. Deleting a campaign prunes it
+   out of `map_pool` automatically, and refuses with a 409 if it is the only
+   campaign left in the pool rather than leaving the vote with nothing.
 
 The orchestrator re-checks install state again at match start
 (`isInstalledEverywhere` in `src/campaignInstall.ts`, called from
