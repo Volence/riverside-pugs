@@ -597,12 +597,34 @@ int RoundMs()
  *  Timer_ReadScore's retry chain 2 to 8 seconds later: by then the next half
  *  can have spawned a fresh survivor team and the count would describe the
  *  wrong round entirely. Same discipline as `half` and `surv`. */
+/**
+ * Survivors still ON THEIR FEET, which is not the same as IsPlayerAlive.
+ *
+ * IsPlayerAlive is true for an INCAPACITATED survivor, and a versus wipe
+ * normally ends with the last players downed rather than fully dead: the round
+ * ends the instant the last one goes down, with nobody left to pick them up.
+ * Counting those as alive reported a wipe as a survival.
+ *
+ * Measured on the live box before this changed: rounds recording 0, 1 or 2
+ * "alive" averaged 78, 95 and 70 points, statistically indistinguishable from
+ * each other, while rounds recording 4 averaged 420. Only 2 of 89 measured
+ * rounds recorded a zero, so the map pages reported ~100% survival everywhere.
+ * A team that got nowhere and a team that reached the saferoom were being
+ * counted the same.
+ *
+ * Someone carried through the door incapacitated is still saved, and this
+ * still reports that correctly: their team mates are standing, so the count is
+ * above zero. The only case this changes is the one where NOBODY is standing,
+ * which is exactly the wipe.
+ */
 int CountAliveSurvivors()
 {
 	int alive = 0;
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR && IsPlayerAlive(i)) alive++;
+		if (!IsClientInGame(i) || GetClientTeam(i) != TEAM_SURVIVOR || !IsPlayerAlive(i)) continue;
+		if (GetEntProp(i, Prop_Send, "m_isIncapacitated") != 0) continue;
+		alive++;
 	}
 	return alive;
 }

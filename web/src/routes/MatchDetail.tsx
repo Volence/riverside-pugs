@@ -165,8 +165,20 @@ function ForecastPanel(
       <h3>Forecast <span class="muted">(admin only)</span></h3>
       <table class="forecast__kv">
         <tbody>
-          <tr><th>Team A</th><td>{f.srA} SR, {pct(f.winProbA)} to win</td></tr>
-          <tr><th>Team B</th><td>{f.srB} SR, {pct(f.winProbB)} to win</td></tr>
+          <tr>
+            <th>Team A</th>
+            <td>
+              {f.srA} SR, {pct(f.winProbA)} to win
+              {' '}<span class="muted">skill {f.muA.toFixed(2)} ± {f.sigmaA.toFixed(2)}</span>
+            </td>
+          </tr>
+          <tr>
+            <th>Team B</th>
+            <td>
+              {f.srB} SR, {pct(f.winProbB)} to win
+              {' '}<span class="muted">skill {f.muB.toFixed(2)} ± {f.sigmaB.toFixed(2)}</span>
+            </td>
+          </tr>
           <tr>
             <th>Gap on SR</th>
             <td>{f.srGap === 0 ? 'even' : `${Math.abs(f.srGap)} SR to Team ${favoured === 'a' ? 'A' : 'B'}`}</td>

@@ -425,6 +425,9 @@ export interface Forecast {
    *  with no uncertainty penalty. Near zero next to a large srGap means the
    *  SR lead is confidence rather than skill. */
   muGap: number;
+  /** Mean skill and mean uncertainty per side. SR is mu - 2*sigma, so on its
+   *  own it cannot show who was favoured; these are the halves it is made of. */
+  muA: number; muB: number; sigmaA: number; sigmaB: number;
   winProbA: number; winProbB: number;
   ratedA: number; ratedB: number;
   source: 'history' | 'current';
