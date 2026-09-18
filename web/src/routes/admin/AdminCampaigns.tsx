@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, type AdminCampaign, type AdminChapter, type AdminInstall } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
+import { chapterName } from '../../format';
 import { useAction } from './useAction';
 
 /** These are hundreds-of-megabytes VPKs; nobody sizing free disk against an
@@ -33,7 +34,7 @@ function ChapterList({ chapters }: { chapters: AdminChapter[] }) {
         // Every chapter of a campaign shares its slug; ordinal is what is
         // actually unique per chapter.
         <li key={ch.ordinal}>
-          {ch.display ?? ch.map}
+          {chapterName(ch.display, ch.map)}
           {ch.is_finale === 1 && <span class="admin-tag">finale</span>}
         </li>
       ))}
@@ -146,6 +147,10 @@ export function AdminCampaigns() {
   const serverIds = servers.filter((s) => s.enabled === 1).map((s) => s.id);
   const serverNames = new Map(servers.map((s) => [s.id, s.name]));
 
+  // null when no upload is in flight; a 0..1 fraction while one is, or -1 when
+  // the browser will not say how large the body is.
+  const [progress, setProgress] = useState<number | null>(null);
+
   const onUpload = async (e: Event) => {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -154,8 +159,18 @@ export function AdminCampaigns() {
     // like it is still queued.
     input.value = '';
     if (!file) return;
-    await run(() => adminApi.uploadCampaign(file));
+    setProgress(0);
+    try {
+      await run(() => adminApi.uploadCampaign(file, (f) => setProgress(f ?? -1)));
+    } finally {
+      // Cleared on every path. A failed upload that left the bar on screen
+      // would read as still running, which is the confusion this whole control
+      // exists to remove.
+      setProgress(null);
+    }
   };
+
+  const uploading = progress !== null;
 
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
 
@@ -171,6 +186,22 @@ export function AdminCampaigns() {
           </span>
           <input type="file" accept=".vpk" aria-label="Upload campaign" disabled={busy} onChange={onUpload} />
         </div>
+        {uploading && (
+          <div class="upprog" role="status" aria-live="polite">
+            <div class="upprog__bar">
+              <div
+                class={`upprog__fill${progress === -1 ? ' is-indeterminate' : ''}`}
+                style={progress !== null && progress >= 0 ? { width: `${Math.round(progress * 100)}%` } : undefined}
+              />
+            </div>
+            <span class="muted">
+              {progress === -1
+                ? 'Uploading...'
+                : `Uploading ${Math.round((progress ?? 0) * 100)}%`}
+              {' '}Large campaigns take a few minutes. Do not close this tab.
+            </span>
+          </div>
+        )}
         {error && <p class="error">{error}</p>}
       </Panel>
 

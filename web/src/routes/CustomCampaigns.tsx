@@ -1,6 +1,6 @@
 import { api, type CustomCampaignRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignTint } from '../format';
+import { campaignTint, chapterName } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 
@@ -82,7 +82,7 @@ export function CustomCampaigns() {
                 </div>
                 <ol class="ccamp__chapters">
                   {c.chapters.filter((ch) => ch.included).map((ch) => (
-                    <li key={ch.map}>{ch.display ?? ch.map}</li>
+                    <li key={ch.map}>{chapterName(ch.display, ch.map)}</li>
                   ))}
                 </ol>
                 {c.notes && <p>{c.notes}</p>}

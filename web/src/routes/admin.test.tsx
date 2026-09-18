@@ -559,6 +559,54 @@ describe('AdminCampaigns', () => {
     expect(rows).toEqual(['Alley', 'Mall', 'Docksfinale']);
   });
 
+  // The first real upload was a 372 MB file and the page looked frozen for
+  // minutes, because nothing reported progress. This asserts the percentage
+  // reaches the screen, not merely that the request was made.
+  it('reports upload progress while the file is going out', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [] });
+    let emit: ((f: number | null) => void) | undefined;
+    let finish: (() => void) | undefined;
+    mockAdmin.uploadCampaign.mockImplementation((_f: File, onProgress: (f: number | null) => void) => {
+      emit = onProgress;
+      return new Promise((resolve) => { finish = () => resolve({ slug: 'x', name: 'x', sizeBytes: 1, chapters: [] }); });
+    });
+
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const input = await waitFor(() => screen.getByLabelText('Upload campaign'));
+    const file = new File(['x'], 'c.vpk');
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    fireEvent.change(input);
+
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    emit!(0.42);
+    expect(await waitFor(() => screen.getByText(/Uploading 42%/))).toBeTruthy();
+
+    // And it must clear when the upload finishes, or it reads as still running.
+    finish!();
+    await waitFor(() => expect(screen.queryByText(/Uploading 42%/)).toBeNull());
+  });
+
+  // A browser that will not report a total must not show a fake percentage.
+  it('falls back to an indeterminate state with no total', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [] });
+    let emit: ((f: number | null) => void) | undefined;
+    mockAdmin.uploadCampaign.mockImplementation((_f: File, onProgress: (f: number | null) => void) => {
+      emit = onProgress;
+      return new Promise(() => {});
+    });
+
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const input = await waitFor(() => screen.getByLabelText('Upload campaign'));
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'c.vpk')], configurable: true });
+    fireEvent.change(input);
+
+    await waitFor(() => expect(emit).toBeTypeOf('function'));
+    emit!(null);
+    expect(await waitFor(() => screen.getByText(/Uploading\.\.\./))).toBeTruthy();
+  });
+
   it('shows a per-server install state, and the error when one failed', async () => {
     mockAdmin.campaigns.mockResolvedValue({
       free: 11 * 1024 ** 3,
