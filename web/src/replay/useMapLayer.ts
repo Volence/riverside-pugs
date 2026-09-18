@@ -6,6 +6,7 @@ import {
 import { overviewFor } from '../../../src/mapOverviews';
 import { STATE, type Frame, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
 import { isSurvivor } from './draw';
+import { preloadOrder, preloadSequentially, shouldPreload, type ConnectionInfo } from './preloadLayers';
 import type { CanvasSize } from './canvasSize';
 
 /** The canvas shape a map with no art gets. It is the captures' own shape,
@@ -163,6 +164,22 @@ export function useMapLayer(
     img.src = src;
     return () => { cancelled = true; };
   }, [transform?.image]);
+
+  /** Warm the rest of the map's layers once one is on screen.
+   *
+   *  Keyed on the overview rather than the current layer so that walking up a
+   *  building does not restart the queue on every floor: the whole stack is
+   *  wanted either way, and the order only decides which arrives first. It
+   *  runs after the first layer has been picked so it never races the image
+   *  the viewer is actually waiting for. */
+  useEffect(() => {
+    if (!overview || !transform?.image) return;
+    const connection = (navigator as { connection?: ConnectionInfo }).connection;
+    if (!shouldPreload(connection)) return;
+    return preloadSequentially(preloadOrder(overview.layers, transform.image));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see the note above:
+    // re-running per layer would restart the queue on every floor change.
+  }, [overview]);
 
   return { transform, view, backdrop };
 }
