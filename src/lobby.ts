@@ -1,5 +1,29 @@
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
 
+/**
+ * Whether the campaign vote's winner can no longer change.
+ *
+ * The vote runs for `voteSeconds` regardless of how quickly it is settled,
+ * which is dead time: the map cannot start loading until the campaign is
+ * known, and the wait between the vote ending and being able to connect is
+ * almost all map load. Ending the vote the moment it is decided moves that
+ * saving straight onto the front of every match.
+ *
+ * "Decided" means one campaign wins outright, not merely leads. A runner-up
+ * that can still draw LEVEL is not settled, because `tally` breaks a tie at
+ * random, so the outcome would genuinely still be in play.
+ */
+export function voteLocked(counts: ReadonlyMap<string, number>, remaining: number): boolean {
+  if (remaining <= 0) return true;
+  if (counts.size === 0) return false;
+  const sorted = [...counts.values()].sort((a, b) => b - a);
+  const leader = sorted[0];
+  const chaser = sorted[1] ?? 0;
+  // A campaign with no votes yet can still be picked by everyone left, so the
+  // field to beat is the best of the runner-up and a standing start.
+  return leader > Math.max(chaser, 0) + remaining;
+}
+
 export interface Scheduler {
   set(fn: () => void, ms: number): number;
   clear(id: number): void;
@@ -128,7 +152,9 @@ export class Lobby {
     if (this.phase !== 'map_vote' || !this.players.includes(steamid)) return false;
     if (!this.opts.mapPool.includes(campaign)) return false;
     this.votes.set(steamid, campaign);
-    if (this.votes.size === this.players.length) {
+    const counts = new Map<string, number>();
+    for (const c of this.votes.values()) counts.set(c, (counts.get(c) ?? 0) + 1);
+    if (voteLocked(counts, this.players.length - this.votes.size)) {
       this.tally();
     } else {
       this.events.onEvent();
