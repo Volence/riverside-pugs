@@ -418,28 +418,19 @@ describe('map round aggregates', () => {
     expect(d.rounds.avgSec).toBe(100);
   });
 
-  // Before the 2026-09-18 plugin fix, survivors_alive counted INCAPACITATED
-  // players as alive, so a wipe recorded 1 to 3 survivors and read as a
-  // survival. Those rows cannot be repaired and are dropped from survival.
-  it('ignores rounds recorded before survivors_alive was trustworthy', () => {
+  // Rounds from before the 2026-09-18 fix counted INCAPACITATED, PINNED and
+  // LEDGED players as alive, so a wipe read as a survival. They are repaired
+  // in place from their replay's final frame by
+  // scripts/repair-survivors-alive.ts rather than excluded, since every
+  // measured round has a replay and the frames carry those states. So this
+  // layer has no cutoff: whatever is stored is taken at face value.
+  it('counts an old round the same as a new one, since the data is repaired in place', () => {
     seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
-    seedHalf(1, 0, 1, { seconds: 100, alive: 3, at: '2026-09-14 00:00:00' });
-    seedHalf(1, 0, 2, { seconds: 100, alive: 4, at: '2026-09-14 00:00:00' });
+    seedHalf(1, 0, 1, { seconds: 100, alive: 0, at: '2026-09-14 00:00:00' });
+    seedHalf(1, 0, 2, { seconds: 100, alive: 2 });
     const d = mapDetail(db, 'airport01')!;
-    expect(d.rounds.survivalPct).toBeNull();
-    expect(d.rounds.measured).toBe(0);
-    // Timing is untouched: an old round's clock is still a real clock.
-    expect(d.rounds.avgSec).toBe(100);
-    expect(d.rounds.attempts).toBe(2);
-  });
-
-  it('counts a trustworthy round even when older ones sit beside it', () => {
-    seedMatch(1, [{ map: 'airport01', a: 1, b: 0 }], {});
-    seedHalf(1, 0, 1, { seconds: 100, alive: 4, at: '2026-09-14 00:00:00' });
-    seedHalf(1, 0, 2, { seconds: 100, alive: 0 });
-    const d = mapDetail(db, 'airport01')!;
-    expect(d.rounds.measured).toBe(1);
-    expect(d.rounds.survivalPct).toBe(0);
+    expect(d.rounds.measured).toBe(2);
+    expect(d.rounds.survivalPct).toBe(50);
   });
 
   it('counts only the rounds it could measure towards survival', () => {

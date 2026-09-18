@@ -612,6 +612,15 @@ int RoundMs()
  * A team that got nowhere and a team that reached the saferoom were being
  * counted the same.
  *
+ * PINNED and LEDGED are excluded for the same reason, and pinned is not a
+ * detail: match 39 map 2 half 2 recorded 2 "alive" and was a wipe, with one
+ * player incapacitated and the other pinned on 1 health, seconds from dying.
+ * Excluding only the incapacitated would still have called that a survival.
+ *
+ * A round cannot end with a survivor pinned or hanging and the rest safe: the
+ * saferoom door does not close on a team mate who is still being held. So any
+ * of these three at round end is part of the wipe that just finished.
+ *
  * Someone carried through the door incapacitated is still saved, and this
  * still reports that correctly: their team mates are standing, so the count is
  * above zero. The only case this changes is the one where NOBODY is standing,
@@ -623,7 +632,13 @@ int CountAliveSurvivors()
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (!IsClientInGame(i) || GetClientTeam(i) != TEAM_SURVIVOR || !IsPlayerAlive(i)) continue;
+		// The same three states the replay sampler marks (RPL_S_INCAP,
+		// RPL_S_LEDGED, RPL_S_PINNED). Kept in step with RplClientState
+		// deliberately: if the two ever disagree, the map pages and the replay
+		// would tell different stories about the same moment.
 		if (GetEntProp(i, Prop_Send, "m_isIncapacitated") != 0) continue;
+		if (GetEntProp(i, Prop_Send, "m_isHangingFromLedge") != 0) continue;
+		if (g_iPinnedBy[i] > 0) continue;
 		alive++;
 	}
 	return alive;
