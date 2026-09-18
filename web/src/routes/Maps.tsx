@@ -29,12 +29,32 @@ export function Maps() {
     groups.get(key)!.push(m);
   }
 
+  // In the current vote rotation first, then everything else by how much it has
+  // been played, then the never-played. Sorted rather than split under a "not
+  // in rotation" heading: pool four campaigns out of twenty and such a heading
+  // turns sixteen of them into a reject pile, when the honest reading is only
+  // that they are not up tonight. Out of rotation keeps every stat and stays
+  // one click from its map pages, because losing a favourite map's history to
+  // a rotation change is a worse outcome than a longer page.
+  // Defaulted, not assumed: a page that throws because one field is absent
+  // is a worse failure than one that shows nothing in rotation.
+  const pool = new Set(data.pool ?? []);
+  const playedIn = (rows: MapIndexRow[]) => rows.reduce((n, m) => n + m.played, 0);
+  const ordered = [...groups.entries()].sort(([aSlug, aRows], [bSlug, bRows]) => {
+    const aPool = pool.has(aSlug) ? 1 : 0;
+    const bPool = pool.has(bSlug) ? 1 : 0;
+    if (aPool !== bPool) return bPool - aPool;
+    // 'other' is the catch-all for maps no campaign claims, so it sinks.
+    if ((aSlug === 'other') !== (bSlug === 'other')) return aSlug === 'other' ? 1 : -1;
+    return playedIn(bRows) - playedIn(aRows);
+  });
+
   return (
     <div class="page page--list">
       <PageHeader title="Campaigns">
         {maps.length > 0 && (
           <Figures>
-            <Figure label="Maps played" value={maps.length} />
+            <Figure label="Maps played" value={maps.filter((m) => m.played > 0).length} />
             <Figure label="Campaigns" value={[...groups.keys()].filter((k) => k !== 'other').length} />
             <Figure
               label="Most played"
@@ -51,23 +71,27 @@ export function Maps() {
         <>
           {maps.length > 0 && (
             <CampaignTiles
-              items={[...groups.entries()]
+              items={ordered
                 .filter(([slug]) => slug !== 'other')
                 .map(([slug, rows]) => {
-                  const played = rows.reduce((n, m) => n + m.played, 0);
+                  const played = playedIn(rows);
                   return {
                     slug,
                     sub: played === 0 ? 'Unplayed' : `${rows.length} map${rows.length === 1 ? '' : 's'} · ${played} played`,
                     muted: played === 0,
+                    badge: pool.has(slug) ? 'In the vote' : undefined,
                   };
                 })}
             />
           )}
 
           <div class="stack">
-            {[...groups.entries()].map(([campaign, rows]) => (
+            {ordered.map(([campaign, rows]) => (
               <Panel class="panel--table" key={campaign}>
-                <h3>{campaign === 'other' ? 'Other' : campaignName(campaign)}</h3>
+                <h3>
+                  {campaign === 'other' ? 'Other' : campaignName(campaign)}
+                  {pool.has(campaign) && <span class="ccamp__pool">In the vote</span>}
+                </h3>
                 <div class="table-wrap">
                   <table>
                     <thead>

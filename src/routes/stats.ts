@@ -10,6 +10,7 @@ import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
  *  thousand; the bound exists so a runaway feed cannot become a multi-megabyte
  *  page, not to window anything a real match produces. */
 const MATCH_EVENT_LIMIT = 20_000;
+import { getCampaignPool } from '../settings.js';
 import { mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr, matchForecast } from '../rating.js';
 import { currentSeasonId } from '../players.js';
@@ -114,7 +115,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   app.get('/api/live', async () => ({ matches: getLiveMatches(db) }));
 
   /** Every map that has been played, so the map pages are discoverable. */
-  app.get('/api/maps', async () => ({ maps: mapIndex(db) }));
+  // `pool` is the current vote rotation, so the page can put what you might
+  // actually play tonight above what you cannot. Out of rotation is not out of
+  // sight: those campaigns keep every stat, they just sort below.
+  app.get('/api/maps', async () => ({ maps: mapIndex(db), pool: getCampaignPool(db) }));
 
   /** Everyone's record on one map. Counterpart to the profile's by-map view. */
   app.get('/api/maps/:map', async (req, reply) => {
