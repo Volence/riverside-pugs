@@ -127,7 +127,7 @@ export const STAT_LABELS: Record<string, string> = {
 export const LIVE_STAT_GROUPS: { key: string; keys: string[] }[] = [
   { key: 'core', keys: ['hp', 'ck', 'sidmg', 'sikill', 'ff', 'rev'] },
   { key: 'tank', keys: ['tank_damage', 'damage_as_si', 'tank_punches', 'tank_rocks_landed'] },
-  { key: 'skeet', keys: ['skeets', 'team_skeets', 'skeets_hurt', 'skeet_assists'] },
+  { key: 'skeet', keys: ['skeets', 'team_skeets', 'skeet_assists'] },
   { key: 'skill', keys: ['boomer_pops', 'crowns', 'rock_skeets', 'dps_landed'] },
   { key: 'boom', keys: ['boomer_spawns', 'boom_successes', 'boomer_rate', 'boomed_vomit', 'boomed_proxy'] },
 ];
@@ -172,6 +172,23 @@ export const LIVE_STAT_ORDER = LIVE_STAT_GROUPS.flatMap((g) => g.keys);
  *  recorded player-matches. `skeets_shotgun` (462) and `skeets_hurt` (122) were
  *  in here too and are NOT dead, which is why the skeet columns could not be
  *  reconciled by eye: a populated stat was being hidden as uncollectable. */
+/**
+ * Real, populated stats that are nonetheless not given a column, because they
+ * are already counted inside one that is.
+ *
+ * Kept separate from DEAD_STAT_KEYS on purpose. That set means "L4D1 cannot
+ * produce this", and putting a populated stat in it is exactly the mistake that
+ * made the skeet columns impossible to reconcile: skeets_hurt was being
+ * suppressed as uncollectable while carrying 122 real events.
+ *
+ * skeets_hurt is a chip skeet, a skeet on an already damaged hunter. Under the
+ * ruleset (see src/statKeys.ts) every skeet is claimed by exactly one survivor
+ * and is either a skeet or a team skeet, so a chip skeet is ALREADY in one of
+ * those columns. Showing it alongside them reads as a third bucket and makes
+ * the totals look wrong, which is the confusion this whole thread started with.
+ */
+export const SUBSET_STAT_KEYS: ReadonlySet<string> = new Set(['skeets_hurt']);
+
 export const DEAD_STAT_KEYS: ReadonlySet<string> = new Set([
   'skeets_melee', 'skeets_sniper', 'deadstops', 'tongue_cuts', 'survivors_biled',
   'times_deadstopped',
@@ -188,7 +205,7 @@ export const DEAD_STAT_KEYS: ReadonlySet<string> = new Set([
  *  side because they are not skill-detect keys. */
 export const STAT_FAMILIES: { key: string; side: 'core' | 'survivor' | 'infected'; keys: string[] }[] = [
   { key: 'core', side: 'core', keys: ['hp', 'ck', 'sidmg', 'sikill', 'ff', 'rev'] },
-  { key: 'skeets', side: 'survivor', keys: ['skeets', 'team_skeets', 'skeets_hurt', 'skeets_shotgun', 'skeet_assists'] },
+  { key: 'skeets', side: 'survivor', keys: ['skeets', 'team_skeets', 'skeets_shotgun', 'skeet_assists'] },
   { key: 'pins', side: 'survivor', keys: ['clears', 'insta_clears', 'self_clears', 'tongue_clears', 'times_quadded'] },
   { key: 'witch', side: 'survivor', keys: ['crowns', 'draw_crowns'] },
   { key: 'antitank', side: 'survivor', keys: ['tank_damage', 'rock_skeets'] },
@@ -235,7 +252,7 @@ export function orderStatKeysBySide(
   statDefs: { key: string; side: 'survivor' | 'infected' }[],
 ): string[] {
   const sideOf = new Map(statDefs.map((d) => [d.key, d.side]));
-  const live = keys.filter((k) => !DEAD_STAT_KEYS.has(k));
+  const live = keys.filter((k) => !DEAD_STAT_KEYS.has(k) && !SUBSET_STAT_KEYS.has(k));
   const claimed = new Set(STAT_FAMILIES.flatMap((f) => f.keys));
 
   // Each side is its families in reading order, then whatever that side has
@@ -270,7 +287,7 @@ export function orderLiveStatKeys(keys: string[]): string[] {
   // `rest` fallback below appends anything the list does not know, so an
   // omission silently reinstates the column. survivors_biled reaches the live
   // payload for real, so without this the live card grows a permanent zero.
-  const live = keys.filter((k) => !DEAD_STAT_KEYS.has(k));
+  const live = keys.filter((k) => !DEAD_STAT_KEYS.has(k) && !SUBSET_STAT_KEYS.has(k));
   const known = LIVE_STAT_ORDER.filter((k) => live.includes(k));
   const rest = live.filter((k) => !LIVE_STAT_ORDER.includes(k)).sort();
   return [...known, ...rest];
