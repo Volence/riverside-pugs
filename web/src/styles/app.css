@@ -1453,12 +1453,18 @@ body.is-theater { overflow: hidden; }
   white-space: pre;
 }
 /* The integrity board's column key. A <details> so it explains itself once and
- * then stays out of the way, rather than a paragraph nobody rereads. */
-.key summary { cursor: pointer; font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--fs-label); color: var(--text-muted); }
-.key__list { margin: var(--sp-3) 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); }
-.key__list dt { font-weight: 600; white-space: nowrap; }
-.key__list dd { margin: 0; color: var(--text-muted); }
-@media (max-width: 640px) { .key__list { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } .key__list dd { margin-bottom: var(--sp-2); } }
+ * then stays out of the way, rather than a paragraph nobody rereads.
+ *
+ * NOT `.key`, which is the replay viewer's floating legend (see above, around
+ * the .key__swatch rules): that one is `position: absolute`, so sharing the
+ * name pulled this whole disclosure out of its panel's flow and left an empty
+ * box with nothing to click. Shipped that way and was live, invisible, for
+ * a day. Two components, two names. */
+.colkey summary { cursor: pointer; font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--fs-label); color: var(--text-muted); }
+.colkey__list { margin: var(--sp-3) 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); }
+.colkey__list dt { font-weight: 600; white-space: nowrap; }
+.colkey__list dd { margin: 0; color: var(--text-muted); }
+@media (max-width: 640px) { .colkey__list { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } .colkey__list dd { margin-bottom: var(--sp-2); } }
 
 /* Sample size under a survival percentage. Its own line so a narrow column
  * does not wrap the number away from what it is over. */
