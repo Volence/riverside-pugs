@@ -1,6 +1,6 @@
 import { STATE, ZOMBIE_CLASSES, weaponName, type PlayerSample, type ReplayHeader } from '../../../src/replayFormat';
 import { isSurvivor, maxHealthOf, slotColor, slotLabel, slotNumber } from './draw';
-import { healthBar, portraitFor, statusFlags } from './hud';
+import { healthBar, portraitFor, statusFlags, TEMP_HEALTH_COLOR } from './hud';
 
 function Panel(
   { p, header, name, showHp, showGuns }:
@@ -36,6 +36,17 @@ function Panel(
           {showHp && (
             <span class="hudp__hp" style={{ color: bar.color }}>
               {alive ? p.health : 0}
+              {/* Permanent health alone is misleading: a survivor on 1
+                  permanent and 90 temporary read as "1", one hit from death,
+                  when they are nothing of the sort. Coloured to match the
+                  bar's temp segment so the two read as one thing. Suppressed
+                  while downed, where `healthBar` zeroes temp on purpose and
+                  the number is a bleed-out reading rather than health. */}
+              {alive && !bar.downed && p.temp > 0 && (
+                <span class="hudp__hp-temp" style={{ color: TEMP_HEALTH_COLOR }}>
+                  +{Math.round(p.temp)}
+                </span>
+              )}
             </span>
           )}
         </div>
