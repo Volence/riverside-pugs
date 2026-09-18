@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, missingDirs } from '../src/config.js';
 import { CAMPAIGNS } from '../src/campaigns.js';
 
 describe('loadConfig', () => {
@@ -38,5 +38,21 @@ describe('loadConfig', () => {
 describe('campaigns', () => {
   it('has the four original campaigns', () => {
     expect(Object.keys(CAMPAIGNS)).toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
+  });
+});
+
+describe('missingDirs', () => {
+  it('names a configured directory that is not there', () => {
+    const cfg = loadConfig({ REPLAY_DIR: '/definitely/not/here', DEMO_DIR: '' });
+    expect(missingDirs(cfg)).toEqual([{ name: 'REPLAY_DIR', path: '/definitely/not/here' }]);
+  });
+
+  it('says nothing when a directory is simply not configured', () => {
+    expect(missingDirs(loadConfig({}))).toEqual([]);
+  });
+
+  it('says nothing when the directory exists', () => {
+    const cfg = loadConfig({ REPLAY_DIR: process.cwd() });
+    expect(missingDirs(cfg)).toEqual([]);
   });
 });
