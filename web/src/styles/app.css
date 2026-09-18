@@ -1260,6 +1260,10 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .hudp__hp { font-family: var(--font-display); font-size: 1.25rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .hudp__cls, .hudp__gun, .hudp__flags { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
 .hudp__flags { color: var(--rating); }
+/* Smaller than the permanent reading it trails, so the pair reads as one
+ * number with a modifier rather than two competing figures. Colour comes from
+ * TEMP_HEALTH_COLOR in replay/hud.ts, inline, to match the bar segment. */
+.hudp__hp-temp { font-size: 0.8em; margin-left: 0.15em; }
 .hudp__bar { position: relative; height: 8px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
 .hudp__bar-temp, .hudp__bar-perm { position: absolute; inset: 0 auto 0 0; }
 .hudp__bar-temp { background: #c2d9a7; } /* TEMP_HEALTH_COLOR in replay/hud.ts; keep the two in step. */

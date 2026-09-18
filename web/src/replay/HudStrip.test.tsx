@@ -31,6 +31,39 @@ describe('HudStrip', () => {
     expect(container.querySelectorAll('.hudp')).toHaveLength(8);
   });
 
+  // A survivor on 1 permanent and 90 temporary is not one hit from death, but
+  // the readout said "1" and only the bar hinted otherwise.
+  it('shows temporary health alongside permanent health', () => {
+    const ps = players();
+    ps[0] = { ...ps[0], health: 1, temp: 90 };
+    const { container } = render(
+      <HudStrip players={ps} header={HEADER} names={NAMES} showHp showGuns={false} />,
+    );
+    const hp = container.querySelector('.hudp__hp')!;
+    expect(hp.textContent).toBe('1+90');
+    expect(hp.querySelector('.hudp__hp-temp')!.textContent).toBe('+90');
+  });
+
+  it('shows no temporary reading when there is none', () => {
+    const { container } = render(
+      <HudStrip players={players()} header={HEADER} names={NAMES} showHp showGuns={false} />,
+    );
+    expect(container.querySelector('.hudp__hp')!.textContent).toBe('100');
+    expect(container.querySelector('.hudp__hp-temp')).toBeNull();
+  });
+
+  // healthBar zeroes temp for a downed survivor on purpose: the record's temp
+  // is whatever it was before they went down, and the number beside the bar
+  // is a bleed-out reading rather than health.
+  it('shows no temporary reading for a downed survivor', () => {
+    const ps = players();
+    ps[0] = { ...ps[0], state: STATE.PRESENT | STATE.ALIVE | STATE.INCAP, health: 250, temp: 90 };
+    const { container } = render(
+      <HudStrip players={ps} header={HEADER} names={NAMES} showHp showGuns={false} />,
+    );
+    expect(container.querySelector('.hudp__hp-temp')).toBeNull();
+  });
+
   it('renders survivors down the left edge and infected down the right in slot order', () => {
     const { container } = render(
       <HudStrip players={players()} header={HEADER} names={NAMES} showHp showGuns={false} layout="edges" />,
