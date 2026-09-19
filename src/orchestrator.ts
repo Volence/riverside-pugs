@@ -15,6 +15,7 @@ import { clearLive } from './liveView.js';
 import { CAMPAIGNS } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
+import { stopAfterMap } from './stopPoint.js';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
 export interface Orchestrator {
@@ -132,7 +133,13 @@ export class RealOrchestrator implements Orchestrator {
       await rcon.exec(`sm_pug_leave_budget ${settingInt(this.db, 'leave_budget_seconds', 300)}`);
       await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
       await rcon.exec(`sv_password "${serverPasswordFor(token)}"`);
-      await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}`);
+      // The map to stop after, when we know the campaign's chapters. Omitted
+      // rather than guessed when we do not: the plugin then keeps using its own
+      // NextMapIsFinale(), which is what every self-started match relies on and
+      // what every match did before this argument existed.
+      const stopMap = stopAfterMap(this.db, match.campaign);
+      const stopArg = stopMap ? ` ${stopMap}` : '';
+      await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}${stopArg}`);
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
       // unquoted args on ':', so the plugin would receive a bare steamid, reject
       // the line, and then kick every player as non-rostered. Verified on the
