@@ -1,6 +1,7 @@
 # File consistency, Phase 2: the enforced list, and marking who was rejected
 
-Status: design approved in conversation 2026-09-19, spec written the same day. Nothing built.
+Status: design approved in conversation 2026-09-19, spec written the same day. File-type
+probes and the pure-whitelist spike done the same evening; nothing else built.
 
 Related: `2026-09-18-file-consistency-design.md` (Phase 1, the mechanism, PASSED for
 materials and sounds), `2026-09-17-integrity-design.md` (the replay analyzer, a different
@@ -152,13 +153,52 @@ sound/player/footsteps/boomer/**                  (148)
 scripts/game_sounds_infected_common.txt
 ```
 
-### File types still unproven
+### File types: all proven, 2026-09-19
 
-Only `.vmt` and `.wav` have produced a rejection. Groups above also rely on `.mdl`, `.vtf`,
-`.txt` and `.pcf`. Each gets a one-file probe on the local server, same method as Phase 1:
-force one, join with a modified copy, expect the rejection naming it, then join with the
-stock copy and expect nothing. A type that does not reject is dropped from the list and
-recorded here, not left in as decoration.
+Every type the list relies on has now produced a rejection naming the file, on the local
+server with a real client:
+
+| type | how the client copy was modified | result |
+|---|---|---|
+| `.vmt` | `$baseTexture` edited inside `pak01_dir.vpk` (Phase 1) | rejected |
+| `.wav` | `silenced.vpk` addon (Phase 1) | rejected |
+| `.txt` | `scripts/game_sounds_weapons.txt` with one comment line added, shipped in an addon VPK | rejected |
+| `.mdl` | one byte in the unused tail of the header name field, in place in `pak01_035.vpk` | rejected; the same client passed with the stock byte |
+| `.vtf` | one pixel byte, in place in `pak01_017.vpk` | rejected |
+| `.pcf` | one letter of a string, in place in `pak01_028.vpk` | rejected |
+
+Three facts came out of the probes and shape the rest of this spec:
+
+- **The check re-runs on every level change**, not only at first connect. A client already in
+  game was dropped at the next map load once a file it had modified was forced. So turning
+  the list on, or adding to it, bites connected players at the next map. Rollout accounts
+  for that below.
+- **The client CRCs the file from disk at check time.** A byte flipped while the game was
+  running was caught at the next map load, and restoring it cleared the client, with no
+  game restart either way.
+- **On L4D1, `pak01` beats addons and loose files.** An addon VPK carrying a modified hunter
+  `.vmt`, `.vtf`, `.mdl` and `.pcf` was mounted and changed nothing: the hunter rendered
+  stock and nothing was rejected. Only paths that are not in `pak01` (sounds, scripts, new
+  files) can be overridden by an addon. For models, materials and particles the attack is
+  editing the archive itself, which is what the skin sites instruct, and ForceExactFile
+  catches it.
+
+### Rejected alternative: the pure server whitelist (`sv_pure 1` + `check_crc`)
+
+Spiked 2026-09-19 because it promised what ForceExactFile cannot: the server does the kick
+and the file name lands in the disconnect reason. It does not work for this problem:
+
+- It only CRC-checks loose files. A hunter `.vmt` edited inside `pak01_dir.vpk` loaded (the
+  client saw the missing-texture checkerboard), played for minutes and was never kicked.
+  That is the commonest skin install.
+- Every loose `.wav` is reported under the `[AUDIO]` path ID, which the server has no record
+  for, so a STOCK client was kicked the moment the smg fired.
+- The CRC cacher segfaults on `...` rules over archive-only directories and on
+  `models\infected\hulk.mdl`, and any path present in two search paths
+  (`scripts/game_sounds_manifest.txt` is in base and `left4dead_dlc3`) mismatches for a stock
+  client.
+- A force-listed file drops the client at signon, before pure ever runs, so the two cannot be
+  combined to get attribution for the same file.
 
 ## The plugin, Phase 2
 
@@ -230,8 +270,7 @@ by a script and any collision is fixed before the list goes live.
 
 On the local test server, never Dallas, in this order:
 
-1. The four unproven file types, one probe each, both halves (modified rejects, stock
-   passes).
+1. ~~The four unproven file types.~~ Done 2026-09-19, all four reject; see "File types".
 2. Full list applied, **stock client joins and plays a full map**. Zero disconnects. This is
    the gate; nothing ships without it.
 3. One modified file per group, expect the rejection naming it.
@@ -244,7 +283,9 @@ On the local test server, never Dallas, in this order:
    refusal.
 
 Dallas, on an empty server, with the owner's go-ahead: extension and plugin staged with
-`l4d_consistency_enabled 0`, cfg in place, then flipped on over rcon. Rollback is
+`l4d_consistency_enabled 0`, cfg in place, then flipped on over rcon. Because the check
+re-runs at every level change, flipping it on never touches the current map; it takes
+effect for everyone at the next map load. Rollback is
 `sv_consistency 0` over rcon, instant, no restart. Group 6 repeats steps 2 to 4 and the
 staging.
 
