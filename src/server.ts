@@ -38,7 +38,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { resolveServerBySource } from './serverPool.js';
-import { abortCommand, resetMap } from './matchTeardown.js';
+import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
@@ -354,6 +354,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
             .catch((err) => console.error('[abandon] failed:', err));
+          return;
+        }
+        if (ev.kind === 'problem') {
+          // The plugin could not do part of a teardown (today: the game never
+          // unpaused). The match is already aborted; this is for the admin
+          // channel, so someone knows the box may need a hand.
+          const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
+          publishAdminEvent({ kind: 'problem', matchId: row?.id, text: problemText(ev.code, row?.id ?? null) });
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
