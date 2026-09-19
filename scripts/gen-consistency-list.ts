@@ -1,0 +1,209 @@
+/**
+ * Generate consistency/configs/l4d_consistency.cfg: the explicit list of files the
+ * server forces for consistency checking.
+ *
+ * The list is generated and COMMITTED rather than expanded from wildcards by the
+ * plugin at runtime. A glob expanded against the game's file system hides a bad
+ * rule as a silent zero; a generated file is diffable, reviewable, and is what the
+ * campaign uploader intersects an uploaded VPK against.
+ *
+ * Rules and their reasons are in
+ * docs/superpowers/specs/2026-09-19-file-consistency-phase2-design.md.
+ *
+ * Usage:
+ *   npx tsx scripts/gen-consistency-list.ts                    # groups 1 to 5
+ *   npx tsx scripts/gen-consistency-list.ts --commons          # also group 6
+ *   npx tsx scripts/gen-consistency-list.ts --game /path/to/left4dead
+ *   npx tsx scripts/gen-consistency-list.ts --verify /path/to/other/left4dead
+ *
+ * --game is a STOCK install (default: the local test server). Models, materials
+ * and particles are read from its pak01_dir.vpk; sounds and scripts are loose
+ * files on L4D1, so those are walked on disk.
+ *
+ * --verify compares every loose file on the list against a second install and
+ * names any that differ. Run it against a client before trusting a server: the
+ * engine CRCs the SERVER's copy, so one customised sound on the server would
+ * disconnect every stock client.
+ */
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { listVpkPaths } from '../src/vpk.js';
+
+const here = fileURLToPath(new URL('.', import.meta.url));
+const args = process.argv.slice(2);
+const flag = (name: string): string | null => {
+  const i = args.indexOf(name);
+  return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
+};
+const GAME = resolve(flag('--game') ?? '/home/volence/l4d1-ds/server/left4dead');
+const VERIFY = flag('--verify');
+const COMMONS = args.includes('--commons');
+const OUT = resolve(flag('--out') ?? join(here, '../consistency/configs/l4d_consistency.cfg'));
+
+/** A rule selects paths out of one source. `dir` matches files directly in that
+ *  directory; `tree` matches the directory and everything below it. */
+type Rule =
+  | { from: 'pak' | 'loose'; file: string }
+  | { from: 'pak' | 'loose'; dir: string; ext?: string[] }
+  | { from: 'loose'; tree: string };
+
+interface Group { n: number; title: string; rules: Rule[] }
+
+const SI = ['boomer', 'hulk', 'hunter', 'smoker', 'witch'];
+const GUNS = ['smg', 'shotgun', 'auto_shotgun', 'rifle', 'hunting_rifle', 'pistol', 'minigun'];
+
+const GROUPS: Group[] = [
+  {
+    n: 1, title: 'special infected models and materials',
+    rules: [
+      ...[...SI, 'smoker_tongue_attach'].map((m): Rule => ({ from: 'pak', file: `models/infected/${m}.mdl` })),
+      // Both .vmt and .vtf: skins usually edit the material definition inside
+      // pak01_dir.vpk and leave the stock texture alone.
+      ...SI.map((m): Rule => ({ from: 'pak', dir: `materials/models/infected/${m}` })),
+    ],
+  },
+  {
+    n: 2, title: 'foliage and plants',
+    rules: [
+      { from: 'pak', dir: 'models/props_foliage', ext: ['mdl'] },
+      { from: 'pak', dir: 'materials/models/props_foliage' },
+      { from: 'pak', dir: 'models/props_plants', ext: ['mdl'] },
+      { from: 'pak', dir: 'materials/models/props_plants' },
+    ],
+  },
+  {
+    n: 3, title: 'gunfire and the weapon soundscripts',
+    rules: [
+      ...GUNS.map((g): Rule => ({ from: 'loose', dir: `sound/weapons/${g}/gunfire`, ext: ['wav'] })),
+      { from: 'loose', file: 'scripts/game_sounds_weapons.txt' },
+      { from: 'loose', file: 'scripts/game_sounds_manifest.txt' },
+    ],
+  },
+  {
+    n: 4, title: 'special infected sounds',
+    rules: [
+      ...['hunter', 'smoker', 'boomer', 'tank'].map((m): Rule => ({ from: 'loose', tree: `sound/player/${m}` })),
+      { from: 'loose', tree: 'sound/npc/witch' },
+      { from: 'loose', tree: 'sound/player/footsteps/tank' },
+      { from: 'loose', tree: 'sound/player/footsteps/witch' },
+      { from: 'loose', file: 'scripts/game_sounds_infected_special.txt' },
+    ],
+  },
+  {
+    n: 5, title: 'bile, smoke and the SI particle definitions',
+    rules: [
+      { from: 'pak', file: 'materials/particle/screenspaceboomervomit.vmt' },
+      { from: 'pak', file: 'materials/particle/vomitscreensplash.vtf' },
+      { from: 'pak', dir: 'materials/particle/smoke1' },
+      { from: 'pak', dir: 'materials/particle/vistasmokev1' },
+      { from: 'pak', file: 'materials/particle/particle_smokegrenade.vmt' },
+      { from: 'pak', file: 'materials/particle/particle_smokegrenade1.vmt' },
+      { from: 'pak', file: 'materials/particle/particle_smokegrenade_sc.vmt' },
+      { from: 'pak', file: 'materials/particle/particle_smokegrenade.vtf' },
+      ...['smoker_fx', 'boomer_fx', 'hunter_fx', 'tank_fx', 'witch_fx', 'infected_fx', 'screen_fx']
+        .map((f): Rule => ({ from: 'pak', file: `particles/${f}.pcf` })),
+    ],
+  },
+];
+
+const GROUP6: Group = {
+  n: 6, title: 'common infected',
+  rules: [
+    { from: 'pak', dir: 'models/infected', ext: ['mdl'] }, // narrowed to common_* below
+    { from: 'pak', dir: 'materials/models/infected/common' },
+    { from: 'loose', tree: 'sound/npc/infected' },
+    { from: 'loose', tree: 'sound/player/footsteps/infected' },
+    { from: 'loose', tree: 'sound/player/footsteps/boomer' },
+    { from: 'loose', file: 'scripts/game_sounds_infected_common.txt' },
+  ],
+};
+
+const pakPaths = listVpkPaths(join(GAME, 'pak01_dir.vpk'));
+if (pakPaths.length === 0) {
+  console.error(`no pak01_dir.vpk under ${GAME}`);
+  process.exit(1);
+}
+const pakLower = new Map(pakPaths.map((p) => [p.toLowerCase(), p]));
+
+function walk(rel: string, recurse: boolean): string[] {
+  const abs = join(GAME, rel);
+  if (!existsSync(abs)) return [];
+  const out: string[] = [];
+  for (const name of readdirSync(abs).sort()) {
+    const childRel = `${rel}/${name}`;
+    const st = statSync(join(GAME, childRel));
+    if (st.isDirectory()) { if (recurse) out.push(...walk(childRel, true)); }
+    else out.push(childRel);
+  }
+  return out;
+}
+
+const extOf = (p: string): string => p.slice(p.lastIndexOf('.') + 1).toLowerCase();
+
+function select(rule: Rule): string[] {
+  if ('file' in rule) {
+    if (rule.from === 'pak') { const hit = pakLower.get(rule.file.toLowerCase()); return hit ? [hit] : []; }
+    return existsSync(join(GAME, rule.file)) ? [rule.file] : [];
+  }
+  if ('tree' in rule) return walk(rule.tree, true);
+  const inDir = rule.from === 'pak'
+    ? pakPaths.filter((p) => p.slice(0, p.lastIndexOf('/')).toLowerCase() === rule.dir.toLowerCase())
+    : walk(rule.dir, false);
+  return rule.ext ? inDir.filter((p) => rule.ext!.includes(extOf(p))) : inDir;
+}
+
+// Anything that is not a game asset the client could meaningfully differ on.
+const SKIP_EXT = new Set(['cache', 'db', 'ds_store']);
+
+const groups = COMMONS ? [...GROUPS, GROUP6] : GROUPS;
+const seen = new Set<string>();
+const lines: string[] = [
+  '# GENERATED by scripts/gen-consistency-list.ts. Do not edit by hand; change the rules and re-run.',
+  '# One game-relative path per line. "# group N: title" starts a group; the plugin reports per group.',
+  '',
+];
+let total = 0;
+let failed = false;
+for (const g of groups) {
+  const paths: string[] = [];
+  for (const rule of g.rules) {
+    let hits = select(rule);
+    if (g.n === 6 && 'dir' in rule && rule.dir === 'models/infected') {
+      hits = hits.filter((p) => /\/common_[^/]*\.mdl$/i.test(p));
+    }
+    hits = hits.filter((p) => !SKIP_EXT.has(extOf(p)));
+    if (hits.length === 0) {
+      // A rule that matches nothing is a typo or a game update, never something to skip quietly.
+      console.error(`group ${g.n}: rule matched NOTHING: ${JSON.stringify(rule)}`);
+      failed = true;
+    }
+    for (const p of hits) if (!seen.has(p.toLowerCase())) { seen.add(p.toLowerCase()); paths.push(p); }
+  }
+  lines.push(`# group ${g.n}: ${g.title}`, ...paths, '');
+  console.log(`group ${g.n}: ${String(paths.length).padStart(4)}  ${g.title}`);
+  total += paths.length;
+}
+console.log(`total:   ${String(total).padStart(4)}`);
+if (failed) process.exit(1);
+
+if (VERIFY) {
+  const md5 = (f: string): string => createHash('md5').update(readFileSync(f)).digest('hex');
+  let differ = 0, missing = 0, checked = 0;
+  for (const p of seen) {
+    const a = join(GAME, p);
+    if (!existsSync(a)) continue; // archive content; compare pak01_dir.vpk itself instead
+    const b = join(resolve(VERIFY), p);
+    if (!existsSync(b)) { console.error(`verify: MISSING in ${VERIFY}: ${p}`); missing++; continue; }
+    checked++;
+    if (md5(a) !== md5(b)) { console.error(`verify: DIFFERS: ${p}`); differ++; }
+  }
+  const pakSame = existsSync(join(resolve(VERIFY), 'pak01_dir.vpk'))
+    && md5(join(GAME, 'pak01_dir.vpk')) === md5(join(resolve(VERIFY), 'pak01_dir.vpk'));
+  console.log(`verify: ${checked} loose files compared, ${differ} differ, ${missing} missing; pak01_dir.vpk ${pakSame ? 'identical' : 'DIFFERS'}`);
+  if (differ || missing || !pakSame) process.exit(1);
+}
+
+writeFileSync(OUT, lines.join('\n'));
+console.log(`wrote ${OUT}`);

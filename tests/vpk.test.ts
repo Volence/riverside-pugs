@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeVpk } from './fixtures/makeVpk.js';
-import { parseKeyValues, parseMission, missionFromVpk } from '../src/vpk.js';
+import { parseKeyValues, parseMission, missionFromVpk, listVpkPaths } from '../src/vpk.js';
 
 const MISSION = `
 "mission"
@@ -137,5 +137,35 @@ describe('missionFromVpk', () => {
     const p = join(dir, 'dbd_v2.vpk');
     makeVpk(p, { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION, version: 2 });
     expect(missionFromVpk(p)).toEqual(parseMission(MISSION));
+  });
+});
+
+describe('listVpkPaths', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vpk-list-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('lists dir/name.ext without opening a numbered archive', () => {
+    const p = join(dir, 'a.vpk');
+    makeVpk(p, { ext: 'vmt', dir: 'materials/models/infected/hunter', name: 'hunter_01', body: 'x', archiveIndex: 3 });
+    expect(listVpkPaths(p)).toEqual(['materials/models/infected/hunter/hunter_01.vmt']);
+  });
+
+  it('steps over preload bytes and the v2 header', () => {
+    const p = join(dir, 'b.vpk');
+    makeVpk(p, { ext: 'txt', dir: 'scripts', name: 'game_sounds_weapons', body: 'abcdef', preloadBytes: 4, version: 2 });
+    expect(listVpkPaths(p)).toEqual(['scripts/game_sounds_weapons.txt']);
+  });
+
+  it('spells a root-level file without the single-space directory', () => {
+    const p = join(dir, 'c.vpk');
+    makeVpk(p, { ext: 'txt', dir: ' ', name: 'addoninfo', body: 'x' });
+    expect(listVpkPaths(p)).toEqual(['addoninfo.txt']);
+  });
+
+  it('returns nothing for a file that is not a VPK', () => {
+    const p = join(dir, 'd.vpk');
+    writeFileSync(p, 'not a vpk at all');
+    expect(listVpkPaths(p)).toEqual([]);
   });
 });
