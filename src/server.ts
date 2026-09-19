@@ -41,6 +41,7 @@ import { resolveServerBySource } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import {
@@ -71,6 +72,9 @@ export interface ServerDeps {
   discordApi?: DiscordApi;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
+  /** Runs a batch of console commands on one server, for the ban sync.
+   *  Injected in tests so a ban never dials rcon. */
+  serverExec?: ServerExec;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -329,6 +333,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
   }));
 
+  // Every enabled box mirrors the website's bans. Built here, next to the
+  // releaser, because both are the backend reaching into a game server
+  // outside a match; started below once the server list has been reconciled.
+  const banSync = new ServerBanSync({
+    db: deps.db,
+    exec: deps.serverExec ?? (async (server, commands) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        for (const c of commands) await rcon.exec(c);
+      } finally {
+        rcon.close();
+      }
+    }),
+  });
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   if (!orchestrator) {
@@ -462,6 +482,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
         onNoServer: (id) => pending?.add(id),
+        beforeLive: (rcon) => banSync.pushAll((c) => rcon.exec(c)),
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -575,6 +596,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       busy: () => matchInFlight(deps.db),
     })
     : undefined;
+
+  if (!deps.config.devMode) {
+    banSync.start();
+    banSync.sweep().catch((err) => console.error('[serverBans] boot sweep failed:', err));
+  }
 
   const reaper = setInterval(() => {
     try {
@@ -701,6 +727,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(pruneTimer);
     clearTimeout(pruneOnBoot);
+    banSync.stop();
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
