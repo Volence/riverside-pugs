@@ -606,6 +606,26 @@ describe('DELETE /api/admin/campaigns/:slug', () => {
     expect(getJsonSetting<string[]>(db, 'map_pool')).toEqual(['no_mercy', 'death_toll']);
   });
 
+  // campaign_play_rules has no foreign key on slug, deliberately, so a stock
+  // slug can be stored there too. That means nothing prunes a custom
+  // campaign's row on its own, so a re-upload landing on the same slug would
+  // silently inherit a deleted campaign's stop point without this.
+  it('clears the maps-to-play rule so a re-upload of the same slug does not inherit it', async () => {
+    const fake = fakeAddonsTransport();
+    installedDbd(fake);
+    setMapsToPlay(db, 'dbd', 1);
+    const app = await buildTestApp({
+      db, addonsDir: addons, installTargets: () => [{ id: 1, transport: fake.transport }],
+    });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/admin/campaigns/dbd',
+      cookies: adminCookie(app, '76561198000000001'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getMapsToPlay(db, 'dbd')).toBeNull();
+  });
+
   it('leaves map_pool untouched when the deleted campaign was never pooled', async () => {
     const fake = fakeAddonsTransport();
     installedDbd(fake);
