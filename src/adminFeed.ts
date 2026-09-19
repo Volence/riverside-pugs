@@ -14,7 +14,12 @@ export type AdminEvent =
   | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
   | { kind: 'problem'; text: string; matchId?: number }
-  | { kind: 'abandon'; steamid: string; matchId: number; minutes: number };
+  | { kind: 'abandon'; steamid: string; matchId: number; minutes: number }
+  // A steamid dropped while connecting for the second time in ten minutes
+  // without getting in between. `name` is the in-game name off the drop line,
+  // because the steamid is often nobody the site knows. `count` is the drops in
+  // that window, `total` every drop on record.
+  | { kind: 'signon_drop'; steamid: string; name: string; count: number; total: number };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -24,6 +29,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   account: 'admin_feed_accounts',
   problem: 'admin_feed_problems',
   abandon: 'admin_feed_penalties',
+  signon_drop: 'admin_feed_problems',
 };
 
 type Listener = (e: AdminEvent) => void;

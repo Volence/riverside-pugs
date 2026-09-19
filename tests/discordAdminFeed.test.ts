@@ -100,6 +100,36 @@ describe('admin feed', () => {
     expect(t.live()).toHaveLength(0);
   });
 
+  it('a repeated connect drop posts one line: name, steamid, count and the wording', async () => {
+    // Not one of IDS: most dropped steamids have never signed in to the site.
+    const stranger = '76561198005192651';
+    publishAdminEvent({ kind: 'signon_drop', steamid: stranger, name: 'may*hem', count: 2, total: 5 });
+    await feed.idle();
+    expect(t.live()).toHaveLength(1);
+    expect(t.live()[0].channelId).toBe('admins');
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    // The in-game name, markdown-escaped: it is attacker-controlled text.
+    expect(line).toContain('**may\\*hem**');
+    expect(line).toContain(`\`${stranger}\``);
+    expect(line).toContain('2 times in ten minutes');
+    expect(line).toContain('5 on record');
+    expect(line).toContain('likely rejected for a modified game file; the file name was shown on their screen');
+    expect(line).not.toContain('/player/');
+  });
+
+  it('a connect drop by a known player links the steamid to their profile', async () => {
+    publishAdminEvent({ kind: 'signon_drop', steamid: IDS[4], name: 'in game name', count: 2, total: 2 });
+    await feed.idle();
+    expect(t.live()[0].payload.embeds[0].description).toContain(`[${IDS[4]}](https://pug.test/player/${IDS[4]})`);
+  });
+
+  it('connect drops ride the problems toggle', async () => {
+    setSetting(db, 'admin_feed_problems', '0');
+    publishAdminEvent({ kind: 'signon_drop', steamid: IDS[4], name: 'x', count: 2, total: 2 });
+    await feed.idle();
+    expect(t.live()).toHaveLength(0);
+  });
+
   it('a secret setting change never shows its value', async () => {
     logAdmin(db, ADMIN, 'setting', 'invite_code', { changed: true });
     await feed.idle();
