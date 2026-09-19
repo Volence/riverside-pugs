@@ -89,6 +89,7 @@ MatchState g_State = MS_None;
 int g_iMatchId;
 char g_sToken[65];
 char g_sCampaign[64];
+char g_sStopAfterMap[64];               // backend-supplied last scored map; empty = use NextMapIsFinale
 char g_sEndResult[128];
 
 // The end-of-match kick, held in its OWN state rather than reading the match
@@ -343,7 +344,7 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
-	RegServerCmd("sm_pug_match", Cmd_Match, "sm_pug_match <matchid> <token> <campaign>");
+	RegServerCmd("sm_pug_match", Cmd_Match, "sm_pug_match <matchid> <token> <campaign> [stopaftermap]");
 	RegServerCmd("sm_pug_roster", Cmd_Roster, "sm_pug_roster <steamid64>:<a|b>");
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token>");
@@ -1477,7 +1478,7 @@ public Action Cmd_Match(int args)
 {
 	if (args < 3)
 	{
-		PrintToServer("PUGERR usage: sm_pug_match <matchid> <token> <campaign>");
+		PrintToServer("PUGERR usage: sm_pug_match <matchid> <token> <campaign> [stopaftermap]");
 		return Plugin_Handled;
 	}
 	char buf[65];
@@ -1495,6 +1496,13 @@ public Action Cmd_Match(int args)
 	g_iMatchId = matchId;
 	GetCmdArg(2, g_sToken, sizeof(g_sToken));
 	GetCmdArg(3, g_sCampaign, sizeof(g_sCampaign));
+	// Optional fourth argument: the map after which this match ends. The
+	// backend sends it only when it knows the campaign's chapter list, so an
+	// absent argument means "decide for yourself", which is what every match
+	// did before this existed and what every self-started match still does.
+	if (args >= 4) GetCmdArg(4, g_sStopAfterMap, sizeof(g_sStopAfterMap));
+	if (g_sStopAfterMap[0] != '\0')
+		LogMessage("[pug] match %d stops after %s", matchId, g_sStopAfterMap);
 	g_State = MS_Pending;
 	// Convention shared with the backend: pug team a starts as survivors on map 1.
 	g_iPugSide[1] = TEAM_SURVIVOR;
@@ -2165,6 +2173,7 @@ void ResetMatchState()
 	g_iMatchId = 0;
 	g_sToken[0] = '\0';
 	g_sCampaign[0] = '\0';
+	g_sStopAfterMap[0] = '\0';
 	g_sEndResult[0] = '\0';
 	g_iRosterCount = 0;
 	g_bSelfStarted = false;
@@ -3062,8 +3071,24 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
  *  match is already ending. */
 void FinishSecondHalf()
 {
+	// g_sCurrentMap is read before FinalizeMap so the comparison is against the
+	// map that was just played, not whatever a pending changelevel has set.
+	char justPlayed[64];
+	strcopy(justPlayed, sizeof(justPlayed), g_sCurrentMap);
+
 	FinalizeMap();
-	if (g_State == MS_Live && NextMapIsFinale()) EndMatchNow("last scored map done");
+	if (g_State != MS_Live) return;
+
+	// A backend-supplied stop map wins outright. It is the whole point of the
+	// argument: it can name the finale, which NextMapIsFinale() can never
+	// report because chapter == chapters - 1 is false on the last chapter.
+	if (g_sStopAfterMap[0] != '\0')
+	{
+		if (StrEqual(justPlayed, g_sStopAfterMap, false)) EndMatchNow("stop map done");
+		return;
+	}
+
+	if (NextMapIsFinale()) EndMatchNow("last scored map done");
 }
 
 /** True when the map that just finished is the one right before the finale.
