@@ -1505,7 +1505,8 @@ public Action Cmd_Match(int args)
 		return Plugin_Handled;
 	}
 	// A new match, so any kick still pending from the last one is void. This
-	// and the two sites below are the ONLY places the kick is cancelled.
+	// and the two sites below are the ONLY places the kick is cancelled, and
+	// a pending teardown is cancelled at the same three places.
 	CancelEndKick();
 	CancelTeardown();
 	ResetMatchState();
@@ -1904,7 +1905,7 @@ void CancelTeardown()
 	ClearTeardownState();
 }
 
-/** The strings only. Called from inside the timer, which must not KillTimer itself. */
+/** Everything except the timer handle. Called from inside the timer, which must not KillTimer itself. */
 void ClearTeardownState()
 {
 	g_sTeardownMap[0] = '\0';
@@ -1969,7 +1970,8 @@ bool IsEndKickTarget(int client)
 	return !IsFakeClient(client) && !IsClientSourceTV(client);
 }
 
-/** Kick every human who has finished loading. Bots and the SourceTV relay stay. */
+/** Kick every human who has finished loading. Bots and the SourceTV relay stay.
+ *  Format string never the buffer itself. */
 void KickHumans(const char[] reason)
 {
 	for (int c = 1; c <= MaxClients; c++)
@@ -2013,7 +2015,7 @@ public Action Timer_EndKick(Handle timer)
 	// first pass lands in the middle of the map load that triggered it, and
 	// kicking a client who has not finished loading is not safe. They are
 	// caught by a later pass instead, which is the whole reason this timer
-	// repeats. Format string never the buffer itself.
+	// repeats.
 	KickHumans(g_sEndKickReason);
 	return Plugin_Continue;
 }
@@ -2628,6 +2630,12 @@ public Action Timer_TeamLock(Handle timer)
 public void OnMapEnd()
 {
 	RplClose();
+	// Same trap as g_hReplayTimer above: g_hTeardown is also
+	// TIMER_FLAG_NO_MAPCHANGE, and the handle is still valid here, before
+	// SourceMod frees it. A teardown orphaned by someone else's changelevel
+	// (not its own ForceChangeLevel) is correctly abandoned here rather than
+	// left to KillTimer a freed handle on the next map's CancelTeardown().
+	CancelTeardown();
 }
 
 /**
@@ -2815,6 +2823,7 @@ public void OnRoundIsLive()
 			// window is real: people staying on the box after a website match
 			// and simply playing on.
 			CancelEndKick();
+			CancelTeardown();
 			ResetMatchState();
 			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
 			// forward: this half is live. Left false, Event_RoundEnd returned early
