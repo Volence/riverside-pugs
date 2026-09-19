@@ -44,6 +44,7 @@ import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
+import { SignonDropNotifier } from './signonDropNotify.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
   recordRoundStart, recordRoundEnd,
@@ -330,6 +331,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
+  // Assigned further down, once the bot variable it reads exists: the same
+  // forward reference selfStarted uses, null-safe for the same reason.
+  let signonDrops: SignonDropNotifier | null = null;
   if (!orchestrator) {
     if (deps.config.devMode) {
       orchestrator = new DevOrchestrator();
@@ -338,6 +342,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
       logListener = new LogListener((ev, source) => {
+        // The two token-less kinds. LogListener has already pinned them to a
+        // game server's address. Handled first so nothing below is ever
+        // asked for a token they do not have, and guarded so a database error
+        // cannot take down the listener that also carries match_end.
+        if (ev.kind === 'signon_drop') {
+          signonDrops?.onDrop(ev).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
+          return;
+        }
+        if (ev.kind === 'entered') {
+          try {
+            signonDrops?.onEntered(ev.steamid);
+          } catch (err) {
+            console.error('[consistency] failed to record an entry:', err);
+          }
+          return;
+        }
         if (ev.kind === 'match_end') {
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
           if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
@@ -398,6 +418,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
             recordPlayerConnect(deps.db, ev.token, ev.steamid);
+            // The plugin emits this from OnClientPostAdminCheck, which only
+            // fires once the client is fully in game, so it is an entry too.
+            // The engine's own "entered the game" line normally gets here
+            // first; this is the second chance when that datagram was lost.
+            signonDrops?.onEntered(ev.steamid);
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
@@ -653,6 +678,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
+  // Only where a real listener exists to feed it. `bot` is read per drop,
+  // because the bot logs in some seconds after this line runs, and stays null
+  // for good when Discord is not configured: drops are then stored and shown
+  // to admins on the site, and nobody is DMed.
+  if (logListener) {
+    signonDrops = new SignonDropNotifier({
+      db: deps.db,
+      publicUrl: deps.config.publicUrl,
+      dm: () => {
+        const transport = bot?.transport;
+        return transport ? (userId, payload) => transport.dm(userId, payload) : null;
+      },
+    });
+  }
   // Someone who linked before joining the server is let in the moment they join.
   membership.onAdd((userId) => {
     const p = playerByDiscordId(deps.db, userId);
