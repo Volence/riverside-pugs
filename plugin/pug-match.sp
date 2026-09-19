@@ -3102,6 +3102,12 @@ void FinishSecondHalf()
 	// report because chapter == chapters - 1 is false on the last chapter.
 	if (g_sStopAfterMap[0] != '\0')
 	{
+		// Same per-map instrumentation NextMapIsFinale() carries below, kept alive
+		// on this branch: once a backend stop map exists, NextMapIsFinale() never
+		// runs, and this line is the only way an operator sees per-map progress or
+		// notices the backend's chapter count disagreeing with the game's.
+		LogMessage("[pug] half-2 end on %s: stop map %s, maps scored %d",
+			justPlayed, g_sStopAfterMap, g_iMapCount);
 		if (StrEqual(justPlayed, g_sStopAfterMap, false)) EndMatchNow("stop map done");
 		return;
 	}
