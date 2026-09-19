@@ -38,6 +38,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { resolveServerBySource } from './serverPool.js';
+import { abortCommand, resetMap } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { LogListener } from './logListener.js';
@@ -272,7 +273,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
-  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token) => {
+  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
       await rcon.connect();
@@ -291,7 +292,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       }
       if (token) {
         try {
-          await rcon.exec(`sm_pug_abort ${token}`);
+          // With teardown the plugin announces, waits for an unpause, kicks
+          // everyone and changes to the reset map itself. One command rather
+          // than five because exec secrets.cfg below drops the session and
+          // each extra command is another thing that can time out first.
+          await rcon.exec(abortCommand(token, opts.teardown, resetMap(deps.db)));
         } catch (err) {
           console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
         }
