@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/preact';
 import { ReplayHud, liveStatusText } from './ReplayHud';
+import type { LivePhase } from '../api';
 import { DEFAULT_TOGGLES } from './useToggles';
 
 afterEach(cleanup);
@@ -66,7 +67,7 @@ describe('ReplayHud', () => {
 // `now` is passed in so the pause countdown is deterministic.
 describe('liveStatusText', () => {
   const NOW = 1_700_000_000_000;
-  const phase = (over: object) => ({ state: 'live', team: null, limit: 0, leave: false, sinceMs: NOW - 30_000, ...over } as const);
+  const phase = (over: Partial<LivePhase>): LivePhase => ({ state: 'live', team: null, limit: 0, leave: false, unready: [], sinceMs: NOW - 30_000, ...over });
 
   it('names the pausing team and counts down the ceiling', () => {
     expect(liveStatusText(true, false, 0, 0, phase({ state: 'paused', team: 'b', limit: 120 }), NOW))
@@ -95,6 +96,15 @@ describe('liveStatusText', () => {
   it('says readying up and loading', () => {
     expect(liveStatusText(true, true, 0, 0, phase({ state: 'readyup' }), NOW)).toBe('Readying up');
     expect(liveStatusText(true, true, 0, 0, phase({ state: 'loading' }), NOW)).toBe('Loading the next map');
+  });
+
+  it('names who everyone is waiting on during a ready-up', () => {
+    const names = { '76561198000000001': 'killshot', '76561198000000004': 'goober' };
+    expect(liveStatusText(true, true, 0, 0, phase({ state: 'readyup', unready: ['76561198000000001', '76561198000000004'] }), NOW, names))
+      .toBe('Readying up, waiting on killshot, goober');
+    // An id with no name known falls back to the id rather than a blank.
+    expect(liveStatusText(true, true, 0, 0, phase({ state: 'readyup', unready: ['76561198000000009'] }), NOW, names))
+      .toBe('Readying up, waiting on 76561198000000009');
   });
 
   it('falls back to the file state when the phase is live or unknown', () => {

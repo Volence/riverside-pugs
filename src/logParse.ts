@@ -11,6 +11,9 @@ export interface Phase {
   limit: number;
   /** A pause the plugin called itself while waiting for a dropped player. */
   leave: boolean;
+  /** Rostered players who have not readied, during a ready-up. Empty
+   *  otherwise, and empty once everyone has and the countdown is running. */
+  unready: string[];
 }
 
 export type LogEvent =
@@ -101,7 +104,8 @@ function phaseOf(state: string | undefined, rest: Record<string, string>): Phase
   if (!state || !(PHASE_STATES as readonly string[]).includes(state)) return null;
   const team = rest.team === '1' ? 'a' : rest.team === '2' ? 'b' : null;
   const limit = intOf(rest.limit) ?? 0;
-  return { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1' };
+  const unready = (rest.unready ?? '').split(',').filter((id) => /^\d{17}$/.test(id));
+  return { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
 }
 
 function kv(parts: string[]): Record<string, string> {

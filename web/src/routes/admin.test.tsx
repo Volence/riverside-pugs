@@ -126,6 +126,7 @@ describe('AdminMatches layout', () => {
       enabled: 1, tvEnabled: 1, tvPort: 27020, tvPassword: 'dunged',
     }],
     queue: [{ steamid: '1', name: 'alice', avatar: null }],
+    slowToReady: [],
   });
 
   const openTab = async () => {
@@ -156,6 +157,7 @@ describe('AdminMatches layout', () => {
     const o = overview();
     o.recent = [{
       id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
+      readyups: [],
       pauses: [
         { team: 'b', leave: false, mapOrdinal: 1, half: 2, startedAt: '2026-09-18 03:10:00', endedAt: '2026-09-18 03:11:30', seconds: 90 },
         { team: null, leave: true, mapOrdinal: 2, half: 1, startedAt: '2026-09-18 03:30:00', endedAt: '2026-09-18 03:30:20', seconds: 20 },
@@ -167,6 +169,46 @@ describe('AdminMatches layout', () => {
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
     expect(screen.getByText('Team B 1:30 on map 2')).toBeTruthy();
     expect(screen.getByText('Reconnect 0:20 on map 3')).toBeTruthy();
+  });
+
+  it('lists each recent match\'s ready-ups with how long and who readied last', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.recent = [{
+      id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
+      pauses: [],
+      readyups: [
+        { mapOrdinal: 0, half: 1, startedAt: '2026-09-18 03:00:00', endedAt: '2026-09-18 03:02:10', seconds: 130,
+          lastUnready: ['76561198000000001'], lastUnreadyNames: ['killshot'],
+          players: [{ steamid: '76561198000000001', name: 'killshot', seconds: 130 }] },
+        { mapOrdinal: 1, half: 1, startedAt: '2026-09-18 03:20:00', endedAt: '2026-09-18 03:20:25', seconds: 25,
+          lastUnready: [], lastUnreadyNames: [], players: [] },
+      ],
+    }];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('2:10 on map 1, last killshot')).toBeTruthy();
+    expect(screen.getByText('0:25 on map 2')).toBeTruthy();
+  });
+
+  it('shows the slow-to-ready table so a repeat offender stands out', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.slowToReady = [
+      { steamid: '76561198000000001', name: 'killshot', readyups: 6, timesLast: 5, totalSeconds: 600, avgSeconds: 100 },
+      { steamid: '76561198000000002', name: 'goober', readyups: 4, timesLast: 0, totalSeconds: 40, avgSeconds: 10 },
+    ];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('Slow to ready')).toBeTruthy();
+    const row = screen.getByText('killshot').closest('tr')!;
+    expect(row.textContent).toContain('5 of 6');
+    expect(row.textContent).toContain('1:40');
+    expect(row.textContent).toContain('10:00');
   });
 
   it('shows no connect line for a match with no server yet', async () => {

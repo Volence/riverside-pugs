@@ -16,7 +16,7 @@ describe('openDb', () => {
       'integrity_clips', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps',
-      'match_pauses', 'match_player_stats', 'match_players', 'match_replays', 'match_rounds',
+      'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
       'matches', 'matchmaker_state',
       'penalties', 'player_notes', 'player_ratings', 'players',
       'rating_history', 'reports', 'seasons', 'servers', 'settings',

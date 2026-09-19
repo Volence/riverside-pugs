@@ -75,10 +75,12 @@ describe('admin matches', () => {
     const matchId = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'dead_air', ?)").run(token).lastInsertRowid);
     const ins = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
     IDS.forEach((id, i) => ins.run(matchId, id, i < 4 ? 'a' : 'b'));
-    recordPhase(db, token, { state: 'paused', team: 'b', limit: 120, leave: false });
-    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false });
-    recordPhase(db, token, { state: 'paused', team: null, limit: 0, leave: true });
-    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false });
+    recordPhase(db, token, { state: 'paused', team: 'b', limit: 120, leave: false, unready: [] });
+    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false, unready: [] });
+    recordPhase(db, token, { state: 'paused', team: null, limit: 0, leave: true, unready: [] });
+    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false, unready: [] });
+    recordPhase(db, token, { state: 'readyup', team: null, limit: 0, leave: false, unready: [IDS[5]] });
+    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false, unready: [] });
     const dump: Dump = {
       matchId, maps: [{ map: 'm1', a: 300, b: 200 }],
       players: IDS.map((steamid, i) => ({ steamid, team: i < 4 ? 'a' : 'b', sidmg: 1, sikill: 1, ck: 1, ff: 0, rev: 0 })),
@@ -93,6 +95,11 @@ describe('admin matches', () => {
       { team: null, leave: true, mapOrdinal: 0 },
     ]);
     expect(typeof o.recent[0].pauses[0].seconds).toBe('number');
+    // Ready-ups ride along the same way, and the slow-to-ready table covers
+    // every completed match so a repeat offender stands out.
+    expect(o.recent[0].readyups).toMatchObject([{ lastUnready: [IDS[5]] }]);
+    expect(typeof o.recent[0].readyups[0].seconds).toBe('number');
+    expect(o.slowToReady).toMatchObject([{ steamid: IDS[5], readyups: 1, timesLast: 1 }]);
   });
 
   it('void needs a reason, drops the match, recomputes later ratings, and is audited', async () => {

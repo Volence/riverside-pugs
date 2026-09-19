@@ -45,6 +45,7 @@ export function ToggleChips(
 export function liveStatusText(
   live: boolean, closed: boolean, tMs: number, endMs: number,
   phase: LivePhase | null = null, nowMs: number = Date.now(),
+  names: Record<string, string> = {},
 ): string | null {
   if (!live) return null;
   // The plugin's word wins when it names a state with nothing to draw. A
@@ -58,7 +59,10 @@ export function liveStatusText(
     const left = Math.max(0, phase.limit * 1000 - (nowMs - phase.sinceMs));
     return `${who}, ${formatTime(left)} left`;
   }
-  if (phase?.state === 'readyup') return 'Readying up';
+  if (phase?.state === 'readyup') {
+    if (phase.unready.length === 0) return 'Readying up';
+    return `Readying up, waiting on ${phase.unready.map((id) => names[id] ?? id).join(', ')}`;
+  }
   if (phase?.state === 'loading') return 'Loading the next map';
   if (!closed) return 'Live, 10s delayed';
   return tMs < endMs ? 'Round over, catching up' : 'Round over, waiting for the next round';
@@ -71,13 +75,14 @@ export function liveStatusText(
  * Purely presentational, like ReplayControls.
  */
 export function ReplayHud(
-  { tMs, endMs, counts, live, closed, phase = null, toggles, toggle, theater }: {
+  { tMs, endMs, counts, live, closed, phase = null, names = {}, toggles, toggle, theater }: {
     tMs: number;
     endMs: number;
     counts: { survivors: number; commons: number; specials: number };
     live: boolean;
     closed: boolean;
     phase?: LivePhase | null;
+    names?: Record<string, string>;
     toggles: Toggles;
     toggle: (k: BoolToggle) => void;
     theater?: TheaterChip;
@@ -91,8 +96,8 @@ export function ReplayHud(
         <span class="rhud__counts eyebrow">
           {counts.survivors} alive · {counts.commons} common · {counts.specials} special
         </span>
-        {liveStatusText(live, closed, tMs, endMs, phase) && (
-          <span class="rhud__live eyebrow">{liveStatusText(live, closed, tMs, endMs, phase)}</span>
+        {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names) && (
+          <span class="rhud__live eyebrow">{liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names)}</span>
         )}
       </div>
       <div class="rhud__right">

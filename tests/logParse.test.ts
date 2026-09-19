@@ -33,7 +33,7 @@ describe('parseLogDatagram', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=2 limit=120 leave=0`));
     expect(ev).toEqual({
       kind: 'phase', token: TOKEN,
-      phase: { state: 'paused', team: 'b', limit: 120, leave: false },
+      phase: { state: 'paused', team: 'b', limit: 120, leave: false, unready: [] },
     });
   });
 
@@ -41,8 +41,23 @@ describe('parseLogDatagram', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=readyup`));
     expect(ev).toEqual({
       kind: 'phase', token: TOKEN,
-      phase: { state: 'readyup', team: null, limit: 0, leave: false },
+      phase: { state: 'readyup', team: null, limit: 0, leave: false, unready: [] },
     });
+  });
+
+  // Who has not readied yet, so the page can say who everyone is waiting on
+  // and the ready-up ledger can charge the seconds to the right players.
+  it('parses the not-ready roster on a ready-up PHASE', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=readyup unready=76561198000000001,76561198000000004`));
+    expect(ev).toEqual({
+      kind: 'phase', token: TOKEN,
+      phase: { state: 'readyup', team: null, limit: 0, leave: false, unready: ['76561198000000001', '76561198000000004'] },
+    });
+  });
+
+  it('drops malformed ids from the not-ready roster rather than the whole line', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=readyup unready=76561198000000001,bogus,`));
+    expect(ev).toMatchObject({ phase: { unready: ['76561198000000001'] } });
   });
 
   it('drops a PHASE whose state it does not know rather than storing a word it cannot render', () => {
@@ -56,7 +71,7 @@ describe('parseLogDatagram', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} HEARTBEAT phase=paused team=0 limit=0 leave=1`));
     expect(ev).toEqual({
       kind: 'heartbeat', token: TOKEN,
-      phase: { state: 'paused', team: null, limit: 0, leave: true },
+      phase: { state: 'paused', team: null, limit: 0, leave: true, unready: [] },
     });
   });
 

@@ -122,7 +122,7 @@ describe('GET /api/replays/live/match/:id', () => {
   it('carries the reported phase so the viewer can say what the game is doing', async () => {
     writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 60, false);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
-    recordPhase(db, TOKEN, { state: 'paused', team: 'b', limit: 120, leave: false });
+    recordPhase(db, TOKEN, { state: 'paused', team: 'b', limit: 120, leave: false, unready: [] });
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
     expect(res.json().phase).toMatchObject({ state: 'paused', team: 'b', limit: 120, leave: false });
     expect(typeof res.json().phase.sinceMs).toBe('number');

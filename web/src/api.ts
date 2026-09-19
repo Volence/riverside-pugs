@@ -191,7 +191,23 @@ export interface LivePhase {
   /** Seconds a pause may last, 0 for no ceiling. */
   limit: number;
   leave: boolean;
+  /** Rostered players not yet ready, during a ready-up. */
+  unready: string[];
   sinceMs: number;
+}
+export interface MatchReadyup {
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds to go live, null while still open. */
+  seconds: number | null;
+  lastUnready: string[];
+  lastUnreadyNames: string[];
+  players: { steamid: string; name: string; seconds: number }[];
+}
+export interface SlowToReady {
+  steamid: string; name: string; readyups: number; timesLast: number; totalSeconds: number; avgSeconds: number;
 }
 export interface MatchPause {
   team: 'a' | 'b' | null;
@@ -497,9 +513,11 @@ export interface AdminOverview {
     forecast: Forecast | null;
   }[];
   servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[] }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
+  /** Across every counted match: who is habitually the one holding up the ready-up. */
+  slowToReady: SlowToReady[];
 }
 
 export interface AdminSetting {
