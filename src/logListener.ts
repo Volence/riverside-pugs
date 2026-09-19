@@ -32,6 +32,9 @@ export class LogListener {
       sock.on('message', (msg, rinfo) => {
         const ev = parseLogDatagram(msg);
         if (!ev) return;
+        // Token-less lines have no token to gate on. Dropped until the
+        // address-pinned admission for them exists, which is the next commit.
+        if (ev.kind === 'signon_drop' || ev.kind === 'entered') return;
         if (this.tokens.has(ev.token)) return this.onEvent(ev, rinfo.address);
         // MATCH_CREATE is the first line that can cause database writes, and
         // UDP source addresses are trivially spoofable off-path but not from
