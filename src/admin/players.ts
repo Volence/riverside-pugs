@@ -3,6 +3,7 @@ import { displaySr } from '../rating.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
+import { signonDropSummary } from '../signonDrops.js';
 
 export interface BanRow {
   id: number;
@@ -141,6 +142,9 @@ export function playerDetail(db: DB, steamid: string) {
     matches,
     penalties: penaltyHistory(db, steamid),
     reportsAgainst: listReports(db, 'all').filter((r) => r.targetId === steamid),
+    // Connects that ended before the player was in game, on a map that forced
+    // files: likely a consistency rejection, possibly a cancelled load.
+    signonDrops: signonDropSummary(db, steamid),
     timeout: (() => {
       const t = activeTimeout(db, steamid);
       return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
