@@ -484,6 +484,14 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   penalties: { id: number; kind: string; matchId: number | null; createdAt: string; clearedBy: string | null; clearedAt: string | null }[];
   timeout: { until: string; offenses: number } | null;
   reportsAgainst: AdminReport[];
+  /** Connects that ended before the player was in game, on a map that forced
+   *  files. Likely a file-consistency rejection; a cancelled loading screen
+   *  looks identical. `enteredAfterAt` is when they next got in, null if never. */
+  signonDrops: {
+    count: number;
+    lastAt: string | null;
+    rows: { id: number; name: string; secsConnected: number; forcedCount: number; at: string; enteredAfterAt: string | null }[];
+  };
 }
 
 /** Team SR, the gap and the paper odds. `source` says which ratings it came

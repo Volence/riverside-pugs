@@ -50,6 +50,7 @@ describe('Admin page', () => {
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
     window.confirm = () => true;
@@ -60,6 +61,50 @@ describe('Admin page', () => {
     fireEvent.input(screen.getByPlaceholderText('Reason (shown to them)'), { target: { value: 'throwing' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
     await waitFor(() => expect(mockAdmin.ban).toHaveBeenCalledWith('2', 'throwing', null));
+  });
+
+  it('shows a connect drops line that links to the rows', async () => {
+    const row = { steamid: '2', name: 'skinner', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: {
+        count: 2, lastAt: '2026-09-19T21:00:00.000Z',
+        rows: [
+          { id: 2, name: 'skinner', secsConnected: -1, forcedCount: 651, at: '2026-09-19T21:00:00.000Z', enteredAfterAt: null },
+          { id: 1, name: 'skinner', secsConnected: 12, forcedCount: 651, at: '2026-09-19T20:00:00.000Z', enteredAfterAt: '2026-09-19T20:03:00.000Z' },
+        ],
+      },
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('skinner')).toBeTruthy());
+    fireEvent.click(screen.getByText('skinner'));
+
+    const link = await waitFor(() => screen.getByRole('link', { name: /^2, last / }));
+    expect(link.getAttribute('href')).toBe('#connect-drops');
+    const section = document.getElementById('connect-drops')!;
+    expect(section).toBeTruthy();
+    const items = within(section).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain('time unknown');
+    expect(items[0].textContent).toContain('has not got in since');
+    expect(items[1].textContent).toContain('after 12 s');
+    expect(items[1].textContent).toContain('got in');
+    expect(within(section).getByRole('link', { name: 'What players are told' }).getAttribute('href')).toBe('/help/consistency');
+  });
+
+  it('says none, with no section, for a player with no connect drops', async () => {
+    const row = { steamid: '2', name: 'clean', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
+    fireEvent.click(screen.getByText('clean'));
+    await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
+    expect(document.getElementById('connect-drops')).toBeNull();
   });
 
   it('settings tab shows grouped settings', async () => {

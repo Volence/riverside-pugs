@@ -5,6 +5,7 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { getPlayer, linkDiscord } from '../src/players.js';
 import { liftExpiredBans, banMessage } from '../src/admin/players.js';
+import { recordSignonDrop, markEntered } from '../src/signonDrops.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const ADMIN = '76561198000000001';
@@ -123,6 +124,24 @@ describe('admin players', () => {
     await post(`/api/admin/players/${P2}/clear-penalties`, admin);
     d = (await get(`/api/admin/players/${P2}`, admin)).json();
     expect(d.timeout).toBeNull();
+  });
+
+  it('reports connect drops with the count, the last time and the rows', async () => {
+    const empty = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(empty.signonDrops).toEqual({ count: 0, lastAt: null, rows: [] });
+
+    recordSignonDrop(db, { steamid: P2, name: 'p002 in game', secs: 12, forced: 651 }, new Date('2026-09-19T20:00:00.000Z'));
+    markEntered(db, P2, new Date('2026-09-19T20:03:00.000Z'));
+    recordSignonDrop(db, { steamid: P2, name: 'p002 in game', secs: -1, forced: 651 }, new Date('2026-09-19T21:00:00.000Z'));
+    recordSignonDrop(db, { steamid: P3, name: 'someone else', secs: 5, forced: 651 }, new Date('2026-09-19T21:30:00.000Z'));
+
+    const detail = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(detail.signonDrops.count).toBe(2);
+    expect(detail.signonDrops.lastAt).toBe('2026-09-19T21:00:00.000Z');
+    expect(detail.signonDrops.rows).toEqual([
+      { id: 2, name: 'p002 in game', secsConnected: -1, forcedCount: 651, at: '2026-09-19T21:00:00.000Z', enteredAfterAt: null },
+      { id: 1, name: 'p002 in game', secsConnected: 12, forcedCount: 651, at: '2026-09-19T20:00:00.000Z', enteredAfterAt: '2026-09-19T20:03:00.000Z' },
+    ]);
   });
 
   it('activate does not unban', async () => {

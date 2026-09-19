@@ -69,6 +69,12 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
           <p class="muted">
             {d.status}{d.isAdmin ? ' · admin' : ''} · SR {d.sr ?? 'n/a'} · {d.games} games · joined {fmtTime(d.createdAt)}
             <br />Discord: {d.discordName ?? 'not linked'}
+            <br />Connect drops:{' '}
+            {d.signonDrops.count === 0 ? 'none' : (
+              <a href="#connect-drops" class="admin-warn">
+                {d.signonDrops.count}, last {fmtTime(d.signonDrops.lastAt)}
+              </a>
+            )}
           </p>
         </div>
       </div>
@@ -153,6 +159,27 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
           </ul>
         )}
       </section>
+
+      {d.signonDrops.count > 0 && (
+        <section id="connect-drops">
+          <h4>Connect drops</h4>
+          <p class="muted">
+            Left while still loading in, on a map that was enforcing file consistency. Usually a rejected
+            modified file (the player saw its name on their screen; the server never does), sometimes
+            just a cancelled loading screen. <a href="/help/consistency">What players are told</a>.
+          </p>
+          <ul class="admin-list">
+            {d.signonDrops.rows.map((r) => (
+              <li key={r.id}>
+                {fmtTime(r.at)}: as {r.name}, {r.secsConnected < 0 ? 'time unknown' : `after ${r.secsConnected} s`}, {r.forcedCount} files enforced
+                {r.enteredAfterAt
+                  ? <span class="muted"> · got in {fmtTime(r.enteredAfterAt)}</span>
+                  : <span class="admin-warn"> · has not got in since</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section>
         <h4>Notes</h4>
