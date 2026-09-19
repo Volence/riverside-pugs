@@ -84,4 +84,23 @@ describe('startBot extras', () => {
     await bot!.stop();
     expect(membership.isMember('2')).toBeNull();
   });
+
+  it('loads voice states, follows updates, and forgets them on stop', async () => {
+    const { VoicePresence } = await import('../src/discord/voicePresence.js');
+    const s = setup(ENV);
+    s.t.voiceOf.set('1', 'chan-a');
+    const presence = new VoicePresence();
+    const left: string[] = [];
+    presence.onLeave((id) => left.push(id));
+    const bot = await startBot({ ...s, connect: async () => s.t, presence });
+    expect(presence.inVoice('1')).toBe(true);
+    expect(presence.inVoice('2')).toBe(false);
+    s.t.voiceHandlers!.update('2', 'chan-a');
+    expect(presence.inVoice('2')).toBe(true);
+    s.t.voiceHandlers!.update('1', null);
+    expect(presence.inVoice('1')).toBe(false);
+    expect(left).toEqual(['1']);
+    await bot!.stop();
+    expect(presence.inVoice('2')).toBeNull();
+  });
 });

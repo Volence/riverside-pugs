@@ -31,7 +31,8 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
   app.post('/api/lobby/ready', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return;
-    if (!matchmaker.ready(steamid)) return reply.code(409).send({ error: 'no ready check active' });
+    const result = matchmaker.ready(steamid);
+    if (!result.ok) return reply.code(409).send({ error: result.error });
     return { ok: true };
   });
 

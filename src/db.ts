@@ -468,6 +468,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
   require_discord_to_queue: '1',
+  // Pressing Ready needs that account to be in a voice channel on the guild.
+  require_voice_to_ready: '1',
   discord_invite_url: '',
   // Private channel the bot posts the admin feed to; empty turns the feed off.
   discord_admin_channel_id: '',

@@ -104,7 +104,8 @@ export async function handleButton(
     if (!lobby || lobby.id !== lobbyId) return say('That ready check is over, or it is not yours.');
     if (parts[2] === 'ready') {
       if (lobby.phase !== 'ready_check') return say('Everyone is ready already. Vote a campaign.');
-      mm.ready(steamid);
+      const r = mm.ready(steamid);
+      if (!r.ok) return say(`Not yet: ${r.error}, then press Ready again.`);
       return say('You are ready.');
     }
     if (parts[2] === 'vote' && parts[3]) {

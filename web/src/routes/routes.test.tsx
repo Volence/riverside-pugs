@@ -670,6 +670,57 @@ describe('Play', () => {
     expect(screen.getByText('bob')).toBeTruthy();
   });
 
+  it('a ready check the viewer cannot ready for says why, disables Ready, and marks who is out of voice', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 8, joined: true, players: [] },
+          lobby: {
+            id: 'l1', phase: 'ready_check',
+            players: [
+              { steamid: '1', name: 'alice', avatar: null, readyBlock: 'join_voice' },
+              { steamid: '2', name: 'bob', avatar: null, readyBlock: null },
+              { steamid: '3', name: 'carol', avatar: null, readyBlock: 'link_discord' },
+            ],
+            ready: ['2'], options: [], votes: {}, deadline: Date.now() + 30_000, myVote: null,
+          },
+          match: null,
+          readyBlock: 'join_voice',
+        }}
+        refresh={noop}
+      />,
+    );
+    const ready = screen.getByRole('button', { name: 'Ready' }) as HTMLButtonElement;
+    expect(ready.disabled).toBe(true);
+    expect(screen.getByText(/join a voice channel in the riverside discord/i)).toBeTruthy();
+    const rows = [...document.querySelectorAll('.roster--ready li')];
+    expect(rows.map((li) => li.classList.contains('is-blocked'))).toEqual([true, false, true]);
+    expect(rows[0].textContent).toContain('not in voice');
+    expect(rows[2].textContent).toContain('no Discord');
+  });
+
+  it('a viewer who may ready sees an enabled Ready button and no voice notice', () => {
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 8, joined: true, players: [] },
+          lobby: {
+            id: 'l1', phase: 'ready_check',
+            players: [{ steamid: '1', name: 'alice', avatar: null, readyBlock: null }],
+            ready: [], options: [], votes: {}, deadline: Date.now() + 30_000, myVote: null,
+          },
+          match: null,
+          readyBlock: null,
+        }}
+        refresh={noop}
+      />,
+    );
+    expect((screen.getByRole('button', { name: 'Ready' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/voice channel/i)).toBeNull();
+  });
+
   it('shows both rosters once a match exists', () => {
     render(
       <Play

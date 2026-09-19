@@ -816,6 +816,9 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .roster--ready .tick { color: var(--text-muted); font-weight: 600; }
 .roster--ready li.is-ready { color: var(--win); }
 .roster--ready li.is-ready .tick { color: var(--win); }
+.roster--ready li.is-blocked { color: var(--text-muted); }
+.roster--ready .blocked-why { font-size: 0.8em; color: var(--text-muted); margin-left: auto; padding-right: 0.75rem; }
+.ready-notice { color: var(--text-muted); margin: 0.5rem 0 0; text-align: center; }
 
 /* ---------- match detail ---------- */
 
