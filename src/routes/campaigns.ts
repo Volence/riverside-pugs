@@ -330,6 +330,11 @@ export async function campaignRoutes(
     await uninstallCampaign(db, slug, { servers: targets() });
     await rm(join(addonsDir, c.vpk_filename), { force: true });
     deleteCampaign(db, slug);
+    // campaign_play_rules has no foreign key on slug (deliberately, so a stock
+    // slug can be stored there too), so nothing else prunes this row. Without
+    // this, re-uploading a VPK that resolves to the same slug would silently
+    // inherit the deleted campaign's stop point.
+    clearMapsToPlay(db, slug);
     invalidateCampaignCache();
     logAdmin(db, adminId, 'campaign_delete', slug, { name: c.name });
     return { ok: true };
