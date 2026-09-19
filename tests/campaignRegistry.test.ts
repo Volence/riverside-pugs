@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { insertDraft, publishCampaign, deleteCampaign } from '../src/customCampaigns.js';
 import { upsertPlayer } from '../src/players.js';
@@ -117,5 +120,51 @@ describe('campaignDisplayName', () => {
   it('falls back to the slug for a campaign nothing knows about', async () => {
     const { campaignDisplayName } = await import('../src/campaignRegistry.js');
     expect(campaignDisplayName(db, 'never_heard_of_it')).toBe('never_heard_of_it');
+  });
+});
+
+describe('stock chapter lists', () => {
+  const AIRPORT = `"mission"
+{
+  "Name" "airport"
+  "DisplayTitle" "Dead Air"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_vs_airport01_greenhouse" "DisplayName" "The Greenhouse" }
+      "2" { "Map" "l4d_vs_airport02_offices" "DisplayName" "The Crane" }
+      "3" { "Map" "l4d_vs_airport03_garage" "DisplayName" "The Garage" }
+      "4" { "Map" "l4d_vs_airport04_terminal" "DisplayName" "The Terminal" }
+      "5" { "Map" "l4d_vs_airport05_runway" "DisplayName" "The Runway" }
+    }
+  }
+}
+`;
+
+  afterEach(async () => {
+    // A directory left set on one test's missions dir would otherwise leak
+    // into the next test's registry cache.
+    const { setMissionsDir } = await import('../src/campaignRegistry.js');
+    setMissionsDir('');
+  });
+
+  it('is empty when no missions directory is configured', async () => {
+    const { setMissionsDir, campaignRegistry } = await import('../src/campaignRegistry.js');
+    setMissionsDir('');
+    expect(campaignRegistry(db).get('dead_air')!.maps).toEqual([]);
+  });
+
+  it('reads the stock chapter list once a missions directory is configured', async () => {
+    const { setMissionsDir, campaignRegistry } = await import('../src/campaignRegistry.js');
+    const dir = mkdtempSync(join(tmpdir(), 'missions-'));
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'airport.txt'), AIRPORT);
+      setMissionsDir(dir);
+      expect(campaignRegistry(db).get('dead_air')!.maps).toHaveLength(5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -35,6 +35,11 @@ export interface Config {
    *  guessed from another path is how you write a 300 MB file somewhere
    *  nothing reads it. */
   addonsDir: string;
+  /** The game's missions directory, holding the stock campaigns' chapter
+   *  lists. Empty means the stock four have no known chapters, which leaves
+   *  every campaign on its default stop point: the same reason demoDir and
+   *  addonsDir default to empty rather than to a guess. */
+  missionsDir: string;
   discord: DiscordConfig | null;
 }
 
@@ -55,6 +60,7 @@ export interface Config {
 export function missingDirs(cfg: Config): { name: string; path: string }[] {
   const pairs: [string, string][] = [
     ['REPLAY_DIR', cfg.replayDir], ['DEMO_DIR', cfg.demoDir], ['ADDONS_DIR', cfg.addonsDir],
+    ['MISSIONS_DIR', cfg.missionsDir],
   ];
   return pairs
     .filter(([, path]) => path && !existsSync(path))
@@ -75,6 +81,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     demoDir: env.DEMO_DIR ?? '',
     replayDir: env.REPLAY_DIR ?? '',
     addonsDir: env.ADDONS_DIR ?? '',
+    missionsDir: env.MISSIONS_DIR ?? '',
     discord: loadDiscord(env),
   };
 }

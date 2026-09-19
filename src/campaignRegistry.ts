@@ -3,6 +3,7 @@ import { CAMPAIGNS, campaignForMap } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { enabledServerIds } from './serverPool.js';
+import { readStockMissions } from './stockMissions.js';
 
 /**
  * Every campaign the site can run: the stock four, plus published custom ones.
@@ -42,11 +43,24 @@ export function invalidateCampaignCache(): void {
   cache = null;
 }
 
+let missionsDir = '';
+
+/** Where the stock campaigns' chapter lists live. Set once at startup from
+ *  config. Module state rather than a parameter because campaignRegistry(db) is
+ *  called from a dozen places that have no business knowing about the game
+ *  directory. */
+export function setMissionsDir(dir: string): void {
+  missionsDir = dir;
+  cache = null;
+}
+
 function build(db: DB): NonNullable<typeof cache> {
   const registry = new Map<string, CampaignEntry>();
+  const stockMissions = readStockMissions(missionsDir);
   for (const [slug, c] of Object.entries(CAMPAIGNS)) {
     registry.set(slug, {
-      slug, name: c.name, firstMap: STOCK_FIRST[slug], maps: [], custom: false,
+      slug, name: c.name, firstMap: STOCK_FIRST[slug],
+      maps: (stockMissions.get(slug) ?? []).map((ch) => ch.map), custom: false,
     });
   }
 
