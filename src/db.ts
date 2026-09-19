@@ -169,6 +169,21 @@ CREATE TABLE IF NOT EXISTS match_live_map_stats (
   stats_json TEXT    NOT NULL,
   PRIMARY KEY (match_id, ordinal, player_id)
 );
+-- Every pause of a match, kept after the match ends: the record an admin
+-- reads when one side says the other paused them to death. Written from the
+-- plugin's PHASE transitions, so a lost datagram can leave ended_at NULL
+-- until the next heartbeat closes it.
+CREATE TABLE IF NOT EXISTS match_pauses (
+  id          INTEGER PRIMARY KEY,
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  map_ordinal INTEGER NOT NULL,
+  half        INTEGER,
+  team        TEXT CHECK (team IN ('a','b')),
+  leave_pause INTEGER NOT NULL DEFAULT 0,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS match_pauses_match ON match_pauses(match_id);
 CREATE TABLE IF NOT EXISTS match_live_events (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   -- Which map of the match this happened on, stamped at write time from the
@@ -496,6 +511,13 @@ export function openDb(path: string): DB {
   // exists, so a column introduced after a database was created needs this.
   // Idempotent and cheap; there is no migration framework here by design.
   ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
+  // What the game is doing right now, as last reported by the plugin, and
+  // since when. NULL until a plugin that emits PHASE has spoken.
+  ensureColumn(db, 'match_live', 'phase', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_team', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_limit', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'match_live', 'phase_leave', 'INTEGER NOT NULL DEFAULT 0');
   // -1, not 0 or NULL: ALTER TABLE ADD COLUMN on a populated table needs a
   // non-null default, and 0 is a real value here (an event in the first
   // millisecond of a round). -1 means "recorded before round timing existed".

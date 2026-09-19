@@ -5,7 +5,7 @@ import { ServerReleaser } from '../src/serverRelease.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, clearLive, getLiveMatches,
   STALE_AFTER_MS, LIVE_EVENT_LIMIT, reapOrphanedMatches, ORPHAN_AFTER_MS, mapStatsFor, eventsFor,
-  recordRoundStart, recordRoundEnd, roundsFor, recordChat,
+  recordRoundStart, recordRoundEnd, roundsFor, recordChat, recordPhase, pausesFor,
 } from '../src/liveView.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -719,5 +719,92 @@ describe('recordChat', () => {
     recordChat(db, 'f'.repeat(32), chat({ token: 'f'.repeat(32), seq: 99 }));
     const n = db.prepare('SELECT COUNT(*) AS n FROM match_chat').get() as { n: number };
     expect(n.n).toBe(0);
+  });
+});
+
+describe('liveView: match phase', () => {
+  const paused = { state: 'paused' as const, team: 'a' as const, limit: 120, leave: false };
+  const live = { state: 'live' as const, team: null, limit: 0, leave: false };
+
+  it('exposes the reported phase, with when it began, on the live match', () => {
+    seedLive();
+    recordPhase(db, TOKEN, paused);
+    const m = getLiveMatches(db)[0];
+    expect(m.phase).toMatchObject({ state: 'paused', team: 'a', limit: 120, leave: false });
+    expect(Math.abs(m.phase!.sinceMs - Date.now())).toBeLessThan(5000);
+  });
+
+  it('reports no phase before the plugin has said anything', () => {
+    seedLive();
+    recordHeartbeat(db, TOKEN);
+    expect(getLiveMatches(db)[0].phase).toBeNull();
+  });
+
+  it('keeps the original start when the same phase is reported again', () => {
+    // The heartbeat repeats the phase every thirty seconds; a repeat is a
+    // confirmation, not a new pause, and the countdown must not restart.
+    seedLive();
+    recordPhase(db, TOKEN, paused);
+    const old = new Date(Date.now() - 40_000).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare('UPDATE match_live SET phase_since = ?').run(old);
+    recordPhase(db, TOKEN, paused);
+    expect(Date.now() - getLiveMatches(db)[0].phase!.sinceMs).toBeGreaterThan(30_000);
+  });
+
+  it('restarts the clock when the phase changes', () => {
+    seedLive();
+    recordPhase(db, TOKEN, paused);
+    const old = new Date(Date.now() - 40_000).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare('UPDATE match_live SET phase_since = ?').run(old);
+    recordPhase(db, TOKEN, live);
+    const m = getLiveMatches(db)[0];
+    expect(m.phase!.state).toBe('live');
+    expect(Date.now() - m.phase!.sinceMs).toBeLessThan(5000);
+  });
+
+  it('records each pause for the match: who, when, on which map and half, and for how long', () => {
+    const id = seedLive();
+    recordMatchStart(db, TOKEN, 'l4d_hospital01_apartment');
+    recordMapResult(db, TOKEN, 'l4d_hospital01_apartment', 100, 200);
+    recordRoundStart(db, TOKEN, { kind: 'round_start', token: TOKEN, map: 'l4d_hospital02_subway', half: 2, surv: 'a' });
+    recordPhase(db, TOKEN, paused);
+    expect(pausesFor(db, id)).toMatchObject([
+      { team: 'a', leave: false, mapOrdinal: 1, half: 2, endedAt: null, seconds: null },
+    ]);
+    const old = new Date(Date.now() - 90_000).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare('UPDATE match_pauses SET started_at = ?').run(old);
+    recordPhase(db, TOKEN, live);
+    const [p] = pausesFor(db, id);
+    expect(p.endedAt).not.toBeNull();
+    expect(p.seconds).toBeGreaterThanOrEqual(89);
+    expect(p.seconds).toBeLessThanOrEqual(92);
+  });
+
+  it('does not open a second pause row when the pause is reported again', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, paused);
+    recordPhase(db, TOKEN, paused);
+    expect(pausesFor(db, id)).toHaveLength(1);
+  });
+
+  it('records a disconnect pause as nobody\'s', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, { state: 'paused', team: null, limit: 0, leave: true });
+    expect(pausesFor(db, id)).toMatchObject([{ team: null, leave: true }]);
+  });
+
+  it('ignores a phase for a token that is not a live match', () => {
+    const id = seedLive('completed');
+    recordPhase(db, TOKEN, paused);
+    expect(pausesFor(db, id)).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_live').get()).toEqual({ n: 0 });
+  });
+
+  it('clearLive keeps the pause record, which is the point of it', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, paused);
+    recordPhase(db, TOKEN, live);
+    clearLive(db, id);
+    expect(pausesFor(db, id)).toHaveLength(1);
   });
 });

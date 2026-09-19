@@ -1491,6 +1491,7 @@ body.is-theater { overflow: hidden; }
  * column clean outside the panel. A port is five digits and the password is
  * short: size them for what they hold. The .table-wrap around the table is the
  * backstop, not the fix. */
+.admin-pauses { list-style: none; margin: 0; padding: 0; white-space: nowrap; }
 .admin-table--servers .admin-form { flex-wrap: nowrap; }
 .admin-table--servers .admin-form input { flex: 0 1 auto; width: 7rem; }
 .admin-table td, .admin-table th { white-space: nowrap; }

@@ -2,7 +2,7 @@ import { publishAdminEvent } from './adminFeed.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
-import type { LogEvent } from './logParse.js';
+import type { LogEvent, Phase } from './logParse.js';
 import type { ServerReleaser } from './serverRelease.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
@@ -43,6 +43,19 @@ export interface LiveEvent {
   target: { steamid: string; name: string } | null;
   value: number;
 }
+/** A reported phase plus when it began, as epoch milliseconds so a page can
+ *  run a pause countdown against its own clock. */
+export interface LivePhase extends Phase { sinceMs: number }
+export interface MatchPause {
+  team: 'a' | 'b' | null;
+  leave: boolean;
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds, or null while the pause is still open. */
+  seconds: number | null;
+}
 export interface LiveMatch {
   id: number;
   campaign: string;
@@ -62,6 +75,8 @@ export interface LiveMatch {
   events: LiveEvent[];
   /** How to watch on SourceTV, or null when that server has none. */
   spectate: SpectateInfo | null;
+  /** What the game is doing, or null until the plugin has reported one. */
+  phase: LivePhase | null;
 }
 
 /**
@@ -146,6 +161,103 @@ export function recordLiveStat(
      ON CONFLICT (match_id, player_id) DO UPDATE SET stats_json = excluded.stats_json`,
   ).run(id, steamid, JSON.stringify(merged));
   touch(db, id);
+}
+
+function sqliteToMs(s: string): number {
+  return Date.parse(`${s.replace(' ', 'T')}Z`);
+}
+
+/**
+ * Record what the game is doing, and keep the pause ledger from it.
+ *
+ * The state, the team and the leave flag together identify a phase. A repeat
+ * of the current one (the heartbeat re-sends it every thirty seconds, and UDP
+ * duplicates) is a confirmation: `phase_since` stays, so a pause countdown
+ * does not restart, and no second pause row is opened. A change stamps a new
+ * `since`, and if the change is into or out of a pause the ledger row is
+ * opened or closed. The ledger row is stamped with the map and half in
+ * progress at write time, the same way events are, because nothing on the
+ * wire carries them.
+ */
+export function recordPhase(db: DB, token: string, phase: Phase): void {
+  const id = liveMatchIdOf(db, token);
+  if (id === null) return;
+  const prev = db
+    .prepare('SELECT phase, phase_team, phase_leave FROM match_live WHERE match_id = ?')
+    .get(id) as { phase: string | null; phase_team: string | null; phase_leave: number } | undefined;
+  const same = prev !== undefined && prev.phase === phase.state
+    && (prev.phase_team ?? null) === phase.team && Boolean(prev.phase_leave) === phase.leave;
+  if (same) {
+    touch(db, id);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO match_live (match_id, current_map, last_seen, phase, phase_since, phase_team, phase_limit, phase_leave)
+     VALUES (?, NULL, datetime('now'), ?, datetime('now'), ?, ?, ?)
+     ON CONFLICT (match_id) DO UPDATE SET
+       last_seen = datetime('now'),
+       phase = excluded.phase, phase_since = excluded.phase_since,
+       phase_team = excluded.phase_team, phase_limit = excluded.phase_limit,
+       phase_leave = excluded.phase_leave`,
+  ).run(id, phase.state, phase.team, phase.limit, phase.leave ? 1 : 0);
+
+  const wasPaused = prev?.phase === 'paused';
+  if (wasPaused) {
+    db.prepare(
+      "UPDATE match_pauses SET ended_at = datetime('now') WHERE match_id = ? AND ended_at IS NULL",
+    ).run(id);
+  }
+  if (phase.state === 'paused') {
+    const ordinal = currentOrdinal(db, id);
+    const round = db
+      .prepare('SELECT MAX(half) AS half FROM match_rounds WHERE match_id = ? AND ordinal = ?')
+      .get(id, ordinal) as { half: number | null };
+    db.prepare(
+      `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    ).run(id, ordinal, round.half, phase.team, phase.leave ? 1 : 0);
+  }
+}
+
+export function phaseFor(db: DB, matchId: number): LivePhase | null {
+  const row = db
+    .prepare('SELECT phase, phase_since, phase_team, phase_limit, phase_leave FROM match_live WHERE match_id = ?')
+    .get(matchId) as {
+      phase: string | null; phase_since: string | null; phase_team: 'a' | 'b' | null;
+      phase_limit: number; phase_leave: number;
+    } | undefined;
+  if (!row || !row.phase || !row.phase_since) return null;
+  return {
+    state: row.phase as Phase['state'],
+    team: row.phase_team ?? null,
+    limit: row.phase_limit,
+    leave: Boolean(row.phase_leave),
+    sinceMs: sqliteToMs(row.phase_since),
+  };
+}
+
+/** Every pause of a match, oldest first. Survives clearLive on purpose. */
+export function pausesFor(db: DB, matchId: number): MatchPause[] {
+  const rows = db
+    .prepare(
+      `SELECT map_ordinal, half, team, leave_pause, started_at, ended_at
+       FROM match_pauses WHERE match_id = ? ORDER BY id`,
+    )
+    .all(matchId) as {
+      map_ordinal: number; half: number | null; team: 'a' | 'b' | null;
+      leave_pause: number; started_at: string; ended_at: string | null;
+    }[];
+  return rows.map((r) => ({
+    team: r.team ?? null,
+    leave: Boolean(r.leave_pause),
+    mapOrdinal: r.map_ordinal,
+    half: r.half,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    seconds: r.ended_at === null
+      ? null
+      : Math.max(0, Math.round((sqliteToMs(r.ended_at) - sqliteToMs(r.started_at)) / 1000)),
+  }));
 }
 
 /** Cap on how many feed entries the payload carries. The table keeps
@@ -602,6 +714,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
       id: m.id,
       campaign: m.campaign,
       spectate: spectateFor(db, m.serverId),
+      phase: phaseFor(db, m.id),
       currentMap: m.currentMap ?? null,
       teamA: ps.filter((p) => p.team === 'a').map(named),
       teamB: ps.filter((p) => p.team === 'b').map(named),

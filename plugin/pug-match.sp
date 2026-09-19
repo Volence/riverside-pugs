@@ -8,7 +8,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.2.0"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -2220,7 +2220,13 @@ void ResetMatchState()
 
 public Action Timer_Heartbeat(Handle timer)
 {
-	if (g_State != MS_None) EmitPug("HEARTBEAT");
+	if (g_State != MS_None)
+	{
+		// The phase rides on the heartbeat so a lost PHASE line self-corrects.
+		char fields[96];
+		PhaseFields("phase", fields, sizeof(fields));
+		EmitPug("HEARTBEAT %s", fields);
+	}
 	LeaveHeartbeat();
 	return Plugin_Continue;
 }
@@ -2473,6 +2479,7 @@ public Action Timer_TeamLock(Handle timer)
 public void OnMapEnd()
 {
 	RplClose();
+	PhaseMapEnd();
 }
 
 /**

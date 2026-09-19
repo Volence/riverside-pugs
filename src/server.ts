@@ -46,6 +46,7 @@ import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
+  recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
@@ -361,6 +362,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           if (ev.kind === 'match_start') recordMatchStart(deps.db, ev.token, ev.map);
           else if (ev.kind === 'heartbeat') {
             recordHeartbeat(deps.db, ev.token);
+            // The heartbeat repeats the phase so a lost PHASE datagram is
+            // corrected within thirty seconds; recordPhase treats a repeat
+            // as confirmation and does not restart anything.
+            if (ev.phase) recordPhase(deps.db, ev.token, ev.phase);
             // Demos are also scanned here, not only on MAP_RESULT. A map's
             // demo is not closed until the NEXT map's tv_record replaces it,
             // so at MAP_RESULT time it is still the newest file and is
@@ -394,6 +399,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
+          else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
           else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);

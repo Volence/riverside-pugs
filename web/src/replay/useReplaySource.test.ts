@@ -177,4 +177,27 @@ describe('useReplaySource cursor across a live round change', () => {
     expect(urls.some((u) => u.includes('/api/replays/file/'))).toBe(false);
     expect(urls.some((u) => u.includes(TOKEN))).toBe(false);
   });
+  // What the game is doing rides on the live answer. The viewer has nothing
+  // to draw while the game is paused or readying up, so this is the only way
+  // it can say so instead of showing a frozen frame.
+  it('surfaces the phase a live match reports', async () => {
+    const chunkA = concat([encodeHeader(header()), encodeFrame(emptyFrame(0))]);
+    const phase = { state: 'paused', team: 'a', limit: 120, leave: false, sinceMs: 1_700_000_000_000 };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) return jsonResponse({ ordinal: 0, half: 1, closed: false, phase });
+      return fileResponse(chunkA, false);
+    }));
+
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result.current.phase).toEqual(phase);
+  });
+
+  it('reports no phase for a saved round', async () => {
+    const chunkA = concat([encodeHeader(header()), encodeFrame(emptyFrame(0))]);
+    vi.stubGlobal('fetch', vi.fn(async () => fileResponse(chunkA, true)));
+    const { result } = renderHook(() => useReplaySource({ kind: 'match', matchId: 7, ordinal: 0, half: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result.current.phase).toBeNull();
+  });
 });

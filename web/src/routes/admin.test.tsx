@@ -149,6 +149,26 @@ describe('AdminMatches layout', () => {
     expect(screen.getByText('password pug_ab12cd34; connect 45.32.199.85:27015')).toBeTruthy();
   });
 
+  // The pause ledger is for disputes: when one side says the other paused
+  // them to death, the admin sees who paused, for how long, and on which map.
+  it('lists each recent match\'s pauses with who and for how long', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.recent = [{
+      id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
+      pauses: [
+        { team: 'b', leave: false, mapOrdinal: 1, half: 2, startedAt: '2026-09-18 03:10:00', endedAt: '2026-09-18 03:11:30', seconds: 90 },
+        { team: null, leave: true, mapOrdinal: 2, half: 1, startedAt: '2026-09-18 03:30:00', endedAt: '2026-09-18 03:30:20', seconds: 20 },
+      ],
+    }];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('Team B 1:30 on map 2')).toBeTruthy();
+    expect(screen.getByText('Reconnect 0:20 on map 3')).toBeTruthy();
+  });
+
   it('shows no connect line for a match with no server yet', async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();

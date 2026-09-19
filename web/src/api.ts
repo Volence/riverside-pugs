@@ -175,6 +175,28 @@ export interface LiveEvent {
   value: number;
 }
 
+/** What the game is doing, from the plugin's one-second tracker, plus when
+ *  it began (epoch ms) so a pause countdown can run against our clock. */
+export interface LivePhase {
+  state: 'live' | 'paused' | 'readyup' | 'roundover' | 'loading';
+  /** Who is charged for a pause; null for a disconnect pause, an admin, or any
+   *  state that is not a pause. */
+  team: 'a' | 'b' | null;
+  /** Seconds a pause may last, 0 for no ceiling. */
+  limit: number;
+  leave: boolean;
+  sinceMs: number;
+}
+export interface MatchPause {
+  team: 'a' | 'b' | null;
+  leave: boolean;
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds, null while still open. */
+  seconds: number | null;
+}
 export interface LiveMatch {
   id: number;
   campaign: string;
@@ -197,6 +219,7 @@ export interface LiveMatch {
    *  is distinguishable from six small ones. */
   events: LiveEvent[];
   spectate?: SpectateInfo | null;
+  phase?: LivePhase | null;
 }
 
 export interface MatchDemo {
@@ -468,7 +491,7 @@ export interface AdminOverview {
     forecast: Forecast | null;
   }[];
   servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[] }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
 }
