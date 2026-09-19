@@ -11,6 +11,7 @@ import { makeRequireAdmin } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { CAMPAIGNS } from '../campaigns.js';
 import { campaignRegistry, invalidateCampaignCache } from '../campaignRegistry.js';
+import { allMapsToPlay, clearMapsToPlay, setMapsToPlay } from '../campaignRules.js';
 import { transportFor } from '../addonsTransport.js';
 import { installCampaign, uninstallCampaign, type InstallTarget } from '../campaignInstall.js';
 import {
@@ -133,12 +134,25 @@ export async function campaignRoutes(
     } catch (err) {
       req.log.error({ err }, 'could not read free disk space for the campaigns panel');
     }
-    return {
-      free,
-      campaigns: listCampaigns(db).map((c) => ({
-        ...c, chapters: chaptersOf(db, c.slug), installs: installsOf(db, c.slug),
-      })),
-    };
+    const rules = allMapsToPlay(db);
+    const registry = campaignRegistry(db);
+    const custom = listCampaigns(db).map((c) => ({
+      ...c, chapters: chaptersOf(db, c.slug), installs: installsOf(db, c.slug),
+      mapsToPlay: rules.get(c.slug) ?? null,
+      maps: registry.get(c.slug)?.maps ?? [],
+      stock: false,
+    }));
+    // The stock four have no custom_campaigns row, but an admin wants to drop
+    // a stock finale for exactly the same reason as a custom one, so they get
+    // a row here too: published, no installs (nothing to install), no upload
+    // controls (the UI hides those behind `stock`).
+    const stock = [...registry.values()].filter((c) => !c.custom).map((c) => ({
+      slug: c.slug, name: c.name, vpk_filename: '', size_bytes: 0, sha256: '',
+      state: 'published' as const, enabled: 1, uploaded_by: null, uploaded_at: 0,
+      notes: null, chapters: [], installs: [],
+      mapsToPlay: rules.get(c.slug) ?? null, maps: c.maps, stock: true,
+    }));
+    return { free, campaigns: [...custom, ...stock] };
   });
 
   app.post('/api/admin/campaigns', async (req, reply) => {
@@ -258,6 +272,31 @@ export async function campaignRoutes(
     void installCampaign(db, slug, {
       sourcePath: join(addonsDir, c.vpk_filename), servers: targets(),
     }).catch((err) => req.log.error({ err, slug }, 'installCampaign rejected unexpectedly'));
+    return { ok: true };
+  });
+
+  app.post('/api/admin/campaigns/:slug/maps-to-play', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { slug } = req.params as { slug: string };
+    // Stock campaigns are configurable here too and have no custom_campaigns
+    // row, so validate against the registry rather than that table.
+    if (!campaignRegistry(db).has(slug)) return reply.code(404).send({ error: 'no such campaign' });
+
+    // No invalidateCampaignCache() below. The rule is read per match by
+    // stopAfterMap, not cached in the registry, so invalidating would just be
+    // cache churn on every save.
+    const raw = (req.body as { maps?: number | null } | undefined)?.maps ?? null;
+    if (raw === null) {
+      clearMapsToPlay(db, slug);
+      logAdmin(db, adminId, 'campaign_maps_to_play', slug, { maps: null });
+      return { ok: true };
+    }
+    if (!Number.isInteger(raw) || raw < 1) {
+      return reply.code(400).send({ error: 'maps must be a whole number of at least 1' });
+    }
+    setMapsToPlay(db, slug, raw);
+    logAdmin(db, adminId, 'campaign_maps_to_play', slug, { maps: raw });
     return { ok: true };
   });
 

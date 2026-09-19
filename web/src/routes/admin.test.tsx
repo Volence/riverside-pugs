@@ -9,7 +9,7 @@ const { mockAdmin, mockApi } = vi.hoisted(() => ({
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
-    reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(),
+    reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(), setMapsToPlay: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
 }));
@@ -548,7 +548,7 @@ describe('AdminCampaigns', () => {
           { slug: 'dbd', ordinal: 2, map: 'dbd2', display: 'Mall', is_finale: 0, included: 1, play_order: 2 },
           { slug: 'dbd', ordinal: 3, map: 'dbd3', display: 'Docks', is_finale: 1, included: 1, play_order: 3 },
         ],
-        installs: [],
+        installs: [], mapsToPlay: null, maps: ['dbd1', 'dbd2', 'dbd3'], stock: false,
       }],
     });
     const { container } = render(<Admin session={{ kind: 'active', me }} />);
@@ -619,6 +619,7 @@ describe('AdminCampaigns', () => {
           { slug: 'dbd', server_id: 1, state: 'installed', sha256: null, error: null, updated_at: 0 },
           { slug: 'dbd', server_id: 2, state: 'failed', sha256: null, error: 'connection refused', updated_at: 0 },
         ],
+        mapsToPlay: null, maps: ['dbd1'], stock: false,
       }],
     });
     render(<Admin session={{ kind: 'active', me }} />);
@@ -638,6 +639,7 @@ describe('AdminCampaigns', () => {
         size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'dbd.vpk',
         uploaded_by: null, uploaded_at: 0, notes: null, chapters: [],
         installs: [{ slug: 'dbd', server_id: 2, state: 'failed', sha256: null, error: 'x', updated_at: 0 }],
+        mapsToPlay: null, maps: [], stock: false,
       }],
     });
     render(<Admin session={{ kind: 'active', me }} />);
@@ -685,5 +687,57 @@ describe('AdminCampaigns', () => {
     fireEvent.input(input, { target: { value: '   ' } });
     // Same toBeDisabled() unavailability as the pool-gate checkbox above.
     expect(screen.getByRole('button', { name: 'Publish' })).toHaveProperty('disabled', true);
+  });
+
+  const fiveMapCampaign = (over: Record<string, unknown> = {}) => ({
+    slug: 'five', name: 'Five', state: 'published', enabled: 1,
+    size_bytes: 9, sha256: 'a'.repeat(64), vpk_filename: 'five.vpk',
+    uploaded_by: null, uploaded_at: 0, notes: null,
+    chapters: [1, 2, 3, 4, 5].map((n) => ({
+      slug: 'five', ordinal: n, map: `m${n}`, display: null,
+      is_finale: n === 5 ? 1 : 0, included: 1, play_order: n,
+    })),
+    installs: [], mapsToPlay: null, maps: ['m1', 'm2', 'm3', 'm4', 'm5'], stock: false,
+    ...over,
+  });
+
+  it('describes the unconfigured default as every map but the last', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [fiveMapCampaign()] });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const select = await waitFor(() => screen.getByLabelText('Maps to play') as HTMLSelectElement);
+    expect(select.value).toBe('');
+    expect(screen.getByText(/Default \(4 maps, no finale\)/)).toBeTruthy();
+  });
+
+  it('calls setMapsToPlay when an admin picks how many maps to play', async () => {
+    mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [fiveMapCampaign()] });
+    mockAdmin.setMapsToPlay.mockResolvedValue({ ok: true });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const select = await waitFor(() => screen.getByLabelText('Maps to play'));
+    fireEvent.change(select, { target: { value: '5' } });
+    await waitFor(() => expect(mockAdmin.setMapsToPlay).toHaveBeenCalledWith('five', 5));
+  });
+
+  it('renders a stock campaign with a maps-to-play control but no reinstall or delete', async () => {
+    mockAdmin.campaigns.mockResolvedValue({
+      free: 11 * 1024 ** 3,
+      campaigns: [{
+        slug: 'no_mercy', name: 'No Mercy', state: 'published', enabled: 1,
+        size_bytes: 0, sha256: '', vpk_filename: '',
+        uploaded_by: null, uploaded_at: 0, notes: null,
+        chapters: [], installs: [], mapsToPlay: null,
+        maps: ['l4d_vs_hospital01_apartment', 'l4d_vs_hospital02_subway', 'l4d_vs_hospital03_sewers',
+          'l4d_vs_hospital04_interior', 'l4d_vs_hospital05_rooftop'],
+        stock: true,
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    await waitFor(() => screen.getByText('No Mercy'));
+    expect(screen.getByLabelText('Maps to play')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Reinstall' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
 });

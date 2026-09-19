@@ -25,21 +25,66 @@ function installedEverywhere(c: AdminCampaign, serverIds: number[]): boolean {
 
 type Run = (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
 
-function ChapterList({ chapters }: { chapters: AdminChapter[] }) {
+/** `playCount` dims the chapters a stop-point rule drops, so the chapter list
+ *  and the MapsToPlay control right below it visibly agree about which
+ *  chapters are actually going to be played. Omitted entirely (drafts) means
+ *  nothing is dimmed. */
+function ChapterList({ chapters, playCount }: { chapters: AdminChapter[]; playCount?: number }) {
   const included = chapters.filter((ch) => ch.included === 1);
   if (included.length === 0) return <p class="muted">No chapters parsed.</p>;
   return (
     <ol class="admin-list">
-      {included.map((ch) => (
+      {included.map((ch, i) => (
         // Every chapter of a campaign shares its slug; ordinal is what is
         // actually unique per chapter.
-        <li key={ch.ordinal}>
+        <li key={ch.ordinal} class={playCount !== undefined && i >= playCount ? 'muted' : undefined}>
           {chapterName(ch.display, ch.map)}
           {ch.is_finale === 1 && <span class="admin-tag">finale</span>}
         </li>
       ))}
     </ol>
   );
+}
+
+/** How many maps this campaign plays. The empty value is the default, which is
+ *  every chapter but the last: the same thing the plugin does unprompted, so an
+ *  unconfigured campaign and a campaign explicitly set to its default behave
+ *  identically rather than taking different code paths. */
+function MapsToPlay(
+  { c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run },
+) {
+  if (c.maps.length === 0) {
+    return <p class="muted">Chapters unknown, so this campaign plays its default.</p>;
+  }
+  return (
+    <label>
+      Plays{' '}
+      <select
+        aria-label="Maps to play"
+        disabled={busy}
+        value={c.mapsToPlay === null ? '' : String(c.mapsToPlay)}
+        onChange={(e) => {
+          const v = (e.target as HTMLSelectElement).value;
+          run(() => adminApi.setMapsToPlay(c.slug, v === '' ? null : Number(v)));
+        }}
+      >
+        <option value="">Default ({Math.max(c.maps.length - 1, 1)} maps, no finale)</option>
+        {c.maps.map((_m, i) => (
+          <option key={i} value={String(i + 1)}>
+            {i + 1} map{i === 0 ? '' : 's'}{i + 1 === c.maps.length ? ' (includes the finale)' : ''}
+          </option>
+        ))}
+      </select>
+      {' '}
+      <span class="muted">Takes effect next match. Nothing is reinstalled.</span>
+    </label>
+  );
+}
+
+/** How many maps a mapsToPlay-less card should treat as played, for dimming
+ *  purposes: the same default the plugin and stopAfterMap fall back to. */
+function playCountOf(c: AdminCampaign): number {
+  return c.mapsToPlay ?? Math.max(c.maps.length - 1, 1);
 }
 
 /** One row per server this campaign has an install record for. A campaign
@@ -96,7 +141,8 @@ function PublishedCard(
         <h3>{c.name}</h3>
         <span class="muted">{gb(c.size_bytes)}</span>
       </div>
-      <ChapterList chapters={c.chapters} />
+      <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
+      <MapsToPlay c={c} busy={busy} run={run} />
       <InstallList installs={c.installs} serverNames={serverNames} />
       <div class="admin-row">
         <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
@@ -117,6 +163,18 @@ function PublishedCard(
       {!ok
         ? <p class="muted">Not on every server yet, so it cannot be added to the vote. Players can still download it.</p>
         : <p class="muted">Installed everywhere and downloadable. Add it to the vote on the Settings tab.</p>}
+    </Panel>
+  );
+}
+
+/** One of the stock four: no VPK, so no upload, install state, reinstall or
+ *  delete. Still gets a stop-point control, because an admin wants to drop
+ *  a stock finale for exactly the reason they'd drop a custom one. */
+function StockCard({ c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run }) {
+  return (
+    <Panel>
+      <h3>{c.name} <span class="admin-tag">stock</span></h3>
+      <MapsToPlay c={c} busy={busy} run={run} />
     </Panel>
   );
 }
@@ -166,7 +224,8 @@ export function AdminCampaigns() {
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
 
   const drafts = data.campaigns.filter((c) => c.state === 'draft');
-  const published = data.campaigns.filter((c) => c.state === 'published');
+  const published = data.campaigns.filter((c) => c.state === 'published' && !c.stock);
+  const stock = data.campaigns.filter((c) => c.stock);
 
   return (
     <div class="stack">
@@ -196,12 +255,16 @@ export function AdminCampaigns() {
         {error && <p class="error">{error}</p>}
       </Panel>
 
-      {data.campaigns.length === 0 && <Panel><Empty>No custom campaigns uploaded yet.</Empty></Panel>}
+      {/* The stock four always have a row (they need no upload to exist), so
+          this is keyed on custom campaigns specifically, not the raw list. */}
+      {drafts.length === 0 && published.length === 0
+        && <Panel><Empty>No custom campaigns uploaded yet.</Empty></Panel>}
 
       {drafts.map((c) => <DraftCard key={c.slug} c={c} busy={busy} run={run} />)}
       {published.map((c) => (
         <PublishedCard key={c.slug} c={c} busy={busy} run={run} serverIds={serverIds} serverNames={serverNames} />
       ))}
+      {stock.map((c) => <StockCard key={c.slug} c={c} busy={busy} run={run} />)}
     </div>
   );
 }
