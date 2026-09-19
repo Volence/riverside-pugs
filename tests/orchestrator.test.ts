@@ -12,7 +12,7 @@ import {
 } from '../src/rconPacket.js';
 import { pugReply } from './helpers.js';
 import { deleteCampaign, insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
-import { invalidateCampaignCache } from '../src/campaignRegistry.js';
+import { invalidateCampaignCache, setMissionsDir } from '../src/campaignRegistry.js';
 
 function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
   const cmds: string[] = [];
@@ -427,6 +427,63 @@ describe('custom campaign availability', () => {
 
     expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+});
+
+describe('stop-after map', () => {
+  // Same rcon fake and orchestrator wiring as the other describe blocks in
+  // this file.
+  async function setup(): Promise<{ orch: RealOrchestrator; cmds: string[] }> {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener,
+      logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}),
+      makeRcon: (o) => o,
+    });
+    return { orch, cmds: srv.cmds };
+  }
+
+  function publishFive(): void {
+    insertDraft(db, {
+      slug: 'five', name: 'Five', vpkFilename: 'five.vpk',
+      sizeBytes: 1, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [1, 2, 3, 4, 5].map((n) => ({ map: `m${n}`, display: null, isFinale: n === 5 })));
+    publishCampaign(db, 'five', 'Five');
+    invalidateCampaignCache();
+  }
+
+  const matchCmd = (cmds: string[]) => cmds.find((c) => c.startsWith('sm_pug_match')) ?? '';
+
+  it('sends the stop map as a fourth argument when one is known', async () => {
+    const { orch, cmds } = await setup();
+    publishFive();
+    const mid = seedMatch(db, 'five');
+
+    await orch.setupMatch(mid);
+
+    // Default rule: one before the last, so the fourth of five.
+    expect(matchCmd(cmds).endsWith(' m4')).toBe(true);
+  });
+
+  // This is the regression guard for every match the site already runs. A
+  // stock campaign has no known chapters until a missions directory is
+  // configured, so the command must keep its exact old shape: three
+  // arguments, no trailing anything.
+  it('sends three arguments when no stop map is known', async () => {
+    const { orch, cmds } = await setup();
+    setMissionsDir('');
+    invalidateCampaignCache();
+    const mid = seedMatch(db, 'dead_air');
+
+    await orch.setupMatch(mid);
+
+    expect(matchCmd(cmds)).toMatch(/^sm_pug_match \d+ \S+ dead_air$/);
   });
 });
 
