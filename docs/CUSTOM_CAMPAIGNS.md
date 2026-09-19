@@ -232,13 +232,27 @@ files, which needs `MISSIONS_DIR` in `/home/pug/app/.env`:
 
     MISSIONS_DIR=/home/l4d/l4d1-server/left4dead/missions
 
-Unset (the default) is safe, not a crash: `readStockMissions` in
-`src/stockMissions.ts` returns an empty map for every stock campaign, the
-"Plays" control degrades to its disabled message for all four, and
-`stopAfterMap` returns `null`, which sends the plugin nothing and leaves it
-on its own `NextMapIsFinale()` exactly as before. So skipping this step does
-not break anything; it just leaves the stock four unconfigurable here, the
-same as before this feature existed.
+Unset (the default) is safe, not a crash, **for the stock four only**:
+`readStockMissions` in `src/stockMissions.ts` returns an empty map for every
+stock campaign, the "Plays" control degrades to its disabled message for all
+four, and `stopAfterMap` returns `null`, which sends the plugin nothing and
+leaves it on its own `NextMapIsFinale()` exactly as before. So skipping this
+step does not break anything for the stock four; it just leaves them
+unconfigurable here, the same as before this feature existed.
+
+**`MISSIONS_DIR` gates nothing for a published custom campaign.** Its
+registry `maps` come from `chaptersOf(db, slug)` (the chapters recorded at
+upload time), not from `MISSIONS_DIR`, so `stopAfterMap` already has a
+non-null answer for every published custom campaign whether or not
+`MISSIONS_DIR` is set and whether or not an admin has ever touched the
+"Plays" control for it. Merging this feature means every custom campaign's
+very next match gets the fourth `sm_pug_match` argument, using the default
+rule (second-to-last map) if no rule is stored. The outcome matches what
+`NextMapIsFinale()` already did for a non-finale stop, but it arrives by a
+different code path that drops `NextMapIsFinale()`'s own defensive guard for
+those matches. If a custom campaign's finale is ever reached this way before
+verification case 2 below has been run for it, that is the untested path
+running for the first time on a live match, not a configuration mistake.
 
 ### Staging the plugin change
 
@@ -287,9 +301,17 @@ feature with a real match:
    round is over. This is the one case in this list that specifically did
    not work before `9097ade`, which fixed the finale backstop ending the
    match the instant the finale *loaded* rather than once it was played.
-3. **No rule at all.** Confirm a campaign with nothing set in the "Plays"
-   control still behaves exactly as it did before this feature: every
-   chapter but the last, ending after the second-to-last map.
+3. **No rule at all, on a published custom campaign specifically.** Pick a
+   custom campaign that has never had its "Plays" control touched and start
+   a match on it. This is the path that changed on merge with no admin
+   action: `stopAfterMap` already resolves from that campaign's uploaded
+   chapters regardless of `MISSIONS_DIR`, so it is getting the fourth
+   argument for the first time here. Testing a stock campaign with
+   `MISSIONS_DIR` unset instead would only exercise the one path that
+   definitively did not change (`stopAfterMap` returns `null` for it) and
+   would leave this case looking covered when it is not. Confirm the match
+   still behaves exactly as it did before this feature: every chapter but
+   the last, ending after the second-to-last map.
 4. **A self-started match still ends on its own.** Start a match the old
    way (`!load_4v4p` / `!mix`, not through the web queue) on a campaign with
    no rule set, and confirm it still ends itself at the usual point. A
