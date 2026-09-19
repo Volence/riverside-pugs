@@ -56,6 +56,16 @@ describe('parseLogDatagram', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} MATCH_END a=1 b=2 winner=x`))).toBeNull();
   });
 
+  it('parses PROBLEM with a code', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PROBLEM code=unpause_timeout`));
+    expect(ev).toEqual({ kind: 'problem', token: TOKEN, code: 'unpause_timeout' });
+  });
+
+  it('rejects PROBLEM without a well-formed code', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} PROBLEM`))).toBeNull();
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} PROBLEM code=Bad Code`))).toBeNull();
+  });
+
   /* Byte-for-byte framing captured from the live L4D1 box on 2026-08-29 via
    * `logaddress_add` + a UDP sink:
    *   b'\xff\xff\xff\xffRL 08/29/2026 - 15:29:00: PUG <token> HEARTBEAT\n\x00'
