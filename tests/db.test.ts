@@ -19,7 +19,7 @@ describe('openDb', () => {
       'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
       'matches', 'matchmaker_state',
       'penalties', 'player_notes', 'player_ratings', 'players',
-      'rating_history', 'reports', 'seasons', 'servers', 'settings',
+      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops',
     ]);
   });
 
