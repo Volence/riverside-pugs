@@ -209,3 +209,116 @@ The orchestrator re-checks install state again at match start
 installed (a re-image, a manual delete) fails that match's setup with a
 named error instead of stranding it on a black screen. That is a safety net,
 not a substitute for checking the panel after every publish.
+
+## 5. Campaign stop points: how many maps a campaign plays
+
+An admin can now set, per campaign (stock or custom), how many of its maps a
+match plays before it is scored and ended. The Campaigns tab's "Plays"
+control writes this; the plugin reads it off the backend's `sm_pug_match`
+call as an extra argument (`stopAfterMap`, `src/stopPoint.ts`) and the
+finale backstop (`OnMapStart` in `plugin/pug-match.sp`) yields to it when the
+stop map is the finale itself. None of this is exercised by a unit test:
+`plugin/pug-match.sp` has none, and the interaction between a live match and
+a real map load is exactly the kind of thing a test cannot fake honestly.
+This section is the actual verification plan.
+
+### Before any of this works: `MISSIONS_DIR`
+
+The "Plays" control is disabled (it reads "Chapters unknown, so this
+campaign plays its default") for any campaign whose chapter list the site
+cannot see. For a custom campaign that list comes from the uploaded VPK, but
+for the stock four it has to be read off the game server's own mission
+files, which needs `MISSIONS_DIR` in `/home/pug/app/.env`:
+
+    MISSIONS_DIR=/home/l4d/l4d1-server/left4dead/missions
+
+Unset (the default) is safe, not a crash: `readStockMissions` in
+`src/stockMissions.ts` returns an empty map for every stock campaign, the
+"Plays" control degrades to its disabled message for all four, and
+`stopAfterMap` returns `null`, which sends the plugin nothing and leaves it
+on its own `NextMapIsFinale()` exactly as before. So skipping this step does
+not break anything; it just leaves the stock four unconfigurable here, the
+same as before this feature existed.
+
+### Staging the plugin change
+
+This plan **does** change the plugin, unlike the rest of this document. Two
+things about that are easy to get wrong:
+
+1. **`plugin/stage.sh` rsyncs `pug-match.smx` from its own directory**, not
+   from wherever your shell happens to be. It resolves `HERE` from
+   `${BASH_SOURCE[0]}` and copies `$HERE/pug-match.smx`, so it always ships
+   whatever binary sits next to the script it is run from, with no warning
+   if that is the wrong one. Run it from **this worktree**
+   (`/home/volence/l4d/pug/.claude/worktrees/stop-point/plugin`), which has
+   the rebuilt binary. Running it from the main checkout's `plugin/` would
+   silently ship that checkout's older plugin, built before this feature
+   existed, and every symptom below would look like the feature never
+   shipped rather than like a stale binary.
+2. **`plugin/pug-match.smx` is gitignored** (`.gitignore:5`; it was
+   deliberately untracked in `e97fbab` because a compiled binary that
+   changes on every build has no business in history). It is never in the
+   repository, on any branch, in any worktree. Run `./build.sh` first, from
+   the same `plugin/` directory, or `stage.sh` refuses with "no
+   pug-match.smx; run ./build.sh first".
+
+Stage on an **empty** server, the same rule as every other change to this
+box (`ops/README.md`, "Live server: no unasked changes"). `stage.sh` itself
+refuses to run if anyone is connected unless you pass `--force`, but do not
+reach for `--force` here: a plugin reload is low risk, but the sequence
+below asks you to actually play matches to the finale, which is not
+something to do with real players around.
+
+### Live verification sequence
+
+Do all four of these against the real box, in order, before trusting this
+feature with a real match:
+
+1. **Stop one map early.** Set a campaign's "Plays" control to one fewer
+   than its full chapter count, start a match on it, and play it down. The
+   match should end after that map, not the one after. Confirm the ended
+   match's dump (`sm_pug_dump`, or the match page) reports exactly that many
+   maps, not one more or one fewer.
+2. **Play the finale.** Set a campaign's "Plays" control to its full chapter
+   count (the option marked "includes the finale") and play the match
+   through. **This path has never run against a real server.** Confirm the
+   finale map actually loads, that the second-half round on it is scored
+   like any other map, and that the match ends automatically once that
+   round is over. This is the one case in this list that specifically did
+   not work before `9097ade`, which fixed the finale backstop ending the
+   match the instant the finale *loaded* rather than once it was played.
+3. **No rule at all.** Confirm a campaign with nothing set in the "Plays"
+   control still behaves exactly as it did before this feature: every
+   chapter but the last, ending after the second-to-last map.
+4. **A self-started match still ends on its own.** Start a match the old
+   way (`!load_4v4p` / `!mix`, not through the web queue) on a campaign with
+   no rule set, and confirm it still ends itself at the usual point. A
+   self-started match never gets a `stopAfterMap` argument at all (there is
+   no backend match row to read a rule from), so this should be an
+   unaffected no-op, but it is the case most likely to reveal a regression
+   in the finale backstop itself.
+
+`[pug] match N stops after <map>` in the server log is how to tell the
+backend's argument actually arrived at the plugin; if you set a rule and
+never see this line for that match's ID, the argument did not make it and
+the match will fall back to the plugin's own default rather than obeying
+what the panel says. `sm_pug_status` also prints `stopAfterMap=<map>` (or
+`(none)`) for whichever match is live right now, which is faster to check
+mid-match than grepping the log.
+
+### A consequence worth knowing before you try case 2
+
+Ending a match used to have exactly one automatic trigger for a finale
+campaign: the finale loading. That backstop is now gated on the stop map
+matching what actually loaded, which is the whole point (case 2 above is
+what that gate makes possible), but it means a finale campaign no longer has
+an unconditional automatic end. If an admin changes a campaign mid-finale,
+or the finale's second-half round never sends a score (a crash, a stuck
+round, whatever match 34 on 2026-09-17 was), nothing ends the match on its
+own anymore. Before this feature, the finale loading alone would have
+ended it regardless.
+
+Recovery is the same as any other stuck match: `!endpug` in-game, or
+`sm_pug_abort <token>` over rcon. `sm_pug_status`'s `stopAfterMap=` line is
+the tell that a match is in this state, since it shows a match still
+expecting to stop on a map it may already have played or skipped past.

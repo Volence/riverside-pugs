@@ -10,6 +10,7 @@ import { buildServer } from '../src/server.js';
 import {
   getCampaign, insertDraft, installsOf, publishCampaign, setInstall,
 } from '../src/customCampaigns.js';
+import { getMapsToPlay, setMapsToPlay } from '../src/campaignRules.js';
 import { campaignRegistry, invalidateCampaignCache } from '../src/campaignRegistry.js';
 import type { InstallTarget } from '../src/campaignInstall.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
@@ -372,12 +373,19 @@ describe('GET /api/admin/campaigns', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.campaigns).toHaveLength(1);
-    expect(body.campaigns[0].slug).toBe('dbd');
-    expect(body.campaigns[0].chapters.map((c: { map: string }) => c.map)).toEqual(['dbd1_alley']);
-    expect(body.campaigns[0].installs).toEqual([
+    // The stock four are always in the registry, so they always appear here
+    // too: an admin wants to drop a stock finale for the same reason as a
+    // custom one, and this list is the only place that control lives.
+    expect(body.campaigns).toHaveLength(5);
+    const dbd = body.campaigns.find((c: { slug: string }) => c.slug === 'dbd');
+    expect(dbd.chapters.map((c: { map: string }) => c.map)).toEqual(['dbd1_alley']);
+    expect(dbd.installs).toEqual([
       expect.objectContaining({ server_id: 1, state: 'installed' }),
     ]);
+    expect(dbd.stock).toBe(false);
+    const noMercy = body.campaigns.find((c: { slug: string }) => c.slug === 'no_mercy');
+    expect(noMercy.stock).toBe(true);
+    expect(noMercy.installs).toEqual([]);
   });
 
   // statfs('') throws; that must not take the whole panel down, since the
@@ -396,7 +404,9 @@ describe('GET /api/admin/campaigns', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.free).toBeNull();
-    expect(body.campaigns.map((c: { slug: string }) => c.slug)).toEqual(['dbd']);
+    expect(body.campaigns.map((c: { slug: string }) => c.slug)).toEqual(
+      expect.arrayContaining(['dbd', 'no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
+    );
   });
 
   it('refuses a non-admin', async () => {
@@ -655,5 +665,76 @@ describe('DELETE /api/admin/campaigns/:slug', () => {
       cookies: adminCookie(app, '76561198000000001'),
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('POST /api/admin/campaigns/:slug/maps-to-play', () => {
+  const publishFive = () => {
+    insertDraft(db, {
+      slug: 'five', name: 'Five', vpkFilename: 'five.vpk',
+      sizeBytes: 9, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, [1, 2, 3, 4, 5].map((n) => ({ map: `m${n}`, display: null, isFinale: n === 5 })));
+    publishCampaign(db, 'five', 'Five');
+  };
+
+  const ADMIN_ID = '76561198000000001';
+  // The default steamid is the same one every other admin test in this file
+  // promotes via adminCookie. An explicit non-default steamid (the
+  // "refuses a non-admin" case below) is deliberately left un-promoted, so
+  // authedCookie alone is what it gets.
+  const post = (app: FastifyInstance, slug: string, body: { maps: number | null }, steamid = ADMIN_ID) =>
+    app.inject({
+      method: 'POST', url: `/api/admin/campaigns/${slug}/maps-to-play`,
+      cookies: steamid === ADMIN_ID ? adminCookie(app, steamid) : authedCookie(app, db, steamid),
+      payload: body,
+    });
+
+  it('stores a rule and reports it back', async () => {
+    publishFive();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'five', { maps: 3 })).statusCode).toBe(200);
+    expect(getMapsToPlay(db, 'five')).toBe(3);
+    const list = await app.inject({
+      method: 'GET', url: '/api/admin/campaigns',
+      cookies: authedCookie(app, db, ADMIN_ID),
+    });
+    const row = list.json().campaigns.find((c: { slug: string }) => c.slug === 'five');
+    expect(row.mapsToPlay).toBe(3);
+  });
+
+  it('clears the rule when given null', async () => {
+    publishFive();
+    setMapsToPlay(db, 'five', 3);
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'five', { maps: null })).statusCode).toBe(200);
+    expect(getMapsToPlay(db, 'five')).toBeNull();
+  });
+
+  // Stock campaigns are configurable here too and have no custom_campaigns row.
+  it('accepts a stock campaign', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'dead_air', { maps: 5 })).statusCode).toBe(200);
+    expect(getMapsToPlay(db, 'dead_air')).toBe(5);
+  });
+
+  it('refuses a campaign nothing knows about', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'nope', { maps: 2 })).statusCode).toBe(404);
+  });
+
+  // Zero would mean a match with no maps. Refuse rather than store it and rely
+  // on stopAfterMap quietly ignoring it later.
+  it.each([0, -1, 2.5])('refuses a nonsense rule of %s', async (maps) => {
+    publishFive();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'five', { maps })).statusCode).toBe(400);
+    expect(getMapsToPlay(db, 'five')).toBeNull();
+  });
+
+  it('refuses a non-admin', async () => {
+    publishFive();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'five', { maps: 3 }, '76561198000000009')).statusCode).toBe(403);
+    expect(getMapsToPlay(db, 'five')).toBeNull();
   });
 });

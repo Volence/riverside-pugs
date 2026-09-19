@@ -504,6 +504,16 @@ export interface AdminCampaign {
   uploaded_by: string | null; uploaded_at: number; notes: string | null;
   chapters: AdminChapter[];
   installs: AdminInstall[];
+  /** Null when unconfigured: the campaign plays every chapter but the last,
+   *  the same default the plugin falls back to on its own. */
+  mapsToPlay: number | null;
+  /** Every map in play order, from the registry. Empty when the site cannot
+   *  see this campaign's chapters (e.g. a stock campaign with no
+   *  MISSIONS_DIR configured), which is also what disables this control. */
+  maps: string[];
+  /** True for the stock four, which have no custom_campaigns row and so no
+   *  upload, reinstall or delete controls. */
+  stock: boolean;
 }
 
 export interface ReportEligibility {
@@ -679,6 +689,8 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/publish`, { name }),
   reinstallCampaign: (slug: string) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/reinstall`, {}),
+  setMapsToPlay: (slug: string, maps: number | null) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/maps-to-play`, { maps }),
   deleteCampaign: (slug: string) =>
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
 };
