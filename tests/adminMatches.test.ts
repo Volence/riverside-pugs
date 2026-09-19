@@ -5,9 +5,11 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { completeMatch } from '../src/matchResult.js';
 import { recomputeSeasonRatings } from '../src/rating.js';
-import { addServer } from '../src/serverPool.js';
+import { addServer, markLive } from '../src/serverPool.js';
 import type { Dump } from '../src/dumpParse.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
+import { abortMatch } from '../src/admin/matches.js';
+import { ServerReleaser } from '../src/serverRelease.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ADMIN = IDS[0];
@@ -144,5 +146,21 @@ describe('admin matches', () => {
       expect((await app.inject({ method: 'POST', url, cookies: user, payload: {} })).statusCode, url).toBe(403);
     }
     expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: user })).statusCode).toBe(403);
+  });
+});
+
+describe('admin abort teardown', () => {
+  it('releases the box with a teardown', async () => {
+    const db = openDb(':memory:');
+    const serverId = addServer(db, { name: 's', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    markLive(db, serverId);
+    const mid = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (1, 'live', 'no_mercy', ?, ?)",
+    ).run(serverId, 'b'.repeat(32)).lastInsertRowid);
+    const seen: boolean[] = [];
+    const releaser = new ServerReleaser(db, async (_s, _t, opts) => { seen.push(opts.teardown); });
+    expect(abortMatch(db, releaser, mid)).toEqual({ ok: true });
+    await new Promise((r) => setImmediate(r));
+    expect(seen).toEqual([true]);
   });
 });

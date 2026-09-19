@@ -70,7 +70,7 @@ export async function handleAbandon(deps: AbandonDeps, token: string, steamid: s
     })();
     if (!changed) return null;
     clearLive(db, match.id);
-    deps.releaser.release(match.server_id);
+    deps.releaser.release(match.server_id, { teardown: true });
     publishAdminEvent({ kind: 'abandon', steamid, matchId: match.id, minutes });
     console.warn(`[abandon] match ${match.id} ended: ${steamid} abandoned it; banned for ${minutes} minutes`);
     return match.id;

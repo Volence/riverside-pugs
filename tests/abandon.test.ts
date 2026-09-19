@@ -99,3 +99,16 @@ describe('statusShowsAbandoner', () => {
     expect(statusShowsAbandoner(body.replace(IDS[2], 'none'), IDS[2])).toBe(false);
   });
 });
+
+describe('abandon teardown', () => {
+  it('releases the box with a teardown', async () => {
+    const calls: { id: number; opts: unknown }[] = [];
+    const d = {
+      db,
+      releaser: { release: (id: number, opts: unknown) => void calls.push({ id, opts }) } as never,
+      confirm: async () => true,
+    };
+    await handleAbandon(d, TOKEN, IDS[0]);
+    expect(calls).toEqual([{ id: serverId, opts: { teardown: true } }]);
+  });
+});

@@ -139,6 +139,30 @@ describe('ServerReleaser', () => {
     const releaser = new ServerReleaser(db, async () => {});
     expect(() => releaser.release(999)).not.toThrow();
   });
+
+  it('tells the cleaner this is not a teardown unless asked', async () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    markLive(db, id);
+    const seen: boolean[] = [];
+    const clear: ServerCleaner = async (_s, _t, opts) => { seen.push(opts.teardown); };
+    const releaser = new ServerReleaser(db, clear);
+    releaser.release(id);
+    await new Promise((r) => setImmediate(r));
+    expect(seen).toEqual([false]);
+  });
+
+  it('passes a requested teardown through to the cleaner', async () => {
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    markLive(db, id);
+    const seen: boolean[] = [];
+    const clear: ServerCleaner = async (_s, _t, opts) => { seen.push(opts.teardown); };
+    const releaser = new ServerReleaser(db, clear);
+    releaser.release(id, { teardown: true });
+    await new Promise((r) => setImmediate(r));
+    expect(seen).toEqual([true]);
+  });
 });
 
 describe('reconcileServers', () => {

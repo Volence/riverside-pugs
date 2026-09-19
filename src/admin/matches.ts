@@ -61,7 +61,7 @@ export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): A
   if (!m) return { ok: false, status: 404, error: 'no such match' };
   if (m.state !== 'configuring' && m.state !== 'live') return { ok: false, status: 409, error: `match is ${m.state}` };
   db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?").run(matchId);
-  if (m.server_id !== null) releaser.release(m.server_id);
+  if (m.server_id !== null) releaser.release(m.server_id, { teardown: true });
   clearLive(db, matchId);
   return { ok: true };
 }
