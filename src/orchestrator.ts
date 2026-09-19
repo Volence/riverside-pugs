@@ -137,8 +137,12 @@ export class RealOrchestrator implements Orchestrator {
       // rather than guessed when we do not: the plugin then keeps using its own
       // NextMapIsFinale(), which is what every self-started match relies on and
       // what every match did before this argument existed.
+      // Quoted for the same reason the roster line below is: an uploaded VPK's
+      // mission file can put anything between quotes (src/vpk.ts does not
+      // validate map names), and an unquoted space would truncate the arg at
+      // GetCmdArg(4) while an unquoted ';' would inject a console command.
       const stopMap = stopAfterMap(this.db, match.campaign);
-      const stopArg = stopMap ? ` ${stopMap}` : '';
+      const stopArg = stopMap ? ` "${stopMap}"` : '';
       await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}${stopArg}`);
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
       // unquoted args on ':', so the plugin would receive a bare steamid, reject

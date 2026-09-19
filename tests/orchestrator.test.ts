@@ -467,8 +467,30 @@ describe('stop-after map', () => {
 
     await orch.setupMatch(mid);
 
-    // Default rule: one before the last, so the fourth of five.
-    expect(matchCmd(cmds).endsWith(' m4')).toBe(true);
+    // Default rule: one before the last, so the fourth of five. Quoted like
+    // the roster arg above it, since a chapter map name is uploaded data, not
+    // something the backend can trust to be one bare token.
+    expect(matchCmd(cmds).endsWith(' "m4"')).toBe(true);
+  });
+
+  // A map name straight out of an uploaded VPK's mission file is not
+  // validated (src/vpk.ts tokenizes any bytes between quotes), so a name with
+  // a space must still survive as a single fourth argument. Unquoted, Source's
+  // console tokenizer would split it and GetCmdArg(4) would see only the
+  // first word, silently breaking the stop point with no error anywhere.
+  it('quotes a stop map whose name contains a space', async () => {
+    const { orch, cmds } = await setup();
+    insertDraft(db, {
+      slug: 'spacey', name: 'Spacey', vpkFilename: 'spacey.vpk',
+      sizeBytes: 1, sha256: 'b'.repeat(64), uploadedBy: null,
+    }, [1, 2, 3].map((n) => ({ map: n === 2 ? 'm two' : `m${n}`, display: null, isFinale: n === 3 })));
+    publishCampaign(db, 'spacey', 'Spacey');
+    invalidateCampaignCache();
+    const mid = seedMatch(db, 'spacey');
+
+    await orch.setupMatch(mid);
+
+    expect(matchCmd(cmds).endsWith(' "m two"')).toBe(true);
   });
 
   // This is the regression guard for every match the site already runs. A
