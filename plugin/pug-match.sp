@@ -2059,11 +2059,12 @@ public Action Cmd_Dump(int args)
  *  that produced it, per-map results so far, and the pending-finalize flag. */
 public Action Cmd_Status(int args)
 {
-	DumpLine("STATUS state=%s match=%d token=%s campaign=%s map=%s",
+	DumpLine("STATUS state=%s match=%d token=%s campaign=%s map=%s stopAfterMap=%s",
 		StateName(g_State), g_iMatchId,
 		g_sToken[0] == '\0' ? "(none)" : g_sToken,
 		g_sCampaign[0] == '\0' ? "(none)" : g_sCampaign,
-		g_sCurrentMap);
+		g_sCurrentMap,
+		g_sStopAfterMap[0] == '\0' ? "(none)" : g_sStopAfterMap);
 	DumpLine("STATUS orient a=%s b=%s round1Logical=%d round1SurvPug=%d logicalOfA=%d minOrient=%d debug=%d",
 		SideName(g_iPugSide[1]), SideName(g_iPugSide[2]),
 		g_iRound1Logical, g_iRound1SurvPug, g_iLogicalOfPugA, g_cvMinOrient.IntValue, g_cvDebug.IntValue);
@@ -2544,7 +2545,14 @@ public void OnMapStart()
 	// This is the FIRST statement of the forward on purpose. RplClose below
 	// can in principle throw, and an unwind before this line costs a map its
 	// result: no replay problem is ever allowed to do that.
+	bool lateFinalize = g_bPendingFinalize;
 	if (g_bPendingFinalize) FinalizeMap();
+	// FinishSecondHalf owns the stop-map check, and this failsafe bypasses it.
+	// Without this, a campaign cut short keeps playing whenever the score read
+	// loses its race with the changelevel (match 34, 2026-09-17).
+	if (lateFinalize && g_State == MS_Live && g_sStopAfterMap[0] != '\0'
+		&& StrEqual(g_sCurrentMap, g_sStopAfterMap, false))
+		EndMatchNow("stop map done");
 
 	// Belt and braces to OnMapEnd: a changelevel is not a round_end, and a
 	// replay left open across one (e.g. the plugin was loaded mid-map, so no
@@ -2580,7 +2588,15 @@ public void OnMapStart()
 	// Campaign-minus-finale complete: freeze and report. Before StartMatchDemo,
 	// like the campaign-change end above, so the finale never gets a match
 	// demo of its own (each match used to list a 1 MB stub for it).
-	if (g_State == MS_Live && L4D_IsMissionFinalMap(true)) EndMatchNow("finale loaded");
+	//
+	// A backend-supplied stop map owns the end of the match. Without this the
+	// finale backstop would end a match the moment the finale loads, which is
+	// the one map an admin asking to play the finale wants played and scored.
+	// An empty g_sStopAfterMap can never equal a real map name, so every match
+	// without a stop map takes this branch exactly as before.
+	if (g_State == MS_Live && L4D_IsMissionFinalMap(true)
+		&& !StrEqual(g_sCurrentMap, g_sStopAfterMap, false))
+		EndMatchNow("finale loaded");
 
 	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
 }
@@ -3071,8 +3087,10 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
  *  match is already ending. */
 void FinishSecondHalf()
 {
-	// g_sCurrentMap is read before FinalizeMap so the comparison is against the
-	// map that was just played, not whatever a pending changelevel has set.
+	// Copied rather than compared against g_sCurrentMap directly below: defensive
+	// against FinalizeMap ever growing a reason to write that global. It only
+	// reads it today, so this local is not load bearing, but the stop-map
+	// comparison should not have to be re-audited if that ever changes.
 	char justPlayed[64];
 	strcopy(justPlayed, sizeof(justPlayed), g_sCurrentMap);
 
