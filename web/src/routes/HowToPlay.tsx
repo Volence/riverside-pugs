@@ -49,6 +49,10 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>Matches where too few people connect are cancelled automatically after 10 minutes, and nobody who connected is penalised. If something else is wrong, tell an admin in Discord: they can abort a match and free the server.</>,
   },
   {
+    q: 'I was dropped while loading with "Server is enforcing consistency for this file".',
+    a: <>Your copy of the file it names has been modified, usually by a skin, a no-trees pack or a silenced-weapons pack. Remove that addon or verify your game files in Steam and you can connect straight away. <a href="/help/consistency">Step by step</a>.</>,
+  },
+  {
     q: 'My demo crashes when I play it back.',
     a: <>Load any versus map first (<code>map l4d_vs_hospital01_apartment versus</code>), then <code>playdemo</code>. Loading a versus demo from the main menu crashes the game. The match page has the full steps next to the downloads.</>,
   },
