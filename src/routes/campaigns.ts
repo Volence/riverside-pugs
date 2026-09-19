@@ -10,7 +10,7 @@ import type { DB } from '../db.js';
 import { makeRequireAdmin } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { CAMPAIGNS } from '../campaigns.js';
-import { campaignRegistry, invalidateCampaignCache } from '../campaignRegistry.js';
+import { campaignRegistry, invalidateCampaignCache, stockChaptersOf } from '../campaignRegistry.js';
 import { allMapsToPlay, clearMapsToPlay, setMapsToPlay } from '../campaignRules.js';
 import { transportFor } from '../addonsTransport.js';
 import { installCampaign, uninstallCampaign, type InstallTarget } from '../campaignInstall.js';
@@ -146,12 +146,25 @@ export async function campaignRoutes(
     // a stock finale for exactly the same reason as a custom one, so they get
     // a row here too: published, no installs (nothing to install), no upload
     // controls (the UI hides those behind `stock`).
-    const stock = [...registry.values()].filter((c) => !c.custom).map((c) => ({
-      slug: c.slug, name: c.name, vpk_filename: '', size_bytes: 0, sha256: '',
-      state: 'published' as const, enabled: 1, uploaded_by: null, uploaded_at: 0,
-      notes: null, chapters: [], installs: [],
-      mapsToPlay: rules.get(c.slug) ?? null, maps: c.maps, stock: true,
-    }));
+    const stock = [...registry.values()].filter((c) => !c.custom).map((c) => {
+      // Synthesized rather than read off a custom_campaigns-style table: the
+      // stock four have none. Shaped like AdminChapter anyway so the admin
+      // panel can reuse the same ChapterList component a custom card uses,
+      // rather than a second rendering path for the same "map, display,
+      // is this the finale" data.
+      const missionChapters = stockChaptersOf(db, c.slug);
+      const chapters = missionChapters.map((ch, i) => ({
+        slug: c.slug, ordinal: i, map: ch.map, display: ch.display,
+        is_finale: i === missionChapters.length - 1 ? 1 : 0,
+        included: 1, play_order: null,
+      }));
+      return {
+        slug: c.slug, name: c.name, vpk_filename: '', size_bytes: 0, sha256: '',
+        state: 'published' as const, enabled: 1, uploaded_by: null, uploaded_at: 0,
+        notes: null, chapters, installs: [],
+        mapsToPlay: rules.get(c.slug) ?? null, maps: c.maps, stock: true,
+      };
+    });
     return { free, campaigns: [...custom, ...stock] };
   });
 
