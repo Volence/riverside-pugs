@@ -20,6 +20,12 @@
  * and particles are read from its pak01_dir.vpk; sounds and scripts are loose
  * files on L4D1, so those are walked on disk.
  *
+ * --overlay names a search-path directory that SOME legitimate clients mount ahead
+ * of left4dead and others do not (left4dead_dlc4). A listed path that an overlay
+ * also ships, loose or in its pak01, would resolve differently for the two
+ * populations and disconnect one of them, so generation fails naming it. Defaults
+ * to <game>/../left4dead_dlc4 when that exists. May be given more than once.
+ *
  * --verify compares every loose file on the list against a second install and
  * names any that differ. Run it against a client before trusting a server: the
  * engine CRCs the SERVER's copy, so one customised sound on the server would
@@ -39,6 +45,8 @@ const flag = (name: string): string | null => {
 };
 const GAME = resolve(flag('--game') ?? '/home/volence/l4d1-ds/server/left4dead');
 const VERIFY = flag('--verify');
+const OVERLAYS = args.flatMap((a, i) => (a === '--overlay' && args[i + 1] ? [resolve(args[i + 1])] : []));
+if (OVERLAYS.length === 0 && existsSync(join(GAME, '../left4dead_dlc4'))) OVERLAYS.push(join(GAME, '../left4dead_dlc4'));
 const COMMONS = args.includes('--commons');
 const OUT = resolve(flag('--out') ?? join(here, '../consistency/configs/l4d_consistency.cfg'));
 
@@ -78,11 +86,16 @@ const GROUPS: Group[] = [
     n: 3, title: 'gunfire and the soundscripts',
     rules: [
       ...GUNS.map((g): Rule => ({ from: 'loose', dir: `sound/weapons/${g}/gunfire`, ext: ['wav'] })),
-      // The manifest AND every soundscript it loads, not just the weapons one: a
-      // sound entry can be redefined from any script the manifest names, so
-      // forcing game_sounds_weapons.txt alone leaves the quiet-gun edit open one
-      // file over. soundmixers.txt sets per-category volume, the same trick again.
-      { from: 'loose', file: 'scripts/game_sounds_manifest.txt' },
+      // Every soundscript the manifest loads, not just the weapons one: a sound
+      // entry can be redefined from any script the manifest names, so forcing
+      // game_sounds_weapons.txt alone leaves the quiet-gun edit open one file
+      // over. soundmixers.txt sets per-category volume, the same trick again.
+      //
+      // The manifest ITSELF is deliberately absent. The l4d2-on-l4d1 pack
+      // (left4dead_dlc4, which Dallas mounts and which players need for the
+      // L4D2 maps) ships its own game_sounds_manifest.txt, so a server with the
+      // pack and a client without it, or the reverse, resolve different files
+      // and the stock player is the one disconnected. See --overlay.
       { from: 'manifest' },
       { from: 'loose', file: 'scripts/soundmixers.txt' },
     ],
@@ -212,6 +225,23 @@ for (const g of groups) {
   total += paths.length;
 }
 console.log(`total:   ${String(total).padStart(4)}`);
+
+for (const overlay of OVERLAYS) {
+  const inPak = existsSync(join(overlay, 'pak01_dir.vpk')) ? listVpkPaths(join(overlay, 'pak01_dir.vpk')) : [];
+  const shipped = new Set(inPak.map((p) => p.toLowerCase()));
+  const walkAll = (abs: string, rel: string): void => {
+    for (const name of readdirSync(abs)) {
+      const childAbs = join(abs, name), childRel = rel ? `${rel}/${name}` : name;
+      if (statSync(childAbs).isDirectory()) walkAll(childAbs, childRel);
+      else shipped.add(childRel.toLowerCase());
+    }
+  };
+  walkAll(overlay, '');
+  const hits = [...seen].filter((p) => shipped.has(p));
+  for (const h of hits) console.error(`overlay ${overlay} also ships a listed path: ${h}`);
+  console.log(`overlay: ${overlay}: ${shipped.size} paths, ${hits.length} on the list`);
+  if (hits.length) failed = true;
+}
 if (failed) process.exit(1);
 
 if (VERIFY) {
