@@ -3,6 +3,7 @@ import { displaySr } from '../rating.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
+import { publishBanChange } from '../banEvents.js';
 
 export interface BanRow {
   id: number;
@@ -44,6 +45,8 @@ export function banPlayer(
       .run(steamid, reason, by, now.toISOString(), expires);
     db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
   })();
+  // After the commit, never inside it: a subscriber may dial RCON.
+  publishBanChange({ kind: 'ban', steamid, reason });
 }
 
 /** Lift every open ban and restore the player to active. */
@@ -53,6 +56,7 @@ export function unbanPlayer(db: DB, steamid: string, by: string, now = new Date(
       .run(by, now.toISOString(), steamid);
     db.prepare("UPDATE players SET status = 'active' WHERE steamid = ? AND status = 'banned'").run(steamid);
   })();
+  publishBanChange({ kind: 'unban', steamid });
 }
 
 /** Runs on the 60 s reaper. A banned player whose every ban has run out goes
@@ -69,6 +73,7 @@ export function liftExpiredBans(db: DB, now = new Date()): string[] {
     if (!activeBan(db, player_id, now)) {
       db.prepare("UPDATE players SET status = 'active' WHERE steamid = ? AND status = 'banned'").run(player_id);
       lifted.push(player_id);
+      publishBanChange({ kind: 'unban', steamid: player_id });
     }
   }
   return lifted;
