@@ -184,6 +184,27 @@ CREATE TABLE IF NOT EXISTS match_pauses (
   ended_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS match_pauses_match ON match_pauses(match_id);
+-- Every ready-up of a match, and who was still not ready in the last report
+-- before it went live (a JSON list of steamids). Kept after the match ends.
+CREATE TABLE IF NOT EXISTS match_readyups (
+  id           INTEGER PRIMARY KEY,
+  match_id     INTEGER NOT NULL REFERENCES matches(id),
+  map_ordinal  INTEGER NOT NULL,
+  half         INTEGER,
+  started_at   TEXT NOT NULL,
+  ended_at     TEXT,
+  last_unready TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS match_readyups_match ON match_readyups(match_id);
+-- Seconds each player spent not ready in one ready-up, summed from the
+-- intervals between the plugin's roster reports.
+CREATE TABLE IF NOT EXISTS match_readyup_players (
+  readyup_id INTEGER NOT NULL REFERENCES match_readyups(id),
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  player_id  TEXT    NOT NULL,
+  seconds    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (readyup_id, player_id)
+);
 CREATE TABLE IF NOT EXISTS match_live_events (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   -- Which map of the match this happened on, stamped at write time from the
@@ -520,6 +541,10 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'match_live', 'phase_team', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_limit', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'match_live', 'phase_leave', 'INTEGER NOT NULL DEFAULT 0');
+  // The not-ready roster as last reported (JSON), and when that report
+  // arrived, so the seconds since can be charged to those players.
+  ensureColumn(db, 'match_live', 'phase_unready', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_unready_at', 'TEXT');
   // -1, not 0 or NULL: ALTER TABLE ADD COLUMN on a populated table needs a
   // non-null default, and 0 is a real value here (an event in the first
   // millisecond of a round). -1 means "recorded before round timing existed".

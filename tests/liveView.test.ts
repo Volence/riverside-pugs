@@ -5,7 +5,7 @@ import { ServerReleaser } from '../src/serverRelease.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, clearLive, getLiveMatches,
   STALE_AFTER_MS, LIVE_EVENT_LIMIT, reapOrphanedMatches, ORPHAN_AFTER_MS, mapStatsFor, eventsFor,
-  recordRoundStart, recordRoundEnd, roundsFor, recordChat, recordPhase, pausesFor,
+  recordRoundStart, recordRoundEnd, roundsFor, recordChat, recordPhase, pausesFor, readyupsFor, slowToReady,
 } from '../src/liveView.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -723,8 +723,8 @@ describe('recordChat', () => {
 });
 
 describe('liveView: match phase', () => {
-  const paused = { state: 'paused' as const, team: 'a' as const, limit: 120, leave: false };
-  const live = { state: 'live' as const, team: null, limit: 0, leave: false };
+  const paused = { state: 'paused' as const, team: 'a' as const, limit: 120, leave: false, unready: [] };
+  const live = { state: 'live' as const, team: null, limit: 0, leave: false, unready: [] };
 
   it('exposes the reported phase, with when it began, on the live match', () => {
     seedLive();
@@ -789,7 +789,7 @@ describe('liveView: match phase', () => {
 
   it('records a disconnect pause as nobody\'s', () => {
     const id = seedLive();
-    recordPhase(db, TOKEN, { state: 'paused', team: null, limit: 0, leave: true });
+    recordPhase(db, TOKEN, { state: 'paused', team: null, limit: 0, leave: true, unready: [] });
     expect(pausesFor(db, id)).toMatchObject([{ team: null, leave: true }]);
   });
 
@@ -806,5 +806,87 @@ describe('liveView: match phase', () => {
     recordPhase(db, TOKEN, live);
     clearLive(db, id);
     expect(pausesFor(db, id)).toHaveLength(1);
+  });
+});
+
+describe('liveView: ready-up ledger', () => {
+  const ready = (unready: string[]) => ({ state: 'readyup' as const, team: null, limit: 0, leave: false, unready });
+  const live = { state: 'live' as const, team: null, limit: 0, leave: false, unready: [] as string[] };
+  const backdate = (table: string, col: string, secs: number, where = '1=1') => {
+    const t = new Date(Date.now() - secs * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare(`UPDATE ${table} SET ${col} = ? WHERE ${where}`).run(t);
+  };
+
+  it('records how long a ready-up took and who readied last', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, ready([A[0], B[1]]));
+    expect(readyupsFor(db, id)).toMatchObject([{ mapOrdinal: 0, endedAt: null, seconds: null, lastUnready: [A[0], B[1]] }]);
+    backdate('match_readyups', 'started_at', 100);
+    recordPhase(db, TOKEN, ready([B[1]]));
+    recordPhase(db, TOKEN, ready([]));
+    recordPhase(db, TOKEN, live);
+    const [r] = readyupsFor(db, id);
+    expect(r.endedAt).not.toBeNull();
+    expect(r.seconds).toBeGreaterThanOrEqual(99);
+    // The last set that still held anyone: the empty set at the end is the
+    // countdown, not a person.
+    expect(r.lastUnready).toEqual([B[1]]);
+    expect(r.lastUnreadyNames).toEqual([`p${B[1].slice(-1)}`]);
+  });
+
+  it('charges each player the seconds they spent not ready', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, ready([A[0], B[1]]));
+    // Forty seconds with both unready, then sixty more with only B[1].
+    backdate('match_live', 'phase_unready_at', 40);
+    backdate('match_readyups', 'started_at', 40);
+    recordPhase(db, TOKEN, ready([B[1]]));
+    backdate('match_live', 'phase_unready_at', 60);
+    backdate('match_readyups', 'started_at', 100);
+    recordPhase(db, TOKEN, live);
+    const [r] = readyupsFor(db, id);
+    const by = Object.fromEntries(r.players.map((p) => [p.steamid, p.seconds]));
+    expect(by[A[0]]).toBeGreaterThanOrEqual(39);
+    expect(by[A[0]]).toBeLessThanOrEqual(42);
+    expect(by[B[1]]).toBeGreaterThanOrEqual(99);
+    expect(by[B[1]]).toBeLessThanOrEqual(102);
+  });
+
+  it('treats a repeated identical roster as confirmation, not a new ready-up', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, ready([A[0]]));
+    recordPhase(db, TOKEN, ready([A[0]]));
+    recordPhase(db, TOKEN, live);
+    expect(readyupsFor(db, id)).toHaveLength(1);
+  });
+
+  it('exposes the not-ready roster on the live phase', () => {
+    seedLive();
+    recordPhase(db, TOKEN, ready([A[1]]));
+    expect(getLiveMatches(db)[0].phase).toMatchObject({ state: 'readyup', unready: [A[1]] });
+  });
+
+  it('ranks players across matches by how slow they are to ready', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, ready([A[0], A[1]]));
+    backdate('match_live', 'phase_unready_at', 30);
+    backdate('match_readyups', 'started_at', 30);
+    recordPhase(db, TOKEN, ready([A[0]]));
+    backdate('match_live', 'phase_unready_at', 90);
+    backdate('match_readyups', 'started_at', 120);
+    recordPhase(db, TOKEN, live);
+    recordPhase(db, TOKEN, ready([A[0]]));
+    backdate('match_live', 'phase_unready_at', 20, 'phase = \'readyup\'');
+    backdate('match_readyups', 'started_at', 20, 'ended_at IS NULL');
+    recordPhase(db, TOKEN, live);
+    clearLive(db, id);
+
+    const rows = slowToReady(db);
+    expect(rows[0]).toMatchObject({ steamid: A[0], name: `p${A[0].slice(-1)}`, readyups: 2, timesLast: 2 });
+    expect(rows[0].totalSeconds).toBeGreaterThanOrEqual(138);
+    expect(rows[0].avgSeconds).toBeGreaterThanOrEqual(69);
+    expect(rows[1]).toMatchObject({ steamid: A[1], readyups: 1, timesLast: 0 });
+    expect(rows[1].totalSeconds).toBeGreaterThanOrEqual(29);
+    expect(rows[1].totalSeconds).toBeLessThanOrEqual(32);
   });
 });

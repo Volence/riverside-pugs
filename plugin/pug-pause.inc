@@ -48,7 +48,7 @@ bool g_bPauseSeen;            // whether the game was paused on the previous tic
 float g_fPauseStarted;        // engine time the current pause began
 float g_fPauseHeld;           // seconds the ceiling clock has been held while a player is absent
 int g_iPauseWarned;           // last warning threshold announced, in seconds remaining
-char g_sPhaseLast[16];        // last phase word sent, so PHASE goes out on change only (see the phase section)
+char g_sPhaseLast[320];       // last PHASE fields sent, so a line goes out on change only (see the phase section)
 
 void PauseInit()
 {
@@ -306,13 +306,41 @@ void PhaseFields(const char[] key, char[] out, int len)
 		Format(out, len, "%s=%s team=%d limit=%d leave=%d",
 			key, state, g_iPauseOwner, g_cvPauseSeconds.IntValue, g_bLeavePaused ? 1 : 0);
 	}
+	else if (StrEqual(state, "readyup"))
+	{
+		// Who everyone is waiting on: rostered, in game, not readied. The
+		// backend charges the seconds between reports to these players and
+		// remembers the last roster that named anyone as who readied last.
+		char ids[MAX_ROSTER * 19];
+		PhaseUnready(ids, sizeof(ids));
+		Format(out, len, "%s=%s unready=%s", key, state, ids);
+	}
 	else
 	{
 		Format(out, len, "%s=%s", key, state);
 	}
 }
 
-/** Once a second from Timer_PauseClock. Emits only on a change. */
+/** Comma-separated steamids of rostered, connected players who have not
+ *  readied. Empty when readyup's per-player native is not there. */
+static void PhaseUnready(char[] out, int len)
+{
+	out[0] = '\0';
+	if (!g_bReadyUpAvailable) return;
+	if (GetFeatureStatus(FeatureType_Native, "IsReady") != FeatureStatus_Available) return;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
+		int slot = g_iClientRoster[c];
+		if (slot < 0 || g_sRosterId[slot][0] == '\0') continue;
+		if (IsReady(c)) continue;
+		if (out[0] != '\0') StrCat(out, len, ",");
+		StrCat(out, len, g_sRosterId[slot]);
+	}
+}
+
+/** Once a second from Timer_PauseClock. Emits only when the fields change,
+ *  which during a ready-up means every time someone readies. */
 void PhaseTick()
 {
 	if (g_State == MS_None)
@@ -320,12 +348,10 @@ void PhaseTick()
 		g_sPhaseLast[0] = '\0';
 		return;
 	}
-	char now[16];
-	PhaseCurrent(now, sizeof(now));
-	if (StrEqual(now, g_sPhaseLast)) return;
-	strcopy(g_sPhaseLast, sizeof(g_sPhaseLast), now);
-	char fields[96];
+	char fields[320];
 	PhaseFields("state", fields, sizeof(fields));
+	if (StrEqual(fields, g_sPhaseLast)) return;
+	strcopy(g_sPhaseLast, sizeof(g_sPhaseLast), fields);
 	EmitPug("PHASE %s", fields);
 }
 
@@ -334,6 +360,6 @@ void PhaseTick()
 void PhaseMapEnd()
 {
 	if (g_State == MS_None) return;
-	strcopy(g_sPhaseLast, sizeof(g_sPhaseLast), "loading");
+	strcopy(g_sPhaseLast, sizeof(g_sPhaseLast), "state=loading");
 	EmitPug("PHASE state=loading");
 }

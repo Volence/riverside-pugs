@@ -2223,7 +2223,7 @@ public Action Timer_Heartbeat(Handle timer)
 	if (g_State != MS_None)
 	{
 		// The phase rides on the heartbeat so a lost PHASE line self-corrects.
-		char fields[96];
+		char fields[320];
 		PhaseFields("phase", fields, sizeof(fields));
 		EmitPug("HEARTBEAT %s", fields);
 	}

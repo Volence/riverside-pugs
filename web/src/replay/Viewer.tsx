@@ -361,6 +361,7 @@ export function Viewer(
           live={live}
           closed={closed}
           phase={phase}
+          names={names}
           toggles={toggles}
           toggle={toggle}
           theater={theaterChip}
@@ -457,6 +458,7 @@ export function Viewer(
           live={live}
           closed={closed}
           phase={phase}
+          names={names}
         />
       </div>
     );
