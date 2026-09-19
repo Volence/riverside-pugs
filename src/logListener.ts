@@ -4,8 +4,11 @@ import { parseLogDatagram, type LogEvent } from './logParse.js';
 
 /**
  * Binds a UDP socket for srcds `logaddress` traffic. Datagrams are parsed and,
- * if their token is registered, handed to the callback. Everything else (bad
- * parse, unknown token) is dropped, because the stream is untrusted and lossy by design.
+ * if their token is registered, handed to the callback. Two things may arrive
+ * without a registered token, and both are admitted by the sender's address
+ * instead: the in-game match-create burst, and the token-less lines
+ * (`L4DC SIGNON_DROP`, "entered the game"), which can only ever produce a hint.
+ * Everything else is dropped, because the stream is untrusted and lossy by design.
  */
 /** The only line kinds a not-yet-registered token may carry. These are the
  *  in-game `!load_4v4p` burst, whose token the plugin generates and we
@@ -32,16 +35,24 @@ export class LogListener {
       sock.on('message', (msg, rinfo) => {
         const ev = parseLogDatagram(msg);
         if (!ev) return;
-        // Token-less lines have no token to gate on. Dropped until the
-        // address-pinned admission for them exists, which is the next commit.
-        if (ev.kind === 'signon_drop' || ev.kind === 'entered') return;
+        // Both address-pinned paths below ask the same question: is this
+        // datagram from a game server we know? UDP source addresses are
+        // trivially spoofable off-path but not from the open internet against
+        // a feed port the firewall does not open.
+        const fromGameServer = (): boolean =>
+          this.matchCreateSources.has(rinfo.address) || this.matchCreateCheck?.(rinfo.address) === true;
+        // Token-less lines (the consistency plugin's SIGNON_DROP and the
+        // engine's "entered the game") have no token to gate on, so the
+        // sender's address is the ONLY gate. Checked first and returned from
+        // unconditionally: nothing below may ever see an event without a token.
+        if (ev.kind === 'signon_drop' || ev.kind === 'entered') {
+          if (fromGameServer()) this.onEvent(ev, rinfo.address);
+          return;
+        }
         if (this.tokens.has(ev.token)) return this.onEvent(ev, rinfo.address);
-        // MATCH_CREATE is the first line that can cause database writes, and
-        // UDP source addresses are trivially spoofable off-path but not from
-        // the open internet against a localhost-only feed. Admission is
-        // therefore pinned to the configured game server's address.
-        if (SELF_START_KINDS.has(ev.kind)
-          && (this.matchCreateSources.has(rinfo.address) || this.matchCreateCheck?.(rinfo.address))) {
+        // MATCH_CREATE is the first line that can cause database writes.
+        // Admission is therefore pinned to the configured game server's address.
+        if (SELF_START_KINDS.has(ev.kind) && fromGameServer()) {
           return this.onEvent(ev, rinfo.address);
         }
       });
