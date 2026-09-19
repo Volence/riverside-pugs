@@ -86,6 +86,9 @@ export interface ServerDeps {
   /** Overrides the campaign upload's multipart file-size limit. Injected in
    *  tests to exercise the truncation path without a multi-gigabyte body. */
   maxUploadBytes?: number;
+  /** Overrides where the campaign uploader reads the enforced file list from.
+   *  Injected in tests only; production reads the committed cfg. */
+  consistencyListPath?: string;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -755,6 +758,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
+    consistencyListPath: deps.consistencyListPath,
   });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
