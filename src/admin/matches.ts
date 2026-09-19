@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import type { ServerReleaser } from '../serverRelease.js';
-import { clearLive } from '../liveView.js';
+import { clearLive, pausesFor } from '../liveView.js';
 import { matchForecast, recomputeSeasonRatings } from '../rating.js';
 import { getServer } from '../serverPool.js';
 import { serverPasswordFor } from '../matchToken.js';
@@ -43,7 +43,9 @@ export function adminOverview(db: DB) {
   const recent = (db.prepare(
     `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
      FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT 30`,
-  ).all() as { id: number }[]).map((m) => ({ ...m, forecast: matchForecast(db, m.id) }));
+  // Pauses ride along per match: when one side says the other paused them
+  // to death, this is the record, and it outlives the live scratch tables.
+  ).all() as { id: number }[]).map((m) => ({ ...m, forecast: matchForecast(db, m.id), pauses: pausesFor(db, m.id) }));
   const voided = db.prepare(
     `SELECT id, campaign, voided_at AS voidedAt, void_reason AS voidReason
      FROM matches WHERE voided_at IS NOT NULL ORDER BY voided_at DESC LIMIT 30`,

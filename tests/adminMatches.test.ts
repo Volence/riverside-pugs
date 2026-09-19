@@ -8,6 +8,7 @@ import { recomputeSeasonRatings } from '../src/rating.js';
 import { addServer } from '../src/serverPool.js';
 import type { Dump } from '../src/dumpParse.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
+import { recordPhase } from '../src/liveView.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ADMIN = IDS[0];
@@ -67,6 +68,31 @@ describe('admin matches', () => {
     expect(o.queue.map((p: { steamid: string }) => p.steamid)).toEqual([IDS[3]]);
     expect(o.open).toEqual([]);
     expect(JSON.stringify(o)).not.toContain('rcon');
+  });
+
+  it('overview lists each recent match\'s pauses, for when a team complains about the other side\'s', async () => {
+    const token = 'c'.repeat(32);
+    const matchId = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'dead_air', ?)").run(token).lastInsertRowid);
+    const ins = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
+    IDS.forEach((id, i) => ins.run(matchId, id, i < 4 ? 'a' : 'b'));
+    recordPhase(db, token, { state: 'paused', team: 'b', limit: 120, leave: false });
+    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false });
+    recordPhase(db, token, { state: 'paused', team: null, limit: 0, leave: true });
+    recordPhase(db, token, { state: 'live', team: null, limit: 0, leave: false });
+    const dump: Dump = {
+      matchId, maps: [{ map: 'm1', a: 300, b: 200 }],
+      players: IDS.map((steamid, i) => ({ steamid, team: i < 4 ? 'a' : 'b', sidmg: 1, sikill: 1, ck: 1, ff: 0, rev: 0 })),
+      skillDetect: false, skills: [], winner: 'a', totalA: 300, totalB: 200,
+    };
+    completeMatch(db, matchId, dump);
+
+    const o = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin })).json();
+    expect(o.recent[0].id).toBe(matchId);
+    expect(o.recent[0].pauses).toMatchObject([
+      { team: 'b', leave: false, mapOrdinal: 0 },
+      { team: null, leave: true, mapOrdinal: 0 },
+    ]);
+    expect(typeof o.recent[0].pauses[0].seconds).toBe('number');
   });
 
   it('void needs a reason, drops the match, recomputes later ratings, and is audited', async () => {

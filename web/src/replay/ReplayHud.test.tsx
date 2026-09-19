@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/preact';
-import { ReplayHud } from './ReplayHud';
+import { ReplayHud, liveStatusText } from './ReplayHud';
 import { DEFAULT_TOGGLES } from './useToggles';
 
 afterEach(cleanup);
@@ -59,5 +59,52 @@ describe('ReplayHud', () => {
     expect(chip.classList.contains('is-on')).toBe(true);
     fireEvent.click(chip);
     expect(t).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The words under the clock, as a pure function of what the server said.
+// `now` is passed in so the pause countdown is deterministic.
+describe('liveStatusText', () => {
+  const NOW = 1_700_000_000_000;
+  const phase = (over: object) => ({ state: 'live', team: null, limit: 0, leave: false, sinceMs: NOW - 30_000, ...over } as const);
+
+  it('names the pausing team and counts down the ceiling', () => {
+    expect(liveStatusText(true, false, 0, 0, phase({ state: 'paused', team: 'b', limit: 120 }), NOW))
+      .toBe('Paused by Team B, 1:30 left');
+  });
+
+  it('says only who paused when there is no ceiling', () => {
+    expect(liveStatusText(true, false, 0, 0, phase({ state: 'paused', team: 'a' }), NOW))
+      .toBe('Paused by Team A');
+  });
+
+  it('never counts below zero once the ceiling has passed', () => {
+    expect(liveStatusText(true, false, 0, 0, phase({ state: 'paused', team: 'a', limit: 10 }), NOW))
+      .toBe('Paused by Team A, 0:00 left');
+  });
+
+  it('explains a pause the plugin called for a dropped player', () => {
+    expect(liveStatusText(true, false, 0, 0, phase({ state: 'paused', leave: true }), NOW))
+      .toBe('Paused, waiting for a player to reconnect');
+  });
+
+  it('says paused with no blame when nobody is charged', () => {
+    expect(liveStatusText(true, false, 0, 0, phase({ state: 'paused' }), NOW)).toBe('Paused');
+  });
+
+  it('says readying up and loading', () => {
+    expect(liveStatusText(true, true, 0, 0, phase({ state: 'readyup' }), NOW)).toBe('Readying up');
+    expect(liveStatusText(true, true, 0, 0, phase({ state: 'loading' }), NOW)).toBe('Loading the next map');
+  });
+
+  it('falls back to the file state when the phase is live or unknown', () => {
+    expect(liveStatusText(true, false, 0, 0, phase({ state: 'live' }), NOW)).toBe('Live, 10s delayed');
+    expect(liveStatusText(true, true, 10, 10, phase({ state: 'live' }), NOW)).toBe('Round over, waiting for the next round');
+    expect(liveStatusText(true, true, 10, 10, null, NOW)).toBe('Round over, waiting for the next round');
+    expect(liveStatusText(true, true, 5, 10, phase({ state: 'roundover' }), NOW)).toBe('Round over, catching up');
+  });
+
+  it('says nothing for a saved replay whatever the phase', () => {
+    expect(liveStatusText(false, true, 0, 0, phase({ state: 'paused', team: 'a' }), NOW)).toBeNull();
   });
 });

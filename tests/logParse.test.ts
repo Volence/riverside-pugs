@@ -25,6 +25,41 @@ describe('parseLogDatagram', () => {
     expect(ev).toEqual({ kind: 'heartbeat', token: TOKEN });
   });
 
+  // The plugin's one-second phase tracker: what the game is doing between
+  // frames, so the live page can say "paused" or "readying up" instead of
+  // sitting on a frozen frame. team is the plugin's 1/2 for pug a/b, 0 for a
+  // pause nobody is charged for (a disconnect pause, an admin).
+  it('parses PHASE with the pause fields', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=2 limit=120 leave=0`));
+    expect(ev).toEqual({
+      kind: 'phase', token: TOKEN,
+      phase: { state: 'paused', team: 'b', limit: 120, leave: false },
+    });
+  });
+
+  it('parses a PHASE with no team or limit as an unattributed, uncapped state', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=readyup`));
+    expect(ev).toEqual({
+      kind: 'phase', token: TOKEN,
+      phase: { state: 'readyup', team: null, limit: 0, leave: false },
+    });
+  });
+
+  it('drops a PHASE whose state it does not know rather than storing a word it cannot render', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=teleporting`))).toBeNull();
+  });
+
+  // The heartbeat carries the phase too, so a lost PHASE datagram is corrected
+  // within thirty seconds. A heartbeat from an older plugin has no phase and
+  // parses exactly as before.
+  it('parses the phase riding on a HEARTBEAT', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} HEARTBEAT phase=paused team=0 limit=0 leave=1`));
+    expect(ev).toEqual({
+      kind: 'heartbeat', token: TOKEN,
+      phase: { state: 'paused', team: null, limit: 0, leave: true },
+    });
+  });
+
   it('parses PLAYER connect/disconnect', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} PLAYER steamid=76561198000000001 event=disconnect`));
     expect(ev).toEqual({ kind: 'player', token: TOKEN, steamid: '76561198000000001', event: 'disconnect' });
