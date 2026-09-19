@@ -1,4 +1,5 @@
 import { formatTime } from './ReplayControls';
+import { liveStatusText } from './ReplayHud';
 
 /** "fit" at 1, otherwise one decimal with a trailing .0 dropped: 2x, 2.4x. */
 export function zoomLabel(zoom: number): string {
@@ -29,7 +30,9 @@ export function TheaterStatus(
       <span class="tstat__item">{counts.commons} common</span>
       <span class="tstat__item">{counts.specials} specials</span>
       <span class="tstat__item">{zoomLabel(zoom)}</span>
-      {live && !closed && <span class="tstat__item tstat__item--live">Live, 10s delayed</span>}
+      {liveStatusText(live, closed, tMs, endMs) && (
+        <span class="tstat__item tstat__item--live">{liveStatusText(live, closed, tMs, endMs)}</span>
+      )}
     </div>
   );
 }

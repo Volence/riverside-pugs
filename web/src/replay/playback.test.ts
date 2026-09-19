@@ -41,6 +41,18 @@ describe('advance', () => {
     expect(advance(0, 16, 1, 500, true)).toBe(16);
   });
 
+  // When a round ends the server releases the ten seconds it was holding
+  // back in one batch. The snap rule saw a clock nine seconds behind and
+  // jumped to the end, skipping the finish of every round. A closed file's
+  // end never moves again, so there is nothing to catch up to: play it out.
+  it('plays a closed round out at real time while following instead of jumping', () => {
+    expect(advance(0, 16, 1, 10_000, true, true)).toBe(16);
+  });
+
+  it('still holds at the last frame of a closed round while following', () => {
+    expect(advance(9990, 16, 1, 10_000, true, true)).toBe(10_000);
+  });
+
   it('plays through a gap smaller than the snap distance rather than jumping', () => {
     const behind = 10_000 - LIVE_SNAP_MS + 10;
     expect(advance(behind, 16, 1, 10_000, true)).toBe(behind + 16);

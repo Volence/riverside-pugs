@@ -45,9 +45,19 @@ export const LIVE_SNAP_MS = 3000;
  */
 export function advance(
   tMs: number, elapsedMs: number, speed: number, endMs: number, following: boolean,
+  closed: boolean = false,
 ): number {
   const step = elapsedMs > MAX_STEP_MS ? MAX_STEP_MS : elapsedMs;
   if (following) {
+    // A closed file's end never moves again, so there is nothing to catch up
+    // to. This matters at the moment a round ends: the server releases the
+    // ten seconds it was holding back in one batch, which put the clock nine
+    // seconds behind the new end, and the snap below skipped the finish of
+    // every round. Play the tail out at real time instead.
+    if (closed) {
+      const next = tMs + step;
+      return next >= endMs ? endMs : next;
+    }
     // Live used to mean "sit on the newest frame". Frames arrive in one
     // second batches from the poll, so that snapped everyone forward once a
     // second and played nothing in between. Instead the clock runs at real
@@ -84,7 +94,9 @@ export interface Playback {
   seek(t: number): void; setSpeed(s: number): void; follow(): void;
 }
 
-export function usePlayback(endMs: number, opts: { live?: boolean } = {}): Playback {
+export function usePlayback(
+  endMs: number, opts: { live?: boolean; closed?: boolean } = {},
+): Playback {
   const tRef = useRef(0);
   const [tMs, setTMs] = useState(0);
   /** What the DOM was last told. Compared against `tRef` so the loop can skip
@@ -100,8 +112,9 @@ export function usePlayback(endMs: number, opts: { live?: boolean } = {}): Playb
 
   const endRef = useRef(endMs);
   endRef.current = endMs;
-  const stateRef = useRef({ playing, speed, following });
-  stateRef.current = { playing, speed, following };
+  const closed = Boolean(opts.closed);
+  const stateRef = useRef({ playing, speed, following, closed });
+  stateRef.current = { playing, speed, following, closed };
 
   useEffect(() => {
     let raf = 0;
@@ -113,7 +126,7 @@ export function usePlayback(endMs: number, opts: { live?: boolean } = {}): Playb
       last = now;
       const s = stateRef.current;
       if (s.playing) {
-        tRef.current = advance(tRef.current, elapsed, s.speed, endRef.current, s.following);
+        tRef.current = advance(tRef.current, elapsed, s.speed, endRef.current, s.following, s.closed);
       }
       // Publishing is separate from advancing rather than folded into the
       // branch above, so the last moment of a finished round still reaches

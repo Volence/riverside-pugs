@@ -25,6 +25,16 @@ describe('TheaterStatus', () => {
     );
     expect(screen.getByText(/live, 10s delayed/i)).toBeTruthy();
   });
+  it('says the round is over once a live file closes', () => {
+    const counts = { survivors: 0, commons: 0, specials: 0 };
+    const { rerender } = render(
+      <TheaterStatus tMs={5000} endMs={10_000} counts={counts} zoom={1} live closed />,
+    );
+    expect(screen.queryByText(/live, 10s delayed/i)).toBeNull();
+    expect(screen.getByText(/round over, catching up/i)).toBeTruthy();
+    rerender(<TheaterStatus tMs={10_000} endMs={10_000} counts={counts} zoom={1} live closed />);
+    expect(screen.getByText(/round over, waiting for the next round/i)).toBeTruthy();
+  });
 });
 
 describe('zoomLabel', () => {
