@@ -249,6 +249,19 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       h.all([...all.keys()]);
       console.log(`[discord] tracking ${all.size} server members`);
     },
+    async watchVoice(h) {
+      client.on(Events.VoiceStateUpdate, (_before, after) => {
+        if (after.guild.id === guild.id) h.update(after.id, after.channelId ?? null);
+      });
+      // The gateway sends the guild's voice states with the guild itself, so
+      // this cache is complete as soon as the client is ready.
+      const states: [string, string][] = [];
+      for (const vs of guild.voiceStates.cache.values()) {
+        if (vs.channelId) states.push([vs.id, vs.channelId]);
+      }
+      h.all(states);
+      console.log(`[discord] tracking voice: ${states.length} in a channel`);
+    },
     voice,
     async destroy() {
       await client.destroy();

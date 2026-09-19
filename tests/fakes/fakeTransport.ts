@@ -64,6 +64,13 @@ export class FakeTransport implements BotTransport {
     h.all(this.guildMembers);
   }
 
+  voiceHandlers: { all(states: [string, string][]): void; update(userId: string, channelId: string | null): void } | null = null;
+  /** Reports voiceOf as the initial states. Tests drive changes through voiceHandlers. */
+  async watchVoice(h: { all(states: [string, string][]): void; update(userId: string, channelId: string | null): void }): Promise<void> {
+    this.voiceHandlers = h;
+    h.all([...this.voiceOf.entries()]);
+  }
+
   /** Messages still present, oldest first. */
   live(): FakeMessage[] {
     return this.messages.filter((m) => !m.deleted);
