@@ -101,6 +101,22 @@ export function HelpConsistency() {
         </Panel>
 
         <Panel>
+          <h3>What you can keep</h3>
+          <p>
+            Custom HUDs and custom crosshairs are never checked, so there is no need to remove
+            them. The same goes for the infected vision colour files, which you may edit or delete:
+          </p>
+          <ul>
+            <li><code class="mono">ghost.raw</code> and <code class="mono">ghost.pwl.raw</code></li>
+            <li><code class="mono">infected.raw</code> and <code class="mono">infected.pwl.raw</code></li>
+          </ul>
+          <p>
+            If the dialog names a file, it is never one of these. Look at skins, foliage packs and
+            sound packs first.
+          </p>
+        </Panel>
+
+        <Panel>
           <h3>Grass settings are not part of this</h3>
           <p>
             Turning detail grass down or off with <code>cl_detaildist</code> or{' '}

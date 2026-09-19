@@ -39,4 +39,13 @@ describe('HelpConsistency', () => {
     // Built from its code point so this file does not contain one either.
     expect(container.textContent).not.toContain(String.fromCharCode(0x2014));
   });
+
+  // The owner's ruling: HUDs, crosshairs and the infected vision colour files are
+  // never checked. A player who reads this page must not strip a HUD to get in.
+  it('says which customisations are never checked', () => {
+    render(<HelpConsistency />);
+    expect(screen.getByRole('heading', { name: 'What you can keep' })).toBeTruthy();
+    expect(screen.getByText(/Custom HUDs and custom crosshairs/)).toBeTruthy();
+    expect(screen.getByText('ghost.raw')).toBeTruthy();
+  });
 });
