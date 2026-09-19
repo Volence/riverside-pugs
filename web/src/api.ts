@@ -30,10 +30,14 @@ export interface NamedPlayer {
 
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
 
+/** What stands between a player and pressing Ready: no Discord linked, or
+ *  not in a voice channel on the server (when the voice requirement is on). */
+export type ReadyBlock = 'link_discord' | 'join_voice';
+
 export interface LobbySnapshot {
   id: string;
   phase: LobbyPhase;
-  players: NamedPlayer[];
+  players: (NamedPlayer & { readyBlock?: ReadyBlock | null })[];
   ready: string[];
   options: string[];
   votes: Record<string, number>;
@@ -72,6 +76,8 @@ export interface StateSnapshot {
   timeout?: { until: string; offenses: number } | null;
   /** The Discord step still missing before the viewer may queue. */
   queueBlock?: 'link_discord' | 'join_discord' | null;
+  /** The step still missing before the viewer may press Ready. */
+  readyBlock?: ReadyBlock | null;
 }
 
 export interface SpectateInfo {

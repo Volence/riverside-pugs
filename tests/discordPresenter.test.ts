@@ -52,6 +52,26 @@ describe('renderLobby', () => {
     expect(p.mentionUserIds).toEqual(['111']);
   });
 
+  it('ready check with voice required: marks who is not in voice and says so in the footer', () => {
+    const p = renderLobby({
+      lobbyId: 'lob_1', phase: 'ready_check', deadlineMs: 1_800_000_000_000, options: [],
+      voiceRequired: true,
+      players: [{ ...alice, ready: true, blocked: false }, { ...bob, ready: false, blocked: true }],
+    });
+    const desc = p.embeds[0].description!;
+    expect(desc).toContain('✅ <@111> (1200)');
+    expect(desc).toContain('⬜ 🔇 b\\*o\\_b');
+    expect(p.embeds[0].footer).toMatch(/voice channel/i);
+  });
+
+  it('ready check without voice required: no markers, the old footer', () => {
+    const p = renderLobby({
+      lobbyId: 'lob_1', phase: 'ready_check', deadlineMs: 1_800_000_000_000, options: [], players,
+    });
+    expect(text(p)).not.toContain('🔇');
+    expect(p.embeds[0].footer).not.toMatch(/voice/i);
+  });
+
   it('map vote: one button per campaign with counts', () => {
     const p = renderLobby({
       lobbyId: 'lob_1', phase: 'map_vote', deadlineMs: 1_800_000_000_000, players,

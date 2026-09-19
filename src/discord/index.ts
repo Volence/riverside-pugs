@@ -6,6 +6,7 @@ import { handleButton, type ControllerDeps } from './controller.js';
 import { DiscordSync, type VoiceHook } from './sync.js';
 import type { BotInteraction, BotTransport, InteractionReply, SlashCommandDef } from './transport.js';
 import type { GuildMembership } from './membership.js';
+import type { VoicePresence } from './voicePresence.js';
 
 export interface BotDeps {
   config: Config;
@@ -19,6 +20,8 @@ export interface BotDeps {
   voice?: (transport: BotTransport) => VoiceHook;
   /** Filled from the server's member list for the queue gate. */
   membership?: GuildMembership;
+  /** Filled from the server's voice states for the ready gate. */
+  presence?: VoicePresence;
   /** Extra startup work that needs the connected transport (the admin feed). */
   onConnected?: (transport: BotTransport) => void | Promise<void>;
   /** Buttons outside the queue flow, by custom_id prefix (e.g. 'r:' for report cards). */
@@ -73,6 +76,11 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
     await transport.watchMembers({ all: (ids) => m.setAll(ids), add: (id) => m.add(id), remove: (id) => m.remove(id) })
       .catch((err) => console.error('[discord] loading the member list failed; the queue gate allows everyone until it loads:', err));
   }
+  if (deps.presence) {
+    const p = deps.presence;
+    await transport.watchVoice({ all: (states) => p.setAll(states), update: (id, ch) => p.update(id, ch) })
+      .catch((err) => console.error('[discord] loading voice states failed; the ready gate allows everyone until it loads:', err));
+  }
   await deps.onConnected?.(transport);
 
   const sync = new DiscordSync({
@@ -92,6 +100,7 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
     async stop() {
       sync.stop();
       deps.membership?.reset();
+      deps.presence?.reset();
       await transport.destroy?.();
     },
   };

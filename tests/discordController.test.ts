@@ -92,6 +92,23 @@ describe('discord buttons', () => {
     expect(body(await press(0, `l:${lobbyId}:vote:not_a_campaign`))).toMatch(/not an option/i);
   });
 
+  it('ready is refused with the reason when the ready gate blocks, and nothing is marked', async () => {
+    const { VoicePresence } = await import('../src/discord/voicePresence.js');
+    const { makeReadyGate } = await import('../src/readyGate.js');
+    const voice = new VoicePresence();
+    voice.setAll([[did(1), 'chan']]);
+    mm = new Matchmaker(db, {
+      broadcast: () => {}, orchestrator: { setupMatch: async () => {}, finishMatch: async () => {} },
+      scheduler: sched, rng: () => 0, readyGate: makeReadyGate(db, true, voice),
+    });
+    for (const id of IDS) mm.join(id);
+    const lobbyId = mm.lobbies()[0].id;
+    expect(body(await press(0, `l:${lobbyId}:ready`))).toMatch(/join a voice channel in the Riverside Discord first/);
+    expect(mm.lobbies()[0].snapshot.ready).toEqual([]);
+    expect(body(await press(1, `l:${lobbyId}:ready`))).toMatch(/You are ready/);
+    expect(mm.lobbies()[0].snapshot.ready).toEqual([IDS[1]]);
+  });
+
   it('ready pressed during the vote says you are already ready', async () => {
     for (let i = 0; i < 8; i++) await press(i, 'q:join');
     const lobbyId = mm.lobbies()[0].id;
