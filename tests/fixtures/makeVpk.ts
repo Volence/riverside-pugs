@@ -66,3 +66,53 @@ export function makeVpk(path: string, entry: VpkEntry): void {
 
   writeFileSync(path, Buffer.concat([header, tree, tail]));
 }
+
+/** Write a valid v1 VPK holding several files, every one stored inline.
+ *  makeVpk above writes exactly one entry, which cannot express the case the
+ *  consistency check exists for: a real campaign (it has a mission file) that
+ *  ALSO ships a path the server enforces. Entries are grouped the way the
+ *  format requires, by extension and then by directory, in first-seen order. */
+export function makeVpkMulti(path: string, entries: Pick<VpkEntry, 'ext' | 'dir' | 'name' | 'body'>[]): void {
+  const cstr = (s: string) => Buffer.concat([Buffer.from(s, 'utf8'), Buffer.from([0])]);
+  const end = Buffer.from([0]);
+
+  const byExt = new Map<string, Map<string, typeof entries>>();
+  for (const e of entries) {
+    const dirs = byExt.get(e.ext) ?? new Map<string, typeof entries>();
+    byExt.set(e.ext, dirs);
+    dirs.set(e.dir, [...(dirs.get(e.dir) ?? []), e]);
+  }
+
+  const tree: Buffer[] = [];
+  const data: Buffer[] = [];
+  let offset = 0;
+  for (const [ext, dirs] of byExt) {
+    tree.push(cstr(ext));
+    for (const [dir, files] of dirs) {
+      tree.push(cstr(dir));
+      for (const f of files) {
+        const body = Buffer.from(f.body, 'utf8');
+        const meta = Buffer.alloc(18);
+        meta.writeUInt32LE(0, 0);            // CRC, unchecked by the reader
+        meta.writeUInt16LE(0, 4);            // no preload
+        meta.writeUInt16LE(0x7fff, 6);       // data is in this file
+        meta.writeUInt32LE(offset, 8);       // from the end of the tree
+        meta.writeUInt32LE(body.length, 12);
+        meta.writeUInt16LE(0xffff, 16);      // entry terminator
+        tree.push(cstr(f.name), meta);
+        data.push(body);
+        offset += body.length;
+      }
+      tree.push(end);                        // end of this directory's files
+    }
+    tree.push(end);                          // end of this extension's directories
+  }
+  tree.push(end);                            // end of extensions
+
+  const treeBuf = Buffer.concat(tree);
+  const header = Buffer.alloc(12);
+  header.writeUInt32LE(0x55aa1234, 0);
+  header.writeUInt32LE(1, 4);
+  header.writeUInt32LE(treeBuf.length, 8);
+  writeFileSync(path, Buffer.concat([header, treeBuf, ...data]));
+}
