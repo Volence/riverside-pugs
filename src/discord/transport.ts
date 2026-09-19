@@ -111,6 +111,10 @@ export interface BotTransport {
   /** False when the message no longer exists (deleted by hand). */
   edit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean>;
   remove(channelId: string, messageId: string): Promise<void>;
+  /** A direct message to one user. Rejects when Discord refuses it, which is
+   *  ordinary: the user has DMs from server members closed, or has left the
+   *  guild and shares no server with the bot. Callers decide what that means. */
+  dm(userId: string, payload: MessagePayload): Promise<void>;
   onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>): void;
   registerCommands(defs: SlashCommandDef[]): Promise<void>;
   /** Load the server's member list, then report joins and leaves. */

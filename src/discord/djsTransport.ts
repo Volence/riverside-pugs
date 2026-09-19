@@ -224,6 +224,16 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         if (codeOf(err) !== UNKNOWN_MESSAGE) throw err;
       }
     },
+    async dm(userId, payload) {
+      // No extra gateway intent: sending a DM is a REST call. users.fetch
+      // resolves anyone by id; send() is what fails for closed DMs (50007).
+      const user = await client.users.fetch(userId);
+      const m = toMessage(payload);
+      await user.send({
+        content: m.content || undefined, embeds: m.embeds, components: m.components as never,
+        allowedMentions: m.allowedMentions,
+      });
+    },
     onInteraction(h) {
       handler = h;
     },

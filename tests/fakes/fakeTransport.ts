@@ -44,6 +44,16 @@ export class FakeTransport implements BotTransport {
     return true;
   }
 
+  /** Direct messages, in order. */
+  dms: { userId: string; payload: MessagePayload }[] = [];
+  /** User ids whose DMs are closed: dm() rejects for them, as Discord does. */
+  dmsClosed = new Set<string>();
+
+  async dm(userId: string, payload: MessagePayload): Promise<void> {
+    if (this.dmsClosed.has(userId)) throw new Error('Cannot send messages to this user');
+    this.dms.push({ userId, payload });
+  }
+
   async remove(_channelId: string, messageId: string): Promise<void> {
     const m = this.messages.find((x) => x.id === messageId);
     if (m) m.deleted = true;
