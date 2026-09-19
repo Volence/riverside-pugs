@@ -33,6 +33,21 @@ describe('ReplayHud', () => {
     expect(screen.getByText(/live, 10s delayed/i)).toBeTruthy();
   });
 
+  it('says the round is over once a live file closes, and whether the tail is still playing', () => {
+    const counts = { survivors: 0, commons: 0, specials: 0 };
+    const { rerender } = render(
+      <ReplayHud tMs={5000} endMs={10_000} counts={counts}
+        live closed toggles={DEFAULT_TOGGLES} toggle={() => {}} />,
+    );
+    expect(screen.queryByText(/live, 10s delayed/i)).toBeNull();
+    expect(screen.getByText(/round over, catching up/i)).toBeTruthy();
+    rerender(
+      <ReplayHud tMs={10_000} endMs={10_000} counts={counts}
+        live closed toggles={DEFAULT_TOGGLES} toggle={() => {}} />,
+    );
+    expect(screen.getByText(/round over, waiting for the next round/i)).toBeTruthy();
+  });
+
   it('offers a theater chip when given one, lit while on', () => {
     const t = vi.fn();
     render(

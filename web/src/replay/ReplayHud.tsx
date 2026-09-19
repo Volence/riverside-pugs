@@ -32,6 +32,24 @@ export function ToggleChips(
 }
 
 /**
+ * What the live flag under the clock should say, or null for a saved replay.
+ *
+ * A live source that has closed its current file is between rounds: the
+ * server will name the next file once that round goes live and is ten
+ * seconds old. Until then the page sits on the last frame, and without a
+ * word about it that read as frozen (2026-09-19). While the clock is still
+ * short of the end the last ten seconds are playing out, and that is said
+ * too, so a viewer who sees action under a "round over" flag knows why.
+ */
+export function liveStatusText(
+  live: boolean, closed: boolean, tMs: number, endMs: number,
+): string | null {
+  if (!live) return null;
+  if (!closed) return 'Live, 10s delayed';
+  return tMs < endMs ? 'Round over, catching up' : 'Round over, waiting for the next round';
+}
+
+/**
  * The overlay drawn over the stage: the clock and the alive counts top left,
  * the toggle chips top right, the live flag beneath the clock. What used to
  * be a status line under the canvas and a toggle row above the follow row.
@@ -57,7 +75,9 @@ export function ReplayHud(
         <span class="rhud__counts eyebrow">
           {counts.survivors} alive · {counts.commons} common · {counts.specials} special
         </span>
-        {live && !closed && <span class="rhud__live eyebrow">Live, 10s delayed</span>}
+        {liveStatusText(live, closed, tMs, endMs) && (
+          <span class="rhud__live eyebrow">{liveStatusText(live, closed, tMs, endMs)}</span>
+        )}
       </div>
       <div class="rhud__right">
         <ToggleChips toggles={toggles} toggle={toggle} theater={theater} />
