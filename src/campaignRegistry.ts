@@ -3,7 +3,7 @@ import { CAMPAIGNS, campaignForMap } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { enabledServerIds } from './serverPool.js';
-import { readStockMissions } from './stockMissions.js';
+import { readStockMissions, type StockChapter } from './stockMissions.js';
 
 /**
  * Every campaign the site can run: the stock four, plus published custom ones.
@@ -37,7 +37,16 @@ const STOCK_FIRST: Record<string, string> = {
   blood_harvest: 'l4d_vs_farm01_hilltop',
 };
 
-let cache: { registry: Map<string, CampaignEntry>; byMap: Map<string, string> } | null = null;
+let cache: {
+  registry: Map<string, CampaignEntry>;
+  byMap: Map<string, string>;
+  // Kept alongside `registry` rather than folded into CampaignEntry.maps:
+  // stopAfterMap and the orchestrator only ever need the bare map names in
+  // play order, and reshaping that shared field to carry display names too
+  // would ripple into every one of their readers. Chapter display is admin-UI
+  // presentation only, so it gets its own lookup.
+  stockChapters: Map<string, StockChapter[]>;
+} | null = null;
 
 export function invalidateCampaignCache(): void {
   cache = null;
@@ -84,7 +93,7 @@ function build(db: DB): NonNullable<typeof cache> {
     for (const c of chapters) byMap.set(c.map.toLowerCase(), row.slug);
   }
 
-  return { registry, byMap };
+  return { registry, byMap, stockChapters: stockMissions };
 }
 
 function warm(db: DB): NonNullable<typeof cache> {
@@ -108,6 +117,13 @@ export function resolveCampaignForMap(db: DB, map: string): string | null {
 export function firstMapOf(db: DB, campaign: string): string {
   const entry = campaignRegistry(db).get(campaign);
   return entry?.firstMap ?? STOCK_FIRST.no_mercy;
+}
+
+/** A stock campaign's chapters with their display names, for the admin panel.
+ *  Empty for a custom campaign (its chapters come from chaptersOf instead) or
+ *  when MISSIONS_DIR is unset, same as CampaignEntry.maps in that case. */
+export function stockChaptersOf(db: DB, slug: string): StockChapter[] {
+  return warm(db).stockChapters.get(slug) ?? [];
 }
 
 /**

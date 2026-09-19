@@ -7,7 +7,7 @@ import { insertDraft, publishCampaign, deleteCampaign } from '../src/customCampa
 import { upsertPlayer } from '../src/players.js';
 import { ME, OTHER, seedMatch } from './playerStats.test.js';
 import {
-  campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf,
+  campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf, stockChaptersOf,
 } from '../src/campaignRegistry.js';
 
 let db: DB;
@@ -166,5 +166,30 @@ describe('stock chapter lists', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // stockChaptersOf is the admin panel's only source for a stock campaign's
+  // chapter display names: CampaignEntry.maps stays plain map names on
+  // purpose, since stopAfterMap and the orchestrator only ever need those.
+  it('carries chapter display names for the admin panel', async () => {
+    const { setMissionsDir } = await import('../src/campaignRegistry.js');
+    const dir = mkdtempSync(join(tmpdir(), 'missions-'));
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'airport.txt'), AIRPORT);
+      setMissionsDir(dir);
+      const chapters = stockChaptersOf(db, 'dead_air');
+      expect(chapters.map((c) => c.display)).toEqual([
+        'The Greenhouse', 'The Crane', 'The Garage', 'The Terminal', 'The Runway',
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('is empty for stockChaptersOf when no missions directory is configured', async () => {
+    const { setMissionsDir } = await import('../src/campaignRegistry.js');
+    setMissionsDir('');
+    expect(stockChaptersOf(db, 'dead_air')).toEqual([]);
   });
 });

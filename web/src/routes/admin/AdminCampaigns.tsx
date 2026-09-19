@@ -174,6 +174,7 @@ function StockCard({ c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run
   return (
     <Panel>
       <h3>{c.name} <span class="admin-tag">stock</span></h3>
+      <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
       <MapsToPlay c={c} busy={busy} run={run} />
     </Panel>
   );

@@ -11,7 +11,7 @@ import {
   getCampaign, insertDraft, installsOf, publishCampaign, setInstall,
 } from '../src/customCampaigns.js';
 import { getMapsToPlay, setMapsToPlay } from '../src/campaignRules.js';
-import { campaignRegistry, invalidateCampaignCache } from '../src/campaignRegistry.js';
+import { campaignRegistry, invalidateCampaignCache, setMissionsDir } from '../src/campaignRegistry.js';
 import type { InstallTarget } from '../src/campaignInstall.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { makeVpk } from './fixtures/makeVpk.js';
@@ -29,6 +29,22 @@ const MISSION = `
     {
       "1" { "Map" "dbd1_alley" "DisplayName" "Alley" }
       "2" { "Map" "dbd2_mall" "DisplayName" "Mall" }
+    }
+  }
+}
+`;
+
+const AIRPORT_MISSION = `
+"mission"
+{
+  "Name" "airport"
+  "DisplayTitle" "Dead Air"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_vs_airport01_greenhouse" "DisplayName" "The Greenhouse" }
+      "2" { "Map" "l4d_vs_airport02_offices" "DisplayName" "The Crane" }
     }
   }
 }
@@ -63,7 +79,13 @@ beforeEach(() => {
   // tests/campaignRegistry.test.ts uses.
   invalidateCampaignCache();
 });
-afterEach(() => { rmSync(addons, { recursive: true, force: true }); });
+afterEach(() => {
+  rmSync(addons, { recursive: true, force: true });
+  // Same leak guard as the cache invalidation above: a directory left set by
+  // one test's missions dir would otherwise carry into the next test's
+  // registry build.
+  setMissionsDir('');
+});
 
 /** authedCookie logs a player in but leaves is_admin at 0 (config.adminSteamIds
  *  is empty in these tests); promote explicitly, same as tests/adminMatches.test.ts. */
@@ -416,6 +438,34 @@ describe('GET /api/admin/campaigns', () => {
       cookies: authedCookie(app, db, '76561198000000009'),
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  // A stock campaign's chapters were hardcoded to [] here regardless of
+  // MISSIONS_DIR, even though readStockMissions already parses each
+  // chapter's display name; the admin panel had nowhere to read it from.
+  it('carries chapter names for a stock campaign once MISSIONS_DIR is configured', async () => {
+    const missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
+    try {
+      writeFileSync(join(missionsDir, 'airport.txt'), AIRPORT_MISSION);
+      const app = await buildTestApp({ db, addonsDir: addons });
+      // buildServer calls setMissionsDir(config.missionsDir) itself, which
+      // resets it to '' since MISSIONS_DIR is not among the env vars
+      // buildTestApp passes to loadConfig; set it again after the app exists.
+      setMissionsDir(missionsDir);
+      const res = await app.inject({
+        method: 'GET', url: '/api/admin/campaigns',
+        cookies: adminCookie(app, '76561198000000001'),
+      });
+      expect(res.statusCode).toBe(200);
+      const deadAir = res.json().campaigns.find((c: { slug: string }) => c.slug === 'dead_air');
+      expect(deadAir.chapters.map((c: { map: string; display: string | null }) => [c.map, c.display])).toEqual([
+        ['l4d_vs_airport01_greenhouse', 'The Greenhouse'],
+        ['l4d_vs_airport02_offices', 'The Crane'],
+      ]);
+      expect(deadAir.chapters.map((c: { is_finale: number }) => c.is_finale)).toEqual([0, 1]);
+    } finally {
+      rmSync(missionsDir, { recursive: true, force: true });
+    }
   });
 });
 

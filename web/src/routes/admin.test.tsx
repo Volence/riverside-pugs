@@ -740,4 +740,32 @@ describe('AdminCampaigns', () => {
     expect(screen.queryByRole('button', { name: 'Reinstall' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
+
+  // The spec asks for a stock campaign's card to list its chapters like a
+  // custom one does, so an admin choosing "3 maps" can see which three. The
+  // backend now fills `chapters` for the stock four once MISSIONS_DIR is
+  // configured; this is the card actually rendering that data instead of
+  // discarding it the way the registry's plain maps: string[] does.
+  it('lists a stock campaign\'s chapters by name', async () => {
+    mockAdmin.campaigns.mockResolvedValue({
+      free: 11 * 1024 ** 3,
+      campaigns: [{
+        slug: 'dead_air', name: 'Dead Air', state: 'published', enabled: 1,
+        size_bytes: 0, sha256: '', vpk_filename: '',
+        uploaded_by: null, uploaded_at: 0, notes: null,
+        chapters: [
+          { slug: 'dead_air', ordinal: 0, map: 'l4d_vs_airport01_greenhouse', display: 'The Greenhouse', is_finale: 0, included: 1, play_order: null },
+          { slug: 'dead_air', ordinal: 1, map: 'l4d_vs_airport02_offices', display: 'The Crane', is_finale: 1, included: 1, play_order: null },
+        ],
+        installs: [], mapsToPlay: null,
+        maps: ['l4d_vs_airport01_greenhouse', 'l4d_vs_airport02_offices'],
+        stock: true,
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    await waitFor(() => screen.getByText('Dead Air'));
+    expect(screen.getByText('The Greenhouse')).toBeTruthy();
+    expect(screen.getByText('The Crane')).toBeTruthy();
+  });
 });
