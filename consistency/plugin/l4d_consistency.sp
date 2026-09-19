@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <l4d_consistency>
 
-#define PLUGIN_VERSION "0.2.0"
+#define PLUGIN_VERSION "0.2.1"
 
 /**
  * Phase 2: force the generated list (configs/l4d_consistency.cfg) on every map,
@@ -191,7 +191,8 @@ int DownloadablesMax()
  *
  *   L4DC SIGNON_DROP steamid=<id> secs=<connected seconds> forced=<count> name=<rest of line>
  *
- * Name is LAST and takes the rest of the line, the same treatment MATCH_ROSTER
+ * <id> is a 17 digit SteamID64 when the client slot is still valid, otherwise the
+ * event's networkid (STEAM_1:Y:Z). Name is LAST and takes the rest of the line, the same treatment MATCH_ROSTER
  * gives it, so a name cannot forge an earlier field. No match token: a drop
  * mostly happens while people are still joining, before any match exists, which
  * is why this is not an EmitPug line. The web admits it by source address.
@@ -211,8 +212,17 @@ public Action Event_PlayerDisconnect(Event event, const char[] name, bool dontBr
 		return Plugin_Continue; // had entered the game: an ordinary leave
 	}
 
+	// SteamID64, the form the web keys everything on, whenever the slot can
+	// still be asked. validate is false on purpose: a client that drops itself
+	// during signon has often not finished Steam validation, and an id that is
+	// only good enough for a hint is exactly what this line carries. When the
+	// slot is already gone, fall back to the event's networkid, which is the
+	// STEAM_1:Y:Z form; the web accepts both and converts.
 	char steamid[64], player[MAX_NAME_LENGTH];
-	event.GetString("networkid", steamid, sizeof(steamid));
+	if (client <= 0 || !IsClientConnected(client)
+		|| !GetClientAuthId(client, AuthId_SteamID64, steamid, sizeof(steamid), false)) {
+		event.GetString("networkid", steamid, sizeof(steamid));
+	}
 	event.GetString("name", player, sizeof(player));
 	if (StrEqual(steamid, "BOT")) {
 		return Plugin_Continue;
