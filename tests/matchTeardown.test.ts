@@ -17,6 +17,16 @@ describe('reset_map setting', () => {
     expect(validateSetting('reset_map', 'l4d_vs_farm01_hilltop')).toEqual({ ok: true, value: 'l4d_vs_farm01_hilltop' });
     expect(validateSetting('reset_map', '')).toEqual({ ok: false, error: 'cannot be empty' });
   });
+
+  it('agrees with resetMap at the length boundary', () => {
+    const db = openDb(':memory:');
+    const ok63 = 'a'.repeat(63);
+    const too64 = 'a'.repeat(64);
+    expect(validateSetting('reset_map', ok63)).toEqual({ ok: true, value: ok63 });
+    expect(validateSetting('reset_map', too64).ok).toBe(false);
+    setSetting(db, 'reset_map', ok63);
+    expect(resetMap(db)).toBe(ok63);
+  });
 });
 
 describe('resetMap', () => {
