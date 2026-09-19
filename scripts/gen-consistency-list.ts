@@ -193,6 +193,21 @@ function select(rule: Rule): string[] {
   return rule.ext ? inDir.filter((p) => rule.ext!.includes(extOf(p))) : inDir;
 }
 
+// What players are ALLOWED to change, by the owner's ruling (2026-09-19): custom
+// HUDs, custom crosshairs, and the infected-vision colour correction files, which
+// may be edited or deleted outright. No rule may ever force one of these. It is
+// checked here, against the finished list, so a broad rule added later (group 6,
+// or a whole-directory rule) fails generation instead of disconnecting everyone
+// who runs a HUD.
+const NEVER_FORCE: { why: string; test: RegExp }[] = [
+  { why: 'HUD and menu layout', test: /^resource\// },
+  { why: 'HUD scripts', test: /^scripts\/(hudlayout\.res|hudanimations\.txt|hud_textures\.txt|mod_textures\.txt)$/ },
+  { why: 'HUD scripts', test: /^scripts\/.*\.res$/ },
+  { why: 'HUD and crosshair art', test: /^materials\/vgui\// },
+  { why: 'crosshair art', test: /^materials\/(crosshairs?|sprites\/crosshair)/ },
+  { why: 'infected vision colour correction', test: /^materials\/correction\/(ghost|infected)(\.pwl)?\.raw$/ },
+];
+
 // Anything that is not a game asset the client could meaningfully differ on.
 const SKIP_EXT = new Set(['cache', 'db', 'ds_store']);
 
@@ -225,6 +240,12 @@ for (const g of groups) {
   total += paths.length;
 }
 console.log(`total:   ${String(total).padStart(4)}`);
+
+for (const p of seen) {
+  const hit = NEVER_FORCE.find((n) => n.test.test(p));
+  if (hit) { console.error(`listed path is on the never-force list (${hit.why}): ${p}`); failed = true; }
+}
+console.log(`never-force: ${NEVER_FORCE.length} patterns, ${failed ? 'VIOLATED' : '0 listed paths match'}`);
 
 for (const overlay of OVERLAYS) {
   const inPak = existsSync(join(overlay, 'pak01_dir.vpk')) ? listVpkPaths(join(overlay, 'pak01_dir.vpk')) : [];
