@@ -125,8 +125,12 @@ export interface LobbyView {
   lobbyId: string;
   phase: 'ready_check' | 'map_vote';
   deadlineMs: number;
-  players: (PlayerView & { ready: boolean })[];
+  /** `blocked`: they may not press Ready yet (not in voice, or no Discord
+   *  linked), shown with a muted marker so the team can see who to chase. */
+  players: (PlayerView & { ready: boolean; blocked?: boolean })[];
   options: { campaign: string; name: string; votes: number }[];
+  /** Whether the voice requirement is on, which changes the footer. */
+  voiceRequired?: boolean;
 }
 
 const pings = (players: PlayerView[]) => players.filter((p) => p.discordId).map((p) => p.discordId!);
@@ -134,17 +138,20 @@ const pings = (players: PlayerView[]) => players.filter((p) => p.discordId).map(
 export function renderLobby(v: LobbyView): MessagePayload {
   const deadline = `<t:${Math.floor(v.deadlineMs / 1000)}:R>`;
   const readyCount = v.players.filter((p) => p.ready).length;
-  const roster = v.players.map((p) => `${p.ready ? '✅' : '⬜'} ${playerLabel(p)}`).join('\n');
+  const roster = v.players.map((p) => `${p.ready ? '✅' : '⬜'} ${p.blocked ? '🔇 ' : ''}${playerLabel(p)}`).join('\n');
   const mentions = pings(v.players);
 
   if (v.phase === 'ready_check') {
+    const footer = v.voiceRequired
+      ? 'Join a voice channel on this server to ready up (🔇 is not in one yet). Anyone not ready in time goes back out; everyone who readied keeps their place at the front.'
+      : 'Anyone not ready in time goes back out; everyone who readied keeps their place at the front.';
     return {
       content: mentions.length ? mentions.map((id) => `<@${id}>`).join(' ') : undefined,
       embeds: [{
         title: 'Queue popped! Ready up',
         color: COLOR.gold,
         description: `Ready check ends ${deadline}. **${readyCount}/${v.players.length}** ready.\n\n${roster}`,
-        footer: 'Anyone not ready in time goes back out; everyone who readied keeps their place at the front.',
+        footer,
       }],
       components: [[{ kind: 'button', customId: `l:${v.lobbyId}:ready`, label: 'Ready', style: 'success' }]],
       mentionUserIds: mentions,

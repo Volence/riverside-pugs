@@ -115,6 +115,9 @@ export interface BotTransport {
   registerCommands(defs: SlashCommandDef[]): Promise<void>;
   /** Load the server's member list, then report joins and leaves. */
   watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void>;
+  /** Load who is in which voice channel, then report every change: the
+   *  channel they are in now, or null when they left voice. */
+  watchVoice(h: { all(states: [userId: string, channelId: string][]): void; update(userId: string, channelId: string | null): void }): Promise<void>;
   voice: VoiceOps;
   roles: RoleOps;
 }

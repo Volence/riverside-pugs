@@ -9,6 +9,7 @@ import { getServer } from './serverPool.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
 import { activeTimeout, recordPenalty } from './penalties.js';
 import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
+import { READY_BLOCK_MESSAGE, type ReadyBlock } from './readyGate.js';
 import type { Orchestrator } from './orchestrator.js';
 
 export interface MatchmakerDeps {
@@ -20,6 +21,8 @@ export interface MatchmakerDeps {
   notify?: (msg: string) => void;
   /** The Discord requirement (linked + in the server). See queueGate.ts. */
   queueGate?: (steamid: string) => QueueBlock | null;
+  /** The voice requirement for pressing Ready. See readyGate.ts. */
+  readyGate?: (steamid: string) => ReadyBlock | null;
 }
 
 /** Parse discord_queue_thresholds defensively. A malformed or non-array
@@ -43,7 +46,12 @@ export interface NamedPlayer {
 export interface StateSnapshot {
   queue: { count: number; joined: boolean; players: NamedPlayer[] };
   lobby:
-    | (Omit<LobbySnapshot, 'players'> & { players: NamedPlayer[]; myVote: string | null })
+    | (Omit<LobbySnapshot, 'players'> & {
+      /** Each player's own ready block, so the roster can show who is
+       *  still missing from voice. Null once they may press Ready. */
+      players: (NamedPlayer & { readyBlock: ReadyBlock | null })[];
+      myVote: string | null;
+    })
     | null;
   match: {
     id: number;
@@ -64,6 +72,8 @@ export interface StateSnapshot {
   timeout: { until: string; offenses: number } | null;
   /** What the viewer still has to do on Discord before they may queue. */
   queueBlock: QueueBlock | null;
+  /** What the viewer still has to do before they may press Ready. */
+  readyBlock: ReadyBlock | null;
 }
 
 /** Lifecycle events the broadcast cannot carry, because it sends only an
@@ -208,8 +218,23 @@ export class Matchmaker {
     this.changed();
   }
 
-  ready(steamid: string): boolean {
-    return this.lobbyFor(steamid)?.markReady(steamid) ?? false;
+  ready(steamid: string): { ok: boolean; error?: string } {
+    const lobby = this.lobbyFor(steamid);
+    if (!lobby) return { ok: false, error: 'no ready check active' };
+    const block = this.readyBlock(steamid);
+    if (block) return { ok: false, error: READY_BLOCK_MESSAGE[block] };
+    return lobby.markReady(steamid) ? { ok: true } : { ok: false, error: 'no ready check active' };
+  }
+
+  /** Take back a player's Ready, for someone who left voice during the ready
+   *  check. True when it changed anything. */
+  unready(steamid: string): boolean {
+    return this.lobbyFor(steamid)?.unmarkReady(steamid) ?? false;
+  }
+
+  /** What stands between this player and pressing Ready, or null. */
+  readyBlock(steamid: string): ReadyBlock | null {
+    return this.deps.readyGate?.(steamid) ?? null;
   }
 
   vote(steamid: string, campaign: string): boolean {
@@ -367,7 +392,11 @@ export class Matchmaker {
         players: this.queue.list().map(named),
       },
       lobby: snap && lobby
-        ? { ...snap, players: snap.players.map(named), myVote: lobby.myVote(steamid) }
+        ? {
+          ...snap,
+          players: snap.players.map((p) => ({ ...named(p), readyBlock: this.readyBlock(p) })),
+          myVote: lobby.myVote(steamid),
+        }
         : null,
       match,
       timeout: (() => {
@@ -375,6 +404,7 @@ export class Matchmaker {
         return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
       })(),
       queueBlock: this.deps.queueGate?.(steamid) ?? null,
+      readyBlock: this.readyBlock(steamid),
     };
   }
 
