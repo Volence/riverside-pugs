@@ -468,6 +468,24 @@ CREATE TABLE IF NOT EXISTS custom_campaign_installs (
   PRIMARY KEY (slug, server_id)
 );
 CREATE INDEX IF NOT EXISTS custom_chapter_map ON custom_campaign_chapters(map);
+-- A client that connected, never entered the game and left by its own hand on
+-- a map that forced files: the only trace a file-consistency rejection leaves
+-- on the server, and also what a cancelled loading screen looks like. A hint,
+-- never an accusation. steamid is deliberately NOT a foreign key: most drops
+-- happen to people who have never signed in to the site. Timestamps are ISO
+-- strings written by the app, so the ten minute rule is testable with a clock.
+-- entered_after_at is when the same steamid was next seen in game, which is
+-- what separates "came back clean" from "still trying".
+CREATE TABLE IF NOT EXISTS signon_drops (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  steamid TEXT NOT NULL,
+  name TEXT NOT NULL,
+  secs_connected INTEGER NOT NULL,
+  forced_count INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  entered_after_at TEXT
+);
+CREATE INDEX IF NOT EXISTS signon_drops_steamid ON signon_drops(steamid, at);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
