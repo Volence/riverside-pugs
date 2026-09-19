@@ -432,6 +432,10 @@ CREATE TABLE IF NOT EXISTS custom_campaign_installs (
   PRIMARY KEY (slug, server_id)
 );
 CREATE INDEX IF NOT EXISTS custom_chapter_map ON custom_campaign_chapters(map);
+CREATE TABLE IF NOT EXISTS campaign_play_rules (
+  slug TEXT PRIMARY KEY,
+  maps_to_play INTEGER NOT NULL
+);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
