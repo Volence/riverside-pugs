@@ -45,6 +45,7 @@ const OUT = resolve(flag('--out') ?? join(here, '../consistency/configs/l4d_cons
 /** A rule selects paths out of one source. `dir` matches files directly in that
  *  directory; `tree` matches the directory and everything below it. */
 type Rule =
+  | { from: 'manifest' }
   | { from: 'pak' | 'loose'; file: string }
   | { from: 'pak' | 'loose'; dir: string; ext?: string[] }
   | { from: 'loose'; tree: string };
@@ -74,11 +75,16 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    n: 3, title: 'gunfire and the weapon soundscripts',
+    n: 3, title: 'gunfire and the soundscripts',
     rules: [
       ...GUNS.map((g): Rule => ({ from: 'loose', dir: `sound/weapons/${g}/gunfire`, ext: ['wav'] })),
-      { from: 'loose', file: 'scripts/game_sounds_weapons.txt' },
+      // The manifest AND every soundscript it loads, not just the weapons one: a
+      // sound entry can be redefined from any script the manifest names, so
+      // forcing game_sounds_weapons.txt alone leaves the quiet-gun edit open one
+      // file over. soundmixers.txt sets per-category volume, the same trick again.
       { from: 'loose', file: 'scripts/game_sounds_manifest.txt' },
+      { from: 'manifest' },
+      { from: 'loose', file: 'scripts/soundmixers.txt' },
     ],
   },
   {
@@ -127,6 +133,25 @@ if (pakPaths.length === 0) {
 }
 const pakLower = new Map(pakPaths.map((p) => [p.toLowerCase(), p]));
 
+// Loose files resolve through the search paths in gameinfo order: left4dead_dlc3
+// sits ahead of left4dead, and several soundscripts exist only there.
+const LOOSE_ROOTS = [join(GAME, '../left4dead_dlc3'), GAME];
+const resolveLoose = (rel: string): string | null => {
+  for (const root of LOOSE_ROOTS) if (existsSync(join(root, rel))) return join(root, rel);
+  return null;
+};
+
+function manifestScripts(): string[] {
+  const manifest = resolveLoose('scripts/game_sounds_manifest.txt');
+  if (!manifest) return [];
+  const out: string[] = [];
+  for (const m of readFileSync(manifest, 'utf8').matchAll(/^\s*"(?:precache|preload)_file"\s+"([^"]+)"/gm)) {
+    if (resolveLoose(m[1])) out.push(m[1]);
+    else console.error(`manifest names a script that does not exist: ${m[1]}`);
+  }
+  return out;
+}
+
 function walk(rel: string, recurse: boolean): string[] {
   const abs = join(GAME, rel);
   if (!existsSync(abs)) return [];
@@ -143,9 +168,10 @@ function walk(rel: string, recurse: boolean): string[] {
 const extOf = (p: string): string => p.slice(p.lastIndexOf('.') + 1).toLowerCase();
 
 function select(rule: Rule): string[] {
+  if (rule.from === 'manifest') return manifestScripts();
   if ('file' in rule) {
     if (rule.from === 'pak') { const hit = pakLower.get(rule.file.toLowerCase()); return hit ? [hit] : []; }
-    return existsSync(join(GAME, rule.file)) ? [rule.file] : [];
+    return resolveLoose(rule.file) ? [rule.file] : [];
   }
   if ('tree' in rule) return walk(rule.tree, true);
   const inDir = rule.from === 'pak'
@@ -191,11 +217,13 @@ if (failed) process.exit(1);
 if (VERIFY) {
   const md5 = (f: string): string => createHash('md5').update(readFileSync(f)).digest('hex');
   let differ = 0, missing = 0, checked = 0;
-  for (const p of seen) {
-    const a = join(GAME, p);
-    if (!existsSync(a)) continue; // archive content; compare pak01_dir.vpk itself instead
-    const b = join(resolve(VERIFY), p);
-    if (!existsSync(b)) { console.error(`verify: MISSING in ${VERIFY}: ${p}`); missing++; continue; }
+  const otherRoots = [join(resolve(VERIFY), '../left4dead_dlc3'), resolve(VERIFY)];
+  // `seen` is lower-cased for de-duplication; walk the emitted lines for real paths.
+  for (const p of lines.filter((l) => l && !l.startsWith('#'))) {
+    const a = resolveLoose(p);
+    if (!a) continue; // archive content; pak01_dir.vpk itself is compared below
+    const b = otherRoots.map((r) => join(r, p)).find((f) => existsSync(f));
+    if (!b) { console.error(`verify: MISSING in ${VERIFY}: ${p}`); missing++; continue; }
     checked++;
     if (md5(a) !== md5(b)) { console.error(`verify: DIFFERS: ${p}`); differ++; }
   }
