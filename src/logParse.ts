@@ -94,7 +94,19 @@ export type LogEvent =
   | {
       kind: 'chat'; token: string; seq: number; half: number; tMs: number;
       steamid: string; team: 'a' | 'b' | null; message: string;
-    };
+    }
+  // The two lines below carry NO token, so neither has a `token` field and
+  // neither can pass the listener's token gate. LogListener admits them only
+  // from a game server's own address. Both can only ever produce a hint.
+  //
+  // From l4d_consistency.smx: a human who connected, never entered the game
+  // and left by their own hand on a map that forced files. That is what a
+  // file-consistency rejection looks like from the server, and also what a
+  // cancelled loading screen looks like. `secs` is -1 when the plugin could
+  // not read the connection time.
+  | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
+  // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
+  | { kind: 'entered'; steamid: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -131,6 +143,75 @@ function halfOf(s: string | undefined): number | null {
   return n === 1 || n === 2 ? n : null;
 }
 
+/** The SteamID64 of account 0 in the individual-account universe. */
+const STEAM64_BASE = 76561197960265728n;
+
+/**
+ * A SteamID in either form the game server writes, as the SteamID64 the rest
+ * of the web uses, or null when it is neither.
+ *
+ * `STEAM_X:Y:Z` is what the engine prints in its own log lines and what the
+ * player_disconnect event carries as `networkid`; the account number is
+ * Z * 2 + Y. BigInt because the result is past Number.MAX_SAFE_INTEGER.
+ */
+export function steamId64Of(raw: string): string | null {
+  if (/^\d{17}$/.test(raw)) return raw;
+  const m = /^STEAM_\d:([01]):(\d{1,10})$/.exec(raw);
+  if (!m) return null;
+  return String(STEAM64_BASE + BigInt(m[2]) * 2n + BigInt(m[1]));
+}
+
+/** The engine's `L MM/DD/YYYY - HH:MM:SS: ` stamp, which opens every log line. */
+const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
+
+/** Anchored at BOTH ends, and the name is greedy, so the fields read are the
+ *  last `<uid><steamid><team>` on the line: the engine's own. A name that
+ *  contains a whole fake suffix only ends up inside the name group. A `say`
+ *  line cannot match either, because it ends with a closing quote. */
+const ENTERED_RE = /^".*<\d+><(STEAM_\d:[01]:\d{1,10})><[^<>"]*>" entered the game$/;
+
+/**
+ * The token-less lines: `L4DC SIGNON_DROP ...` from l4d_consistency.smx and the
+ * engine's "entered the game". Returns undefined when the line is neither, so
+ * the caller carries on to the PUG grammar; null when it is one of ours but
+ * malformed.
+ *
+ * Unlike the PUG path, the marker is NOT searched for anywhere in the datagram.
+ * Those lines are protected by a secret token; these are protected only by the
+ * sender's address, and the game server's address also sends every chat line
+ * (`"name<2><STEAM_1:0:5><Survivor>" say "L4DC SIGNON_DROP steamid=..."`). So
+ * the marker must be the first thing after the engine's stamp, which no player
+ * controlled text can be: every engine line about a player opens with a quote.
+ */
+function parseSourcePinned(text: string): LogEvent | null | undefined {
+  const stamp = LOG_STAMP_RE.exec(text);
+  const body = (stamp ? text.slice(stamp.index + stamp[0].length) : text).split('\n', 1)[0].trimEnd();
+
+  if (body.startsWith('L4DC ')) {
+    // Name is last and takes the rest of the line. Every other field is read
+    // from the slice BEFORE the first ` name=`, the CHAT treatment, so a name
+    // like "x steamid=76561198000000009" cannot overwrite the real steamid.
+    const at = body.indexOf(' name=');
+    if (at < 0) return null;
+    const head = body.slice(0, at).split(/\s+/);
+    if (head[1] !== 'SIGNON_DROP') return null;
+    const rest = kv(head.slice(2));
+    const steamid = steamId64Of(rest.steamid ?? '');
+    const secs = intOf(rest.secs);
+    const forced = intOf(rest.forced);
+    const name = body.slice(at + ' name='.length).trim().slice(0, 64);
+    if (!steamid || secs === null || secs < -1 || forced === null || forced < 1 || !name) return null;
+    return { kind: 'signon_drop', steamid, secs, forced, name };
+  }
+
+  const entered = ENTERED_RE.exec(body);
+  if (entered) {
+    const steamid = steamId64Of(entered[1]);
+    return steamid ? { kind: 'entered', steamid } : null;
+  }
+  return undefined;
+}
+
 /**
  * Decode a raw srcds log UDP datagram into a typed PUG event, or null if it is
  * not one of ours or is malformed. Never throws. Tolerant of the engine framing
@@ -139,6 +220,8 @@ function halfOf(s: string | undefined): number | null {
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {
   const text = buf.toString('utf8');
+  const pinned = parseSourcePinned(text);
+  if (pinned !== undefined) return pinned;
   const idx = text.indexOf('PUG ');
   if (idx < 0) return null;
   const line = text.slice(idx).split('\n', 1)[0].trim();
