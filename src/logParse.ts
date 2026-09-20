@@ -1,3 +1,5 @@
+import { steamId64Of } from './steamId.js';
+
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
 export const PHASE_STATES = ['live', 'paused', 'readyup', 'roundover', 'loading'] as const;
@@ -142,24 +144,6 @@ function teamOf(s: string | undefined): 'a' | 'b' | null {
 function halfOf(s: string | undefined): number | null {
   const n = intOf(s);
   return n === 1 || n === 2 ? n : null;
-}
-
-/** The SteamID64 of account 0 in the individual-account universe. */
-const STEAM64_BASE = 76561197960265728n;
-
-/**
- * A SteamID in either form the game server writes, as the SteamID64 the rest
- * of the web uses, or null when it is neither.
- *
- * `STEAM_X:Y:Z` is what the engine prints in its own log lines and what the
- * player_disconnect event carries as `networkid`; the account number is
- * Z * 2 + Y. BigInt because the result is past Number.MAX_SAFE_INTEGER.
- */
-export function steamId64Of(raw: string): string | null {
-  if (/^\d{17}$/.test(raw)) return raw;
-  const m = /^STEAM_\d:([01]):(\d{1,10})$/.exec(raw);
-  if (!m) return null;
-  return String(STEAM64_BASE + BigInt(m[2]) * 2n + BigInt(m[1]));
 }
 
 /** The engine's `L MM/DD/YYYY - HH:MM:SS: ` stamp, which opens every log line. */

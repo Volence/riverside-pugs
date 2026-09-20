@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseLogDatagram, steamId64Of } from '../src/logParse.js';
+import { parseLogDatagram } from '../src/logParse.js';
+import { steamId64Of } from '../src/steamId.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const ID64 = '76561198030413993';
