@@ -31,7 +31,20 @@ const publish = (slug = 'dbd') => {
 describe('campaignRegistry', () => {
   it('contains the four stock campaigns with no custom ones present', () => {
     expect([...campaignRegistry(db).keys()])
-      .toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
+      .toEqual([
+        'no_mercy',
+        'death_toll',
+        'dead_air',
+        'blood_harvest',
+        'dead_center',
+        'dark_carnival',
+        'swamp_fever',
+        'hard_rain',
+        'the_parish',
+        'the_passing',
+        'cold_stream',
+        'the_last_stand',
+      ]);
   });
 
   it('merges a published custom campaign in', () => {

@@ -245,7 +245,7 @@ describe('SelfStartedMatches', () => {
   });
 
   it('refuses an unknown map rather than filing it under a wrong campaign', async () => {
-    adopter.handle(create(TOKEN, 1, 'c5m1_waterfront'));
+    adopter.handle(create(TOKEN, 1, 'de_dust2'));
     adopter.handle(roster(ids(1)[0], 'a', 'Alice'));
     adopter.handle(end(1));
     await new Promise((r) => setTimeout(r, 30));

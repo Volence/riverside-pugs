@@ -285,7 +285,7 @@ describe('mapIndex', () => {
   it('leaves campaign null for a map the campaign table does not know', () => {
     // Better than guessing: an unknown map must not be filed under a real
     // campaign just because it was played.
-    seedMatch(db, 1, [{ map: 'c5m1_waterfront', a: 1, b: 0 }], {});
+    seedMatch(db, 1, [{ map: 'de_dust2', a: 1, b: 0 }], {});
     expect(mapIndex(db)[0].campaign).toBeNull();
   });
 
