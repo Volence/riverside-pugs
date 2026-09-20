@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import { copyFile, rename, stat, unlink } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { Client as FtpClient } from 'basic-ftp';
 import type { ServerRow } from './serverPool.js';
@@ -6,9 +8,10 @@ import type { ServerRow } from './serverPool.js';
 /**
  * Putting a campaign VPK into a game server's addons directory.
  *
- * Two implementations because the two boxes differ in reach and nothing else:
+ * Three implementations because the boxes differ in reach and nothing else:
  * Dallas runs the web app itself, so a file copy is the whole job; Chicago is
- * a rented box we can only speak FTP to.
+ * a rented box we can only speak FTP to; Riverside is our own second machine,
+ * reachable only over ssh, so that one shells out to scp/ssh with a key.
  *
  * Verification is by size, not by hash. Hashing the remote copy would mean
  * downloading a 300 MB file back over FTP after every install, and a truncated
@@ -118,13 +121,74 @@ export function ftpTransport(cfg: {
  *  Null, never a guess. A half-configured server must do nothing at all: a
  *  transport that wrote to a default path would put a campaign somewhere the
  *  game server does not read and report success. */
+
+/** Single-quote a remote path for the shell on the far side. Names are already
+ *  restricted by assertPlainName; the directory comes from our own database. */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+const execFileAsync = promisify(execFile);
+
+export function sftpTransport(cfg: {
+  host: string; port: number; user: string; keyPath: string; dir: string;
+  run?: (cmd: string, args: string[]) => Promise<{ stdout: string }>;
+}): AddonsTransport {
+  // BatchMode so a missing key fails fast instead of hanging on a prompt, and
+  // accept-new so first contact works without a manual known_hosts step while
+  // still pinning the key after that.
+  const common = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-i', cfg.keyPath];
+  const run = cfg.run ?? (async (cmd: string, args: string[]) => {
+    const { stdout } = await execFileAsync(cmd, args, { maxBuffer: 1 << 20 });
+    return { stdout };
+  });
+  const remote = (name: string) => `${cfg.dir}/${name}`;
+  // scp spells the port -P, ssh spells it -p. Getting this backwards silently
+  // talks to the wrong port, so keep the two arg builders separate.
+  const ssh = (script: string) => run('ssh', [...common, '-p', String(cfg.port), `${cfg.user}@${cfg.host}`, script]);
+  return {
+    async put(localPath, remoteName) {
+      assertPlainName(remoteName);
+      // Same reason as localTransport: srcds mounts whatever is in addons/ at
+      // map load, so it must never see a partial file under the real name.
+      const final = remote(remoteName);
+      const tmp = `${final}.part`;
+      await run('scp', [...common, '-P', String(cfg.port), localPath, `${cfg.user}@${cfg.host}:${tmp}`]);
+      await ssh(`mv -- ${shq(tmp)} ${shq(final)}`);
+    },
+    async size(remoteName) {
+      assertPlainName(remoteName);
+      try {
+        const { stdout } = await ssh(`stat -c %s -- ${shq(remote(remoteName))}`);
+        const n = Number.parseInt(stdout.trim(), 10);
+        return Number.isFinite(n) ? n : null;
+      } catch {
+        // No such file is the common case and is not an error here.
+        return null;
+      }
+    },
+    async remove(remoteName) {
+      assertPlainName(remoteName);
+      await ssh(`rm -f -- ${shq(remote(remoteName))}`);
+    },
+  };
+}
+
 export function transportFor(server: ServerRow): AddonsTransport | null {
   const row = server as ServerRow & {
     addons_transport?: string | null; addons_dir?: string | null;
     ftp_host?: string | null; ftp_port?: number | null;
     ftp_user?: string | null; ftp_password?: string | null;
+    ssh_key_path?: string | null;
   };
   if (!row.addons_dir) return null;
+  if (row.addons_transport === 'sftp') {
+    if (!row.ftp_host || !row.ftp_user || !row.ssh_key_path) return null;
+    return sftpTransport({
+      host: row.ftp_host, port: row.ftp_port ?? 22, user: row.ftp_user,
+      keyPath: row.ssh_key_path, dir: row.addons_dir,
+    });
+  }
   if (row.addons_transport === 'ftp') {
     if (!row.ftp_host || !row.ftp_user || !row.ftp_password) return null;
     return ftpTransport({
