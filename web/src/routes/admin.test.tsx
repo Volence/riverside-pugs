@@ -131,6 +131,22 @@ describe('Admin page', () => {
     expect(await screen.findByText(/Chicago/)).toBeTruthy();
     expect(screen.getByText(/needs the L4D2 mappack/i)).toBeTruthy();
   });
+
+  // A stale cached response, or a version-skew moment mid-deploy, can hand
+  // the browser a settings payload built before serversMissingDlc4 existed.
+  // The panel must degrade to "no notice", not take down every other
+  // setting on the page.
+  it('renders the campaign pool when the payload omits serversMissingDlc4 entirely', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.settings.mockResolvedValue({
+      settings: [{ key: 'map_pool', label: 'Campaign pool', help: 'h', group: 'Queue', value: '["no_mercy"]', type: { kind: 'campaigns' } }],
+      campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    await waitFor(() => expect(screen.getByText('Campaign pool')).toBeTruthy());
+    expect(screen.getByText('No Mercy')).toBeTruthy();
+  });
 });
 
 describe('queue timeout', () => {

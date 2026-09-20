@@ -8,6 +8,14 @@ export function AdminSettings() {
   const { data, reload } = useFetch((s) => adminApi.settings(s), []);
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
   const groups = [...new Set(data.settings.map((s) => s.group))];
+  // The AdminSetting[] type is a compile-time promise the network does not
+  // keep: a stale cached response, or a version-skew moment mid-deploy where
+  // this bundle is newer than the server it's talking to, can hand back a
+  // payload from before this field existed. Default it here, at the point
+  // the untrusted JSON enters the component tree, so every consumer below
+  // (and any added later) inherits "no data" as "no notice" instead of a
+  // crash that takes out the whole Settings panel.
+  const serversMissingDlc4 = data.serversMissingDlc4 ?? [];
   return (
     <div class="stack">
       {groups.map((g) => (
@@ -16,7 +24,7 @@ export function AdminSettings() {
           <div class="admin-settings">
             {data.settings.filter((s) => s.group === g).map((s) => (
               <SettingRow key={s.key} setting={s} campaigns={data.campaigns}
-                serversMissingDlc4={data.serversMissingDlc4} onSaved={reload} />
+                serversMissingDlc4={serversMissingDlc4} onSaved={reload} />
             ))}
           </div>
         </Panel>
