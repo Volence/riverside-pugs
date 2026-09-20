@@ -166,6 +166,10 @@ export interface MapBreakdownRow {
    *  gets here, which is the comparable number: a total just says who has
    *  played the most. */
   avgStats: Record<string, number>;
+  /** Not set here: this module is pure statistics over the database and has
+   *  no campaign import. playerQueries.ts fills it in once this row leaves
+   *  here, so every caller of playerMapBreakdown still gets the field. */
+  campaignName?: string | null;
 }
 
 /**

@@ -40,6 +40,11 @@ export interface Config {
    *  every campaign on its default stop point: the same reason demoDir and
    *  addonsDir default to empty rather than to a guess. */
   missionsDir: string;
+  /** The game's DLC4 missions directory, holding the dlc4 campaigns' chapter
+   *  lists. Empty means the dlc4 eight have no known chapters, the same default
+   *  and for the same reason as missionsDir: a path guessed from another path
+   *  is how you write a lot of wrong behavior into a place nothing reads it. */
+  dlc4MissionsDir: string;
   discord: DiscordConfig | null;
 }
 
@@ -60,7 +65,7 @@ export interface Config {
 export function missingDirs(cfg: Config): { name: string; path: string }[] {
   const pairs: [string, string][] = [
     ['REPLAY_DIR', cfg.replayDir], ['DEMO_DIR', cfg.demoDir], ['ADDONS_DIR', cfg.addonsDir],
-    ['MISSIONS_DIR', cfg.missionsDir],
+    ['MISSIONS_DIR', cfg.missionsDir], ['DLC4_MISSIONS_DIR', cfg.dlc4MissionsDir],
   ];
   return pairs
     .filter(([, path]) => path && !existsSync(path))
@@ -82,6 +87,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     replayDir: env.REPLAY_DIR ?? '',
     addonsDir: env.ADDONS_DIR ?? '',
     missionsDir: env.MISSIONS_DIR ?? '',
+    dlc4MissionsDir: env.DLC4_MISSIONS_DIR ?? '',
     discord: loadDiscord(env),
   };
 }

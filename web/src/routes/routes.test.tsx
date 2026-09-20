@@ -438,6 +438,19 @@ describe('Profile', () => {
     render(<Profile steamid="1" />);
     await waitFor(() => expect(screen.getByText(/unrated this season/i)).toBeTruthy());
   });
+
+  // By-map mixes every campaign a player has touched, so a bare chapter name
+  // there identifies nothing once dlc4 chapters share names with L4D1 ones.
+  it('qualifies by-map rows with their campaign', async () => {
+    mockApi.profile.mockResolvedValue({
+      ...profile,
+      byMap: [
+        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 3, wins: 1, losses: 2, stats: {}, avgStats: {} },
+      ],
+    });
+    render(<Profile steamid="1" />);
+    expect(await screen.findByText(/Dead Center 2 · Streets/)).toBeTruthy();
+  });
 });
 
 describe('skill stats display', () => {

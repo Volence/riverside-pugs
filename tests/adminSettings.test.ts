@@ -8,7 +8,7 @@ import { SETTINGS_SCHEMA, validateSetting } from '../src/settingsSchema.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache } from '../src/campaignRegistry.js';
-import { addServer } from '../src/serverPool.js';
+import { addServer, setHasDlc4 } from '../src/serverPool.js';
 
 const ADMIN = '76561198000000001';
 let db: DB;
@@ -48,6 +48,15 @@ describe('settings schema', () => {
     expect(validateSetting('discord_queue_thresholds', [0]).ok).toBe(false);
     expect(validateSetting('not_a_setting', '1').ok).toBe(false);
   });
+
+  // The default is only reached by a caller with no registry to consult, and
+  // that caller must still fail closed on a campaign that needs an install
+  // check: a dlc4 campaign is not automatically safe just because nobody
+  // passed campaignSlugs.
+  it('defaults campaignSlugs to the campaigns that need no install check, not every campaign', () => {
+    expect(validateSetting('map_pool', ['dead_center']).ok).toBe(false);
+    expect(validateSetting('map_pool', ['no_mercy']).ok).toBe(true);
+  });
 });
 
 describe('settings routes', () => {
@@ -56,6 +65,16 @@ describe('settings routes', () => {
     const invite = res.settings.find((s: { key: string }) => s.key === 'invite_code');
     expect(invite.secret).toBe(true);
     expect(res.settings.find((s: { key: string }) => s.key === 'ready_seconds').value).toBe('120');
+  });
+
+  // The pool gate (map_pool's poolableCampaigns filter) already hides a dlc4
+  // campaign from an admin with no explanation; this is what lets the panel
+  // say why, next to the pool checkboxes.
+  it('names the servers missing the mappack, for the panel to explain the gate', async () => {
+    const serverId = addServer(db, { name: 'Chicago', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    setHasDlc4(db, serverId, false);
+    const res = (await app.inject({ method: 'GET', url: '/api/admin/settings', cookies: admin })).json();
+    expect(res.serversMissingDlc4).toEqual(['Chicago']);
   });
 
   it('saves a valid value and audits it; rejects invalid with the reason; 404s unknown', async () => {
@@ -145,6 +164,17 @@ describe('the settings pool candidate list is gated the same as the panel', () =
     publishDbd(serverId, { installed: true });
     expect(await poolSlugs()).toContain('dbd');
     expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(200);
+  });
+
+  // A dlc4 campaign is stock, not custom, so it has no install row to gate
+  // on the way dbd does above. It still must not be poolable while a server
+  // lacks the mappack, or this same route would be the hole that lets a
+  // match changelevel into a map that server cannot load.
+  it('withholds a dlc4 campaign while a server lacks the mappack', async () => {
+    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    setHasDlc4(db, serverId, false);
+    expect(await poolSlugs()).not.toContain('dead_center');
+    expect((await put('map_pool', ['no_mercy', 'dead_center'])).statusCode).toBe(400);
   });
 
   // Judgement call: an admin should not be locked out of their own settings

@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, survivalNote, sortMapRows, type MapSort } from '../format';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
@@ -156,7 +156,7 @@ export function Profile(
                 return (
                   <BarRow
                     key={r.map}
-                    name={mapName(r.map)}
+                    name={qualifiedMapName(r.map, r.campaignName ?? null)}
                     href={`/map/${encodeURIComponent(r.map)}`}
                     value={lead === null ? 'n/a' : `${lead}%`}
                     detail={mapSort === 'survival'
