@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive } from './guards.js';
+import { publicBans } from '../admin/players.js';
 import { fileReport, reportEligibility } from '../reports.js';
 
 export interface ApiRouteOpts {
@@ -79,4 +80,9 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
   // without signing in. Carries nothing viewer-relative and no connect block.
   app.get('/api/queue', async () => matchmaker.publicQueue());
 
+  /** The ban list, public. See publicBans for what is and is not in it. */
+  app.get('/api/bans', async (req) => {
+    const { q } = req.query as { q?: string };
+    return { bans: publicBans(db, typeof q === 'string' ? q.slice(0, 64) : '') };
+  });
 }

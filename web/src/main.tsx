@@ -19,6 +19,7 @@ import { Crosshair } from './routes/Crosshair';
 import { ReplayPage } from './routes/ReplayPage';
 import { LinkDiscord } from './routes/LinkDiscord';
 import { Admin } from './routes/Admin';
+import { Bans } from './routes/Bans';
 import { HowToPlay } from './routes/HowToPlay';
 import { HelpConsistency } from './routes/HelpConsistency';
 import { Panel } from './components/bits';
@@ -82,6 +83,7 @@ function App() {
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
           <Route path="/admin" component={Admin} session={session} />
+          <Route path="/bans" component={Bans} />
           <Route path="/how-to-play" component={HowToPlay} session={session} />
           <Route path="/help/consistency" component={HelpConsistency} />
           <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />
