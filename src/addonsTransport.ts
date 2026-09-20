@@ -174,27 +174,31 @@ export function sftpTransport(cfg: {
   };
 }
 
-export function transportFor(server: ServerRow): AddonsTransport | null {
+/** @param dirOverride probe or write somewhere other than the addons directory,
+ *  keeping this one function as the only place that knows how each box is
+ *  reached. Used by the dlc4 probe, which must look at left4dead_dlc4/maps. */
+export function transportFor(server: ServerRow, dirOverride?: string): AddonsTransport | null {
   const row = server as ServerRow & {
     addons_transport?: string | null; addons_dir?: string | null;
     ftp_host?: string | null; ftp_port?: number | null;
     ftp_user?: string | null; ftp_password?: string | null;
     ssh_key_path?: string | null;
   };
-  if (!row.addons_dir) return null;
+  const dir = dirOverride ?? row.addons_dir;
+  if (!dir) return null;
   if (row.addons_transport === 'sftp') {
     if (!row.ftp_host || !row.ftp_user || !row.ssh_key_path) return null;
     return sftpTransport({
       host: row.ftp_host, port: row.ftp_port ?? 22, user: row.ftp_user,
-      keyPath: row.ssh_key_path, dir: row.addons_dir,
+      keyPath: row.ssh_key_path, dir,
     });
   }
   if (row.addons_transport === 'ftp') {
     if (!row.ftp_host || !row.ftp_user || !row.ftp_password) return null;
     return ftpTransport({
       host: row.ftp_host, port: row.ftp_port ?? 21, user: row.ftp_user,
-      password: row.ftp_password, dir: row.addons_dir,
+      password: row.ftp_password, dir,
     });
   }
-  return localTransport(row.addons_dir);
+  return localTransport(dir);
 }

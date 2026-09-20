@@ -40,6 +40,12 @@ describe('openDb', () => {
     setSetting(db, 'invite_code', 'sekrit');
     expect(getSetting(db, 'invite_code')).toBe('sekrit');
   });
+
+  it('gives servers a has_dlc4 column defaulting to 0', () => {
+    const db = openDb(':memory:');
+    const cols = db.prepare('PRAGMA table_info(servers)').all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toContain('has_dlc4');
+  });
 });
 
 describe('round schema', () => {
