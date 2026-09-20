@@ -3,7 +3,7 @@ import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
 import { RealOrchestrator } from '../src/orchestrator.js';
 import { ServerReleaser } from '../src/serverRelease.js';
-import { addServer, getServer } from '../src/serverPool.js';
+import { addServer, getServer, setHasDlc4 } from '../src/serverPool.js';
 import { LogListener } from '../src/logListener.js';
 import { currentSeasonId } from '../src/players.js';
 import {
@@ -466,6 +466,51 @@ describe('custom campaign availability', () => {
 
     expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+});
+
+describe('dlc4 campaign availability', () => {
+  // Same rcon fake and orchestrator wiring as the custom-campaign suite above.
+  async function setup(): Promise<{ orch: RealOrchestrator; cmds: string[]; serverId: number }> {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener,
+      logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}),
+      makeRcon: (o) => o,
+    });
+    return { orch, cmds: srv.cmds, serverId };
+  }
+
+  // The pool flag can be stale the same way the custom-campaign one can: a
+  // server added or re-enabled after the vote has no mappack, and
+  // changelevel into c1m1_hotel with no left4dead_dlc4 strands the match on
+  // a black screen with no error anyone sees.
+  it('refuses a dlc4 campaign on a server that does not have the mappack', async () => {
+    const { orch, cmds, serverId } = await setup();
+    setHasDlc4(db, serverId, false);
+    const mid = seedMatch(db, 'dead_center');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+
+  it('allows a dlc4 campaign once that server reports the mappack installed', async () => {
+    const { orch, cmds, serverId } = await setup();
+    setHasDlc4(db, serverId, true);
+    const mid = seedMatch(db, 'dead_center');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds).toContain('changelevel c1m1_hotel');
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
   });
 });
 
