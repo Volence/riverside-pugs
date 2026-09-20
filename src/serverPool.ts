@@ -97,6 +97,27 @@ export function listServers(db: DB): ServerRow[] {
   return db.prepare('SELECT * FROM servers ORDER BY id').all() as ServerRow[];
 }
 
+/** Records the result of probing a server for the dlc4 mappack (Task 4). */
+export function setHasDlc4(db: DB, serverId: number, has: boolean): void {
+  db.prepare('UPDATE servers SET has_dlc4 = ? WHERE id = ?').run(has ? 1 : 0, serverId);
+}
+
+/** Enabled servers without the mappack, by name, for telling an admin exactly
+ *  which box is holding the dlc4 campaigns out of the pool. */
+export function serversMissingDlc4(db: DB): string[] {
+  return (db
+    .prepare('SELECT name FROM servers WHERE enabled = 1 AND has_dlc4 = 0 ORDER BY id')
+    .all() as { name: string }[]).map((s) => s.name);
+}
+
+/** True when every enabled server carries the dlc4 mappack. */
+export function allServersHaveDlc4(db: DB): boolean {
+  const row = db
+    .prepare('SELECT COUNT(*) AS n FROM servers WHERE enabled = 1 AND has_dlc4 = 0')
+    .get() as { n: number };
+  return row.n === 0;
+}
+
 /** The servers a custom campaign must be on before it can be pooled: every
  *  server actually in play, matching campaignInstall's own install targets. */
 export function enabledServerIds(db: DB): number[] {
