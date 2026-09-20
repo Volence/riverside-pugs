@@ -65,7 +65,7 @@ export function setMissionsDir(dir: string): void {
 
 function build(db: DB): NonNullable<typeof cache> {
   const registry = new Map<string, CampaignEntry>();
-  const stockMissions = readStockMissions(missionsDir);
+  const stockMissions = readStockMissions([missionsDir]);
   for (const [slug, c] of Object.entries(CAMPAIGNS)) {
     registry.set(slug, {
       slug, name: c.name, firstMap: STOCK_FIRST[slug],
