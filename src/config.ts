@@ -11,6 +11,15 @@ export interface DiscordConfig {
   lobbyChannelId: string | null;
 }
 
+/** Twitch application. Null when either piece is missing, which is the tested
+ *  default: the site then behaves exactly as it did before Twitch existed. No
+ *  scopes are ever requested, so the only permission involved is knowing which
+ *  account authorised. */
+export interface TwitchConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
 export interface Config {
   port: number;
   publicUrl: string;
@@ -41,6 +50,7 @@ export interface Config {
    *  addonsDir default to empty rather than to a guess. */
   missionsDir: string;
   discord: DiscordConfig | null;
+  twitch: TwitchConfig | null;
 }
 
 /**
@@ -83,7 +93,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     addonsDir: env.ADDONS_DIR ?? '',
     missionsDir: env.MISSIONS_DIR ?? '',
     discord: loadDiscord(env),
+    twitch: loadTwitch(env),
   };
+}
+
+function loadTwitch(env: Record<string, string | undefined>): TwitchConfig | null {
+  const clientId = env.TWITCH_CLIENT_ID?.trim();
+  const clientSecret = env.TWITCH_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret };
 }
 
 function loadDiscord(env: Record<string, string | undefined>): DiscordConfig | null {
