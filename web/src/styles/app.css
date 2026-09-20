@@ -1572,6 +1572,16 @@ body.is-theater { overflow: hidden; }
   margin: var(--sp-3) 0;
 }
 .launch-opts code { white-space: pre; }
+
+/* Public ban list. A lifted or expired ban stays on the page and recedes,
+   rather than being removed: the record is the point. */
+.ban-search { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.ban-search input { flex: 1 1 16rem; min-width: 0; }
+.ban-reason { max-width: 42ch; white-space: normal; word-break: break-word; }
+.ban-by { white-space: nowrap; }
+.ban-state { font-family: var(--font-label); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.12em; }
+.ban-state--on { color: var(--loss); }
+tbody tr.is-lifted td { opacity: 0.55; }
 .admin-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-dense); }
 .admin-list li { padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 
