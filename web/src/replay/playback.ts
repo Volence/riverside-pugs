@@ -34,6 +34,21 @@ export const LIVE_BUFFER_MS = 1000;
  *  buffer point instead of playing catch-up for seconds. */
 export const LIVE_SNAP_MS = 3000;
 
+/** The same rule for a CLOSED file, at a distance that clears a round
+ *  release.
+ *
+ *  A round ending hands the clock about ten seconds of catch-up in one batch,
+ *  and playing those out is the whole reason the closed branch below exists,
+ *  so this has to sit comfortably above ten seconds or that breaks. It also
+ *  has to sit far below a round length, because the case it is here for is a
+ *  viewer who is not ten seconds behind but four minutes: `currentFileFor`
+ *  holds the live pointer on the previous round for ten seconds after the
+ *  next one starts, so a page opened in that window resolves to a finished
+ *  round's file and starts at zero. Without a ceiling the clock crawled the
+ *  whole round in real time under a "Round over, catching up" flag while the
+ *  next round was being played. */
+export const CLOSED_CATCHUP_MS = 20_000;
+
 /**
  * Where the clock lands after `elapsedMs` of real time.
  *
@@ -54,7 +69,12 @@ export function advance(
     // ten seconds it was holding back in one batch, which put the clock nine
     // seconds behind the new end, and the snap below skipped the finish of
     // every round. Play the tail out at real time instead.
+    //
+    // Only the tail, though. Past CLOSED_CATCHUP_MS the clock is not finishing
+    // a round it was watching, it has landed on one it never saw, and real
+    // time would mean watching the whole thing before live resumed.
     if (closed) {
+      if (endMs - tMs > CLOSED_CATCHUP_MS) return endMs;
       const next = tMs + step;
       return next >= endMs ? endMs : next;
     }
