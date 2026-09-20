@@ -22,7 +22,6 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/maps', 'Campaigns'],
   ['/custom-campaigns', 'Custom'],
   ['/crosshair', 'Crosshair'],
-  ['/bans', 'Bans'],
   ['/how-to-play', 'How to play'],
 ];
 
@@ -40,6 +39,10 @@ export function Nav({ session, state }: { session: Session; state: StateSnapshot
              rel={target ? 'noopener' : undefined}
              aria-current={path === href ? 'page' : undefined}>{label}</a>
         ))}
+        {/* The ban list is admins only for now, so its link is too. */}
+        {me?.isAdmin && (
+          <a href="/bans" aria-current={path === '/bans' ? 'page' : undefined}>Bans</a>
+        )}
         {me?.isAdmin && (
           <a href="/admin" aria-current={path === '/admin' ? 'page' : undefined}>Admin</a>
         )}

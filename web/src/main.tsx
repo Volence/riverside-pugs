@@ -83,7 +83,7 @@ function App() {
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
           <Route path="/admin" component={Admin} session={session} />
-          <Route path="/bans" component={Bans} />
+          <Route path="/bans" component={Bans} session={session} />
           <Route path="/how-to-play" component={HowToPlay} session={session} />
           <Route path="/help/consistency" component={HelpConsistency} />
           <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />

@@ -1,20 +1,36 @@
 import { useState } from 'preact/hooks';
 import { api, type PublicBan } from '../api';
+import type { Session } from '../hooks/useLiveState';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { fmtDate } from '../format';
 
 /**
- * The ban list, public.
+ * The ban list. Admins only for now, by the owner's ruling (2026-09-20).
  *
- * Public because a ban list only admins can read asks everyone else to take
- * enforcement on trust. The reason text is already shown to the person banned,
- * so nothing here is new to them; what it adds is that everyone else can see
- * the same thing. Lifted bans stay on the list, because a record that quietly
- * removes its own mistakes is not a record.
+ * It was written to be public, on the argument that a ban list only admins can
+ * read asks everyone else to take enforcement on trust, and nothing in it is
+ * private: the reason text is already shown to the person banned. Lifted bans
+ * stay on the list, because a record that quietly removes its own mistakes is
+ * not a record. Opening it up again means dropping the guard on /api/bans, the
+ * session check here and the admin condition on the nav link.
  */
-export function Bans() {
+export function Bans({ session }: { session: Session }) {
+  const isAdmin = session.kind === 'active' && session.me.isAdmin;
+  if (session.kind === 'loading') return <div class="page page--list" />;
+  if (!isAdmin) {
+    return (
+      <div class="page page--list">
+        <PageHeader eyebrow="Riverside" title="Bans" />
+        <Panel><Empty>The ban list is for admins only right now.</Empty></Panel>
+      </div>
+    );
+  }
+  return <BanList />;
+}
+
+function BanList() {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const { data, error } = useFetch((s) => api.bans(query, s), [query]);
@@ -84,7 +100,10 @@ export function Bans() {
 function BanRow({ b }: { b: PublicBan }) {
   return (
     <tr class={b.active ? '' : 'is-lifted'}>
-      <td class="pname"><PlayerLink steamid={b.steamid} name={b.name} /></td>
+      <td class="pname">
+        <PlayerLink steamid={b.steamid} name={b.name} />
+        <div class="ban-steamid mono muted">{b.steamid}</div>
+      </td>
       {/* Admin-written text. Rendered as text, never as markup: it is the one
           field on this public page a person types by hand. */}
       <td class="ban-reason">{b.reason}</td>

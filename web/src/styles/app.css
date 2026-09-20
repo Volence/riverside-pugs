@@ -1579,6 +1579,7 @@ body.is-theater { overflow: hidden; }
 .ban-search input { flex: 1 1 16rem; min-width: 0; }
 .ban-reason { max-width: 42ch; white-space: normal; word-break: break-word; }
 .ban-by { white-space: nowrap; }
+.ban-steamid { font-size: 0.78em; }
 .ban-state { font-family: var(--font-label); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.12em; }
 .ban-state--on { color: var(--loss); }
 tbody tr.is-lifted td { opacity: 0.55; }
