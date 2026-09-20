@@ -1717,8 +1717,13 @@ describe('Live with nothing running', () => {
 
 describe('leaderboard stat leaders', () => {
   const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
-  const row = (steamid: string, name: string, stats: Record<string, number>) =>
-    ({ steamid, name, avatar: null, sr: 1200, wins: 5, losses: 5, games: 10, ranked: true, stats });
+  // medianStats defaults to the same bag so the cases that are not ABOUT the
+  // measure read the same either way. The cases that are about it pass a
+  // different bag, which is the shape the real payload has.
+  const row = (
+    steamid: string, name: string,
+    stats: Record<string, number>, medianStats: Record<string, number> = stats,
+  ) => ({ steamid, name, avatar: null, sr: 1200, wins: 5, losses: 5, games: 10, ranked: true, stats, medianStats });
 
   beforeEach(() => {
     mockApi.seasons.mockResolvedValue({ seasons: [] });
@@ -1771,5 +1776,66 @@ describe('leaderboard stat leaders', () => {
     expect(card.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(card);
     await waitFor(() => expect(card.getAttribute('aria-pressed')).toBe('true'));
+  });
+});
+
+describe('leaderboard measure', () => {
+  const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
+  // alice turns up to far more matches and out-totals bob while being the
+  // weaker player in every one of them. The two measures disagree about who is
+  // top, which is the bug the per-match default fixes.
+  const rows = [
+    {
+      steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 10, losses: 10, games: 20,
+      ranked: true, stats: { skeets: 60 }, medianStats: { skeets: 3 },
+    },
+    {
+      steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 3, losses: 2, games: 5,
+      ranked: true, stats: { skeets: 40 }, medianStats: { skeets: 8 },
+    },
+  ];
+
+  beforeEach(() => {
+    mockApi.seasons.mockResolvedValue({ seasons: [] });
+    mockApi.leaderboard.mockResolvedValue(board(rows));
+  });
+
+  const skeetCells = () =>
+    Array.from(document.querySelectorAll('tbody tr')).map(
+      (tr) => tr.querySelectorAll('td')[7]?.textContent,
+    );
+
+  it('shows the per-match median by default, not the season total', async () => {
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText(/median over the matches/i)).toBeTruthy());
+    expect(skeetCells()).toEqual(['3', '8']);
+  });
+
+  it('switches every stat column to season totals on the Totals tab', async () => {
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText(/median over the matches/i)).toBeTruthy());
+    fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
+    await waitFor(() => expect(screen.getByText(/season totals/i)).toBeTruthy());
+    expect(skeetCells()).toEqual(['60', '40']);
+  });
+
+  it('reorders the table when the measure changes, because the two disagree', async () => {
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Skeets')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('Sort the table by Skeets'));
+
+    const names = () => Array.from(document.querySelectorAll('tbody tr .pname'))
+      .map((td) => td.textContent);
+    await waitFor(() => expect(names()).toEqual(['bob', 'alice']));
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
+    await waitFor(() => expect(names()).toEqual(['alice', 'bob']));
+  });
+
+  it('carries the other measure in the cell title so it can be read without switching', async () => {
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText(/median over the matches/i)).toBeTruthy());
+    const cell = document.querySelectorAll('tbody tr')[0].querySelectorAll('td')[7];
+    expect(cell.getAttribute('title')).toBe('60 over 20 matches');
   });
 });

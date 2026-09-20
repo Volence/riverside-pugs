@@ -2,7 +2,8 @@ import type { DB } from './db.js';
 import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
 import { getPlayer, currentSeasonId } from './players.js';
-import { STAT_DEFS, statDef } from './statKeys.js';
+import { FIXED_STAT_KEYS, STAT_DEFS, statDef } from './statKeys.js';
+import { quantiles } from './quantiles.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 
@@ -22,40 +23,65 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
      FROM player_ratings pr JOIN players p ON p.steamid = pr.player_id
      WHERE pr.season_id = ?`,
   ).all(seasonId) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
-  // Per-player season totals, so the leaderboard can be sorted by any stat
-  // client side without a request per column. Two queries for the whole
-  // table rather than one per player.
-  const fixed = db.prepare(
+  // Per-player season stats, so the leaderboard can be sorted by any stat
+  // client side without a request per column. Two queries for the whole table
+  // rather than one per player.
+  //
+  // These pull one row PER MATCH rather than a SUM, because the table now
+  // offers a per-match median as well as a season total, and a median cannot be
+  // recovered from a sum. Both bags are then reduced from the same samples, so
+  // the two tabs can never disagree about what they are measuring. The season
+  // total is unchanged by the switch: it is the same addition, done here.
+  //
+  // `stats_json IS NOT NULL` is the captured test for the fixed columns. They
+  // live on match_players and default to 0, and matchResult.ts writes them and
+  // stats_json together in one UPDATE per player the dump carried, so a NULL
+  // there marks the fixed zeros as never recorded rather than as a bad night.
+  // The skill table needs no such test: a row that was not measured is absent.
+  const fixedRows = db.prepare(
     `SELECT mp.player_id AS steamid,
-            COALESCE(SUM(mp.si_damage),0)    AS sidmg,
-            COALESCE(SUM(mp.si_kills),0)     AS sikill,
-            COALESCE(SUM(mp.common_kills),0) AS ck,
-            COALESCE(SUM(mp.ff_dealt),0)     AS ff,
-            COALESCE(SUM(mp.revives),0)      AS rev
+            mp.si_damage AS sidmg, mp.si_kills AS sikill, mp.common_kills AS ck,
+            mp.ff_dealt AS ff, mp.revives AS rev
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
-     GROUP BY mp.player_id`,
-  ).all(seasonId) as Record<string, number | string>[];
+     WHERE m.season_id = ? AND m.state = 'completed' AND mp.stats_json IS NOT NULL`,
+  ).all(seasonId) as ({ steamid: string } & Record<string, number>)[];
 
-  const skill = db.prepare(
-    `SELECT mps.player_id AS steamid, mps.stat, SUM(mps.value) AS total
+  const skillRows = db.prepare(
+    `SELECT mps.player_id AS steamid, mps.stat, mps.value
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
-     GROUP BY mps.player_id, mps.stat`,
-  ).all(seasonId) as { steamid: string; stat: string; total: number }[];
+     WHERE m.season_id = ? AND m.state = 'completed'`,
+  ).all(seasonId) as { steamid: string; stat: string; value: number }[];
 
-  const statsBy = new Map<string, Record<string, number>>();
-  for (const r of fixed) {
-    const { steamid, ...rest } = r as { steamid: string } & Record<string, number>;
-    statsBy.set(steamid, { ...rest });
-  }
-  for (const r of skill) {
+  const samplesBy = new Map<string, Map<string, number[]>>();
+  const sample = (steamid: string, key: string, value: number) => {
+    let bags = samplesBy.get(steamid);
+    if (!bags) { bags = new Map(); samplesBy.set(steamid, bags); }
+    const bag = bags.get(key);
+    if (bag) bag.push(value);
+    else bags.set(key, [value]);
+  };
+  for (const r of fixedRows) for (const k of FIXED_STAT_KEYS) sample(r.steamid, k, r[k]);
+  for (const r of skillRows) {
     // self-visibility stats are never rankable and must not ride along on a
     // public payload, so they are dropped here rather than filtered in the UI.
     if (statDef(r.stat)?.visibility === 'self') continue;
-    const bucket = statsBy.get(r.steamid) ?? {};
-    bucket[r.stat] = r.total;
-    statsBy.set(r.steamid, bucket);
+    sample(r.steamid, r.stat, r.value);
+  }
+
+  const statsBy = new Map<string, Record<string, number>>();
+  const medianBy = new Map<string, Record<string, number>>();
+  for (const [steamid, bags] of samplesBy) {
+    const totals: Record<string, number> = {};
+    const medians: Record<string, number> = {};
+    for (const [key, values] of bags) {
+      totals[key] = values.reduce((a, b) => a + b, 0);
+      // Never null here: a bag only exists once something has been pushed into
+      // it. A key nobody recorded has no bag and so appears in neither result,
+      // which is the absent-is-not-zero rule the rest of this file follows.
+      medians[key] = quantiles(values)!.p50;
+    }
+    statsBy.set(steamid, totals);
+    medianBy.set(steamid, medians);
   }
 
   // How many matches have produced ratings this season. The page used to
@@ -74,6 +100,7 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
         sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games,
         ranked: r.games >= RANKED_MIN_GAMES,
         stats: statsBy.get(r.steamid) ?? {},
+        medianStats: medianBy.get(r.steamid) ?? {},
       }))
       .sort((x, y) => y.sr - x.sr),
   };

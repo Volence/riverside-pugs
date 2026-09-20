@@ -8,6 +8,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { upsertPlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
 import { statDef, STAT_DEFS } from '../src/statKeys.js';
+import { RANKED_MIN_GAMES } from '../src/standings.js';
 import { getSetting, setSetting } from '../src/settings.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -387,14 +388,37 @@ describe('stats routes', () => {
   });
 
   describe('stat leaderboard', () => {
-    it('ranks players by summed stat across completed matches in a season', async () => {
-      const matchId = playCompletedMatch(db);
-      seedStats(db, matchId, IDS[0], { skeets: 5 });
-      seedStats(db, matchId, IDS[1], { skeets: 9 });
+    // The whole point of the change: a season total ranks attendance. IDS[0]
+    // turns up to twice as many matches and out-totals IDS[1] while being the
+    // weaker player in every single one of them. Ordering by total puts IDS[0]
+    // top, which is the bug; ordering by the per-match median puts IDS[1] top.
+    it('ranks by the per-match median, so turning up more does not win the board', async () => {
+      for (let i = 0; i < 6; i++) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: 3 });
+      for (let i = 0; i < 3; i++) seedStats(db, playCompletedMatch(db), IDS[1], { skeets: 5 });
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
       expect(res.statusCode).toBe(200);
-      expect(res.json().rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
-      expect(res.json().rows[0].total).toBe(9);
+      const rows = res.json().rows;
+      expect(rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
+      expect(rows[0]).toMatchObject({ median: 5, matches: 3, total: 15 });
+      // The loser of the comparison still has the bigger season total, which is
+      // exactly what the old ordering was rewarding.
+      expect(rows[1]).toMatchObject({ median: 3, matches: 6, total: 18 });
+    });
+
+    it('carries the spread beside the median so a reader can see how steady it is', async () => {
+      for (const v of [1, 1, 10, 10]) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: v });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
+      expect(res.json().rows[0]).toMatchObject({ p25: 1, median: 5.5, p75: 10, matches: 4 });
+    });
+
+    // There is no provisional section on this route to demote anyone into, the
+    // way the leaderboard table has, so a one-match median has to be excluded
+    // here or a single lucky night tops the board outright.
+    it('leaves out a player with fewer matches than a median can rest on', async () => {
+      for (let i = 0; i < 3; i++) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: 2 });
+      seedStats(db, playCompletedMatch(db), IDS[1], { skeets: 99 });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
+      expect(res.json().rows.map((r: any) => r.steamid)).toEqual([IDS[0]]);
     });
 
     // times_skeeted is public now, and must STILL not be rankable: a board of
@@ -411,20 +435,34 @@ describe('stats routes', () => {
       expect(res.statusCode).toBe(404);
     });
 
+    // Three matches each, not one: a single match leaves every player under
+    // RANKED_MIN_GAMES, and these would then assert a limit against an empty
+    // list and pass whatever the limit parsing did.
+    const seedEveryoneRankable = () => {
+      for (let i = 0; i < RANKED_MIN_GAMES; i++) {
+        const matchId = playCompletedMatch(db);
+        IDS.forEach((id, n) => seedStats(db, matchId, id, { skeets: n + 1 }));
+      }
+    };
+
     it('truncates a fractional limit instead of passing it to SQLite unchanged', async () => {
-      const matchId = playCompletedMatch(db);
-      IDS.forEach((id, i) => seedStats(db, matchId, id, { skeets: i + 1 }));
+      seedEveryoneRankable();
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=50.7', cookies });
       expect(res.statusCode).toBe(200);
-      expect(res.json().rows.length).toBeLessThanOrEqual(50);
+      expect(res.json().rows.length).toBe(IDS.length);
     });
 
     it('falls back to the default limit on a garbage limit string', async () => {
-      const matchId = playCompletedMatch(db);
-      IDS.forEach((id, i) => seedStats(db, matchId, id, { skeets: i + 1 }));
+      seedEveryoneRankable();
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=abc', cookies });
       expect(res.statusCode).toBe(200);
-      expect(res.json().rows.length).toBeLessThanOrEqual(25);
+      expect(res.json().rows.length).toBe(IDS.length);
+    });
+
+    it('applies a real limit', async () => {
+      seedEveryoneRankable();
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=3', cookies });
+      expect(res.json().rows.length).toBe(3);
     });
   });
   it('carries per-player season totals so the table can sort by any column', async () => {

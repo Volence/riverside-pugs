@@ -2,8 +2,11 @@ import { Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { api, type LeaderboardRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders } from '../format';
-import { Empty, Panel, PlayerLink } from '../components/bits';
+import {
+  deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders,
+  STAT_MEASURE_TABS, type StatMeasure,
+} from '../format';
+import { Empty, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 
@@ -24,8 +27,12 @@ const BASE_COLS = [
 type Row = LeaderboardRow & { stats?: Record<string, number> };
 
 /** Everything sortable resolves through here, so a column header and the
- *  comparator can never disagree about what a column means. */
-function valueOf(r: Row, key: string): number | null {
+ *  comparator can never disagree about what a column means.
+ *
+ *  `measure` only reaches the stat columns. The five base columns are counts
+ *  and rates of the season itself: a median SR or a median win rate is not a
+ *  thing, and `games` is the count the medians are taken over. */
+function valueOf(r: Row, key: string, measure: StatMeasure): number | null {
   switch (key) {
     case 'sr': return r.sr;
     case 'wins': return r.wins;
@@ -37,7 +44,7 @@ function valueOf(r: Row, key: string): number | null {
       // cell must not claim a 0% win rate for someone who has not lost.
       return decided > 0 ? (r.wins / decided) * 100 : null;
     }
-    default: return r.stats?.[key] ?? null;
+    default: return (measure === 'median' ? r.medianStats : r.stats)?.[key] ?? null;
   }
 }
 
@@ -47,11 +54,16 @@ export function Leaderboard({ me }: { me: string | null }) {
   const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
   const seasons = seasonList?.seasons ?? [];
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'sr', desc: true });
+  // Per match by default. A season total mostly reports who has turned up to
+  // the most PUGs, so sorting the board by skeets used to rank attendance.
+  const [measure, setMeasure] = useState<StatMeasure>('median');
 
   const rows = (data?.rows ?? []) as Row[];
 
   // Stat columns come from the data present, so a season with no skill_detect
-  // matches shows no permanently empty columns.
+  // matches shows no permanently empty columns. Read off `stats`, which carries
+  // the same keys as `medianStats`, so the columns do not move when the measure
+  // is toggled.
   const statCols = useMemo(
     () => orderLiveStatKeys(Array.from(new Set(rows.flatMap((r) => Object.keys(r.stats ?? {}))))),
     [rows],
@@ -62,8 +74,8 @@ export function Leaderboard({ me }: { me: string | null }) {
   // player is not on the board yet, whichever column is being compared.
   const { ranked, provisional } = useMemo(() => {
     const cmp = (x: Row, y: Row) => {
-      const a = valueOf(x, sort.key);
-      const b = valueOf(y, sort.key);
+      const a = valueOf(x, sort.key, measure);
+      const b = valueOf(y, sort.key, measure);
       // Absent always sorts last, whichever direction, rather than being
       // treated as zero and beating real low scores.
       if (a === null && b === null) return x.name.localeCompare(y.name);
@@ -76,7 +88,7 @@ export function Leaderboard({ me }: { me: string | null }) {
       ranked: rows.filter((r) => r.ranked).sort(cmp),
       provisional: rows.filter((r) => !r.ranked).sort(cmp),
     };
-  }, [rows, sort]);
+  }, [rows, sort, measure]);
 
   const th = (key: string, label: string, cls = '') => (
     <th
@@ -129,7 +141,13 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
-      <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />
+      {/* Ranked players only, the same rule the Top rated card below already
+          applies. Under the median measure a provisional player's figure is
+          one match, which would otherwise take every card on a quiet season. */}
+      <StatLeaders
+        rows={ranked} sortKey={sort.key} measure={measure}
+        onPick={(k) => setSort({ key: k, desc: true })}
+      />
 
       <div class="lb-layout">
         <Panel class="panel--table">
@@ -140,6 +158,20 @@ export function Leaderboard({ me }: { me: string | null }) {
           ) : rows.length === 0 ? (
             <Empty>No rated players yet.</Empty>
           ) : (
+            <>
+            {/* What every stat column means. Not a display preference: the two
+                answer different questions and disagree about who is best, so
+                the table says which one it is currently answering. */}
+            <Tabs
+              active={measure}
+              onSelect={(k) => setMeasure(k as StatMeasure)}
+              tabs={[...STAT_MEASURE_TABS]}
+            />
+            <p class="muted lb__measure">
+              {measure === 'median'
+                ? 'Stat columns are a median over the matches that measured them, so a long season does not beat a good one.'
+                : 'Stat columns are season totals, which mostly reflect how many matches each player has turned up to.'}
+            </p>
             <div class={`table-wrap lb${sort.key === 'sr' && sort.desc && ranked.length > 0 ? ' lb--ranked' : ''}`}>
               <table>
                 <thead>
@@ -186,10 +218,20 @@ export function Leaderboard({ me }: { me: string | null }) {
                               : <span class="muted">n/a</span>}
                           </td>
                           {statCols.map((k) => {
-                            const v = r.stats?.[k];
+                            const v = valueOf(r, k, measure);
                             return (
-                              <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                                {v === undefined ? <span class="muted">n/a</span> : v}
+                              <td
+                                class={`num${v ? '' : ' is-dim'}`}
+                                key={k}
+                                // The other measure, on hover: the two are one
+                                // click apart, but a reader comparing a median
+                                // against a total should not have to lose their
+                                // place in the table to do it.
+                                title={measure === 'median'
+                                  ? `${r.stats?.[k] ?? 0} over ${r.games} matches`
+                                  : `${r.medianStats?.[k] ?? 0} per match`}
+                              >
+                                {v === null ? <span class="muted">n/a</span> : v}
                               </td>
                             );
                           })}
@@ -200,6 +242,7 @@ export function Leaderboard({ me }: { me: string | null }) {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </Panel>
         {/* Top rated is chosen among RANKED players only: a provisional SR
@@ -239,19 +282,23 @@ export function Leaderboard({ me }: { me: string | null }) {
  * which is the discoverability the column headers were missing.
  */
 function StatLeaders(
-  { rows, sortKey, onPick }: {
+  { rows, sortKey, measure, onPick }: {
     rows: Row[];
     sortKey: string;
+    /** The table's measure. A card is the table's sort control, so the two must
+     *  name the same leader: clicking "skeets" and landing on a table topped by
+     *  somebody else reads as a bug. */
+    measure: StatMeasure;
     onPick: (key: string) => void;
   },
 ) {
   const cards = useMemo(
     () => FEATURED_STAT_KEYS
-      .map((key) => ({ key, leaders: statLeaders(rows, key) }))
+      .map((key) => ({ key, leaders: statLeaders(rows, key, 3, measure) }))
       // A stat nobody has scored in yet gets no card, rather than a card
       // reading "nobody, 0". Keeps a fresh season honest.
       .filter((c) => c.leaders.length > 0),
-    [rows],
+    [rows, measure],
   );
   if (cards.length === 0) return null;
 

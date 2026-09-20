@@ -553,19 +553,31 @@ describe('FEATURED_STAT_KEYS', () => {
 });
 
 describe('statLeaders', () => {
-  const rows: { steamid: string; name: string; stats?: Record<string, number> }[] = [
-    { steamid: '1', name: 'alice', stats: { skeets: 10, crowns: 0 } },
-    { steamid: '2', name: 'bob', stats: { skeets: 25, crowns: 3 } },
-    { steamid: '3', name: 'carol', stats: { skeets: 25 } },
+  // The real payload always carries both bags, reduced from one set of samples
+  // server side, so a fixture with only one of them is not a shape the cards
+  // ever see. `medianStats` is deliberately NOT a rescaling of `stats` here:
+  // the two orders disagree, which is the whole reason the measure exists.
+  type Row = {
+    steamid: string; name: string;
+    stats?: Record<string, number>; medianStats?: Record<string, number>;
+  };
+  const rows: Row[] = [
+    { steamid: '1', name: 'alice', stats: { skeets: 10, crowns: 0 }, medianStats: { skeets: 5, crowns: 0 } },
+    { steamid: '2', name: 'bob', stats: { skeets: 25, crowns: 3 }, medianStats: { skeets: 2, crowns: 1 } },
+    { steamid: '3', name: 'carol', stats: { skeets: 25 }, medianStats: { skeets: 2 } },
     { steamid: '4', name: 'dave' },
   ];
 
-  it('ranks by value, highest first', () => {
-    expect(statLeaders(rows, 'skeets').map((r) => r.name)).toEqual(['bob', 'carol', 'alice']);
+  it('ranks by the per-match median by default, highest first', () => {
+    expect(statLeaders(rows, 'skeets').map((r) => r.name)).toEqual(['alice', 'bob', 'carol']);
+  });
+
+  it('ranks by season total when asked for totals, which is a different order', () => {
+    expect(statLeaders(rows, 'skeets', 3, 'total').map((r) => r.name)).toEqual(['bob', 'carol', 'alice']);
   });
 
   it('breaks a tie by name so the order is stable across renders', () => {
-    const [a, b] = statLeaders(rows, 'skeets');
+    const [, a, b] = statLeaders(rows, 'skeets');
     expect(a.value).toBe(b.value);
     expect(a.name).toBe('bob');
     expect(b.name).toBe('carol');
@@ -582,7 +594,7 @@ describe('statLeaders', () => {
   });
 
   it('honours the limit', () => {
-    expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['bob', 'carol']);
+    expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['alice', 'bob']);
   });
 });
 

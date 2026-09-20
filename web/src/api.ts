@@ -146,6 +146,13 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** The same keys as `stats`, as a median over the completed matches that
+   *  measured them. The table's default measure: a season total ranks whoever
+   *  has played the most, which is not what any of these columns is asked.
+   *
+   *  A key is absent here exactly when it is absent from `stats`, since both
+   *  are reduced from one set of per-match samples. */
+  medianStats?: Record<string, number>;
 }
 
 export interface Leaderboard {

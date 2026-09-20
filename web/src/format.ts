@@ -604,6 +604,23 @@ export const FEATURED_STAT_KEYS: readonly string[] = [
 export interface StatLeader { steamid: string; name: string; value: number }
 
 /**
+ * Which of the two stat bags a surface is reading.
+ *
+ * `median` is per completed match and answers "what does this player usually
+ * get". `total` is the season sum and answers "how much of this has happened",
+ * which mostly reports who has turned up most. The median is the default
+ * everywhere the question is about a player rather than about the season.
+ */
+export type StatMeasure = 'median' | 'total';
+
+/** Tabs for the two, in the order they are offered. Shared so the leaderboard
+ *  and the map pages cannot drift into different wording for the same toggle. */
+export const STAT_MEASURE_TABS = [
+  { key: 'median', label: 'Per match' },
+  { key: 'total', label: 'Totals' },
+] as const;
+
+/**
  * Top `limit` players for one stat, from rows already loaded.
  *
  * Computed client-side on purpose. /api/leaderboard/stat/:key exists and does
@@ -616,12 +633,20 @@ export interface StatLeader { steamid: string; name: string; value: number }
  * "third best, with none" is not a standing.
  */
 export function statLeaders(
-  rows: { steamid: string; name: string; stats?: Record<string, number> }[],
+  rows: { steamid: string; name: string; stats?: Record<string, number>; medianStats?: Record<string, number> }[],
   key: string,
   limit = 3,
+  /** Which bag the cards lead on. The cards are also the table's sort control,
+   *  so they have to measure whatever the table is currently showing: a card
+   *  reading one name and a table sorting to a different one, from one click on
+   *  that same card, is worse than either measure on its own. */
+  measure: StatMeasure = 'median',
 ): StatLeader[] {
   return rows
-    .map((r) => ({ steamid: r.steamid, name: r.name, value: r.stats?.[key] ?? 0 }))
+    .map((r) => ({
+      steamid: r.steamid, name: r.name,
+      value: (measure === 'median' ? r.medianStats : r.stats)?.[key] ?? 0,
+    }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
     .slice(0, limit);
