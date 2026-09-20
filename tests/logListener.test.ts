@@ -143,6 +143,30 @@ describe('LogListener: token-less lines are admitted by source address alone', (
     ]);
   });
 
+  // PUGNET is emitted for every human connect, match or not, so it has no
+  // token to gate on and the sender's address is the only thing admitting it.
+  it('delivers PUGNET from an allowed source and drops it from anywhere else', async () => {
+    const line = 'PUGNET steamid=76561198030413993 ip=203.0.113.9 cc=US';
+
+    const allowed: LogEvent[] = [];
+    listener = new LogListener((ev) => allowed.push(ev));
+    let port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(allowed).toEqual([
+      { kind: 'player_net', steamid: '76561198030413993', ip: '203.0.113.9', country: 'US' },
+    ]);
+
+    await listener.close();
+    const denied: LogEvent[] = [];
+    listener = new LogListener((ev) => denied.push(ev));
+    port = await listener.listen(0, '127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(denied).toEqual([]);
+  });
+
   it('admits them through the per-datagram predicate too', async () => {
     // A game server added to the database after boot is only known to the
     // predicate, never to the fixed set.

@@ -18,6 +18,9 @@ import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { setReview } from '../integrity/store.js';
+import { removeAlias, resolveAlias } from '../aliases.js';
+import { MergeError, mergePlayers } from '../mergePlayers.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 
 export interface AdminRouteOpts {
@@ -119,6 +122,60 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const before = getPlayer(db, t.steamid)?.discord_name ?? null;
     unlinkDiscord(db, t.steamid);
     logAdmin(db, t.adminId, 'unlink_discord', t.steamid, { was: before });
+    return { ok: true };
+  });
+
+  /**
+   * Fold this account into another one: one person, one identity, one rating.
+   *
+   * `dryRun` first, always, from the panel. The merge rewrites rating history
+   * for everyone who played in the affected matches, not just the two
+   * accounts, because ratings are sequential and a roster corrected four
+   * matches back changes every rating computed since. The plan says how much
+   * it is about to move before anyone commits to it.
+   */
+  app.post('/api/admin/players/:steamid/merge', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const { into, dryRun } = (req.body ?? {}) as { into?: unknown; dryRun?: unknown };
+    if (typeof into !== 'string' || !/^\d{17}$/.test(into)) {
+      return reply.code(400).send({ error: 'into must be a SteamID64' });
+    }
+    try {
+      const plan = mergePlayers(db, {
+        from: t.steamid, into, dryRun: dryRun === true, by: t.adminId,
+      });
+      if (dryRun === true) return { plan };
+      logAdmin(db, t.adminId, 'merge_player', t.steamid, { ...plan });
+      publishAdminEvent({
+        kind: 'problem',
+        text: `${t.steamid} was merged into ${into}: ${plan.matchesMoved} matches moved, ${plan.matchesCollapsed} collapsed, season ${plan.seasons.join(', ')} recomputed.`,
+      });
+      return { ok: true, plan };
+    } catch (err) {
+      // Only what the merge itself rejects becomes a 400: same account,
+      // unknown account, an alias chain. Anything else is a fault on our side
+      // and must surface as a 500 rather than be dressed up as bad input.
+      if (err instanceof MergeError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  /** Undo the alias a merge left behind. The history stays merged; this only
+   *  frees the SteamID to be its own account again.
+   *
+   *  Does NOT go through `target`: a merged alt has no player row by
+   *  definition, so requiring one here would 404 on every id this route
+   *  exists to act on. The alias row is the thing that must exist. */
+  app.post('/api/admin/players/:steamid/unalias', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { steamid } = req.params as { steamid: string };
+    if (resolveAlias(db, steamid) === steamid) {
+      return reply.code(404).send({ error: 'that account is not an alias' });
+    }
+    removeAlias(db, steamid);
+    logAdmin(db, adminId, 'unalias_player', steamid);
     return { ok: true };
   });
 

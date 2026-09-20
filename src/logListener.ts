@@ -45,7 +45,7 @@ export class LogListener {
         // engine's "entered the game") have no token to gate on, so the
         // sender's address is the ONLY gate. Checked first and returned from
         // unconditionally: nothing below may ever see an event without a token.
-        if (ev.kind === 'signon_drop' || ev.kind === 'entered') {
+        if (ev.kind === 'signon_drop' || ev.kind === 'entered' || ev.kind === 'player_net') {
           if (fromGameServer()) this.onEvent(ev, rinfo.address);
           return;
         }

@@ -2,11 +2,17 @@ import type { DB } from './db.js';
 import type { LogEvent } from './logParse.js';
 import { resolveCampaignForMap } from './campaignRegistry.js';
 import { currentSeasonId } from './players.js';
+import { publishAdminEvent } from './adminFeed.js';
+import { QUEUE_SIZE } from './queue.js';
 
 /** How long to wait after MATCH_CREATE before committing with whatever roster
  *  lines arrived. The burst is emitted in one tick by the plugin, so this only
  *  matters when MATCH_CREATE_END is the datagram that got dropped. */
 const BURST_GRACE_MS = 5_000;
+
+/** Players per side. A team over this is the signature of one person on two
+ *  accounts, which is what `addLateJoiner` and `reportOverfull` exist for. */
+const TEAM_SIZE = QUEUE_SIZE / 2;
 
 export interface SelfStartedDeps {
   db: DB;
@@ -88,6 +94,40 @@ export class SelfStartedMatches {
     const live = db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
       .get(ev.token) as { id: number } | undefined;
     if (!live) return false;
+
+    // A roster line for a team that is already full is either a sub for
+    // somebody who left, or a second account belonging to somebody already
+    // on it. Nothing in the line distinguishes the two, so the account
+    // decides: a sub is a person this site has seen sign in, and the shape
+    // that has never been anything but an alt is a SteamID with no player row
+    // at all, arriving mid-match, onto a team with no room.
+    //
+    // Refusing matters more than it looks. Letting it through does not just
+    // add a name: it invents a player row, which earns a rating, which scores
+    // the team as five-a-side for the rest of the match and every match after
+    // (see the over-full tests). Refusing costs that account its stats for
+    // this match, which is the right trade against corrupting everyone's.
+    const already = db.prepare(
+      'SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?',
+    ).get(live.id, ev.steamid);
+    if (!already && this.teamCount(live.id, ev.team) >= TEAM_SIZE) {
+      const known = db.prepare("SELECT 1 FROM players WHERE steamid = ? AND status = 'active'")
+        .get(ev.steamid);
+      if (!known) {
+        publishAdminEvent({
+          kind: 'problem',
+          matchId: live.id,
+          text: `Refused to roster ${ev.name} (${ev.steamid}) onto team ${ev.team.toUpperCase()} of match #${live.id}: the team already has ${TEAM_SIZE} and that account has never signed in. Likely a second account for someone already on the team.`,
+        });
+        return true;
+      }
+      publishAdminEvent({
+        kind: 'problem',
+        matchId: live.id,
+        text: `${ev.name} (${ev.steamid}) was rostered onto team ${ev.team.toUpperCase()} of match #${live.id}, which already had ${TEAM_SIZE}. Allowed as a sub because the account has signed in, but the team is now five.`,
+      });
+    }
+
     const admins = this.deps.adminSteamIds ?? [];
     const isAdmin = admins.includes(ev.steamid);
     db.transaction(() => {
@@ -102,6 +142,31 @@ export class SelfStartedMatches {
       if (r.changes > 0) console.log(`[selfStarted] match ${live.id}: rostered ${ev.steamid} on ${ev.team} at map ${ev.joinedMap}`);
     })();
     return true;
+  }
+
+  /** How many players are rostered on one side of a match. */
+  private teamCount(matchId: number, team: 'a' | 'b'): number {
+    const row = this.deps.db.prepare(
+      'SELECT COUNT(*) AS n FROM match_players WHERE match_id = ? AND team = ?',
+    ).get(matchId, team) as { n: number };
+    return row.n;
+  }
+
+  /** Raise a problem for any side of a freshly adopted match that came in
+   *  over TEAM_SIZE, naming the members so an admin can tell at a glance
+   *  which two are one person. Published after the transaction commits, so a
+   *  listener that throws cannot roll the match back. */
+  private reportOverfull(matchId: number, p: Pending): void {
+    for (const team of ['a', 'b'] as const) {
+      const members = [...p.roster.entries()].filter(([, v]) => v.team === team);
+      if (members.length <= TEAM_SIZE) continue;
+      const who = members.map(([id, v]) => `${v.name} (${id})`).join(', ');
+      publishAdminEvent({
+        kind: 'problem',
+        matchId,
+        text: `Match #${matchId} was adopted with ${members.length} players on team ${team.toUpperCase()}, not ${TEAM_SIZE}: ${who}. Check for one person on two accounts before this match is rated.`,
+      });
+    }
   }
 
   private ensure(token: string, source: string): Pending {
@@ -210,6 +275,15 @@ export class SelfStartedMatches {
       this.finish(token, p);
       return;
     }
+
+    // Nobody is dropped, unlike the late-joiner path. These players were all
+    // on the server when the match was adopted, and which of a team's five is
+    // the extra one is not knowable from the burst: the duplicate account may
+    // well be the one that goes on to play. Losing a real player's whole match
+    // is worse than an over-full roster, so the match is taken as reported and
+    // the problem is raised instead. Outside the transaction, so that a
+    // subscriber cannot roll back a match that is already being played.
+    this.reportOverfull(matchId, p);
 
     // Register before the rcon round trip: MATCH_START can arrive immediately.
     this.deps.listener.register(token);
