@@ -412,7 +412,11 @@ describe('MatchDetail', () => {
 
 describe('Profile', () => {
   const profile = {
-    player: { steamid: '1', name: 'alice', avatar: null, createdAt: '2026-01-01T00:00:00' },
+    player: {
+      steamid: '1', name: 'alice', avatar: null, createdAt: '2026-01-01T00:00:00',
+      bio: null, pronouns: null, country: null, twitchName: null,
+    },
+    social: [],
     rating: { sr: 1200, mu: 25, sigma: 8, wins: 3, losses: 1 },
     totals: { games: 4, siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
     matches: [
@@ -522,7 +526,11 @@ describe('skill stats display', () => {
 
   it('shows the private panel only when privateStatTotals is present', async () => {
     mockApi.profile.mockResolvedValue({
-      player: { steamid: '1', name: 'alice', avatar: null, createdAt: '2026-01-01T00:00:00' },
+      player: {
+        steamid: '1', name: 'alice', avatar: null, createdAt: '2026-01-01T00:00:00',
+        bio: null, pronouns: null, country: null, twitchName: null,
+      },
+      social: [],
       rating: { sr: 1500, mu: 25, sigma: 5, wins: 3, losses: 1 },
       totals: { games: 4, siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
       matches: [],
@@ -537,7 +545,11 @@ describe('skill stats display', () => {
 
   it('hides the private panel when privateStatTotals is null', async () => {
     mockApi.profile.mockResolvedValue({
-      player: { steamid: '2', name: 'bob', avatar: null, createdAt: '2026-01-01T00:00:00' },
+      player: {
+        steamid: '2', name: 'bob', avatar: null, createdAt: '2026-01-01T00:00:00',
+        bio: null, pronouns: null, country: null, twitchName: null,
+      },
+      social: [],
       rating: { sr: 1500, mu: 25, sigma: 5, wins: 3, losses: 1 },
       totals: { games: 4, siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4 },
       matches: [],

@@ -7,6 +7,9 @@ import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelt
 import { Headliner } from '../components/Headliner';
 import { Figures, Figure, RankBadge } from '../components/PageHeader';
 import { DiscordLinkCard } from '../components/DiscordLink';
+import { ProfileEdit } from '../components/ProfileEdit';
+import { SocialChips } from '../components/SocialChips';
+import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 
 export function Profile(
@@ -58,6 +61,11 @@ export function Profile(
           eyebrow={`Joined ${fmtDate(player.createdAt)}`}
           name={player.name}
           avatar={player.avatar}
+          pronouns={player.pronouns}
+          countryCode={player.country}
+          countryLabel={countryName(player.country)}
+          countryFlag={countryFlag(player.country)}
+          bio={player.bio}
           rating={rating ? rating.sr : null}
           delta={lastDelta}
           stats={rating ? [
@@ -67,8 +75,18 @@ export function Profile(
           ] : []}
         />
 
+        <SocialChips links={data.social} twitchName={player.twitchName} />
+
         {session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid && (
-          <Panel><DiscordLinkCard me={session.me} onChange={refresh} /></Panel>
+          <Panel>
+            <DiscordLinkCard me={session.me} onChange={refresh} />
+            <ProfileEdit
+              data={data}
+              twitchEnabled={session.me.twitchEnabled ?? false}
+              twitchLinked={Boolean(session.me.twitch)}
+              onSaved={() => refresh?.()}
+            />
+          </Panel>
         )}
 
         <Panel>

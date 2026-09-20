@@ -8,6 +8,7 @@ import { useFetch } from '../hooks/useFetch';
 import { QUEUE_SIZE } from '../queueSize';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { SpectatePanel } from '../components/SpectatePanel';
+import { StreamStrip } from '../components/StreamStrip';
 import { PageHeader } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed } from '../components/StatTable';
@@ -53,6 +54,7 @@ export function Live({ me }: { me: string | null }) {
 
   return (
     <div class="page page--list">
+      <StreamStrip />
       <PageHeader eyebrow="Right now" title="Live" />
 
       {matches.length === 0 ? (

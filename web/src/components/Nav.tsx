@@ -17,6 +17,7 @@ import type { Session } from '../hooks/useLiveState';
 export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/', 'Play'],
   ['/live', 'Live'],
+  ['/streams', 'Streams'],
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
   ['/maps', 'Campaigns'],

@@ -10,6 +10,7 @@ import { Play } from './routes/Play';
 import { Leaderboard } from './routes/Leaderboard';
 import { Matches } from './routes/Matches';
 import { Live } from './routes/Live';
+import { Streams } from './routes/Streams';
 import { MatchDetail } from './routes/MatchDetail';
 import { MapDetail } from './routes/MapDetail';
 import { Maps } from './routes/Maps';
@@ -75,6 +76,7 @@ function App() {
           <Route path="/leaderboard" component={Leaderboard} me={me} />
           <Route path="/matches" component={Matches} />
           <Route path="/live" component={Live} me={me} />
+          <Route path="/streams" component={Streams} />
           <Route path="/match/:id" component={MatchDetail} me={me} />
           <Route path="/maps" component={Maps} />
           <Route path="/custom-campaigns" component={CustomCampaigns} />

@@ -413,6 +413,42 @@ export interface ProfileFieldsInput {
   links?: Record<string, string>;
 }
 
+export interface StreamMatch { id: number; campaign: string; map: string | null }
+
+export interface StreamCard {
+  steamid: string;
+  name: string;
+  avatar: string | null;
+  /** The Twitch login. The id is never served. */
+  twitchName: string;
+  title: string;
+  gameName: string;
+  viewers: number;
+  /** Twitch's template, {width}x{height} intact. Substituted at render. */
+  thumbnail: string;
+  startedAt: string | null;
+  /** The PUG this stream is of, when there is one. */
+  match: StreamMatch | null;
+}
+
+export interface OfflineCard {
+  steamid: string;
+  name: string;
+  avatar: string | null;
+  twitchName: string;
+  lastLiveAt: string | null;
+}
+
+export interface StreamsView {
+  /** True when the poll cache is too old to claim anyone is live. */
+  stale: boolean;
+  inPug: StreamCard[];
+  live: StreamCard[];
+  offline: OfflineCard[];
+  /** How many offline channels exist, which is not offline.length once capped. */
+  offlineTotal: number;
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -834,6 +870,8 @@ export const api = {
   seasons: (signal?: AbortSignal) => get<{ seasons: Season[] }>('/api/seasons', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
+  streams: (all = false, signal?: AbortSignal) =>
+    get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[] }>('/api/maps', signal),
   campaignNames: (signal?: AbortSignal) =>
     get<{ names: Record<string, string> }>('/api/campaigns/names', signal),

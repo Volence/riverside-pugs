@@ -1779,3 +1779,143 @@ tbody tr.is-lifted td { opacity: 0.55; }
  * the same meaning as the badge on the Custom campaigns page: it is in
  * map_pool, so it can come up tonight. */
 .ctile__badge { position: absolute; top: var(--sp-2); right: var(--sp-2); padding: 2px 6px; border: 1px solid var(--accent); border-radius: 2px; font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); background: rgba(5, 4, 3, 0.55); }
+
+/* ---- Profile identity: flag, pronouns, bio ---- */
+
+.headliner__identity { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
+.headliner__flag { font-size: var(--fs-h3); line-height: 1; }
+.headliner__pronouns { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: lowercase; color: var(--text-muted); }
+.headliner__bio { margin: var(--sp-2) 0 0; max-width: 52ch; color: var(--text); font-size: var(--fs-dense); }
+
+/* ---- Social chips ---- */
+
+.socialchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: calc(-1 * var(--sp-2)); }
+.socialchip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-decoration: none;
+  font-size: var(--fs-dense);
+  color: var(--text);
+}
+.socialchip:hover { border-color: var(--border-strong); color: var(--text-bright); }
+.socialchip__label { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.socialchip--twitch { border-color: color-mix(in srgb, var(--rating) 45%, var(--border)); }
+.socialchip--twitch .socialchip__label { color: var(--rating); }
+
+/* ---- Profile editor ---- */
+
+.profileedit { margin-top: var(--sp-3); }
+.profileedit--open { display: grid; gap: var(--sp-3); }
+.field { display: grid; gap: var(--sp-1); }
+.field__label { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.field__input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-bright);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  padding: var(--sp-2) var(--sp-3);
+}
+.field__input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.field__hint { justify-self: end; font-size: var(--fs-label); color: var(--text-muted); }
+.field__error { margin: 0; color: var(--loss); font-size: var(--fs-dense); }
+.field__static { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.profileedit__actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
+
+/* ---- Streams ---- */
+
+.streamsec { margin-top: var(--sp-6); }
+.streamsec__head {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-bottom: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  border-bottom: 2px solid var(--rule);
+}
+.streamsec__more { margin-top: var(--sp-4); }
+
+.streamgrid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.streamgrid--big { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+
+.streamtile {
+  display: block;
+  text-decoration: none;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.streamtile:hover { border-color: var(--border-strong); }
+.streamtile--big { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.streamtile--big:hover { border-color: var(--accent); }
+.streamtile__shot { position: relative; aspect-ratio: 16 / 9; background: var(--bg); }
+.streamtile__shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.streamtile__noshot { width: 100%; height: 100%; }
+.streamtile__badge {
+  position: absolute; top: var(--sp-2); left: var(--sp-2);
+  padding: 2px 6px; border-radius: 2px;
+  background: var(--accent); color: var(--accent-ink);
+  font-family: var(--font-label); font-size: var(--fs-label);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.streamtile__viewers, .streamtile__uptime {
+  position: absolute; bottom: var(--sp-2);
+  padding: 2px 6px; border-radius: 2px;
+  background: rgba(5, 4, 3, 0.72); color: var(--text-bright);
+  font-size: var(--fs-label);
+}
+.streamtile__viewers { left: var(--sp-2); }
+.streamtile__uptime { right: var(--sp-2); }
+.streamtile__body { padding: var(--sp-3); display: grid; gap: var(--sp-2); }
+.streamtile__match {
+  font-family: var(--font-label); font-size: var(--fs-label);
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--rating);
+}
+.streamtile__who { display: flex; gap: var(--sp-2); align-items: center; }
+.streamtile__avatar { width: 32px; height: 32px; object-fit: cover; flex: none; }
+.streamtile__avatar--blank { background: var(--surface-2); display: inline-block; }
+.streamtile__name { font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.1; color: var(--text-bright); }
+.streamtile__channel { font-size: var(--fs-label); color: var(--text-muted); }
+.streamtile__title { margin: 0; font-size: var(--fs-dense); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.offlinegrid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.offlinetile { text-align: center; text-decoration: none; color: var(--text-muted); opacity: 0.75; }
+.offlinetile:hover { opacity: 1; color: var(--text); }
+.offlinetile__avatar { width: 56px; height: 56px; object-fit: cover; }
+.offlinetile__avatar--blank { display: inline-block; background: var(--surface-2); }
+.offlinetile__name { font-size: var(--fs-dense); color: var(--text); margin-top: var(--sp-1); }
+.offlinetile__when { font-size: var(--fs-label); }
+
+/* One line at the top of Live. Deliberately not sticky: that page is already a
+ * long scroll with a replay viewer per game. */
+.streamstrip {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--text);
+  font-size: var(--fs-dense);
+}
+.streamstrip:hover { border-color: var(--accent); color: var(--text-bright); }
+.streamstrip__dot { width: 8px; height: 8px; background: var(--accent); flex: none; }
+.streamstrip__avatars { display: flex; }
+.streamstrip__avatar { width: 22px; height: 22px; object-fit: cover; margin-left: -6px; border: 2px solid var(--surface); }
+.streamstrip__avatar:first-child { margin-left: 0; }
+.streamstrip__avatar--blank { display: inline-block; background: var(--surface-2); }
+
+@media (max-width: 560px) {
+  .streamgrid, .streamgrid--big { grid-template-columns: 1fr; }
+}
