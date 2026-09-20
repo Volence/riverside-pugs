@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { insertDraft, publishCampaign } from '../src/customCampaigns.js';
-import { invalidateCampaignCache, setMissionsDir } from '../src/campaignRegistry.js';
+import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 import { setMapsToPlay } from '../src/campaignRules.js';
 import { stopAfterMap } from '../src/stopPoint.js';
 
 let db: DB;
 beforeEach(() => {
   db = openDb(':memory:');
-  setMissionsDir('');
+  setMissionsDirs([]);
   invalidateCampaignCache();
   insertDraft(db, {
     slug: 'five', name: 'Five', vpkFilename: 'five.vpk',
@@ -17,7 +17,7 @@ beforeEach(() => {
   publishCampaign(db, 'five', 'Five');
   invalidateCampaignCache();
 });
-afterEach(() => { setMissionsDir(''); invalidateCampaignCache(); });
+afterEach(() => { setMissionsDirs([]); invalidateCampaignCache(); });
 
 describe('stopAfterMap', () => {
   // The default is today's behaviour, and this is the assertion that protects

@@ -8,6 +8,7 @@ import { upsertPlayer } from '../src/players.js';
 import { ME, OTHER, seedMatch } from './playerStats.test.js';
 import {
   campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf, stockChaptersOf,
+  setMissionsDirs,
 } from '../src/campaignRegistry.js';
 
 let db: DB;
@@ -158,23 +159,23 @@ describe('stock chapter lists', () => {
   afterEach(async () => {
     // A directory left set on one test's missions dir would otherwise leak
     // into the next test's registry cache.
-    const { setMissionsDir } = await import('../src/campaignRegistry.js');
-    setMissionsDir('');
+    const { setMissionsDirs } = await import('../src/campaignRegistry.js');
+    setMissionsDirs([]);
   });
 
   it('is empty when no missions directory is configured', async () => {
-    const { setMissionsDir, campaignRegistry } = await import('../src/campaignRegistry.js');
-    setMissionsDir('');
+    const { setMissionsDirs, campaignRegistry } = await import('../src/campaignRegistry.js');
+    setMissionsDirs([]);
     expect(campaignRegistry(db).get('dead_air')!.maps).toEqual([]);
   });
 
   it('reads the stock chapter list once a missions directory is configured', async () => {
-    const { setMissionsDir, campaignRegistry } = await import('../src/campaignRegistry.js');
+    const { setMissionsDirs, campaignRegistry } = await import('../src/campaignRegistry.js');
     const dir = mkdtempSync(join(tmpdir(), 'missions-'));
     try {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'airport.txt'), AIRPORT);
-      setMissionsDir(dir);
+      setMissionsDirs([dir]);
       expect(campaignRegistry(db).get('dead_air')!.maps).toHaveLength(5);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -185,12 +186,12 @@ describe('stock chapter lists', () => {
   // chapter display names: CampaignEntry.maps stays plain map names on
   // purpose, since stopAfterMap and the orchestrator only ever need those.
   it('carries chapter display names for the admin panel', async () => {
-    const { setMissionsDir } = await import('../src/campaignRegistry.js');
+    const { setMissionsDirs } = await import('../src/campaignRegistry.js');
     const dir = mkdtempSync(join(tmpdir(), 'missions-'));
     try {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'airport.txt'), AIRPORT);
-      setMissionsDir(dir);
+      setMissionsDirs([dir]);
       const chapters = stockChaptersOf(db, 'dead_air');
       expect(chapters.map((c) => c.display)).toEqual([
         'The Greenhouse', 'The Crane', 'The Garage', 'The Terminal', 'The Runway',
@@ -201,8 +202,54 @@ describe('stock chapter lists', () => {
   });
 
   it('is empty for stockChaptersOf when no missions directory is configured', async () => {
-    const { setMissionsDir } = await import('../src/campaignRegistry.js');
-    setMissionsDir('');
+    const { setMissionsDirs } = await import('../src/campaignRegistry.js');
+    setMissionsDirs([]);
     expect(stockChaptersOf(db, 'dead_air')).toEqual([]);
+  });
+});
+
+describe('dlc4 campaigns in the registry', () => {
+  it('lists all twelve campaigns with no missions directory configured', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    const reg = campaignRegistry(db);
+    expect(reg.size).toBe(12);
+    // Chapter lists come from mission files, so they are empty here. The
+    // campaign still exists, which is what makes the pool gate meaningful
+    // even when the paths are unset.
+    expect(reg.get('dead_center')?.maps).toEqual([]);
+  });
+
+  it('marks exactly the dlc4 campaigns as requiring dlc4', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    const reg = campaignRegistry(db);
+    expect(reg.get('dead_center')?.requiresDlc4).toBe(true);
+    expect(reg.get('the_last_stand')?.requiresDlc4).toBe(true);
+    expect(reg.get('no_mercy')?.requiresDlc4).toBe(false);
+  });
+
+  it('gives a dlc4 campaign its own first map, with no vs_ infix', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    expect(firstMapOf(db, 'dead_center')).toBe('c1m1_hotel');
+    expect(firstMapOf(db, 'the_parish')).toBe('c5m1_waterfront');
+    expect(firstMapOf(db, 'no_mercy')).toBe('l4d_vs_hospital01_apartment');
+  });
+
+  it('resolves a dlc4 map to its campaign', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    expect(resolveCampaignForMap(db, 'c2m3_coaster')).toBe('dark_carnival');
+  });
+
+  // A published custom campaign must never be marked as needing dlc4: it has
+  // its own VPK and its own install rows, and conflating the two gates would
+  // make every custom campaign unpoolable the moment one server lacked dlc4.
+  it('never marks a custom campaign as requiring dlc4', () => {
+    publish();
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    expect(campaignRegistry(db).get('dbd')?.requiresDlc4).toBe(false);
   });
 });

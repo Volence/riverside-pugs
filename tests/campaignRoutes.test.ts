@@ -11,7 +11,7 @@ import {
   getCampaign, insertDraft, installsOf, publishCampaign, setInstall,
 } from '../src/customCampaigns.js';
 import { getMapsToPlay, setMapsToPlay } from '../src/campaignRules.js';
-import { campaignRegistry, invalidateCampaignCache, setMissionsDir } from '../src/campaignRegistry.js';
+import { campaignRegistry, invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 import type { InstallTarget } from '../src/campaignInstall.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { makeVpk, makeVpkMulti } from './fixtures/makeVpk.js';
@@ -87,7 +87,7 @@ afterEach(() => {
   // Same leak guard as the cache invalidation above: a directory left set by
   // one test's missions dir would otherwise carry into the next test's
   // registry build.
-  setMissionsDir('');
+  setMissionsDirs([]);
 });
 
 /** authedCookie logs a player in but leaves is_admin at 0 (config.adminSteamIds
@@ -529,10 +529,10 @@ describe('GET /api/admin/campaigns', () => {
     try {
       writeFileSync(join(missionsDir, 'airport.txt'), AIRPORT_MISSION);
       const app = await buildTestApp({ db, addonsDir: addons });
-      // buildServer calls setMissionsDir(config.missionsDir) itself, which
-      // resets it to '' since MISSIONS_DIR is not among the env vars
+      // buildServer calls setMissionsDirs([config.missionsDir, config.dlc4MissionsDir]) itself, which
+      // resets it to [] since MISSIONS_DIR is not among the env vars
       // buildTestApp passes to loadConfig; set it again after the app exists.
-      setMissionsDir(missionsDir);
+      setMissionsDirs([missionsDir]);
       const res = await app.inject({
         method: 'GET', url: '/api/admin/campaigns',
         cookies: adminCookie(app, '76561198000000001'),

@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { CAMPAIGNS, campaignForMap } from './campaigns.js';
+import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { enabledServerIds } from './serverPool.js';
@@ -26,15 +26,33 @@ export interface CampaignEntry {
   /** Every map in the campaign, in play order. */
   maps: string[];
   custom: boolean;
+  /** Lives in left4dead_dlc4, so a server without the mappack cannot load it.
+   *  Gated separately from `custom`, which means "has its own VPK to install". */
+  requiresDlc4: boolean;
 }
 
-/** These MUST be the l4d_vs_ BSPs. The plain l4d_ names are the coop maps,
- *  which load a coop mission and cannot be played versus. */
+/** The map a match changelevels into, per campaign.
+ *
+ *  For the base game these MUST be the `l4d_vs_` BSPs. The plain `l4d_` names
+ *  are the coop maps, which load a coop mission and cannot be played versus.
+ *
+ *  The dlc4 ports are the exception and take their plain names: those campaigns
+ *  ship ONE bsp per chapter serving both modes, and the mission file's versus
+ *  block names the same maps its coop block does. There is no `c1m1_vs_hotel`
+ *  to reach for. Verified against the real mission files 2026-09-20. */
 const STOCK_FIRST: Record<string, string> = {
   no_mercy: 'l4d_vs_hospital01_apartment',
   death_toll: 'l4d_vs_smalltown01_caves',
   dead_air: 'l4d_vs_airport01_greenhouse',
   blood_harvest: 'l4d_vs_farm01_hilltop',
+  dead_center: 'c1m1_hotel',
+  dark_carnival: 'c2m1_highway',
+  swamp_fever: 'c3m1_plankcountry',
+  hard_rain: 'c4m1_milltown_a',
+  the_parish: 'c5m1_waterfront',
+  the_passing: 'c6m1_riverbank',
+  cold_stream: 'c13m1_alpinecreek',
+  the_last_stand: 'c14m1_junkyard',
 };
 
 let cache: {
@@ -52,24 +70,25 @@ export function invalidateCampaignCache(): void {
   cache = null;
 }
 
-let missionsDir = '';
+let missionsDirs: string[] = [];
 
-/** Where the stock campaigns' chapter lists live. Set once at startup from
- *  config. Module state rather than a parameter because campaignRegistry(db) is
- *  called from a dozen places that have no business knowing about the game
- *  directory. */
-export function setMissionsDir(dir: string): void {
-  missionsDir = dir;
+/** Where campaign chapter lists live: the base game's `missions/` and dlc4's.
+ *  Set once at startup from config. Module state rather than a parameter
+ *  because campaignRegistry(db) is called from a dozen places that have no
+ *  business knowing about the game directory. */
+export function setMissionsDirs(dirs: string[]): void {
+  missionsDirs = dirs.filter(Boolean);
   cache = null;
 }
 
 function build(db: DB): NonNullable<typeof cache> {
   const registry = new Map<string, CampaignEntry>();
-  const stockMissions = readStockMissions([missionsDir]);
+  const stockMissions = readStockMissions(missionsDirs);
   for (const [slug, c] of Object.entries(CAMPAIGNS)) {
     registry.set(slug, {
       slug, name: c.name, firstMap: STOCK_FIRST[slug],
       maps: (stockMissions.get(slug) ?? []).map((ch) => ch.map), custom: false,
+      requiresDlc4: DLC4_CAMPAIGNS.has(slug),
     });
   }
 
@@ -87,6 +106,7 @@ function build(db: DB): NonNullable<typeof cache> {
     registry.set(row.slug, {
       slug: row.slug, name: row.name, firstMap: played[0].map,
       maps: played.map((c) => c.map), custom: true,
+      requiresDlc4: false,
     });
     // Every chapter claims its map, included or not: a match standing on an
     // excluded chapter is still that campaign for attribution purposes.

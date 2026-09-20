@@ -66,7 +66,7 @@ import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
-import { setMissionsDir } from './campaignRegistry.js';
+import { setMissionsDirs } from './campaignRegistry.js';
 
 export interface ServerDeps {
   config: Config;
@@ -220,7 +220,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Module state rather than a constructor argument: campaignRegistry(db) is
   // called from a dozen places that have no business knowing about the game
   // directory, so this is set once here instead of threaded through all of them.
-  setMissionsDir(deps.config.missionsDir);
+  setMissionsDirs([deps.config.missionsDir, deps.config.dlc4MissionsDir]);
 
   // Null unless all five R2 variables are set, which turns the whole offload
   // off: demos then stay on disk and are served from there, exactly as before.
