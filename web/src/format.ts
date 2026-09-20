@@ -466,13 +466,46 @@ export const MAP_NAMES: Record<string, string> = {
   river03_port: 'Port Finale',
 };
 
-/** Display names for The Passing's chapters, which do not carry an `l4d_`
- *  prefix at all: they are L4D2-style `c6m*` names, mounted from dlc4. Kept
- *  separate from MAP_NAMES only because the prefix strip does not apply. */
-const C6M_NAMES: Record<string, string> = {
+/** dlc4 map names, which carry no `l4d_` prefix at all: they are L4D2-style
+ *  `c<campaign>m<chapter>` names, mounted from left4dead_dlc4. Kept separate
+ *  from MAP_NAMES only because the prefix strip does not apply.
+ *
+ *  Taken from the mission files' versus DisplayName with the "(VS)" suffix
+ *  dropped: every chapter this site shows is versus, so the suffix carries no
+ *  information and doubles the length of every label. */
+const DLC4_NAMES: Record<string, string> = {
+  c1m1_hotel: 'Hotel',
+  c1m2_streets: 'Streets',
+  c1m3_mall: 'Mall',
+  c1m4_atrium: 'Atrium',
+  c2m1_highway: 'Highway',
+  c2m2_fairgrounds: 'Fairgrounds',
+  c2m3_coaster: 'Coaster',
+  c2m4_barns: 'Barns',
+  c2m5_concert: 'Concert',
+  c3m1_plankcountry: 'Plank Country',
+  c3m2_swamp: 'Swamp',
+  c3m3_shantytown: 'Shantytown',
+  c3m4_plantation: 'Plantation',
+  c4m1_milltown_a: 'Milltown',
+  c4m2_sugarmill_a: 'Sugar Mill',
+  c4m3_sugarmill_b: 'Sugar Mill',
+  c4m4_milltown_b: 'Milltown Return',
+  c4m5_milltown_escape: 'Milltown Escape',
+  c5m1_waterfront: 'Waterfront',
+  c5m2_park: 'Park',
+  c5m3_cemetery: 'Cemetery',
+  c5m4_quarter: 'Quarter',
+  c5m5_bridge: 'Bridge',
   c6m1_riverbank: 'The Riverbank',
   c6m2_bedlam: 'Underground',
   c6m3_port: 'Port',
+  c13m1_alpinecreek: 'Alpine Creek',
+  c13m2_southpinestream: 'South Pine Stream',
+  c13m3_memorialbridge: 'Memorial Bridge',
+  c13m4_cutthroatcreek: 'Cut Throat Creek',
+  c14m1_junkyard: 'Junkyard',
+  c14m2_lighthouse: 'Lighthouse',
 };
 
 /** An engine map name as a human chapter title.
@@ -491,7 +524,7 @@ const C6M_NAMES: Record<string, string> = {
 export function mapName(map: string): string {
   if (!map) return '';
   const lower = map.toLowerCase();
-  if (C6M_NAMES[lower]) return C6M_NAMES[lower];
+  if (DLC4_NAMES[lower]) return DLC4_NAMES[lower];
 
   const bare = lower.replace(/^l4d_(?:vs_)?/, '');
   if (MAP_NAMES[bare]) return MAP_NAMES[bare];
@@ -503,6 +536,42 @@ export function mapName(map: string): string {
   const words = (stripped || bare).split('_').filter(Boolean);
   if (words.length === 0) return map;
   return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+/**
+ * Which chapter of its campaign a map is, read off the map name.
+ *
+ * Three shapes, because three naming schemes are in play: dlc4's `c1m3_mall`,
+ * L4D1's `l4d_vs_airport02_offices`, and custom campaigns which mostly just end
+ * in a number (`rombu03`). Null when there is nothing to read, so the caller
+ * prints a campaign-qualified label without a number rather than a wrong one.
+ */
+export function chapterOrdinal(map: string): number | null {
+  if (!map) return null;
+  const lower = map.toLowerCase();
+  const dlc4 = /^c\d+m(\d+)/.exec(lower);
+  if (dlc4) return Number(dlc4[1]);
+  const l4d1 = /^l4d_(?:vs_)?[a-z]+(\d+)_/.exec(lower);
+  if (l4d1) return Number(l4d1[1]);
+  const trailing = /(\d+)$/.exec(lower);
+  return trailing ? Number(trailing[1]) : null;
+}
+
+/**
+ * A map label that identifies itself outside its campaign's own heading.
+ *
+ * Under a campaign heading a bare chapter name is enough and the campaign name
+ * on every row is noise, so this is only for lists that mix campaigns. There it
+ * is not cosmetic: Dead Center has a chapter called Streets and so does City of
+ * the Dead Redux, Dead Center has a Hotel against the existing Hospital, and
+ * Hard Rain's chapters are milltown variants that read almost identically. A
+ * bare chapter name stops being a unique label once the dlc4 campaigns are in.
+ */
+export function qualifiedMapName(map: string, campaignName: string | null): string {
+  const chapter = mapName(map);
+  if (!campaignName) return chapter;
+  const n = chapterOrdinal(map);
+  return n === null ? `${campaignName} · ${chapter}` : `${campaignName} ${n} · ${chapter}`;
 }
 
 /** Stats that get a "season leader" card above the leaderboard table.
