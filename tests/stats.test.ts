@@ -121,6 +121,32 @@ describe('stats routes', () => {
     expect(body.standings).not.toHaveProperty('ff');
   });
 
+  // A badge has to rank the number it is printed beside. The tiles became
+  // medians, and metricsOf was still dividing a season total by matches, so a
+  // streaky player showed "SI dmg / match 693" with a #1 badge earned by a
+  // mean of 1940. steady beats streaky on the median and loses on the mean,
+  // which is what makes this test able to tell the two apart.
+  it('ranks standings on the median, the same figure the profile tile shows', async () => {
+    setSetting(db, 'standing_min_games', '3');
+    const streaky = IDS[0];
+    const steady = IDS[1];
+    const perMatch: Record<string, number[]> = {
+      [streaky]: [100, 100, 100, 100, 5000],
+      [steady]: [400, 400, 400, 400, 400],
+    };
+    for (let i = 0; i < 5; i++) {
+      const m = playCompletedMatch(db, 'b');
+      for (const id of [streaky, steady]) seedStats(db, m, id, { skeets: perMatch[id][i] });
+    }
+
+    // The mean favours streaky (1080 against 400); the median favours steady.
+    const standingsOf = async (id: string) =>
+      (await app.inject({ method: 'GET', url: `/api/players/${id}` })).json().standings;
+
+    expect((await standingsOf(steady)).skeets).toMatchObject({ rank: 1 });
+    expect((await standingsOf(streaky)).skeets).toMatchObject({ rank: 2 });
+  });
+
   // Was: "rank 7 of 8 is outside the top five" and returned nothing at all.
   // Truncating server side meant #6 of 40 and #39 of 40 were the same absent
   // key, so a profile could not tell a near miss from a weakness. The top five

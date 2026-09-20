@@ -410,6 +410,14 @@ export const MIN_SURVIVAL_SAMPLE = 6;
  */
 export const STANDING_TOP = 5;
 
+/** English ordinal suffix. The teens are the exception and all take "th":
+ *  11, 12 and 13 are eleventh, twelfth and thirteenth, not "eleven-first". */
+export function ordinal(n: number): string {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
 /**
  * The spread behind a median, as a line under a figure.
  *

@@ -4,7 +4,7 @@ import {
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
-  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName, spreadNote,
+  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName, spreadNote, ordinal,
 } from './format';
 
 describe('campaignName', () => {
@@ -715,5 +715,23 @@ describe('spreadNote', () => {
 
   it('counts one match as a match', () => {
     expect(spreadNote({ n: 1, p25: 4, p75: 4 })).toBe('1 match');
+  });
+});
+
+describe('ordinal', () => {
+  it('uses st, nd and rd for 1, 2 and 3', () => {
+    expect([1, 2, 3, 4].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th']);
+  });
+
+  it('gives the teens th, which is the whole reason this exists', () => {
+    expect([11, 12, 13].map(ordinal)).toEqual(['11th', '12th', '13th']);
+  });
+
+  it('resumes st, nd and rd past the teens', () => {
+    expect([21, 31, 32, 43].map(ordinal)).toEqual(['21st', '31st', '32nd', '43rd']);
+  });
+
+  it('handles a percentile of zero', () => {
+    expect(ordinal(0)).toBe('0th');
   });
 });

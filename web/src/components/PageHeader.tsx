@@ -1,5 +1,5 @@
 import type { Standing } from '../api';
-import { STANDING_TOP } from '../format';
+import { ordinal, STANDING_TOP } from '../format';
 import type { ComponentChildren } from 'preact';
 
 /**
@@ -70,7 +70,7 @@ export function Figure(
  *  it would be worse. */
 function placeText(s: Standing): string | null {
   if (s.rank <= STANDING_TOP || s.of < 2) return null;
-  return `${s.pct}th percentile, #${s.rank} of ${s.of}`;
+  return `${ordinal(s.pct)} percentile, #${s.rank} of ${s.of}`;
 }
 
 /** "#2" in a small medal. #1 is gold, the rest of the top five a quieter

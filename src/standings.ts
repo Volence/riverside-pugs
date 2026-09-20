@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import { STAT_DEFS } from './statKeys.js';
+import { quantiles } from './quantiles.js';
 
 /** Games before a player holds a rank. Under this they are listed as
  *  provisional: one lucky night at high sigma should not top the board. */
@@ -64,9 +65,12 @@ const FIXED_KEYS = ['sidmg', 'sikill', 'ck', 'rev'] as const;
  * top five still gets the badge, but STANDING_TOP is now the UI's test for
  * that and not this function's test for whether to answer at all.
  *
- * Counts are ranked PER MATCH, not as totals. A season total mostly ranks who
- * has played the most, which is the same reason the profile's tiles prefer
- * rates. Win rate and boomer % are already rates and rank as they are.
+ * Counts are ranked PER MATCH, as a MEDIAN, not as totals. A season total
+ * mostly ranks who has played the most, and a mean is moved by exactly the one
+ * enormous night it should be resistant to. The median is also the figure each
+ * badge sits beside on the profile, which is the point: a badge that ranks a
+ * different number from the one it is next to is worse than no badge. Win rate
+ * and boomer % are pooled rates and rank as they are.
  *
  * Only `high_good` public stats rank: a "#1 in times skeeted" badge is what
  * the self visibility rule exists to prevent, and a neutral stat (a
@@ -90,44 +94,66 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
   const ranked = ratings.filter((r) => r.games >= standingMinGames(db));
   if (!ranked.some((r) => r.steamid === steamid)) return {};
 
-  const fixed = db.prepare(
-    `SELECT mp.player_id AS steamid, COUNT(*) AS matches,
-            COALESCE(SUM(mp.si_damage),0) AS sidmg, COALESCE(SUM(mp.si_kills),0) AS sikill,
-            COALESCE(SUM(mp.common_kills),0) AS ck, COALESCE(SUM(mp.revives),0) AS rev
+  // One row per match, not a SUM, because the metrics below are MEDIANS.
+  // `stats_json IS NOT NULL` is the captured test for the fixed columns: they
+  // default to 0 and matchResult.ts writes them and stats_json together, so a
+  // NULL marks a player the dump had no row for rather than a bad night.
+  const fixedRows = db.prepare(
+    `SELECT mp.player_id AS steamid, mp.si_damage AS sidmg, mp.si_kills AS sikill,
+            mp.common_kills AS ck, mp.revives AS rev
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
-     GROUP BY mp.player_id`,
-  ).all(seasonId) as ({ steamid: string; matches: number } & Record<string, number>)[];
-  const skill = db.prepare(
-    `SELECT mps.player_id AS steamid, mps.stat, SUM(mps.value) AS total
+     WHERE m.season_id = ? AND m.state = 'completed' AND mp.stats_json IS NOT NULL`,
+  ).all(seasonId) as ({ steamid: string } & Record<string, number>)[];
+  const skillRows = db.prepare(
+    `SELECT mps.player_id AS steamid, mps.stat, mps.value
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
-     GROUP BY mps.player_id, mps.stat`,
-  ).all(seasonId) as { steamid: string; stat: string; total: number }[];
+     WHERE m.season_id = ? AND m.state = 'completed'`,
+  ).all(seasonId) as { steamid: string; stat: string; value: number }[];
 
   const rankable = new Set(
     STAT_DEFS.filter((d) => d.visibility === 'public' && d.direction === 'high_good').map((d) => d.key),
   );
-  const fixedBy = new Map(fixed.map((r) => [r.steamid, r]));
-  const skillBy = new Map<string, Record<string, number>>();
-  for (const r of skill) {
-    const bag = skillBy.get(r.steamid) ?? {};
-    bag[r.stat] = r.total;
-    skillBy.set(r.steamid, bag);
+  const samplesBy = new Map<string, Map<string, number[]>>();
+  const sample = (id: string, key: string, value: number) => {
+    let bags = samplesBy.get(id);
+    if (!bags) { bags = new Map(); samplesBy.set(id, bags); }
+    const bag = bags.get(key);
+    if (bag) bag.push(value);
+    else bags.set(key, [value]);
+  };
+  for (const r of fixedRows) for (const k of FIXED_KEYS) sample(r.steamid, k, r[k]);
+  // boomer_spawns and boom_successes are not rankable themselves but are the
+  // two inputs to boomer_rate, so they are sampled and summed rather than
+  // ranked. Everything else that is not rankable is dropped here.
+  const POOLED_INPUTS = ['boomer_spawns', 'boom_successes'];
+  for (const r of skillRows) {
+    if (rankable.has(r.stat) || POOLED_INPUTS.includes(r.stat)) sample(r.steamid, r.stat, r.value);
   }
 
-  /** Every metric for one player, absent where it has no denominator. */
+  /**
+   * Every metric for one player, absent where it has no denominator.
+   *
+   * Counts are MEDIANS over matches, matching the figure each badge sits
+   * beside on the profile. They were means (a season total over matches
+   * played), which stopped agreeing with the tiles the moment those became
+   * medians: a streaky player showed "SI dmg / match 693" with a #1 badge
+   * earned by a mean of 1940. A badge has to rank the number it is next to.
+   *
+   * Win rate and boomer % stay POOLED ratios. A median of per-match rates
+   * would weigh a one-boomer night the same as a four-boomer night.
+   */
   const metricsOf = (r: (typeof ranked)[number]): Record<string, number> => {
     const out: Record<string, number> = {};
     const decided = r.wins + r.losses;
     if (decided > 0) out.winrate = r.wins / decided;
-    const f = fixedBy.get(r.steamid);
-    const matches = f?.matches ?? 0;
-    if (matches === 0) return out;
-    for (const k of FIXED_KEYS) out[k] = (f?.[k] ?? 0) / matches;
-    const bag = skillBy.get(r.steamid) ?? {};
-    for (const [k, v] of Object.entries(bag)) if (rankable.has(k)) out[k] = v / matches;
-    if ((bag.boomer_spawns ?? 0) > 0) out.boomer_rate = (bag.boom_successes ?? 0) / bag.boomer_spawns;
+    const bags = samplesBy.get(r.steamid);
+    if (!bags) return out;
+    for (const [k, values] of bags) {
+      if (rankable.has(k) || (FIXED_KEYS as readonly string[]).includes(k)) out[k] = quantiles(values)!.p50;
+    }
+    const sum = (k: string) => (bags.get(k) ?? []).reduce((a, b) => a + b, 0);
+    const spawns = sum('boomer_spawns');
+    if (spawns > 0) out.boomer_rate = sum('boom_successes') / spawns;
     return out;
   };
 
