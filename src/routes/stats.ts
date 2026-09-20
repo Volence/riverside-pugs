@@ -13,7 +13,8 @@ const MATCH_EVENT_LIMIT = 20_000;
 import { getCampaignPool } from '../settings.js';
 import { mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr, matchForecast } from '../rating.js';
-import { currentSeasonId } from '../players.js';
+import { currentSeasonId, getPlayer, saveProfileFields } from '../players.js';
+import { getSession } from '../session.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
@@ -107,6 +108,20 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const data = profileData(db, steamid, viewerOf(req));
     if (!data) return reply.code(404).send({ error: 'no such player' });
     return data;
+  });
+
+  /** A player editing their own profile. The steamid comes from the session
+   *  and never from the body: there is no "edit as" and no admin override on
+   *  this route, so a body carrying somebody else's id is ignored rather than
+   *  honoured. A test pins that. */
+  app.post('/api/profile', async (req, reply) => {
+    const steamid = getSession(req);
+    if (!steamid || !getPlayer(db, steamid)) {
+      return reply.code(401).send({ error: 'not logged in' });
+    }
+    const result = saveProfileFields(db, steamid, req.body);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+    return { ok: true };
   });
 
   /** What is being played right now. Public: the whole point is that someone

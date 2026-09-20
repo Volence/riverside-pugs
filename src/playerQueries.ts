@@ -1,7 +1,7 @@
 import type { DB } from './db.js';
 import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
-import { getPlayer, currentSeasonId } from './players.js';
+import { getPlayer, currentSeasonId, getProfileFields, socialLinks } from './players.js';
 import { STAT_DEFS, statDef } from './statKeys.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 
@@ -132,8 +132,22 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
   }
   const isSelf = viewer === steamid;
 
+  const fields = getProfileFields(db, steamid);
+
   return {
-    player: { steamid: player.steamid, name: player.name, avatar: player.avatar, createdAt: player.created_at },
+    player: {
+      steamid: player.steamid,
+      name: player.name,
+      avatar: player.avatar,
+      createdAt: player.created_at,
+      bio: fields.bio,
+      pronouns: fields.pronouns,
+      country: fields.country,
+      // The login, never the id. The login is already public on Twitch; the
+      // id is an internal join key and has no business leaving the server.
+      twitchName: player.twitch_name ?? null,
+    },
+    social: socialLinks(db, steamid),
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
     totals, matches, history,
     statTotals,

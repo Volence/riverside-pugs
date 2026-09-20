@@ -15,6 +15,13 @@ export interface PlayerRow {
   created_at: string;
   discord_id: string | null;
   discord_name: string | null;
+  bio: string | null;
+  pronouns: string | null;
+  country: string | null;
+  /** Canonical Twitch identity. Never leaves the server: it is a join key, and
+   *  the login beside it is the only Twitch identifier the API serves. */
+  twitch_id: string | null;
+  twitch_name: string | null;
 }
 
 export interface RatingRow {

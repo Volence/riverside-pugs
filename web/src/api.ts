@@ -392,8 +392,37 @@ export interface ProfileMatch extends MatchSummary {
   srDelta: number;
 }
 
+export interface SocialLink {
+  platform: string;
+  label: string;
+  handle: string;
+  /** Built by the server from a per-platform template. Nothing on this side
+   *  ever constructs a profile URL, so nothing here can be pointed elsewhere. */
+  url: string;
+}
+
+/** A profile edit. Every field is optional: a field the body omits is left
+ *  alone, and an empty string clears it. */
+export interface ProfileFieldsInput {
+  bio?: string;
+  pronouns?: string;
+  country?: string;
+  links?: Record<string, string>;
+}
+
 export interface Profile {
-  player: { steamid: string; name: string; avatar: string | null; createdAt: string };
+  player: {
+    steamid: string;
+    name: string;
+    avatar: string | null;
+    createdAt: string;
+    bio: string | null;
+    pronouns: string | null;
+    country: string | null;
+    /** The Twitch login, which is public. The id is never served. */
+    twitchName: string | null;
+  };
+  social: SocialLink[];
   rating: { sr: number; mu: number; sigma: number; wins: number; losses: number } | null;
   totals: {
     games: number;
@@ -822,6 +851,8 @@ export const api = {
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),
+  saveProfile: (body: ProfileFieldsInput) => post<{ ok: true }>('/api/profile', body),
+  unlinkTwitch: () => post<{ ok: true }>('/api/twitch/unlink'),
   reportEligibility: (matchId: number, signal?: AbortSignal) =>
     get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
   report: (matchId: number, targetId: string, category: string, text: string) =>
