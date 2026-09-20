@@ -77,3 +77,11 @@ describe('missingDirs', () => {
     expect(missingDirs(cfg)).toEqual([]);
   });
 });
+
+describe('dlc4MissionsDir', () => {
+  it('reads DLC4_MISSIONS_DIR, defaulting to empty', () => {
+    expect(loadConfig({ DLC4_MISSIONS_DIR: '/srv/left4dead_dlc4/missions' }).dlc4MissionsDir)
+      .toBe('/srv/left4dead_dlc4/missions');
+    expect(loadConfig({}).dlc4MissionsDir).toBe('');
+  });
+});
