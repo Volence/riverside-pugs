@@ -185,6 +185,12 @@ export function useReplaySource(spec: ReplaySpec | null): {
             roundKey = nextKey;
             cursorRef.current = 0;
             setState({ header: null, frames: [], cursor: 0 });
+            // The frames are this round's; the closed flag must be too. It is
+            // reassigned from every fetch below, but a fetch that 404s or
+            // throws leaves it untouched, and the previous round's `true`
+            // would then sit under the new round saying "Round over" for as
+            // long as the retries lasted.
+            setClosed(false);
           }
         }
 
