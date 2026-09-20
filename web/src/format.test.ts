@@ -4,7 +4,7 @@ import {
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
-  FEATURED_STAT_KEYS, statLeaders, chapterName,
+  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName,
 } from './format';
 
 describe('campaignName', () => {
@@ -409,6 +409,66 @@ describe('mapName', () => {
   it('is case insensitive and survives an empty name', () => {
     expect(mapName('L4D_VS_AIRPORT01_GREENHOUSE')).toBe('The Greenhouse');
     expect(mapName('')).toBe('');
+  });
+});
+
+describe('mapName for dlc4 maps', () => {
+  it.each([
+    ['c1m1_hotel', 'Hotel'],
+    ['c1m2_streets', 'Streets'],
+    ['c1m3_mall', 'Mall'],
+    ['c1m4_atrium', 'Atrium'],
+    ['c2m1_highway', 'Highway'],
+    ['c2m5_concert', 'Concert'],
+    ['c3m1_plankcountry', 'Plank Country'],
+    ['c4m1_milltown_a', 'Milltown'],
+    ['c4m3_sugarmill_b', 'Sugar Mill'],
+    ['c5m1_waterfront', 'Waterfront'],
+    ['c5m5_bridge', 'Bridge'],
+    ['c13m1_alpinecreek', 'Alpine Creek'],
+    ['c14m1_junkyard', 'Junkyard'],
+    ['c14m2_lighthouse', 'Lighthouse'],
+  ])('names %s as %s', (map, expected) => {
+    expect(mapName(map)).toBe(expected);
+  });
+
+  it('distinguishes the Hard Rain return legs', () => {
+    expect(mapName('c4m4_milltown_b')).not.toBe(mapName('c4m1_milltown_a'));
+    expect(mapName('c4m5_milltown_escape')).toBe('Milltown Escape');
+  });
+});
+
+describe('chapterOrdinal', () => {
+  it.each([
+    ['c1m3_mall', 3],
+    ['c13m4_cutthroatcreek', 4],
+    ['l4d_vs_airport02_offices', 2],
+    ['l4d_hospital05_rooftop', 5],
+    ['rombu03', 3],
+  ])('reads %s as chapter %s', (map, expected) => {
+    expect(chapterOrdinal(map)).toBe(expected);
+  });
+
+  it('returns null when there is no number to read', () => {
+    expect(chapterOrdinal('deadbeforedawn')).toBeNull();
+    expect(chapterOrdinal('')).toBeNull();
+  });
+});
+
+describe('qualifiedMapName', () => {
+  it('puts the campaign and chapter number in front', () => {
+    expect(qualifiedMapName('c1m2_streets', 'Dead Center')).toBe('Dead Center 2 · Streets');
+    expect(qualifiedMapName('l4d_vs_farm01_hilltop', 'Blood Harvest'))
+      .toBe('Blood Harvest 1 · The Woods');
+  });
+
+  it('omits the number when the map name has none', () => {
+    expect(qualifiedMapName('deadbeforedawn', 'Dead Before Dawn'))
+      .toBe('Dead Before Dawn · Deadbeforedawn');
+  });
+
+  it('falls back to the bare chapter name with no campaign', () => {
+    expect(qualifiedMapName('c1m2_streets', null)).toBe('Streets');
   });
 });
 
