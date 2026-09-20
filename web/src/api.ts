@@ -389,8 +389,14 @@ export interface MapBreakdownRow {
   avgStats: Record<string, number>;
   /** Which campaign this map belongs to, so a list that mixes every campaign
    *  a player has touched can label a bare chapter name that no longer
-   *  identifies anything on its own. Null for a map the registry can't place. */
-  campaignName: string | null;
+   *  identifies anything on its own. Null for a map the registry can't place.
+   *
+   *  Optional rather than required even though the server always sends it: the
+   *  server-side row type has it optional too, and a type is a promise about
+   *  our code, not about what arrives over the wire. A stale cached response,
+   *  or a browser holding new JS against an older server mid-deploy, delivers
+   *  a row without it whatever this says. Consumers use `?? null`. */
+  campaignName?: string | null;
 }
 
 export interface ProfileMatch extends MatchSummary {

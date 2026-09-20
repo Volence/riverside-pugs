@@ -8,7 +8,7 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
   swamp_fever: { name: 'Swamp Fever' },
   hard_rain: { name: 'Hard Rain' },
   the_parish: { name: 'The Parish' },
-  the_passing: { name: 'The Passing' },
+  the_passing: { name: 'Passifice' },
   cold_stream: { name: 'Cold Stream' },
   the_last_stand: { name: 'The Last Stand' },
 };
@@ -43,6 +43,20 @@ const CAMPAIGN_BY_MAP_WORD: Record<string, string> = {
   smalltown: 'death_toll',
   airport: 'dead_air',
   farm: 'blood_harvest',
+  // The Sacrifice's maps, filed under Passifice on purpose.
+  //
+  // `the_passing` on this server is not stock The Passing: the dlc4 mission
+  // file is overridden to chain c6m1 and c6m2 into the three river maps as one
+  // five-chapter campaign, so the versus score carries across both. Chapters 3
+  // to 5 are therefore river maps, and without this they resolve to null and
+  // three fifths of the campaign goes unattributed in stats and in any match
+  // started from in-game.
+  //
+  // The trade is that a standalone Sacrifice game would also read as Passifice.
+  // That is the right way round here: the river maps are only reachable through
+  // Passifice in this rotation, and losing attribution on the common case to
+  // stay literal about the rare one would be the worse bargain.
+  river: 'the_passing',
 };
 
 /**

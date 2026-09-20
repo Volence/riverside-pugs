@@ -57,6 +57,18 @@ describe('campaignForMap', () => {
     expect(campaignForMap(map)).toBe(expected);
   });
 
+  // Passifice chains The Passing's first two chapters into The Sacrifice's
+  // three river maps as one five-chapter campaign, so the river maps are
+  // chapters 3 to 5 of `the_passing` and must attribute to it. Without this
+  // three fifths of the campaign is unattributed.
+  it.each([
+    ['l4d_river01_docks', 'the_passing'],
+    ['l4d_river02_barge', 'the_passing'],
+    ['l4d_river03_port', 'the_passing'],
+  ])('maps Sacrifice map %s to %s', (map, expected) => {
+    expect(campaignForMap(map)).toBe(expected);
+  });
+
   it('is case insensitive for dlc4 names too', () => {
     expect(campaignForMap('C1M1_HOTEL')).toBe('dead_center');
   });
