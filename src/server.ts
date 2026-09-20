@@ -9,7 +9,9 @@ import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
 import { GuildMembership } from './discord/membership.js';
+import { VoicePresence } from './discord/voicePresence.js';
 import { makeQueueGate } from './queueGate.js';
+import { makeReadyGate } from './readyGate.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
@@ -48,6 +50,7 @@ import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
+  recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
@@ -255,6 +258,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(fastifyStatic, { root: staticRoot });
 
   const membership = new GuildMembership();
+  const presence = new VoicePresence();
   const discordApi: DiscordApi | null = deps.config.discord
     ? deps.discordApi ?? fetchDiscordApi(deps.config.discord)
     : null;
@@ -394,6 +398,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           if (ev.kind === 'match_start') recordMatchStart(deps.db, ev.token, ev.map);
           else if (ev.kind === 'heartbeat') {
             recordHeartbeat(deps.db, ev.token);
+            // The heartbeat repeats the phase so a lost PHASE datagram is
+            // corrected within thirty seconds; recordPhase treats a repeat
+            // as confirmation and does not restart anything.
+            if (ev.phase) recordPhase(deps.db, ev.token, ev.phase);
             // Demos are also scanned here, not only on MAP_RESULT. A map's
             // demo is not closed until the NEXT map's tv_record replaces it,
             // so at MAP_RESULT time it is still the newest file and is
@@ -427,6 +435,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
+          else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
           else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);
@@ -568,6 +577,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     orchestrator,
     notify,
     queueGate: makeQueueGate(deps.db, deps.config.discord !== null, membership),
+    readyGate: makeReadyGate(deps.db, deps.config.discord !== null, presence),
   });
   // Before the bot starts, so restored lobbies keep their Discord cards.
   matchmaker.restore();
@@ -687,6 +697,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const p = playerByDiscordId(deps.db, userId);
     if (p && p.status === 'invited' && discordApi) void applyGate(deps.db, discordApi, p.steamid);
   });
+  // Someone who readied and then left voice has to press Ready again, so a
+  // match never starts with a player outside voice. Only bites during a ready
+  // check: unready() is a no-op once the vote is running or for anyone not in
+  // a lobby, and the gate itself decides whether voice is required.
+  presence.onLeave((userId) => {
+    const p = playerByDiscordId(deps.db, userId);
+    if (p && matchmaker.readyBlock(p.steamid)) matchmaker.unready(p.steamid);
+  });
   if (botEnabled(deps.config)) {
     startBot({
       config: deps.config,
@@ -705,6 +723,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       },
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
       membership,
+      presence,
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();

@@ -169,6 +169,42 @@ CREATE TABLE IF NOT EXISTS match_live_map_stats (
   stats_json TEXT    NOT NULL,
   PRIMARY KEY (match_id, ordinal, player_id)
 );
+-- Every pause of a match, kept after the match ends: the record an admin
+-- reads when one side says the other paused them to death. Written from the
+-- plugin's PHASE transitions, so a lost datagram can leave ended_at NULL
+-- until the next heartbeat closes it.
+CREATE TABLE IF NOT EXISTS match_pauses (
+  id          INTEGER PRIMARY KEY,
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  map_ordinal INTEGER NOT NULL,
+  half        INTEGER,
+  team        TEXT CHECK (team IN ('a','b')),
+  leave_pause INTEGER NOT NULL DEFAULT 0,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS match_pauses_match ON match_pauses(match_id);
+-- Every ready-up of a match, and who was still not ready in the last report
+-- before it went live (a JSON list of steamids). Kept after the match ends.
+CREATE TABLE IF NOT EXISTS match_readyups (
+  id           INTEGER PRIMARY KEY,
+  match_id     INTEGER NOT NULL REFERENCES matches(id),
+  map_ordinal  INTEGER NOT NULL,
+  half         INTEGER,
+  started_at   TEXT NOT NULL,
+  ended_at     TEXT,
+  last_unready TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS match_readyups_match ON match_readyups(match_id);
+-- Seconds each player spent not ready in one ready-up, summed from the
+-- intervals between the plugin's roster reports.
+CREATE TABLE IF NOT EXISTS match_readyup_players (
+  readyup_id INTEGER NOT NULL REFERENCES match_readyups(id),
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  player_id  TEXT    NOT NULL,
+  seconds    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (readyup_id, player_id)
+);
 CREATE TABLE IF NOT EXISTS match_live_events (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   -- Which map of the match this happened on, stamped at write time from the
@@ -453,6 +489,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
   require_discord_to_queue: '1',
+  // Pressing Ready needs that account to be in a voice channel on the guild.
+  require_voice_to_ready: '1',
   discord_invite_url: '',
   // Private channel the bot posts the admin feed to; empty turns the feed off.
   discord_admin_channel_id: '',
@@ -499,6 +537,17 @@ export function openDb(path: string): DB {
   // exists, so a column introduced after a database was created needs this.
   // Idempotent and cheap; there is no migration framework here by design.
   ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
+  // What the game is doing right now, as last reported by the plugin, and
+  // since when. NULL until a plugin that emits PHASE has spoken.
+  ensureColumn(db, 'match_live', 'phase', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_team', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_limit', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'match_live', 'phase_leave', 'INTEGER NOT NULL DEFAULT 0');
+  // The not-ready roster as last reported (JSON), and when that report
+  // arrived, so the seconds since can be charged to those players.
+  ensureColumn(db, 'match_live', 'phase_unready', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_unready_at', 'TEXT');
   // -1, not 0 or NULL: ALTER TABLE ADD COLUMN on a populated table needs a
   // non-null default, and 0 is a real value here (an event in the first
   // millisecond of a round). -1 means "recorded before round timing existed".

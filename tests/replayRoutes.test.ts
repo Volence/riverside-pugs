@@ -8,6 +8,7 @@ import { openDb, type DB } from '../src/db.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { stubOrchestrator } from './helpers.js';
+import { recordPhase } from '../src/liveView.js';
 import {
   encodeHeader, encodeFrame, decodeHeader, VERSION, HEADER_BYTES,
   PLAYER_SLOTS, frameBytes, type ReplayHeader, type Frame,
@@ -110,9 +111,21 @@ describe('GET /api/replays/live/match/:id', () => {
     writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 60, false);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
-    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false });
+    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null });
     expect(res.payload).not.toContain(TOKEN);
     expect(res.payload).not.toContain('.rpl');
+  });
+
+  // The viewer polls this once a second already, so the game's phase rides
+  // along rather than costing a second request: it is what lets the page say
+  // "paused" instead of showing a frozen frame.
+  it('carries the reported phase so the viewer can say what the game is doing', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 60, false);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, { state: 'paused', team: 'b', limit: 120, leave: false, unready: [] });
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.json().phase).toMatchObject({ state: 'paused', team: 'b', limit: 120, leave: false });
+    expect(typeof res.json().phase.sinceMs).toBe('number');
   });
 
   it('404s an unknown match id', async () => {

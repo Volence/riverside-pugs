@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import type { LivePhase } from '../api';
 import {
   decodeFrames, decodeHeader, frameBytes, slotInfected, HEADER_BYTES, VERSION,
   type Frame, type ReplayHeader,
@@ -114,12 +115,16 @@ export function useReplaySource(spec: ReplaySpec | null): {
   header: ReplayHeader | null;
   frames: Frame[];
   closed: boolean;
+  phase: LivePhase | null;
   /** The file's format version is newer than this page understands. */
   tooNew: boolean;
   error: Error | null;
 } {
   const [state, setState] = useState<ReplayState>({ header: null, frames: [], cursor: 0 });
   const [closed, setClosed] = useState(false);
+  // What the game is doing, from the live answer. Null for a saved round and
+  // for a standalone session, whose route does not carry one.
+  const [phase, setPhase] = useState<LivePhase | null>(null);
   const [error, setError] = useState<Error | null>(null);
   // The cursor used to build the next request. Updated synchronously the
   // moment it changes (a fresh chunk, or a live round change resetting it to
@@ -144,6 +149,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
     cursorRef.current = 0;
     setState({ header: null, frames: [], cursor: 0 });
     setClosed(false);
+    setPhase(null);
     setError(null);
 
     async function tick(): Promise<void> {
@@ -162,9 +168,12 @@ export function useReplaySource(spec: ReplaySpec | null): {
           // sv_password, so it never crosses the wire.
           let next: RoundSpec;
           if (live.kind === 'live-match') {
-            const body = (await res.json()) as { ordinal: number; half: number; closed: boolean };
+            const body = (await res.json()) as {
+              ordinal: number; half: number; closed: boolean; phase?: LivePhase | null;
+            };
             if (cancelled) return;
             next = { kind: 'match', matchId: live.matchId, ordinal: body.ordinal, half: body.half };
+            setPhase(body.phase ?? null);
           } else {
             const body = (await res.json()) as { filename: string; closed: boolean };
             if (cancelled) return;
@@ -221,5 +230,5 @@ export function useReplaySource(spec: ReplaySpec | null): {
     };
   }, [key]);
 
-  return { header: state.header, frames: state.frames, closed, tooNew: state.tooNew === true, error };
+  return { header: state.header, frames: state.frames, closed, phase, tooNew: state.tooNew === true, error };
 }

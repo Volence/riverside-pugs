@@ -169,8 +169,11 @@ export class DiscordSync {
         lobbyId: id,
         phase: snapshot.phase,
         deadlineMs: snapshot.deadline,
-        players: snapshot.players.map((p) => ({ ...this.player(p), ready: snapshot.ready.includes(p) })),
+        players: snapshot.players.map((p) => ({
+          ...this.player(p), ready: snapshot.ready.includes(p), blocked: mm.readyBlock(p) !== null,
+        })),
         options: snapshot.options.map((c) => ({ campaign: c, name: campaignDisplayName(this.deps.db, c), votes: snapshot.votes[c] ?? 0 })),
+        voiceRequired: getSetting(db, 'require_voice_to_ready') === '1',
       });
       // A pass awaits Discord between lobbies, and a lobby can complete in
       // that gap. Posting a card for it then would orphan a second card, since

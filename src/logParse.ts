@@ -1,9 +1,33 @@
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
+export const PHASE_STATES = ['live', 'paused', 'readyup', 'roundover', 'loading'] as const;
+export type PhaseState = typeof PHASE_STATES[number];
+export interface Phase {
+  state: PhaseState;
+  /** Who is charged for a pause, or null: a disconnect pause, an admin, or
+   *  any state that is not a pause. */
+  team: 'a' | 'b' | null;
+  /** Seconds a pause may last before the plugin unpauses, 0 for no ceiling. */
+  limit: number;
+  /** A pause the plugin called itself while waiting for a dropped player. */
+  leave: boolean;
+  /** Rostered players who have not readied, during a ready-up. Empty
+   *  otherwise, and empty once everyone has and the countdown is running. */
+  unready: string[];
+}
+
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
-  | { kind: 'heartbeat'; token: string }
+  // `phase` rides on the heartbeat so a lost PHASE datagram self-corrects
+  // within thirty seconds. Absent (not null) from an older plugin, so the
+  // event is byte-for-byte what it was before phases existed.
+  | { kind: 'heartbeat'; token: string; phase?: Phase }
+  // What the game is doing right now, from the plugin's one-second tracker.
+  // Emitted on every transition. Cosmetic: nothing here is read back when a
+  // result is computed, but the pause records built from it are what an admin
+  // sees when a team complains about the other side's pausing.
+  | { kind: 'phase'; token: string; phase: Phase }
   | { kind: 'leave'; token: string; steamid: string; remaining: number }
   | { kind: 'return'; token: string; steamid: string; remaining: number }
   | { kind: 'abandon'; token: string; steamid: string }
@@ -74,6 +98,17 @@ export type LogEvent =
     };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
+/** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
+ *  1 and 2 for pug a and b; anything else is nobody. An unknown state is
+ *  null rather than stored: the page renders a fixed set of words. */
+function phaseOf(state: string | undefined, rest: Record<string, string>): Phase | null {
+  if (!state || !(PHASE_STATES as readonly string[]).includes(state)) return null;
+  const team = rest.team === '1' ? 'a' : rest.team === '2' ? 'b' : null;
+  const limit = intOf(rest.limit) ?? 0;
+  const unready = (rest.unready ?? '').split(',').filter((id) => /^\d{17}$/.test(id));
+  return { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
+}
+
 function kv(parts: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const p of parts) {
@@ -125,8 +160,17 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (!rest.map || a === null || b === null) return null;
       return { kind: 'map_result', token, map: rest.map, a, b };
     }
-    case 'HEARTBEAT':
-      return { kind: 'heartbeat', token };
+    case 'HEARTBEAT': {
+      if (rest.phase === undefined) return { kind: 'heartbeat', token };
+      const phase = phaseOf(rest.phase, rest);
+      // A heartbeat is a liveness signal first: a phase word this parser
+      // does not know costs the phase, never the heartbeat.
+      return phase ? { kind: 'heartbeat', token, phase } : { kind: 'heartbeat', token };
+    }
+    case 'PHASE': {
+      const phase = phaseOf(rest.state, rest);
+      return phase ? { kind: 'phase', token, phase } : null;
+    }
     case 'LEAVE':
     case 'RETURN': {
       const remaining = intOf(rest.remaining);

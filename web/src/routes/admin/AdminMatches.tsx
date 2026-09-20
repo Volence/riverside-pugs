@@ -4,6 +4,8 @@ import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
+import { formatTime } from '../../replay/ReplayControls';
+import type { MatchPause, MatchReadyup } from '../../api';
 
 /**
  * Team SR gap and the paper odds, in one table cell.
@@ -142,7 +144,7 @@ export function AdminMatches() {
         {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
           <div class="table-wrap">
             <table class="admin-table">
-              <thead><tr><th>Match</th><th class="num">Score</th><th>Odds</th><th>Ended</th><th /></tr></thead>
+              <thead><tr><th>Match</th><th class="num">Score</th><th>Odds</th><th>Pauses</th><th>Ready-ups</th><th>Ended</th><th /></tr></thead>
               <tbody>
                 {data.recent.map((m) => (
                   <tr key={m.id}>
@@ -152,6 +154,20 @@ export function AdminMatches() {
                         the point of the column: a run of them is what tells
                         you the balancer needs looking at. */}
                     <td><Odds f={m.forecast} winner={m.winner} /></td>
+                    <td>
+                      {(m.pauses ?? []).length === 0 ? <span class="muted">none</span> : (
+                        <ul class="admin-pauses">
+                          {m.pauses.map((p, i) => <li key={i}>{pauseText(p)}</li>)}
+                        </ul>
+                      )}
+                    </td>
+                    <td>
+                      {(m.readyups ?? []).length === 0 ? <span class="muted">none</span> : (
+                        <ul class="admin-pauses">
+                          {m.readyups.map((r, i) => <li key={i}>{readyupText(r)}</li>)}
+                        </ul>
+                      )}
+                    </td>
                     <td>{fmtTime(m.endedAt)}</td>
                     <td>
                       {voiding === m.id ? (
@@ -172,6 +188,27 @@ export function AdminMatches() {
             </table>
           </div>
         )}
+        {(data.slowToReady ?? []).length > 0 && (
+          <>
+            <h3>Slow to ready</h3>
+            <p class="muted">Across every counted match. "Last" is how often they were the one everybody was waiting on when the round went live.</p>
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead><tr><th>Player</th><th class="num">Last</th><th class="num">Avg unready</th><th class="num">Total unready</th></tr></thead>
+                <tbody>
+                  {data.slowToReady.map((p) => (
+                    <tr key={p.steamid}>
+                      <td><a href={`/player/${p.steamid}`}>{p.name}</a></td>
+                      <td class="num">{p.timesLast} of {p.readyups}</td>
+                      <td class="num">{formatTime(p.avgSeconds * 1000)}</td>
+                      <td class="num">{formatTime(p.totalSeconds * 1000)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
         {data.voided.length > 0 && (
           <>
             <h4>Voided</h4>
@@ -187,6 +224,21 @@ export function AdminMatches() {
 
 /** Per-server SourceTV: the port people spectate on, and its password.
  *  Public once enabled: the broadcast delay is what keeps it fair. */
+/** One pause, in the words an admin settling a dispute wants: who, how long,
+ *  which map. A disconnect pause is the plugin's, not a team's. */
+export function pauseText(p: MatchPause): string {
+  const who = p.team ? `Team ${p.team.toUpperCase()}` : p.leave ? 'Reconnect' : 'Admin';
+  const length = p.seconds === null ? 'still open' : formatTime(p.seconds * 1000);
+  return `${who} ${length} on map ${p.mapOrdinal + 1}`;
+}
+
+/** One ready-up: how long it took, which map, and who readied last. */
+export function readyupText(r: MatchReadyup): string {
+  const length = r.seconds === null ? 'still open' : formatTime(r.seconds * 1000);
+  const last = r.lastUnreadyNames.length ? `, last ${r.lastUnreadyNames.join(', ')}` : '';
+  return `${length} on map ${r.mapOrdinal + 1}${last}`;
+}
+
 function SourceTvCell(
   { server, busy, run }: {
     server: AdminOverview['servers'][number];
