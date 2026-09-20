@@ -6,6 +6,7 @@ import { parseLogDatagram } from '../src/logParse.js';
 import { handleAbandon, abandonBanMinutes, statusShowsAbandoner } from '../src/abandon.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { activeBan } from '../src/admin/players.js';
+import { subscribeBanChanges, type BanChange } from '../src/banEvents.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const TOKEN = 'a'.repeat(32);
@@ -110,5 +111,26 @@ describe('abandon teardown', () => {
     };
     await handleAbandon(d, TOKEN, IDS[0]);
     expect(calls).toEqual([{ id: serverId, opts: { teardown: true } }]);
+  });
+});
+
+describe('abandon ban publish ordering', () => {
+  // banPlayer used to run inside the same outer transaction that flips the
+  // match to 'aborted', so a subscriber (ServerBanSync) could see the ban
+  // before that transaction committed. A throw after the ban insert would
+  // then roll back the bans row while the game server kept a PERMANENT
+  // engine ban the sweep can never lift. This proves the publish now happens
+  // only after the match row is already visibly 'aborted'.
+  it('publishes the ban after the outer transaction commits, not from inside it', async () => {
+    const seen: { change: BanChange; stateAtPublish: string | undefined }[] = [];
+    const off = subscribeBanChanges((change) => {
+      const row = db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as { state: string } | undefined;
+      seen.push({ change, stateAtPublish: row?.state });
+    });
+    expect(await handleAbandon(deps(), TOKEN, IDS[2])).toBe(matchId);
+    off();
+    expect(seen).toEqual([
+      { change: { kind: 'ban', steamid: IDS[2], reason: `Abandoned match #${matchId}` }, stateAtPublish: 'aborted' },
+    ]);
   });
 });

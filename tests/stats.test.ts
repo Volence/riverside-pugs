@@ -47,7 +47,7 @@ describe('stats routes', () => {
 
   beforeEach(async () => {
     db = openDb(':memory:');
-    app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+    app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverExec: async () => {} });
     for (const id of IDS) upsertPlayer(db, { steamid: id, name: `p${id.slice(-1)}`, avatar: null }, []);
     cookies = authedCookie(app, db, ME);
   });

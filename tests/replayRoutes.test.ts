@@ -598,6 +598,7 @@ describe('replayRoutes registration on the real server', () => {
       config: loadConfig({ REPLAY_DIR: dir }),
       db: openDb(':memory:'),
       orchestrator: stubOrchestrator(),
+      serverExec: async () => {},
     });
     const res = await real.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
     expect(res.statusCode).toBe(200);

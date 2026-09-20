@@ -22,7 +22,7 @@ beforeEach(async () => {
   // otherwise leak into this one's fresh, unrelated db. Same guard
   // tests/campaignRoutes.test.ts uses.
   invalidateCampaignCache();
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   admin = authedCookie(app, db, ADMIN);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
 });

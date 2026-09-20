@@ -27,6 +27,7 @@ async function build(env: Record<string, string>, api = fakeDiscordApi({
     verifyLogin: async () => P1,
     fetchPersona: async () => ({ name: 'alice', avatar: null }),
     discordApi: api,
+    serverExec: async () => {},
   });
 }
 
