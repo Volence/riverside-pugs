@@ -8,7 +8,19 @@ import { COUNTRY_OPTIONS } from '../countries';
  *  DiscordLinkCard does this. */
 const BACKEND = { target: '_top', rel: 'noopener' } as const;
 
+/** Mirrors BIO_MAX_CHARS / BIO_MAX_LINES in src/profileFields.ts. The server
+ *  is still the thing that enforces them; these only drive the counter and the
+ *  textarea's own maxlength, so you find out before you press Save. */
 const BIO_MAX = 200;
+const BIO_MAX_LINES = 6;
+
+/** What the server will count after it normalises: blank-line runs collapse,
+ *  and leading and trailing blank lines go. Counting the raw value instead
+ *  would tell the player they are over when they are not. */
+function countLines(s: string): number {
+  const normalised = s.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return normalised === '' ? 0 : normalised.split('\n').length;
+}
 
 /**
  * The player's own profile fields, as a panel on their own profile rather than
@@ -43,6 +55,7 @@ export function ProfileEdit(
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const bioLines = countLines(bio);
 
   const save = async () => {
     setBusy(true);
@@ -84,15 +97,17 @@ export function ProfileEdit(
     <div class="profileedit profileedit--open">
       <label class="field">
         <span class="field__label">Bio</span>
-        <input
-          class="field__input"
-          type="text"
+        <textarea
+          class="field__input field__input--area"
+          rows={4}
           maxLength={BIO_MAX}
           value={bio}
-          placeholder="200 characters, no links"
-          onInput={(e) => setBio((e.target as HTMLInputElement).value)}
+          placeholder={`A few lines about you. ${BIO_MAX} characters, no links.`}
+          onInput={(e) => setBio((e.target as HTMLTextAreaElement).value)}
         />
-        <span class="field__hint">{bio.length}/{BIO_MAX}</span>
+        <span class={`field__hint${bioLines > BIO_MAX_LINES ? ' field__hint--over' : ''}`}>
+          {bio.length}/{BIO_MAX} · {bioLines}/{BIO_MAX_LINES} lines
+        </span>
       </label>
 
       <label class="field">

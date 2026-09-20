@@ -1,5 +1,16 @@
 import type { DB } from './db.js';
 import type { TwitchApi } from './twitch/api.js';
+import { getSetting, setSetting } from './settings.js';
+
+/** When the poller last completed a pass, successfully.
+ *
+ *  A setting rather than MAX(twitch_status.checked_at), because those two
+ *  answer different questions and the difference is user-visible. An empty
+ *  twitch_status is a perfectly healthy state: nobody has linked, or somebody
+ *  linked ten seconds ago and the next tick has not come round yet. Reading
+ *  "no rows" as "the poller is dead" put a "status unavailable" banner on the
+ *  Streams page for the first 60 s after the very first player linked. */
+const POLLED_AT = 'twitch_polled_at';
 
 /** Helix takes 100 channels per request, so the whole community is one call
  *  whatever the interval. Polling faster than this buys nothing real: Twitch's
@@ -29,7 +40,12 @@ export async function pollTwitch(db: DB, api: TwitchApi, now: Date = new Date())
   const linked = db.prepare(
     'SELECT steamid, twitch_id, twitch_name FROM players WHERE twitch_id IS NOT NULL',
   ).all() as LinkedRow[];
-  if (linked.length === 0) return;
+  if (linked.length === 0) {
+    // Nothing to ask Twitch, but the pass completed. Recording it is what
+    // stops an empty table reading as a dead poller.
+    setSetting(db, POLLED_AT, now.toISOString());
+    return;
+  }
 
   let streams;
   try {
@@ -79,17 +95,25 @@ export async function pollTwitch(db: DB, api: TwitchApi, now: Date = new Date())
       // blanking the login would drop the player off the page entirely.
       if (s && s.userLogin && s.userLogin !== row.twitch_name) rename.run(s.userLogin, row.steamid);
     }
+    // Inside the transaction, so the heartbeat and the rows it describes land
+    // together or not at all.
+    setSetting(db, POLLED_AT, iso);
   });
   write();
 }
 
-/** True when nothing may be reported as live. Also true when the cache is
- *  empty, which covers a process that has not polled once yet. */
+/**
+ * True when nothing may be reported as live.
+ *
+ * Measured from the last COMPLETED pass, not from the newest row, so an empty
+ * twitch_status is not mistaken for a dead poller. Also true before the first
+ * pass of a fresh process, which is the one case where "we do not know" is
+ * genuinely the right answer.
+ */
 export function twitchCacheStale(db: DB, now: Date = new Date()): boolean {
-  const row = db.prepare('SELECT MAX(checked_at) AS last FROM twitch_status')
-    .get() as { last: string | null };
-  if (!row.last) return true;
-  const last = Date.parse(row.last);
+  const polledAt = getSetting(db, POLLED_AT);
+  if (!polledAt) return true;
+  const last = Date.parse(polledAt);
   if (!Number.isFinite(last)) return true;
   return now.getTime() - last > TWITCH_STALE_MS;
 }

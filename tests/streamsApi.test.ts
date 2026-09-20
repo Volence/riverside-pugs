@@ -26,6 +26,10 @@ function linkedAndLive(steamid: string, twitchId: string, login: string, live: b
   db.prepare('UPDATE players SET twitch_id = ?, twitch_name = ? WHERE steamid = ?')
     .run(twitchId, login, steamid);
   const nowIso = new Date().toISOString();
+  // The poll heartbeat, which is what staleness is measured from. Without it
+  // the view correctly refuses to call anybody live.
+  db.prepare("INSERT INTO settings (key, value) VALUES ('twitch_polled_at', ?) "
+    + 'ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(nowIso);
   db.prepare(
     `INSERT INTO twitch_status (player_id, is_live, viewers, checked_at, last_live_at)
      VALUES (?,?,?,?,?)`,

@@ -89,9 +89,13 @@ export function linkUrl(platform: string, handle: string): string | null {
  * and a corrupted one still compiles and still matches something, just not
  * what it says. The ranges are legible here and a test pins them.
  */
-function hasUnsafeChars(s: string): boolean {
+function hasUnsafeChars(s: string, allowNewlines = false): boolean {
   for (const ch of s) {
     const c = ch.codePointAt(0)!;
+    // The bio is a paragraph field, so a plain newline is content there. Every
+    // other C0 control still is not, tab included: it buys nothing in a bio and
+    // is one more thing that can render unexpectedly.
+    if (allowNewlines && c === 0x0a) continue;
     if (c <= 0x1f || c === 0x7f) return true;              // C0 controls, DEL
     if (c >= 0x80 && c <= 0x9f) return true;               // C1 controls
     if (c >= 0x200b && c <= 0x200f) return true;           // zero width, LTR/RTL marks
@@ -115,14 +119,47 @@ function asString(raw: unknown): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+export const BIO_MAX_CHARS = 200;
+
+/** A bio is a short paragraph, not an essay and not a wall. The cap exists
+ *  because the bio renders inside the profile header, above the rating, on a
+ *  page somebody opened to read numbers. */
+export const BIO_MAX_LINES = 6;
+
+/**
+ * A short plain-text paragraph.
+ *
+ * Line breaks are content here, unlike every other field. Everything else that
+ * can push the header around is normalised away first: line endings, runs of
+ * blank lines, trailing spaces. Without that, 200 characters of newlines is a
+ * 200 line profile header on a page nobody can then read.
+ */
 export function validateBio(raw: unknown): Validated {
   if (raw !== null && raw !== undefined && typeof raw !== 'string') return bad('bio must be text');
-  const v = asString(raw);
-  if (v === null) return ok(null);
-  if (v.length > 200) return bad('bio is limited to 200 characters');
-  if (hasUnsafeChars(v)) return bad('bio must be a single line of plain text');
-  if (LINKISH.test(v)) return bad('bio cannot contain links. Use the social fields instead.');
-  return ok(v);
+  if (raw === null || raw === undefined) return ok(null);
+
+  const normalised = raw
+    .replace(/\r\n?/g, '\n')      // windows and old-mac endings
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')   // at most one blank line between paragraphs
+    .trim();
+
+  if (normalised === '') return ok(null);
+  if (normalised.length > BIO_MAX_CHARS) {
+    return bad(`bio is limited to ${BIO_MAX_CHARS} characters`);
+  }
+  if (normalised.split('\n').length > BIO_MAX_LINES) {
+    return bad(`bio is limited to ${BIO_MAX_LINES} lines`);
+  }
+  if (hasUnsafeChars(normalised, true)) {
+    return bad('bio must be plain text');
+  }
+  if (LINKISH.test(normalised)) {
+    return bad('bio cannot contain links. Use the social fields instead.');
+  }
+  return ok(normalised);
 }
 
 export function validatePronouns(raw: unknown): Validated {

@@ -114,7 +114,7 @@ describe('pollTwitch', () => {
 });
 
 describe('twitchCacheStale', () => {
-  it('is stale with no rows at all', () => {
+  it('is stale before the poller has ever completed a pass', () => {
     expect(twitchCacheStale(db, T0)).toBe(true);
   });
 
@@ -131,10 +131,38 @@ describe('twitchCacheStale', () => {
     expect(twitchCacheStale(db, new Date(T0.getTime() + TWITCH_STALE_MS + 1))).toBe(true);
   });
 
-  it('is stale when checked_at is unparseable', async () => {
+  it('is fresh after a poll that had nobody to ask about', async () => {
+    // The poller is healthy; there is simply nobody linked. Reporting that as
+    // "status unavailable" is a false alarm, and it is what the page showed
+    // for the first 60 s after the very first player linked.
+    await pollTwitch(db, fakeTwitchApi({}), T0);
+    expect(twitchCacheStale(db, T0)).toBe(false);
+  });
+
+  it('is fresh in the gap between linking and the first poll that sees it', async () => {
+    // The real sequence that produced the false alarm: the poller completes a
+    // pass, THEN somebody links. They have no status row yet, which is not the
+    // same thing as the poller being dead.
+    await pollTwitch(db, fakeTwitchApi({}), T0);
+    link(P1, '11', 'alicetv');
+    expect(twitchCacheStale(db, new Date(T0.getTime() + 5_000))).toBe(false);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM twitch_status').get()).toEqual({ n: 0 });
+  });
+
+  it('stays stale when every poll fails, however many rows exist', async () => {
+    link(P1, '11', 'alicetv');
+    await pollTwitch(db, fakeTwitchApi({ live: { 11: {} } }), T0);
+    // Now the API breaks. Time passes. The cache must go stale even though the
+    // rows are still sitting there looking plausible.
+    const late = new Date(T0.getTime() + TWITCH_STALE_MS + 1);
+    await pollTwitch(db, fakeTwitchApi({ failStreams: 'twitch down' }), late);
+    expect(twitchCacheStale(db, late)).toBe(true);
+  });
+
+  it('is stale when the recorded poll time is unparseable', async () => {
     link(P1, '11', 'alicetv');
     await pollTwitch(db, fakeTwitchApi({}), T0);
-    db.prepare("UPDATE twitch_status SET checked_at = 'nonsense'").run();
+    db.prepare("UPDATE settings SET value = 'nonsense' WHERE key = 'twitch_polled_at'").run();
     expect(twitchCacheStale(db, T0)).toBe(true);
   });
 });

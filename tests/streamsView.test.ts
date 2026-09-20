@@ -15,7 +15,16 @@ function linked(id: string, twitchId: string, login: string) {
     .run(twitchId, login, id);
 }
 
+/** What a completed poll records besides the rows. Staleness is measured from
+ *  this, not from the newest row, so a test that fabricates status rows has to
+ *  fabricate the heartbeat too or the view reports everyone offline. */
+function polled(at: Date = T0) {
+  db.prepare("INSERT INTO settings (key, value) VALUES ('twitch_polled_at', ?) "
+    + 'ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(at.toISOString());
+}
+
 function status(id: string, live: boolean, over: Record<string, unknown> = {}) {
+  polled(new Date(String(over.checked_at ?? T0.toISOString())));
   db.prepare(
     `INSERT INTO twitch_status
        (player_id, is_live, title, game_name, viewers, thumbnail, started_at, last_live_at, checked_at)

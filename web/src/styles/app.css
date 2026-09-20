@@ -1790,7 +1790,9 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .headliner__identity { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); }
 .headliner__flag { font-size: var(--fs-h3); line-height: 1; }
 .headliner__pronouns { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: lowercase; color: var(--text-muted); }
-.headliner__bio { margin: var(--sp-2) 0 0; max-width: 52ch; color: var(--text); font-size: var(--fs-dense); }
+/* pre-line, so the line breaks a player typed survive, while runs of spaces
+ * still collapse the way they do everywhere else on the page. */
+.headliner__bio { margin: var(--sp-2) 0 0; max-width: 52ch; color: var(--text); font-size: var(--fs-dense); white-space: pre-line; }
 
 /* ---- Social chips ---- */
 
@@ -1828,7 +1830,11 @@ tbody tr.is-lifted td { opacity: 0.55; }
   padding: var(--sp-2) var(--sp-3);
 }
 .field__input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* A textarea does not inherit the form font, and defaults to horizontal resize
+ * that can drag it out of the panel. */
+.field__input--area { font: inherit; resize: vertical; min-height: 5.5rem; line-height: 1.45; }
 .field__hint { justify-self: end; font-size: var(--fs-label); color: var(--text-muted); }
+.field__hint--over { color: var(--loss); }
 .field__error { margin: 0; color: var(--loss); font-size: var(--fs-dense); }
 .field__static { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .profileedit__actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
