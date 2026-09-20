@@ -98,8 +98,7 @@ export class DiscordSync {
     const restored = new Set(this.deps.matchmaker.lobbies().map((l) => l.id));
     for (const m of messagesInState(db, 'match', 'open')) {
       if (!m.ref.startsWith('lob_') || restored.has(m.ref)) continue;
-      await this.safeEdit(m.channel_id, m.message_id, renderCancelled());
-      setMessageState(db, 'match', m.ref, 'cancelled');
+      await this.closeLobbyCard(m, renderCancelled(), 'cancelled');
     }
 
     this.deps.matchmaker.on({
@@ -169,8 +168,11 @@ export class DiscordSync {
         lobbyId: id,
         phase: snapshot.phase,
         deadlineMs: snapshot.deadline,
-        players: snapshot.players.map((p) => ({ ...this.player(p), ready: snapshot.ready.includes(p) })),
+        players: snapshot.players.map((p) => ({
+          ...this.player(p), ready: snapshot.ready.includes(p), blocked: mm.readyBlock(p) !== null,
+        })),
         options: snapshot.options.map((c) => ({ campaign: c, name: campaignDisplayName(this.deps.db, c), votes: snapshot.votes[c] ?? 0 })),
+        voiceRequired: getSetting(db, 'require_voice_to_ready') === '1',
       });
       // A pass awaits Discord between lobbies, and a lobby can complete in
       // that gap. Posting a card for it then would orphan a second card, since
@@ -187,8 +189,7 @@ export class DiscordSync {
       const payload = failure
         ? renderLobbyFailed({ ready: failure.ready.map((p) => this.player(p)), notReady: failure.notReady.map((p) => this.player(p)) })
         : renderCancelled();
-      await this.safeEdit(m.channel_id, m.message_id, payload);
-      setMessageState(db, 'match', m.ref, failure ? 'failed' : 'cancelled');
+      await this.closeLobbyCard(m, payload, failure ? 'failed' : 'cancelled');
     }
 
     // 3. Match cards. A match that never had a lobby card gets one posted
@@ -405,6 +406,42 @@ export class DiscordSync {
     await this.deps.transport.remove(stored.channel_id, stored.message_id).catch(() => {});
     this.hashes.delete(stored.message_id);
     setMessageState(this.deps.db, kind, ref, 'removed');
+  }
+
+  /**
+   * Close out a lobby card that will never become a match.
+   *
+   * The outcome used to be edited onto the card, which left a growing pile of
+   * "ready check failed" and "lobby cancelled" embeds in #queue-here between
+   * the live queue panel and the people trying to read it (owner,
+   * 2026-09-20). It goes to the admin channel instead: naming who missed a
+   * ready check is something an admin acts on, and the players who were in
+   * the lobby are told on the site rather than in the channel.
+   *
+   * The edit is still the fallback when no admin channel is set, because the
+   * alternative there is deleting the card and saying nothing anywhere.
+   */
+  private async closeLobbyCard(
+    m: { ref: string; channel_id: string; message_id: string },
+    payload: MessagePayload,
+    state: 'failed' | 'cancelled',
+  ): Promise<void> {
+    const admin = getSetting(this.deps.db, 'discord_admin_channel_id') || '';
+    if (!admin) {
+      await this.safeEdit(m.channel_id, m.message_id, payload);
+      setMessageState(this.deps.db, 'match', m.ref, state);
+      return;
+    }
+    // State first. A Discord failure below must not leave the row 'open', or
+    // the next pass finds the lobby gone again and posts a second copy.
+    setMessageState(this.deps.db, 'match', m.ref, state);
+    await this.deps.transport.remove(m.channel_id, m.message_id).catch((err) => {
+      console.error('[discord] removing a dead lobby card failed:', err);
+    });
+    this.hashes.delete(m.message_id);
+    await this.deps.transport.send(admin, payload).catch((err) => {
+      console.error('[discord] posting a lobby outcome to the admin channel failed:', err);
+    });
   }
 
   private async safeEdit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean> {

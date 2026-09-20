@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive } from './guards.js';
+import { publicBans } from '../admin/players.js';
 import { fileReport, reportEligibility } from '../reports.js';
 
 export interface ApiRouteOpts {
@@ -28,10 +29,19 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     return { ok: true };
   });
 
+  /** Dismiss the "your ready check failed" notice on the Play page. */
+  app.post('/api/lobby/dismiss-notice', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    matchmaker.dismissNotice(steamid);
+    return { ok: true };
+  });
+
   app.post('/api/lobby/ready', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return;
-    if (!matchmaker.ready(steamid)) return reply.code(409).send({ error: 'no ready check active' });
+    const result = matchmaker.ready(steamid);
+    if (!result.ok) return reply.code(409).send({ error: result.error });
     return { ok: true };
   });
 
@@ -69,4 +79,10 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
   // Public on purpose: the point is that people can watch the queue fill
   // without signing in. Carries nothing viewer-relative and no connect block.
   app.get('/api/queue', async () => matchmaker.publicQueue());
+
+  /** The ban list, public. See publicBans for what is and is not in it. */
+  app.get('/api/bans', async (req) => {
+    const { q } = req.query as { q?: string };
+    return { bans: publicBans(db, typeof q === 'string' ? q.slice(0, 64) : '') };
+  });
 }

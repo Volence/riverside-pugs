@@ -124,6 +124,18 @@ describe('usePlayback loop', () => {
     expect(result.current.tMs).toBe(4321);
   });
 
+  it('plays a closed round out to the end while still following', () => {
+    const raf = driveRaf();
+    const { result } = renderHook(() => usePlayback(10_000, { live: true, closed: true }));
+
+    act(() => { raf.tick(16); });
+    // Not snapped to the buffer point 9 seconds in.
+    expect(result.current.tRef.current).toBe(16);
+    // Following survives the round ending, so the next round is picked up
+    // without anyone pressing Live again.
+    expect(result.current.following).toBe(true);
+  });
+
   it('clamps a seek to the round and unpins a live viewer', () => {
     const raf = driveRaf();
     const { result } = renderHook(() => usePlayback(10_000, { live: true }));

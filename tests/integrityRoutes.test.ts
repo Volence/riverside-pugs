@@ -22,7 +22,7 @@ const metrics = (fidMax: number, occZ: number | null) =>
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   adminCookie = authedCookie(app, db, ADMIN);
   userCookie = authedCookie(app, db, CLEAN);
   authedCookie(app, db, SUS);

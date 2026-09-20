@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type AdminPlayerDetail } from '../../api';
+import { adminApi, type AdminPlayerDetail, type MergePlan } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
@@ -69,6 +69,12 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
           <p class="muted">
             {d.status}{d.isAdmin ? ' · admin' : ''} · SR {d.sr ?? 'n/a'} · {d.games} games · joined {fmtTime(d.createdAt)}
             <br />Discord: {d.discordName ?? 'not linked'}
+            <br />Connect drops:{' '}
+            {d.signonDrops.count === 0 ? 'none' : (
+              <a href="#connect-drops" class="admin-warn">
+                {d.signonDrops.count}, last {fmtTime(d.signonDrops.lastAt)}
+              </a>
+            )}
           </p>
         </div>
       </div>
@@ -86,6 +92,8 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         {d.discordName && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.unlinkDiscord(d.steamid), `Unlink ${d.name}'s Discord?`)}>Unlink Discord</button>}
         {d.timeout && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.clearPenalties(d.steamid))}>Clear penalties</button>}
       </div>
+
+      <MergeSection d={d} busy={busy} run={run} />
 
       <section>
         <h4>Ban</h4>
@@ -154,6 +162,27 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         )}
       </section>
 
+      {d.signonDrops.count > 0 && (
+        <section id="connect-drops">
+          <h4>Connect drops</h4>
+          <p class="muted">
+            Left while still loading in, on a map that was enforcing file consistency. Usually a rejected
+            modified file (the player saw its name on their screen; the server never does), sometimes
+            just a cancelled loading screen. <a href="/help/consistency">What players are told</a>.
+          </p>
+          <ul class="admin-list">
+            {d.signonDrops.rows.map((r) => (
+              <li key={r.id}>
+                {fmtTime(r.at)}: as {r.name}, {r.secsConnected < 0 ? 'time unknown' : `after ${r.secsConnected} s`}, {r.forcedCount} files enforced
+                {r.enteredAfterAt
+                  ? <span class="muted"> · got in {fmtTime(r.enteredAfterAt)}</span>
+                  : <span class="admin-warn"> · has not got in since</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h4>Notes</h4>
         <form class="admin-form" onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.note(d.steamid, note)).then(() => setNote('')); }}>
@@ -179,5 +208,140 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         )}
       </section>
     </Panel>
+  );
+}
+
+
+/**
+ * Fold this account into another one, and undo a fold.
+ *
+ * Preview first, always. A merge rewrites rating history for everyone who
+ * played in the affected matches, not just these two accounts, because
+ * ratings are sequential: correcting a roster four matches back changes every
+ * rating computed since. The plan is shown before the commit button appears,
+ * so nobody finds that out afterwards.
+ */
+function MergeSection(
+  { d, busy, run }: {
+    d: AdminPlayerDetail;
+    busy: boolean;
+    run: (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
+  },
+) {
+  const [into, setInto] = useState('');
+  const [plan, setPlan] = useState<MergePlan | null>(null);
+  const [planError, setPlanError] = useState('');
+
+  const preview = async () => {
+    setPlan(null);
+    setPlanError('');
+    try {
+      const res = await adminApi.mergePlayer(d.steamid, into.trim(), true);
+      setPlan(res.plan);
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Could not read that account.');
+    }
+  };
+
+  const aliases = d.aliases ?? [];
+  const shared = d.sharesAddressWith ?? [];
+  const networks = d.networks ?? [];
+  const countries = [...new Set(networks.map((n) => n.country).filter(Boolean))];
+
+  return (
+    <section>
+      <h4>Identity</h4>
+
+      {(shared.length > 0 || countries.length > 0) && (
+        <div class="admin-shared">
+          {countries.length > 0 && (
+            <p class="muted">
+              Connects from {countries.join(', ')}
+              {networks.length > 1 ? ` · ${networks.length} connections seen` : ''}
+            </p>
+          )}
+          {shared.length > 0 && (
+            <>
+              <p>
+                <strong>Seen on the same connection as:</strong>
+              </p>
+              <ul>
+                {shared.map((o) => (
+                  <li key={o.steamid}>
+                    <a href={`/player/${o.steamid}`}>{o.name}</a>{' '}
+                    <code>{o.steamid}</code>{' '}
+                    <span class="muted">
+                      {o.seenCount} {o.seenCount === 1 ? 'connect' : 'connects'}
+                      {o.country ? `, ${o.country}` : ''}, last {fmtTime(o.lastSeen)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {/* Said plainly, because the merge button is right below it and
+                  the cost of acting on a false match is a season recompute. */}
+              <p class="muted">
+                A shared connection is not proof. A VPN, a household, a LAN cafe and two
+                siblings all look like this. Check it against how they play before merging.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+      {aliases.length > 0 && (
+        <div class="admin-aliases">
+          <p class="muted">Accounts merged into this one:</p>
+          <ul>
+            {aliases.map((a) => (
+              <li key={a.steamid}>
+                <code>{a.steamid}</code> <span class="muted">since {fmtTime(a.created_at)}</span>{' '}
+                <button
+                  class="chip" type="button" disabled={busy}
+                  onClick={() => run(
+                    () => adminApi.unaliasPlayer(a.steamid),
+                    `Stop treating ${a.steamid} as ${d.name}? Their past matches stay merged; the account is just free to be its own identity again.`,
+                  )}
+                >Separate</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p class="muted">
+        Merge this account into another, for one person playing on two Steam accounts.
+        <strong> {d.name} disappears</strong> and everything they did moves to the account you name.
+      </p>
+      <form class="admin-merge" onSubmit={(e) => { e.preventDefault(); void preview(); }}>
+        <input
+          value={into} placeholder="SteamID64 to keep"
+          onInput={(e) => { setInto((e.target as HTMLInputElement).value); setPlan(null); }}
+        />
+        <button class="btn" type="submit" disabled={busy || !/^\d{17}$/.test(into.trim())}>Preview</button>
+      </form>
+
+      {planError && <p class="error">{planError}</p>}
+      {plan && (
+        <div class="admin-merge__plan">
+          <p>
+            <strong>{plan.matchesMoved}</strong> matches move, <strong>{plan.matchesCollapsed}</strong> of
+            them had both accounts rostered and will be added together.
+          </p>
+          <p class="muted">
+            Season {plan.seasons.join(', ')} will be recomputed, which changes the rating of
+            everyone who played in those matches, not only these two accounts. There is no undo.
+          </p>
+          <ul class="muted">
+            {Object.entries(plan.rowsByTable).sort().map(([t, n]) => <li key={t}><code>{t}</code> {n}</li>)}
+          </ul>
+          <button
+            class="btn" type="button" disabled={busy}
+            onClick={() => run(
+              () => adminApi.mergePlayer(d.steamid, into.trim()),
+              `Merge ${d.name} into ${into.trim()} and recompute season ${plan.seasons.join(', ')}? This cannot be undone.`,
+            )}
+          >Merge and recompute</button>
+        </div>
+      )}
+    </section>
   );
 }

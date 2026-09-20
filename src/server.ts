@@ -9,7 +9,11 @@ import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
 import { GuildMembership } from './discord/membership.js';
+import { VoicePresence } from './discord/voicePresence.js';
 import { makeQueueGate } from './queueGate.js';
+import { makeReadyGate } from './readyGate.js';
+import { canonicalise } from './aliases.js';
+import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
@@ -38,14 +42,18 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { resolveServerBySource } from './serverPool.js';
+import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
+import { SignonDropNotifier } from './signonDropNotify.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
+  recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordMatchDemos, discoverMatchDemos } from './demos.js';
@@ -71,6 +79,9 @@ export interface ServerDeps {
   discordApi?: DiscordApi;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
+  /** Runs a batch of console commands on one server, for the ban sync.
+   *  Injected in tests so a ban never dials rcon. */
+  serverExec?: ServerExec;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -83,6 +94,9 @@ export interface ServerDeps {
   /** Overrides the campaign upload's multipart file-size limit. Injected in
    *  tests to exercise the truncation path without a multi-gigabyte body. */
   maxUploadBytes?: number;
+  /** Overrides where the campaign uploader reads the enforced file list from.
+   *  Injected in tests only; production reads the committed cfg. */
+  consistencyListPath?: string;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -256,6 +270,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(fastifyStatic, { root: staticRoot });
 
   const membership = new GuildMembership();
+  const presence = new VoicePresence();
   const discordApi: DiscordApi | null = deps.config.discord
     ? deps.discordApi ?? fetchDiscordApi(deps.config.discord)
     : null;
@@ -278,7 +293,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
-  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token) => {
+  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
       await rcon.connect();
@@ -297,7 +312,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       }
       if (token) {
         try {
-          await rcon.exec(`sm_pug_abort ${token}`);
+          // With teardown the plugin announces, waits for an unpause, kicks
+          // everyone and changes to the reset map itself. One command rather
+          // than five because exec secrets.cfg below drops the session and
+          // each extra command is another thing that can time out first.
+          await rcon.exec(abortCommand(token, opts.teardown, resetMap(deps.db)));
         } catch (err) {
           console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
         }
@@ -330,8 +349,27 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
   }));
 
+  // Every enabled box mirrors the website's bans. Built here, next to the
+  // releaser, because both are the backend reaching into a game server
+  // outside a match; started below once the server list has been reconciled.
+  const banSync = new ServerBanSync({
+    db: deps.db,
+    exec: deps.serverExec ?? (async (server, commands) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        for (const c of commands) await rcon.exec(c);
+      } finally {
+        rcon.close();
+      }
+    }),
+  });
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
+  // Assigned further down, once the bot variable it reads exists: the same
+  // forward reference selfStarted uses, null-safe for the same reason.
+  let signonDrops: SignonDropNotifier | null = null;
   if (!orchestrator) {
     if (deps.config.devMode) {
       orchestrator = new DevOrchestrator();
@@ -339,7 +377,39 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      logListener = new LogListener((ev, source) => {
+      logListener = new LogListener((raw, source) => {
+        // One rewrite at the door, before anything reads a SteamID off this
+        // event. A player who connects on a second account that has been
+        // merged into their main arrives here as the main, so the roster,
+        // the stats, the events and the rating all agree without a dozen
+        // call sites each remembering to resolve. See src/aliases.ts.
+        const ev = canonicalise(deps.db, raw);
+        // The two token-less kinds. LogListener has already pinned them to a
+        // game server's address. Handled first so nothing below is ever
+        // asked for a token they do not have, and guarded so a database error
+        // cannot take down the listener that also carries match_end.
+        if (ev.kind === 'signon_drop') {
+          signonDrops?.onDrop(ev).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
+          return;
+        }
+        if (ev.kind === 'player_net') {
+          // Cosmetic-adjacent and never on the critical path: a failure here
+          // must not take down the listener that also carries match_end.
+          try {
+            recordPlayerNet(deps.db, ev);
+          } catch (err) {
+            console.error('[networks] failed to record a connect address:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'entered') {
+          try {
+            signonDrops?.onEntered(ev.steamid);
+          } catch (err) {
+            console.error('[consistency] failed to record an entry:', err);
+          }
+          return;
+        }
         if (ev.kind === 'match_end') {
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
           if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
@@ -357,6 +427,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             .catch((err) => console.error('[abandon] failed:', err));
           return;
         }
+        if (ev.kind === 'problem') {
+          // The plugin could not do part of a teardown (today: the game never
+          // unpaused). The match is already aborted; this is for the admin
+          // channel, so someone knows the box may need a hand.
+          const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
+          publishAdminEvent({ kind: 'problem', matchId: row?.id, text: problemText(ev.code, row?.id ?? null) });
+          return;
+        }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
           selfStarted?.handle(ev, source);
           return;
@@ -367,6 +445,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           if (ev.kind === 'match_start') recordMatchStart(deps.db, ev.token, ev.map);
           else if (ev.kind === 'heartbeat') {
             recordHeartbeat(deps.db, ev.token);
+            // The heartbeat repeats the phase so a lost PHASE datagram is
+            // corrected within thirty seconds; recordPhase treats a repeat
+            // as confirmation and does not restart anything.
+            if (ev.phase) recordPhase(deps.db, ev.token, ev.phase);
             // Demos are also scanned here, not only on MAP_RESULT. A map's
             // demo is not closed until the NEXT map's tv_record replaces it,
             // so at MAP_RESULT time it is still the newest file and is
@@ -396,10 +478,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
             recordPlayerConnect(deps.db, ev.token, ev.steamid);
+            // The plugin emits this from OnClientPostAdminCheck, which only
+            // fires once the client is fully in game, so it is an entry too.
+            // The engine's own "entered the game" line normally gets here
+            // first; this is the second chance when that datagram was lost.
+            signonDrops?.onEntered(ev.steamid);
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
+          else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
           else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);
@@ -455,6 +543,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
         onNoServer: (id) => pending?.add(id),
+        beforeLive: (rcon) => banSync.pushAll((c) => rcon.exec(c)),
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -540,6 +629,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     orchestrator,
     notify,
     queueGate: makeQueueGate(deps.db, deps.config.discord !== null, membership),
+    readyGate: makeReadyGate(deps.db, deps.config.discord !== null, presence),
   });
   // Before the bot starts, so restored lobbies keep their Discord cards.
   matchmaker.restore();
@@ -568,6 +658,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       busy: () => matchInFlight(deps.db),
     })
     : undefined;
+
+  if (!deps.config.devMode) {
+    banSync.start();
+    banSync.sweep().catch((err) => console.error('[serverBans] boot sweep failed:', err));
+  }
 
   const reaper = setInterval(() => {
     try {
@@ -649,10 +744,32 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
+  // Only where a real listener exists to feed it. `bot` is read per drop,
+  // because the bot logs in some seconds after this line runs, and stays null
+  // for good when Discord is not configured: drops are then stored and shown
+  // to admins on the site, and nobody is DMed.
+  if (logListener) {
+    signonDrops = new SignonDropNotifier({
+      db: deps.db,
+      publicUrl: deps.config.publicUrl,
+      dm: () => {
+        const transport = bot?.transport;
+        return transport ? (userId, payload) => transport.dm(userId, payload) : null;
+      },
+    });
+  }
   // Someone who linked before joining the server is let in the moment they join.
   membership.onAdd((userId) => {
     const p = playerByDiscordId(deps.db, userId);
     if (p && p.status === 'invited' && discordApi) void applyGate(deps.db, discordApi, p.steamid);
+  });
+  // Someone who readied and then left voice has to press Ready again, so a
+  // match never starts with a player outside voice. Only bites during a ready
+  // check: unready() is a no-op once the vote is running or for anyone not in
+  // a lobby, and the gate itself decides whether voice is required.
+  presence.onLeave((userId) => {
+    const p = playerByDiscordId(deps.db, userId);
+    if (p && matchmaker.readyBlock(p.steamid)) matchmaker.unready(p.steamid);
   });
   if (botEnabled(deps.config)) {
     startBot({
@@ -672,6 +789,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       },
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
       membership,
+      presence,
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
@@ -694,6 +812,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(pruneTimer);
     clearTimeout(pruneOnBoot);
+    banSync.stop();
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
@@ -703,6 +822,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,
+    consistencyListPath: deps.consistencyListPath,
   });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside

@@ -18,7 +18,8 @@ import {
   chaptersOf, deleteCampaign, getCampaign, insertDraft, installsOf,
   listCampaigns, publishCampaign,
 } from '../customCampaigns.js';
-import { missionFromVpk } from '../vpk.js';
+import { listVpkPaths, missionFromVpk } from '../vpk.js';
+import { collisionMessage, consistencyCollisions, loadConsistencyList } from '../consistencyList.js';
 import type { ServerRow } from '../serverPool.js';
 import { getCampaignPool, setSetting } from '../settings.js';
 
@@ -45,6 +46,10 @@ export interface CampaignRouteOpts {
    *  tests inject a small number to exercise the truncation path without
    *  uploading gigabytes of data. */
   maxUploadBytes?: number;
+  /** Where the enforced file list is read from. Production leaves this unset
+   *  and gets the committed consistency/configs/l4d_consistency.cfg; tests
+   *  point it at a missing file to exercise the refuse-everything path. */
+  consistencyListPath?: string;
 }
 
 export async function campaignRoutes(
@@ -55,6 +60,11 @@ export async function campaignRoutes(
   const freeBytes = opts.freeBytes
     ?? (async () => { const s = await statfs(addonsDir); return s.bsize * s.bavail; });
   const maxUploadBytes = opts.maxUploadBytes ?? 2 * 1024 * 1024 * 1024;
+  // Read once, at startup. The list changes only with a deploy, which
+  // restarts this process anyway. Null means it could not be trusted, and the
+  // upload route then refuses rather than checking nothing; the loader has
+  // already said why on stderr.
+  const forcedPaths = loadConsistencyList(opts.consistencyListPath);
 
   // throwFileSizeLimit: false keeps a too-large upload as a plain
   // part.file.truncated flag once the pipeline below settles, rather than an
@@ -219,6 +229,28 @@ export async function campaignRoutes(
       const mission = missionFromVpk(tmp);
       if (!mission) {
         return reply.code(400).send({ error: 'no versus mission found in that VPK' });
+      }
+
+      // After the mission check, so a file that is not a campaign at all gets
+      // the plainer message, and before anything is renamed into place or
+      // written to the database, so a refusal leaves nothing behind (the
+      // finally below removes the temp file).
+      if (!forcedPaths) {
+        return reply.code(503).send({
+          error: 'the enforced file list could not be loaded, so uploads are refused until it is; see the server log',
+        });
+      }
+      let shipped: string[];
+      try {
+        shipped = listVpkPaths(tmp);
+      } catch {
+        // The mission entry parsed but the directory after it is cut short.
+        // A rejected upload, not a crashed request, as in missionFromVpk.
+        return reply.code(400).send({ error: 'that VPK has a damaged file directory' });
+      }
+      const collisions = consistencyCollisions(shipped, forcedPaths);
+      if (collisions.length > 0) {
+        return reply.code(422).send({ error: collisionMessage(collisions), collisions });
       }
 
       const slug = mission.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');

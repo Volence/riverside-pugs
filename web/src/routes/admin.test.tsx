@@ -50,6 +50,7 @@ describe('Admin page', () => {
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
     window.confirm = () => true;
@@ -60,6 +61,50 @@ describe('Admin page', () => {
     fireEvent.input(screen.getByPlaceholderText('Reason (shown to them)'), { target: { value: 'throwing' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
     await waitFor(() => expect(mockAdmin.ban).toHaveBeenCalledWith('2', 'throwing', null));
+  });
+
+  it('shows a connect drops line that links to the rows', async () => {
+    const row = { steamid: '2', name: 'skinner', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: {
+        count: 2, lastAt: '2026-09-19T21:00:00.000Z',
+        rows: [
+          { id: 2, name: 'skinner', secsConnected: -1, forcedCount: 651, at: '2026-09-19T21:00:00.000Z', enteredAfterAt: null },
+          { id: 1, name: 'skinner', secsConnected: 12, forcedCount: 651, at: '2026-09-19T20:00:00.000Z', enteredAfterAt: '2026-09-19T20:03:00.000Z' },
+        ],
+      },
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('skinner')).toBeTruthy());
+    fireEvent.click(screen.getByText('skinner'));
+
+    const link = await waitFor(() => screen.getByRole('link', { name: /^2, last / }));
+    expect(link.getAttribute('href')).toBe('#connect-drops');
+    const section = document.getElementById('connect-drops')!;
+    expect(section).toBeTruthy();
+    const items = within(section).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain('time unknown');
+    expect(items[0].textContent).toContain('has not got in since');
+    expect(items[1].textContent).toContain('after 12 s');
+    expect(items[1].textContent).toContain('got in');
+    expect(within(section).getByRole('link', { name: 'What players are told' }).getAttribute('href')).toBe('/help/consistency');
+  });
+
+  it('says none, with no section, for a player with no connect drops', async () => {
+    const row = { steamid: '2', name: 'clean', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
+    fireEvent.click(screen.getByText('clean'));
+    await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
+    expect(document.getElementById('connect-drops')).toBeNull();
   });
 
   it('settings tab shows grouped settings', async () => {
@@ -126,6 +171,7 @@ describe('AdminMatches layout', () => {
       enabled: 1, tvEnabled: 1, tvPort: 27020, tvPassword: 'dunged',
     }],
     queue: [{ steamid: '1', name: 'alice', avatar: null }],
+    slowToReady: [],
   });
 
   const openTab = async () => {
@@ -147,6 +193,67 @@ describe('AdminMatches layout', () => {
   it('gives an admin the console line for the real server', async () => {
     await openTab();
     expect(screen.getByText('password pug_ab12cd34; connect 45.32.199.85:27015')).toBeTruthy();
+  });
+
+  // The pause ledger is for disputes: when one side says the other paused
+  // them to death, the admin sees who paused, for how long, and on which map.
+  it('lists each recent match\'s pauses with who and for how long', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.recent = [{
+      id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
+      readyups: [],
+      pauses: [
+        { team: 'b', leave: false, mapOrdinal: 1, half: 2, startedAt: '2026-09-18 03:10:00', endedAt: '2026-09-18 03:11:30', seconds: 90 },
+        { team: null, leave: true, mapOrdinal: 2, half: 1, startedAt: '2026-09-18 03:30:00', endedAt: '2026-09-18 03:30:20', seconds: 20 },
+      ],
+    }];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('Team B 1:30 on map 2')).toBeTruthy();
+    expect(screen.getByText('Reconnect 0:20 on map 3')).toBeTruthy();
+  });
+
+  it('lists each recent match\'s ready-ups with how long and who readied last', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.recent = [{
+      id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
+      pauses: [],
+      readyups: [
+        { mapOrdinal: 0, half: 1, startedAt: '2026-09-18 03:00:00', endedAt: '2026-09-18 03:02:10', seconds: 130,
+          lastUnready: ['76561198000000001'], lastUnreadyNames: ['killshot'],
+          players: [{ steamid: '76561198000000001', name: 'killshot', seconds: 130 }] },
+        { mapOrdinal: 1, half: 1, startedAt: '2026-09-18 03:20:00', endedAt: '2026-09-18 03:20:25', seconds: 25,
+          lastUnready: [], lastUnreadyNames: [], players: [] },
+      ],
+    }];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('2:10 on map 1, last killshot')).toBeTruthy();
+    expect(screen.getByText('0:25 on map 2')).toBeTruthy();
+  });
+
+  it('shows the slow-to-ready table so a repeat offender stands out', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.slowToReady = [
+      { steamid: '76561198000000001', name: 'killshot', readyups: 6, timesLast: 5, totalSeconds: 600, avgSeconds: 100 },
+      { steamid: '76561198000000002', name: 'goober', readyups: 4, timesLast: 0, totalSeconds: 40, avgSeconds: 10 },
+    ];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('Slow to ready')).toBeTruthy();
+    const row = screen.getByText('killshot').closest('tr')!;
+    expect(row.textContent).toContain('5 of 6');
+    expect(row.textContent).toContain('1:40');
+    expect(row.textContent).toContain('10:00');
   });
 
   it('shows no connect line for a match with no server yet', async () => {

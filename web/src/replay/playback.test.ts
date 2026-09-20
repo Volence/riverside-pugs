@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { advance, MAX_STEP_MS, SPEEDS, LIVE_BUFFER_MS, LIVE_SNAP_MS } from './playback';
+import { advance, CLOSED_CATCHUP_MS, MAX_STEP_MS, SPEEDS, LIVE_BUFFER_MS, LIVE_SNAP_MS } from './playback';
 
 describe('SPEEDS', () => {
   it('offers the four rates the toolbar shows', () => {
@@ -39,6 +39,42 @@ describe('advance', () => {
     // A round only half a second old has no buffer to sit behind: the clock
     // simply runs at real time from wherever it is.
     expect(advance(0, 16, 1, 500, true)).toBe(16);
+  });
+
+  // When a round ends the server releases the ten seconds it was holding
+  // back in one batch. The snap rule saw a clock nine seconds behind and
+  // jumped to the end, skipping the finish of every round. A closed file's
+  // end never moves again, so there is nothing to catch up to: play it out.
+  it('plays a closed round out at real time while following instead of jumping', () => {
+    expect(advance(0, 16, 1, 10_000, true, true)).toBe(16);
+  });
+
+  it('still holds at the last frame of a closed round while following', () => {
+    expect(advance(9990, 16, 1, 10_000, true, true)).toBe(10_000);
+  });
+
+  // The other end of the same rule. Playing a closed file out at real time is
+  // right for the ten seconds a round release leaves on the clock, and wrong
+  // for a viewer who lands on a whole finished round: the live page opened in
+  // the ten second window after a round ends resolves to that round's closed
+  // file at t=0, and used to crawl the entire four minutes of it under a
+  // "Round over, catching up" flag while the next round was actually being
+  // played (2026-09-20).
+  it('snaps to the end of a closed round it is nowhere near, while following', () => {
+    expect(advance(0, 16, 1, 244_000, true, true)).toBe(244_000);
+  });
+
+  it('snaps only past the catch-up distance, so a round release still plays out', () => {
+    const justInside = 10_000 - CLOSED_CATCHUP_MS + 10;
+    expect(advance(justInside, 16, 1, 10_000, true, true)).toBe(justInside + 16);
+    const justOutside = 10_000 - CLOSED_CATCHUP_MS - 10;
+    expect(advance(justOutside, 16, 1, 10_000, true, true)).toBe(10_000);
+  });
+
+  // A paused viewer is not following, so nothing here applies to it: someone
+  // who scrubbed back into a finished round is there on purpose.
+  it('never snaps a closed round when not following', () => {
+    expect(advance(0, 16, 1, 244_000, false, true)).toBe(16);
   });
 
   it('plays through a gap smaller than the snap distance rather than jumping', () => {

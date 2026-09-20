@@ -169,6 +169,42 @@ CREATE TABLE IF NOT EXISTS match_live_map_stats (
   stats_json TEXT    NOT NULL,
   PRIMARY KEY (match_id, ordinal, player_id)
 );
+-- Every pause of a match, kept after the match ends: the record an admin
+-- reads when one side says the other paused them to death. Written from the
+-- plugin's PHASE transitions, so a lost datagram can leave ended_at NULL
+-- until the next heartbeat closes it.
+CREATE TABLE IF NOT EXISTS match_pauses (
+  id          INTEGER PRIMARY KEY,
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  map_ordinal INTEGER NOT NULL,
+  half        INTEGER,
+  team        TEXT CHECK (team IN ('a','b')),
+  leave_pause INTEGER NOT NULL DEFAULT 0,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS match_pauses_match ON match_pauses(match_id);
+-- Every ready-up of a match, and who was still not ready in the last report
+-- before it went live (a JSON list of steamids). Kept after the match ends.
+CREATE TABLE IF NOT EXISTS match_readyups (
+  id           INTEGER PRIMARY KEY,
+  match_id     INTEGER NOT NULL REFERENCES matches(id),
+  map_ordinal  INTEGER NOT NULL,
+  half         INTEGER,
+  started_at   TEXT NOT NULL,
+  ended_at     TEXT,
+  last_unready TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS match_readyups_match ON match_readyups(match_id);
+-- Seconds each player spent not ready in one ready-up, summed from the
+-- intervals between the plugin's roster reports.
+CREATE TABLE IF NOT EXISTS match_readyup_players (
+  readyup_id INTEGER NOT NULL REFERENCES match_readyups(id),
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  player_id  TEXT    NOT NULL,
+  seconds    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (readyup_id, player_id)
+);
 CREATE TABLE IF NOT EXISTS match_live_events (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   -- Which map of the match this happened on, stamped at write time from the
@@ -436,6 +472,24 @@ CREATE TABLE IF NOT EXISTS campaign_play_rules (
   slug TEXT PRIMARY KEY,
   maps_to_play INTEGER NOT NULL
 );
+-- A client that connected, never entered the game and left by its own hand on
+-- a map that forced files: the only trace a file-consistency rejection leaves
+-- on the server, and also what a cancelled loading screen looks like. A hint,
+-- never an accusation. steamid is deliberately NOT a foreign key: most drops
+-- happen to people who have never signed in to the site. Timestamps are ISO
+-- strings written by the app, so the ten minute rule is testable with a clock.
+-- entered_after_at is when the same steamid was next seen in game, which is
+-- what separates "came back clean" from "still trying".
+CREATE TABLE IF NOT EXISTS signon_drops (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  steamid TEXT NOT NULL,
+  name TEXT NOT NULL,
+  secs_connected INTEGER NOT NULL,
+  forced_count INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  entered_after_at TEXT
+);
+CREATE INDEX IF NOT EXISTS signon_drops_steamid ON signon_drops(steamid, at);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
@@ -457,11 +511,19 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
   require_discord_to_queue: '1',
+  // Pressing Ready needs that account to be in a voice channel on the guild.
+  require_voice_to_ready: '1',
   discord_invite_url: '',
   // Private channel the bot posts the admin feed to; empty turns the feed off.
   discord_admin_channel_id: '',
   // Where match results are posted. Empty keeps them in the queue channel.
   discord_results_channel_id: '',
+  // Games before a player's per-match figures are ranked for the profile
+  // badges. Deliberately higher than RANKED_MIN_GAMES: three games is enough
+  // for a rating to be worth showing and nowhere near enough for a per-match
+  // average to mean anything, so the badges used to land on whoever had
+  // played least.
+  standing_min_games: '10',
   admin_feed_reports: '1',
   admin_feed_actions: '1',
   admin_feed_penalties: '1',
@@ -474,6 +536,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   noshow_minutes: '10',
   noshow_min_connected: '6',
   no_round_minutes: '30',
+  // Where a server is sent after a cancelled match empties it. No Mercy 1 is
+  // the stock default map, so an idle box looks the way a fresh one does.
+  reset_map: 'l4d_hospital01_apartment',
   // Reconnect allowance per player per match, and whether the game unpauses
   // itself once everyone is back. Pushed to the plugin at match setup.
   leave_budget_seconds: '300',
@@ -500,6 +565,17 @@ export function openDb(path: string): DB {
   // exists, so a column introduced after a database was created needs this.
   // Idempotent and cheap; there is no migration framework here by design.
   ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
+  // What the game is doing right now, as last reported by the plugin, and
+  // since when. NULL until a plugin that emits PHASE has spoken.
+  ensureColumn(db, 'match_live', 'phase', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_team', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_limit', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'match_live', 'phase_leave', 'INTEGER NOT NULL DEFAULT 0');
+  // The not-ready roster as last reported (JSON), and when that report
+  // arrived, so the seconds since can be charged to those players.
+  ensureColumn(db, 'match_live', 'phase_unready', 'TEXT');
+  ensureColumn(db, 'match_live', 'phase_unready_at', 'TEXT');
   // -1, not 0 or NULL: ALTER TABLE ADD COLUMN on a populated table needs a
   // non-null default, and 0 is a real value here (an event in the first
   // millisecond of a round). -1 means "recorded before round timing existed".
@@ -528,6 +604,33 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // Second Steam accounts, pointed at the one account their owner really is.
+  // Written by a merge and read on every line the game server sends, so a
+  // reconnect on the alt is rostered as the person rather than as a new
+  // identity with its own rating. No foreign key on `steamid`: the whole
+  // point is that the alt's player row is gone, and the id still has to
+  // resolve. See src/aliases.ts.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_aliases (
+    steamid      TEXT PRIMARY KEY,
+    canonical_id TEXT NOT NULL REFERENCES players(steamid),
+    created_at   TEXT NOT NULL,
+    created_by   TEXT NOT NULL
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_player_aliases_canonical ON player_aliases (canonical_id)');
+  // Where accounts connect from, for noticing that two of them are one
+  // person. The address is NEVER stored: ip_hash is an HMAC under a salt
+  // generated once per installation (settings.ip_hash_salt), so these rows
+  // answer "same connection?" and nothing else. See src/playerNetworks.ts.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_networks (
+    player_id  TEXT NOT NULL,
+    ip_hash    TEXT NOT NULL,
+    country    TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    seen_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (player_id, ip_hash)
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_player_networks_hash ON player_networks (ip_hash)');
   // A voided match: an admin decided the result must not count. It is also
   // set to 'aborted', which is what drops it from every stat query.
   // SourceTV, per server: anyone can watch a live match, and the tv_delay is
@@ -559,6 +662,12 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'servers', 'ftp_port', 'INTEGER');
   ensureColumn(db, 'servers', 'ftp_user', 'TEXT');
   ensureColumn(db, 'servers', 'ftp_password', 'TEXT');
+  // Path to the private key used by the 'sftp' addons transport. Our own second
+  // machine (Riverside) is reachable only over ssh: no shared filesystem like
+  // Dallas, no FTP like Chicago. Kept as a path, not the key material, so the
+  // secret stays in the filesystem with its own permissions and never in a DB
+  // backup. Reuses ftp_host/ftp_port/ftp_user for the connection details.
+  ensureColumn(db, 'servers', 'ssh_key_path', 'TEXT');
   seed(db);
   return db;
 }

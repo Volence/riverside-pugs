@@ -47,7 +47,7 @@ or when more than `MAX_ROSTER` (8) players are on teams.
 | `sm_pug_match` | `<matchid> <token> <campaign>` | Starts match intake. Resets all match state, arms the roster. |
 | `sm_pug_roster` | `<steamid64>:<a\|b>` | Call once per player (×8). Team letters are lowercase `a`/`b`; convention: team `a` starts as survivors on map 1. |
 | `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. |
-| `sm_pug_abort` | `<token>` | Clears match state. Roster enforcement stops immediately. |
+| `sm_pug_abort` | `<token> [teardown [<map>]]` | End the match. Plain form: reset plugin state, nothing else (the routine post-report call). With `teardown`: announce in chat, ask Rotoblin for an unpause and wait up to 10 s for it, kick every human (bots and SourceTV stay), then `ForceChangeLevel(<map>)` once the kicks have landed. Logs `PUG <token> PROBLEM code=unpause_timeout` if the game never unpaused. The backend sends the teardown form from the release path for abandon, no-show and admin abort; never for a clean finish. |
 | `sm_pug_status` | none | Full current plugin state over the RCON response body. Takes no token deliberately, since the moment you most want it is when setup went wrong and you do not trust your own idea of the token. Read-only, safe at any time. |
 | `sm_pug_setid` | `<token> <matchid>` | Backend assigns the match id for a **self-started** match. Keyed by token, because the id is exactly what the plugin does not know and so cannot be asked for. |
 

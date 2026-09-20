@@ -30,10 +30,14 @@ export interface NamedPlayer {
 
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
 
+/** What stands between a player and pressing Ready: no Discord linked, or
+ *  not in a voice channel on the server (when the voice requirement is on). */
+export type ReadyBlock = 'link_discord' | 'join_voice';
+
 export interface LobbySnapshot {
   id: string;
   phase: LobbyPhase;
-  players: NamedPlayer[];
+  players: (NamedPlayer & { readyBlock?: ReadyBlock | null })[];
   ready: string[];
   options: string[];
   votes: Record<string, number>;
@@ -72,6 +76,37 @@ export interface StateSnapshot {
   timeout?: { until: string; offenses: number } | null;
   /** The Discord step still missing before the viewer may queue. */
   queueBlock?: 'link_discord' | 'join_discord' | null;
+  /** The step still missing before the viewer may press Ready. */
+  readyBlock?: ReadyBlock | null;
+  /** The ready check the viewer was just in, if it failed and they have not
+   *  dismissed it. The failure no longer appears in #queue-here, so this is
+   *  where they find out. */
+  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean } | null;
+}
+
+/** One row of the public ban list. Nothing private is on it: see
+ *  `publicBans` in src/admin/players.ts. */
+export interface PublicBan {
+  steamid: string;
+  name: string;
+  reason: string;
+  createdAt: string;
+  expiresAt: string | null;
+  permanent: boolean;
+  active: boolean;
+  bannedByName: string | null;
+  liftedByName: string | null;
+  liftedAt: string | null;
+}
+
+/** What a merge is about to move, or just moved. */
+export interface MergePlan {
+  from: string;
+  into: string;
+  matchesMoved: number;
+  matchesCollapsed: number;
+  rowsByTable: Record<string, number>;
+  seasons: number[];
 }
 
 export interface SpectateInfo {
@@ -175,6 +210,44 @@ export interface LiveEvent {
   value: number;
 }
 
+/** What the game is doing, from the plugin's one-second tracker, plus when
+ *  it began (epoch ms) so a pause countdown can run against our clock. */
+export interface LivePhase {
+  state: 'live' | 'paused' | 'readyup' | 'roundover' | 'loading';
+  /** Who is charged for a pause; null for a disconnect pause, an admin, or any
+   *  state that is not a pause. */
+  team: 'a' | 'b' | null;
+  /** Seconds a pause may last, 0 for no ceiling. */
+  limit: number;
+  leave: boolean;
+  /** Rostered players not yet ready, during a ready-up. */
+  unready: string[];
+  sinceMs: number;
+}
+export interface MatchReadyup {
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds to go live, null while still open. */
+  seconds: number | null;
+  lastUnready: string[];
+  lastUnreadyNames: string[];
+  players: { steamid: string; name: string; seconds: number }[];
+}
+export interface SlowToReady {
+  steamid: string; name: string; readyups: number; timesLast: number; totalSeconds: number; avgSeconds: number;
+}
+export interface MatchPause {
+  team: 'a' | 'b' | null;
+  leave: boolean;
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds, null while still open. */
+  seconds: number | null;
+}
 export interface LiveMatch {
   id: number;
   campaign: string;
@@ -197,6 +270,7 @@ export interface LiveMatch {
    *  is distinguishable from six small ones. */
   events: LiveEvent[];
   spectate?: SpectateInfo | null;
+  phase?: LivePhase | null;
 }
 
 export interface MatchDemo {
@@ -439,6 +513,22 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   penalties: { id: number; kind: string; matchId: number | null; createdAt: string; clearedBy: string | null; clearedAt: string | null }[];
   timeout: { until: string; offenses: number } | null;
   reportsAgainst: AdminReport[];
+  /** Connects that ended before the player was in game, on a map that forced
+   *  files. Likely a file-consistency rejection; a cancelled loading screen
+   *  looks identical. `enteredAfterAt` is when they next got in, null if never. */
+  signonDrops: {
+    count: number;
+    lastAt: string | null;
+    rows: { id: number; name: string; secsConnected: number; forcedCount: number; at: string; enteredAfterAt: string | null }[];
+  };
+  /** Second Steam accounts folded into this one by a merge. Their SteamIDs
+   *  still resolve here on every line the game server sends. */
+  aliases: { steamid: string; canonical: string; created_at: string; created_by: string }[];
+  /** Connections this account has been seen on. The address itself is never
+   *  stored or sent: `ipHash` is an HMAC under a per-install salt. */
+  networks: { ipHash: string; country: string | null; firstSeen: string; lastSeen: string; seenCount: number }[];
+  /** Other accounts seen on one of those connections. Evidence, not proof. */
+  sharesAddressWith: { steamid: string; name: string; country: string | null; seenCount: number; lastSeen: string }[];
 }
 
 /** Team SR, the gap and the paper odds. `source` says which ratings it came
@@ -468,9 +558,11 @@ export interface AdminOverview {
     forecast: Forecast | null;
   }[];
   servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
+  /** Across every counted match: who is habitually the one holding up the ready-up. */
+  slowToReady: SlowToReady[];
 }
 
 export interface AdminSetting {
@@ -612,6 +704,9 @@ export const adminApi = {
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
+  mergePlayer: (steamid: string, into: string, dryRun = false) =>
+    post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
+  unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
@@ -699,6 +794,8 @@ export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
+  bans: (q = '', signal?: AbortSignal) =>
+    get<{ bans: PublicBan[] }>(`/api/bans${q ? `?q=${encodeURIComponent(q)}` : ''}`, signal),
   queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
   leaderboard: (signal?: AbortSignal, season?: number) =>
     get<Leaderboard>(season === undefined ? '/api/leaderboard' : `/api/leaderboard?season=${season}`, signal),
@@ -732,6 +829,7 @@ export const api = {
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   ready: () => post('/api/lobby/ready'),
+  dismissNotice: () => post('/api/lobby/dismiss-notice'),
   vote: (campaign: string) => post('/api/lobby/vote', { campaign }),
 
   dev: {

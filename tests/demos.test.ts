@@ -152,6 +152,7 @@ describe('demo routes', () => {
       config: loadConfig({ DEMO_DIR: rdir }),
       db: rdb,
       orchestrator: stubOrchestrator(),
+      serverExec: async () => {},
     });
     upsertPlayer(rdb, { steamid: ME, name: 'me', avatar: null }, [ME]);
     rdb.prepare("INSERT INTO matches (season_id, state, campaign, token, winner) VALUES (1, 'completed', 'no_mercy', ?, 'a')").run(TOKEN);

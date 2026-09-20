@@ -121,3 +121,103 @@ describe('LogListener: self-started match admission', () => {
     expect(got.map((e) => e.kind)).toEqual(['heartbeat']);
   });
 });
+
+describe('LogListener: token-less lines are admitted by source address alone', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 60));
+  const DROP = 'L4DC SIGNON_DROP steamid=76561198030413993 secs=14 forced=651 name=volence';
+  const ENTERED = '"volence<61><STEAM_1:1:35074132><>" entered the game';
+
+  it('delivers SIGNON_DROP and "entered the game" from an allowed source', async () => {
+    const got: Array<{ ev: LogEvent; source: string }> = [];
+    listener = new LogListener((ev, source) => got.push({ ev, source }));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+
+    await send(port, DROP);
+    await send(port, ENTERED);
+    await settle();
+
+    expect(got).toEqual([
+      { ev: { kind: 'signon_drop', steamid: '76561198030413993', secs: 14, forced: 651, name: 'volence' }, source: '127.0.0.1' },
+      { ev: { kind: 'entered', steamid: '76561198030413993' }, source: '127.0.0.1' },
+    ]);
+  });
+
+  // PUGNET is emitted for every human connect, match or not, so it has no
+  // token to gate on and the sender's address is the only thing admitting it.
+  it('delivers PUGNET from an allowed source and drops it from anywhere else', async () => {
+    const line = 'PUGNET steamid=76561198030413993 ip=203.0.113.9 cc=US';
+
+    const allowed: LogEvent[] = [];
+    listener = new LogListener((ev) => allowed.push(ev));
+    let port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(allowed).toEqual([
+      { kind: 'player_net', steamid: '76561198030413993', ip: '203.0.113.9', country: 'US' },
+    ]);
+
+    await listener.close();
+    const denied: LogEvent[] = [];
+    listener = new LogListener((ev) => denied.push(ev));
+    port = await listener.listen(0, '127.0.0.1');
+    await send(port, line);
+    await settle();
+    expect(denied).toEqual([]);
+  });
+
+  it('admits them through the per-datagram predicate too', async () => {
+    // A game server added to the database after boot is only known to the
+    // predicate, never to the fixed set.
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateWhen((address) => address === '127.0.0.1');
+
+    await send(port, DROP);
+    await settle();
+
+    expect(got.map((e) => e.kind)).toEqual(['signon_drop']);
+  });
+
+  it('drops them when no source is allowed', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+
+    await send(port, DROP);
+    await send(port, ENTERED);
+    await settle();
+
+    expect(got).toEqual([]);
+  });
+
+  it('drops them from a source that is not allowed', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('203.0.113.7');
+
+    await send(port, DROP);
+    await send(port, ENTERED);
+    await settle();
+
+    expect(got).toEqual([]);
+  });
+
+  it('a registered token buys a token-less line nothing', async () => {
+    // The token gate and the address gate are separate. A live match on the
+    // box must not open the address gate for everyone else.
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.register(TOKEN);
+
+    await send(port, DROP);
+    await send(port, `PUG ${TOKEN} HEARTBEAT`);
+    await settle();
+
+    expect(got.map((e) => e.kind)).toEqual(['heartbeat']);
+  });
+});

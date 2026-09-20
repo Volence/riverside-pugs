@@ -4,11 +4,18 @@
 #include <sourcemod>
 #include <sdktools>
 #include <left4dhooks>
+// Optional, and feature-checked before every call in EmitClientNet: the
+// extension needs a GeoLite2 database beside it and is simply absent on a box
+// that has not been given one. REQUIRE_EXTENSIONS off means the plugin still
+// loads there; without this it would refuse to start at all.
+#undef REQUIRE_EXTENSIONS
+#include <geoip>
+#define REQUIRE_EXTENSIONS
 #undef REQUIRE_PLUGIN
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.3.1"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -32,6 +39,15 @@
  *  L4D1 map load and then some. Bounded so a client that never finishes
  *  loading cannot leave a timer running for the rest of the night. */
 #define END_KICK_TRIES 5
+
+// ---------- teardown: a cancelled backend match empties the box ----------
+// sm_pug_abort <token> teardown <map>. The backend sends it from the release
+// path when a match ends badly (abandon, no-show, admin abort). Everything
+// runs on engine time, which keeps moving while the game is paused; the
+// spike on 2026-09-19 proved SourceMod timers fire during a pause.
+#define TEARDOWN_TICK 0.5
+#define TEARDOWN_UNPAUSE_TICKS 20   // 10 s for Rotoblin's cooperative unpause to land
+#define TEARDOWN_KICK_TICKS 10      // then up to 5 s for the kicks to land before the map changes
 
 /** Longest chat message emitted. Long enough for anything anyone types in a
  *  PUG, short enough that a message cannot push a log line into truncation. */
@@ -107,6 +123,13 @@ char g_sEndResult[128];
 Handle g_hEndKick = null;
 char g_sEndKickReason[128];
 int g_iEndKickTries;
+
+Handle g_hTeardown = null;
+int g_iTeardownTicks;
+bool g_bTeardownKicked;
+char g_sTeardownMap[64];
+char g_sTeardownReason[128];
+char g_sTeardownToken[65];
 
 // Roster: fixed slots, parallel arrays, keyed by SteamID64.
 char g_sRosterId[MAX_ROSTER][32];
@@ -311,6 +334,13 @@ bool g_bRplSampling;
  *  falls back to writing 0, which is exactly what version 1 files carry. */
 bool g_bRplHasSurvChar;
 bool g_bRplSurvCharChecked;              // false until a REAL client was available to ask
+// Which replay slot each roster entry was given for the round being
+// recorded, or -1 for one that did not fit. The replay format carries
+// RPL_SLOTS (8) players and the roster holds up to MAX_ROSTER (12), so on an
+// over-full roster somebody has to be left out of the file. Fixed when the
+// header is written and used unchanged for every frame after it, because the
+// header's slot list is what a reader maps frames onto.
+int g_iRplSlotOf[MAX_ROSTER];
 int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
 int g_iRplFrameNo;
 /** Map counter used ONLY for replay filenames. g_iMapCount stops at MAX_MAPS,
@@ -534,6 +564,32 @@ bool InReadyUp()
 
 /** Live-view line over the logaddress UDP stream. LogToGame is the ONLY native
  *  that reaches logaddress. LogMessage/LogAction stay on the box. */
+/**
+ * Report one client's connecting address and country.
+ *
+ * GeoIP is optional. The extension is a normal SourceMod one and may simply
+ * not be loaded (it needs a GeoLite2 database beside it), so the native is
+ * feature-checked rather than trusted: calling an unbound native throws, and a
+ * throw in OnClientPostAdminCheck would abort the rest of a connect. Without
+ * it the line still goes out with the address and no country, which the
+ * backend accepts.
+ */
+void EmitClientNet(int client, const char[] id)
+{
+	char ip[64];
+	if (!GetClientIP(client, ip, sizeof(ip), true)) return;
+
+	char cc[3];
+	cc[0] = '\0';
+	if (GetFeatureStatus(FeatureType_Native, "GeoipCode2") == FeatureStatus_Available)
+	{
+		if (!GeoipCode2(ip, cc)) cc[0] = '\0';
+	}
+
+	if (cc[0] == '\0') LogToGame("PUGNET steamid=%s ip=%s", id, ip);
+	else LogToGame("PUGNET steamid=%s ip=%s cc=%s", id, ip, cc);
+}
+
 void EmitPug(const char[] fmt, any ...)
 {
 	if (g_State == MS_None) return;
@@ -993,12 +1049,61 @@ void RplOpen()
 	p = RplU32(p, GetTime());
 	p = RplU32(p, 0);                          // indexOffset, patched at close
 	p = RplU32(p, 0);                          // indexCount, patched at close
+	// Which roster entries get the eight slots the format carries.
+	//
+	// Normally every entry fits and this is the identity mapping. It stops
+	// being the identity when the roster is over-full, which happens when one
+	// person is on the server under two accounts: match 65 (2026-09-20) had
+	// nine on the roster, and taking the first eight in roster order wrote a
+	// slot for the account that never connected while the account actually
+	// playing fell off the end and was recorded in no frame at all. Connected
+	// entries are chosen first so the file always describes the people who
+	// are really in the round. Roster order is kept among the chosen, so slot
+	// numbers and colours do not shuffle for the ordinary case.
+	int rplSlotRoster[RPL_SLOTS];
+	for (int slot = 0; slot < RPL_SLOTS; slot++) rplSlotRoster[slot] = -1;
+	for (int i = 0; i < MAX_ROSTER; i++) g_iRplSlotOf[i] = -1;
+	{
+		bool chosen[MAX_ROSTER];
+		int taken = 0;
+		// Pass 1: roster entries with somebody connected on them.
+		for (int i = 0; i < g_iRosterCount && taken < RPL_SLOTS; i++)
+		{
+			if (g_sRosterId[i][0] == '\0') continue;
+			for (int c = 1; c <= MaxClients; c++)
+			{
+				if (g_iClientRoster[c] == i && IsClientInGame(c)) { chosen[i] = true; taken++; break; }
+			}
+		}
+		// Pass 2: whatever room is left, in roster order.
+		for (int i = 0; i < g_iRosterCount && taken < RPL_SLOTS; i++)
+		{
+			if (chosen[i] || g_sRosterId[i][0] == '\0') continue;
+			chosen[i] = true;
+			taken++;
+		}
+		int slot = 0;
+		for (int i = 0; i < g_iRosterCount && slot < RPL_SLOTS; i++)
+		{
+			if (!chosen[i]) continue;
+			rplSlotRoster[slot] = i;
+			g_iRplSlotOf[i] = slot;
+			slot++;
+		}
+		if (taken < g_iRosterCount)
+		{
+			LogError("pug: roster of %d does not fit the replay's %d slots; %d left out of this round's recording",
+				g_iRosterCount, RPL_SLOTS, g_iRosterCount - taken);
+		}
+	}
+
 	for (int slot = 0; slot < RPL_SLOTS; slot++)
 	{
 		int id64[2];
 		// An empty slot writes 0, which the reader decodes as "nobody", never
 		// as a SteamID that happens to be small.
-		if (slot < g_iRosterCount && g_sRosterId[slot][0] != '\0') StringToInt64(g_sRosterId[slot], id64);
+		int r = rplSlotRoster[slot];
+		if (r >= 0 && g_sRosterId[r][0] != '\0') StringToInt64(g_sRosterId[r], id64);
 		else { id64[0] = 0; id64[1] = 0; }
 		p = RplU32(p, id64[0]);
 		p = RplU32(p, id64[1]);
@@ -1011,14 +1116,16 @@ void RplOpen()
 	// survivors, which is wrong every second half and for any roster taken in
 	// join order (auto-track, !load_4v4p).
 	int infectedMask = 0;
-	for (int slot = 0; slot < RPL_SLOTS && slot < g_iRosterCount; slot++)
+	for (int slot = 0; slot < RPL_SLOTS; slot++)
 	{
+		int r = rplSlotRoster[slot];
+		if (r < 0) continue;
 		int side = 0;
 		for (int c = 1; c <= MaxClients; c++)
 		{
-			if (g_iClientRoster[c] == slot && IsClientInGame(c)) { side = GetClientTeam(c); break; }
+			if (g_iClientRoster[c] == r && IsClientInGame(c)) { side = GetClientTeam(c); break; }
 		}
-		if (side != TEAM_SURVIVOR && side != TEAM_INFECTED) side = g_iPugSide[g_iRosterTeam[slot]];
+		if (side != TEAM_SURVIVOR && side != TEAM_INFECTED) side = g_iPugSide[g_iRosterTeam[r]];
 		if (side == TEAM_INFECTED) infectedMask |= (1 << slot);
 	}
 	p = RplU8(p, infectedMask);                // 156: infected slot mask
@@ -1299,7 +1406,12 @@ public Action Timer_RplFrame(Handle timer)
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		if (!IsClientInGame(c)) continue;
-		int slot = g_iClientRoster[c];
+		// Roster index, then the slot the header gave it. The two were the
+		// same thing until an over-full roster made them differ; reading
+		// g_iClientRoster straight into the frame would put a player in a
+		// slot the header says belongs to somebody else.
+		int r = g_iClientRoster[c];
+		int slot = (r >= 0 && r < MAX_ROSTER) ? g_iRplSlotOf[r] : -1;
 		if (slot >= 0 && slot < RPL_SLOTS) slotClient[slot] = c;
 		else if (IsPlayerAlive(c)) bots[botCount++] = c;
 	}
@@ -1490,8 +1602,10 @@ public Action Cmd_Match(int args)
 		return Plugin_Handled;
 	}
 	// A new match, so any kick still pending from the last one is void. This
-	// and the two sites below are the ONLY places the kick is cancelled.
+	// and the two sites below are the ONLY places the kick is cancelled, and
+	// a pending teardown is cancelled at the same three places.
 	CancelEndKick();
+	CancelTeardown();
 	ResetMatchState();
 	g_iMatchId = matchId;
 	GetCmdArg(2, g_sToken, sizeof(g_sToken));
@@ -1693,6 +1807,7 @@ public Action Cmd_LoadPug(int client, int args)
 	}
 
 	CancelEndKick();                 // new match: a kick left over from the last one is void
+	CancelTeardown();                // likewise a teardown still counting down
 	ResetMatchState();
 	g_bSelfStarted = true;
 	g_iMatchId = 0;                  // the backend owns match ids; assigned later via sm_pug_setid
@@ -1839,6 +1954,125 @@ void CancelEndKick()
 	g_iEndKickTries = 0;
 }
 
+/** A bare map name: letters, digits, underscore. Anything else is refused. */
+bool MapNameOk(const char[] map)
+{
+	if (map[0] == '\0') return false;
+	for (int i = 0; map[i] != '\0'; i++)
+	{
+		if (!IsCharAlpha(map[i]) && !IsCharNumeric(map[i]) && map[i] != '_') return false;
+	}
+	return true;
+}
+
+/** Start emptying the box. Runs BEFORE ResetMatchState.
+ *
+ *  Why not just unpause and kick right here: Rotoblin's unpause is a 3 second
+ *  countdown after both teams ready, and its Unpause() needs an in-game client
+ *  to issue the engine command. Kick first and the countdown lands on an empty
+ *  server, Rotoblin clears its own flags, and the engine stays paused with no
+ *  command left that can fix it. So: ask for the unpause, wait for it, then
+ *  kick, then change the map from a later tick once the kicks have landed. */
+void BeginTeardown(const char[] map)
+{
+	CancelEndKick();
+	CancelTeardown();
+	strcopy(g_sTeardownMap, sizeof(g_sTeardownMap), map);
+	strcopy(g_sTeardownToken, sizeof(g_sTeardownToken), g_sToken);
+	if (LeaveHasAbandoner())
+	{
+		Format(g_sTeardownReason, sizeof(g_sTeardownReason),
+			"Match #%d cancelled: a player did not reconnect in time.", g_iMatchId);
+	}
+	else
+	{
+		Format(g_sTeardownReason, sizeof(g_sTeardownReason), "Match #%d cancelled.", g_iMatchId);
+	}
+	PrintToChatAll("\x04[PUG]\x01 %s Everyone will be removed from the server shortly.", g_sTeardownReason);
+	// Unconditionally, not behind g_bLeavePaused: the leave module's idea of
+	// whether it paused can be wrong, and LeaveUnpauseNow checks the real
+	// state itself. Through Rotoblin, never a raw setpause: Rotoblin's command
+	// listener blocks that, and a fake client issuing pause crashes srcds.
+	LeaveUnpauseNow();
+	g_iTeardownTicks = 0;
+	g_bTeardownKicked = false;
+	g_hTeardown = CreateTimer(TEARDOWN_TICK, Timer_Teardown, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+}
+
+void CancelTeardown()
+{
+	if (g_hTeardown != null)
+	{
+		KillTimer(g_hTeardown);
+		g_hTeardown = null;
+	}
+	ClearTeardownState();
+}
+
+/** Everything except the timer handle. Called from inside the timer, which must not KillTimer itself. */
+void ClearTeardownState()
+{
+	g_sTeardownMap[0] = '\0';
+	g_sTeardownReason[0] = '\0';
+	g_sTeardownToken[0] = '\0';
+	g_iTeardownTicks = 0;
+	g_bTeardownKicked = false;
+}
+
+public Action Timer_Teardown(Handle timer)
+{
+	g_iTeardownTicks++;
+
+	if (!g_bTeardownKicked)
+	{
+		bool paused = LeaveRotoblinPaused();
+		if (paused && g_iTeardownTicks < TEARDOWN_UNPAUSE_TICKS) return Plugin_Continue;
+		if (paused)
+		{
+			// Not EmitPug: the match state is already reset, so it would be
+			// dropped. The token was saved for exactly this line.
+			LogToGame("PUG %s PROBLEM code=unpause_timeout", g_sTeardownToken);
+			LogMessage("pug-match: teardown gave up waiting for an unpause after %d ticks", g_iTeardownTicks);
+		}
+		KickHumans(g_sTeardownReason);
+		g_bTeardownKicked = true;
+		g_iTeardownTicks = 0;
+		return Plugin_Continue;
+	}
+
+	int present = CountHumans();
+	if (present > 0 && g_iTeardownTicks < TEARDOWN_KICK_TICKS)
+	{
+		KickHumans(g_sTeardownReason);
+		return Plugin_Continue;
+	}
+
+	// Copy the map before clearing, then null the handle and clear the rest of
+	// the state BEFORE calling ForceChangeLevel, not after: OnMapEnd's own
+	// CancelTeardown() runs g_hTeardown != null before it will KillTimer, and
+	// if this changelevel triggers OnMapEnd synchronously (still inside this
+	// very timer callback), a handle nulled only after the call would have
+	// CancelTeardown try to KillTimer the timer currently executing. Nulling
+	// first makes "a teardown ending in its own ForceChangeLevel has already
+	// nulled the handle before the map ends" (see OnMapEnd) true always,
+	// rather than only when the changelevel happens to be asynchronous.
+	char map[64];
+	strcopy(map, sizeof(map), g_sTeardownMap);
+	g_hTeardown = null;
+	ClearTeardownState();
+
+	if (map[0] != '\0')
+	{
+		LogMessage("pug-match: teardown complete (%d still connected), changing to %s", present, map);
+		ForceChangeLevel(map, "PUG match cancelled");
+	}
+	else
+	{
+		LogMessage("pug-match: teardown complete (%d still connected), no reset map given", present);
+	}
+	return Plugin_Stop;
+}
+
 /** A real person the end-of-match kick should clear off the box.
  *
  *  Bots are not people, and the SourceTV relay must survive: it is a permanent
@@ -1850,6 +2084,27 @@ void CancelEndKick()
 bool IsEndKickTarget(int client)
 {
 	return !IsFakeClient(client) && !IsClientSourceTV(client);
+}
+
+/** Kick every human who has finished loading. Bots and the SourceTV relay stay.
+ *  Format string never the buffer itself. */
+void KickHumans(const char[] reason)
+{
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientInGame(c) && IsEndKickTarget(c)) KickClient(c, "%s", reason);
+	}
+}
+
+/** Humans still connected, loading or not. */
+int CountHumans()
+{
+	int n = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientConnected(c) && IsEndKickTarget(c)) n++;
+	}
+	return n;
 }
 
 public Action Timer_EndKick(Handle timer)
@@ -1864,11 +2119,7 @@ public Action Timer_EndKick(Handle timer)
 	// Counted BEFORE anyone is kicked: KickClient does not necessarily drop the
 	// client within this frame, so a post-kick count would read stale. A pass
 	// that finds nobody left is the normal way this stops.
-	int present = 0;
-	for (int c = 1; c <= MaxClients; c++)
-	{
-		if (IsClientConnected(c) && IsEndKickTarget(c)) present++;
-	}
+	int present = CountHumans();
 	if (present == 0 || g_iEndKickTries > END_KICK_TRIES)
 	{
 		g_hEndKick = null;
@@ -1876,15 +2127,12 @@ public Action Timer_EndKick(Handle timer)
 		return Plugin_Stop;
 	}
 
-	for (int c = 1; c <= MaxClients; c++)
-	{
-		// IsClientInGame, not merely connected: on the finale path this timer's
-		// first pass lands in the middle of the map load that triggered it, and
-		// kicking a client who has not finished loading is not safe. They are
-		// caught by a later pass instead, which is the whole reason this timer
-		// repeats. Format string never the buffer itself.
-		if (IsClientInGame(c) && IsEndKickTarget(c)) KickClient(c, "%s", g_sEndKickReason);
-	}
+	// IsClientInGame, not merely connected: on the finale path this timer's
+	// first pass lands in the middle of the map load that triggered it, and
+	// kicking a client who has not finished loading is not safe. They are
+	// caught by a later pass instead, which is the whole reason this timer
+	// repeats.
+	KickHumans(g_sEndKickReason);
 	return Plugin_Continue;
 }
 
@@ -2037,9 +2285,26 @@ void StopMatchDemo()
 public Action Cmd_Abort(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
+	bool teardown = false;
+	char map[64];
+	if (args >= 2)
+	{
+		char mode[16];
+		GetCmdArg(2, mode, sizeof(mode));
+		teardown = StrEqual(mode, "teardown");
+		if (teardown && args >= 3)
+		{
+			GetCmdArg(3, map, sizeof(map));
+			// Refused rather than trusted: this ends up in ForceChangeLevel.
+			if (!MapNameOk(map)) map[0] = '\0';
+		}
+	}
 	StopMatchDemo();
+	// Before ResetMatchState, which blanks the match id, the token and the
+	// abandoner the announcement and the PROBLEM line need.
+	if (teardown) BeginTeardown(map);
 	ResetMatchState();
-	PrintToServer("PUGOK aborted");
+	PrintToServer(teardown ? "PUGOK aborted teardown" : "PUGOK aborted");
 	return Plugin_Handled;
 }
 
@@ -2230,7 +2495,13 @@ void ResetMatchState()
 
 public Action Timer_Heartbeat(Handle timer)
 {
-	if (g_State != MS_None) EmitPug("HEARTBEAT");
+	if (g_State != MS_None)
+	{
+		// The phase rides on the heartbeat so a lost PHASE line self-corrects.
+		char fields[320];
+		PhaseFields("phase", fields, sizeof(fields));
+		EmitPug("HEARTBEAT %s", fields);
+	}
 	LeaveHeartbeat();
 	return Plugin_Continue;
 }
@@ -2316,9 +2587,26 @@ public void OnClientPostAdminCheck(int client)
 {
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
-	if (g_State == MS_None || IsFakeClient(client)) return;
+	if (IsFakeClient(client)) return;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id)))
+	bool haveId = GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id));
+
+	// Where they connected from, for every human on the box, whether or not a
+	// match is being tracked and whether or not they are on a roster. An
+	// account nobody expected is exactly the one worth correlating, so this
+	// runs BEFORE the MS_None return below.
+	//
+	// The line carries no token, which is deliberate: there may be no match
+	// and so no token to carry. The backend admits it on the sender's address
+	// alone, the same protection SIGNON_DROP has, so the marker is the first
+	// thing on the line where no player-controlled text can reach.
+	//
+	// The backend never stores the address; it keeps an HMAC of it. See
+	// src/playerNetworks.ts.
+	if (haveId) EmitClientNet(client, id);
+
+	if (g_State == MS_None) return;
+	if (!haveId)
 	{
 		KickClient(client, "Could not verify Steam ID");
 		return;
@@ -2483,6 +2771,13 @@ public Action Timer_TeamLock(Handle timer)
 public void OnMapEnd()
 {
 	RplClose();
+	PhaseMapEnd();
+	// Same trap as g_hReplayTimer above: g_hTeardown is also
+	// TIMER_FLAG_NO_MAPCHANGE, and the handle is still valid here, before
+	// SourceMod frees it. A teardown orphaned by someone else's changelevel
+	// (not its own ForceChangeLevel) is correctly abandoned here rather than
+	// left to KillTimer a freed handle on the next map's CancelTeardown().
+	CancelTeardown();
 }
 
 /**
@@ -2685,6 +2980,7 @@ public void OnRoundIsLive()
 			// window is real: people staying on the box after a website match
 			// and simply playing on.
 			CancelEndKick();
+			CancelTeardown();
 			ResetMatchState();
 			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
 			// forward: this half is live. Left false, Event_RoundEnd returned early

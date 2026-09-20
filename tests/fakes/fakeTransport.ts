@@ -44,6 +44,16 @@ export class FakeTransport implements BotTransport {
     return true;
   }
 
+  /** Direct messages, in order. */
+  dms: { userId: string; payload: MessagePayload }[] = [];
+  /** User ids whose DMs are closed: dm() rejects for them, as Discord does. */
+  dmsClosed = new Set<string>();
+
+  async dm(userId: string, payload: MessagePayload): Promise<void> {
+    if (this.dmsClosed.has(userId)) throw new Error('Cannot send messages to this user');
+    this.dms.push({ userId, payload });
+  }
+
   async remove(_channelId: string, messageId: string): Promise<void> {
     const m = this.messages.find((x) => x.id === messageId);
     if (m) m.deleted = true;
@@ -62,6 +72,13 @@ export class FakeTransport implements BotTransport {
   async watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void> {
     this.memberHandlers = h;
     h.all(this.guildMembers);
+  }
+
+  voiceHandlers: { all(states: [string, string][]): void; update(userId: string, channelId: string | null): void } | null = null;
+  /** Reports voiceOf as the initial states. Tests drive changes through voiceHandlers. */
+  async watchVoice(h: { all(states: [string, string][]): void; update(userId: string, channelId: string | null): void }): Promise<void> {
+    this.voiceHandlers = h;
+    h.all([...this.voiceOf.entries()]);
   }
 
   /** Messages still present, oldest first. */

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type StateSnapshot } from '../api';
+import {
+  api, ApiError, type Me, type LobbySnapshot, type NamedPlayer, type PublicQueue, type ReadyBlock, type StateSnapshot,
+} from '../api';
 import { campaignName, fmtClock, winnerLabel } from '../format';
 import { Countdown, useSecondsLeft } from '../components/Countdown';
 import { QUEUE_SIZE } from '../queueSize';
@@ -258,13 +260,72 @@ function Live(
     );
   }
 
-  if (lobby && lobby.phase === 'ready_check') return <ReadyCheck lobby={lobby} me={me} refresh={refresh} />;
+  if (lobby && lobby.phase === 'ready_check') {
+    return <ReadyCheck lobby={lobby} me={me} refresh={refresh} readyBlock={state.readyBlock ?? null} />;
+  }
   if (lobby && lobby.phase === 'map_vote') return <MapVote lobby={lobby} refresh={refresh} />;
   return (
-    <QueuePanel
-      count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
-      timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
-    />
+    <>
+      {state.lobbyNotice && <LobbyNotice notice={state.lobbyNotice} refresh={refresh} />}
+      <QueuePanel
+        count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
+        timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
+      />
+    </>
+  );
+}
+
+/**
+ * "The pop you were just in died, and here is why."
+ *
+ * The lobby card in #queue-here used to become this message. It is deleted
+ * now and the detail goes to the admin channel instead (2026-09-20), so
+ * without this the eight people in a failed ready check would watch the pop
+ * simply disappear with no explanation anywhere they can see.
+ *
+ * Dismissing is a server call rather than local state, because the state it
+ * is clearing lives on the server: hiding it in the browser alone would put
+ * it back on the next refresh.
+ */
+export function LobbyNotice(
+  { notice, refresh }: {
+    notice: NonNullable<StateSnapshot['lobbyNotice']>;
+    refresh: () => void;
+  },
+) {
+  const [going, setGoing] = useState(false);
+  const missing = notice.notReady.map((p) => p.name).join(', ');
+  const dismiss = async () => {
+    setGoing(true);
+    try {
+      await api.dismissNotice();
+      refresh();
+    } catch {
+      // Nothing to recover: the notice is cosmetic, and it clears itself the
+      // moment they queue again.
+      setGoing(false);
+    }
+  };
+  return (
+    <Panel>
+      <div class="lobby-notice">
+        <div>
+          <h3>Ready check failed</h3>
+          <p>
+            {notice.youWereReady ? (
+              <>You readied up. The pop was cancelled because {missing || 'someone'} did not,
+                and you went back to the front of the queue.</>
+            ) : (
+              <>You did not ready up in time, so the pop was cancelled for everyone.
+                That is a queue timeout; it gets longer each time within a week.</>
+            )}
+          </p>
+        </div>
+        <button type="button" class="btn btn--ghost" onClick={dismiss} disabled={going}>
+          Dismiss
+        </button>
+      </div>
+    </Panel>
   );
 }
 
@@ -350,8 +411,21 @@ function Slots({ players }: { players: NamedPlayer[] }) {
   );
 }
 
+/** Why a roster row cannot press Ready yet, short enough to sit on the row. */
+const READY_BLOCK_TAG: Record<ReadyBlock, string> = {
+  join_voice: 'not in voice',
+  link_discord: 'no Discord',
+};
+
+/** The viewer's own block, spelled out under the button. */
+const READY_BLOCK_NOTICE: Record<ReadyBlock, string> = {
+  join_voice: 'Join a voice channel in the Riverside Discord to ready up.',
+  link_discord: 'Link your Discord account to ready up.',
+};
+
 function ReadyCheck(
-  { lobby, me, refresh }: { lobby: LobbySnapshot; me: string; refresh: () => void },
+  { lobby, me, refresh, readyBlock = null }:
+    { lobby: LobbySnapshot; me: string; refresh: () => void; readyBlock?: ReadyBlock | null },
 ) {
   const left = useSecondsLeft(lobby.deadline);
   const iAmReady = lobby.ready.includes(me);
@@ -361,22 +435,26 @@ function ReadyCheck(
       <p class="eyebrow">Match found, ready up</p>
       <Countdown deadline={lobby.deadline} left={left} />
       <ul class="roster roster--ready">
-        {lobby.players.map((p) => (
-          <li key={p.steamid} class={lobby.ready.includes(p.steamid) ? 'is-ready' : ''}>
-            <span>{p.name}</span>
-            <span class="tick" aria-label={lobby.ready.includes(p.steamid) ? 'ready' : 'not ready'}>
-              {lobby.ready.includes(p.steamid) ? '✓' : '·'}
-            </span>
-          </li>
-        ))}
+        {lobby.players.map((p) => {
+          const ready = lobby.ready.includes(p.steamid);
+          const block = p.readyBlock ?? null;
+          return (
+            <li key={p.steamid} class={ready ? 'is-ready' : block ? 'is-blocked' : ''}>
+              <span>{p.name}</span>
+              {!ready && block && <span class="blocked-why">{READY_BLOCK_TAG[block]}</span>}
+              <span class="tick" aria-label={ready ? 'ready' : 'not ready'}>{ready ? '✓' : '·'}</span>
+            </li>
+          );
+        })}
       </ul>
       <button
         class="btn btn--block"
-        disabled={iAmReady}
+        disabled={iAmReady || readyBlock !== null}
         onClick={() => api.ready().catch(() => {}).then(refresh)}
       >
         {iAmReady ? `Ready, waiting for ${lobby.players.length - lobby.ready.length}` : 'Ready'}
       </button>
+      {!iAmReady && readyBlock && <p class="ready-notice">{READY_BLOCK_NOTICE[readyBlock]}</p>}
     </Panel>
   );
 }
