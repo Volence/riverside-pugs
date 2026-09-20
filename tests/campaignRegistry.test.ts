@@ -92,6 +92,21 @@ describe('resolveCampaignForMap', () => {
     expect(resolveCampaignForMap(db, 'some_random_map')).toBeNull();
   });
 
+  // A custom campaign shipping L4D2-style c<N>m<N> map names (nothing stops
+  // an uploader naming chapters that way) must resolve to itself, not to
+  // whichever stock dlc4 campaign the pattern happens to guess. Before dlc4
+  // existed this map name fell through to byMap with nothing to shadow it.
+  it('prefers a registered custom chapter over a dlc4 pattern guess', () => {
+    insertDraft(db, {
+      slug: 'custom_dlc4_lookalike', name: 'Lookalike', vpkFilename: 'x.vpk',
+      sizeBytes: 1, sha256: 'c'.repeat(64), uploadedBy: null,
+    }, [{ map: 'c1m1_myplace', display: null, isFinale: true }]);
+    publishCampaign(db, 'custom_dlc4_lookalike', 'Lookalike');
+    invalidateCampaignCache();
+
+    expect(resolveCampaignForMap(db, 'c1m1_myplace')).toBe('custom_dlc4_lookalike');
+  });
+
   // The parser is called per round by the log listener, so the lookup is
   // cached. A campaign removed after the cache warmed must stop resolving.
   it('stops resolving a deleted campaign once the cache is invalidated', () => {
