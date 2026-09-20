@@ -48,6 +48,15 @@ describe('settings schema', () => {
     expect(validateSetting('discord_queue_thresholds', [0]).ok).toBe(false);
     expect(validateSetting('not_a_setting', '1').ok).toBe(false);
   });
+
+  // The default is only reached by a caller with no registry to consult, and
+  // that caller must still fail closed on a campaign that needs an install
+  // check: a dlc4 campaign is not automatically safe just because nobody
+  // passed campaignSlugs.
+  it('defaults campaignSlugs to the campaigns that need no install check, not every campaign', () => {
+    expect(validateSetting('map_pool', ['dead_center']).ok).toBe(false);
+    expect(validateSetting('map_pool', ['no_mercy']).ok).toBe(true);
+  });
 });
 
 describe('settings routes', () => {
