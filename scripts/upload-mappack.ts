@@ -25,10 +25,19 @@ const CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 // A real pack is 3.4 GB. Anything under 3 GB is a truncated or half-finished
 // download, and uploading it would hand every player in the pool a mappack
-// that fails partway through unzipping.
-const MIN_BYTES = 3 * 1024 * 1024 * 1024;
+// that fails partway through unzipping. Decimal GB (1e9), not GiB: that is
+// the base the brief, this message and the file size everyone quotes are all
+// in, so the constant and the printed number agree. Do not "correct" this to
+// 3 * 1024 ** 3 without also changing gb() below, or the two will drift apart
+// again.
+const MIN_BYTES = 3e9;
 
 const gb = (n: number) => `${(n / 1e9).toFixed(2)} GB`;
+// Byte counts under a few MB round to "0.00 GB", which tells an operator
+// nothing about how badly a download failed. The exact count is always
+// diagnosable, so it goes alongside the rounded figure everywhere a size is
+// reported.
+const bytes = (n: number) => `${n.toLocaleString('en-US')} bytes`;
 
 loadDotEnv();
 
@@ -54,7 +63,7 @@ try {
 }
 
 if (local.size < MIN_BYTES) {
-  console.error(`${localPath} is only ${gb(local.size)}, expected at least ${gb(MIN_BYTES)}.`);
+  console.error(`${localPath} is only ${bytes(local.size)} (${gb(local.size)}), expected at least ${gb(MIN_BYTES)}.`);
   console.error('That looks like a truncated or half-finished download, not the full mappack.');
   console.error('Nothing was uploaded. Re-download the zip and try again.');
   process.exit(1);
@@ -79,7 +88,7 @@ try {
 const after = await head(r2, KEY).catch(() => null);
 if (!after || after.bytes !== local.size) {
   console.error(`Upload reported success but the stored object does not match.`);
-  console.error(`local: ${local.size} bytes, remote: ${after ? after.bytes : 'missing'} bytes.`);
+  console.error(`local: ${bytes(local.size)} (${gb(local.size)}), remote: ${after ? `${bytes(after.bytes)} (${gb(after.bytes)})` : 'missing'}.`);
   console.error('Do not point players at this yet. Re-run the upload.');
   process.exit(1);
 }
