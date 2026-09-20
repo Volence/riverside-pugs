@@ -384,6 +384,10 @@ export interface MapBreakdownRow {
   stats: Record<string, number>;
   /** Per map played, to one decimal. */
   avgStats: Record<string, number>;
+  /** Which campaign this map belongs to, so a list that mixes every campaign
+   *  a player has touched can label a bare chapter name that no longer
+   *  identifies anything on its own. Null for a map the registry can't place. */
+  campaignName: string | null;
 }
 
 export interface ProfileMatch extends MatchSummary {
