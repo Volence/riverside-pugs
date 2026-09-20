@@ -8,8 +8,9 @@ import { upsertPlayer } from '../src/players.js';
 import { ME, OTHER, seedMatch } from './playerStats.test.js';
 import {
   campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf, stockChaptersOf,
-  setMissionsDirs,
+  setMissionsDirs, poolableCampaigns,
 } from '../src/campaignRegistry.js';
+import { addServer, setHasDlc4, serversMissingDlc4 } from '../src/serverPool.js';
 
 let db: DB;
 beforeEach(() => {
@@ -251,5 +252,71 @@ describe('dlc4 campaigns in the registry', () => {
     setMissionsDirs([]);
     invalidateCampaignCache();
     expect(campaignRegistry(db).get('dbd')?.requiresDlc4).toBe(false);
+  });
+});
+
+describe('poolableCampaigns and dlc4', () => {
+  // Goes through the real addServer because `servers` has NOT NULL rcon_port
+  // and rcon_password with no defaults, then sets the two flags the base
+  // insert does not take. `enabled` and `has_dlc4` are both ensureColumn
+  // additions and so carry their own defaults (1 and 0).
+  const seedServer = (name: string, enabled = 1, hasDlc4 = 0): number => {
+    const id = addServer(db, {
+      name, host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x',
+    });
+    db.prepare('UPDATE servers SET enabled = ?, has_dlc4 = ? WHERE id = ?')
+      .run(enabled, hasDlc4, id);
+    return id;
+  };
+
+  beforeEach(() => { setMissionsDirs([]); invalidateCampaignCache(); });
+
+  it('offers the base four but no dlc4 campaign when a server lacks the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 0);
+    const slugs = poolableCampaigns(db).map((c) => c.slug);
+    expect(slugs).toContain('no_mercy');
+    expect(slugs).not.toContain('dead_center');
+  });
+
+  it('offers dlc4 campaigns once every enabled server has the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 1);
+    const slugs = poolableCampaigns(db).map((c) => c.slug);
+    expect(slugs).toContain('dead_center');
+    expect(slugs).toContain('the_last_stand');
+  });
+
+  // A disabled server is not going to host a match, so it must not hold the
+  // pool hostage. Same rule isInstalledEverywhere already uses.
+  it('ignores a disabled server without the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Old box', 0, 0);
+    expect(poolableCampaigns(db).map((c) => c.slug)).toContain('dead_center');
+  });
+
+  // Same reason alsoAllow exists for custom campaigns: a campaign already in
+  // the pool must not make the settings page unsavable when a server loses it.
+  it('keeps offering a dlc4 campaign already in the pool via alsoAllow', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 0);
+    const slugs = poolableCampaigns(db, { alsoAllow: ['dead_center'] }).map((c) => c.slug);
+    expect(slugs).toContain('dead_center');
+  });
+
+  it('names the servers that are missing the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 0);
+    seedServer('Riverside #3', 1, 0);
+    seedServer('Retired', 0, 0);
+    expect(serversMissingDlc4(db)).toEqual(['Chicago', 'Riverside #3']);
+  });
+
+  it('setHasDlc4 records the probe result', () => {
+    const id = seedServer('Dallas', 1, 0);
+    setHasDlc4(db, id, true);
+    expect(serversMissingDlc4(db)).toEqual([]);
+    setHasDlc4(db, id, false);
+    expect(serversMissingDlc4(db)).toEqual(['Dallas']);
   });
 });

@@ -8,7 +8,7 @@ import { SETTINGS_SCHEMA, validateSetting } from '../src/settingsSchema.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache } from '../src/campaignRegistry.js';
-import { addServer } from '../src/serverPool.js';
+import { addServer, setHasDlc4 } from '../src/serverPool.js';
 
 const ADMIN = '76561198000000001';
 let db: DB;
@@ -145,6 +145,17 @@ describe('the settings pool candidate list is gated the same as the panel', () =
     publishDbd(serverId, { installed: true });
     expect(await poolSlugs()).toContain('dbd');
     expect((await put('map_pool', ['no_mercy', 'dbd'])).statusCode).toBe(200);
+  });
+
+  // A dlc4 campaign is stock, not custom, so it has no install row to gate
+  // on the way dbd does above. It still must not be poolable while a server
+  // lacks the mappack, or this same route would be the hole that lets a
+  // match changelevel into a map that server cannot load.
+  it('withholds a dlc4 campaign while a server lacks the mappack', async () => {
+    const serverId = addServer(db, { name: 's', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    setHasDlc4(db, serverId, false);
+    expect(await poolSlugs()).not.toContain('dead_center');
+    expect((await put('map_pool', ['no_mercy', 'dead_center'])).statusCode).toBe(400);
   });
 
   // Judgement call: an admin should not be locked out of their own settings

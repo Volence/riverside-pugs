@@ -2,7 +2,7 @@ import type { DB } from './db.js';
 import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
-import { enabledServerIds } from './serverPool.js';
+import { enabledServerIds, allServersHaveDlc4 } from './serverPool.js';
 import { readStockMissions, type StockChapter } from './stockMissions.js';
 
 /**
@@ -147,33 +147,42 @@ export function stockChaptersOf(db: DB, slug: string): StockChapter[] {
 }
 
 /**
- * Campaigns an admin may put in map_pool: the stock four (no VPK, always
+ * Campaigns an admin may put in map_pool: the base four (no VPK, always
  * eligible), plus published custom campaigns that are `enabled` and
- * installed on every enabled server. That install check is the whole gate:
- * there used to be a second `enabled` flag an admin had to tick first, but
- * once downloads stopped depending on it its only remaining job was permitting
+ * installed on every enabled server, plus the eight dlc4 campaigns once
+ * every enabled server carries the mappack. That install check (custom) and
+ * the dlc4 check (stock) are the whole gate: there used to be a second
+ * `enabled` flag an admin had to tick first for custom campaigns, but once
+ * downloads stopped depending on it its only remaining job was permitting
  * another switch, which cost a click and confused people without adding any
  * safety this does not already provide. Kept as its own lookup rather than
  * filtered on the client so a direct PUT to the setting (validateSetting)
  * enforces exactly the same rule the panel displays.
  *
  * `alsoAllow` keeps an admin from being locked out of their own settings
- * page: a campaign already sitting in map_pool that later loses its install
- * (a server re-imaged, an admin flipping it back to disabled) should not
- * make the pool unsavable or vanish from the list out from under whatever
- * else is being edited. It stays offered until someone deliberately removes
- * it from the pool.
+ * page and wins over BOTH gates below: a campaign already sitting in
+ * map_pool that later loses its install (a server re-imaged, an admin
+ * flipping it back to disabled) or loses dlc4 coverage (a server added
+ * without the pack) should not make the pool unsavable or vanish from the
+ * list out from under whatever else is being edited. It stays offered until
+ * someone deliberately removes it from the pool.
  */
 export function poolableCampaigns(
   db: DB, opts: { alsoAllow?: Iterable<string> } = {},
 ): CampaignEntry[] {
   const serverIds = enabledServerIds(db);
   const already = new Set(opts.alsoAllow ?? []);
-  return [...campaignRegistry(db).values()].filter((c) => (
-    !c.custom
-    || already.has(c.slug)
-    || isInstalledEverywhere(db, c.slug, serverIds)
-  ));
+  // Read once rather than per campaign: eight of the twelve stock campaigns
+  // ask the same question and the answer cannot change inside one call.
+  const dlc4Everywhere = allServersHaveDlc4(db);
+  return [...campaignRegistry(db).values()].filter((c) => {
+    if (already.has(c.slug)) return true;
+    // A dlc4 campaign on a server without the mappack is a match that dies
+    // on the first changelevel, so this gate is the same kind of thing as
+    // the install check below and not a nicety.
+    if (c.requiresDlc4 && !dlc4Everywhere) return false;
+    return !c.custom || isInstalledEverywhere(db, c.slug, serverIds);
+  });
 }
 
 /** A campaign's display name, falling back to the slug.
