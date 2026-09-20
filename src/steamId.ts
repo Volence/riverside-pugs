@@ -19,3 +19,18 @@ export function steam64ToSteam2(id64: string): string {
   if (acc < 0n) throw new Error(`not a SteamID64: ${id64}`);
   return `STEAM_1:${acc % 2n}:${acc / 2n}`;
 }
+
+/**
+ * A SteamID in either form the game server writes, as the SteamID64 the rest
+ * of the web uses, or null when it is neither.
+ *
+ * `STEAM_X:Y:Z` is what the engine prints in its own log lines and what the
+ * player_disconnect event carries as `networkid`; the account number is
+ * Z * 2 + Y. BigInt because the result is past Number.MAX_SAFE_INTEGER.
+ */
+export function steamId64Of(raw: string): string | null {
+  if (/^\d{17}$/.test(raw)) return raw;
+  const m = /^STEAM_\d:([01]):(\d{1,10})$/.exec(raw);
+  if (!m) return null;
+  return String(STEAM64_BASE + BigInt(m[2]) * 2n + BigInt(m[1]));
+}
