@@ -397,7 +397,16 @@ Run: `npx vitest run tests/stockMissions.test.ts tests/config.test.ts`
 Expected: PASS.
 
 Run: `npx tsc --noEmit`
-Expected: one error, at the `readStockMissions(missionsDir)` call in `src/campaignRegistry.ts`. **Leave it.** Task 3 fixes it. Do not patch it here with a throwaway array, because Task 3 replaces that whole code path.
+Expected: one error, at the `readStockMissions(missionsDir)` call in `src/campaignRegistry.ts`. Fix it with the single-element array:
+
+```typescript
+  const stockMissions = readStockMissions([missionsDir]);
+```
+
+Task 3 replaces that line with `setMissionsDirs`, so this one word of churn is deliberate: the Global Constraints require `npx tsc --noEmit` clean before every commit, and leaving the tree broken between two commits would mean no reviewer of Task 2 could type check it.
+
+Re-run: `npx tsc --noEmit`
+Expected: clean.
 
 - [ ] **Step 5: Commit**
 
@@ -1049,12 +1058,14 @@ Add the route in `src/routes/servers.ts`:
       setHasDlc4(db, s.id, hasDlc4);
       results.push({ id: s.id, name: s.name, hasDlc4 });
     }
-    logAdmin(db, adminId, 'server_dlc4_check', null, { results });
+    logAdmin(db, adminId, 'server_dlc4_check', 'all', { results });
     return { results };
   });
 ```
 
 where `probe` defaults to `serverHasDlc4` and is injectable for tests, matching how `installTargets` is injected in `src/routes/campaigns.ts`.
+
+`logAdmin` lives in `src/admin/audit.ts` and its signature is `logAdmin(db, adminId, action, target: string | number, detail)`. **`target` is not nullable**, which is why the call above passes the string `'all'` rather than null: this action is about every server at once and has no single target id.
 
 In the admin settings panel, when `serversMissingDlc4` is non-empty, render a line under the Campaign pool heading naming the servers and saying the L4D2 campaigns are unavailable until every server has the mappack, with a button that POSTs to the new route and refreshes. Write the copy from the reader's side: name the servers, say what is missing, say what to do.
 
@@ -1303,7 +1314,7 @@ Server side:
 ```typescript
   it('tells each by-map row which campaign it belongs to', () => {
     // seed a completed match on a dlc4 map and one on a stock map
-    const got = playerProfile(db, ME).byMap;
+    const got = profileData(db, ME, null).byMap;
     const dc = got.find((r) => r.map === 'c1m2_streets');
     expect(dc?.campaignName).toBe('Dead Center');
     const nm = got.find((r) => r.map === 'l4d_vs_hospital01_apartment');
@@ -1312,12 +1323,12 @@ Server side:
 
   // An unattributable map must not break the row or invent a campaign.
   it('leaves campaignName null for a map it cannot place', () => {
-    const got = playerProfile(db, ME).byMap;
+    const got = profileData(db, ME, null).byMap;
     expect(got.find((r) => r.map === 'de_dust2')?.campaignName).toBeNull();
   });
 ```
 
-Use the file's existing seeding helpers (`seedMatch` and friends from `tests/playerStats.test.ts`) rather than writing new ones, and replace `playerProfile` with whatever the real exported name in `playerQueries.ts` is.
+Use the file's existing seeding helpers (`seedMatch` and friends from `tests/playerStats.test.ts`) rather than writing new ones. The real export is `profileData(db, steamid, viewer)` at `src/playerQueries.ts:84`; the viewer argument takes `null`.
 
 Web side, in `web/src/routes/Profile.test.tsx`:
 
@@ -1468,7 +1479,14 @@ Read `web/src/routes/HowToPlay.tsx` in full and note the component it uses for a
 
 Five steps in this order, and do not reorder them:
 
-1. Download `L4D2-Maps-for-L4D1-v3.1e.zip`, 3.4 GB, linking the R2 URL.
+1. Download `L4D2-Maps-for-L4D1-v3.1e.zip`, 3.4 GB, linking
+   `https://assets.riversidepug.com/mappack/L4D2-Maps-for-L4D1-v3.1e.zip`.
+
+   **Use that custom domain, not the `R2_PUBLIC_URL` value.** The box's
+   `R2_PUBLIC_URL` is still the bucket's default `https://pub-<hash>.r2.dev`, but
+   `src/mapOverviews.ts` already publishes every overview under
+   `assets.riversidepug.com`, and that host is verified serving the bucket. Matching
+   the existing precedent keeps one public hostname for player-facing assets.
 2. Open the Left 4 Dead folder: Steam, right-click Left 4 Dead, Manage, Browse local files. Say what they should see (`left4dead` and `hl2`) so they know they are in the right place.
 3. Drag everything from the zip in and say yes to replacing. Say what they end up with (`left4dead_dlc4` beside `left4dead`).
 4. Options, Video, Advanced, Shader Detail, Medium or lower, **in a warning callout**. The pack's ReadMe buries this at step 4 of 5, but on High these maps crash, so it gets visual weight.
