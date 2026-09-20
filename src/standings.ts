@@ -1,9 +1,28 @@
 import type { DB } from './db.js';
+import { getSetting } from './settings.js';
 import { STAT_DEFS } from './statKeys.js';
 
 /** Games before a player holds a rank. Under this they are listed as
  *  provisional: one lucky night at high sigma should not top the board. */
 export const RANKED_MIN_GAMES = 3;
+
+/** Fallback for the badge gate when the setting is missing or unreadable.
+ *  Never RANKED_MIN_GAMES: see `standingMinGames`. */
+export const STANDING_MIN_GAMES_DEFAULT = 10;
+
+/**
+ * Games before a player is ranked for the profile badges.
+ *
+ * A separate threshold from RANKED_MIN_GAMES, because the two answer different
+ * questions. Three games is enough for a rating to be worth showing. It is
+ * nowhere near enough for a per-match average, which is what every badge is:
+ * divide three games of anything by three and the winner is usually whoever
+ * has played least, which is exactly what the board kept showing.
+ */
+export function standingMinGames(db: DB): number {
+  const raw = Number(getSetting(db, 'standing_min_games'));
+  return Number.isInteger(raw) && raw > 0 ? raw : STANDING_MIN_GAMES_DEFAULT;
+}
 
 /** How many places count as a standing worth showing on a profile. */
 export const STANDING_TOP = 5;
@@ -15,8 +34,8 @@ export interface Standing { rank: number; of: number }
 const FIXED_KEYS = ['sidmg', 'sikill', 'ck', 'rev'] as const;
 
 /**
- * Where one player stands this season, among RANKED players only, for every
- * metric in which they place in the top STANDING_TOP.
+ * Where one player stands this season, among players past the badge gate
+ * only, for every metric in which they place in the top STANDING_TOP.
  *
  * Counts are ranked PER MATCH, not as totals. A season total mostly ranks who
  * has played the most, which is the same reason the profile's tiles prefer
@@ -30,8 +49,10 @@ const FIXED_KEYS = ['sidmg', 'sikill', 'ck', 'rev'] as const;
  * Ties share a rank (1, 1, 3), so two players on the same figure are shown as
  * equal rather than ordered by whatever the database returned first.
  *
- * Empty for a provisional player: they are not on the board yet, so they do
- * not hold a place on it either.
+ * Empty for a player short of `standingMinGames`, and the comparison field is
+ * the same set: someone who does not qualify for a badge does not count
+ * towards anyone else's `of` either, so the denominator is always the number
+ * of people the rank was actually taken against.
  */
 export function playerStandings(db: DB, seasonId: number, steamid: string): Record<string, Standing> {
   const ratings = db.prepare(
@@ -39,7 +60,7 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
             (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = pr.player_id AND rh.season_id = pr.season_id) AS games
      FROM player_ratings pr WHERE pr.season_id = ?`,
   ).all(seasonId) as { steamid: string; wins: number; losses: number; games: number }[];
-  const ranked = ratings.filter((r) => r.games >= RANKED_MIN_GAMES);
+  const ranked = ratings.filter((r) => r.games >= standingMinGames(db));
   if (!ranked.some((r) => r.steamid === steamid)) return {};
 
   const fixed = db.prepare(

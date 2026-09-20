@@ -8,6 +8,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { upsertPlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
 import { statDef, STAT_DEFS } from '../src/statKeys.js';
+import { getSetting, setSetting } from '../src/settings.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -92,6 +93,10 @@ describe('stats routes', () => {
   });
 
   it('profile standings: top-5 places per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
+    // Three matches each, so the badge gate has to be down at three for any
+    // of this to rank at all. The shipped default is higher; see the two
+    // tests below for what it is and what it does.
+    setSetting(db, 'standing_min_games', '3');
     const ids = [1, 2, 3].map(() => playCompletedMatch(db, 'b'));
     // Skeets per match: IDS[1] 3, ME and IDS[2..5] 2 (tied), IDS[6..7] 1.
     for (const m of ids) {
@@ -113,10 +118,35 @@ describe('stats routes', () => {
   });
 
   it('profile standings are empty for a provisional player', async () => {
+    setSetting(db, 'standing_min_games', '3');
     const m = playCompletedMatch(db, 'b');
     seedStats(db, m, ME, { skeets: 9 });
     const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
     expect(body.standings).toEqual({});
+  });
+
+  // Asked for by a player, 2026-09-19: a per-match average over three games
+  // is mostly noise, so the badges kept landing on whoever had played least.
+  // The gate is its own setting rather than RANKED_MIN_GAMES because the two
+  // answer different questions: three games is enough for a rating to be worth
+  // showing, and is not enough for "#1 in boomer pops per match" to mean
+  // anything.
+  it('profile standings hold badges back until the badge gate is met', async () => {
+    setSetting(db, 'standing_min_games', '10');
+    const ids = [1, 2, 3].map(() => playCompletedMatch(db, 'b'));
+    for (const m of ids) IDS.forEach((id) => seedStats(db, m, id, { skeets: 5 }));
+
+    const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
+    expect(body.standings).toEqual({});
+
+    // The leaderboard's own ranked/provisional split is a separate threshold
+    // and must not move with it: three games still puts someone on the board.
+    const lb = (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json();
+    expect(lb.rows.find((r: any) => r.steamid === ME).ranked).toBe(true);
+  });
+
+  it('ships the badge gate at ten games', () => {
+    expect(getSetting(db, 'standing_min_games')).toBe('10');
   });
 
   it('leaderboard: SR-sorted current-season rows with games count', async () => {
