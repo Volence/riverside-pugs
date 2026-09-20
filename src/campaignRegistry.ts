@@ -125,12 +125,19 @@ export function campaignRegistry(db: DB): Map<string, CampaignEntry> {
   return warm(db).registry;
 }
 
-/** The campaign a map belongs to: stock by name prefix, custom by lookup.
- *  Null rather than a default for anything unrecognised. */
+/** The campaign a map belongs to: custom by lookup first, stock by name
+ *  pattern otherwise. Null rather than a default for anything unrecognised.
+ *
+ *  Custom goes first because campaignForMap's dlc4 pattern is a guess from
+ *  the bare map name (c<N>m<N>), and nothing stops an uploaded campaign
+ *  naming its own chapters that way. An explicitly registered chapter is
+ *  ground truth and must win over a pattern match, or a custom campaign
+ *  shaped like dlc4 would get filed under a stock campaign in self-started
+ *  matches and stats. */
 export function resolveCampaignForMap(db: DB, map: string): string | null {
-  const stock = campaignForMap(map);
-  if (stock) return stock;
-  return warm(db).byMap.get(map.toLowerCase()) ?? null;
+  const custom = warm(db).byMap.get(map.toLowerCase());
+  if (custom) return custom;
+  return campaignForMap(map);
 }
 
 /** First playable map of a campaign, which is what a match changelevels into. */
