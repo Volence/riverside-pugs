@@ -13,11 +13,12 @@ const P3 = '76561198000000003';
 
 let db: DB;
 let app: FastifyInstance;
+let adminCookie: Record<string, string>;
 
 beforeEach(async () => {
   db = openDb(':memory:');
   app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
-  authedCookie(app, db, ADMIN);
+  adminCookie = authedCookie(app, db, ADMIN);
   db.prepare('UPDATE players SET is_admin = 1, name = ? WHERE steamid = ?').run('theadmin', ADMIN);
   authedCookie(app, db, P2);
   authedCookie(app, db, P3);
@@ -25,10 +26,25 @@ beforeEach(async () => {
 });
 afterEach(async () => { await app.close(); });
 
-const bans = () => app.inject({ method: 'GET', url: '/api/bans' });
+// Every read below is an admin's, because for now nobody else may read it.
+const bans = () => app.inject({ method: 'GET', url: '/api/bans', cookies: adminCookie });
 
-describe('public bans page', () => {
-  it('is readable without signing in at all', async () => {
+describe('the ban list', () => {
+  // Owner's ruling, 2026-09-20: admins only for now. The page was public for
+  // about half an hour after it first shipped.
+  it('refuses a visitor who is not signed in', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/bans' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('refuses a signed-in player who is not an admin', async () => {
+    banPlayer(db, P2, ADMIN, 'reason', null);
+    const res = await app.inject({ method: 'GET', url: '/api/bans', cookies: authedCookie(app, db, P3) });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.stringify(res.json())).not.toContain('reason');
+  });
+
+  it('is readable by an admin', async () => {
     const res = await bans();
     expect(res.statusCode).toBe(200);
     expect(res.json().bans).toEqual([]);
@@ -63,9 +79,9 @@ describe('public bans page', () => {
   it('searches by SteamID and by name', async () => {
     banPlayer(db, P2, ADMIN, 'r1', null);
     banPlayer(db, P3, ADMIN, 'r2', null);
-    const byId = await app.inject({ method: 'GET', url: `/api/bans?q=${P2}` });
+    const byId = await app.inject({ method: 'GET', url: `/api/bans?q=${P2}`, cookies: adminCookie });
     expect(byId.json().bans.map((b: any) => b.steamid)).toEqual([P2]);
-    const byName = await app.inject({ method: 'GET', url: '/api/bans?q=cheat' });
+    const byName = await app.inject({ method: 'GET', url: '/api/bans?q=cheat', cookies: adminCookie });
     expect(byName.json().bans.map((b: any) => b.steamid)).toEqual([P2]);
   });
 
