@@ -472,26 +472,29 @@ export const MAP_NAMES: Record<string, string> = {
  *
  *  Taken from the mission files' versus DisplayName with the "(VS)" suffix
  *  dropped: every chapter this site shows is versus, so the suffix carries no
- *  information and doubles the length of every label. */
+ *  information and doubles the length of every label. One exception: c6m1_riverbank
+ *  keeps its current live value "The Riverbank" even though the game says "Riverbank",
+ *  because that label already ships in the live UI and an existing test asserts it;
+ *  changing a live user-facing label is not this task's job. */
 const DLC4_NAMES: Record<string, string> = {
   c1m1_hotel: 'Hotel',
   c1m2_streets: 'Streets',
   c1m3_mall: 'Mall',
   c1m4_atrium: 'Atrium',
   c2m1_highway: 'Highway',
-  c2m2_fairgrounds: 'Fairgrounds',
+  c2m2_fairgrounds: 'Fairground',
   c2m3_coaster: 'Coaster',
   c2m4_barns: 'Barns',
   c2m5_concert: 'Concert',
-  c3m1_plankcountry: 'Plank Country',
+  c3m1_plankcountry: 'Plank',
   c3m2_swamp: 'Swamp',
-  c3m3_shantytown: 'Shantytown',
+  c3m3_shantytown: 'Shanty Town',
   c3m4_plantation: 'Plantation',
   c4m1_milltown_a: 'Milltown',
   c4m2_sugarmill_a: 'Sugar Mill',
-  c4m3_sugarmill_b: 'Sugar Mill',
-  c4m4_milltown_b: 'Milltown Return',
-  c4m5_milltown_escape: 'Milltown Escape',
+  c4m3_sugarmill_b: 'Mill Escape',
+  c4m4_milltown_b: 'Return to Town',
+  c4m5_milltown_escape: 'Town Escape',
   c5m1_waterfront: 'Waterfront',
   c5m2_park: 'Park',
   c5m3_cemetery: 'Cemetery',
@@ -503,9 +506,9 @@ const DLC4_NAMES: Record<string, string> = {
   c13m1_alpinecreek: 'Alpine Creek',
   c13m2_southpinestream: 'South Pine Stream',
   c13m3_memorialbridge: 'Memorial Bridge',
-  c13m4_cutthroatcreek: 'Cut Throat Creek',
-  c14m1_junkyard: 'Junkyard',
-  c14m2_lighthouse: 'Lighthouse',
+  c13m4_cutthroatcreek: 'Cut-throat Creek',
+  c14m1_junkyard: 'The Junkyard',
+  c14m2_lighthouse: 'Lighthouse Finale',
 };
 
 /** An engine map name as a human chapter title.
