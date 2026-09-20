@@ -449,6 +449,7 @@ describe('chapterOrdinal', () => {
   it.each([
     ['c1m3_mall', 3],
     ['c13m4_cutthroatcreek', 4],
+    ['l4d_vs_city17_04', 4],
     ['l4d_vs_airport02_offices', 2],
     ['l4d_hospital05_rooftop', 5],
     ['rombu03', 3],

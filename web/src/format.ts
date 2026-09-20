@@ -554,6 +554,13 @@ export function chapterOrdinal(map: string): number | null {
   const lower = map.toLowerCase();
   const dlc4 = /^c\d+m(\d+)/.exec(lower);
   if (dlc4) return Number(dlc4[1]);
+  // A custom campaign's own map name can carry digits before the chapter
+  // number (l4d_vs_city17_04 is City 17, live on the fleet today), which the
+  // middle-group pattern below misreads as the chapter (17, not 4). A
+  // trailing _<digits> is the chapter whenever one is present, so try that
+  // first and only fall back to the middle group when the name has none.
+  const l4d1Trailing = /^l4d_(?:vs_)?[a-z0-9]+_(\d+)$/.exec(lower);
+  if (l4d1Trailing) return Number(l4d1Trailing[1]);
   const l4d1 = /^l4d_(?:vs_)?[a-z]+(\d+)_/.exec(lower);
   if (l4d1) return Number(l4d1[1]);
   const trailing = /(\d+)$/.exec(lower);
