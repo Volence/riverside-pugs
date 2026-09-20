@@ -384,11 +384,17 @@ export class DiscordSync {
     if (this.hashes.get(stored.message_id) === hash) return false;
     // An edit never pings, whatever the content says, so it is always safe to
     // re-render a card that names players.
-    const ok = await this.safeEdit(stored.channel_id, stored.message_id, { ...payload, mentionUserIds: [] });
-    if (ok) {
+    const result = await this.safeEdit(stored.channel_id, stored.message_id, { ...payload, mentionUserIds: [] });
+    if (result === 'ok') {
       this.hashes.set(stored.message_id, hash);
       return false;
     }
+    // Leave the cache alone on a failure: it records what Discord is showing,
+    // and caching a payload that never arrived is what froze match 82's card
+    // at "Setting up the server..." on 2026-09-20 while the match ran. Every
+    // later pass then matched the hash and skipped the edit, so the retry the
+    // catch promises never happened. Untouched, the next pass tries again.
+    if (result === 'failed') return false;
     await this.post(kind, ref, payload, stored.state);
     return true;
   }
@@ -483,12 +489,19 @@ export class DiscordSync {
     });
   }
 
-  private async safeEdit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean> {
+  /**
+   * 'ok' when Discord has the payload, 'gone' when the message no longer
+   * exists and the caller should repost, 'failed' when the edit did not land
+   * and the caller must not record it as applied.
+   */
+  private async safeEdit(
+    channelId: string, messageId: string, payload: MessagePayload,
+  ): Promise<'ok' | 'gone' | 'failed'> {
     try {
-      return await this.deps.transport.edit(channelId, messageId, payload);
+      return await this.deps.transport.edit(channelId, messageId, payload) ? 'ok' : 'gone';
     } catch (err) {
       console.error('[discord] edit failed:', err);
-      return true; // transient: keep the message, retry on a later pass
+      return 'failed'; // transient: keep the message, retry on a later pass
     }
   }
 
