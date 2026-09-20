@@ -192,16 +192,36 @@ Decided once here so every task agrees.
       the tile sub-text.
 - [x] Commit: `Show per-match medians and spread instead of means`
 
-## Out of scope, worth doing next
+## Follow-ups, and what was decided about them
 
-- The leaderboard header figures (`Tank damage`, `Skeets`) are still league-wide
-  sums, and will read oddly above a table of medians. Replacing them with the
-  league median per match and an SR median and p90 is a small follow-up, but it
-  is a fourth surface and is not folded in here.
-- A league baseline on the match page ("p92 for this map") needs per-map
-  distributions on the wire and is a separate plan.
-- Recent form (last 10 matches against the season median) reuses Task 4's
-  samples and is the natural next task after it.
+**Done: the leaderboard header figures.** `Tank damage` and `Skeets` were
+league-wide sums. Replaced by an SR median and top decile over ranked players.
+The test a header figure has to pass, and the one those two failed: a figure
+must not grow simply because another match was played.
+
+**Not doing yet: a league baseline on the match page** ("p92 for this map").
+The sample does not exist. `MIN_SURVIVAL_SAMPLE`'s own comment records that the
+best-covered maps have 8 measured rounds and most have 6, so a per-map
+percentile would be computed over roughly six playings. A percentile implies a
+distribution fine enough to place a value inside it, and six samples cannot
+support that. The match page also already answers "was I the weak link" through
+`markColumn`, which is careful about exactly this: a spread threshold, tied ends
+left unmarked, nothing marked below two values. Printing a confident-looking
+percentile beside those deliberately cautious marks would be a step backwards in
+honesty, and it costs a payload increase to do it. Revisit when the best-covered
+maps reach roughly twenty playings.
+
+**Not doing: recent form** (last 10 matches against the season median). The
+comparison is malformed at this league's size, not merely noisy. A season is
+about eighteen matches and a regular plays about fifteen, so the last ten sit
+INSIDE the season sample they would be measured against: ten of the fifteen
+matches are on both sides of the comparison. That damps any genuine swing and
+manufactures the appearance of stability. The well-formed version is last ten
+against prior N, which leaves N of about five, and five matches cannot establish
+what a player's form was. Cheap to build and it would quietly lie, so it is not
+built. Worth revisiting only once a player's history is long enough for the two
+windows to be disjoint and still meaningful, which is roughly forty matches
+each.
 
 ## Explicitly not doing
 
