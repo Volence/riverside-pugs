@@ -19,6 +19,14 @@ import { loadDotEnv } from './dotenv.js';
 const KEY = 'mappack/L4D2-Maps-for-L4D1-v3.1e.zip';
 const FILENAME = 'L4D2-Maps-for-L4D1-v3.1e.zip';
 
+// What HowToPlay.tsx actually links. R2_PUBLIC_URL is whatever the bucket's
+// configured public URL is on this box right now, which on the real box is
+// still the bucket default (pub-<hash>.r2.dev) rather than this custom
+// domain, so the two can disagree. Hardcoded rather than read from config:
+// this is what the operator needs printed to confirm the player-facing link
+// still works, not a setting to plug in and trust.
+const PLAYER_URL = `https://assets.riversidepug.com/${KEY}`;
+
 // The version is baked into the key, so the object is never rewritten in
 // place and can be cached forever.
 const CACHE_CONTROL = 'public, max-age=31536000, immutable';
@@ -93,5 +101,7 @@ if (!after || after.bytes !== local.size) {
   process.exit(1);
 }
 
-console.log(`Done. ${gb(after.bytes)} stored at ${publicUrlFor(r2, KEY)}`);
+console.log(`Done. ${gb(after.bytes)} stored.`);
+console.log(`R2 object URL (confirms the object landed): ${publicUrlFor(r2, KEY)}`);
+console.log(`Player-facing URL (what the site links, HowToPlay.tsx): ${PLAYER_URL}`);
 process.exit(0);

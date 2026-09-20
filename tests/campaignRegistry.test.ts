@@ -31,7 +31,7 @@ const publish = (slug = 'dbd') => {
 };
 
 describe('campaignRegistry', () => {
-  it('contains the four stock campaigns with no custom ones present', () => {
+  it('contains the twelve stock campaigns with no custom ones present', () => {
     expect([...campaignRegistry(db).keys()])
       .toEqual([
         'no_mercy',

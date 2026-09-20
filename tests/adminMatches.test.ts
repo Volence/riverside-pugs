@@ -175,7 +175,7 @@ describe('admin matches', () => {
 
   it('non-admins are refused', async () => {
     const user = authedCookie(app, db, IDS[5]);
-    for (const url of ['/api/admin/matches/1/void', '/api/admin/matches/1/abort', '/api/admin/servers/1/idle', '/api/admin/servers/1/enabled', '/api/admin/queue/remove']) {
+    for (const url of ['/api/admin/matches/1/void', '/api/admin/matches/1/abort', '/api/admin/servers/1/idle', '/api/admin/servers/1/enabled', '/api/admin/servers/dlc4-check', '/api/admin/queue/remove']) {
       expect((await app.inject({ method: 'POST', url, cookies: user, payload: {} })).statusCode, url).toBe(403);
     }
     expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: user })).statusCode).toBe(403);
