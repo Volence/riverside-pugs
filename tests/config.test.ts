@@ -37,7 +37,20 @@ describe('loadConfig', () => {
 
 describe('campaigns', () => {
   it('has the four original campaigns', () => {
-    expect(Object.keys(CAMPAIGNS)).toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
+    expect(Object.keys(CAMPAIGNS)).toEqual([
+      'no_mercy',
+      'death_toll',
+      'dead_air',
+      'blood_harvest',
+      'dead_center',
+      'dark_carnival',
+      'swamp_fever',
+      'hard_rain',
+      'the_parish',
+      'the_passing',
+      'cold_stream',
+      'the_last_stand',
+    ]);
   });
 });
 
