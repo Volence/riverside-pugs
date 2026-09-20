@@ -410,6 +410,26 @@ export const MIN_SURVIVAL_SAMPLE = 6;
  */
 export const STANDING_TOP = 5;
 
+/**
+ * The spread behind a median, as a line under a figure.
+ *
+ * Two nights of 300 and one of 4000 have the same median as three nights of
+ * 300, and they are not the same player. The quartiles say which one you are
+ * looking at, and `n` says how much to trust either: a median over three
+ * matches and one over forty read identically and are not the same claim.
+ *
+ * Reads "290 to 510 · 23 matches". The middle half of the time is left
+ * implied rather than spelled out, because the figure it sits under is
+ * already labelled and the tile has one line to spend.
+ */
+export function spreadNote(q: { n: number; p25: number; p75: number }): string {
+  const matches = `${q.n} ${q.n === 1 ? 'match' : 'matches'}`;
+  // A player who does the same thing every time has no spread to report, and
+  // "300 to 300" reads as a broken template rather than as consistency.
+  if (q.p25 === q.p75) return matches;
+  return `${q.p25.toLocaleString()} to ${q.p75.toLocaleString()} · ${matches}`;
+}
+
 /** How to render a survival rate, given how many rounds it is over.
  *
  *  Three distinct cases, and conflating any two of them is what made this

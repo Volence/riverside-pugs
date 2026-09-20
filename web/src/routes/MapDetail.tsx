@@ -1,6 +1,6 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, survivalLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, spreadNote, survivalLabel } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
@@ -8,8 +8,10 @@ import { PageHeader, Figures, Figure } from '../components/PageHeader';
 export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
   const [tab, setTab] = useState('winrate');
-  // Averages first: a total mostly reports who has played the most, while
-  // what someone usually gets on a map is the number that compares.
+  // Per map first: a total mostly reports who has played the most, while
+  // what someone usually gets on a map is the number that compares. That
+  // figure is a median over their playings, not a mean, so one exceptional
+  // night does not become the number they are shown for the map.
   const [mode, setMode] = useState<'avg' | 'total'>('avg');
 
   if (error) {
@@ -24,12 +26,16 @@ export function MapDetail({ map }: { map: string }) {
   const players: MapLeaderRow[] = data.players.map((p) => ({
     ...p,
     stats: deriveLiveStats(p.stats ?? {}),
-    avgStats: deriveLiveStats(p.avgStats ?? {}),
+    medianStats: deriveLiveStats(p.medianStats ?? {}),
   }));
-  // The map's own baseline, pooled over everyone, so a player row has
-  // something to be read against.
+  // The map's own baseline, pooled over EVERY player-map at once, so a player
+  // row has something to be read against. Still a mean, deliberately: pooling
+  // is what makes it the map's figure rather than an average of per-player
+  // averages weighted by who turned up most.
   const baseline = deriveLiveStats(data.avgStats ?? {});
-  const cellsOf = (p: MapLeaderRow) => (mode === 'avg' ? p.avgStats : p.stats);
+  const cellsOf = (p: MapLeaderRow) => (mode === 'avg' ? p.medianStats : p.stats);
+  const spreadOf = (p: MapLeaderRow, k: string) =>
+    (mode === 'avg' ? p.spread?.[k] : undefined);
   const cols = orderLiveStatKeys(
     Array.from(new Set(players.flatMap((p) => Object.keys(p.stats)))),
   );
@@ -158,8 +164,15 @@ export function MapDetail({ map }: { map: string }) {
                     </td>
                     {cols.map((k) => {
                       const v = cellsOf(p)[k];
+                      const q = spreadOf(p, k);
                       return (
-                        <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                        <td
+                          class={`num${v ? '' : ' is-dim'}`}
+                          key={k}
+                          // Spread on hover rather than in the cell: this table
+                          // is already twenty-odd numeric columns wide.
+                          title={q ? spreadNote(q) : undefined}
+                        >
                           {v ?? <span class="muted">n/a</span>}
                         </td>
                       );

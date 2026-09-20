@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, STANDING_TOP, survivalNote, sortMapRows, type MapSort } from '../format';
+import type { Profile as ProfileData, Quantiles, Standing } from '../api';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, spreadNote, STANDING_TOP, survivalNote, sortMapRows, type MapSort } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
@@ -79,6 +79,7 @@ export function Profile(
         <ProfileFigures
           totals={totals} statTotals={statTotals} rating={rating}
           standings={data.standings ?? {}} statDefs={data.statDefs}
+          statQuantiles={data.statQuantiles ?? {}}
         />
 
         <div class="profile-grid">
@@ -195,9 +196,18 @@ export function Profile(
                       <td class="num">{r.wins}</td>
                       <td class="num">{r.losses}</td>
                       {mapCols.map((k) => {
-                        const v = (mapMode === 'avg' ? r.avgStats : r.stats)[k];
+                        const v = (mapMode === 'avg' ? r.medianStats : r.stats)[k];
+                        const q = r.spread?.[k];
                         return (
-                          <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                          <td
+                            class={`num${v ? '' : ' is-dim'}`}
+                            key={k}
+                            // The spread goes in the title, not the cell. This
+                            // table is already twenty-odd numeric columns wide
+                            // and a range in every cell would make it
+                            // unreadable, which was the original complaint.
+                            title={q && mapMode === 'avg' ? spreadNote(q) : undefined}
+                          >
                             {v ?? <span class="muted">n/a</span>}
                           </td>
                         );
@@ -237,22 +247,42 @@ export function Profile(
  * whoever has played the most games, which makes it useless for comparing
  * players. A figure is omitted entirely when its denominator is zero, so
  * "never played boomer" reads as absent rather than as 0%.
+ *
+ * The rate is a MEDIAN over matches, not a career total divided by games. The
+ * mean was moved by exactly the nights it should have been resistant to: a
+ * player with one 40-skeet game and eleven quiet ones was shown a per-match
+ * figure they had never once scored. Each tile carries its own quartiles and
+ * sample size underneath, so a steady player and a streaky one on the same
+ * median do not read identically.
+ *
+ * Win rate and boomer % stay POOLED ratios. A median of per-match rates would
+ * weigh a one-boomer night the same as a four-boomer night, which is the same
+ * reason StatTable re-derives boomer_rate rather than averaging it.
  */
 function ProfileFigures(
-  { totals, statTotals, rating, standings, statDefs }: {
+  { totals, statTotals, rating, standings, statDefs, statQuantiles }: {
     totals: ProfileData['totals'];
     statTotals: ProfileData['statTotals'];
     rating: ProfileData['rating'];
     standings: Record<string, Standing>;
     statDefs: ProfileData['statDefs'];
+    statQuantiles: Record<string, Quantiles>;
   },
 ) {
   const games = totals.games || 0;
-  const per = (n: number) => (games > 0 ? Math.round(n / games) : null);
   // Defaulted once, here: a player with no skill stats at all has no
   // statTotals object to read through.
   const st = statTotals ?? {};
   const derived = deriveLiveStats(st);
+
+  /** A per-match tile for one key, or null when nothing was ever measured for
+   *  it. Null rather than a zero tile: absent means not measured, and a 0 here
+   *  would read as "does none of this". */
+  const medianTile = (key: string, label: string) => {
+    const q = statQuantiles[key];
+    if (!q) return null;
+    return { key, label, value: q.p50.toLocaleString(), sub: spreadNote(q) };
+  };
 
   // `key` names the standing the tile shows a badge for, so a tile and its
   // badge always measure the same thing: a per-match tile, a per-match rank.
@@ -267,10 +297,10 @@ function ProfileFigures(
     });
   }
   tiles.push({ label: 'Matches', value: games });
-  const sid = per(totals.siDamage);
-  if (sid !== null) tiles.push({ key: 'sidmg', label: 'SI dmg / match', value: sid });
-  const ck = per(totals.commonKills);
-  if (ck !== null) tiles.push({ key: 'ck', label: 'Commons / match', value: ck });
+  for (const t of [
+    medianTile('sidmg', 'SI dmg / match'),
+    medianTile('ck', 'Commons / match'),
+  ]) if (t) tiles.push(t);
   if (derived.boomer_rate !== undefined) {
     tiles.push({
       key: 'boomer_rate',
@@ -280,13 +310,13 @@ function ProfileFigures(
     });
   }
   // Per match, like the tiles before them, so the rank badge beside them is
-  // for the number actually shown. The career total rides along underneath.
-  if (st.tank_damage && games > 0) {
-    tiles.push({ key: 'tank_damage', label: 'Tank dmg / match', value: Math.round(st.tank_damage / games), sub: `${st.tank_damage} total` });
-  }
-  if (st.skeets && games > 0) {
-    tiles.push({ key: 'skeets', label: 'Skeets / match', value: (st.skeets / games).toFixed(1), sub: `${st.skeets} total` });
-  }
+  // for the number actually shown. Gated on the career total as well as on the
+  // quantiles, so a player who has genuinely never done either gets no tile
+  // rather than a tile reading 0.
+  for (const t of [
+    st.tank_damage ? medianTile('tank_damage', 'Tank dmg / match') : null,
+    st.skeets ? medianTile('skeets', 'Skeets / match') : null,
+  ]) if (t) tiles.push(t);
 
   // Every other top-five place, best first, so a #1 in crowns is not lost
   // just because crowns has no tile.

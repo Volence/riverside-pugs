@@ -3,7 +3,7 @@ import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
 import { getPlayer, currentSeasonId } from './players.js';
 import { FIXED_STAT_KEYS, STAT_DEFS, statDef } from './statKeys.js';
-import { quantiles } from './quantiles.js';
+import { quantiles, type Quantiles } from './quantiles.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 
@@ -160,11 +160,49 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
   }
   const isSelf = viewer === steamid;
 
+  // What this player USUALLY gets, per completed match, with the spread around
+  // it. The tiles above divided a career total by games played, which one
+  // enormous night distorts for the rest of the season: a player with a
+  // 40-skeet game and eleven quiet ones was shown a figure they had never once
+  // scored. The same two sample rules as leaderboardData, and for the same
+  // reasons: stats_json separates a real zero from a player the dump missed,
+  // and an absent match_player_stats row means the stat was not measured.
+  const fixedSamples = db.prepare(
+    `SELECT mp.si_damage AS sidmg, mp.si_kills AS sikill, mp.common_kills AS ck,
+            mp.ff_dealt AS ff, mp.revives AS rev
+     FROM match_players mp JOIN matches m ON m.id = mp.match_id
+     WHERE mp.player_id = ? AND m.state = 'completed' AND mp.stats_json IS NOT NULL`,
+  ).all(steamid) as Record<string, number>[];
+
+  const skillSamples = db.prepare(
+    `SELECT mps.stat, mps.value
+     FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
+     WHERE mps.player_id = ? AND m.state = 'completed'`,
+  ).all(steamid) as { stat: string; value: number }[];
+
+  const samples = new Map<string, number[]>();
+  const sample = (key: string, value: number) => {
+    const bag = samples.get(key);
+    if (bag) bag.push(value);
+    else samples.set(key, [value]);
+  };
+  for (const r2 of fixedSamples) for (const k of FIXED_STAT_KEYS) sample(k, r2[k]);
+  for (const r2 of skillSamples) {
+    // Self-visibility stats keep the same split they have in the totals above:
+    // never on the public bag. They have no private quantiles of their own,
+    // since the private panel is a lifetime list and asks a different question.
+    if (statDef(r2.stat)?.visibility === 'self') continue;
+    sample(r2.stat, r2.value);
+  }
+  const statQuantiles: Record<string, Quantiles> = {};
+  for (const [key, values] of samples) statQuantiles[key] = quantiles(values)!;
+
   return {
     player: { steamid: player.steamid, name: player.name, avatar: player.avatar, createdAt: player.created_at },
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
     totals, matches, history,
     statTotals,
+    statQuantiles,
     // Top-5 places this season, per match, among ranked players. Keyed like
     // the stat bag plus `winrate` and `boomer_rate`.
     standings: playerStandings(db, seasonId, steamid),

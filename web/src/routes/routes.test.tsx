@@ -445,7 +445,7 @@ describe('Profile', () => {
     mockApi.profile.mockResolvedValue({
       ...profile,
       byMap: [
-        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 3, wins: 1, losses: 2, stats: {}, avgStats: {} },
+        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 3, wins: 1, losses: 2, stats: {}, medianStats: {} },
       ],
     });
     render(<Profile steamid="1" />);
@@ -458,6 +458,9 @@ describe('Profile', () => {
       totals: { ...profile.totals, games: 12, siDamage: 4800, commonKills: 1200 },
       statTotals: {},
       statDefs: [],
+      // The tiles read these rather than dividing a career total by games, so
+      // a standings fixture has to carry them or there is no tile to badge.
+      statQuantiles: { sidmg: { n: 12, p25: 320, p50: 400, p75: 510 } },
       standings,
     });
 
@@ -488,6 +491,38 @@ describe('Profile', () => {
     // playerStandings returns every metric now rather than the top five, so
     // without a filter on the page this row lists the player's whole stat bag
     // under a heading that promises their top five places.
+    // The mean was moved by exactly the nights it should have resisted. This
+    // player has one enormous game in twelve: 4800 career SI damage over 12
+    // matches is a 400 mean, which they have never once scored.
+    it('shows the median per match, not the career total divided by games', async () => {
+      mockApi.profile.mockResolvedValue({
+        ...withStandings({}),
+        statQuantiles: { sidmg: { n: 12, p25: 180, p50: 210, p75: 260 } },
+      });
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('SI dmg / match')).toBeTruthy());
+      expect(screen.getByText('210')).toBeTruthy();
+      expect(screen.queryByText('400')).toBeNull();
+    });
+
+    it('puts the spread and the sample size under the figure', async () => {
+      mockApi.profile.mockResolvedValue({
+        ...withStandings({}),
+        statQuantiles: { sidmg: { n: 12, p25: 180, p50: 210, p75: 260 } },
+      });
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('180 to 260 · 12 matches')).toBeTruthy());
+    });
+
+    // Absent is not zero. A stat nobody has measured for this player must not
+    // become a tile reading 0, which says they are bad at it.
+    it('drops a tile entirely when the stat was never measured', async () => {
+      mockApi.profile.mockResolvedValue({ ...withStandings({}), statQuantiles: {} });
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
+      expect(screen.queryByText('SI dmg / match')).toBeNull();
+    });
+
     it('keeps the other-places row to actual top-five places', async () => {
       mockApi.profile.mockResolvedValue(withStandings({
         crowns: { rank: 3, of: 23, pct: 91 },
@@ -986,9 +1021,10 @@ describe('MapDetail', () => {
     rounds: { attempts: 6, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50 },
     players: [
       { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
-        stats: { ck: 30, tank_damage: 900 }, avgStats: { ck: 10, tank_damage: 300 } },
+        stats: { ck: 30, tank_damage: 900 }, medianStats: { ck: 10, tank_damage: 300 },
+        spread: { ck: { n: 3, p25: 8, p50: 10, p75: 12 }, tank_damage: { n: 3, p25: 250, p50: 300, p75: 400 } } },
       { steamid: '2', name: 'bob', games: 3, wins: 0, losses: 3,
-        stats: { ck: 10 }, avgStats: { ck: 3.3 } },
+        stats: { ck: 10 }, medianStats: { ck: 3.3 } },
     ],
   };
 

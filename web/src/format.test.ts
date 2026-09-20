@@ -4,7 +4,7 @@ import {
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
-  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName,
+  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName, spreadNote,
 } from './format';
 
 describe('campaignName', () => {
@@ -696,5 +696,24 @@ describe('chapterName', () => {
   // Stripping must never leave an empty label.
   it('keeps the raw value when stripping would empty it', () => {
     expect(chapterName('1:', 'ignored')).toBe('1:');
+  });
+});
+
+describe('spreadNote', () => {
+  it('reads as a range over a sample size', () => {
+    expect(spreadNote({ n: 23, p25: 290, p75: 510 })).toBe('290 to 510 · 23 matches');
+  });
+
+  it('groups thousands so a four-figure range stays readable', () => {
+    expect(spreadNote({ n: 8, p25: 1200, p75: 4400 })).toBe('1,200 to 4,400 · 8 matches');
+  });
+
+  it('says only the sample size when there is no spread to report', () => {
+    // "300 to 300" reads as a broken template rather than as consistency.
+    expect(spreadNote({ n: 5, p25: 300, p75: 300 })).toBe('5 matches');
+  });
+
+  it('counts one match as a match', () => {
+    expect(spreadNote({ n: 1, p25: 4, p75: 4 })).toBe('1 match');
   });
 });

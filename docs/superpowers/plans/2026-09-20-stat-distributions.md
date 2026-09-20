@@ -98,10 +98,16 @@ Decided once here so every task agrees.
    the question the median answers better, and carrying both would put two
    numbers behind one "Per map" tab. `MapDetail.avgStats`, the pooled map
    baseline, is a different quantity and is left alone.
-4. **A percentile is a rank, not a score.** `pct` is the share of the compared
-   field scoring strictly below, so the top player of 20 reads 95, not 100, and
-   ties share it. It is only computed over the `standingMinGames` field, which
-   is the field `rank` and `of` are already taken against.
+4. **A percentile is a rank, not a score.** `pct` is a midrank:
+   `(below + half of those level with you, self included) / of`. Revised during
+   Task 3, which is why it is worth stating rather than leaving as the obvious
+   choice. Counting only those strictly below reads well until a column ties,
+   and on a quiet season whole columns tie: every player has the same commons,
+   so all eight share first. Strictly-below calls that field the 0th percentile
+   and `(of - rank) / (of - 1)` calls it the 100th, both confidently wrong about
+   the same common case. The midrank puts it at 50 and still leaves a clear
+   leader of twenty at 98. Computed only over the `standingMinGames` field,
+   which is the field `rank` and `of` are already taken against.
 5. **Absent beats zero, everywhere, still.** A stat with no samples is omitted
    from the bag rather than returned as a zero median, which is the rule
    `perMapAverages` and `leaderboardData` already follow.
@@ -110,81 +116,81 @@ Decided once here so every task agrees.
 
 ### Task 1: The quantile primitive
 
-- [ ] `src/quantiles.ts`: `export interface Quantiles { n: number; p25: number; p50: number; p75: number }`
+- [x] `src/quantiles.ts`: `export interface Quantiles { n: number; p25: number; p50: number; p75: number }`
       and `export function quantiles(values: number[]): Quantiles | null`, null for
       an empty sample. Pure, no database import.
-- [ ] `tests/quantiles.test.ts`: empty sample, single value (all three quantiles
+- [x] `tests/quantiles.test.ts`: empty sample, single value (all three quantiles
       equal it), even and odd lengths, unsorted input, a sample containing real
       zeros, one decimal of rounding.
-- [ ] Commit: `Add a quantile helper for per-match statistics`
+- [x] Commit: `Add a quantile helper for per-match statistics`
 
 ### Task 2: Leaderboard defaults to per match
 
-- [ ] `src/playerQueries.ts`: in `leaderboardData`, add a per-match sample query
+- [x] `src/playerQueries.ts`: in `leaderboardData`, add a per-match sample query
       beside the two existing aggregate queries. Skill samples: `mps.value` per
       completed season match, grouped by player and stat, no invented zeros.
       Fixed samples: `si_damage` and friends per completed season match
       `WHERE mp.stats_json IS NOT NULL`. Reduce both through `quantiles` into a
       new `medianStats: Record<string, number>` per row, keeping `stats` as is.
       Drop `self` visibility keys on the same rule the summed bag already uses.
-- [ ] `web/src/api.ts`: `LeaderboardRow.medianStats?: Record<string, number>`,
+- [x] `web/src/api.ts`: `LeaderboardRow.medianStats?: Record<string, number>`,
       documented as per completed match, absent where nothing was measured.
-- [ ] `web/src/routes/Leaderboard.tsx`: a `Tabs` control above the table,
+- [x] `web/src/routes/Leaderboard.tsx`: a `Tabs` control above the table,
       `'median' | 'total'`, defaulting to `'median'`, matching the
       `MapDetail.tsx` pattern. `valueOf` reads the bag the tab selects, so a
       header and its comparator still cannot disagree. A cell with no sample
       reads `n/a`, as it does today.
-- [ ] `web/src/format.ts`: `statLeaders` takes the bag to read, so the cards
+- [x] `web/src/format.ts`: `statLeaders` takes the bag to read, so the cards
       above the table lead on the same measure the table is showing.
-- [ ] `src/routes/stats.ts`: `/api/leaderboard/stat/:key` returns `median` beside
+- [x] `src/routes/stats.ts`: `/api/leaderboard/stat/:key` returns `median` beside
       `total` and orders by it, gated at `RANKED_MIN_GAMES`. The
       `visibility === 'public' && direction === 'high_good'` gate is untouched.
-- [ ] Tests: `tests/api.test.ts` for the new bag and the route ordering;
+- [x] Tests: `tests/api.test.ts` for the new bag and the route ordering;
       `web/src/routes/routes.test.tsx` for the tab default and switching.
-- [ ] Commit: `Rank the leaderboard by per-match medians rather than season totals`
+- [x] Commit: `Rank the leaderboard by per-match medians rather than season totals`
 
 ### Task 3: A percentile for every stat on the profile
 
-- [ ] `src/standings.ts`: `Standing` gains `pct: number`. `playerStandings`
+- [x] `src/standings.ts`: `Standing` gains `pct: number`. `playerStandings`
       returns an entry for every metric the player has, not only `rank <=
       STANDING_TOP`. `STANDING_TOP` stops filtering the return and becomes the
       UI's badge test only.
-- [ ] `web/src/api.ts`: `Standing` gains `pct`, with the doc comment corrected:
+- [x] `web/src/api.ts`: `Standing` gains `pct`, with the doc comment corrected:
       it is no longer top-five only.
-- [ ] `web/src/routes/Profile.tsx`: **the `others` list must now filter on
+- [x] `web/src/routes/Profile.tsx`: **the `others` list must now filter on
       `sd.rank <= STANDING_TOP`**, or the "Other top five places" row renders
       every metric the player has. This is the one place the wider return can
       regress the page.
-- [ ] `web/src/components/PageHeader.tsx`: `Figure` shows the percentile as
+- [x] `web/src/components/PageHeader.tsx`: `Figure` shows the percentile as
       sub-text when there is no top-five badge, so a player at #7 of 23 learns
       something where today they learn nothing.
-- [ ] Tests: `tests/standings.test.ts` for ties sharing a percentile, the
+- [x] Tests: `tests/standings.test.ts` for ties sharing a percentile, the
       `standingMinGames` field, and a metric outside the top five still being
       returned; a `Profile.tsx` test that the others list is still top five only.
-- [ ] Commit: `Report a percentile for every profile stat, not just the top five`
+- [x] Commit: `Report a percentile for every profile stat, not just the top five`
 
 ### Task 4: Median and spread in place of the mean
 
-- [ ] `src/playerQueries.ts`: `profileData` gains
+- [x] `src/playerQueries.ts`: `profileData` gains
       `statQuantiles: Record<string, Quantiles>` over the same two sample sets as
       Task 2, for this player across every completed match.
-- [ ] `web/src/routes/Profile.tsx`: `ProfileFigures` tiles show the median as the
+- [x] `web/src/routes/Profile.tsx`: `ProfileFigures` tiles show the median as the
       value and `p25 to p75 over n matches` as `sub`, replacing
       `per = n / games`. `winrate` and `boomer_rate` tiles are untouched: they
       are pooled ratios by decision 4 above.
-- [ ] `src/playerStats.ts`: `perMapAverages` is replaced by a per-playing sample
+- [x] `src/playerStats.ts`: `perMapAverages` is replaced by a per-playing sample
       collected in the loop that currently sums, and `MapBreakdownRow.avgStats`
       becomes `medianStats`, one decimal, same absent-not-zero rule.
-- [ ] `web/src/routes/Profile.tsx`: the by-map table reads `medianStats` under
+- [x] `web/src/routes/Profile.tsx`: the by-map table reads `medianStats` under
       the "Per map" tab. The cell carries the IQR in its `title` rather than in
       the cell, because the table is already twenty-odd numeric columns wide.
-- [ ] `MapLeaderRow` and `MapDetail.tsx` get the same treatment last, so the two
+- [x] `MapLeaderRow` and `MapDetail.tsx` get the same treatment last, so the two
       pages do not disagree about what "Per map" means. `MapDetail.avgStats`, the
       pooled baseline, stays a mean.
-- [ ] Tests: `tests/playerStats.test.ts` for the per-map medians including a
+- [x] Tests: `tests/playerStats.test.ts` for the per-map medians including a
       never-measured key and a real zero; `web/src/routes/routes.test.tsx` for
       the tile sub-text.
-- [ ] Commit: `Show per-match medians and spread instead of means`
+- [x] Commit: `Show per-match medians and spread instead of means`
 
 ## Out of scope, worth doing next
 
