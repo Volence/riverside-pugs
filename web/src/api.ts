@@ -19,6 +19,9 @@ export interface Me {
   discord?: { id: string; name: string } | null;
   /** In the Discord server; null when not linked or not known right now. */
   discordMember?: boolean | null;
+  /** False when the server has no Twitch app configured: hide every Twitch control. */
+  twitchEnabled?: boolean;
+  twitch?: { id: string; name: string } | null;
   ban?: { reason: string; expiresAt: string | null } | null;
 }
 

@@ -24,6 +24,8 @@ import { VoiceChannels } from './discord/voice.js';
 import { COMMAND_DEFS, handleCommand } from './discord/commands.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
+import { twitchAuthRoutes } from './routes/twitchAuth.js';
+import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -77,6 +79,10 @@ export interface ServerDeps {
   orchestrator?: Orchestrator;
   /** Injected in tests; built from config.discord otherwise. */
   discordApi?: DiscordApi;
+  /** Injected in tests; built from config.twitch otherwise. Explicit null
+   *  means "no Twitch even though it is configured", which is how a test keeps
+   *  the poller from starting. */
+  twitchApi?: TwitchApi | null;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
   /** Runs a batch of console commands on one server, for the ban sync.
@@ -283,6 +289,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     membership,
   });
   await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
+
+  // Injectable for tests, built from config otherwise. Null when unconfigured,
+  // which makes every twitch route 404 rather than half-work.
+  const twitchApi: TwitchApi | null = deps.twitchApi !== undefined
+    ? deps.twitchApi
+    : (deps.config.twitch ? makeTwitchApi(deps.config.twitch) : null);
+  await app.register(twitchAuthRoutes, { config: deps.config, db: deps.db, api: twitchApi });
 
   const hub = deps.hub ?? new Hub();
   await app.register(wsRoutes, { hub });

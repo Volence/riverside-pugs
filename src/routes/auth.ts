@@ -84,6 +84,11 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       isAdmin: player.is_admin === 1,
       discordEnabled: config.discord !== null,
       discord: player.discord_id ? { id: player.discord_id, name: player.discord_name ?? '' } : null,
+      // Only your own session ever sees your twitch id. Everywhere public it
+      // is the login and nothing else; here it is harmless and lets the edit
+      // panel tell "linked" from "not linked" without a second request.
+      twitchEnabled: config.twitch !== null,
+      twitch: player.twitch_id ? { id: player.twitch_id, name: player.twitch_name ?? '' } : null,
       ban: player.status === 'banned' ? (() => {
         const b = activeBan(db, steamid);
         return b ? { reason: b.reason, expiresAt: b.expiresAt } : null;
