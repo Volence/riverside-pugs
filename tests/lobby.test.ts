@@ -55,6 +55,17 @@ describe('ready check', () => {
     const { lobby } = makeLobby();
     expect(lobby.markReady('stranger')).toBe(false);
   });
+
+  it('un-ready takes a ready player back to not ready, during the ready check only', () => {
+    const { lobby } = makeLobby();
+    lobby.markReady('p1');
+    expect(lobby.unmarkReady('p1')).toBe(true);
+    expect(lobby.snapshot().ready).toEqual([]);
+    expect(lobby.unmarkReady('p1')).toBe(false);
+    for (const p of PLAYERS) lobby.markReady(p);
+    expect(lobby.unmarkReady('p1')).toBe(false);
+    expect(lobby.snapshot().ready).toHaveLength(8);
+  });
 });
 
 describe('map vote', () => {

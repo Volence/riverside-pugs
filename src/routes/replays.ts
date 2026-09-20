@@ -3,6 +3,7 @@ import { PassThrough, pipeline, type Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import { currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
+import { phaseFor } from '../liveView.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
@@ -249,7 +250,10 @@ export async function replayRoutes(
     if (!row?.token) return reply.code(404).send({ error: 'no replay for that match' });
     const info = currentFileFor(replayDir, row.token, Date.now(), db);
     if (!info) return reply.code(404).send({ error: 'no replay for that match' });
-    return { ordinal: info.ordinal, half: info.half, closed: info.closed };
+    // The game's phase rides along: this is polled once a second already, and
+    // it is what lets the viewer say "paused" or "readying up" while no frames
+    // are arriving, instead of showing a frozen frame with no explanation.
+    return { ordinal: info.ordinal, half: info.half, closed: info.closed, phase: phaseFor(db, Number(id)) };
   });
 
   /** The same answer for a standalone session, addressed by its own token.

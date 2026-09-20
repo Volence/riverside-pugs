@@ -30,10 +30,14 @@ export interface NamedPlayer {
 
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
 
+/** What stands between a player and pressing Ready: no Discord linked, or
+ *  not in a voice channel on the server (when the voice requirement is on). */
+export type ReadyBlock = 'link_discord' | 'join_voice';
+
 export interface LobbySnapshot {
   id: string;
   phase: LobbyPhase;
-  players: NamedPlayer[];
+  players: (NamedPlayer & { readyBlock?: ReadyBlock | null })[];
   ready: string[];
   options: string[];
   votes: Record<string, number>;
@@ -72,6 +76,8 @@ export interface StateSnapshot {
   timeout?: { until: string; offenses: number } | null;
   /** The Discord step still missing before the viewer may queue. */
   queueBlock?: 'link_discord' | 'join_discord' | null;
+  /** The step still missing before the viewer may press Ready. */
+  readyBlock?: ReadyBlock | null;
 }
 
 export interface SpectateInfo {
@@ -175,6 +181,44 @@ export interface LiveEvent {
   value: number;
 }
 
+/** What the game is doing, from the plugin's one-second tracker, plus when
+ *  it began (epoch ms) so a pause countdown can run against our clock. */
+export interface LivePhase {
+  state: 'live' | 'paused' | 'readyup' | 'roundover' | 'loading';
+  /** Who is charged for a pause; null for a disconnect pause, an admin, or any
+   *  state that is not a pause. */
+  team: 'a' | 'b' | null;
+  /** Seconds a pause may last, 0 for no ceiling. */
+  limit: number;
+  leave: boolean;
+  /** Rostered players not yet ready, during a ready-up. */
+  unready: string[];
+  sinceMs: number;
+}
+export interface MatchReadyup {
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds to go live, null while still open. */
+  seconds: number | null;
+  lastUnready: string[];
+  lastUnreadyNames: string[];
+  players: { steamid: string; name: string; seconds: number }[];
+}
+export interface SlowToReady {
+  steamid: string; name: string; readyups: number; timesLast: number; totalSeconds: number; avgSeconds: number;
+}
+export interface MatchPause {
+  team: 'a' | 'b' | null;
+  leave: boolean;
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds, null while still open. */
+  seconds: number | null;
+}
 export interface LiveMatch {
   id: number;
   campaign: string;
@@ -197,6 +241,7 @@ export interface LiveMatch {
    *  is distinguishable from six small ones. */
   events: LiveEvent[];
   spectate?: SpectateInfo | null;
+  phase?: LivePhase | null;
 }
 
 export interface MatchDemo {
@@ -468,9 +513,11 @@ export interface AdminOverview {
     forecast: Forecast | null;
   }[];
   servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
+  /** Across every counted match: who is habitually the one holding up the ready-up. */
+  slowToReady: SlowToReady[];
 }
 
 export interface AdminSetting {

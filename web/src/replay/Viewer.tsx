@@ -96,7 +96,7 @@ export function Viewer(
     seekMs?: number;
   },
 ) {
-  const { header, frames, closed, tooNew, error } = useReplaySource(spec);
+  const { header, frames, closed, phase, tooNew, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live, closed });
 
@@ -360,6 +360,8 @@ export function Viewer(
           counts={counts}
           live={live}
           closed={closed}
+          phase={phase}
+          names={names}
           toggles={toggles}
           toggle={toggle}
           theater={theaterChip}
@@ -455,6 +457,8 @@ export function Viewer(
           zoom={camera.cam.zoom}
           live={live}
           closed={closed}
+          phase={phase}
+          names={names}
         />
       </div>
     );

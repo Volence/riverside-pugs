@@ -48,6 +48,7 @@ bool g_bPauseSeen;            // whether the game was paused on the previous tic
 float g_fPauseStarted;        // engine time the current pause began
 float g_fPauseHeld;           // seconds the ceiling clock has been held while a player is absent
 int g_iPauseWarned;           // last warning threshold announced, in seconds remaining
+char g_sPhaseLast[320];       // last PHASE fields sent, so a line goes out on change only (see the phase section)
 
 void PauseInit()
 {
@@ -62,7 +63,11 @@ void PauseInit()
 	// before its callback and can refuse the pause without forking it.
 	AddCommandListener(Listener_PugPause, "sm_pause");
 
-	CreateTimer(1.0, Timer_PauseClock, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+	// No TIMER_FLAG_NO_MAPCHANGE: PauseInit runs once, at plugin start, so a
+	// timer killed by the first changelevel never came back and neither the
+	// budget nor the ceiling was enforced from map 2 onward. The phase tracker
+	// below rides on this clock too and has to run on every map.
+	CreateTimer(1.0, Timer_PauseClock, _, TIMER_REPEAT);
 }
 
 /** A new campaign. Called from the same match reset as LeaveReset, which is
@@ -78,6 +83,7 @@ void PauseReset()
 	g_fPauseStarted = 0.0;
 	g_fPauseHeld = 0.0;
 	g_iPauseWarned = 0;
+	g_sPhaseLast[0] = '\0';
 }
 
 int PauseLimit()
@@ -154,6 +160,16 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
  */
 public Action Timer_PauseClock(Handle timer)
 {
+	PauseClockTick();
+	// After the bookkeeping on purpose: the tick that first sees the game
+	// paused is the one that decides who owns the pause, and the PHASE line
+	// that announces it has to carry that owner.
+	PhaseTick();
+	return Plugin_Continue;
+}
+
+static void PauseClockTick()
+{
 	bool paused = LeaveRotoblinPaused();
 
 	if (paused && !g_bPauseSeen)
@@ -186,7 +202,7 @@ public Action Timer_PauseClock(Handle timer)
 			}
 			EmitPug("PAUSE team=%d used=%d limit=%d", g_iPauseOwner, g_iPauseUsed[g_iPauseOwner], PauseLimit());
 		}
-		return Plugin_Continue;
+		return;
 	}
 
 	if (!paused)
@@ -197,12 +213,12 @@ public Action Timer_PauseClock(Handle timer)
 			g_iPauseOwner = 0;
 			g_iPausePendingTeam = 0;
 		}
-		return Plugin_Continue;
+		return;
 	}
 
 	// Paused, and we have seen it before: run the ceiling.
 	int ceiling = g_cvPauseSeconds.IntValue;
-	if (ceiling <= 0 || g_iPauseOwner == 0) return Plugin_Continue;
+	if (ceiling <= 0 || g_iPauseOwner == 0) return;
 
 	// The clock does not run while a rostered player is actually away. A
 	// player pause that a disconnect lands in the middle of must not expire
@@ -210,7 +226,7 @@ public Action Timer_PauseClock(Handle timer)
 	if (LeaveAnyAbsent())
 	{
 		g_fPauseHeld += 1.0;
-		return Plugin_Continue;
+		return;
 	}
 
 	int left = ceiling - RoundToFloor(GetEngineTime() - g_fPauseStarted - g_fPauseHeld);
@@ -226,7 +242,7 @@ public Action Timer_PauseClock(Handle timer)
 		LeaveUnpauseNow();
 		g_bPauseSeen = false;
 		g_iPauseOwner = 0;
-		return Plugin_Continue;
+		return;
 	}
 
 	// Announced once each, so nobody is surprised by the game unfreezing.
@@ -239,7 +255,7 @@ public Action Timer_PauseClock(Handle timer)
 			break;
 		}
 	}
-	return Plugin_Continue;
+	return;
 }
 
 /** STATUS lines for sm_pug_status. */
@@ -252,4 +268,98 @@ void PauseStatus()
 		PrintToServer("pause active owner=%d elapsed=%.0f held=%.0f",
 			g_iPauseOwner, GetEngineTime() - g_fPauseStarted, g_fPauseHeld);
 	}
+}
+
+// ---------- phase: what the game is doing, for the live page ----------
+//
+// The live page draws frames, and there are none during a pause, a ready-up,
+// a scoreboard or a map load: it sat on the last frame and read as frozen.
+// This names the gap. One word, recomputed every second on the clock above,
+// sent as a PHASE line on every change and repeated on every HEARTBEAT so a
+// lost datagram is corrected within thirty seconds. Cosmetic on the wire, but
+// the backend also builds its pause ledger from the paused transitions, which
+// is what an admin reads when one team complains about the other's pausing.
+
+
+/** Paused is checked first because Rotoblin's unpause flow raises the ready
+ *  panel, so IsInReady is true during a pause as well. */
+static void PhaseCurrent(char[] out, int len)
+{
+	if (LeaveRotoblinPaused()) { strcopy(out, len, "paused"); return; }
+	if (InReadyUp()) { strcopy(out, len, "readyup"); return; }
+	if (g_fRoundLiveAt > 0.0 && !g_bRoundEnded) { strcopy(out, len, "live"); return; }
+	if (g_bRoundEnded) { strcopy(out, len, "roundover"); return; }
+	// A new map before its ready-up has engaged: players still loading in.
+	strcopy(out, len, "loading");
+}
+
+/** The phase fields under `key` (PHASE uses state=, HEARTBEAT uses phase=).
+ *  A pause also says who is charged (1 = a, 2 = b, 0 = nobody: a disconnect
+ *  pause or an admin), the ceiling in seconds (0 = none), and whether the
+ *  leave module called it. */
+void PhaseFields(const char[] key, char[] out, int len)
+{
+	char state[16];
+	PhaseCurrent(state, sizeof(state));
+	if (StrEqual(state, "paused"))
+	{
+		Format(out, len, "%s=%s team=%d limit=%d leave=%d",
+			key, state, g_iPauseOwner, g_cvPauseSeconds.IntValue, g_bLeavePaused ? 1 : 0);
+	}
+	else if (StrEqual(state, "readyup"))
+	{
+		// Who everyone is waiting on: rostered, in game, not readied. The
+		// backend charges the seconds between reports to these players and
+		// remembers the last roster that named anyone as who readied last.
+		char ids[MAX_ROSTER * 19];
+		PhaseUnready(ids, sizeof(ids));
+		Format(out, len, "%s=%s unready=%s", key, state, ids);
+	}
+	else
+	{
+		Format(out, len, "%s=%s", key, state);
+	}
+}
+
+/** Comma-separated steamids of rostered, connected players who have not
+ *  readied. Empty when readyup's per-player native is not there. */
+static void PhaseUnready(char[] out, int len)
+{
+	out[0] = '\0';
+	if (!g_bReadyUpAvailable) return;
+	if (GetFeatureStatus(FeatureType_Native, "IsReady") != FeatureStatus_Available) return;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
+		int slot = g_iClientRoster[c];
+		if (slot < 0 || g_sRosterId[slot][0] == '\0') continue;
+		if (IsReady(c)) continue;
+		if (out[0] != '\0') StrCat(out, len, ",");
+		StrCat(out, len, g_sRosterId[slot]);
+	}
+}
+
+/** Once a second from Timer_PauseClock. Emits only when the fields change,
+ *  which during a ready-up means every time someone readies. */
+void PhaseTick()
+{
+	if (g_State == MS_None)
+	{
+		g_sPhaseLast[0] = '\0';
+		return;
+	}
+	char fields[320];
+	PhaseFields("state", fields, sizeof(fields));
+	if (StrEqual(fields, g_sPhaseLast)) return;
+	strcopy(g_sPhaseLast, sizeof(g_sPhaseLast), fields);
+	EmitPug("PHASE %s", fields);
+}
+
+/** From OnMapEnd. The next PhaseTick is a map load away, and until then the
+ *  page would keep saying "round over" about a map that is gone. */
+void PhaseMapEnd()
+{
+	if (g_State == MS_None) return;
+	strcopy(g_sPhaseLast, sizeof(g_sPhaseLast), "state=loading");
+	EmitPug("PHASE state=loading");
 }
