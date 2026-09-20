@@ -192,19 +192,14 @@ export function Leaderboard({ me }: { me: string | null }) {
             <Empty>No rated players yet.</Empty>
           ) : (
             <>
-            {/* What every stat column means. Not a display preference: the two
-                answer different questions and disagree about who is best, so
-                the table says which one it is currently answering. */}
+            {/* Which measure every stat column is showing. The labels carry it;
+                a paragraph explaining what a median is does not belong on a
+                page whose readers already sort this table by twenty columns. */}
             <Tabs
               active={measure}
               onSelect={(k) => setMeasure(k as StatMeasure)}
               tabs={[...STAT_MEASURE_TABS]}
             />
-            <p class="muted lb__measure">
-              {measure === 'median'
-                ? 'Stat columns are a median over the matches that measured them, so a long season does not beat a good one.'
-                : 'Stat columns are season totals, which mostly reflect how many matches each player has turned up to.'}
-            </p>
             <div class={`table-wrap lb${sort.key === 'sr' && sort.desc && ranked.length > 0 ? ' lb--ranked' : ''}`}>
               <table>
                 <thead>

@@ -1936,19 +1936,21 @@ describe('leaderboard measure', () => {
     Array.from(document.querySelectorAll('tbody tr')).map(
       (tr) => tr.querySelectorAll('td')[7]?.textContent,
     );
+  const tableReady = () =>
+    waitFor(() => expect(document.querySelectorAll('tbody tr').length).toBe(2));
 
   it('shows the per-match median by default, not the season total', async () => {
     render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getByText(/median over the matches/i)).toBeTruthy());
+    await tableReady();
+    expect(screen.getByRole('tab', { name: 'Per match' }).getAttribute('aria-selected')).toBe('true');
     expect(skeetCells()).toEqual(['3', '8']);
   });
 
   it('switches every stat column to season totals on the Totals tab', async () => {
     render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getByText(/median over the matches/i)).toBeTruthy());
+    await tableReady();
     fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
-    await waitFor(() => expect(screen.getByText(/season totals/i)).toBeTruthy());
-    expect(skeetCells()).toEqual(['60', '40']);
+    await waitFor(() => expect(skeetCells()).toEqual(['60', '40']));
   });
 
   it('reorders the table when the measure changes, because the two disagree', async () => {
@@ -1966,7 +1968,7 @@ describe('leaderboard measure', () => {
 
   it('carries the other measure in the cell title so it can be read without switching', async () => {
     render(<Leaderboard me={null} />);
-    await waitFor(() => expect(screen.getByText(/median over the matches/i)).toBeTruthy());
+    await tableReady();
     const cell = document.querySelectorAll('tbody tr')[0].querySelectorAll('td')[7];
     expect(cell.getAttribute('title')).toBe('60 over 20 matches');
   });

@@ -1079,11 +1079,6 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 }
 .lb td.is-dim { opacity: 0.35; }
 
-/* One line under the measure tabs saying what the stat columns are counting.
-   Sits between the tabs and the table's own sticky header, so it needs the
-   bottom margin to keep off it. */
-.lb__measure { margin: var(--sp-2) 0 var(--sp-3); font-size: 0.85rem; }
-
 /* The board is two axes of scrolling at once and used to handle neither.
    Twenty-odd stat columns run off the right, and forty-odd rows run off the
    bottom, so the header row scrolled away after six rows and the horizontal
