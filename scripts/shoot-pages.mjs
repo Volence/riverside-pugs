@@ -9,7 +9,7 @@ const PORT = 9340;
 const BASE = process.env.SHOOT_BASE ?? 'http://localhost:5173';
 const OUT = 'shots';
 const ROUTES = [
-  ['home', '/'], ['live', '/live'], ['leaderboard', '/leaderboard'],
+  ['home', '/'], ['live', '/live'], ['streams', '/streams'], ['leaderboard', '/leaderboard'],
   ['matches', '/matches'], ['match-9001', '/match/9001'], ['campaigns', '/maps'],
   ['map-caves', '/map/l4d_vs_smalltown01_caves'],
   ['profile', '/player/76561198000000001'],

@@ -1899,7 +1899,9 @@ tbody tr.is-lifted td { opacity: 0.55; }
 /* One line at the top of Live. Deliberately not sticky: that page is already a
  * long scroll with a replay viewer per game. */
 .streamstrip {
-  display: flex; align-items: center; gap: var(--sp-2);
+  /* inline-flex so the bar hugs its text instead of stretching the full page
+   * width, where a one-line strip reads as an empty band. */
+  display: inline-flex; align-items: center; gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-3);
   border: 1px solid var(--border);
