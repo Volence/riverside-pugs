@@ -1048,7 +1048,6 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   /* Opaque, or the scrolling numbers show through underneath. */
   background: var(--surface);
 }
-.lb thead .lb__rank, .lb thead .lb__pcol, .lb thead .lb__sr { z-index: 3; }
 .lb .lb__rank { left: 0; width: var(--lb-rank-w); min-width: var(--lb-rank-w); }
 .lb .lb__pcol {
   left: var(--lb-rank-w);
@@ -1075,6 +1074,38 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
   background: color-mix(in srgb, var(--rating) 8%, var(--surface));
 }
 .lb td.is-dim { opacity: 0.35; }
+
+/* The board is two axes of scrolling at once and used to handle neither.
+   Twenty-odd stat columns run off the right, and forty-odd rows run off the
+   bottom, so the header row scrolled away after six rows and the horizontal
+   scrollbar sat at the very bottom of the whole table. Scrolling sideways to
+   find a stat meant paging to the end of the board, dragging blind with no
+   column labels in view, then paging back up to read the top ten under a
+   header that was no longer there (owner, 2026-09-19).
+
+   Capping the box fixes both at once. The rows scroll inside it rather than
+   with the page, which keeps the horizontal scrollbar pinned to the bottom
+   edge of something viewport-sized instead of the bottom of a long table, and
+   it gives `thead` a scrollport to stick to. Sticky needs that: the wrap is
+   already a scroll container on both axes (a computed `overflow-x: auto`
+   forces `overflow-y` to match), so `top: 0` here resolves against the wrap
+   and never against the viewport, whatever the page does above it. */
+.lb.table-wrap { max-height: calc(100vh - 6rem); overflow: auto; }
+.lb thead th {
+  position: sticky;
+  top: 0;
+  /* thead cells paint over scrolling rows, so they cannot be transparent.
+     The row's own bottom border travels with it under `border-collapse:
+     separate`, which is what `.lb` already sets for the pinned columns. */
+  background: var(--surface);
+}
+/* Three sticky layers, and the order matters at the corner. Body cells in the
+   pinned columns (z 2) pass under the header; plain header cells (z 3) pass
+   under the pinned ones; the corner cells are both at once and have to beat
+   both, or the rank, name and SR labels scroll out sideways underneath the
+   stat labels. */
+.lb thead th { z-index: 3; }
+.lb thead .lb__rank, .lb thead .lb__pcol, .lb thead .lb__sr { z-index: 4; }
 /* A table with no rank column (profile by-map, map page players). Without
    this the name pinned 3.25rem in, and the stats scrolled through the gap.
    Out-specifies the phone override below, so it holds at every width. */
