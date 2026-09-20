@@ -200,6 +200,34 @@ and the file name lands in the disconnect reason. It does not work for this prob
 - A force-listed file drops the client at signon, before pure ever runs, so the two cannot be
   combined to get attribution for the same file.
 
+## Known gap: per-map sound overrides (proven 2026-09-19, accepted)
+
+The L4D1 sound emitter loads `maps/<mapname>_level_sounds.txt` as overrides that REPLACE
+any entry the manifest and soundscripts defined. Stock maps ship no such file, so a client
+can add one. Proven by ear: a new loose
+`maps/l4d_vs_hospital01_apartment_level_sounds.txt` redefining `Pistol.Fire` to a witch
+shriek played the shriek, with all 651 files forced and no rejection. The same file could
+point gunfire at a new quiet wav.
+
+File forcing cannot close it. Each step was tested on the local server:
+
+1. The engine will not force a path the server lacks: `ForceExactFile` returns 1 but the
+   string never enters the `downloadables` table.
+2. Give the server its own copy and force that, and the client's modified copy IS rejected
+   by name. But a client with NO such file, which is every legitimate player, is rejected
+   too.
+3. `sv_downloadurl` does not rescue it. L4D1 has no `sv_allowdownload`, and with a working
+   HTTP download URL the client made no request at all: the consistency check runs before
+   any download and the client drops within two seconds.
+
+So the only way to make it pass would be every player installing our per-map files by hand,
+which is the opposite of "nothing asked of players". Accepted as a gap. It needs a
+hand-written file per map, no downloadable silencer pack works this way, and everything
+such packs do use (replacement wavs, edited soundscripts, `soundmixers.txt`) is forced. The
+manifest-insert route (see group 3) is the same class and is likewise open; it was not
+tested by ear because this result makes it moot. Do not describe either route on the help
+page.
+
 ## The plugin, Phase 2
 
 `l4d_consistency.sp` grows from "one file by cvar" to "the list":
