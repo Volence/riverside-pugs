@@ -93,7 +93,7 @@ describe('stats routes', () => {
     }
   });
 
-  it('profile standings: top-5 places per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
+  it('profile standings: a place per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
     // Three matches each, so the badge gate has to be down at three for any
     // of this to rank at all. The shipped default is higher; see the two
     // tests below for what it is and what it does.
@@ -106,16 +106,34 @@ describe('stats routes', () => {
     seedStats(db, ids[0], ME, { times_skeeted: 50, boomer_spawns: 4, boom_successes: 4 });
 
     const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
-    expect(body.standings.skeets).toEqual({ rank: 2, of: 8 });
-    // Every player has the same commons, so all eight share first.
-    expect(body.standings.ck).toEqual({ rank: 1, of: 8 });
-    expect(body.standings.boomer_rate).toEqual({ rank: 1, of: 1 });
+    // ME is on 2 skeets a match: one player above, five level including ME,
+    // two below. Midrank puts that at (2 + 5/2) / 8.
+    expect(body.standings.skeets).toEqual({ rank: 2, of: 8, pct: 56 });
+    // Every player has the same commons, so all eight share first. An
+    // undifferentiated field is the 50th percentile, not the 100th: sharing
+    // first place with everyone is not evidence of being good at it.
+    expect(body.standings.ck).toEqual({ rank: 1, of: 8, pct: 50 });
+    // Only ME has drawn a boomer, so the field is one player: rank 1 of 1 and
+    // a percentile against nobody, which the UI suppresses rather than shows.
+    expect(body.standings.boomer_rate).toEqual({ rank: 1, of: 1, pct: 50 });
     expect(body.standings).not.toHaveProperty('tongue_cuts');
     expect(body.standings).not.toHaveProperty('times_skeeted');
     expect(body.standings).not.toHaveProperty('ff');
-    // Rank 7 of 8 in skeets is outside the top five.
+  });
+
+  // Was: "rank 7 of 8 is outside the top five" and returned nothing at all.
+  // Truncating server side meant #6 of 40 and #39 of 40 were the same absent
+  // key, so a profile could not tell a near miss from a weakness. The top five
+  // still gets the badge, but that is now the page's decision to make.
+  it('profile standings report a place outside the top five rather than staying silent', async () => {
+    setSetting(db, 'standing_min_games', '3');
+    const ids = [1, 2, 3].map(() => playCompletedMatch(db, 'b'));
+    for (const m of ids) {
+      IDS.forEach((id, i) => seedStats(db, m, id, { skeets: i === 1 ? 3 : i <= 5 ? 2 : 1 }));
+    }
+
     const low = (await app.inject({ method: 'GET', url: `/api/players/${IDS[7]}` })).json();
-    expect(low.standings.skeets).toBeUndefined();
+    expect(low.standings.skeets).toEqual({ rank: 7, of: 8, pct: 13 });
   });
 
   it('profile standings are empty for a provisional player', async () => {

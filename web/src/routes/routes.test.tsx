@@ -451,6 +451,54 @@ describe('Profile', () => {
     render(<Profile steamid="1" />);
     expect(await screen.findByText(/Dead Center 2 · Streets/)).toBeTruthy();
   });
+
+  describe('standings', () => {
+    const withStandings = (standings: Record<string, { rank: number; of: number; pct: number }>) => ({
+      ...profile,
+      totals: { ...profile.totals, games: 12, siDamage: 4800, commonKills: 1200 },
+      statTotals: {},
+      statDefs: [],
+      standings,
+    });
+
+    it('shows a badge for a top-five place and no percentile beside it', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 2, of: 23, pct: 96 } }));
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('SI dmg / match')).toBeTruthy());
+      expect(screen.getByText('#2')).toBeTruthy();
+      expect(screen.queryByText(/percentile/)).toBeNull();
+    });
+
+    // The point of the change: #6 of 23 used to be an absent key, so the tile
+    // said 400 and nothing else, and a reader could not tell it from #22.
+    it('shows a percentile for a place outside the top five', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 6, of: 23, pct: 74 } }));
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('74th percentile, #6 of 23')).toBeTruthy());
+      expect(screen.queryByText('#6')).toBeNull();
+    });
+
+    it('says nothing about a place taken against a field of one', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 1, of: 1, pct: 50 } }));
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('SI dmg / match')).toBeTruthy());
+      expect(screen.queryByText(/percentile/)).toBeNull();
+    });
+
+    // playerStandings returns every metric now rather than the top five, so
+    // without a filter on the page this row lists the player's whole stat bag
+    // under a heading that promises their top five places.
+    it('keeps the other-places row to actual top-five places', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({
+        crowns: { rank: 3, of: 23, pct: 91 },
+        clears: { rank: 19, of: 23, pct: 20 },
+      }));
+      render(<Profile steamid="1" />);
+      const row = await screen.findByLabelText(/other top five places/i);
+      expect(within(row).getByText(/crowns/i)).toBeTruthy();
+      expect(within(row).queryByText(/clears/i)).toBeNull();
+    });
+  });
 });
 
 describe('skill stats display', () => {

@@ -431,14 +431,26 @@ export interface Profile {
   /** Per-map performance across every completed match. `stats` can be empty
    *  for matches played before per-map capture existed, while `games` is not. */
   byMap?: MapBreakdownRow[];
-  /** Top-five places this season among ranked players, ranked per match.
-   *  Keyed like the stat bag, plus `winrate` and `boomer_rate`. Empty for a
-   *  provisional player. */
+  /** Where this player stands this season among ranked players, per match, for
+   *  every metric they have scored in. Keyed like the stat bag, plus `winrate`
+   *  and `boomer_rate`. Empty for a provisional player. */
   standings?: Record<string, Standing>;
 }
 
-/** A place on this season's board: `rank` of `of` ranked players. Ties share. */
-export interface Standing { rank: number; of: number }
+/** A place on this season's board: `rank` of `of` ranked players. Ties share.
+ *
+ *  Carries every metric the player has scored in, not only their top-five
+ *  places. STANDING_TOP decides which of them earns a badge; the rest are
+ *  shown as a percentile, so #6 of 40 reads as a near miss rather than as
+ *  silence. */
+export interface Standing {
+  rank: number;
+  of: number;
+  /** Percentile rank, 0 to 100, by midrank so that a tied field lands at 50
+   *  rather than at either extreme. Meaningless at `of` 1 and suppressed
+   *  there: a sole qualifier is the whole distribution. */
+  pct: number;
+}
 
 /** Thrown for any non-OK response, carrying the status so callers can tell
  *  "not logged in" (401/403) and "no such thing" (404) apart from a real fault. */

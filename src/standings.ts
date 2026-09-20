@@ -24,10 +24,31 @@ export function standingMinGames(db: DB): number {
   return Number.isInteger(raw) && raw > 0 ? raw : STANDING_MIN_GAMES_DEFAULT;
 }
 
-/** How many places count as a standing worth showing on a profile. */
+/** How many places earn a rank BADGE on a profile. No longer what decides
+ *  whether a standing is returned at all: see playerStandings. */
 export const STANDING_TOP = 5;
 
-export interface Standing { rank: number; of: number }
+export interface Standing {
+  rank: number;
+  of: number;
+  /**
+   * Percentile rank against the same field, 0 to 100.
+   *
+   * The textbook formula, `(below + half of those level with you, self
+   * included) / of`, rather than anything derived from `rank` alone. Ties are
+   * the reason. Counting only those strictly below would put a player who
+   * leads a field where everyone is level at the 0th percentile, and
+   * `(of - rank) / (of - 1)` would put all of them at the 100th. Both are
+   * wrong about the same situation, which is common here: on a quiet season
+   * whole columns tie. The midrank puts that field at 50, which is what an
+   * undifferentiated field means, and leaves a clear leader of twenty at 98.
+   *
+   * Meaningless at `of` 1, where it is 50 by the same formula: a sole
+   * qualifier IS the distribution. The UI suppresses it rather than claiming
+   * a player is averagely good at something nobody else has done.
+   */
+  pct: number;
+}
 
 /** Fixed match_players columns that are achievements. `ff` is left out on
  *  purpose: topping friendly fire is not a standing anyone wants shown. */
@@ -35,7 +56,13 @@ const FIXED_KEYS = ['sidmg', 'sikill', 'ck', 'rev'] as const;
 
 /**
  * Where one player stands this season, among players past the badge gate
- * only, for every metric in which they place in the top STANDING_TOP.
+ * only, for every metric they have scored in.
+ *
+ * Every metric, not only the top five. Truncating here meant a player outside
+ * the top five was told nothing at all: #6 of 40 and #39 of 40 were both an
+ * absent key, and the profile could not tell a near miss from a weakness. The
+ * top five still gets the badge, but STANDING_TOP is now the UI's test for
+ * that and not this function's test for whether to answer at all.
  *
  * Counts are ranked PER MATCH, not as totals. A season total mostly ranks who
  * has played the most, which is the same reason the profile's tiles prefer
@@ -110,8 +137,13 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
   for (const [key, value] of Object.entries(mine)) {
     if (!(value > 0)) continue;
     const field = all.map((x) => x.m[key]).filter((v): v is number => v !== undefined);
-    const rank = 1 + field.filter((v) => v > value).length;
-    if (rank <= STANDING_TOP) out[key] = { rank, of: field.length };
+    const above = field.filter((v) => v > value).length;
+    const level = field.filter((v) => v === value).length;
+    out[key] = {
+      rank: 1 + above,
+      of: field.length,
+      pct: Math.round(100 * (field.length - above - level + level / 2) / field.length),
+    };
   }
   return out;
 }

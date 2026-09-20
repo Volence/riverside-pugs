@@ -397,6 +397,19 @@ export function deriveLiveStats(stats: Record<string, number>): Record<string, n
  */
 export const MIN_SURVIVAL_SAMPLE = 6;
 
+/**
+ * How many places earn a rank badge rather than a percentile.
+ *
+ * Must match STANDING_TOP in src/standings.ts, which cannot be imported here:
+ * that module reaches the database and the settings table, and web/tsconfig.json
+ * only admits leaf modules from the backend. Kept beside MIN_SURVIVAL_SAMPLE
+ * because it is the same kind of constant, a threshold for what to print.
+ *
+ * The server no longer truncates at this number, it only ranks. Deciding what a
+ * rank outside the top five looks like is this side's job.
+ */
+export const STANDING_TOP = 5;
+
 /** How to render a survival rate, given how many rounds it is over.
  *
  *  Three distinct cases, and conflating any two of them is what made this

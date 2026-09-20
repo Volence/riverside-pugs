@@ -1,7 +1,7 @@
 import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, STANDING_TOP, survivalNote, sortMapRows, type MapSort } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
@@ -290,11 +290,17 @@ function ProfileFigures(
 
   // Every other top-five place, best first, so a #1 in crowns is not lost
   // just because crowns has no tile.
+  //
+  // `rank <= STANDING_TOP` is now this side's job. playerStandings used to
+  // truncate to the top five and this list took whatever it returned; it now
+  // returns every metric the player has scored in, so without the filter this
+  // row would list all twenty-odd of them and stop meaning anything. The
+  // heading still says "top five places" and this is what keeps it true.
   const onTiles = new Set(tiles.map((t) => t.key));
   const labelOf = (k: string) =>
     STANDING_LABELS[k] ?? statDefs.find((d) => d.key === k)?.label ?? labelFor(k);
   const others = Object.entries(standings)
-    .filter(([k]) => !onTiles.has(k) && !DEAD_STAT_KEYS.has(k))
+    .filter(([k, sd]) => sd.rank <= STANDING_TOP && !onTiles.has(k) && !DEAD_STAT_KEYS.has(k))
     .sort(([ka, a], [kb, b]) => a.rank - b.rank || labelOf(ka).localeCompare(labelOf(kb)));
 
   return (

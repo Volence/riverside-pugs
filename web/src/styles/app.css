@@ -281,6 +281,10 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .figure__value--win { color: var(--win); }
 .figure__value--loss { color: var(--loss); }
 .figure__sub { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); color: var(--text-muted); }
+/* Where the figure places this season, for the figures that did not earn a
+   badge. Dimmer than the sub, which is the figure's own breakdown: this is a
+   comparison against other people and must not compete with the number. */
+.figure__place { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); color: var(--text-muted); opacity: 0.75; }
 .rankbadge {
   display: inline-block;
   margin-left: 0.5em;

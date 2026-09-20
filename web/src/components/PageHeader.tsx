@@ -1,4 +1,5 @@
 import type { Standing } from '../api';
+import { STANDING_TOP } from '../format';
 import type { ComponentChildren } from 'preact';
 
 /**
@@ -43,20 +44,33 @@ export function Figure(
     value: string | number;
     sub?: string;
     tone?: 'rating' | 'win' | 'loss';
-    /** A top-five place this season, shown as a badge beside the label. */
+    /** Where this figure places this season. A top-five place is a badge
+     *  beside the label; anything else becomes a percentile under the number,
+     *  because a figure with nothing beside it tells a reader only what they
+     *  scored and never whether that is any good. */
     standing?: Standing;
   },
 ) {
+  const place = standing ? placeText(standing) : null;
   return (
     <div class="figure">
       <p class="figure__label eyebrow">
         {label}
-        {standing && <RankBadge standing={standing} />}
+        {standing && standing.rank <= STANDING_TOP && <RankBadge standing={standing} />}
       </p>
       <p class={`figure__value num${tone ? ` figure__value--${tone}` : ''}`}>{value}</p>
       {sub && <p class="figure__sub">{sub}</p>}
+      {place && <p class="figure__place">{place}</p>}
     </div>
   );
+}
+
+/** Top five earns a badge and needs no second label. `of` 1 gets nothing: a
+ *  percentile against a field of one is not a comparison, and "#1 of 1" beside
+ *  it would be worse. */
+function placeText(s: Standing): string | null {
+  if (s.rank <= STANDING_TOP || s.of < 2) return null;
+  return `${s.pct}th percentile, #${s.rank} of ${s.of}`;
 }
 
 /** "#2" in a small medal. #1 is gold, the rest of the top five a quieter
