@@ -178,12 +178,12 @@ export function HowToPlay({ session }: { session: Session }) {
               do not, you are in the wrong place.
             </li>
             <li>
-              Drag everything from inside the zip into that folder, and click{' '}
-              <strong>Yes</strong> when it asks about replacing files. When it is done you will
-              have a new <code>left4dead_dlc4</code> folder sitting next to <code>left4dead</code>.
+              Open the zip you downloaded, then drag everything inside it into that folder, and
+              click <strong>Yes</strong> when it asks about replacing files. When it is done you
+              will have a new <code>left4dead_dlc4</code> folder sitting next to <code>left4dead</code>.
             </li>
             <li>
-              <strong>Turn your Shader Detail down, or these maps will crash your game.</strong>{' '}
+              <strong class="howto-warn">Turn your Shader Detail down, or these maps will crash your game.</strong>{' '}
               In-game: <strong>Options</strong>, then <strong>Video</strong>, then{' '}
               <strong>Advanced</strong>, then <strong>Shader Detail</strong>, set to Medium or
               lower. This is the single most common reason someone drops mid match after
