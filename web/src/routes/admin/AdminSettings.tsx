@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, ApiError, type AdminSetting } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Panel } from '../../components/bits';
+import { useAction } from './useAction';
 
 export function AdminSettings() {
   const { data, reload } = useFetch((s) => adminApi.settings(s), []);
@@ -14,11 +15,40 @@ export function AdminSettings() {
           <h3>{g}</h3>
           <div class="admin-settings">
             {data.settings.filter((s) => s.group === g).map((s) => (
-              <SettingRow key={s.key} setting={s} campaigns={data.campaigns} onSaved={reload} />
+              <SettingRow key={s.key} setting={s} campaigns={data.campaigns}
+                serversMissingDlc4={data.serversMissingDlc4} onSaved={reload} />
             ))}
           </div>
         </Panel>
       ))}
+    </div>
+  );
+}
+
+/** "Chicago", "Chicago and Riverside #3", "Chicago, Riverside #3, and
+ *  Riverside #4": readable regardless of how many servers are missing the
+ *  pack, since a fleet this size is exactly where it stops being one box. */
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
+/** Named next to the Campaign pool checkboxes, because that is exactly where
+ *  an admin notices a campaign is missing and has no way to tell why. */
+function MissingDlc4Notice({ servers, onChecked }: { servers: string[]; onChecked: () => void }) {
+  const { busy, error, run } = useAction(onChecked);
+  if (servers.length === 0) return null;
+  return (
+    <div class="admin-setting__notice">
+      <p>
+        {listNames(servers)} {servers.length === 1 ? 'needs' : 'need'} the L4D2 mappack.
+        The new L4D2 campaigns stay out of the pool until every server has it.
+      </p>
+      <button class="btn" type="button" disabled={busy} onClick={() => run(() => adminApi.dlc4Check())}>
+        Re-check servers
+      </button>
+      {error && <span class="error">{error}</span>}
     </div>
   );
 }
@@ -30,8 +60,9 @@ function initial(s: AdminSetting): string {
   return s.value;
 }
 
-function SettingRow({ setting: s, campaigns, onSaved }: {
-  setting: AdminSetting; campaigns: { slug: string; name: string }[]; onSaved: () => void;
+function SettingRow({ setting: s, campaigns, serversMissingDlc4, onSaved }: {
+  setting: AdminSetting; campaigns: { slug: string; name: string }[];
+  serversMissingDlc4: string[]; onSaved: () => void;
 }) {
   const [value, setValue] = useState(initial(s));
   const [pool, setPool] = useState<string[]>(() => {
@@ -72,15 +103,18 @@ function SettingRow({ setting: s, campaigns, onSaved }: {
       break;
     case 'campaigns':
       input = (
-        <div class="admin-checks">
-          {campaigns.map((c) => (
-            <label key={c.slug}>
-              <input type="checkbox" checked={pool.includes(c.slug)}
-                onChange={(e) => setPool((e.target as HTMLInputElement).checked ? [...pool, c.slug] : pool.filter((x) => x !== c.slug))} />
-              {c.name}
-            </label>
-          ))}
-        </div>
+        <>
+          <div class="admin-checks">
+            {campaigns.map((c) => (
+              <label key={c.slug}>
+                <input type="checkbox" checked={pool.includes(c.slug)}
+                  onChange={(e) => setPool((e.target as HTMLInputElement).checked ? [...pool, c.slug] : pool.filter((x) => x !== c.slug))} />
+                {c.name}
+              </label>
+            ))}
+          </div>
+          <MissingDlc4Notice servers={serversMissingDlc4} onChecked={onSaved} />
+        </>
       );
       break;
     default:

@@ -41,7 +41,7 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { resolveServerBySource } from './serverPool.js';
+import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
@@ -97,6 +97,10 @@ export interface ServerDeps {
   /** Overrides where the campaign uploader reads the enforced file list from.
    *  Injected in tests only; production reads the committed cfg. */
   consistencyListPath?: string;
+  /** Probes one server for the dlc4 mappack, for the admin's dlc4-check
+   *  route. Injected in tests so the check never dials a real box; defaults
+   *  to the real serverHasDlc4 otherwise. */
+  dlc4Probe?: (server: ServerRow) => Promise<boolean>;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -816,7 +820,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
-  await app.register(adminRoutes, { db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs });
+  await app.register(adminRoutes, {
+    db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
+    dlc4Probe: deps.dlc4Probe,
+  });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
   await app.register(campaignRoutes, {
