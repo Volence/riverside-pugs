@@ -153,3 +153,43 @@ describe('admin players', () => {
     expect((await get('/api/me', admin)).json().isAdmin).toBe(true);
   });
 });
+
+describe('admin merge', () => {
+  it('previews a merge without changing anything', async () => {
+    const res = await post(`/api/admin/players/${P3}/merge`, admin, { into: P2, dryRun: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().plan.into).toBe(P2);
+    expect(getPlayer(db, P3)).toBeTruthy();
+  });
+
+  it('merges, leaves an alias, and writes an audit entry', async () => {
+    const res = await post(`/api/admin/players/${P3}/merge`, admin, { into: P2 });
+    expect(res.statusCode).toBe(200);
+    expect(getPlayer(db, P3)).toBeUndefined();
+
+    const detail = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(detail.aliases.map((a: any) => a.steamid)).toEqual([P3]);
+
+    const audit = (await get('/api/admin/audit', admin)).json();
+    expect(audit.actions.some((r: any) => r.action === 'merge_player' && r.target === P3)).toBe(true);
+  });
+
+  it('refuses a merge into an account that does not exist, or into itself', async () => {
+    expect((await post(`/api/admin/players/${P3}/merge`, admin, { into: '76561199999999999' })).statusCode).toBe(400);
+    expect((await post(`/api/admin/players/${P3}/merge`, admin, { into: P3 })).statusCode).toBe(400);
+    expect((await post(`/api/admin/players/${P3}/merge`, admin, {})).statusCode).toBe(400);
+    expect(getPlayer(db, P3)).toBeTruthy();
+  });
+
+  it('un-merges: removing the alias frees the id to be its own account again', async () => {
+    await post(`/api/admin/players/${P3}/merge`, admin, { into: P2 });
+    const res = await post(`/api/admin/players/${P3}/unalias`, admin);
+    expect(res.statusCode).toBe(200);
+    expect((await get(`/api/admin/players/${P2}`, admin)).json().aliases).toEqual([]);
+  });
+
+  it('is admin-only, like every other action here', async () => {
+    expect((await post(`/api/admin/players/${P3}/merge`, user, { into: P2 })).statusCode).toBe(403);
+    expect((await post(`/api/admin/players/${P3}/unalias`, user)).statusCode).toBe(403);
+  });
+});

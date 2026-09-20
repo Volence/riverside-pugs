@@ -1,4 +1,6 @@
 import type { DB } from '../db.js';
+import { aliasesOf } from '../aliases.js';
+import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { displaySr } from '../rating.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
@@ -162,6 +164,14 @@ export function playerDetail(db: DB, steamid: string) {
     // Connects that ended before the player was in game, on a map that forced
     // files: likely a consistency rejection, possibly a cancelled load.
     signonDrops: signonDropSummary(db, steamid),
+    // Second accounts folded into this one. Shown so an admin can see at a
+    // glance that a player has been merged, and undo it.
+    aliases: aliasesOf(db, steamid),
+    // Where this account connects from, and any other account seen on the
+    // same connection. Evidence for the merge tool above, never a verdict:
+    // a VPN, a shared house and two siblings all look the same here.
+    networks: networksOf(db, steamid),
+    sharesAddressWith: sharesAddressWith(db, steamid),
     timeout: (() => {
       const t = activeTimeout(db, steamid);
       return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;
@@ -172,4 +182,56 @@ export function playerDetail(db: DB, steamid: string) {
 export function addNote(db: DB, steamid: string, authorId: string, text: string): void {
   db.prepare('INSERT INTO player_notes (player_id, author_id, text, created_at) VALUES (?, ?, ?, ?)')
     .run(steamid, authorId, text, new Date().toISOString());
+}
+
+export interface PublicBan {
+  steamid: string;
+  name: string;
+  reason: string;
+  createdAt: string;
+  expiresAt: string | null;
+  /** No expiry: the ban does not end on its own. */
+  permanent: boolean;
+  /** Still in force right now. A lifted or expired ban stays on the list. */
+  active: boolean;
+  bannedByName: string | null;
+  liftedByName: string | null;
+  liftedAt: string | null;
+}
+
+/**
+ * The ban list as anyone may read it, signed in or not.
+ *
+ * Public on purpose. A ban list nobody outside the admin team can see asks
+ * players to take enforcement on trust, and the reason text is already shown
+ * to the person banned, so publishing it tells them nothing new. What is NOT
+ * here is everything else on a player's admin page: notes, reports, penalty
+ * history, connect drops. Those were never shown to anyone and this route is
+ * not a way to reach them.
+ *
+ * Lifted and expired bans stay listed. A record that quietly deletes its
+ * mistakes is not a record, and "unbanned by, and when" is the part that
+ * shows the process works.
+ */
+export function publicBans(db: DB, q = '', now = new Date()): PublicBan[] {
+  const like = `%${q.trim().toLowerCase()}%`;
+  const rows = db.prepare(
+    `SELECT b.player_id AS steamid, p.name AS name, b.reason, b.created_at AS createdAt,
+            b.expires_at AS expiresAt, b.lifted_at AS liftedAt,
+            pc.name AS bannedByName, pl.name AS liftedByName
+       FROM bans b
+       LEFT JOIN players p  ON p.steamid  = b.player_id
+       LEFT JOIN players pc ON pc.steamid = b.created_by
+       LEFT JOIN players pl ON pl.steamid = b.lifted_by
+      WHERE (? = '' OR b.player_id = ? OR LOWER(COALESCE(p.name, '')) LIKE ?)
+      ORDER BY b.id DESC
+      LIMIT 500`,
+  ).all(q.trim(), q.trim(), like) as (Omit<PublicBan, 'permanent' | 'active'> & { name: string | null })[];
+
+  return rows.map((r) => ({
+    ...r,
+    name: r.name ?? r.steamid,
+    permanent: r.expiresAt === null,
+    active: r.liftedAt === null && (r.expiresAt === null || Date.parse(r.expiresAt) > now.getTime()),
+  }));
 }

@@ -3,6 +3,8 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { SelfStartedMatches } from '../src/selfStarted.js';
 import type { LogEvent } from '../src/logParse.js';
+import { subscribeAdminEvents } from '../src/adminFeed.js';
+import { addAlias, canonicalise } from '../src/aliases.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const MAP = 'l4d_vs_hospital01_apartment';
@@ -54,6 +56,95 @@ async function burst(n = 2) {
   adopter.handle(end(n));
   await vi.waitFor(() => expect(setIds.length).toBe(1));
 }
+
+// Match 65 (2026-09-20): a player connected on a second Steam account that
+// had never signed in anywhere, and the plugin rostered both of his accounts.
+// Team B went to five, the account that never connected held a replay slot as
+// a permanently empty panel, the account that actually played fell off the end
+// of the eight the replay format carries, and both were rated, scoring his
+// team as a five-man side in four matches.
+//
+// Nothing in here refuses a roster wholesale: a roster line describes players
+// who are ON the server, and dropping one loses a real person's stats. What it
+// refuses is the one shape that cannot be legitimate, and it reports the rest.
+describe('SelfStartedMatches over-full teams', () => {
+  const problems: string[] = [];
+  let unsub: () => void;
+  beforeEach(() => {
+    problems.length = 0;
+    unsub?.();
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+  });
+
+  async function fullTeamB(): Promise<string[]> {
+    const members = ids(8);
+    adopter.handle(create(TOKEN, 8));
+    members.forEach((id, i) => adopter.handle(roster(id, i < 4 ? 'a' : 'b', `p${i}`)));
+    adopter.handle(end(8));
+    await vi.waitFor(() => expect(setIds.length).toBe(1));
+    return members;
+  }
+
+  it('commits an over-full burst rather than dropping anyone, and says so', async () => {
+    const members = ids(9);
+    adopter.handle(create(TOKEN, 9));
+    members.forEach((id, i) => adopter.handle(roster(id, i < 4 ? 'a' : 'b', `p${i}`)));
+    adopter.handle(end(9));
+    await vi.waitFor(() => expect(setIds.length).toBe(1));
+
+    // Everyone is rostered: the fifth player is really on the server and
+    // really scoring, and silently dropping them would lose that.
+    const n = db.prepare("SELECT COUNT(*) AS n FROM match_players WHERE match_id = 1 AND team = 'b'").get() as any;
+    expect(n.n).toBe(5);
+    expect(problems.join('\n')).toMatch(/team b/i);
+    expect(problems.join('\n')).toMatch(/5/);
+  });
+
+  it('refuses a late joiner onto a full team when that account has never signed in', async () => {
+    await fullTeamB();
+    const alt = '76561199861598482';
+    adopter.handle(roster(alt, 'b', 'mayhem', TOKEN, 2));
+
+    expect(db.prepare('SELECT 1 FROM match_players WHERE match_id = 1 AND player_id = ?').get(alt)).toBeUndefined();
+    // And no player row is conjured for it either, which is what gave the alt
+    // a rating of its own.
+    expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get(alt)).toBeUndefined();
+    expect(problems.join('\n')).toMatch(/mayhem/);
+  });
+
+  it('still allows a known player to sub onto a full team, and reports it', async () => {
+    await fullTeamB();
+    const sub = '76561198000000123';
+    upsertPlayer(db, { steamid: sub, name: 'sub', avatar: null }, [sub]); // admin => active
+
+    adopter.handle(roster(sub, 'b', 'sub', TOKEN, 2));
+    expect(db.prepare('SELECT 1 FROM match_players WHERE match_id = 1 AND player_id = ?').get(sub)).toBeTruthy();
+    expect(problems.join('\n')).toMatch(/sub/);
+  });
+
+  // The end of the story that started with match 65: once the two accounts
+  // are merged, the alt is not refused, it is simply the person. This is what
+  // makes the merge permanent rather than a nightly chore.
+  it('rosters a merged alt as the account it was merged into, not as a fifth player', async () => {
+    const members = await fullTeamB();
+    const alt = '76561199861598482';
+    addAlias(db, { steamid: alt, canonical: members[4], by: 'admin' });
+
+    // What server.ts does to every datagram before dispatching it.
+    adopter.handle(canonicalise(db, roster(alt, 'b', 'mayhem', TOKEN, 2)));
+
+    expect(db.prepare("SELECT COUNT(*) AS n FROM match_players WHERE match_id = 1 AND team = 'b'").get())
+      .toEqual({ n: 4 });
+    expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get(alt)).toBeUndefined();
+    expect(problems).toEqual([]);
+  });
+
+  it('says nothing when a late joiner lands on a team with room', async () => {
+    await burst();
+    adopter.handle(roster('76561199000000009', 'b', 'mayhem', TOKEN, 2));
+    expect(problems).toEqual([]);
+  });
+});
 
 describe('SelfStartedMatches', () => {
   it('adds a late joiner to a live match from a lone MATCH_ROSTER line', async () => {

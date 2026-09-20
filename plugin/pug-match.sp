@@ -4,11 +4,18 @@
 #include <sourcemod>
 #include <sdktools>
 #include <left4dhooks>
+// Optional, and feature-checked before every call in EmitClientNet: the
+// extension needs a GeoLite2 database beside it and is simply absent on a box
+// that has not been given one. REQUIRE_EXTENSIONS off means the plugin still
+// loads there; without this it would refuse to start at all.
+#undef REQUIRE_EXTENSIONS
+#include <geoip>
+#define REQUIRE_EXTENSIONS
 #undef REQUIRE_PLUGIN
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.2.0"
+#define PLUGIN_VERSION "0.3.0"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -326,6 +333,13 @@ bool g_bRplSampling;
  *  falls back to writing 0, which is exactly what version 1 files carry. */
 bool g_bRplHasSurvChar;
 bool g_bRplSurvCharChecked;              // false until a REAL client was available to ask
+// Which replay slot each roster entry was given for the round being
+// recorded, or -1 for one that did not fit. The replay format carries
+// RPL_SLOTS (8) players and the roster holds up to MAX_ROSTER (12), so on an
+// over-full roster somebody has to be left out of the file. Fixed when the
+// header is written and used unchanged for every frame after it, because the
+// header's slot list is what a reader maps frames onto.
+int g_iRplSlotOf[MAX_ROSTER];
 int g_iRplEntityEveryN;                  // sample world entities 1 frame in N
 int g_iRplFrameNo;
 /** Map counter used ONLY for replay filenames. g_iMapCount stops at MAX_MAPS,
@@ -549,6 +563,32 @@ bool InReadyUp()
 
 /** Live-view line over the logaddress UDP stream. LogToGame is the ONLY native
  *  that reaches logaddress. LogMessage/LogAction stay on the box. */
+/**
+ * Report one client's connecting address and country.
+ *
+ * GeoIP is optional. The extension is a normal SourceMod one and may simply
+ * not be loaded (it needs a GeoLite2 database beside it), so the native is
+ * feature-checked rather than trusted: calling an unbound native throws, and a
+ * throw in OnClientPostAdminCheck would abort the rest of a connect. Without
+ * it the line still goes out with the address and no country, which the
+ * backend accepts.
+ */
+void EmitClientNet(int client, const char[] id)
+{
+	char ip[64];
+	if (!GetClientIP(client, ip, sizeof(ip), true)) return;
+
+	char cc[3];
+	cc[0] = '\0';
+	if (GetFeatureStatus(FeatureType_Native, "GeoipCode2") == FeatureStatus_Available)
+	{
+		if (!GeoipCode2(ip, cc)) cc[0] = '\0';
+	}
+
+	if (cc[0] == '\0') LogToGame("PUGNET steamid=%s ip=%s", id, ip);
+	else LogToGame("PUGNET steamid=%s ip=%s cc=%s", id, ip, cc);
+}
+
 void EmitPug(const char[] fmt, any ...)
 {
 	if (g_State == MS_None) return;
@@ -1008,12 +1048,61 @@ void RplOpen()
 	p = RplU32(p, GetTime());
 	p = RplU32(p, 0);                          // indexOffset, patched at close
 	p = RplU32(p, 0);                          // indexCount, patched at close
+	// Which roster entries get the eight slots the format carries.
+	//
+	// Normally every entry fits and this is the identity mapping. It stops
+	// being the identity when the roster is over-full, which happens when one
+	// person is on the server under two accounts: match 65 (2026-09-20) had
+	// nine on the roster, and taking the first eight in roster order wrote a
+	// slot for the account that never connected while the account actually
+	// playing fell off the end and was recorded in no frame at all. Connected
+	// entries are chosen first so the file always describes the people who
+	// are really in the round. Roster order is kept among the chosen, so slot
+	// numbers and colours do not shuffle for the ordinary case.
+	int rplSlotRoster[RPL_SLOTS];
+	for (int slot = 0; slot < RPL_SLOTS; slot++) rplSlotRoster[slot] = -1;
+	for (int i = 0; i < MAX_ROSTER; i++) g_iRplSlotOf[i] = -1;
+	{
+		bool chosen[MAX_ROSTER];
+		int taken = 0;
+		// Pass 1: roster entries with somebody connected on them.
+		for (int i = 0; i < g_iRosterCount && taken < RPL_SLOTS; i++)
+		{
+			if (g_sRosterId[i][0] == '\0') continue;
+			for (int c = 1; c <= MaxClients; c++)
+			{
+				if (g_iClientRoster[c] == i && IsClientInGame(c)) { chosen[i] = true; taken++; break; }
+			}
+		}
+		// Pass 2: whatever room is left, in roster order.
+		for (int i = 0; i < g_iRosterCount && taken < RPL_SLOTS; i++)
+		{
+			if (chosen[i] || g_sRosterId[i][0] == '\0') continue;
+			chosen[i] = true;
+			taken++;
+		}
+		int slot = 0;
+		for (int i = 0; i < g_iRosterCount && slot < RPL_SLOTS; i++)
+		{
+			if (!chosen[i]) continue;
+			rplSlotRoster[slot] = i;
+			g_iRplSlotOf[i] = slot;
+			slot++;
+		}
+		if (taken < g_iRosterCount)
+		{
+			LogError("pug: roster of %d does not fit the replay's %d slots; %d left out of this round's recording",
+				g_iRosterCount, RPL_SLOTS, g_iRosterCount - taken);
+		}
+	}
+
 	for (int slot = 0; slot < RPL_SLOTS; slot++)
 	{
 		int id64[2];
 		// An empty slot writes 0, which the reader decodes as "nobody", never
 		// as a SteamID that happens to be small.
-		if (slot < g_iRosterCount && g_sRosterId[slot][0] != '\0') StringToInt64(g_sRosterId[slot], id64);
+		int r = rplSlotRoster[slot];
+		if (r >= 0 && g_sRosterId[r][0] != '\0') StringToInt64(g_sRosterId[r], id64);
 		else { id64[0] = 0; id64[1] = 0; }
 		p = RplU32(p, id64[0]);
 		p = RplU32(p, id64[1]);
@@ -1026,14 +1115,16 @@ void RplOpen()
 	// survivors, which is wrong every second half and for any roster taken in
 	// join order (auto-track, !load_4v4p).
 	int infectedMask = 0;
-	for (int slot = 0; slot < RPL_SLOTS && slot < g_iRosterCount; slot++)
+	for (int slot = 0; slot < RPL_SLOTS; slot++)
 	{
+		int r = rplSlotRoster[slot];
+		if (r < 0) continue;
 		int side = 0;
 		for (int c = 1; c <= MaxClients; c++)
 		{
-			if (g_iClientRoster[c] == slot && IsClientInGame(c)) { side = GetClientTeam(c); break; }
+			if (g_iClientRoster[c] == r && IsClientInGame(c)) { side = GetClientTeam(c); break; }
 		}
-		if (side != TEAM_SURVIVOR && side != TEAM_INFECTED) side = g_iPugSide[g_iRosterTeam[slot]];
+		if (side != TEAM_SURVIVOR && side != TEAM_INFECTED) side = g_iPugSide[g_iRosterTeam[r]];
 		if (side == TEAM_INFECTED) infectedMask |= (1 << slot);
 	}
 	p = RplU8(p, infectedMask);                // 156: infected slot mask
@@ -1314,7 +1405,12 @@ public Action Timer_RplFrame(Handle timer)
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		if (!IsClientInGame(c)) continue;
-		int slot = g_iClientRoster[c];
+		// Roster index, then the slot the header gave it. The two were the
+		// same thing until an over-full roster made them differ; reading
+		// g_iClientRoster straight into the frame would put a player in a
+		// slot the header says belongs to somebody else.
+		int r = g_iClientRoster[c];
+		int slot = (r >= 0 && r < MAX_ROSTER) ? g_iRplSlotOf[r] : -1;
 		if (slot >= 0 && slot < RPL_SLOTS) slotClient[slot] = c;
 		else if (IsPlayerAlive(c)) bots[botCount++] = c;
 	}
@@ -2481,9 +2577,26 @@ public void OnClientPostAdminCheck(int client)
 {
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
-	if (g_State == MS_None || IsFakeClient(client)) return;
+	if (IsFakeClient(client)) return;
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id)))
+	bool haveId = GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id));
+
+	// Where they connected from, for every human on the box, whether or not a
+	// match is being tracked and whether or not they are on a roster. An
+	// account nobody expected is exactly the one worth correlating, so this
+	// runs BEFORE the MS_None return below.
+	//
+	// The line carries no token, which is deliberate: there may be no match
+	// and so no token to carry. The backend admits it on the sender's address
+	// alone, the same protection SIGNON_DROP has, so the marker is the first
+	// thing on the line where no player-controlled text can reach.
+	//
+	// The backend never stores the address; it keeps an HMAC of it. See
+	// src/playerNetworks.ts.
+	if (haveId) EmitClientNet(client, id);
+
+	if (g_State == MS_None) return;
+	if (!haveId)
 	{
 		KickClient(client, "Could not verify Steam ID");
 		return;

@@ -12,6 +12,8 @@ import { GuildMembership } from './discord/membership.js';
 import { VoicePresence } from './discord/voicePresence.js';
 import { makeQueueGate } from './queueGate.js';
 import { makeReadyGate } from './readyGate.js';
+import { canonicalise } from './aliases.js';
+import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
@@ -369,13 +371,29 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      logListener = new LogListener((ev, source) => {
+      logListener = new LogListener((raw, source) => {
+        // One rewrite at the door, before anything reads a SteamID off this
+        // event. A player who connects on a second account that has been
+        // merged into their main arrives here as the main, so the roster,
+        // the stats, the events and the rating all agree without a dozen
+        // call sites each remembering to resolve. See src/aliases.ts.
+        const ev = canonicalise(deps.db, raw);
         // The two token-less kinds. LogListener has already pinned them to a
         // game server's address. Handled first so nothing below is ever
         // asked for a token they do not have, and guarded so a database error
         // cannot take down the listener that also carries match_end.
         if (ev.kind === 'signon_drop') {
           signonDrops?.onDrop(ev).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
+          return;
+        }
+        if (ev.kind === 'player_net') {
+          // Cosmetic-adjacent and never on the critical path: a failure here
+          // must not take down the listener that also carries match_end.
+          try {
+            recordPlayerNet(deps.db, ev);
+          } catch (err) {
+            console.error('[networks] failed to record a connect address:', err);
+          }
           return;
         }
         if (ev.kind === 'entered') {

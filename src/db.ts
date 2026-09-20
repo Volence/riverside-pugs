@@ -600,6 +600,33 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // Second Steam accounts, pointed at the one account their owner really is.
+  // Written by a merge and read on every line the game server sends, so a
+  // reconnect on the alt is rostered as the person rather than as a new
+  // identity with its own rating. No foreign key on `steamid`: the whole
+  // point is that the alt's player row is gone, and the id still has to
+  // resolve. See src/aliases.ts.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_aliases (
+    steamid      TEXT PRIMARY KEY,
+    canonical_id TEXT NOT NULL REFERENCES players(steamid),
+    created_at   TEXT NOT NULL,
+    created_by   TEXT NOT NULL
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_player_aliases_canonical ON player_aliases (canonical_id)');
+  // Where accounts connect from, for noticing that two of them are one
+  // person. The address is NEVER stored: ip_hash is an HMAC under a salt
+  // generated once per installation (settings.ip_hash_salt), so these rows
+  // answer "same connection?" and nothing else. See src/playerNetworks.ts.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_networks (
+    player_id  TEXT NOT NULL,
+    ip_hash    TEXT NOT NULL,
+    country    TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    seen_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (player_id, ip_hash)
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_player_networks_hash ON player_networks (ip_hash)');
   // A voided match: an admin decided the result must not count. It is also
   // set to 'aborted', which is what drops it from every stat query.
   // SourceTV, per server: anyone can watch a live match, and the tv_delay is

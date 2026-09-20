@@ -109,7 +109,15 @@ export type LogEvent =
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
-  | { kind: 'entered'; steamid: string };
+  | { kind: 'entered'; steamid: string }
+  // Where a client connected from, emitted for EVERY human that joins the box
+  // whether or not a match is being tracked and whether or not they are on a
+  // roster: an account nobody expected is exactly the one worth correlating.
+  // Token-less, so LogListener admits it on the sender's address alone. The
+  // address is used to compute a hash and is never stored; see
+  // src/playerNetworks.ts. `country` is absent when the GeoIP extension is
+  // not loaded, which is normal and not an error.
+  | { kind: 'player_net'; steamid: string; ip: string; country: string | null };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -187,6 +195,20 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
     const name = body.slice(at + ' name='.length).trim().slice(0, 64);
     if (!steamid || secs === null || secs < -1 || forced === null || forced < 1 || !name) return null;
     return { kind: 'signon_drop', steamid, secs, forced, name };
+  }
+
+  // Where a client connected from. Same protection as SIGNON_DROP and for the
+  // same reason: no token, so the marker must be the first thing after the
+  // engine's stamp, which no player-controlled text can be.
+  if (body.startsWith('PUGNET ')) {
+    const rest = kv(body.slice('PUGNET '.length).split(/\s+/));
+    const steamid = steamId64Of(rest.steamid ?? '');
+    const ip = rest.ip ?? '';
+    // Shape-checked here rather than downstream: this value decides whether a
+    // sighting counts and what its hash is.
+    if (!steamid || !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
+    const cc = (rest.cc ?? '').toUpperCase();
+    return { kind: 'player_net', steamid, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null };
   }
 
   const entered = ENTERED_RE.exec(body);
