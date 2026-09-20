@@ -4,6 +4,7 @@ import { displaySr } from './rating.js';
 import { getPlayer, currentSeasonId } from './players.js';
 import { STAT_DEFS, statDef } from './statKeys.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
+import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
  *  number on the site and the same number in Discord come from one query. */
@@ -143,7 +144,15 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // How this player does on each map, across every match. Only meaningful
     // once per-map capture exists, so older matches contribute win/loss with
     // an empty stat bag rather than being omitted.
-    byMap: playerMapBreakdown(db, steamid),
+    //
+    // Campaign resolved here rather than inside playerMapBreakdown: that module
+    // is pure statistics over the database and has no campaign import, and
+    // pulling the registry into it for a presentation concern would drag
+    // customCampaigns into the stats path too.
+    byMap: playerMapBreakdown(db, steamid).map((r) => {
+      const slug = resolveCampaignForMap(db, r.map);
+      return { ...r, campaignName: slug ? campaignDisplayName(db, slug) : null };
+    }),
     // Contract (web/src/api.ts: Profile['privateStatTotals']) is populated-or-
     // null, never an empty object: Profile.tsx gates its private-stats panel
     // on truthiness, and {} is truthy, so a self-viewer with no private stats

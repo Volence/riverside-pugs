@@ -37,7 +37,20 @@ describe('loadConfig', () => {
 
 describe('campaigns', () => {
   it('has the four original campaigns', () => {
-    expect(Object.keys(CAMPAIGNS)).toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
+    expect(Object.keys(CAMPAIGNS)).toEqual([
+      'no_mercy',
+      'death_toll',
+      'dead_air',
+      'blood_harvest',
+      'dead_center',
+      'dark_carnival',
+      'swamp_fever',
+      'hard_rain',
+      'the_parish',
+      'the_passing',
+      'cold_stream',
+      'the_last_stand',
+    ]);
   });
 });
 
@@ -62,5 +75,13 @@ describe('missingDirs', () => {
   it('says nothing when the directory exists', () => {
     const cfg = loadConfig({ REPLAY_DIR: process.cwd() });
     expect(missingDirs(cfg)).toEqual([]);
+  });
+});
+
+describe('dlc4MissionsDir', () => {
+  it('reads DLC4_MISSIONS_DIR, defaulting to empty', () => {
+    expect(loadConfig({ DLC4_MISSIONS_DIR: '/srv/left4dead_dlc4/missions' }).dlc4MissionsDir)
+      .toBe('/srv/left4dead_dlc4/missions');
+    expect(loadConfig({}).dlc4MissionsDir).toBe('');
   });
 });
