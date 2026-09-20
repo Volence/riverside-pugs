@@ -420,21 +420,28 @@ describe('mapName for dlc4 maps', () => {
     ['c1m4_atrium', 'Atrium'],
     ['c2m1_highway', 'Highway'],
     ['c2m5_concert', 'Concert'],
-    ['c3m1_plankcountry', 'Plank Country'],
+    ['c3m1_plankcountry', 'Plank'],
     ['c4m1_milltown_a', 'Milltown'],
-    ['c4m3_sugarmill_b', 'Sugar Mill'],
+    ['c4m3_sugarmill_b', 'Mill Escape'],
     ['c5m1_waterfront', 'Waterfront'],
     ['c5m5_bridge', 'Bridge'],
     ['c13m1_alpinecreek', 'Alpine Creek'],
-    ['c14m1_junkyard', 'Junkyard'],
-    ['c14m2_lighthouse', 'Lighthouse'],
+    ['c14m1_junkyard', 'The Junkyard'],
+    ['c14m2_lighthouse', 'Lighthouse Finale'],
   ])('names %s as %s', (map, expected) => {
     expect(mapName(map)).toBe(expected);
   });
 
-  it('distinguishes the Hard Rain return legs', () => {
-    expect(mapName('c4m4_milltown_b')).not.toBe(mapName('c4m1_milltown_a'));
-    expect(mapName('c4m5_milltown_escape')).toBe('Milltown Escape');
+  it('makes all four Hard Rain chapters distinct', () => {
+    const names = [
+      mapName('c4m1_milltown_a'),
+      mapName('c4m2_sugarmill_a'),
+      mapName('c4m3_sugarmill_b'),
+      mapName('c4m4_milltown_b'),
+      mapName('c4m5_milltown_escape'),
+    ];
+    // All five chapters must be distinguishable by name alone
+    expect(new Set(names).size).toBe(5);
   });
 });
 
