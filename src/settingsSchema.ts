@@ -1,4 +1,4 @@
-import { CAMPAIGNS } from './campaigns.js';
+import { CAMPAIGNS, DLC4_CAMPAIGNS } from './campaigns.js';
 
 /**
  * The settings an admin may edit, with how each is validated.
@@ -74,8 +74,11 @@ export type Validated = { ok: true; value: string } | { ok: false; error: string
  *
  *  `campaignSlugs` is how a custom campaign becomes selectable: the pool is
  *  validated against whatever the registry currently holds, not against the
- *  stock four. Callers without a registry to hand get the stock four, which is
- *  the correct answer for every caller that predates custom campaigns. */
+ *  base four. Callers without a registry to hand get CAMPAIGNS minus
+ *  DLC4_CAMPAIGNS: the campaigns that need no install check at all, which is
+ *  the only default that stays safe as CAMPAIGNS grows. Hardcoding the base
+ *  four here would silently rot the moment a stock campaign starts requiring
+ *  something to be installed, exactly as happened when dlc4 landed. */
 export function validateSetting(
   key: string, raw: unknown, opts: { campaignSlugs?: Set<string> } = {},
 ): Validated {
@@ -103,7 +106,8 @@ export function validateSetting(
       return { ok: false, error: 'must be on or off' };
     case 'campaigns': {
       if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: 'pick at least one campaign' };
-      const known = opts.campaignSlugs ?? new Set(Object.keys(CAMPAIGNS));
+      const known = opts.campaignSlugs
+        ?? new Set(Object.keys(CAMPAIGNS).filter((slug) => !DLC4_CAMPAIGNS.has(slug)));
       const unknown = raw.filter((c) => typeof c !== 'string' || !known.has(c));
       if (unknown.length) return { ok: false, error: `unknown campaign: ${unknown.join(', ')}` };
       return { ok: true, value: JSON.stringify([...new Set(raw as string[])]) };
