@@ -514,6 +514,12 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_admin_channel_id: '',
   // Where match results are posted. Empty keeps them in the queue channel.
   discord_results_channel_id: '',
+  // Games before a player's per-match figures are ranked for the profile
+  // badges. Deliberately higher than RANKED_MIN_GAMES: three games is enough
+  // for a rating to be worth showing and nowhere near enough for a per-match
+  // average to mean anything, so the badges used to land on whoever had
+  // played least.
+  standing_min_games: '10',
   admin_feed_reports: '1',
   admin_feed_actions: '1',
   admin_feed_penalties: '1',
