@@ -1608,6 +1608,13 @@ body.is-theater { overflow: hidden; }
 
 .queue-timeout { margin-top: var(--sp-3); color: var(--loss); }
 
+/* The failed-ready-check notice. Text and its Dismiss button on one row, and
+   the button drops under the text rather than squeezing it on a phone. */
+.lobby-notice { display: flex; gap: var(--sp-4); align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.lobby-notice h3 { margin: 0 0 var(--sp-2); }
+.lobby-notice p { margin: 0; color: var(--text-muted); max-width: 60ch; }
+.lobby-notice button { flex: none; }
+
 /* ---------- setup checklist, how to play ---------- */
 
 .checklist ol { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: grid; gap: var(--sp-4); }

@@ -28,6 +28,14 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     return { ok: true };
   });
 
+  /** Dismiss the "your ready check failed" notice on the Play page. */
+  app.post('/api/lobby/dismiss-notice', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    matchmaker.dismissNotice(steamid);
+    return { ok: true };
+  });
+
   app.post('/api/lobby/ready', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return;
@@ -70,4 +78,5 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
   // Public on purpose: the point is that people can watch the queue fill
   // without signing in. Carries nothing viewer-relative and no connect block.
   app.get('/api/queue', async () => matchmaker.publicQueue());
+
 }

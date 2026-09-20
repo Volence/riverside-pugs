@@ -265,10 +265,67 @@ function Live(
   }
   if (lobby && lobby.phase === 'map_vote') return <MapVote lobby={lobby} refresh={refresh} />;
   return (
-    <QueuePanel
-      count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
-      timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
-    />
+    <>
+      {state.lobbyNotice && <LobbyNotice notice={state.lobbyNotice} refresh={refresh} />}
+      <QueuePanel
+        count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
+        timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
+      />
+    </>
+  );
+}
+
+/**
+ * "The pop you were just in died, and here is why."
+ *
+ * The lobby card in #queue-here used to become this message. It is deleted
+ * now and the detail goes to the admin channel instead (2026-09-20), so
+ * without this the eight people in a failed ready check would watch the pop
+ * simply disappear with no explanation anywhere they can see.
+ *
+ * Dismissing is a server call rather than local state, because the state it
+ * is clearing lives on the server: hiding it in the browser alone would put
+ * it back on the next refresh.
+ */
+export function LobbyNotice(
+  { notice, refresh }: {
+    notice: NonNullable<StateSnapshot['lobbyNotice']>;
+    refresh: () => void;
+  },
+) {
+  const [going, setGoing] = useState(false);
+  const missing = notice.notReady.map((p) => p.name).join(', ');
+  const dismiss = async () => {
+    setGoing(true);
+    try {
+      await api.dismissNotice();
+      refresh();
+    } catch {
+      // Nothing to recover: the notice is cosmetic, and it clears itself the
+      // moment they queue again.
+      setGoing(false);
+    }
+  };
+  return (
+    <Panel>
+      <div class="lobby-notice">
+        <div>
+          <h3>Ready check failed</h3>
+          <p>
+            {notice.youWereReady ? (
+              <>You readied up. The pop was cancelled because {missing || 'someone'} did not,
+                and you went back to the front of the queue.</>
+            ) : (
+              <>You did not ready up in time, so the pop was cancelled for everyone.
+                That is a queue timeout; it gets longer each time within a week.</>
+            )}
+          </p>
+        </div>
+        <button type="button" class="btn btn--ghost" onClick={dismiss} disabled={going}>
+          Dismiss
+        </button>
+      </div>
+    </Panel>
   );
 }
 
