@@ -268,6 +268,14 @@ export class Matchmaker {
     return [...this.playerLobby.keys()];
   }
 
+  /** Everyone waiting for a match right now: in the queue, or in a lobby that
+   *  has not gone live yet. Read by the streams page to decide whether a live
+   *  stream belongs in the top tier. Both collections live only in memory, so
+   *  this is the only way out of the matchmaker. */
+  engagedIds(): string[] {
+    return [...new Set([...this.queue.list(), ...this.lobbyMembers()])];
+  }
+
   private lobbyFor(steamid: string): Lobby | undefined {
     const id = this.playerLobby.get(steamid);
     return id ? this.lobbyMap.get(id) : undefined;
