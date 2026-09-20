@@ -158,6 +158,21 @@ export const STAT_DEFS: readonly StatDef[] = [
   def('times_quadded', 'survivor', 'Times quadded', 'high_bad', false),
 ];
 
+/**
+ * The five counters that are columns on `match_players` rather than rows in
+ * `match_player_stats`, in the order the stat bags carry them.
+ *
+ * They are NOT entries in STAT_DEFS and never will be: this registry exists so
+ * that a typo'd key in the narrow table fails loudly, and these have real
+ * columns that a typo could not reach. They are listed here only so the read
+ * models stop spelling the same five strings out by hand.
+ *
+ * Not to be confused with `standings.ts`'s own FIXED_KEYS, which is this list
+ * minus `ff` because topping friendly fire is not an achievement. That list
+ * answers a different question and stays where it is.
+ */
+export const FIXED_STAT_KEYS = ['sidmg', 'sikill', 'ck', 'ff', 'rev'] as const;
+
 const BY_KEY = new Map(STAT_DEFS.map((d) => [d.key, d]));
 
 export function statDef(key: string): StatDef | undefined {
