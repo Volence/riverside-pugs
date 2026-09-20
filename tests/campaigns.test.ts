@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CAMPAIGNS, campaignForMap } from '../src/campaigns.js';
+import { CAMPAIGNS, DLC4_CAMPAIGNS, campaignForMap } from '../src/campaigns.js';
 
 describe('campaignForMap', () => {
   // A self-started match reports the map it is standing on, not a campaign
@@ -33,8 +33,46 @@ describe('campaignForMap', () => {
     expect(campaignForMap('L4D_VS_AIRPORT01_GREENHOUSE')).toBe('dead_air');
   });
 
+  // The L4D2 ports use L4D2's own map naming, which shares nothing with the
+  // l4d_<word><nn> scheme. Versus and coop are the SAME bsp on these, so there
+  // is no vs_ variant to test.
+  it.each([
+    ['c1m1_hotel', 'dead_center'],
+    ['c1m4_atrium', 'dead_center'],
+    ['c2m1_highway', 'dark_carnival'],
+    ['c2m5_concert', 'dark_carnival'],
+    ['c3m1_plankcountry', 'swamp_fever'],
+    ['c3m4_plantation', 'swamp_fever'],
+    ['c4m1_milltown_a', 'hard_rain'],
+    ['c4m5_milltown_escape', 'hard_rain'],
+    ['c5m1_waterfront', 'the_parish'],
+    ['c5m5_bridge', 'the_parish'],
+    ['c6m1_riverbank', 'the_passing'],
+    ['c6m3_port', 'the_passing'],
+    ['c13m1_alpinecreek', 'cold_stream'],
+    ['c13m4_cutthroatcreek', 'cold_stream'],
+    ['c14m1_junkyard', 'the_last_stand'],
+    ['c14m2_lighthouse', 'the_last_stand'],
+  ])('maps dlc4 map %s to %s', (map, expected) => {
+    expect(campaignForMap(map)).toBe(expected);
+  });
+
+  it('is case insensitive for dlc4 names too', () => {
+    expect(campaignForMap('C1M1_HOTEL')).toBe('dead_center');
+  });
+
+  // A campaign number we do not ship must not be invented into a slug.
+  it('returns null for an unknown dlc4 campaign number', () => {
+    expect(campaignForMap('c7m1_somewhere')).toBeNull();
+    expect(campaignForMap('c99m1_nope')).toBeNull();
+  });
+
+  it('every dlc4 slug exists in CAMPAIGNS', () => {
+    for (const slug of DLC4_CAMPAIGNS) expect(Object.keys(CAMPAIGNS)).toContain(slug);
+  });
+
   it('returns null for an unknown map rather than guessing', () => {
-    expect(campaignForMap('c5m1_waterfront')).toBeNull();
+    expect(campaignForMap('de_dust2')).toBeNull();
     expect(campaignForMap('')).toBeNull();
     expect(campaignForMap('l4d_vs_dam01_something')).toBeNull();
   });

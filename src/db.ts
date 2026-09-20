@@ -732,6 +732,10 @@ export function openDb(path: string): DB {
   // secret stays in the filesystem with its own permissions and never in a DB
   // backup. Reuses ftp_host/ftp_port/ftp_user for the connection details.
   ensureColumn(db, 'servers', 'ssh_key_path', 'TEXT');
+  // Whether this box's dlc4 mappack has been proved present by probing its
+  // own transport (see src/dlc4.ts), not set by hand. Defaults to 0 so an
+  // existing row stays out of the dlc4 map pool until it is actually checked.
+  ensureColumn(db, 'servers', 'has_dlc4', 'INTEGER NOT NULL DEFAULT 0');
   seed(db);
   return db;
 }

@@ -66,6 +66,37 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
 ];
 
+const INSTALL_FAQ: { q: string; a: preact.ComponentChildren }[] = [
+  {
+    q: 'I already have L4D2 maps installed',
+    a: <>Delete the old <code>left4dead_dlc4</code> folder first. If <code>thelaststand.vpk</code>{' '}
+      or <code>[L4D] Campaign pack l4d2.vpk</code> are in <code>left4dead\addons</code>, delete
+      those too. Then start from step 3 above.</>,
+  },
+  {
+    q: 'Turning the map pack back off',
+    a: <>Nothing to delete. Open <code>left4dead\gameinfo.txt</code>, put <code>//</code> in
+      front of the <code>Game left4dead_dlc4</code> line, save, and restart the game. It looks
+      like this:
+      <pre class="launch-opts"><code>{`SearchPaths
+{
+    Game    |gameinfo_path|.
+    //Game  left4dead_dlc4
+    Game    left4dead_dlc3
+    Game    left4dead_dlc2
+    Game    left4dead_dlc1
+    Game    left4dead
+    Game    hl2
+}`}</code></pre>
+      Remove the <code>//</code> to turn it back on.</>,
+  },
+  {
+    q: 'Checking which version you have',
+    a: <>Open <code>left4dead_dlc4\dlc4_version.inf</code> in a text editor. The first line
+      reads <code>DLCVersion=</code>, and ours is <code>v3.1e</code>.</>,
+  },
+];
+
 export function HowToPlay({ session }: { session: Session }) {
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   return (
@@ -126,6 +157,53 @@ export function HowToPlay({ session }: { session: Session }) {
             frames, and the three mouse flags stop Windows applying its own acceleration
             on top of yours.
           </p>
+        </Panel>
+        <Panel>
+          <h3>Installing the map pack</h3>
+          <p>
+            Some campaigns are L4D2 maps ported to L4D1. They are not part of a normal
+            install, so before you can join a match on one, install the map pack once.
+            It stays installed after that.
+          </p>
+          <ol class="howto">
+            <li>
+              <a href="https://assets.riversidepug.com/mappack/L4D2-Maps-for-L4D1-v3.1e.zip">
+                <strong>Download the map pack</strong>
+              </a>. It is 3.4 GB, so do not start it on a phone tether.
+            </li>
+            <li>
+              Open your Left 4 Dead folder. In Steam, right-click <strong>Left 4 Dead</strong>,
+              then <strong>Manage</strong>, then <strong>Browse local files</strong>. You should
+              see a <code>left4dead</code> folder and an <code>hl2</code> folder there. If you
+              do not, you are in the wrong place.
+            </li>
+            <li>
+              Open the zip you downloaded, then drag everything inside it into that folder, and
+              click <strong>Yes</strong> when it asks about replacing files. When it is done you
+              will have a new <code>left4dead_dlc4</code> folder sitting next to <code>left4dead</code>.
+            </li>
+            <li>
+              <strong class="howto-warn">Turn your Shader Detail down, or these maps will crash your game.</strong>{' '}
+              In-game: <strong>Options</strong>, then <strong>Video</strong>, then{' '}
+              <strong>Advanced</strong>, then <strong>Shader Detail</strong>, set to Medium or
+              lower. This is the single most common reason someone drops mid match after
+              installing the pack. The pack's own ReadMe buries it at step 4 of 5. We are not
+              burying it here.
+            </li>
+            <li>
+              Check it worked. Open the console and type <code>map c1m1_hotel</code>. If a hotel
+              level loads, you are done. If you get "map not found", the files went into the
+              wrong folder: redo step 2.
+            </li>
+          </ol>
+          <div class="faq">
+            {INSTALL_FAQ.map((f) => (
+              <details key={f.q}>
+                <summary>{f.q}</summary>
+                <p>{f.a}</p>
+              </details>
+            ))}
+          </div>
         </Panel>
         <Panel>
           <h3>Playing a match</h3>

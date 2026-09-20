@@ -1,8 +1,8 @@
 import type { DB } from './db.js';
-import { CAMPAIGNS, campaignForMap } from './campaigns.js';
+import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
-import { enabledServerIds } from './serverPool.js';
+import { enabledServerIds, allServersHaveDlc4 } from './serverPool.js';
 import { readStockMissions, type StockChapter } from './stockMissions.js';
 
 /**
@@ -26,15 +26,33 @@ export interface CampaignEntry {
   /** Every map in the campaign, in play order. */
   maps: string[];
   custom: boolean;
+  /** Lives in left4dead_dlc4, so a server without the mappack cannot load it.
+   *  Gated separately from `custom`, which means "has its own VPK to install". */
+  requiresDlc4: boolean;
 }
 
-/** These MUST be the l4d_vs_ BSPs. The plain l4d_ names are the coop maps,
- *  which load a coop mission and cannot be played versus. */
+/** The map a match changelevels into, per campaign.
+ *
+ *  For the base game these MUST be the `l4d_vs_` BSPs. The plain `l4d_` names
+ *  are the coop maps, which load a coop mission and cannot be played versus.
+ *
+ *  The dlc4 ports are the exception and take their plain names: those campaigns
+ *  ship ONE bsp per chapter serving both modes, and the mission file's versus
+ *  block names the same maps its coop block does. There is no `c1m1_vs_hotel`
+ *  to reach for. Verified against the real mission files 2026-09-20. */
 const STOCK_FIRST: Record<string, string> = {
   no_mercy: 'l4d_vs_hospital01_apartment',
   death_toll: 'l4d_vs_smalltown01_caves',
   dead_air: 'l4d_vs_airport01_greenhouse',
   blood_harvest: 'l4d_vs_farm01_hilltop',
+  dead_center: 'c1m1_hotel',
+  dark_carnival: 'c2m1_highway',
+  swamp_fever: 'c3m1_plankcountry',
+  hard_rain: 'c4m1_milltown_a',
+  the_parish: 'c5m1_waterfront',
+  the_passing: 'c6m1_riverbank',
+  cold_stream: 'c13m1_alpinecreek',
+  the_last_stand: 'c14m1_junkyard',
 };
 
 let cache: {
@@ -52,24 +70,25 @@ export function invalidateCampaignCache(): void {
   cache = null;
 }
 
-let missionsDir = '';
+let missionsDirs: string[] = [];
 
-/** Where the stock campaigns' chapter lists live. Set once at startup from
- *  config. Module state rather than a parameter because campaignRegistry(db) is
- *  called from a dozen places that have no business knowing about the game
- *  directory. */
-export function setMissionsDir(dir: string): void {
-  missionsDir = dir;
+/** Where campaign chapter lists live: the base game's `missions/` and dlc4's.
+ *  Set once at startup from config. Module state rather than a parameter
+ *  because campaignRegistry(db) is called from a dozen places that have no
+ *  business knowing about the game directory. */
+export function setMissionsDirs(dirs: string[]): void {
+  missionsDirs = dirs.filter(Boolean);
   cache = null;
 }
 
 function build(db: DB): NonNullable<typeof cache> {
   const registry = new Map<string, CampaignEntry>();
-  const stockMissions = readStockMissions(missionsDir);
+  const stockMissions = readStockMissions(missionsDirs);
   for (const [slug, c] of Object.entries(CAMPAIGNS)) {
     registry.set(slug, {
       slug, name: c.name, firstMap: STOCK_FIRST[slug],
       maps: (stockMissions.get(slug) ?? []).map((ch) => ch.map), custom: false,
+      requiresDlc4: DLC4_CAMPAIGNS.has(slug),
     });
   }
 
@@ -87,6 +106,7 @@ function build(db: DB): NonNullable<typeof cache> {
     registry.set(row.slug, {
       slug: row.slug, name: row.name, firstMap: played[0].map,
       maps: played.map((c) => c.map), custom: true,
+      requiresDlc4: false,
     });
     // Every chapter claims its map, included or not: a match standing on an
     // excluded chapter is still that campaign for attribution purposes.
@@ -105,12 +125,19 @@ export function campaignRegistry(db: DB): Map<string, CampaignEntry> {
   return warm(db).registry;
 }
 
-/** The campaign a map belongs to: stock by name prefix, custom by lookup.
- *  Null rather than a default for anything unrecognised. */
+/** The campaign a map belongs to: custom by lookup first, stock by name
+ *  pattern otherwise. Null rather than a default for anything unrecognised.
+ *
+ *  Custom goes first because campaignForMap's dlc4 pattern is a guess from
+ *  the bare map name (c<N>m<N>), and nothing stops an uploaded campaign
+ *  naming its own chapters that way. An explicitly registered chapter is
+ *  ground truth and must win over a pattern match, or a custom campaign
+ *  shaped like dlc4 would get filed under a stock campaign in self-started
+ *  matches and stats. */
 export function resolveCampaignForMap(db: DB, map: string): string | null {
-  const stock = campaignForMap(map);
-  if (stock) return stock;
-  return warm(db).byMap.get(map.toLowerCase()) ?? null;
+  const custom = warm(db).byMap.get(map.toLowerCase());
+  if (custom) return custom;
+  return campaignForMap(map);
 }
 
 /** First playable map of a campaign, which is what a match changelevels into. */
@@ -127,33 +154,42 @@ export function stockChaptersOf(db: DB, slug: string): StockChapter[] {
 }
 
 /**
- * Campaigns an admin may put in map_pool: the stock four (no VPK, always
+ * Campaigns an admin may put in map_pool: the base four (no VPK, always
  * eligible), plus published custom campaigns that are `enabled` and
- * installed on every enabled server. That install check is the whole gate:
- * there used to be a second `enabled` flag an admin had to tick first, but
- * once downloads stopped depending on it its only remaining job was permitting
+ * installed on every enabled server, plus the eight dlc4 campaigns once
+ * every enabled server carries the mappack. That install check (custom) and
+ * the dlc4 check (stock) are the whole gate: there used to be a second
+ * `enabled` flag an admin had to tick first for custom campaigns, but once
+ * downloads stopped depending on it its only remaining job was permitting
  * another switch, which cost a click and confused people without adding any
  * safety this does not already provide. Kept as its own lookup rather than
  * filtered on the client so a direct PUT to the setting (validateSetting)
  * enforces exactly the same rule the panel displays.
  *
  * `alsoAllow` keeps an admin from being locked out of their own settings
- * page: a campaign already sitting in map_pool that later loses its install
- * (a server re-imaged, an admin flipping it back to disabled) should not
- * make the pool unsavable or vanish from the list out from under whatever
- * else is being edited. It stays offered until someone deliberately removes
- * it from the pool.
+ * page and wins over BOTH gates below: a campaign already sitting in
+ * map_pool that later loses its install (a server re-imaged, an admin
+ * flipping it back to disabled) or loses dlc4 coverage (a server added
+ * without the pack) should not make the pool unsavable or vanish from the
+ * list out from under whatever else is being edited. It stays offered until
+ * someone deliberately removes it from the pool.
  */
 export function poolableCampaigns(
   db: DB, opts: { alsoAllow?: Iterable<string> } = {},
 ): CampaignEntry[] {
   const serverIds = enabledServerIds(db);
   const already = new Set(opts.alsoAllow ?? []);
-  return [...campaignRegistry(db).values()].filter((c) => (
-    !c.custom
-    || already.has(c.slug)
-    || isInstalledEverywhere(db, c.slug, serverIds)
-  ));
+  // Read once rather than per campaign: eight of the twelve stock campaigns
+  // ask the same question and the answer cannot change inside one call.
+  const dlc4Everywhere = allServersHaveDlc4(db);
+  return [...campaignRegistry(db).values()].filter((c) => {
+    if (already.has(c.slug)) return true;
+    // A dlc4 campaign on a server without the mappack is a match that dies
+    // on the first changelevel, so this gate is the same kind of thing as
+    // the install check below and not a nicety.
+    if (c.requiresDlc4 && !dlc4Everywhere) return false;
+    return !c.custom || isInstalledEverywhere(db, c.slug, serverIds);
+  });
 }
 
 /** A campaign's display name, falling back to the slug.

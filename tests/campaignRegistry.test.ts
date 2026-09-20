@@ -8,7 +8,9 @@ import { upsertPlayer } from '../src/players.js';
 import { ME, OTHER, seedMatch } from './playerStats.test.js';
 import {
   campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf, stockChaptersOf,
+  setMissionsDirs, poolableCampaigns,
 } from '../src/campaignRegistry.js';
+import { addServer, setHasDlc4, serversMissingDlc4 } from '../src/serverPool.js';
 
 let db: DB;
 beforeEach(() => {
@@ -29,9 +31,22 @@ const publish = (slug = 'dbd') => {
 };
 
 describe('campaignRegistry', () => {
-  it('contains the four stock campaigns with no custom ones present', () => {
+  it('contains the twelve stock campaigns with no custom ones present', () => {
     expect([...campaignRegistry(db).keys()])
-      .toEqual(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']);
+      .toEqual([
+        'no_mercy',
+        'death_toll',
+        'dead_air',
+        'blood_harvest',
+        'dead_center',
+        'dark_carnival',
+        'swamp_fever',
+        'hard_rain',
+        'the_parish',
+        'the_passing',
+        'cold_stream',
+        'the_last_stand',
+      ]);
   });
 
   it('merges a published custom campaign in', () => {
@@ -75,6 +90,21 @@ describe('resolveCampaignForMap', () => {
   // stay unattributed rather than land under someone else's campaign.
   it('returns null for a map nothing claims', () => {
     expect(resolveCampaignForMap(db, 'some_random_map')).toBeNull();
+  });
+
+  // A custom campaign shipping L4D2-style c<N>m<N> map names (nothing stops
+  // an uploader naming chapters that way) must resolve to itself, not to
+  // whichever stock dlc4 campaign the pattern happens to guess. Before dlc4
+  // existed this map name fell through to byMap with nothing to shadow it.
+  it('prefers a registered custom chapter over a dlc4 pattern guess', () => {
+    insertDraft(db, {
+      slug: 'custom_dlc4_lookalike', name: 'Lookalike', vpkFilename: 'x.vpk',
+      sizeBytes: 1, sha256: 'c'.repeat(64), uploadedBy: null,
+    }, [{ map: 'c1m1_myplace', display: null, isFinale: true }]);
+    publishCampaign(db, 'custom_dlc4_lookalike', 'Lookalike');
+    invalidateCampaignCache();
+
+    expect(resolveCampaignForMap(db, 'c1m1_myplace')).toBe('custom_dlc4_lookalike');
   });
 
   // The parser is called per round by the log listener, so the lookup is
@@ -145,23 +175,23 @@ describe('stock chapter lists', () => {
   afterEach(async () => {
     // A directory left set on one test's missions dir would otherwise leak
     // into the next test's registry cache.
-    const { setMissionsDir } = await import('../src/campaignRegistry.js');
-    setMissionsDir('');
+    const { setMissionsDirs } = await import('../src/campaignRegistry.js');
+    setMissionsDirs([]);
   });
 
   it('is empty when no missions directory is configured', async () => {
-    const { setMissionsDir, campaignRegistry } = await import('../src/campaignRegistry.js');
-    setMissionsDir('');
+    const { setMissionsDirs, campaignRegistry } = await import('../src/campaignRegistry.js');
+    setMissionsDirs([]);
     expect(campaignRegistry(db).get('dead_air')!.maps).toEqual([]);
   });
 
   it('reads the stock chapter list once a missions directory is configured', async () => {
-    const { setMissionsDir, campaignRegistry } = await import('../src/campaignRegistry.js');
+    const { setMissionsDirs, campaignRegistry } = await import('../src/campaignRegistry.js');
     const dir = mkdtempSync(join(tmpdir(), 'missions-'));
     try {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'airport.txt'), AIRPORT);
-      setMissionsDir(dir);
+      setMissionsDirs([dir]);
       expect(campaignRegistry(db).get('dead_air')!.maps).toHaveLength(5);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -172,12 +202,12 @@ describe('stock chapter lists', () => {
   // chapter display names: CampaignEntry.maps stays plain map names on
   // purpose, since stopAfterMap and the orchestrator only ever need those.
   it('carries chapter display names for the admin panel', async () => {
-    const { setMissionsDir } = await import('../src/campaignRegistry.js');
+    const { setMissionsDirs } = await import('../src/campaignRegistry.js');
     const dir = mkdtempSync(join(tmpdir(), 'missions-'));
     try {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'airport.txt'), AIRPORT);
-      setMissionsDir(dir);
+      setMissionsDirs([dir]);
       const chapters = stockChaptersOf(db, 'dead_air');
       expect(chapters.map((c) => c.display)).toEqual([
         'The Greenhouse', 'The Crane', 'The Garage', 'The Terminal', 'The Runway',
@@ -188,8 +218,120 @@ describe('stock chapter lists', () => {
   });
 
   it('is empty for stockChaptersOf when no missions directory is configured', async () => {
-    const { setMissionsDir } = await import('../src/campaignRegistry.js');
-    setMissionsDir('');
+    const { setMissionsDirs } = await import('../src/campaignRegistry.js');
+    setMissionsDirs([]);
     expect(stockChaptersOf(db, 'dead_air')).toEqual([]);
+  });
+});
+
+describe('dlc4 campaigns in the registry', () => {
+  it('lists all twelve campaigns with no missions directory configured', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    const reg = campaignRegistry(db);
+    expect(reg.size).toBe(12);
+    // Chapter lists come from mission files, so they are empty here. The
+    // campaign still exists, which is what makes the pool gate meaningful
+    // even when the paths are unset.
+    expect(reg.get('dead_center')?.maps).toEqual([]);
+  });
+
+  it('marks exactly the dlc4 campaigns as requiring dlc4', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    const reg = campaignRegistry(db);
+    expect(reg.get('dead_center')?.requiresDlc4).toBe(true);
+    expect(reg.get('the_last_stand')?.requiresDlc4).toBe(true);
+    expect(reg.get('no_mercy')?.requiresDlc4).toBe(false);
+  });
+
+  it('gives a dlc4 campaign its own first map, with no vs_ infix', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    expect(firstMapOf(db, 'dead_center')).toBe('c1m1_hotel');
+    expect(firstMapOf(db, 'the_parish')).toBe('c5m1_waterfront');
+    expect(firstMapOf(db, 'no_mercy')).toBe('l4d_vs_hospital01_apartment');
+  });
+
+  it('resolves a dlc4 map to its campaign', () => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    expect(resolveCampaignForMap(db, 'c2m3_coaster')).toBe('dark_carnival');
+  });
+
+  // A published custom campaign must never be marked as needing dlc4: it has
+  // its own VPK and its own install rows, and conflating the two gates would
+  // make every custom campaign unpoolable the moment one server lacked dlc4.
+  it('never marks a custom campaign as requiring dlc4', () => {
+    publish();
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    expect(campaignRegistry(db).get('dbd')?.requiresDlc4).toBe(false);
+  });
+});
+
+describe('poolableCampaigns and dlc4', () => {
+  // Goes through the real addServer because `servers` has NOT NULL rcon_port
+  // and rcon_password with no defaults, then sets the two flags the base
+  // insert does not take. `enabled` and `has_dlc4` are both ensureColumn
+  // additions and so carry their own defaults (1 and 0).
+  const seedServer = (name: string, enabled = 1, hasDlc4 = 0): number => {
+    const id = addServer(db, {
+      name, host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x',
+    });
+    db.prepare('UPDATE servers SET enabled = ?, has_dlc4 = ? WHERE id = ?')
+      .run(enabled, hasDlc4, id);
+    return id;
+  };
+
+  beforeEach(() => { setMissionsDirs([]); invalidateCampaignCache(); });
+
+  it('offers the base four but no dlc4 campaign when a server lacks the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 0);
+    const slugs = poolableCampaigns(db).map((c) => c.slug);
+    expect(slugs).toContain('no_mercy');
+    expect(slugs).not.toContain('dead_center');
+  });
+
+  it('offers dlc4 campaigns once every enabled server has the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 1);
+    const slugs = poolableCampaigns(db).map((c) => c.slug);
+    expect(slugs).toContain('dead_center');
+    expect(slugs).toContain('the_last_stand');
+  });
+
+  // A disabled server is not going to host a match, so it must not hold the
+  // pool hostage. Same rule isInstalledEverywhere already uses.
+  it('ignores a disabled server without the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Old box', 0, 0);
+    expect(poolableCampaigns(db).map((c) => c.slug)).toContain('dead_center');
+  });
+
+  // Same reason alsoAllow exists for custom campaigns: a campaign already in
+  // the pool must not make the settings page unsavable when a server loses it.
+  it('keeps offering a dlc4 campaign already in the pool via alsoAllow', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 0);
+    const slugs = poolableCampaigns(db, { alsoAllow: ['dead_center'] }).map((c) => c.slug);
+    expect(slugs).toContain('dead_center');
+  });
+
+  it('names the servers that are missing the pack', () => {
+    seedServer('Dallas', 1, 1);
+    seedServer('Chicago', 1, 0);
+    seedServer('Riverside #3', 1, 0);
+    seedServer('Retired', 0, 0);
+    expect(serversMissingDlc4(db)).toEqual(['Chicago', 'Riverside #3']);
+  });
+
+  it('setHasDlc4 records the probe result', () => {
+    const id = seedServer('Dallas', 1, 0);
+    setHasDlc4(db, id, true);
+    expect(serversMissingDlc4(db)).toEqual([]);
+    setHasDlc4(db, id, false);
+    expect(serversMissingDlc4(db)).toEqual(['Dallas']);
   });
 });

@@ -177,6 +177,15 @@ export class RealOrchestrator implements Orchestrator {
       if (entry.custom && !isInstalledEverywhere(this.db, match.campaign, [server.id])) {
         throw new Error(`${entry.name} is not installed on ${server.name}`);
       }
+      // Same staleness argument as the custom-campaign check above, applied to
+      // the dlc4 mappack: a server added or re-enabled after the vote defaults
+      // to has_dlc4 = 0, and map_pool is never pruned to drop it back out, so
+      // the pool answer can be wrong by the time we get here. changelevel into
+      // a c1m1_hotel-style map with no left4dead_dlc4 on the box strands the
+      // match the same way, with no error anyone sees.
+      if (entry.requiresDlc4 && !server.has_dlc4) {
+        throw new Error(`${entry.name} requires the dlc4 mappack, which ${server.name} does not have`);
+      }
       if (this.beforeLive) {
         try {
           await this.beforeLive(rcon);

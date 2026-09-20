@@ -3,7 +3,8 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
-import { getServer, setEnabled } from '../serverPool.js';
+import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, type ServerRow } from '../serverPool.js';
+import { serverHasDlc4 } from '../dlc4.js';
 import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
 import { getCampaignPool, getSetting, setSetting } from '../settings.js';
@@ -32,6 +33,9 @@ export interface AdminRouteOpts {
    *  analyse and the panel says so rather than offering a button that cannot
    *  work. */
   integrityJobs?: IntegrityJobs;
+  /** Probes one server for the dlc4 mappack. Injected in tests so the check
+   *  never dials a real box; defaults to the real serverHasDlc4, which does. */
+  dlc4Probe?: (server: ServerRow) => Promise<boolean>;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
@@ -39,6 +43,7 @@ export interface AdminRouteOpts {
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
   const { db, matchmaker, releaser, broadcast, integrityJobs } = opts;
   const requireAdmin = makeRequireAdmin(db);
+  const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
   app.get('/api/admin/players', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
@@ -282,6 +287,26 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true };
   });
 
+  // Probing is a network round trip per server, so this is an explicit admin
+  // action rather than something that runs on page load. The result is
+  // stored, and the pool gate (serversMissingDlc4) reads that stored value
+  // rather than probing again.
+  app.post('/api/admin/servers/dlc4-check', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const results = [];
+    for (const s of listServers(db)) {
+      const hasDlc4 = await dlc4Probe(s);
+      setHasDlc4(db, s.id, hasDlc4);
+      results.push({ id: s.id, name: s.name, hasDlc4 });
+    }
+    // 'all': this action is about every server at once and has no single
+    // target id, unlike server_idle/server_enable which target one.
+    logAdmin(db, adminId, 'server_dlc4_check', 'all', { results });
+    broadcast('refresh');
+    return { results };
+  });
+
   app.post('/api/admin/queue/remove', async (req, reply) => {
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
@@ -305,6 +330,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       // the panel does not make its own already-saved setting look invalid.
       campaigns: poolableCampaigns(db, { alsoAllow: getCampaignPool(db) })
         .map((c) => ({ slug: c.slug, name: c.name, custom: c.custom })),
+      // Named servers, not just a boolean, so the panel can say which box is
+      // holding the dlc4 campaigns out of the pool instead of leaving an
+      // admin to guess.
+      serversMissingDlc4: serversMissingDlc4(db),
     };
   });
 

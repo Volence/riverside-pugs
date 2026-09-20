@@ -3,7 +3,7 @@ import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
 import { RealOrchestrator } from '../src/orchestrator.js';
 import { ServerReleaser } from '../src/serverRelease.js';
-import { addServer, getServer } from '../src/serverPool.js';
+import { addServer, getServer, setHasDlc4 } from '../src/serverPool.js';
 import { LogListener } from '../src/logListener.js';
 import { currentSeasonId } from '../src/players.js';
 import {
@@ -12,7 +12,7 @@ import {
 } from '../src/rconPacket.js';
 import { pugReply } from './helpers.js';
 import { deleteCampaign, insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
-import { invalidateCampaignCache, setMissionsDir } from '../src/campaignRegistry.js';
+import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
 function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
   const cmds: string[] = [];
@@ -469,6 +469,51 @@ describe('custom campaign availability', () => {
   });
 });
 
+describe('dlc4 campaign availability', () => {
+  // Same rcon fake and orchestrator wiring as the custom-campaign suite above.
+  async function setup(): Promise<{ orch: RealOrchestrator; cmds: string[]; serverId: number }> {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener,
+      logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}),
+      makeRcon: (o) => o,
+    });
+    return { orch, cmds: srv.cmds, serverId };
+  }
+
+  // The pool flag can be stale the same way the custom-campaign one can: a
+  // server added or re-enabled after the vote has no mappack, and
+  // changelevel into c1m1_hotel with no left4dead_dlc4 strands the match on
+  // a black screen with no error anyone sees.
+  it('refuses a dlc4 campaign on a server that does not have the mappack', async () => {
+    const { orch, cmds, serverId } = await setup();
+    setHasDlc4(db, serverId, false);
+    const mid = seedMatch(db, 'dead_center');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+
+  it('allows a dlc4 campaign once that server reports the mappack installed', async () => {
+    const { orch, cmds, serverId } = await setup();
+    setHasDlc4(db, serverId, true);
+    const mid = seedMatch(db, 'dead_center');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds).toContain('changelevel c1m1_hotel');
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
+  });
+});
+
 describe('stop-after map', () => {
   // Same rcon fake and orchestrator wiring as the other describe blocks in
   // this file.
@@ -538,7 +583,7 @@ describe('stop-after map', () => {
   // arguments, no trailing anything.
   it('sends three arguments when no stop map is known', async () => {
     const { orch, cmds } = await setup();
-    setMissionsDir('');
+    setMissionsDirs([]);
     invalidateCampaignCache();
     const mid = seedMatch(db, 'dead_air');
 
@@ -549,12 +594,23 @@ describe('stop-after map', () => {
 });
 
 describe('firstMapOf', () => {
-  // The plain l4d_ BSPs are co-op maps. The first web match shipped on one.
-  it('changelevels into the versus BSP for every campaign', async () => {
+  // Base game campaigns use l4d_vs_ BSPs (the versus variants, since the plain
+  // l4d_ ones are co-op-only). Dlc4 campaigns use plain map names like c1m1_hotel
+  // because those BSPs serve both modes.
+  it('returns the correct first map for each campaign', async () => {
     const { firstMapOf } = await import('../src/campaignRegistry.js');
-    const { CAMPAIGNS } = await import('../src/campaigns.js');
+    const { CAMPAIGNS, DLC4_CAMPAIGNS } = await import('../src/campaigns.js');
     const db = openDb(':memory:');
-    for (const c of Object.keys(CAMPAIGNS)) expect(firstMapOf(db, c)).toMatch(/^l4d_vs_/);
+    for (const slug of Object.keys(CAMPAIGNS)) {
+      const map = firstMapOf(db, slug);
+      if (DLC4_CAMPAIGNS.has(slug)) {
+        // dlc4 campaigns use plain names like c1m1_hotel
+        expect(map).toMatch(/^c\d+m\d+/);
+      } else {
+        // base game campaigns use l4d_vs_ BSPs
+        expect(map).toMatch(/^l4d_vs_/);
+      }
+    }
     expect(firstMapOf(db, 'unknown')).toMatch(/^l4d_vs_/);
   });
 });

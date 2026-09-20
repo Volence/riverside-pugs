@@ -1646,6 +1646,11 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .queue-block { margin-top: var(--sp-3); }
 
 .howto { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
+/* Shader Detail crash warning in the map pack install steps. Borrows
+   .error's color since it is the same "this will hurt you" red, but not its
+   font-size: this is a preventive warning read before anything has gone
+   wrong, not a shrunken status line for a failure that already happened. */
+.howto-warn { color: var(--loss); }
 .steps { margin: var(--sp-3) 0; padding-left: 1.25rem; display: grid; gap: var(--sp-2); }
 .steps code { word-break: break-all; }
 .faq details { border-bottom: 1px solid var(--border); padding: var(--sp-3) 0; }

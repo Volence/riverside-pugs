@@ -387,6 +387,10 @@ export interface MapBreakdownRow {
   stats: Record<string, number>;
   /** Per map played, to one decimal. */
   avgStats: Record<string, number>;
+  /** Which campaign this map belongs to, so a list that mixes every campaign
+   *  a player has touched can label a bare chapter name that no longer
+   *  identifies anything on its own. Null for a map the registry can't place. */
+  campaignName: string | null;
 }
 
 export interface ProfileMatch extends MatchSummary {
@@ -789,8 +793,9 @@ export const adminApi = {
   resolveReport: (id: number, status: 'resolved' | 'dismissed', note: string) =>
     post(`/api/admin/reports/${id}/resolve`, { status, note }),
   settings: (signal?: AbortSignal) =>
-    get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[] }>('/api/admin/settings', signal),
+    get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[]; serversMissingDlc4: string[] }>('/api/admin/settings', signal),
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
+  dlc4Check: () => post<{ results: { id: number; name: string; hasDlc4: boolean }[] }>('/api/admin/servers/dlc4-check'),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
