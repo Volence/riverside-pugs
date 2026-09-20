@@ -625,6 +625,12 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'servers', 'ftp_port', 'INTEGER');
   ensureColumn(db, 'servers', 'ftp_user', 'TEXT');
   ensureColumn(db, 'servers', 'ftp_password', 'TEXT');
+  // Path to the private key used by the 'sftp' addons transport. Our own second
+  // machine (Riverside) is reachable only over ssh: no shared filesystem like
+  // Dallas, no FTP like Chicago. Kept as a path, not the key material, so the
+  // secret stays in the filesystem with its own permissions and never in a DB
+  // backup. Reuses ftp_host/ftp_port/ftp_user for the connection details.
+  ensureColumn(db, 'servers', 'ssh_key_path', 'TEXT');
   seed(db);
   return db;
 }
