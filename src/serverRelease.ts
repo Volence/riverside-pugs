@@ -1,13 +1,25 @@
 import type { DB } from './db.js';
 import { getServer, release, type ServerRow } from './serverPool.js';
 
-/** Hands a server back: clear sv_password, and tell the plugin the match whose
- *  token this is (if any) is over. Injected so tests never dial rcon and so the
- *  reapers, which have no rcon of their own, can still do both.
+/** How a server is being freed. `teardown` is the ending that went wrong:
+ *  abandon, no-show, admin abort. The roster is still on the box, possibly
+ *  paused, on the match map, and the plugin is asked to empty it and change
+ *  to the reset map. A clean finish, a boot-time reconcile and a failed setup
+ *  all pass false: the first is already empty (the plugin kicks at the end of
+ *  a backend match), and the other two may have casual players on the box
+ *  who have nothing to do with any match. */
+export interface ReleaseOpts {
+  teardown: boolean;
+}
+
+/** Hands a server back: restore sv_password, and tell the plugin the match whose
+ *  token this is (if any) is over, with a teardown when asked. Injected so tests
+ *  never dial rcon and so the reapers, which have no rcon of their own, can
+ *  still do both.
  *
  *  `token` is null when no match on that box ever got one, in which case there
  *  is nothing to abort. */
-export type ServerCleaner = (server: ServerRow, token: string | null) => Promise<void>;
+export type ServerCleaner = (server: ServerRow, token: string | null, opts: ReleaseOpts) => Promise<void>;
 
 /**
  * The single place a server stops being ours.
@@ -66,16 +78,17 @@ export class ServerReleaser {
    * would mean keeping the row unclaimable until the rcon settles, which is a
    * larger change than this class.
    */
-  release(serverId: number): void {
+  release(serverId: number, opts: Partial<ReleaseOpts> = {}): void {
     const server = getServer(this.db, serverId);
     if (!server) return;
+    const full: ReleaseOpts = { teardown: opts.teardown ?? false };
     // Read before the row is freed, though nothing here depends on the order:
     // release() writes only the servers table. The newest match on the box is
     // the one whose match the plugin may still be holding. A stale or already
     // aborted token is harmless: the plugin answers PUGERR and changes nothing.
     const token = lastTokenOn(this.db, serverId);
     release(this.db, serverId);
-    const done = this.cleanServer(server, token)
+    const done = this.cleanServer(server, token, full)
       .catch((err) => {
         // A dead rcon target must never wedge the queue: the waiters still
         // fire below even when the cleanup fails.

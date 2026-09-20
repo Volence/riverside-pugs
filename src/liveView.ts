@@ -2,7 +2,7 @@ import { publishAdminEvent } from './adminFeed.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
-import type { LogEvent } from './logParse.js';
+import type { LogEvent, Phase } from './logParse.js';
 import type { ServerReleaser } from './serverRelease.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
@@ -43,6 +43,40 @@ export interface LiveEvent {
   target: { steamid: string; name: string } | null;
   value: number;
 }
+/** A reported phase plus when it began, as epoch milliseconds so a page can
+ *  run a pause countdown against its own clock. */
+export interface LivePhase extends Phase { sinceMs: number }
+export interface MatchPause {
+  team: 'a' | 'b' | null;
+  leave: boolean;
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds, or null while the pause is still open. */
+  seconds: number | null;
+}
+export interface MatchReadyup {
+  mapOrdinal: number;
+  half: number | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** Whole seconds from the ready-up beginning to going live, null while open. */
+  seconds: number | null;
+  /** Who was still not ready in the last report that named anyone. */
+  lastUnready: string[];
+  lastUnreadyNames: string[];
+  /** Seconds each player spent not ready. */
+  players: { steamid: string; name: string; seconds: number }[];
+}
+export interface SlowToReady {
+  steamid: string;
+  name: string;
+  readyups: number;
+  timesLast: number;
+  totalSeconds: number;
+  avgSeconds: number;
+}
 export interface LiveMatch {
   id: number;
   campaign: string;
@@ -62,6 +96,8 @@ export interface LiveMatch {
   events: LiveEvent[];
   /** How to watch on SourceTV, or null when that server has none. */
   spectate: SpectateInfo | null;
+  /** What the game is doing, or null until the plugin has reported one. */
+  phase: LivePhase | null;
 }
 
 /**
@@ -146,6 +182,235 @@ export function recordLiveStat(
      ON CONFLICT (match_id, player_id) DO UPDATE SET stats_json = excluded.stats_json`,
   ).run(id, steamid, JSON.stringify(merged));
   touch(db, id);
+}
+
+function sqliteToMs(s: string): number {
+  return Date.parse(`${s.replace(' ', 'T')}Z`);
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort(), sb = [...b].sort();
+  return sa.every((x, i) => x === sb[i]);
+}
+
+function parseIds(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Charge the seconds since the last roster report to everyone it named,
+ *  on the match's open ready-up. */
+function chargeUnready(db: DB, matchId: number, unready: string[], sinceSql: string | null): void {
+  if (unready.length === 0 || !sinceSql) return;
+  const open = db
+    .prepare('SELECT id FROM match_readyups WHERE match_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1')
+    .get(matchId) as { id: number } | undefined;
+  if (!open) return;
+  const secs = Math.max(0, Math.round((Date.now() - sqliteToMs(sinceSql)) / 1000));
+  const add = db.prepare(
+    `INSERT INTO match_readyup_players (readyup_id, match_id, player_id, seconds) VALUES (?, ?, ?, ?)
+     ON CONFLICT (readyup_id, player_id) DO UPDATE SET seconds = seconds + excluded.seconds`,
+  );
+  for (const id of unready) add.run(open.id, matchId, id, secs);
+}
+
+/**
+ * Record what the game is doing, and keep the pause and ready-up ledgers.
+ *
+ * The state, the team and the leave flag together identify a phase. A repeat
+ * of the current one (the heartbeat re-sends it every thirty seconds, and UDP
+ * duplicates) is a confirmation: `phase_since` stays, so a pause countdown
+ * does not restart, and no second ledger row is opened. A change stamps a new
+ * `since`, and a change into or out of a pause or a ready-up opens or closes
+ * the matching ledger row. Ledger rows are stamped with the map and half in
+ * progress at write time, the same way events are, because nothing on the
+ * wire carries them.
+ *
+ * Within a ready-up the not-ready roster changes as people ready. Each report
+ * charges the seconds since the previous one to everyone the previous one
+ * named, and the newest non-empty roster is remembered as who readied last:
+ * the empty roster at the end is the go-live countdown, not a person.
+ */
+export function recordPhase(db: DB, token: string, phase: Phase): void {
+  const id = liveMatchIdOf(db, token);
+  if (id === null) return;
+  const prev = db
+    .prepare('SELECT phase, phase_team, phase_leave, phase_unready, phase_unready_at FROM match_live WHERE match_id = ?')
+    .get(id) as {
+      phase: string | null; phase_team: string | null; phase_leave: number;
+      phase_unready: string | null; phase_unready_at: string | null;
+    } | undefined;
+  const prevUnready = parseIds(prev?.phase_unready ?? null);
+  const unready = phase.state === 'readyup' ? phase.unready : [];
+  const sameState = prev !== undefined && prev.phase === phase.state
+    && (prev.phase_team ?? null) === phase.team && Boolean(prev.phase_leave) === phase.leave;
+
+  if (sameState && sameIds(prevUnready, unready)) {
+    touch(db, id);
+    return;
+  }
+
+  if (sameState) {
+    // Still readying up, a different roster: charge the old one and move on.
+    chargeUnready(db, id, prevUnready, prev!.phase_unready_at);
+    db.prepare(
+      "UPDATE match_live SET last_seen = datetime('now'), phase_unready = ?, phase_unready_at = datetime('now') WHERE match_id = ?",
+    ).run(JSON.stringify(unready), id);
+    if (unready.length > 0) {
+      db.prepare(
+        'UPDATE match_readyups SET last_unready = ? WHERE match_id = ? AND ended_at IS NULL',
+      ).run(JSON.stringify(unready), id);
+    }
+    return;
+  }
+
+  if (prev?.phase === 'readyup') {
+    chargeUnready(db, id, prevUnready, prev.phase_unready_at);
+    db.prepare(
+      "UPDATE match_readyups SET ended_at = datetime('now') WHERE match_id = ? AND ended_at IS NULL",
+    ).run(id);
+  }
+  if (prev?.phase === 'paused') {
+    db.prepare(
+      "UPDATE match_pauses SET ended_at = datetime('now') WHERE match_id = ? AND ended_at IS NULL",
+    ).run(id);
+  }
+
+  db.prepare(
+    `INSERT INTO match_live (match_id, current_map, last_seen, phase, phase_since, phase_team, phase_limit, phase_leave, phase_unready, phase_unready_at)
+     VALUES (?, NULL, datetime('now'), ?, datetime('now'), ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (match_id) DO UPDATE SET
+       last_seen = datetime('now'),
+       phase = excluded.phase, phase_since = excluded.phase_since,
+       phase_team = excluded.phase_team, phase_limit = excluded.phase_limit,
+       phase_leave = excluded.phase_leave,
+       phase_unready = excluded.phase_unready, phase_unready_at = excluded.phase_unready_at`,
+  ).run(id, phase.state, phase.team, phase.limit, phase.leave ? 1 : 0, JSON.stringify(unready));
+
+  if (phase.state === 'paused' || phase.state === 'readyup') {
+    const ordinal = currentOrdinal(db, id);
+    const round = db
+      .prepare('SELECT MAX(half) AS half FROM match_rounds WHERE match_id = ? AND ordinal = ?')
+      .get(id, ordinal) as { half: number | null };
+    if (phase.state === 'paused') {
+      db.prepare(
+        `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      ).run(id, ordinal, round.half, phase.team, phase.leave ? 1 : 0);
+    } else {
+      db.prepare(
+        `INSERT INTO match_readyups (match_id, map_ordinal, half, started_at, last_unready)
+         VALUES (?, ?, ?, datetime('now'), ?)`,
+      ).run(id, ordinal, round.half, JSON.stringify(unready));
+    }
+  }
+}
+
+/** Every ready-up of a match, oldest first. Survives clearLive on purpose. */
+export function readyupsFor(db: DB, matchId: number): MatchReadyup[] {
+  const rows = db
+    .prepare(
+      `SELECT id, map_ordinal, half, started_at, ended_at, last_unready
+       FROM match_readyups WHERE match_id = ? ORDER BY id`,
+    )
+    .all(matchId) as {
+      id: number; map_ordinal: number; half: number | null;
+      started_at: string; ended_at: string | null; last_unready: string;
+    }[];
+  const playersOf = db.prepare(
+    `SELECT rp.player_id AS steamid, COALESCE(p.name, rp.player_id) AS name, rp.seconds
+     FROM match_readyup_players rp LEFT JOIN players p ON p.steamid = rp.player_id
+     WHERE rp.readyup_id = ? ORDER BY rp.seconds DESC, rp.player_id`,
+  );
+  const nameOf = db.prepare('SELECT name FROM players WHERE steamid = ?');
+  return rows.map((r) => {
+    const lastUnready = parseIds(r.last_unready);
+    return {
+      mapOrdinal: r.map_ordinal,
+      half: r.half,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      seconds: r.ended_at === null
+        ? null
+        : Math.max(0, Math.round((sqliteToMs(r.ended_at) - sqliteToMs(r.started_at)) / 1000)),
+      lastUnready,
+      lastUnreadyNames: lastUnready.map((id) => (nameOf.get(id) as { name: string } | undefined)?.name ?? id),
+      players: playersOf.all(r.id) as { steamid: string; name: string; seconds: number }[],
+    };
+  });
+}
+
+/**
+ * Who is slow to ready, across every finished ready-up of every match that
+ * still counts. Sorted by how often they were the last one, then by total
+ * seconds, so a repeat offender is at the top.
+ */
+export function slowToReady(db: DB, limit = 25): SlowToReady[] {
+  return db
+    .prepare(
+      `SELECT rp.player_id AS steamid, COALESCE(p.name, rp.player_id) AS name,
+              COUNT(DISTINCT rp.readyup_id) AS readyups,
+              SUM(rp.seconds) AS totalSeconds,
+              ROUND(AVG(rp.seconds)) AS avgSeconds,
+              SUM(EXISTS (SELECT 1 FROM json_each(r.last_unready) WHERE value = rp.player_id)) AS timesLast
+       FROM match_readyup_players rp
+       JOIN match_readyups r ON r.id = rp.readyup_id
+       JOIN matches m ON m.id = rp.match_id
+       LEFT JOIN players p ON p.steamid = rp.player_id
+       WHERE r.ended_at IS NOT NULL AND m.voided_at IS NULL
+       GROUP BY rp.player_id
+       ORDER BY timesLast DESC, totalSeconds DESC, rp.player_id
+       LIMIT ?`,
+    )
+    .all(limit) as SlowToReady[];
+}
+
+export function phaseFor(db: DB, matchId: number): LivePhase | null {
+  const row = db
+    .prepare('SELECT phase, phase_since, phase_team, phase_limit, phase_leave, phase_unready FROM match_live WHERE match_id = ?')
+    .get(matchId) as {
+      phase: string | null; phase_since: string | null; phase_team: 'a' | 'b' | null;
+      phase_limit: number; phase_leave: number; phase_unready: string | null;
+    } | undefined;
+  if (!row || !row.phase || !row.phase_since) return null;
+  return {
+    state: row.phase as Phase['state'],
+    team: row.phase_team ?? null,
+    limit: row.phase_limit,
+    leave: Boolean(row.phase_leave),
+    unready: parseIds(row.phase_unready),
+    sinceMs: sqliteToMs(row.phase_since),
+  };
+}
+
+/** Every pause of a match, oldest first. Survives clearLive on purpose. */
+export function pausesFor(db: DB, matchId: number): MatchPause[] {
+  const rows = db
+    .prepare(
+      `SELECT map_ordinal, half, team, leave_pause, started_at, ended_at
+       FROM match_pauses WHERE match_id = ? ORDER BY id`,
+    )
+    .all(matchId) as {
+      map_ordinal: number; half: number | null; team: 'a' | 'b' | null;
+      leave_pause: number; started_at: string; ended_at: string | null;
+    }[];
+  return rows.map((r) => ({
+    team: r.team ?? null,
+    leave: Boolean(r.leave_pause),
+    mapOrdinal: r.map_ordinal,
+    half: r.half,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    seconds: r.ended_at === null
+      ? null
+      : Math.max(0, Math.round((sqliteToMs(r.ended_at) - sqliteToMs(r.started_at)) / 1000)),
+  }));
 }
 
 /** Cap on how many feed entries the payload carries. The table keeps
@@ -602,6 +867,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
       id: m.id,
       campaign: m.campaign,
       spectate: spectateFor(db, m.serverId),
+      phase: phaseFor(db, m.id),
       currentMap: m.currentMap ?? null,
       teamA: ps.filter((p) => p.team === 'a').map(named),
       teamB: ps.filter((p) => p.team === 'b').map(named),

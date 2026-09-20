@@ -114,6 +114,9 @@ describe('DiscordSync', () => {
     expect(JSON.stringify(t.byId(card)!.payload)).toContain(`PUG #${match.id}`);
   });
 
+  // Without an admin channel configured there is nowhere else for the outcome
+  // to go, so it stays on the card. This is the pre-2026-09-20 behaviour and
+  // the fallback for a server that has not set the channel.
   it('a failed ready check edits the card to name who missed it', async () => {
     await build().start();
     for (const id of IDS) mm.join(id);
@@ -125,6 +128,54 @@ describe('DiscordSync', () => {
     const p = t.byId(card)!.payload;
     expect(p.embeds[0].title).toMatch(/failed/i);
     expect(p.components).toEqual([]);
+  });
+
+  // Owner, 2026-09-20: "only thing in queue-here should be the queues, keeps
+  // it clean". A dead ready check is an admin's problem, not eight people's
+  // scrollback, and the players who were in it are told on the site instead.
+  describe('with an admin channel configured', () => {
+    const ADMIN = 'admin-chan';
+    beforeEach(() => setSetting(db, 'discord_admin_channel_id', ADMIN));
+
+    it('takes a failed ready check out of the queue channel and into admin', async () => {
+      await build().start();
+      for (const id of IDS) mm.join(id);
+      await sync.pass();
+      const card = t.live()[0].id;
+      mm.ready(IDS[0]);
+      sched.fireAll();
+      await sync.pass();
+
+      expect(t.byId(card)!.deleted).toBe(true);
+      expect(getMessage(db, 'match', 'lob_1')?.state ?? 'failed').toBe('failed');
+      const posted = t.messages.filter((m) => m.channelId === ADMIN && !m.deleted);
+      expect(posted).toHaveLength(1);
+      expect(posted[0].payload.embeds[0].title).toMatch(/failed/i);
+      // Who missed it is the whole reason an admin is reading this.
+      expect(JSON.stringify(posted[0].payload)).toMatch(/not ready/i);
+    });
+
+    it('takes a cancelled lobby out of the queue channel too', async () => {
+      const stale = await t.send(CH, { embeds: [{ title: 'Queue popped! Ready up' }], components: [] });
+      saveMessage(db, { kind: 'match', ref: 'lob_old_1', channelId: CH, messageId: stale });
+      await build().start();
+
+      expect(t.byId(stale)!.deleted).toBe(true);
+      expect(getMessage(db, 'match', 'lob_old_1')?.state).toBe('cancelled');
+      expect(t.messages.filter((m) => m.channelId === ADMIN && !m.deleted)).toHaveLength(1);
+    });
+
+    it('leaves the queue panel alone', async () => {
+      await build().start();
+      for (const id of IDS) mm.join(id);
+      await sync.pass();
+      mm.ready(IDS[0]);
+      sched.fireAll();
+      await sync.pass();
+      // The panel is the one thing that belongs in the channel.
+      expect(t.live().filter((m) => m.channelId === CH)).toHaveLength(1);
+      expect(getMessage(db, 'panel', 'queue')).toBeTruthy();
+    });
   });
 
   it('pings the roster once when the server goes live, and posts one result on completion', async () => {

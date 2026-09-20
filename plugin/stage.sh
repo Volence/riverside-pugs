@@ -114,12 +114,19 @@ ssh "root@$HOST" "chown l4d:l4d $REMOTE/pug-match.smx"
 # off the command's own reply rather than off `plugins list`, so it does not
 # depend on the name-vs-filename distinction at all.
 echo "==> Loading plugin"
+# Rotoblin's per-mode plugin configs end with `sm plugins load_lock`, so between
+# matches the server refuses every load and reload with "global plugin loading
+# lock in effect". Worse, a reload under the lock UNLOADS the old copy and then
+# fails to load the new one, leaving no plugin at all (2026-09-19). pug_match.cfg
+# itself unlocks, loads, and re-locks, so do exactly that here.
+"$RCON" "sm plugins load_unlock" >/dev/null
 RELOAD_OUT=$("$RCON" "sm plugins reload pug-match" 2>&1 || true)
 printf '%s\n' "$RELOAD_OUT"
-if printf '%s' "$RELOAD_OUT" | grep -qiE "not loaded|not found|unable to|invalid"; then
+if printf '%s' "$RELOAD_OUT" | grep -qiE "not loaded|not found|unable to|invalid|failed"; then
   echo "    not loaded yet, loading fresh"
   "$RCON" "sm plugins load pug-match"
 fi
+"$RCON" "sm plugins load_lock" >/dev/null
 
 echo "==> Verifying"
 if ! "$RCON" "sm plugins list" | grep -F "$PLUGIN_NAME"; then

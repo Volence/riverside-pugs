@@ -154,3 +154,18 @@ describe('no-show reaper', () => {
     expect(getServer(db, serverId)!.status).toBe('live');
   });
 });
+
+describe('no-show teardown', () => {
+  it('releases the box with a teardown', () => {
+    const db = openDb(':memory:');
+    const { serverId } = liveMatch(db, 15);
+    const seen: boolean[] = [];
+    const releaser = new ServerReleaser(db, async (_s, _t, opts) => { seen.push(opts.teardown); });
+    reapNoShowMatches(db, releaser);
+    return new Promise<void>((r) => setImmediate(() => {
+      expect(getServer(db, serverId)!.status).toBe('idle');
+      expect(seen).toEqual([true]);
+      r();
+    }));
+  });
+});

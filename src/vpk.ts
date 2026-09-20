@@ -109,6 +109,47 @@ export function parseMission(text: string): Mission | null {
   return { name, displayTitle, chapters };
 }
 
+/**
+ * Every path in a VPK directory, as `dir/name.ext`, in tree order. Reads the
+ * tree only and never opens a numbered archive, so it works on `pak01_dir.vpk`
+ * as well as on a single-file addon. Returns [] for anything that is not a VPK.
+ */
+export function listVpkPaths(vpkPath: string): string[] {
+  const buf = readFileSync(vpkPath);
+  if (buf.length < 12 || buf.readUInt32LE(0) !== VPK_MAGIC) return [];
+  const version = buf.readUInt32LE(4);
+  const treeLength = buf.readUInt32LE(8);
+  const treeStart = version === 2 ? 28 : 12;
+  if (treeStart + treeLength > buf.length) return [];
+
+  let p = treeStart;
+  const readCString = (): string => {
+    let s = '';
+    while (p < buf.length && buf[p] !== 0) { s += String.fromCharCode(buf[p]); p++; }
+    p++;
+    return s;
+  };
+
+  const out: string[] = [];
+  for (;;) {
+    const ext = readCString();
+    if (ext === '') break;
+    for (;;) {
+      const dir = readCString();
+      if (dir === '') break;
+      for (;;) {
+        const name = readCString();
+        if (name === '') break;
+        const preloadBytes = buf.readUInt16LE(p + 4);
+        p += 18 + preloadBytes;
+        // A single space is the format's spelling of "the archive root".
+        out.push(dir === ' ' ? `${name}.${ext}` : `${dir}/${name}.${ext}`);
+      }
+    }
+  }
+  return out;
+}
+
 /** Locate `missions/<something>.txt` in a VPK and return its text. */
 export function readMissionFromVpk(vpkPath: string): { file: string; text: string } | null {
   const buf = readFileSync(vpkPath);

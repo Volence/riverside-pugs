@@ -111,10 +111,17 @@ export interface BotTransport {
   /** False when the message no longer exists (deleted by hand). */
   edit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean>;
   remove(channelId: string, messageId: string): Promise<void>;
+  /** A direct message to one user. Rejects when Discord refuses it, which is
+   *  ordinary: the user has DMs from server members closed, or has left the
+   *  guild and shares no server with the bot. Callers decide what that means. */
+  dm(userId: string, payload: MessagePayload): Promise<void>;
   onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>): void;
   registerCommands(defs: SlashCommandDef[]): Promise<void>;
   /** Load the server's member list, then report joins and leaves. */
   watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void>;
+  /** Load who is in which voice channel, then report every change: the
+   *  channel they are in now, or null when they left voice. */
+  watchVoice(h: { all(states: [userId: string, channelId: string][]): void; update(userId: string, channelId: string | null): void }): Promise<void>;
   voice: VoiceOps;
   roles: RoleOps;
 }

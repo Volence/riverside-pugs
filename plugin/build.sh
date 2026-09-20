@@ -18,6 +18,15 @@ if [ ! -e "$SKILL_DETECT_INC" ]; then
 	cp /home/volence/l4d/L4D1_2-Plugins/l4d2_skill_detect/scripting/include/l4d2_skill_detect.inc "$SKILL_DETECT_INC"
 	CLEANUP="$CLEANUP $SKILL_DETECT_INC"
 fi
+# geoip.inc is a stock SourceMod include, but this Rotoblin tree does not ship
+# one. Same borrow-and-clean-up rule as skill_detect above, so a fresh checkout
+# builds without anyone having to know about it. (EmitClientNet feature-checks
+# the native at runtime, so the extension being absent on a box is fine.)
+GEOIP_INC="$SCRIPTING/include/geoip.inc"
+if [ ! -e "$GEOIP_INC" ]; then
+	cp /home/volence/l4d1-ds/server/left4dead/addons/sourcemod/scripting/include/geoip.inc "$GEOIP_INC"
+	CLEANUP="$CLEANUP $GEOIP_INC"
+fi
 trap 'rm -f '"$CLEANUP" EXIT
 (cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -iinclude)
 mv "$SCRIPTING/pug-match.smx" ./pug-match.smx

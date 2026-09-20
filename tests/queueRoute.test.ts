@@ -12,7 +12,7 @@ let app: FastifyInstance;
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverExec: async () => {} });
 });
 
 describe('GET /api/queue', () => {

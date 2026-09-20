@@ -132,6 +132,17 @@ export class AdminFeedPoster {
           text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
+      case 'signon_drop': {
+        // The in-game name, not this.name(): most of these steamids have never
+        // signed in, and an admin searching the server log needs the name the
+        // player was actually using.
+        const known = getPlayer(this.deps.db, e.steamid);
+        const id = known ? `[${e.steamid}](${this.deps.publicUrl}/player/${e.steamid})` : `\`${e.steamid}\``;
+        return {
+          text: `**${escapeName(e.name)}** (${id}) dropped while connecting ${e.count} times in ten minutes without getting in (${e.total} on record): likely rejected for a modified game file; the file name was shown on their screen. A cancelled loading screen looks the same, so this is a hint, not proof.`,
+          color: COLOR.problem,
+        };
+      }
     }
   }
 

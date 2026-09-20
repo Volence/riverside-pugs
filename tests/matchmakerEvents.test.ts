@@ -82,6 +82,52 @@ describe('Matchmaker lobby events', () => {
     expect(mm.lastFailure(lobby.id)).toEqual({ ready: [IDS[0]], notReady: IDS.slice(1) });
   });
 
+  // The failure used to be announced by editing the lobby card in #queue-here.
+  // That now goes to the admin channel instead (owner, 2026-09-20: keep the
+  // queue channel to queues), so the people it actually happened to need
+  // telling somewhere. This is what the Play page reads.
+  describe('lobby notice', () => {
+    const fail = () => {
+      for (const id of IDS) mm.join(id);
+      mm.ready(IDS[0]);
+      mm.ready(IDS[1]);
+      sched.fireAll();
+    };
+
+    it('tells everyone who was in the lobby what happened, and who was missing', () => {
+      fail();
+      const mine = mm.stateFor(IDS[0]).lobbyNotice!;
+      expect(mine.youWereReady).toBe(true);
+      expect(mine.notReady.map((p) => p.steamid)).toEqual(IDS.slice(2));
+
+      // And the people who missed it are told they were the reason.
+      expect(mm.stateFor(IDS[3]).lobbyNotice!.youWereReady).toBe(false);
+    });
+
+    it('says nothing to someone who was never in that lobby', () => {
+      fail();
+      const stranger = '76561198000000999';
+      upsertPlayer(db, { steamid: stranger, name: 'x', avatar: null }, []);
+      expect(mm.stateFor(stranger).lobbyNotice).toBeNull();
+    });
+
+    it('clears on dismiss', () => {
+      fail();
+      mm.dismissNotice(IDS[0]);
+      expect(mm.stateFor(IDS[0]).lobbyNotice).toBeNull();
+      // One player dismissing is not everyone dismissing.
+      expect(mm.stateFor(IDS[1]).lobbyNotice).not.toBeNull();
+    });
+
+    it('clears when they queue again, so it cannot outlive the thing it is about', () => {
+      fail();
+      // The ready players are requeued at the front, so leave and rejoin.
+      mm.leave(IDS[0]);
+      mm.join(IDS[0]);
+      expect(mm.stateFor(IDS[0]).lobbyNotice).toBeNull();
+    });
+  });
+
   it('lobby ids are unique across Matchmaker instances, so a restart never reuses one', () => {
     for (const id of IDS) mm.join(id);
     const first = mm.lobbies()[0].id;

@@ -224,6 +224,16 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         if (codeOf(err) !== UNKNOWN_MESSAGE) throw err;
       }
     },
+    async dm(userId, payload) {
+      // No extra gateway intent: sending a DM is a REST call. users.fetch
+      // resolves anyone by id; send() is what fails for closed DMs (50007).
+      const user = await client.users.fetch(userId);
+      const m = toMessage(payload);
+      await user.send({
+        content: m.content || undefined, embeds: m.embeds, components: m.components as never,
+        allowedMentions: m.allowedMentions,
+      });
+    },
     onInteraction(h) {
       handler = h;
     },
@@ -248,6 +258,19 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       const all = await guild.members.fetch();
       h.all([...all.keys()]);
       console.log(`[discord] tracking ${all.size} server members`);
+    },
+    async watchVoice(h) {
+      client.on(Events.VoiceStateUpdate, (_before, after) => {
+        if (after.guild.id === guild.id) h.update(after.id, after.channelId ?? null);
+      });
+      // The gateway sends the guild's voice states with the guild itself, so
+      // this cache is complete as soon as the client is ready.
+      const states: [string, string][] = [];
+      for (const vs of guild.voiceStates.cache.values()) {
+        if (vs.channelId) states.push([vs.id, vs.channelId]);
+      }
+      h.all(states);
+      console.log(`[discord] tracking voice: ${states.length} in a channel`);
     },
     voice,
     async destroy() {

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -14,7 +14,7 @@ import { getMapsToPlay, setMapsToPlay } from '../src/campaignRules.js';
 import { campaignRegistry, invalidateCampaignCache, setMissionsDir } from '../src/campaignRegistry.js';
 import type { InstallTarget } from '../src/campaignInstall.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
-import { makeVpk } from './fixtures/makeVpk.js';
+import { makeVpk, makeVpkMulti } from './fixtures/makeVpk.js';
 import { fakeAddonsTransport } from './fakes/fakeAddonsTransport.js';
 import { getJsonSetting, setSetting } from '../src/settings.js';
 
@@ -56,18 +56,21 @@ let addons: string;
 const buildTestApp = (o: {
   db: DB; addonsDir: string; freeBytes?: number;
   installTargets?: () => InstallTarget[]; maxUploadBytes?: number;
+  consistencyListPath?: string;
 }): Promise<FastifyInstance> =>
   buildServer({
     config: loadConfig({ ADDONS_DIR: o.addonsDir }),
     db: o.db,
     orchestrator: stubOrchestrator(),
     serverCleaner: async () => {},
+    serverExec: async () => {},
     // Injected for the same reason orchestrator and serverCleaner are: the
     // real one calls statfs, so the disk-floor test would pass or fail based
     // on how full the machine running it happens to be.
     freeBytes: o.freeBytes === undefined ? undefined : async () => o.freeBytes!,
     installTargets: o.installTargets,
     maxUploadBytes: o.maxUploadBytes,
+    consistencyListPath: o.consistencyListPath,
   });
 
 beforeEach(() => {
@@ -279,6 +282,84 @@ describe('POST /api/admin/campaigns', () => {
       payload: form,
     });
     expect(res.statusCode).toBe(409);
+  });
+
+  // A forced path that a campaign overrides would disconnect every player on
+  // its maps, stock client or not: the client checks its disk against the
+  // SERVER's checksum, and the server has the campaign mounted.
+  it('refuses a campaign that ships files the server enforces, naming them', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const vpkPath = join(addons, 'source.vpk');
+    makeVpkMulti(vpkPath, [
+      { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION },
+      { ext: 'txt', dir: 'scripts', name: 'game_sounds_weapons', body: '// quieter' },
+      // Case must not matter: the engine's file system does not care.
+      { ext: 'vmt', dir: 'Materials/Models/Infected/Hunter', name: 'Hunter_01', body: 'x' },
+      { ext: 'vmt', dir: 'materials/dbd', name: 'wall', body: 'x' },
+    ]);
+    const form = new FormData();
+    form.set('file', new Blob([readFileSync(vpkPath)]), 'dbd.vpk');
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: form,
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().collisions).toEqual([
+      'materials/models/infected/hunter/hunter_01.vmt', 'scripts/game_sounds_weapons.txt',
+    ]);
+    expect(res.json().error).toContain('materials/models/infected/hunter/hunter_01.vmt');
+    expect(res.json().error).toContain('scripts/game_sounds_weapons.txt');
+    expect(res.json().error).not.toContain('materials/dbd/wall.vmt');
+
+    // Refused means nothing landed: no row, no VPK, no temp file. The temp
+    // file is removed in the route's finally, which runs AFTER reply.send has
+    // already answered this inject, so wait for it rather than race it.
+    expect(getCampaign(db, 'dbd')).toBeUndefined();
+    expect(existsSync(join(addons, 'dbd.vpk'))).toBe(false);
+    await vi.waitFor(() => {
+      expect(readdirSync(addons).filter((f) => f.endsWith('.part'))).toEqual([]);
+    });
+  });
+
+  it('accepts a multi-file campaign that ships only its own files', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const vpkPath = join(addons, 'source.vpk');
+    makeVpkMulti(vpkPath, [
+      { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION },
+      { ext: 'vmt', dir: 'materials/dbd', name: 'wall', body: 'x' },
+      { ext: 'wav', dir: 'sound/dbd', name: 'alarm', body: 'x' },
+    ]);
+    const form = new FormData();
+    form.set('file', new Blob([readFileSync(vpkPath)]), 'dbd.vpk');
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: form,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().slug).toBe('dbd');
+  });
+
+  it('refuses every upload when the enforced list cannot be loaded', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const app = await buildTestApp({ db, addonsDir: addons, consistencyListPath: join(addons, 'no-such.cfg') });
+      const vpkPath = join(addons, 'source.vpk');
+      makeVpk(vpkPath, { ext: 'txt', dir: 'missions', name: 'dbd', body: MISSION });
+      const form = new FormData();
+      form.set('file', new Blob([readFileSync(vpkPath)]), 'dbd.vpk');
+      const res = await app.inject({
+        method: 'POST', url: '/api/admin/campaigns',
+        cookies: adminCookie(app, '76561198000000001'),
+        payload: form,
+      });
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error).toMatch(/enforced file list/);
+      expect(getCampaign(db, 'dbd')).toBeUndefined();
+    } finally {
+      err.mockRestore();
+    }
   });
 
   it('rejects a file that is not a campaign VPK', async () => {

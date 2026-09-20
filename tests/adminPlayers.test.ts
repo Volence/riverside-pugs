@@ -5,6 +5,7 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { getPlayer, linkDiscord } from '../src/players.js';
 import { liftExpiredBans, banMessage } from '../src/admin/players.js';
+import { recordSignonDrop, markEntered } from '../src/signonDrops.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const ADMIN = '76561198000000001';
@@ -18,7 +19,7 @@ let user: Record<string, string>;
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   admin = authedCookie(app, db, ADMIN);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
   user = authedCookie(app, db, P2);
@@ -125,6 +126,24 @@ describe('admin players', () => {
     expect(d.timeout).toBeNull();
   });
 
+  it('reports connect drops with the count, the last time and the rows', async () => {
+    const empty = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(empty.signonDrops).toEqual({ count: 0, lastAt: null, rows: [] });
+
+    recordSignonDrop(db, { steamid: P2, name: 'p002 in game', secs: 12, forced: 651 }, new Date('2026-09-19T20:00:00.000Z'));
+    markEntered(db, P2, new Date('2026-09-19T20:03:00.000Z'));
+    recordSignonDrop(db, { steamid: P2, name: 'p002 in game', secs: -1, forced: 651 }, new Date('2026-09-19T21:00:00.000Z'));
+    recordSignonDrop(db, { steamid: P3, name: 'someone else', secs: 5, forced: 651 }, new Date('2026-09-19T21:30:00.000Z'));
+
+    const detail = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(detail.signonDrops.count).toBe(2);
+    expect(detail.signonDrops.lastAt).toBe('2026-09-19T21:00:00.000Z');
+    expect(detail.signonDrops.rows).toEqual([
+      { id: 2, name: 'p002 in game', secsConnected: -1, forcedCount: 651, at: '2026-09-19T21:00:00.000Z', enteredAfterAt: null },
+      { id: 1, name: 'p002 in game', secsConnected: 12, forcedCount: 651, at: '2026-09-19T20:00:00.000Z', enteredAfterAt: '2026-09-19T20:03:00.000Z' },
+    ]);
+  });
+
   it('activate does not unban', async () => {
     await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'x' });
     expect((await post(`/api/admin/players/${P2}/activate`, admin)).statusCode).toBe(409);
@@ -132,5 +151,45 @@ describe('admin players', () => {
 
   it('/api/me says isAdmin for the admin', async () => {
     expect((await get('/api/me', admin)).json().isAdmin).toBe(true);
+  });
+});
+
+describe('admin merge', () => {
+  it('previews a merge without changing anything', async () => {
+    const res = await post(`/api/admin/players/${P3}/merge`, admin, { into: P2, dryRun: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().plan.into).toBe(P2);
+    expect(getPlayer(db, P3)).toBeTruthy();
+  });
+
+  it('merges, leaves an alias, and writes an audit entry', async () => {
+    const res = await post(`/api/admin/players/${P3}/merge`, admin, { into: P2 });
+    expect(res.statusCode).toBe(200);
+    expect(getPlayer(db, P3)).toBeUndefined();
+
+    const detail = (await get(`/api/admin/players/${P2}`, admin)).json();
+    expect(detail.aliases.map((a: any) => a.steamid)).toEqual([P3]);
+
+    const audit = (await get('/api/admin/audit', admin)).json();
+    expect(audit.actions.some((r: any) => r.action === 'merge_player' && r.target === P3)).toBe(true);
+  });
+
+  it('refuses a merge into an account that does not exist, or into itself', async () => {
+    expect((await post(`/api/admin/players/${P3}/merge`, admin, { into: '76561199999999999' })).statusCode).toBe(400);
+    expect((await post(`/api/admin/players/${P3}/merge`, admin, { into: P3 })).statusCode).toBe(400);
+    expect((await post(`/api/admin/players/${P3}/merge`, admin, {})).statusCode).toBe(400);
+    expect(getPlayer(db, P3)).toBeTruthy();
+  });
+
+  it('un-merges: removing the alias frees the id to be its own account again', async () => {
+    await post(`/api/admin/players/${P3}/merge`, admin, { into: P2 });
+    const res = await post(`/api/admin/players/${P3}/unalias`, admin);
+    expect(res.statusCode).toBe(200);
+    expect((await get(`/api/admin/players/${P2}`, admin)).json().aliases).toEqual([]);
+  });
+
+  it('is admin-only, like every other action here', async () => {
+    expect((await post(`/api/admin/players/${P3}/merge`, user, { into: P2 })).statusCode).toBe(403);
+    expect((await post(`/api/admin/players/${P3}/unalias`, user)).statusCode).toBe(403);
   });
 });

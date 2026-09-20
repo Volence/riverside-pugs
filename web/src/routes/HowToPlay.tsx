@@ -13,6 +13,14 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>When 8 players are queued it pops: everyone has two minutes to press Ready (on the site or the bot's card in #queue-here), then there is a 30 second campaign vote. Teams are balanced by SR, a server is set up, and you get a Connect button. A match is a full campaign minus the finale, both teams playing each map as survivors and infected.</>,
   },
   {
+    q: 'Do I need to change any settings?',
+    a: <>One thing: your rates. Riverside runs at 100 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download>autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
+  },
+  {
+    q: 'What launch options should I use?',
+    a: <>The one that matters is <code>-lv</code>: without it, hittables drift out of line with their own hitboxes, so the car you are swinging at is not where the game thinks it is. Steam → right-click Left 4 Dead → Properties → Launch Options: <code>-lv -novid -forcenovsync -mat_queue_mode 2 -useforcedmparms -noforcemaccel -noforcemspd -refresh 60</code>, with the refresh rate changed to your monitor's. Full explanation under <strong>Your config</strong> above.</>,
+  },
+  {
     q: 'How do I connect to the server?',
     a: <>Press <strong>Connect</strong> on Play or on the Discord match card and paste the line into the L4D console (enable the console in Options, open it with <code>~</code>). The password goes first, then the connect: <code>password pug_xxxx; connect ip:port</code>. The other way round fails with "Bad password".</>,
   },
@@ -49,6 +57,10 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>Matches where too few people connect are cancelled automatically after 10 minutes, and nobody who connected is penalised. If something else is wrong, tell an admin in Discord: they can abort a match and free the server.</>,
   },
   {
+    q: 'I was dropped while loading with "Server is enforcing consistency for this file".',
+    a: <>Your copy of the file it names has been modified, usually by a skin, a no-trees pack or a silenced-weapons pack. Remove that addon or verify your game files in Steam and you can connect straight away. <a href="/help/consistency">Step by step</a>.</>,
+  },
+  {
     q: 'My demo crashes when I play it back.',
     a: <>Load any versus map first (<code>map l4d_vs_hospital01_apartment versus</code>), then <code>playdemo</code>. Loading a versus demo from the main menu crashes the game. The match page has the full steps next to the downloads.</>,
   },
@@ -63,6 +75,57 @@ export function HowToPlay({ session }: { session: Session }) {
         <Panel>
           <h3>Getting set up</h3>
           {session.kind !== 'loading' && <SetupChecklist me={me} />}
+        </Panel>
+        {/* Its own panel rather than a checklist item or an FAQ line alone.
+            Everything else on this page is something the site can check for
+            you; this is the one step that happens on the player's own machine
+            where nothing here can tell whether it worked, so it gets said
+            plainly instead of being one entry in a list of eleven. */}
+        <Panel>
+          <h3>Your config</h3>
+          <p>
+            Riverside runs at 100 tick. L4D1 clients ignore rates the server tries to set for
+            them, so unless you set your own, your hit registration is worse than everyone
+            else's and the server cannot fix it for you.
+          </p>
+          <ol class="howto">
+            <li>
+              <a href="/autoexec.cfg" download><strong>Download autoexec.cfg</strong></a>
+            </li>
+            <li>
+              Put it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. On Windows
+              that is usually <code>C:\Program Files (x86)\Steam\steamapps\common\left 4 dead\left4dead\cfg</code>.
+              If you already have one, keep a copy first.
+            </li>
+            <li>
+              Restart L4D. It runs by itself, nothing to type. Check it took by holding
+              TAB in a game: the net graph appears, and <code>cl_updaterate</code> in the
+              console reads 100.
+            </li>
+          </ol>
+          <p class="muted">
+            The rates at the top are the part that matters. Everything below them is
+            preference and you should change it, starting with <code>sensitivity</code>.
+          </p>
+
+          <h4>Launch options</h4>
+          <p>
+            One of these actually changes how the game plays. Without <code>-lv</code>,
+            hittables drift out of line with their own hitboxes, so the car you are
+            swinging at is not where the game thinks it is. Set it and forget it.
+          </p>
+          <p>
+            In Steam, right-click <strong>Left 4 Dead</strong> →{' '}
+            <strong>Properties</strong> → <strong>Launch Options</strong>, and paste:
+          </p>
+          <pre class="launch-opts"><code>-lv -novid -forcenovsync -mat_queue_mode 2 -useforcedmparms -noforcemaccel -noforcemspd -refresh 60</code></pre>
+          <p class="muted">
+            Change <code>-refresh 60</code> to your monitor's actual refresh rate.
+            The rest: <code>-lv</code> keeps hittables honest, <code>-novid</code> skips
+            the intro, <code>-forcenovsync</code> and <code>-mat_queue_mode 2</code> are
+            frames, and the three mouse flags stop Windows applying its own acceleration
+            on top of yours.
+          </p>
         </Panel>
         <Panel>
           <h3>Playing a match</h3>

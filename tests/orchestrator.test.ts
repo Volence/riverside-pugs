@@ -339,6 +339,45 @@ describe('RealOrchestrator', () => {
     expect(after.ended_at).toBe(before.ended_at);
     expect(getServer(db, serverId)!.status).toBe('idle');
   });
+
+  it('runs beforeLive on the setup connection after the roster and before the changelevel', async () => {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+      beforeLive: async (rcon) => { await rcon.exec('sm_addban 0 "STEAM_1:1:35074132" "probe"'); },
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+    const ban = srv.cmds.indexOf('sm_addban 0 "STEAM_1:1:35074132" "probe"');
+    const lastRoster = srv.cmds.map((c) => c.startsWith('sm_pug_roster')).lastIndexOf(true);
+    const change = srv.cmds.findIndex((c) => c.startsWith('changelevel'));
+    expect(ban).toBeGreaterThan(lastRoster);
+    expect(ban).toBeLessThan(change);
+  });
+
+  it('a failing beforeLive does not cost the match its server', async () => {
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500',
+      releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+      beforeLive: async () => { throw new Error('ban push exploded'); },
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+    expect(getServer(db, serverId)!.status).toBe('live');
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as { state: string }).state).toBe('live');
+  });
 });
 
 describe('custom campaign availability', () => {

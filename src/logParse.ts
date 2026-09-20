@@ -1,12 +1,39 @@
+import { steamId64Of } from './steamId.js';
+
 const TOKEN_RE = /^[0-9a-f]{32}$/;
+
+export const PHASE_STATES = ['live', 'paused', 'readyup', 'roundover', 'loading'] as const;
+export type PhaseState = typeof PHASE_STATES[number];
+export interface Phase {
+  state: PhaseState;
+  /** Who is charged for a pause, or null: a disconnect pause, an admin, or
+   *  any state that is not a pause. */
+  team: 'a' | 'b' | null;
+  /** Seconds a pause may last before the plugin unpauses, 0 for no ceiling. */
+  limit: number;
+  /** A pause the plugin called itself while waiting for a dropped player. */
+  leave: boolean;
+  /** Rostered players who have not readied, during a ready-up. Empty
+   *  otherwise, and empty once everyone has and the countdown is running. */
+  unready: string[];
+}
 
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
-  | { kind: 'heartbeat'; token: string }
+  // `phase` rides on the heartbeat so a lost PHASE datagram self-corrects
+  // within thirty seconds. Absent (not null) from an older plugin, so the
+  // event is byte-for-byte what it was before phases existed.
+  | { kind: 'heartbeat'; token: string; phase?: Phase }
+  // What the game is doing right now, from the plugin's one-second tracker.
+  // Emitted on every transition. Cosmetic: nothing here is read back when a
+  // result is computed, but the pause records built from it are what an admin
+  // sees when a team complains about the other side's pausing.
+  | { kind: 'phase'; token: string; phase: Phase }
   | { kind: 'leave'; token: string; steamid: string; remaining: number }
   | { kind: 'return'; token: string; steamid: string; remaining: number }
   | { kind: 'abandon'; token: string; steamid: string }
+  | { kind: 'problem'; token: string; code: string }
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
   | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
   // Emitted by !load_4v4p for a match started in-game rather than by us. The
@@ -70,9 +97,40 @@ export type LogEvent =
   | {
       kind: 'chat'; token: string; seq: number; half: number; tMs: number;
       steamid: string; team: 'a' | 'b' | null; message: string;
-    };
+    }
+  // The two lines below carry NO token, so neither has a `token` field and
+  // neither can pass the listener's token gate. LogListener admits them only
+  // from a game server's own address. Both can only ever produce a hint.
+  //
+  // From l4d_consistency.smx: a human who connected, never entered the game
+  // and left by their own hand on a map that forced files. That is what a
+  // file-consistency rejection looks like from the server, and also what a
+  // cancelled loading screen looks like. `secs` is -1 when the plugin could
+  // not read the connection time.
+  | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
+  // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
+  | { kind: 'entered'; steamid: string }
+  // Where a client connected from, emitted for EVERY human that joins the box
+  // whether or not a match is being tracked and whether or not they are on a
+  // roster: an account nobody expected is exactly the one worth correlating.
+  // Token-less, so LogListener admits it on the sender's address alone. The
+  // address is used to compute a hash and is never stored; see
+  // src/playerNetworks.ts. `country` is absent when the GeoIP extension is
+  // not loaded, which is normal and not an error.
+  | { kind: 'player_net'; steamid: string; ip: string; country: string | null };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
+/** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
+ *  1 and 2 for pug a and b; anything else is nobody. An unknown state is
+ *  null rather than stored: the page renders a fixed set of words. */
+function phaseOf(state: string | undefined, rest: Record<string, string>): Phase | null {
+  if (!state || !(PHASE_STATES as readonly string[]).includes(state)) return null;
+  const team = rest.team === '1' ? 'a' : rest.team === '2' ? 'b' : null;
+  const limit = intOf(rest.limit) ?? 0;
+  const unready = (rest.unready ?? '').split(',').filter((id) => /^\d{17}$/.test(id));
+  return { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
+}
+
 function kv(parts: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const p of parts) {
@@ -96,6 +154,71 @@ function halfOf(s: string | undefined): number | null {
   return n === 1 || n === 2 ? n : null;
 }
 
+/** The engine's `L MM/DD/YYYY - HH:MM:SS: ` stamp, which opens every log line. */
+const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
+
+/** Anchored at BOTH ends, and the name is greedy, so the fields read are the
+ *  last `<uid><steamid><team>` on the line: the engine's own. A name that
+ *  contains a whole fake suffix only ends up inside the name group. A `say`
+ *  line cannot match either, because it ends with a closing quote. */
+const ENTERED_RE = /^".*<\d+><(STEAM_\d:[01]:\d{1,10})><[^<>"]*>" entered the game$/;
+
+/**
+ * The token-less lines: `L4DC SIGNON_DROP ...` from l4d_consistency.smx and the
+ * engine's "entered the game". Returns undefined when the line is neither, so
+ * the caller carries on to the PUG grammar; null when it is one of ours but
+ * malformed.
+ *
+ * Unlike the PUG path, the marker is NOT searched for anywhere in the datagram.
+ * Those lines are protected by a secret token; these are protected only by the
+ * sender's address, and the game server's address also sends every chat line
+ * (`"name<2><STEAM_1:0:5><Survivor>" say "L4DC SIGNON_DROP steamid=..."`). So
+ * the marker must be the first thing after the engine's stamp, which no player
+ * controlled text can be: every engine line about a player opens with a quote.
+ */
+function parseSourcePinned(text: string): LogEvent | null | undefined {
+  const stamp = LOG_STAMP_RE.exec(text);
+  const body = (stamp ? text.slice(stamp.index + stamp[0].length) : text).split('\n', 1)[0].trimEnd();
+
+  if (body.startsWith('L4DC ')) {
+    // Name is last and takes the rest of the line. Every other field is read
+    // from the slice BEFORE the first ` name=`, the CHAT treatment, so a name
+    // like "x steamid=76561198000000009" cannot overwrite the real steamid.
+    const at = body.indexOf(' name=');
+    if (at < 0) return null;
+    const head = body.slice(0, at).split(/\s+/);
+    if (head[1] !== 'SIGNON_DROP') return null;
+    const rest = kv(head.slice(2));
+    const steamid = steamId64Of(rest.steamid ?? '');
+    const secs = intOf(rest.secs);
+    const forced = intOf(rest.forced);
+    const name = body.slice(at + ' name='.length).trim().slice(0, 64);
+    if (!steamid || secs === null || secs < -1 || forced === null || forced < 1 || !name) return null;
+    return { kind: 'signon_drop', steamid, secs, forced, name };
+  }
+
+  // Where a client connected from. Same protection as SIGNON_DROP and for the
+  // same reason: no token, so the marker must be the first thing after the
+  // engine's stamp, which no player-controlled text can be.
+  if (body.startsWith('PUGNET ')) {
+    const rest = kv(body.slice('PUGNET '.length).split(/\s+/));
+    const steamid = steamId64Of(rest.steamid ?? '');
+    const ip = rest.ip ?? '';
+    // Shape-checked here rather than downstream: this value decides whether a
+    // sighting counts and what its hash is.
+    if (!steamid || !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
+    const cc = (rest.cc ?? '').toUpperCase();
+    return { kind: 'player_net', steamid, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null };
+  }
+
+  const entered = ENTERED_RE.exec(body);
+  if (entered) {
+    const steamid = steamId64Of(entered[1]);
+    return steamid ? { kind: 'entered', steamid } : null;
+  }
+  return undefined;
+}
+
 /**
  * Decode a raw srcds log UDP datagram into a typed PUG event, or null if it is
  * not one of ours or is malformed. Never throws. Tolerant of the engine framing
@@ -104,6 +227,8 @@ function halfOf(s: string | undefined): number | null {
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {
   const text = buf.toString('utf8');
+  const pinned = parseSourcePinned(text);
+  if (pinned !== undefined) return pinned;
   const idx = text.indexOf('PUG ');
   if (idx < 0) return null;
   const line = text.slice(idx).split('\n', 1)[0].trim();
@@ -124,8 +249,17 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (!rest.map || a === null || b === null) return null;
       return { kind: 'map_result', token, map: rest.map, a, b };
     }
-    case 'HEARTBEAT':
-      return { kind: 'heartbeat', token };
+    case 'HEARTBEAT': {
+      if (rest.phase === undefined) return { kind: 'heartbeat', token };
+      const phase = phaseOf(rest.phase, rest);
+      // A heartbeat is a liveness signal first: a phase word this parser
+      // does not know costs the phase, never the heartbeat.
+      return phase ? { kind: 'heartbeat', token, phase } : { kind: 'heartbeat', token };
+    }
+    case 'PHASE': {
+      const phase = phaseOf(rest.state, rest);
+      return phase ? { kind: 'phase', token, phase } : null;
+    }
     case 'LEAVE':
     case 'RETURN': {
       const remaining = intOf(rest.remaining);
@@ -135,6 +269,11 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
     case 'ABANDON':
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       return { kind: 'abandon', token, steamid: rest.steamid };
+    case 'PROBLEM':
+      // A short machine code, never free text: kv() splits on whitespace and
+      // the backend owns the wording (matchTeardown.ts problemText).
+      if (!/^[a-z_]{1,40}$/.test(rest.code ?? '')) return null;
+      return { kind: 'problem', token, code: rest.code };
     case 'PLAYER': {
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       if (rest.event !== 'connect' && rest.event !== 'disconnect') return null;

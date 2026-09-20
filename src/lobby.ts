@@ -148,6 +148,15 @@ export class Lobby {
     return true;
   }
 
+  /** Take a ready player back to not ready. Only during the ready check: once
+   *  everyone readied the vote is running and there is nothing to go back to. */
+  unmarkReady(steamid: string): boolean {
+    if (this.phase !== 'ready_check' || !this.ready.has(steamid)) return false;
+    this.ready.delete(steamid);
+    this.events.onEvent();
+    return true;
+  }
+
   castVote(steamid: string, campaign: string): boolean {
     if (this.phase !== 'map_vote' || !this.players.includes(steamid)) return false;
     if (!this.opts.mapPool.includes(campaign)) return false;
