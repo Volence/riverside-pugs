@@ -655,3 +655,37 @@ must go back to 0.
 Put `sm_pug_pause_seconds` back to 120 when you are done:
 
     R "sm_pug_pause_seconds 120"
+
+## Teardown (`sm_pug_abort <token> teardown <map>`)
+
+Needs a REAL client connected to the local test server (`/home/volence/l4d1-ds`,
+LAN address 192.168.4.85, `sv_allow_lobby_connect_only 0` after each map load).
+Rotoblin must be loaded. Over RCON:
+
+1. `sm_pug_match 999 <32 hex chars> no_mercy`, then `sm_pug_roster "<your steamid64>:a"`.
+2. Join the server. Confirm `sm_pug_status` shows you rostered.
+3. Unpaused case: `sm_pug_abort <token> teardown l4d_hospital01_apartment`.
+   Expect within ~6 s: the "[PUG] Match #999 cancelled." chat line, a kick whose
+   dialog reads "Match #999 cancelled.", then `status` over RCON shows
+   `map : l4d_hospital01_apartment` and 0 humans.
+4. Paused case: repeat 1 and 2, then type `!pause` in game. Run the same abort.
+   With only one client connected, `LeaveUnpauseNow` can send `sm_ready` for
+   only one team, so Rotoblin's both-teams-ready countdown may legitimately
+   never complete; either outcome below is expected, not a bug, with a single
+   tester:
+   (a) The game unpauses within 10 s: the kick and map change happen as in
+       step 3, and the srcds console shows no `PROBLEM` line.
+   (b) The 10 s wait times out: the console shows
+       `PUG <token> PROBLEM code=unpause_timeout`, then the kick still runs.
+       Record whether the map changed afterward too, that is the open
+       changelevel-while-paused question from the spec; note the answer in
+       the spec's spike table.
+   Record which of (a) or (b) happened. A second real client on the other
+   team turns this step into a real test of the unpause path, since only then
+   can both teams actually ready up.
+5. Bad map: `sm_pug_abort <token> teardown "l4d_hospital01_apartment; sv_cheats 1"`.
+   Expect the kick, no map change, and no cvar change.
+6. Plain abort still plain: configure again, `sm_pug_abort <token>`. Expect no
+   kick and no map change (the routine post-report path is unchanged).
+
+`sm_addban` cannot be tested here: on a LAN server it is a silent no-op.

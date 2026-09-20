@@ -40,8 +40,10 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { resolveServerBySource } from './serverPool.js';
+import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
@@ -74,6 +76,9 @@ export interface ServerDeps {
   discordApi?: DiscordApi;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
+  /** Runs a batch of console commands on one server, for the ban sync.
+   *  Injected in tests so a ban never dials rcon. */
+  serverExec?: ServerExec;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -280,7 +285,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
-  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token) => {
+  const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
       await rcon.connect();
@@ -299,7 +304,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       }
       if (token) {
         try {
-          await rcon.exec(`sm_pug_abort ${token}`);
+          // With teardown the plugin announces, waits for an unpause, kicks
+          // everyone and changes to the reset map itself. One command rather
+          // than five because exec secrets.cfg below drops the session and
+          // each extra command is another thing that can time out first.
+          await rcon.exec(abortCommand(token, opts.teardown, resetMap(deps.db)));
         } catch (err) {
           console.error(`[serverRelease] sm_pug_abort failed on ${server.name} (non-fatal):`, err);
         }
@@ -331,6 +340,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       rcon.close();
     }
   }));
+
+  // Every enabled box mirrors the website's bans. Built here, next to the
+  // releaser, because both are the backend reaching into a game server
+  // outside a match; started below once the server list has been reconciled.
+  const banSync = new ServerBanSync({
+    db: deps.db,
+    exec: deps.serverExec ?? (async (server, commands) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        for (const c of commands) await rcon.exec(c);
+      } finally {
+        rcon.close();
+      }
+    }),
+  });
 
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
@@ -376,6 +401,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
             .catch((err) => console.error('[abandon] failed:', err));
+          return;
+        }
+        if (ev.kind === 'problem') {
+          // The plugin could not do part of a teardown (today: the game never
+          // unpaused). The match is already aborted; this is for the admin
+          // channel, so someone knows the box may need a hand.
+          const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
+          publishAdminEvent({ kind: 'problem', matchId: row?.id, text: problemText(ev.code, row?.id ?? null) });
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
@@ -486,6 +519,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         demoDir: deps.config.demoDir,
         replayDir: deps.config.replayDir,
         onNoServer: (id) => pending?.add(id),
+        beforeLive: (rcon) => banSync.pushAll((c) => rcon.exec(c)),
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -600,6 +634,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       busy: () => matchInFlight(deps.db),
     })
     : undefined;
+
+  if (!deps.config.devMode) {
+    banSync.start();
+    banSync.sweep().catch((err) => console.error('[serverBans] boot sweep failed:', err));
+  }
 
   const reaper = setInterval(() => {
     try {
@@ -749,6 +788,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(pruneTimer);
     clearTimeout(pruneOnBoot);
+    banSync.stop();
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });

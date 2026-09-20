@@ -33,6 +33,15 @@
  *  loading cannot leave a timer running for the rest of the night. */
 #define END_KICK_TRIES 5
 
+// ---------- teardown: a cancelled backend match empties the box ----------
+// sm_pug_abort <token> teardown <map>. The backend sends it from the release
+// path when a match ends badly (abandon, no-show, admin abort). Everything
+// runs on engine time, which keeps moving while the game is paused; the
+// spike on 2026-09-19 proved SourceMod timers fire during a pause.
+#define TEARDOWN_TICK 0.5
+#define TEARDOWN_UNPAUSE_TICKS 20   // 10 s for Rotoblin's cooperative unpause to land
+#define TEARDOWN_KICK_TICKS 10      // then up to 5 s for the kicks to land before the map changes
+
 /** Longest chat message emitted. Long enough for anything anyone types in a
  *  PUG, short enough that a message cannot push a log line into truncation. */
 #define CHAT_MAX_BYTES 128
@@ -106,6 +115,13 @@ char g_sEndResult[128];
 Handle g_hEndKick = null;
 char g_sEndKickReason[128];
 int g_iEndKickTries;
+
+Handle g_hTeardown = null;
+int g_iTeardownTicks;
+bool g_bTeardownKicked;
+char g_sTeardownMap[64];
+char g_sTeardownReason[128];
+char g_sTeardownToken[65];
 
 // Roster: fixed slots, parallel arrays, keyed by SteamID64.
 char g_sRosterId[MAX_ROSTER][32];
@@ -1489,8 +1505,10 @@ public Action Cmd_Match(int args)
 		return Plugin_Handled;
 	}
 	// A new match, so any kick still pending from the last one is void. This
-	// and the two sites below are the ONLY places the kick is cancelled.
+	// and the two sites below are the ONLY places the kick is cancelled, and
+	// a pending teardown is cancelled at the same three places.
 	CancelEndKick();
+	CancelTeardown();
 	ResetMatchState();
 	g_iMatchId = matchId;
 	GetCmdArg(2, g_sToken, sizeof(g_sToken));
@@ -1685,6 +1703,7 @@ public Action Cmd_LoadPug(int client, int args)
 	}
 
 	CancelEndKick();                 // new match: a kick left over from the last one is void
+	CancelTeardown();                // likewise a teardown still counting down
 	ResetMatchState();
 	g_bSelfStarted = true;
 	g_iMatchId = 0;                  // the backend owns match ids; assigned later via sm_pug_setid
@@ -1831,6 +1850,125 @@ void CancelEndKick()
 	g_iEndKickTries = 0;
 }
 
+/** A bare map name: letters, digits, underscore. Anything else is refused. */
+bool MapNameOk(const char[] map)
+{
+	if (map[0] == '\0') return false;
+	for (int i = 0; map[i] != '\0'; i++)
+	{
+		if (!IsCharAlpha(map[i]) && !IsCharNumeric(map[i]) && map[i] != '_') return false;
+	}
+	return true;
+}
+
+/** Start emptying the box. Runs BEFORE ResetMatchState.
+ *
+ *  Why not just unpause and kick right here: Rotoblin's unpause is a 3 second
+ *  countdown after both teams ready, and its Unpause() needs an in-game client
+ *  to issue the engine command. Kick first and the countdown lands on an empty
+ *  server, Rotoblin clears its own flags, and the engine stays paused with no
+ *  command left that can fix it. So: ask for the unpause, wait for it, then
+ *  kick, then change the map from a later tick once the kicks have landed. */
+void BeginTeardown(const char[] map)
+{
+	CancelEndKick();
+	CancelTeardown();
+	strcopy(g_sTeardownMap, sizeof(g_sTeardownMap), map);
+	strcopy(g_sTeardownToken, sizeof(g_sTeardownToken), g_sToken);
+	if (LeaveHasAbandoner())
+	{
+		Format(g_sTeardownReason, sizeof(g_sTeardownReason),
+			"Match #%d cancelled: a player did not reconnect in time.", g_iMatchId);
+	}
+	else
+	{
+		Format(g_sTeardownReason, sizeof(g_sTeardownReason), "Match #%d cancelled.", g_iMatchId);
+	}
+	PrintToChatAll("\x04[PUG]\x01 %s Everyone will be removed from the server shortly.", g_sTeardownReason);
+	// Unconditionally, not behind g_bLeavePaused: the leave module's idea of
+	// whether it paused can be wrong, and LeaveUnpauseNow checks the real
+	// state itself. Through Rotoblin, never a raw setpause: Rotoblin's command
+	// listener blocks that, and a fake client issuing pause crashes srcds.
+	LeaveUnpauseNow();
+	g_iTeardownTicks = 0;
+	g_bTeardownKicked = false;
+	g_hTeardown = CreateTimer(TEARDOWN_TICK, Timer_Teardown, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+}
+
+void CancelTeardown()
+{
+	if (g_hTeardown != null)
+	{
+		KillTimer(g_hTeardown);
+		g_hTeardown = null;
+	}
+	ClearTeardownState();
+}
+
+/** Everything except the timer handle. Called from inside the timer, which must not KillTimer itself. */
+void ClearTeardownState()
+{
+	g_sTeardownMap[0] = '\0';
+	g_sTeardownReason[0] = '\0';
+	g_sTeardownToken[0] = '\0';
+	g_iTeardownTicks = 0;
+	g_bTeardownKicked = false;
+}
+
+public Action Timer_Teardown(Handle timer)
+{
+	g_iTeardownTicks++;
+
+	if (!g_bTeardownKicked)
+	{
+		bool paused = LeaveRotoblinPaused();
+		if (paused && g_iTeardownTicks < TEARDOWN_UNPAUSE_TICKS) return Plugin_Continue;
+		if (paused)
+		{
+			// Not EmitPug: the match state is already reset, so it would be
+			// dropped. The token was saved for exactly this line.
+			LogToGame("PUG %s PROBLEM code=unpause_timeout", g_sTeardownToken);
+			LogMessage("pug-match: teardown gave up waiting for an unpause after %d ticks", g_iTeardownTicks);
+		}
+		KickHumans(g_sTeardownReason);
+		g_bTeardownKicked = true;
+		g_iTeardownTicks = 0;
+		return Plugin_Continue;
+	}
+
+	int present = CountHumans();
+	if (present > 0 && g_iTeardownTicks < TEARDOWN_KICK_TICKS)
+	{
+		KickHumans(g_sTeardownReason);
+		return Plugin_Continue;
+	}
+
+	// Copy the map before clearing, then null the handle and clear the rest of
+	// the state BEFORE calling ForceChangeLevel, not after: OnMapEnd's own
+	// CancelTeardown() runs g_hTeardown != null before it will KillTimer, and
+	// if this changelevel triggers OnMapEnd synchronously (still inside this
+	// very timer callback), a handle nulled only after the call would have
+	// CancelTeardown try to KillTimer the timer currently executing. Nulling
+	// first makes "a teardown ending in its own ForceChangeLevel has already
+	// nulled the handle before the map ends" (see OnMapEnd) true always,
+	// rather than only when the changelevel happens to be asynchronous.
+	char map[64];
+	strcopy(map, sizeof(map), g_sTeardownMap);
+	g_hTeardown = null;
+	ClearTeardownState();
+
+	if (map[0] != '\0')
+	{
+		LogMessage("pug-match: teardown complete (%d still connected), changing to %s", present, map);
+		ForceChangeLevel(map, "PUG match cancelled");
+	}
+	else
+	{
+		LogMessage("pug-match: teardown complete (%d still connected), no reset map given", present);
+	}
+	return Plugin_Stop;
+}
+
 /** A real person the end-of-match kick should clear off the box.
  *
  *  Bots are not people, and the SourceTV relay must survive: it is a permanent
@@ -1842,6 +1980,27 @@ void CancelEndKick()
 bool IsEndKickTarget(int client)
 {
 	return !IsFakeClient(client) && !IsClientSourceTV(client);
+}
+
+/** Kick every human who has finished loading. Bots and the SourceTV relay stay.
+ *  Format string never the buffer itself. */
+void KickHumans(const char[] reason)
+{
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientInGame(c) && IsEndKickTarget(c)) KickClient(c, "%s", reason);
+	}
+}
+
+/** Humans still connected, loading or not. */
+int CountHumans()
+{
+	int n = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (IsClientConnected(c) && IsEndKickTarget(c)) n++;
+	}
+	return n;
 }
 
 public Action Timer_EndKick(Handle timer)
@@ -1856,11 +2015,7 @@ public Action Timer_EndKick(Handle timer)
 	// Counted BEFORE anyone is kicked: KickClient does not necessarily drop the
 	// client within this frame, so a post-kick count would read stale. A pass
 	// that finds nobody left is the normal way this stops.
-	int present = 0;
-	for (int c = 1; c <= MaxClients; c++)
-	{
-		if (IsClientConnected(c) && IsEndKickTarget(c)) present++;
-	}
+	int present = CountHumans();
 	if (present == 0 || g_iEndKickTries > END_KICK_TRIES)
 	{
 		g_hEndKick = null;
@@ -1868,15 +2023,12 @@ public Action Timer_EndKick(Handle timer)
 		return Plugin_Stop;
 	}
 
-	for (int c = 1; c <= MaxClients; c++)
-	{
-		// IsClientInGame, not merely connected: on the finale path this timer's
-		// first pass lands in the middle of the map load that triggered it, and
-		// kicking a client who has not finished loading is not safe. They are
-		// caught by a later pass instead, which is the whole reason this timer
-		// repeats. Format string never the buffer itself.
-		if (IsClientInGame(c) && IsEndKickTarget(c)) KickClient(c, "%s", g_sEndKickReason);
-	}
+	// IsClientInGame, not merely connected: on the finale path this timer's
+	// first pass lands in the middle of the map load that triggered it, and
+	// kicking a client who has not finished loading is not safe. They are
+	// caught by a later pass instead, which is the whole reason this timer
+	// repeats.
+	KickHumans(g_sEndKickReason);
 	return Plugin_Continue;
 }
 
@@ -2029,9 +2181,26 @@ void StopMatchDemo()
 public Action Cmd_Abort(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
+	bool teardown = false;
+	char map[64];
+	if (args >= 2)
+	{
+		char mode[16];
+		GetCmdArg(2, mode, sizeof(mode));
+		teardown = StrEqual(mode, "teardown");
+		if (teardown && args >= 3)
+		{
+			GetCmdArg(3, map, sizeof(map));
+			// Refused rather than trusted: this ends up in ForceChangeLevel.
+			if (!MapNameOk(map)) map[0] = '\0';
+		}
+	}
 	StopMatchDemo();
+	// Before ResetMatchState, which blanks the match id, the token and the
+	// abandoner the announcement and the PROBLEM line need.
+	if (teardown) BeginTeardown(map);
 	ResetMatchState();
-	PrintToServer("PUGOK aborted");
+	PrintToServer(teardown ? "PUGOK aborted teardown" : "PUGOK aborted");
 	return Plugin_Handled;
 }
 
@@ -2480,6 +2649,12 @@ public void OnMapEnd()
 {
 	RplClose();
 	PhaseMapEnd();
+	// Same trap as g_hReplayTimer above: g_hTeardown is also
+	// TIMER_FLAG_NO_MAPCHANGE, and the handle is still valid here, before
+	// SourceMod frees it. A teardown orphaned by someone else's changelevel
+	// (not its own ForceChangeLevel) is correctly abandoned here rather than
+	// left to KillTimer a freed handle on the next map's CancelTeardown().
+	CancelTeardown();
 }
 
 /**
@@ -2667,6 +2842,7 @@ public void OnRoundIsLive()
 			// window is real: people staying on the box after a website match
 			// and simply playing on.
 			CancelEndKick();
+			CancelTeardown();
 			ResetMatchState();
 			// ResetMatchState clears g_bHalfWasLive, but we are INSIDE the go-live
 			// forward: this half is live. Left false, Event_RoundEnd returned early

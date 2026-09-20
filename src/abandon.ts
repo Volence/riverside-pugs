@@ -1,8 +1,9 @@
 import type { DB } from './db.js';
 import type { ServerReleaser } from './serverRelease.js';
 import { clearLive } from './liveView.js';
-import { banPlayer } from './admin/players.js';
+import { insertBan } from './admin/players.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { publishBanChange } from './banEvents.js';
 
 /** Abandon bans escalate within this window: 1 day, then 3, then 7. */
 const LADDER_MINUTES = [1440, 4320, 10080];
@@ -61,16 +62,19 @@ export async function handleAbandon(deps: AbandonDeps, token: string, steamid: s
     if (!confirmed) return null;
 
     const minutes = abandonBanMinutes(db, steamid);
+    const reason = `Abandoned match #${match.id}`;
     const changed = db.transaction(() => {
       const n = db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ? AND state IN ('configuring', 'live')")
         .run(match.id).changes;
       if (n === 0) return false;
-      banPlayer(db, steamid, 'system', `Abandoned match #${match.id}`, minutes);
+      insertBan(db, steamid, 'system', reason, minutes);
       return true;
     })();
     if (!changed) return null;
+    // After the outer commit, never inside it: see insertBan's doc comment.
+    publishBanChange({ kind: 'ban', steamid, reason });
     clearLive(db, match.id);
-    deps.releaser.release(match.server_id);
+    deps.releaser.release(match.server_id, { teardown: true });
     publishAdminEvent({ kind: 'abandon', steamid, matchId: match.id, minutes });
     console.warn(`[abandon] match ${match.id} ended: ${steamid} abandoned it; banned for ${minutes} minutes`);
     return match.id;

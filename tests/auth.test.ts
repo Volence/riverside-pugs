@@ -20,6 +20,7 @@ beforeEach(async () => {
     verifyLogin: async () => P1,
     fetchPersona: async (steamid) => ({ name: 'alice', avatar: null }),
     orchestrator: stubOrchestrator(),
+    serverExec: async () => {},
   });
 });
 

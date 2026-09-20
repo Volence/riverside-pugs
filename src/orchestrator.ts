@@ -46,6 +46,11 @@ export interface RealOrchestratorDeps {
   /** Called when setupMatch finds no idle server. The match stays 'configuring'
    *  rather than aborting; the pending list is what retries it once one frees. */
   onNoServer?: (matchId: number) => void;
+  /** Run on the setup connection once the match is configured and before the
+   *  changelevel: anything the box must have before players can join. Today
+   *  that is the ban list (ServerBanSync.pushAll). Wrapped by the caller; a
+   *  failure here is logged and never costs the match its server. */
+  beforeLive?: (rcon: RconClient) => Promise<void>;
   /** Where srcds writes demos. Empty disables demo recording on the site. */
   demoDir?: string;
   /** Where the plugin writes replay files. Empty disables replay recording on
@@ -71,6 +76,7 @@ export class RealOrchestrator implements Orchestrator {
   private demoDir: string;
   private replayDir: string;
   onNoServer?: (matchId: number) => void;
+  private beforeLive?: (rcon: RconClient) => Promise<void>;
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -82,6 +88,7 @@ export class RealOrchestrator implements Orchestrator {
     this.demoDir = deps.demoDir ?? '';
     this.replayDir = deps.replayDir ?? '';
     this.onNoServer = deps.onNoServer;
+    this.beforeLive = deps.beforeLive;
   }
 
   private async connectRcon(server: ServerRow): Promise<RconClient> {
@@ -158,6 +165,13 @@ export class RealOrchestrator implements Orchestrator {
       }
       if (entry.custom && !isInstalledEverywhere(this.db, match.campaign, [server.id])) {
         throw new Error(`${entry.name} is not installed on ${server.name}`);
+      }
+      if (this.beforeLive) {
+        try {
+          await this.beforeLive(rcon);
+        } catch (err) {
+          console.error(`[orchestrator] beforeLive hook failed for match ${matchId} (non-fatal):`, err);
+        }
       }
       await rcon.exec(`changelevel ${firstMapOf(this.db, match.campaign)}`);
       markLive(this.db, server.id);

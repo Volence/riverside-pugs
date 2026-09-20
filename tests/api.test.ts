@@ -13,7 +13,7 @@ let cookies: Record<string, Record<string, string>>;
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverExec: async () => {} });
   cookies = {};
   for (const id of IDS) cookies[id] = authedCookie(app, db, id);
 });

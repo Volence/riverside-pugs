@@ -33,6 +33,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'noshow_minutes', group: 'Match', label: 'No-show minutes', help: 'A live match with too few players connected after this long is aborted.', type: { kind: 'int', min: 3, max: 60 } },
   { key: 'noshow_min_connected', group: 'Match', label: 'No-show minimum connected', help: 'Players that must have connected by the no-show deadline.', type: { kind: 'int', min: 1, max: 8 } },
   { key: 'no_round_minutes', group: 'Match', label: 'No-round minutes', help: 'A live match with no round played after this long is aborted.', type: { kind: 'int', min: 10, max: 120 } },
+  { key: 'reset_map', group: 'Match', label: 'Reset map', help: 'Where a server is sent once a cancelled match has emptied it. A stock L4D1 map name, such as l4d_hospital01_apartment.', type: { kind: 'string', maxLength: 63, allowEmpty: false } },
   { key: 'penalties_enabled', group: 'Penalties', label: 'No-show penalties', help: 'Missing a ready check or never connecting to a match earns an escalating queue timeout.', type: { kind: 'bool' } },
   { key: 'penalty_window_days', group: 'Penalties', label: 'Penalty window (days)', help: 'Offenses older than this stop counting.', type: { kind: 'int', min: 1, max: 60 } },
   { key: 'penalty_minutes', group: 'Penalties', label: 'Timeout ladder (minutes)', help: 'Timeout for the 1st, 2nd, 3rd... offense in the window. The last value repeats.', type: { kind: 'intList', min: 1, max: 43200, maxItems: 8 } },
