@@ -25,9 +25,9 @@ function liveMatch(server: number): number {
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   for (const id of IDS) authedCookie(app, db, id);
-  serverId = addServer(db, { name: 'Dallas', host: '45.32.199.85', port: 27015, rconPort: 27015, rconPassword: 'x' });
+  serverId = addServer(db, { name: 'Dallas', host: '203.0.113.5', port: 27015, rconPort: 27015, rconPassword: 'x' });
   matchId = liveMatch(serverId);
 });
 afterEach(async () => { await app.close(); });
@@ -39,7 +39,7 @@ describe('spectateFor', () => {
   it('is null until SourceTV is switched on for that server', () => {
     expect(spectateFor(db, serverId)).toBeNull();
     enableTv();
-    expect(spectateFor(db, serverId)).toEqual({ host: '45.32.199.85', port: 27020, password: 'dunged', delay: 30 });
+    expect(spectateFor(db, serverId)).toEqual({ host: '203.0.113.5', port: 27020, password: 'dunged', delay: 30 });
   });
 
   it('is null for a server with no row, and carries no password when none is set', () => {
@@ -55,7 +55,7 @@ describe('live spectate info', () => {
     expect(live.matches[0].spectate).toBeNull();
     enableTv();
     live = (await app.inject({ method: 'GET', url: '/api/live' })).json();
-    expect(live.matches[0]).toMatchObject({ id: matchId, spectate: { host: '45.32.199.85', port: 27020, password: 'dunged' } });
+    expect(live.matches[0]).toMatchObject({ id: matchId, spectate: { host: '203.0.113.5', port: 27020, password: 'dunged' } });
   });
 
   it('a rostered player sees it on their own match state too', async () => {

@@ -10,7 +10,7 @@ let app: FastifyInstance;
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverExec: async () => {} });
 });
 
 /** The frontend uses real URLs rather than hash routes, so the server has to

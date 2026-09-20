@@ -29,6 +29,12 @@ import { subscribeBanChanges, type BanChange } from './banEvents.js';
  *
  * `sm_unban` reaches RemoveBan, which issues removeid AND writeid, so a lift
  * persists too. Checked; without it a lift would resurrect on restart.
+ *
+ * The sweep sends one `sm_addban` per open ban to every enabled server every
+ * five minutes, and each one triggers a `writeid` of banned_user.cfg on the
+ * box. Trivial at today's ban counts, but worth revisiting (a delta against
+ * the box's own list, or a longer interval) if the table grows into the
+ * hundreds.
  */
 
 export const SWEEP_MS = 5 * 60 * 1000;
@@ -142,7 +148,11 @@ export class ServerBanSync {
 
   /** Subscribe to changes and start the sweep timer. */
   start(): void {
-    this.unsubscribe = subscribeBanChanges((e) => { void this.onChange(e); });
+    // A second start would leak the first subscription and interval.
+    if (this.timer) return;
+    this.unsubscribe = subscribeBanChanges((e) => {
+      void this.onChange(e).catch((err) => console.error('[serverBans] change push failed:', err));
+    });
     this.timer = setInterval(() => {
       this.sweep().catch((err) => console.error('[serverBans] sweep failed:', err));
     }, SWEEP_MS);

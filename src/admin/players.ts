@@ -36,15 +36,27 @@ export function activeBan(db: DB, steamid: string, now = new Date()): BanRow | n
   return r ? toBan(r) : null;
 }
 
-export function banPlayer(
+/** The state flip and the ban INSERT, with no transaction and no publish of
+ *  its own. For a caller that already holds its own outer transaction: run
+ *  this inside it, then call publishBanChange yourself once that outer
+ *  transaction has committed. Publishing before the outer commit can tell a
+ *  game server to hold a PERMANENT engine ban for a bans row that a later
+ *  failure in the same transaction rolls back, and nothing in this codebase
+ *  ever un-does a permanent engine ban that has no lifted_at row to justify
+ *  an sm_unban. */
+export function insertBan(
   db: DB, steamid: string, by: string, reason: string, minutes: number | null, now = new Date(),
 ): void {
   const expires = minutes ? new Date(now.getTime() + minutes * 60 * 1000).toISOString() : null;
-  db.transaction(() => {
-    db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-      .run(steamid, reason, by, now.toISOString(), expires);
-    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
-  })();
+  db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+    .run(steamid, reason, by, now.toISOString(), expires);
+  db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
+}
+
+export function banPlayer(
+  db: DB, steamid: string, by: string, reason: string, minutes: number | null, now = new Date(),
+): void {
+  db.transaction(() => insertBan(db, steamid, by, reason, minutes, now))();
   // After the commit, never inside it: a subscriber may dial RCON.
   publishBanChange({ kind: 'ban', steamid, reason });
 }

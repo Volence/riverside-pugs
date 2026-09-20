@@ -36,7 +36,7 @@ const history = () => db.prepare('SELECT player_id, match_id, mu_before, mu_afte
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   for (const id of IDS) authedCookie(app, db, id);
   admin = authedCookie(app, db, ADMIN);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);

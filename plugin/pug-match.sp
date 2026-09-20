@@ -1943,17 +1943,29 @@ public Action Timer_Teardown(Handle timer)
 		return Plugin_Continue;
 	}
 
-	if (g_sTeardownMap[0] != '\0')
+	// Copy the map before clearing, then null the handle and clear the rest of
+	// the state BEFORE calling ForceChangeLevel, not after: OnMapEnd's own
+	// CancelTeardown() runs g_hTeardown != null before it will KillTimer, and
+	// if this changelevel triggers OnMapEnd synchronously (still inside this
+	// very timer callback), a handle nulled only after the call would have
+	// CancelTeardown try to KillTimer the timer currently executing. Nulling
+	// first makes "a teardown ending in its own ForceChangeLevel has already
+	// nulled the handle before the map ends" (see OnMapEnd) true always,
+	// rather than only when the changelevel happens to be asynchronous.
+	char map[64];
+	strcopy(map, sizeof(map), g_sTeardownMap);
+	g_hTeardown = null;
+	ClearTeardownState();
+
+	if (map[0] != '\0')
 	{
-		LogMessage("pug-match: teardown complete (%d still connected), changing to %s", present, g_sTeardownMap);
-		ForceChangeLevel(g_sTeardownMap, "PUG match cancelled");
+		LogMessage("pug-match: teardown complete (%d still connected), changing to %s", present, map);
+		ForceChangeLevel(map, "PUG match cancelled");
 	}
 	else
 	{
 		LogMessage("pug-match: teardown complete (%d still connected), no reset map given", present);
 	}
-	g_hTeardown = null;
-	ClearTeardownState();
 	return Plugin_Stop;
 }
 

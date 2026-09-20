@@ -14,7 +14,7 @@ const cookie: Record<string, Record<string, string>> = {};
 
 beforeEach(async () => {
   db = openDb(':memory:');
-  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {} });
+  app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   for (const id of IDS) cookie[id] = authedCookie(app, db, id);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
   matchId = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, ended_at) VALUES (1, 'completed', 'dead_air', datetime('now', '-2 hours'))").run().lastInsertRowid);

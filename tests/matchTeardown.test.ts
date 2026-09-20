@@ -42,6 +42,10 @@ describe('resetMap', () => {
     expect(resetMap(db)).toBe(DEFAULT_RESET_MAP);
     setSetting(db, 'reset_map', '');
     expect(resetMap(db)).toBe(DEFAULT_RESET_MAP);
+    // Linux map files are case-sensitive, so a mixed-case value must fall
+    // back too rather than reach changelevel and fail there.
+    setSetting(db, 'reset_map', 'L4d_Hospital01_Apartment');
+    expect(resetMap(db)).toBe(DEFAULT_RESET_MAP);
   });
 });
 
@@ -51,6 +55,10 @@ describe('abortCommand', () => {
   });
   it('carries the map with teardown', () => {
     expect(abortCommand(TOKEN, true, 'l4d_hospital01_apartment')).toBe(`sm_pug_abort ${TOKEN} teardown l4d_hospital01_apartment`);
+  });
+  it('validates the map only when teardown actually sends it', () => {
+    expect(() => abortCommand(TOKEN, true, 'x; sv_cheats 1')).toThrow(/invalid reset map/);
+    expect(abortCommand(TOKEN, false, 'x; sv_cheats 1')).toBe(`sm_pug_abort ${TOKEN}`);
   });
 });
 

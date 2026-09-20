@@ -13,7 +13,10 @@ import { getSetting } from './settings.js';
  */
 
 export const DEFAULT_RESET_MAP = 'l4d_hospital01_apartment';
-const MAP_RE = /^[a-z0-9_]{1,63}$/i;
+// Case-sensitive: Linux map files are case-sensitive, so a mixed-case value
+// that passed a case-insensitive check here would still fail changelevel on
+// the box, leaving it empty on the match map.
+const MAP_RE = /^[a-z0-9_]{1,63}$/;
 
 /** The map an emptied server is sent to. Falls back rather than throws: this
  *  is read on the release path, which must never fail over a setting, and it
@@ -26,9 +29,17 @@ export function resetMap(db: DB): string {
 /** The one command the release path sends the plugin. With `teardown` the
  *  plugin announces, waits for an unpause, kicks everyone and changes to
  *  `map` itself; see Cmd_Abort in plugin/pug-match.sp. Without it, behaviour
- *  is the routine post-report abort, unchanged. */
+ *  is the routine post-report abort, unchanged, and `map` is never sent so it
+ *  is never validated.
+ *
+ *  `map` is checked against the same MAP_RE as resetMap, which is the only
+ *  caller today so this never actually rejects anything; it exists so the
+ *  plugin's own MapNameOk is a genuine second line of defence rather than
+ *  the only one. */
 export function abortCommand(token: string, teardown: boolean, map: string): string {
-  return teardown ? `sm_pug_abort ${token} teardown ${map}` : `sm_pug_abort ${token}`;
+  if (!teardown) return `sm_pug_abort ${token}`;
+  if (!MAP_RE.test(map)) throw new Error(`invalid reset map: ${map}`);
+  return `sm_pug_abort ${token} teardown ${map}`;
 }
 
 /** Admin-feed text for a `PUG <token> PROBLEM code=<code>` line. */
@@ -37,7 +48,7 @@ export function problemText(code: string, matchId: number | null): string {
   switch (code) {
     case 'unpause_timeout':
       return `Tearing down ${m}: the game did not unpause within 10 seconds. Players were kicked and the map `
-        + 'changed anyway; if the server is still paused an admin must unpause it in game.';
+        + 'change was attempted anyway; if the server is still paused an admin must unpause it in game.';
     default:
       return `Tearing down ${m}: the plugin reported ${code}.`;
   }
