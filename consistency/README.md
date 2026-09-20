@@ -76,6 +76,56 @@ The plugin compiles with the local test server's native spcomp:
 The `.smx` is committed, unlike `plugin/pug-match.smx`, so a checkout is
 installable without a compiler.
 
+## Building for Windows
+
+    ./build-win.sh
+
+Cross-compiles `build/l4d_consistency.ext.dll` from Linux for a Windows dedicated
+server. Needs `clang-cl`, `lld-link` and the LLVM binutils; the MSVC CRT and
+Windows SDK headers are fetched once with `xwin` into `sourcetv/deps/winsdk`,
+about 800 MB, outside the repo.
+
+**Not MinGW, and this is not a preference.** The extension exists to call one
+virtual on an interface Valve compiled with MSVC. On i386 an MSVC member call is
+`__thiscall`, with `this` in ECX; GCC passes `this` as the first stack argument.
+A MinGW build links and loads perfectly and then corrupts the stack on the first
+call. clang-cl implements the Microsoft C++ ABI, so it is the only cross
+compiler that produces a correct DLL here.
+
+Two SDK problems the Linux build never hits, both handled in the script:
+
+- `mathlib.h` writes `movzx eax, CtrlwdHolder` inside `__asm`. MSVC infers a word
+  operand; clang's MS-asm parser refuses it as ambiguous, and it is right to,
+  since `movzx r32, r/m32` does not exist. The script patches a copy and force
+  includes it, so the include guard makes the SDK's own copy a no-op. Shadowing
+  it with `-I` does NOT work: clang-cl runs in MSVC compatibility mode, where a
+  quoted include searches every directory on the include STACK before the `-I`
+  list, and `eiface.h` is on that stack.
+- `NO_MALLOC_OVERRIDE`, which the Linux build requires, must not be defined here.
+  On Windows it leaves `MemAlloc_Free` undeclared, because the fallback inlines
+  that define it live in `memalloc.h`'s POSIX branch.
+
+The CRT is linked statically (`/MT`), so the DLL imports only `KERNEL32` and
+needs no vcruntime redistributable on the target.
+
+### What the build verifies, and why
+
+There is no Windows machine here, so the build proves statically what it can and
+FAILS rather than emitting a DLL that would be wrong in game:
+
+| check | the failure it catches |
+|---|---|
+| exports `GetSMExtAPI`, `CreateInterface_MMS` | SourceMod rejects the file at load |
+| the vtable slot, read from `eiface.h` at build time, appears in the disassembly | an SDK update inserting a virtual above `ForceExactFile` silently shifts the index and calls a different engine function |
+| `this` reaches the call in ECX | the MinGW mistake above |
+
+The slot is computed from the header rather than hardcoded, so it stays honest
+across SDK updates. As of the L4D1 SDK at the time of writing it is slot 82
+(offset `0x148`), which is the same slot the proven Linux build calls.
+
+**The DLL has never been executed on Windows.** Verified by disassembly is not
+verified by running, and the binary is committed on that understanding.
+
 ## The enforced list
 
 `configs/l4d_consistency.cfg` is one game-relative path per line. `#` starts a
@@ -125,6 +175,7 @@ After regenerating, in this order:
 ## Installing
 
     cp build/l4d_consistency.ext.so    <game>/left4dead/addons/sourcemod/extensions/
+    # windows server: cp build/l4d_consistency.ext.dll instead
     cp plugin/l4d_consistency.smx      <game>/left4dead/addons/sourcemod/plugins/
     cp configs/l4d_consistency.cfg     <game>/left4dead/addons/sourcemod/configs/
 
