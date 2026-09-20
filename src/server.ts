@@ -26,6 +26,7 @@ import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
+import { startTwitchPoll } from './twitchPoll.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -296,6 +297,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ? deps.twitchApi
     : (deps.config.twitch ? makeTwitchApi(deps.config.twitch) : null);
   await app.register(twitchAuthRoutes, { config: deps.config, db: deps.db, api: twitchApi });
+
+  // Only when Twitch is configured AND a real API exists. Tests inject a fake
+  // and drive pollTwitch directly, so a timer started for them would be noise
+  // that outlives the test.
+  const stopTwitchPoll = deps.twitchApi === undefined && twitchApi
+    ? startTwitchPoll(deps.db, twitchApi)
+    : null;
 
   const hub = deps.hub ?? new Hub();
   await app.register(wsRoutes, { hub });
@@ -824,6 +832,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     await bot?.stop();
     clearInterval(reaper);
     clearInterval(pruneTimer);
+    stopTwitchPoll?.();
     clearTimeout(pruneOnBoot);
     banSync.stop();
     if (logListener) await logListener.close();
