@@ -189,6 +189,14 @@ void LeaveHeartbeat()
 	if (g_sAbandoner[0] != '\0') EmitPug("ABANDON steamid=%s", g_sAbandoner);
 }
 
+/** Whether this match ended because someone ran out of reconnect time. Read by
+ *  the teardown to word its announcement; a function because the .sp includes
+ *  this file last and never reads its globals directly. */
+bool LeaveHasAbandoner()
+{
+	return g_sAbandoner[0] != '\0';
+}
+
 bool LeaveRotoblinPaused()
 {
 	return GetFeatureStatus(FeatureType_Native, "IsInPause") == FeatureStatus_Available && IsInPause();

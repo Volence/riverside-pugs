@@ -180,7 +180,7 @@ describe('GET /api/live', () => {
     recordMatchStart(db, TOKEN, 'l4d_vs_hospital01_apartment');
     recordMapResult(db, TOKEN, 'l4d_vs_hospital01_apartment', 250, 180);
 
-    const app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+    const app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverExec: async () => {} });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/live' });
       expect(res.statusCode).toBe(200);
@@ -199,7 +199,7 @@ describe('GET /api/live', () => {
     const { loadConfig } = await import('../src/config.js');
     const { buildServer } = await import('../src/server.js');
     const { stubOrchestrator } = await import('./helpers.js');
-    const app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator() });
+    const app = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverExec: async () => {} });
     try {
       const res = await app.inject({ method: 'GET', url: '/api/live' });
       expect(res.statusCode).toBe(200);
@@ -395,7 +395,9 @@ describe('restart resilience', () => {
     ).run();
 
     // devMode:false is what builds the real listener; port 0 so it binds free.
-    const app = await buildServer({ config: { ...loadConfig({}), devMode: false, logListenPort: 0 }, db });
+    const app = await buildServer({
+      config: { ...loadConfig({}), devMode: false, logListenPort: 0 }, db, serverExec: async () => {},
+    });
     try {
       // The live match's token must be accepted after a cold start.
       recordHeartbeat(db, TOKEN);

@@ -4,6 +4,7 @@ import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
+import { publishBanChange } from '../banEvents.js';
 
 export interface BanRow {
   id: number;
@@ -36,15 +37,29 @@ export function activeBan(db: DB, steamid: string, now = new Date()): BanRow | n
   return r ? toBan(r) : null;
 }
 
-export function banPlayer(
+/** The state flip and the ban INSERT, with no transaction and no publish of
+ *  its own. For a caller that already holds its own outer transaction: run
+ *  this inside it, then call publishBanChange yourself once that outer
+ *  transaction has committed. Publishing before the outer commit can tell a
+ *  game server to hold a PERMANENT engine ban for a bans row that a later
+ *  failure in the same transaction rolls back, and nothing in this codebase
+ *  ever un-does a permanent engine ban that has no lifted_at row to justify
+ *  an sm_unban. */
+export function insertBan(
   db: DB, steamid: string, by: string, reason: string, minutes: number | null, now = new Date(),
 ): void {
   const expires = minutes ? new Date(now.getTime() + minutes * 60 * 1000).toISOString() : null;
-  db.transaction(() => {
-    db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-      .run(steamid, reason, by, now.toISOString(), expires);
-    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
-  })();
+  db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+    .run(steamid, reason, by, now.toISOString(), expires);
+  db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
+}
+
+export function banPlayer(
+  db: DB, steamid: string, by: string, reason: string, minutes: number | null, now = new Date(),
+): void {
+  db.transaction(() => insertBan(db, steamid, by, reason, minutes, now))();
+  // After the commit, never inside it: a subscriber may dial RCON.
+  publishBanChange({ kind: 'ban', steamid, reason });
 }
 
 /** Lift every open ban and restore the player to active. */
@@ -54,6 +69,7 @@ export function unbanPlayer(db: DB, steamid: string, by: string, now = new Date(
       .run(by, now.toISOString(), steamid);
     db.prepare("UPDATE players SET status = 'active' WHERE steamid = ? AND status = 'banned'").run(steamid);
   })();
+  publishBanChange({ kind: 'unban', steamid });
 }
 
 /** Runs on the 60 s reaper. A banned player whose every ban has run out goes
@@ -70,6 +86,7 @@ export function liftExpiredBans(db: DB, now = new Date()): string[] {
     if (!activeBan(db, player_id, now)) {
       db.prepare("UPDATE players SET status = 'active' WHERE steamid = ? AND status = 'banned'").run(player_id);
       lifted.push(player_id);
+      publishBanChange({ kind: 'unban', steamid: player_id });
     }
   }
   return lifted;

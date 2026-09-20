@@ -526,6 +526,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   noshow_minutes: '10',
   noshow_min_connected: '6',
   no_round_minutes: '30',
+  // Where a server is sent after a cancelled match empties it. No Mercy 1 is
+  // the stock default map, so an idle box looks the way a fresh one does.
+  reset_map: 'l4d_hospital01_apartment',
   // Reconnect allowance per player per match, and whether the game unpauses
   // itself once everyone is back. Pushed to the plugin at match setup.
   leave_budget_seconds: '300',

@@ -83,7 +83,7 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
     // none. Adding the call would be harmless, but nothing depends on it.
     db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?")
       .run(r.id);
-    if (r.server_id !== null) releaser.release(r.server_id);
+    if (r.server_id !== null) releaser.release(r.server_id, { teardown: true });
     // Only the "nobody turned up" rule names culprits. The no-round rule means
     // everyone connected and the game never started, which is nobody's no-show.
     if (r.age_min >= noShowMin && r.connected < minConnected) {

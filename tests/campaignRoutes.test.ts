@@ -46,6 +46,7 @@ const buildTestApp = (o: {
     db: o.db,
     orchestrator: stubOrchestrator(),
     serverCleaner: async () => {},
+    serverExec: async () => {},
     // Injected for the same reason orchestrator and serverCleaner are: the
     // real one calls statfs, so the disk-floor test would pass or fail based
     // on how full the machine running it happens to be.
