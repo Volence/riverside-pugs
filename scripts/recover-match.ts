@@ -17,7 +17,7 @@ import { parseDump } from '../src/dumpParse.js';
 import { completeMatch } from '../src/matchResult.js';
 import { recordMatchDemos } from '../src/demos.js';
 import { recordMatchReplays } from '../src/replays.js';
-import { clearLive } from '../src/liveView.js';
+import { clearLive } from '../src/matchArchive.js';
 import { release } from '../src/serverPool.js';
 
 const matchId = Number(process.argv[2]);

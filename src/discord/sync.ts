@@ -236,7 +236,10 @@ export class DiscordSync {
         unlinked: [...teamA, ...teamB].map((p) => this.player(p)).filter((p) => !p.discordId).map((p) => p.name),
         canSpectate: spectateFor(db, row.server_id) !== null,
       });
-      await this.upsert('match', m.ref, payload);
+      // Skipped for 'aborted': closeMatchCard below moves the card to the
+      // admin channel, and editing it in place first would both cost an extra
+      // Discord call and flash the outcome in #queue-here on the way out.
+      if (state !== 'aborted') await this.upsert('match', m.ref, payload);
 
       if (state === 'live' && !getMessage(db, 'live', m.ref)) {
         const players = [...teamA, ...teamB].map((p) => this.player(p));
@@ -278,9 +281,7 @@ export class DiscordSync {
         await this.drop('live', m.ref);
         await this.drop('match', m.ref);
       } else if (state === 'aborted') {
-        setMessageState(db, 'match', m.ref, 'done');
-        // The card stays: with no result posted it is the only trace the
-        // match happened. The ping is spent either way.
+        await this.closeMatchCard(m, payload);
         await this.drop('live', m.ref);
       }
     }
@@ -441,6 +442,44 @@ export class DiscordSync {
     this.hashes.delete(m.message_id);
     await this.deps.transport.send(admin, payload).catch((err) => {
       console.error('[discord] posting a lobby outcome to the admin channel failed:', err);
+    });
+  }
+
+  /**
+   * Close out a match card for a match that ended with no result.
+   *
+   * Same reasoning as closeLobbyCard above, one step later in the lifecycle.
+   * The aborted card used to stay in #queue-here because with no result posted
+   * it was the only trace the match happened; three abandons in a row on
+   * 2026-09-20 put three dead rosters between the queue panel and the people
+   * trying to queue (owner). It is an admin's business anyway: who was in it
+   * and how far it got is what an admin checks after a leaver, and the match
+   * page it links to now serves an aborted match rather than 404ing.
+   *
+   * Editing in place stays the fallback when no admin channel is set, because
+   * the alternative there is deleting the card and saying nothing anywhere.
+   */
+  private async closeMatchCard(
+    m: { ref: string; channel_id: string; message_id: string },
+    payload: MessagePayload,
+  ): Promise<void> {
+    const db = this.deps.db;
+    const admin = getSetting(db, 'discord_admin_channel_id') || '';
+    if (!admin) {
+      await this.upsert('match', m.ref, payload);
+      setMessageState(db, 'match', m.ref, 'done');
+      return;
+    }
+    // State first, as in closeLobbyCard: a Discord failure below must not
+    // leave the row 'open', or the next pass finds it again and posts a
+    // second copy into the admin channel.
+    setMessageState(db, 'match', m.ref, 'done');
+    await this.deps.transport.remove(m.channel_id, m.message_id).catch((err) => {
+      console.error('[discord] removing an aborted match card failed:', err);
+    });
+    this.hashes.delete(m.message_id);
+    await this.deps.transport.send(admin, payload).catch((err) => {
+      console.error('[discord] posting an aborted match to the admin channel failed:', err);
     });
   }
 

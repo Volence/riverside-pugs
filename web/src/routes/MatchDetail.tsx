@@ -336,6 +336,21 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     ...r, name: players.find((p) => p.steamid === r.steamid)?.name ?? r.name,
   }));
 
+  // An aborted match reached no result, so there is no winner to name and the
+  // scoreline below is how far it got rather than a final score. Saying so
+  // once, at the top, is what keeps the rest of the page readable as-is: every
+  // panel under it is an honest record of what was captured before the match
+  // ended, and none of it means what a completed match's numbers mean.
+  //
+  // A match VOIDED by an admin is also stored as 'aborted', but it did finish
+  // and does have a real result, so it gets its own wording and keeps the
+  // winner in the eyebrow.
+  const voided = Boolean(match.voidedAt);
+  const aborted = match.state === 'aborted' && !voided;
+  const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
+    : aborted ? 'Aborted'
+      : winnerLabel(match.winner!);
+
   // An admin integrity clip links here with `?ordinal=&half=&t=`, computed
   // once: it names the round the link was ABOUT, not whatever round is on
   // screen right now, so it must not be recomputed every render as `ordinal`
@@ -365,7 +380,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   return (
     <div class="page page--match">
       <PageHeader
-        eyebrow={`Match #${match.id} · ${winnerLabel(match.winner)} · ${fmtDate(match.endedAt)}`}
+        eyebrow={`Match #${match.id} · ${outcome} · ${fmtDate(match.endedAt)}`}
         title={campaignName(match.campaign)}
       >
         {headlineCards.length > 0 && (
@@ -376,6 +391,19 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
           </Figures>
         )}
       </PageHeader>
+
+      {(aborted || voided) && (
+        <Panel>
+          <p class="muted">
+            {aborted
+              ? 'This match was cancelled before it finished, so nothing here counts: no winner was '
+                + 'recorded and nobody\u2019s rating moved. The scoreline is how far the two teams got, '
+                + 'and the maps, stats and replays below are whatever was captured up to the moment it ended.'
+              : `This match was voided by an admin${match.voidReason ? `: ${match.voidReason}` : ''}. `
+                + 'It no longer counts anywhere, and the season\u2019s ratings were rebuilt without it.'}
+          </p>
+        </Panel>
+      )}
 
       <VersusHeader
         teamA={teamPlayers('a').map((p) => p.name)}

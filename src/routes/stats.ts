@@ -154,9 +154,19 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   app.get('/api/matches/:id', async (req, reply) => {
     const viewer = viewerOf(req);
     const id = Number((req.params as { id: string }).id);
+    // 'aborted' as well as 'completed'. An abandoned or reaped match used to
+    // 404 here, which meant the Discord card's own "Match page" link led
+    // nowhere and there was no record anywhere of who was in it or how far it
+    // got. archiveAborted (src/matchArchive.ts) now writes the same
+    // match_maps / match_players rows a completed match has, so everything
+    // below serves one with no special case; a NULL `winner` is what tells
+    // the page no result was reached. 'aborted' also covers a VOIDED match,
+    // which is a completed one flipped over with voided_at set, so the void
+    // reason rides along for the page to say so.
     const match = db.prepare(
-      `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
-       FROM matches WHERE id = ? AND state = 'completed'`,
+      `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore,
+              winner, voided_at AS voidedAt, void_reason AS voidReason
+       FROM matches WHERE id = ? AND state IN ('completed', 'aborted')`,
     ).get(id);
     if (!match) return reply.code(404).send({ error: 'no such match' });
     // Per-map player stats come from the end-of-map snapshots kept by the

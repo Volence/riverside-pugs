@@ -194,6 +194,7 @@ describe('AdminMatches layout', () => {
       },
     }],
     recent: [],
+    aborted: [],
     voided: [],
     servers: [{
       id: 1, name: 'Dallas', host: '45.32.199.85', port: 27015, status: 'live',
@@ -210,6 +211,25 @@ describe('AdminMatches layout', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
   };
+
+  // The index into what abandoned matches left behind. Without it an aborted
+  // match is only reachable from a Discord post that scrolls away.
+  it('lists aborted matches with the leaver and a link to the record', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    o.aborted = [{
+      id: 80, campaign: 'no_mercy', endedAt: '2026-09-20T21:58:52Z',
+      teamAScore: 181, teamBScore: 105, abandonedBy: 'mayhem',
+    }];
+    mockAdmin.overview.mockResolvedValue(o);
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    expect(screen.getByText('Aborted')).toBeTruthy();
+    expect(screen.getByText(/181 - 105/)).toBeTruthy();
+    expect(screen.getByText(/left: mayhem/)).toBeTruthy();
+    expect(screen.getByText('#80').closest('a')?.getAttribute('href')).toBe('/match/80');
+  });
 
   it('shows the paper odds and the gap for a live match', async () => {
     await openTab();

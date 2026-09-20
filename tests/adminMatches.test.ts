@@ -226,6 +226,25 @@ describe('admin servers dlc4-check', () => {
   });
 });
 
+describe('the aborted list', () => {
+  it('indexes matches that ended with no result, and names the leaver', async () => {
+    const mid = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, ended_at) VALUES (1, 'aborted', 'no_mercy', datetime('now'))",
+    ).run().lastInsertRowid);
+    db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)').run(mid, IDS[1], 'a');
+    db.prepare("INSERT INTO bans (player_id, created_by, reason, created_at) VALUES (?, 'system', ?, datetime('now'))")
+      .run(IDS[1], `Abandoned match #${mid}`);
+    // A voided match is stored as 'aborted' too, and belongs to the other list.
+    const voided = play('a');
+    db.prepare("UPDATE matches SET state = 'aborted', voided_at = datetime('now'), void_reason = 'alt' WHERE id = ?").run(voided);
+
+    const body = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin })).json();
+    expect(body.aborted).toHaveLength(1);
+    expect(body.aborted[0]).toMatchObject({ id: mid, campaign: 'no_mercy', abandonedBy: 'p001' });
+    expect(body.voided.map((v: { id: number }) => v.id)).toEqual([voided]);
+  });
+});
+
 describe('admin abort teardown', () => {
   it('releases the box with a teardown', async () => {
     const db = openDb(':memory:');
@@ -239,5 +258,21 @@ describe('admin abort teardown', () => {
     expect(abortMatch(db, releaser, mid)).toEqual({ ok: true });
     await new Promise((r) => setImmediate(r));
     expect(seen).toEqual([true]);
+  });
+
+  it('keeps the record instead of wiping it', () => {
+    const db = openDb(':memory:');
+    const mid = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)",
+    ).run('c'.repeat(32)).lastInsertRowid);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'm1', datetime('now'))").run(mid);
+    db.prepare("INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (?, 'm0', 0, 120, 90)").run(mid);
+
+    abortMatch(db, new ServerReleaser(db, async () => {}), mid);
+
+    expect(db.prepare('SELECT ordinal, map FROM match_maps WHERE match_id = ? ORDER BY ordinal').all(mid))
+      .toEqual([{ ordinal: 0, map: 'm0' }, { ordinal: 1, map: 'm1' }]);
+    expect(db.prepare('SELECT team_a_score AS a, team_b_score AS b FROM matches WHERE id = ?').get(mid))
+      .toEqual({ a: 120, b: 90 });
   });
 });

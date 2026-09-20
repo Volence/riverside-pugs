@@ -258,7 +258,10 @@ describe('DiscordSync', () => {
     expect(t.byId(card)!.deleted).toBe(true);
   });
 
-  it('an aborted match keeps its card, which is the only trace, but still drops the ping', async () => {
+  // With nowhere else to put it the card stays and is edited, the same
+  // fallback closeLobbyCard takes. Deleting it would erase the only trace the
+  // match happened.
+  it('with no admin channel an aborted match keeps its card, but still drops the ping', async () => {
     setSetting(db, 'discord_results_channel_id', 'results');
     await build().start();
     const matchId = await toLive();
@@ -286,6 +289,32 @@ describe('DiscordSync', () => {
     const card = getMessage(db, 'match', String(match.id))!;
     expect(JSON.stringify(t.byId(card.message_id)!.payload)).toContain('aborted');
     expect(t.live().some((m) => m.payload.embeds[0]?.title?.includes('result'))).toBe(false);
+  });
+
+  // Owner, 2026-09-20, after three abandons in a row: the dead rosters piled
+  // up in #queue-here where the queue panel is meant to be.
+  it('takes an aborted match out of the queue channel and into admin', async () => {
+    setSetting(db, 'discord_admin_channel_id', 'admin-chan');
+    await build().start();
+    const matchId = await toLive();
+    const card = getMessage(db, 'match', String(matchId))!.message_id;
+    const ping = getMessage(db, 'live', String(matchId))!.message_id;
+
+    db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(matchId);
+    await sync.pass();
+    await sync.pass();
+
+    expect(t.byId(card)!.deleted).toBe(true);
+    expect(t.byId(ping)!.deleted).toBe(true);
+    expect(getMessage(db, 'match', String(matchId))?.state).toBe('done');
+    const posted = t.messages.filter((m) => m.channelId === 'admin-chan' && !m.deleted);
+    expect(posted).toHaveLength(1);
+    // The roster is the whole reason an admin opens this.
+    expect(JSON.stringify(posted[0].payload)).toContain('aborted');
+    expect(JSON.stringify(posted[0].payload)).toContain(`/match/${matchId}`);
+    // A second pass must not post a duplicate.
+    await sync.pass();
+    expect(t.messages.filter((m) => m.channelId === 'admin-chan' && !m.deleted)).toHaveLength(1);
   });
 
   it('on start, a lobby card left open by the previous process is cancelled', async () => {

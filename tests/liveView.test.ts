@@ -3,10 +3,11 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { ServerReleaser } from '../src/serverRelease.js';
 import {
-  recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, clearLive, getLiveMatches,
+  recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, getLiveMatches,
   STALE_AFTER_MS, LIVE_EVENT_LIMIT, reapOrphanedMatches, ORPHAN_AFTER_MS, mapStatsFor, eventsFor,
   recordRoundStart, recordRoundEnd, roundsFor, recordChat, recordPhase, pausesFor, readyupsFor, slowToReady,
 } from '../src/liveView.js';
+import { clearLive } from '../src/matchArchive.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const A = ['76561198000000001', '76561198000000002'];
@@ -363,7 +364,7 @@ describe('reapOrphanedMatches', () => {
     expect(getLiveMatches(db)).toHaveLength(1);
   });
 
-  it('clears the scratch tables for what it reaps', () => {
+  it('archives what it reaps into the permanent tables, then clears the scratch', () => {
     const id = seedLive();
     recordLiveStat(db, TOKEN, A[0], { ck: 5 });
     recordLiveEvent(db, TOKEN, {
@@ -377,7 +378,14 @@ describe('reapOrphanedMatches', () => {
     for (const t of ['match_live', 'match_live_players', 'match_live_maps']) {
       expect(db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get(), t).toEqual({ n: 0 });
     }
-    expect(db.prepare('SELECT COUNT(*) AS n FROM match_maps').get()).toEqual({ n: 0 });
+    // A reaped match never gets a dump, so the scratch it had IS its record:
+    // archiveAborted promotes it rather than letting clearLive destroy it.
+    expect(db.prepare('SELECT ordinal, map, team_a_score AS a, team_b_score AS b FROM match_maps WHERE match_id = ?').all(id))
+      .toEqual([{ ordinal: 0, map: 'l4d_vs_hospital01_apartment', a: 100, b: 50 }]);
+    expect(db.prepare('SELECT common_kills FROM match_players WHERE match_id = ? AND player_id = ?').get(id, A[0]))
+      .toEqual({ common_kills: 5 });
+    expect(db.prepare('SELECT team_a_score AS a, team_b_score AS b, winner FROM matches WHERE id = ?').get(id))
+      .toEqual({ a: 100, b: 50, winner: null });
   });
 });
 

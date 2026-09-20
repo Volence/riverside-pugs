@@ -283,7 +283,10 @@ export interface MatchDemo {
 }
 
 export interface MatchDetail {
-  match: MatchSummary & { state: string };
+  /** `winner` is null on an aborted match: it never reached a result. The
+   *  void fields are set only when a COMPLETED match was voided afterwards,
+   *  which the schema also records as state 'aborted'. */
+  match: MatchSummary & { state: string; winner: Winner | null; voidedAt?: string | null; voidReason?: string | null };
   maps: {
     ordinal: number; map: string; teamAScore: number; teamBScore: number;
     /** Per-player stats for this map, keyed by steamid. Empty for matches
@@ -637,6 +640,9 @@ export interface AdminOverview {
   }[];
   servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
+  /** Ended with no result. `abandonedBy` names the leaver when the abandon
+   *  path ended it, and is null for an admin abort or a reaped match. */
+  aborted: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; abandonedBy: string | null }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
   /** Across every counted match: who is habitually the one holding up the ready-up. */

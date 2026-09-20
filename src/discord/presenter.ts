@@ -229,7 +229,7 @@ const STATE_LINE: Record<MatchCardState, string> = {
   waiting: 'Waiting for a server to free up. You will be pinged here when it is ready.',
   live: 'Server is ready. Press **Connect** for the address and password.',
   finished: 'Finished. The result is posted below.',
-  aborted: 'Match aborted.',
+  aborted: 'Match aborted. No result, no rating change. The roster and how far it got are on the match page.',
 };
 
 export function renderMatch(v: MatchView): MessagePayload {

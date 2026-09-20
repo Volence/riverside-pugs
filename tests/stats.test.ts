@@ -259,6 +259,25 @@ describe('stats routes', () => {
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
   });
 
+  // 2026-09-20: three abandons in a row, and every one of them 404'd here, so
+  // the Discord card's own "Match page" link led nowhere and nobody could see
+  // who was in it or how far it got.
+  it('serves an aborted match, with no winner and the score it reached', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    db.prepare("UPDATE matches SET state = 'aborted', winner = NULL WHERE id = ?").run(matchId);
+
+    const res = await app.inject({ method: 'GET', url: `/api/matches/${matchId}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.match.state).toBe('aborted');
+    expect(body.match.winner).toBeNull();
+    expect(body.players).toHaveLength(8);
+    expect(body.maps).toHaveLength(1);
+    // Still out of the public list: that one is results, and this has none.
+    const list = (await app.inject({ method: 'GET', url: '/api/matches' })).json();
+    expect(list.matches).toHaveLength(0);
+  });
+
   it('lists demos only for maps the match actually has', async () => {
     // The recorder opens a demo on every map load under the match token,
     // including the post-finale map the server rolls to after the match

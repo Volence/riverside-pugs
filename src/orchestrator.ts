@@ -11,7 +11,7 @@ import type { ServerReleaser } from './serverRelease.js';
 import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
-import { clearLive } from './liveView.js';
+import { clearLive } from './matchArchive.js';
 import { CAMPAIGNS } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';

@@ -4,6 +4,7 @@ import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent, Phase } from './logParse.js';
 import type { ServerReleaser } from './serverRelease.js';
+import { archiveAborted } from './matchArchive.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
  *  emits one every 30s, so this tolerates three consecutive losses on a lossy
@@ -716,37 +717,15 @@ export function reapOrphanedMatches(
     // Through the releaser, not a raw status write: a reaped match is exactly
     // the one whose sv_password nobody is left to clear by hand.
     if (r.server_id !== null) releaser.release(r.server_id);
-    clearLive(db, r.id);
+    // archiveAborted, not clearLive: a reaped match never gets a dump either,
+    // so the live scratch is the only record it will ever have.
+    archiveAborted(db, r.id);
     publishAdminEvent({ kind: 'problem', matchId: r.id, text: `Match #${r.id} aborted: the game server stopped reporting it.` });
     console.warn(`[liveView] reaped orphaned match ${r.id}: no heartbeat for ${olderThanMs}ms`);
   }
   return rows.map((r) => r.id);
 }
 
-/**
- * Drop the volatile rows once a match is no longer live.
- *
- * Deliberately KEEPS `match_live_map_stats` and `match_live_events`. They were
- * originally cleared with everything else, which meant completing a match
- * destroyed the only per-map player breakdown and the whole event feed that
- * had just been collected: the match page could never show them. They are the
- * historical record, not scratch.
- *
- * What does go is genuinely transient: `match_live` is heartbeat and
- * current-map bookkeeping, `match_live_players` is a running cumulative total
- * superseded by the authoritative `match_players` rows, and `match_live_maps`
- * is superseded by `match_maps` from the dump.
- *
- * Nothing here is keyed on by the live page, which only ever looks at matches
- * in state 'live', so retained rows cost nothing but a little disk.
- */
-export function clearLive(db: DB, matchId: number): void {
-  db.transaction(() => {
-    db.prepare('DELETE FROM match_live_players WHERE match_id = ?').run(matchId);
-    db.prepare('DELETE FROM match_live_maps WHERE match_id = ?').run(matchId);
-    db.prepare('DELETE FROM match_live WHERE match_id = ?').run(matchId);
-  })();
-}
 
 /** Per-map per-player stats for any match, live or finished, as
  *  {ordinal: {steamid: stats}}. Shared by the live page and the match page so

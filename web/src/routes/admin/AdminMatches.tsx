@@ -209,6 +209,24 @@ export function AdminMatches() {
             </div>
           </>
         )}
+        {(data.aborted ?? []).length > 0 && (
+          <>
+            <h4>Aborted</h4>
+            <p class="muted">
+              Ended with no result, so nothing counted. The scoreline is how far they got; the
+              roster, stats and replays are on the match page.
+            </p>
+            <ul class="admin-list">
+              {data.aborted.map((m) => (
+                <li key={m.id}>
+                  <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} {m.teamAScore} - {m.teamBScore}
+                  {m.abandonedBy ? <> · left: {m.abandonedBy}</> : null}
+                  {' '}<span class="muted">({fmtTime(m.endedAt)})</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         {data.voided.length > 0 && (
           <>
             <h4>Voided</h4>

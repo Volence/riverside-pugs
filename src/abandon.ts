@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import type { ServerReleaser } from './serverRelease.js';
-import { clearLive } from './liveView.js';
+import { archiveAborted } from './matchArchive.js';
 import { insertBan } from './admin/players.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { publishBanChange } from './banEvents.js';
@@ -73,7 +73,7 @@ export async function handleAbandon(deps: AbandonDeps, token: string, steamid: s
     if (!changed) return null;
     // After the outer commit, never inside it: see insertBan's doc comment.
     publishBanChange({ kind: 'ban', steamid, reason });
-    clearLive(db, match.id);
+    archiveAborted(db, match.id);
     deps.releaser.release(match.server_id, { teardown: true });
     publishAdminEvent({ kind: 'abandon', steamid, matchId: match.id, minutes });
     console.warn(`[abandon] match ${match.id} ended: ${steamid} abandoned it; banned for ${minutes} minutes`);
