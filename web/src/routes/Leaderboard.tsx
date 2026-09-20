@@ -7,6 +7,7 @@ import {
   STAT_MEASURE_TABS, type StatMeasure,
 } from '../format';
 import { Empty, Panel, PlayerLink, Tabs } from '../components/bits';
+import { percentile } from '../../../src/quantiles';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 
@@ -108,6 +109,29 @@ export function Leaderboard({ me }: { me: string | null }) {
     return deriveLiveStats(t);
   }, [rows]);
 
+  /**
+   * What a rating on this board is worth, as a distribution.
+   *
+   * This replaced a league-wide "Tank damage 79,180" and "Skeets 547". Those
+   * were sums of everything everybody has ever done, which no reader has a
+   * scale for and which grow forever whatever anyone does. Sitting above a
+   * table of medians they also contradicted it.
+   *
+   * SR is the one figure on the page every column is ultimately about, and a
+   * reader seeing 1,427 has no way to tell a good rating from an ordinary one.
+   * The median and the top decile give them the two reference points that
+   * answer it. Ranked players only, since a provisional SR after one match is
+   * not yet a rating.
+   */
+  const srSpread = useMemo(() => {
+    const srs = rows.filter((r) => r.ranked).map((r) => r.sr);
+    const median = percentile(srs, 0.5);
+    const p90 = percentile(srs, 0.9);
+    return median === null || p90 === null
+      ? null
+      : { median: Math.round(median), p90: Math.round(p90), n: srs.length };
+  }, [rows]);
+
   return (
     <div class="page page--list">
       <PageHeader
@@ -132,8 +156,17 @@ export function Leaderboard({ me }: { me: string | null }) {
                 game count, which is only right while everyone has played
                 every match. */}
             {data && <Figure label="Matches rated" value={data.matchesRated} />}
-            {totals.tank_damage ? <Figure label="Tank damage" value={totals.tank_damage} /> : null}
-            {totals.skeets ? <Figure label="Skeets" value={totals.skeets} /> : null}
+            {srSpread && (
+              <Figure
+                label="Median SR" value={srSpread.median.toLocaleString()}
+                sub={`${srSpread.n} ranked`}
+              />
+            )}
+            {srSpread && (
+              <Figure label="Top 10%" value={`${srSpread.p90.toLocaleString()}+`} sub="SR" />
+            )}
+            {/* Kept: a pooled rate over the whole league is a real figure and
+                does not grow just because another match was played. */}
             {totals.boomer_rate !== undefined
               ? <Figure label="Boomer %" value={`${totals.boomer_rate}%`} sub="everyone" />
               : null}

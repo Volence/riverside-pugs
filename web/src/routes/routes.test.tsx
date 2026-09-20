@@ -1863,6 +1863,54 @@ describe('leaderboard stat leaders', () => {
   });
 });
 
+describe('leaderboard header figures', () => {
+  const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
+  const player = (steamid: string, sr: number, ranked: boolean) => ({
+    steamid, name: `p${steamid}`, avatar: null, sr, wins: 5, losses: 5,
+    games: ranked ? 10 : 1, ranked, stats: { skeets: 40 }, medianStats: { skeets: 4 },
+  });
+
+  beforeEach(() => {
+    mockApi.seasons.mockResolvedValue({ seasons: [] });
+  });
+
+  // These were league-wide sums ("Tank damage 79,180"), which no reader has a
+  // scale for, grow forever whatever anyone does, and contradicted the table
+  // of medians underneath them.
+  it('describes the SR distribution rather than summing the league', async () => {
+    mockApi.leaderboard.mockResolvedValue(board(
+      [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]
+        .map((sr, i) => player(String(i), sr, true)),
+    ));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Median SR')).toBeTruthy());
+    expect(screen.getByText('1,450')).toBeTruthy();
+    expect(screen.getByText('10 ranked')).toBeTruthy();
+    expect(screen.getByText('1,810+')).toBeTruthy();
+    expect(screen.queryByText(/Tank damage/)).toBeNull();
+  });
+
+  // A provisional SR after one match is not yet a rating, so it must not drag
+  // the league's own reference points around.
+  it('takes the distribution over ranked players only', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([
+      player('1', 1000, true), player('2', 1000, true), player('3', 1000, true),
+      player('4', 9999, false),
+    ]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Median SR')).toBeTruthy());
+    expect(screen.getByText('3 ranked')).toBeTruthy();
+    expect(screen.queryByText('9,999+')).toBeNull();
+  });
+
+  it('shows no SR figures on a season where nobody is ranked yet', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([player('1', 1200, false)]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Leaderboard')).toBeTruthy());
+    expect(screen.queryByText('Median SR')).toBeNull();
+  });
+});
+
 describe('leaderboard measure', () => {
   const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
   // alice turns up to far more matches and out-totals bob while being the

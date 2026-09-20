@@ -47,6 +47,19 @@ export function quantiles(values: number[]): Quantiles | null {
   };
 }
 
+/**
+ * One arbitrary percentile, for the callers that want a cut `quantiles` does
+ * not carry (a p90, say). Null for an empty sample, on the same rule.
+ *
+ * `p` is a fraction, not a percentage: 0.9, never 90. Same formula as
+ * `quantiles`, which is the point of it living here rather than being open
+ * coded at the call site.
+ */
+export function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  return quantileOf([...values].sort((a, b) => a - b), p);
+}
+
 /** One quantile of an already sorted, non-empty sample. */
 function quantileOf(sorted: number[], p: number): number {
   const h = (sorted.length - 1) * p;
