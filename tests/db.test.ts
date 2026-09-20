@@ -18,8 +18,8 @@ describe('openDb', () => {
       'match_live_players', 'match_maps',
       'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
       'matches', 'matchmaker_state',
-      'penalties', 'player_aliases', 'player_networks', 'player_notes', 'player_ratings', 'players',
-      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops',
+      'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings', 'players',
+      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'twitch_status',
     ]);
   });
 
@@ -69,5 +69,66 @@ describe('round schema', () => {
     const tms = cols.find((c) => c.name === 't_ms');
     expect(half?.dflt_value).toBe('-1');
     expect(tms?.dflt_value).toBe('-1');
+  });
+});
+
+describe('social profile schema', () => {
+  it('players carries the profile and twitch columns', () => {
+    const db = openDb(':memory:');
+    const cols = (db.prepare('PRAGMA table_info(players)').all() as { name: string }[])
+      .map((c) => c.name);
+    for (const c of ['bio', 'pronouns', 'country', 'twitch_id', 'twitch_name']) {
+      expect(cols).toContain(c);
+    }
+  });
+
+  it('one twitch channel cannot be claimed by two players', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('1', 'a')").run();
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('2', 'b')").run();
+    db.prepare("UPDATE players SET twitch_id = '999' WHERE steamid = '1'").run();
+    expect(() => db.prepare("UPDATE players SET twitch_id = '999' WHERE steamid = '2'").run())
+      .toThrow();
+  });
+
+  it('unlinked players do not collide on a null twitch_id', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('1', 'a')").run();
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('2', 'b')").run();
+    const n = db.prepare('SELECT COUNT(*) AS n FROM players WHERE twitch_id IS NULL')
+      .get() as { n: number };
+    expect(n.n).toBe(2);
+  });
+
+  it('player_links is one row per player per platform', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('1', 'a')").run();
+    const ins = db.prepare('INSERT INTO player_links (player_id, platform, handle) VALUES (?,?,?)');
+    ins.run('1', 'x', 'alice');
+    expect(() => ins.run('1', 'x', 'bob')).toThrow();
+    ins.run('1', 'youtube', 'alice');
+    const n = db.prepare('SELECT COUNT(*) AS n FROM player_links').get() as { n: number };
+    expect(n.n).toBe(2);
+  });
+
+  it('twitch_status is one row per player', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO players (steamid, name) VALUES ('1', 'a')").run();
+    const ins = db.prepare(
+      'INSERT INTO twitch_status (player_id, is_live, checked_at) VALUES (?,?,?)',
+    );
+    ins.run('1', 1, '2026-09-20T00:00:00Z');
+    expect(() => ins.run('1', 0, '2026-09-20T00:01:00Z')).toThrow();
+  });
+
+  it('seeds the social settings', () => {
+    const db = openDb(':memory:');
+    const get = (k: string) =>
+      (db.prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string } | undefined)?.value;
+    expect(get('chemistry_min_games')).toBe('5');
+    expect(get('endorse_budget')).toBe('2');
+    expect(get('endorse_window_hours')).toBe('24');
+    expect(get('endorse_title_min')).toBe('5');
+    expect(get('endorse_title_min_games')).toBe('10');
   });
 });

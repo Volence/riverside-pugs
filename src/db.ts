@@ -13,6 +13,42 @@ CREATE TABLE IF NOT EXISTS players (
   is_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- A player's off-site presence. Handles, never URLs: the URL is generated
+-- server-side from a per-platform template, so there is no code path that
+-- renders a link a player typed. On a public site that has already had one
+-- identity forgery bug, a free URL field is somewhere to hang a phishing link.
+--
+-- Deliberately no CHECK on 'platform', unlike most of this schema. SQLite
+-- cannot alter a CHECK without rebuilding the table, which would make adding a
+-- platform exactly the migration this table exists to avoid. The permitted set
+-- lives in LINK_PLATFORMS in src/profileFields.ts, which has to be correct
+-- anyway because it also builds the URLs.
+CREATE TABLE IF NOT EXISTS player_links (
+  player_id TEXT NOT NULL REFERENCES players(steamid),
+  platform  TEXT NOT NULL,
+  handle    TEXT NOT NULL,
+  PRIMARY KEY (player_id, platform)
+);
+-- The Twitch poll cache, overwritten every minute. Separate from 'players' on
+-- purpose: this is volatile data on a hot write path, and it must never touch
+-- the row where identity, admin flag and ban status live.
+--
+-- 'checked_at' is always written, even when nothing changed, because the read
+-- path uses it to decide the cache is too stale to claim anyone is live. A
+-- LIVE badge stuck on forever after the poller dies would make the whole page
+-- untrustworthy; a wrong "offline" is a shrug.
+CREATE TABLE IF NOT EXISTS twitch_status (
+  player_id    TEXT PRIMARY KEY REFERENCES players(steamid),
+  is_live      INTEGER NOT NULL DEFAULT 0,
+  title        TEXT,
+  game_name    TEXT,
+  viewers      INTEGER,
+  thumbnail    TEXT,
+  started_at   TEXT,
+  last_live_at TEXT,
+  checked_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_twitch_status_live ON twitch_status (is_live, viewers DESC);
 CREATE TABLE IF NOT EXISTS seasons (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -546,6 +582,20 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
+  // Minimum shared matches before a with/against win rate is worth showing.
+  // Its own knob rather than a reuse of standing_min_games for the reason
+  // given in 5d2ae85: "we have played five together" and "is your per-match
+  // average meaningful" are different questions with different answers.
+  chemistry_min_games: '5',
+  // Endorsements a player may give per match, and how long after the match
+  // ends giving stays open. The window exists so a pair cannot decide one
+  // evening to farm every match they have ever played together.
+  endorse_budget: '2',
+  endorse_window_hours: '24',
+  // Before a kind becomes a visible title: that many endorsements of the kind,
+  // and that many matches played at all.
+  endorse_title_min: '5',
+  endorse_title_min_games: '10',
 };
 
 /** Add a column if the table lacks it. No-op when already present. */
@@ -604,6 +654,20 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // Player-authored profile fields. All three are constrained rather than
+  // trusted: see src/profileFields.ts. They are columns rather than rows in
+  // player_links because they are one-per-player and are rendered with the
+  // name itself rather than as a list.
+  ensureColumn(db, 'players', 'bio', 'TEXT');
+  ensureColumn(db, 'players', 'pronouns', 'TEXT');
+  ensureColumn(db, 'players', 'country', 'TEXT');
+  // Twitch identity. The id is canonical and the login is a cache: Twitch
+  // logins change and ids do not, so every lookup and every unique constraint
+  // keys on the id. Partial index for the same reason as discord_id: almost
+  // every row is NULL and NULLs must not collide.
+  ensureColumn(db, 'players', 'twitch_id', 'TEXT');
+  ensureColumn(db, 'players', 'twitch_name', 'TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_twitch_id ON players(twitch_id) WHERE twitch_id IS NOT NULL');
   // Second Steam accounts, pointed at the one account their owner really is.
   // Written by a merge and read on every line the game server sends, so a
   // reconnect on the alt is rostered as the person rather than as a new
