@@ -4,6 +4,7 @@ import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive, makeRequireAdmin } from './guards.js';
 import { publicBans } from '../admin/players.js';
 import { fileReport, reportEligibility } from '../reports.js';
+import { streamsView } from '../streamsView.js';
 
 export interface ApiRouteOpts {
   db: DB;
@@ -13,6 +14,15 @@ export interface ApiRouteOpts {
 export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promise<void> {
   const { db, matchmaker } = opts;
   const requireActive = makeRequireActive(db);
+
+  /** Who is streaming, in three tiers. Public: a page anyone can open is the
+   *  point, and no session changes what it shows. Serialises the Twitch login
+   *  and never the Twitch id, because the login is the only Twitch identifier
+   *  that is already public. */
+  app.get('/api/streams', async (req) => {
+    const { all } = req.query as { all?: string };
+    return streamsView(db, { engaged: matchmaker.engagedIds(), all: all === '1' });
+  });
 
   app.post('/api/queue/join', async (req, reply) => {
     const steamid = requireActive(req, reply);
