@@ -5,7 +5,7 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { completeMatch } from '../src/matchResult.js';
 import { recomputeSeasonRatings } from '../src/rating.js';
-import { addServer, markLive } from '../src/serverPool.js';
+import { addServer, markLive, serversMissingDlc4 } from '../src/serverPool.js';
 import type { Dump } from '../src/dumpParse.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { recordPhase } from '../src/liveView.js';
@@ -179,6 +179,50 @@ describe('admin matches', () => {
       expect((await app.inject({ method: 'POST', url, cookies: user, payload: {} })).statusCode, url).toBe(403);
     }
     expect((await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: user })).statusCode).toBe(403);
+  });
+});
+
+// A separate app per test here, not the shared one from the outer beforeEach,
+// because the probe has to be injected at buildServer time (same reasoning
+// as installTargets in tests/campaignRoutes.test.ts): a real probe would mean
+// dialing an actual box.
+describe('admin servers dlc4-check', () => {
+  it('probes every server and records the result', async () => {
+    const db2 = openDb(':memory:');
+    const hasIt: Record<string, boolean> = { Dallas: true, Chicago: false };
+    const app2 = await buildServer({
+      config: loadConfig({}), db: db2, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {},
+      dlc4Probe: async (s) => hasIt[s.name] ?? false,
+    });
+    const adminCookie = authedCookie(app2, db2, ADMIN);
+    db2.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+    const dallasId = addServer(db2, { name: 'Dallas', host: '1.1.1.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    const chicagoId = addServer(db2, { name: 'Chicago', host: '2.2.2.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
+
+    const res = await app2.inject({ method: 'POST', url: '/api/admin/servers/dlc4-check', cookies: adminCookie });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().results).toEqual([
+      { id: dallasId, name: 'Dallas', hasDlc4: true },
+      { id: chicagoId, name: 'Chicago', hasDlc4: false },
+    ]);
+    // Persisted, so the pool gate (which reads serversMissingDlc4 straight
+    // from the servers table) sees the same answer without re-probing.
+    expect(serversMissingDlc4(db2)).toEqual(['Chicago']);
+    const audit = (await app2.inject({ method: 'GET', url: '/api/admin/audit', cookies: adminCookie })).json();
+    expect(audit.actions[0]).toMatchObject({ action: 'server_dlc4_check', target: 'all' });
+    await app2.close();
+  });
+
+  it('refuses a non-admin', async () => {
+    const db2 = openDb(':memory:');
+    const app2 = await buildServer({
+      config: loadConfig({}), db: db2, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {},
+    });
+    const res = await app2.inject({ method: 'POST', url: '/api/admin/servers/dlc4-check' });
+    expect(res.statusCode).toBe(401);
+    await app2.close();
   });
 });
 

@@ -58,6 +58,16 @@ describe('settings routes', () => {
     expect(res.settings.find((s: { key: string }) => s.key === 'ready_seconds').value).toBe('120');
   });
 
+  // The pool gate (map_pool's poolableCampaigns filter) already hides a dlc4
+  // campaign from an admin with no explanation; this is what lets the panel
+  // say why, next to the pool checkboxes.
+  it('names the servers missing the mappack, for the panel to explain the gate', async () => {
+    const serverId = addServer(db, { name: 'Chicago', host: 'h', port: 1, rconPort: 1, rconPassword: 'p' });
+    setHasDlc4(db, serverId, false);
+    const res = (await app.inject({ method: 'GET', url: '/api/admin/settings', cookies: admin })).json();
+    expect(res.serversMissingDlc4).toEqual(['Chicago']);
+  });
+
   it('saves a valid value and audits it; rejects invalid with the reason; 404s unknown', async () => {
     expect((await put('ready_seconds', '90')).statusCode).toBe(200);
     expect(getSetting(db, 'ready_seconds')).toBe('90');

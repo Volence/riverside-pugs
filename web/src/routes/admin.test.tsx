@@ -118,6 +118,19 @@ describe('Admin page', () => {
     await waitFor(() => expect(screen.getByText('Ready check seconds')).toBeTruthy());
     expect((screen.getByLabelText('Ready check seconds') as HTMLInputElement).value).toBe('120');
   });
+
+  it('says which servers are missing the mappack next to the campaign pool', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.settings.mockResolvedValue({
+      settings: [{ key: 'map_pool', label: 'Campaign pool', help: 'h', group: 'Queue', value: '["no_mercy"]', type: { kind: 'campaigns' } }],
+      campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }],
+      serversMissingDlc4: ['Chicago'],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    expect(await screen.findByText(/Chicago/)).toBeTruthy();
+    expect(screen.getByText(/needs the L4D2 mappack/i)).toBeTruthy();
+  });
 });
 
 describe('queue timeout', () => {
