@@ -17,6 +17,9 @@ export interface ServerRow {
    *  Collapsing the two would mean expressing "do not use this" as a fake
    *  status that reconcileServers would then helpfully reset back to idle. */
   enabled: number;
+  /** Whether this box carries the left4dead_dlc4 mappack. Set by the probe
+   *  in setHasDlc4; present on the row because claimIdle does SELECT *. */
+  has_dlc4: number;
 }
 
 export function addServer(
