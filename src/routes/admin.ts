@@ -93,7 +93,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       }
     }
     banPlayer(db, t.steamid, t.adminId, reason.trim(), mins);
-    matchmaker.leave(t.steamid);
+    // Out of the queue AND out of any ready check or vote in progress.
+    matchmaker.remove(t.steamid);
     logAdmin(db, t.adminId, 'ban', t.steamid, { reason: reason.trim(), minutes: mins });
     return { ok: true };
   });

@@ -83,7 +83,13 @@ export interface StateSnapshot {
    * detail goes to the admin channel instead, so without this the eight
    * people it happened to would see the pop simply vanish.
    */
-  lobbyNotice: { notReady: NamedPlayer[]; youWereReady: boolean } | null;
+  lobbyNotice: {
+    notReady: NamedPlayer[];
+    youWereReady: boolean;
+    /** Set instead when nobody failed to ready: this player was taken out of
+     *  the lobby (banned mid ready check) and the pop was cancelled for it. */
+    removed?: NamedPlayer;
+  } | null;
 }
 
 /** Lifecycle events the broadcast cannot carry, because it sends only an
@@ -111,7 +117,7 @@ export class Matchmaker {
   /** Per-player "your ready check failed", keyed by steamid. In memory and
    *  deliberately not persisted: it is about something that happened seconds
    *  ago, and a notice that outlived a restart would be noise. */
-  private notices = new Map<string, { notReady: string[]; youWereReady: boolean }>();
+  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string }>();
 
   constructor(private db: DB, private deps: MatchmakerDeps) {}
 
@@ -237,6 +243,34 @@ export class Matchmaker {
 
   leave(steamid: string): void {
     this.queue.leave(steamid);
+    this.changed();
+  }
+
+  /**
+   * Take a player out of matchmaking altogether: the queue, and any ready
+   * check or campaign vote they are in. For a ban. leave() only ever knew
+   * about the queue, so someone banned during a ready check stayed in it,
+   * could still ready up, and was handed a place on the match.
+   *
+   * There is no "decline" in a lobby to borrow; the one way a lobby ends
+   * without a match is a failed ready check, so this follows that path
+   * (onLobbyFail): dissolve, put the others back at the FRONT of the queue in
+   * their old order, and pop again at once if the queue behind them can fill
+   * the gap. Two differences: nobody is penalised, because nobody here failed
+   * to ready, and no failure is recorded, so the Discord card closes as
+   * cancelled rather than naming people who did nothing wrong.
+   */
+  remove(steamid: string): void {
+    const lobbyId = this.playerLobby.get(steamid);
+    if (!lobbyId && !this.queue.has(steamid)) return;
+    this.queue.leave(steamid);
+    if (lobbyId) {
+      const others = this.dissolveLobby(lobbyId).filter((p) => p !== steamid);
+      for (const p of others) this.notices.set(p, { notReady: [], youWereReady: true, removed: steamid });
+      this.emit('lobbyFailed', lobbyId, [...others], []);
+      this.queue.requeueFront(others);
+      this.maybeStartLobby();
+    }
     this.changed();
   }
 
@@ -441,7 +475,11 @@ export class Matchmaker {
       readyBlock: this.readyBlock(steamid),
       lobbyNotice: (() => {
         const n = this.notices.get(steamid);
-        return n ? { notReady: n.notReady.map(named), youWereReady: n.youWereReady } : null;
+        if (!n) return null;
+        return {
+          notReady: n.notReady.map(named), youWereReady: n.youWereReady,
+          ...(n.removed ? { removed: named(n.removed) } : {}),
+        };
       })(),
     };
   }

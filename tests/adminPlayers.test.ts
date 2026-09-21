@@ -71,6 +71,18 @@ describe('admin players', () => {
     expect(audit.actions[0]).toMatchObject({ action: 'ban', target: P2, adminId: ADMIN });
   });
 
+  it('a ban pulls the player out of a ready check, not only out of the queue', async () => {
+    const others = Array.from({ length: 7 }, (_, i) => `7656119800000010${i}`);
+    for (const id of others) await post('/api/queue/join', authedCookie(app, db, id));
+    await post('/api/queue/join', user);
+    expect((await get('/api/state', user)).json().lobby).not.toBeNull();
+    await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'griefing' });
+    const seat = (await get('/api/state', authedCookie(app, db, others[0]))).json();
+    expect(seat.lobby).toBeNull();
+    expect(seat.queue.count).toBe(7);
+    expect(seat.queue.players.map((p: { steamid: string }) => p.steamid)).not.toContain(P2);
+  });
+
   it('you cannot ban yourself or remove your own admin', async () => {
     expect((await post(`/api/admin/players/${ADMIN}/ban`, admin, { reason: 'x' })).statusCode).toBe(400);
     expect((await post(`/api/admin/players/${ADMIN}/admin`, admin, { isAdmin: false })).statusCode).toBe(400);

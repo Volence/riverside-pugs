@@ -84,7 +84,9 @@ export interface StateSnapshot {
   /** The ready check the viewer was just in, if it failed and they have not
    *  dismissed it. The failure no longer appears in #queue-here, so this is
    *  where they find out. */
-  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean } | null;
+  /** `removed` is set instead of `notReady` when the pop was cancelled because
+   *  a player was taken out of it (banned mid ready check). */
+  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
 }
 
 /** One row of the public ban list. Nothing private is on it: see
