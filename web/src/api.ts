@@ -760,6 +760,50 @@ export interface AdminOverview {
   slowToReady: SlowToReady[];
 }
 
+/** The admin live board. Mirrors src/admin/liveBoard.ts field for field.
+ *  Every `...S` figure is whole seconds as of the moment the server answered;
+ *  the page counts on from when the payload arrived and never compares
+ *  anything here against its own wall clock. */
+export type LiveBoardReason = { kind: 'signon_drop'; at: string } | { kind: 'not_in_voice' };
+export type LiveBoardStatus =
+  | { kind: 'connected'; remainingS: number | null }
+  | { kind: 'never_connected'; sincePopS: number }
+  | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
+export interface LiveBoardPlayer {
+  steamid: string; name: string; team: 'a' | 'b'; status: LiveBoardStatus; reason: LiveBoardReason | null;
+}
+export interface LiveBoardClock {
+  kind: 'abandon'; steamid: string; name: string; remainingS: number; held: boolean; holdLeftS: number | null;
+}
+export interface LiveBoardMatch {
+  id: number;
+  campaign: string;
+  map: string | null;
+  state: 'waiting' | 'configuring' | 'live' | 'paused';
+  phase: 'live' | 'paused' | 'readyup' | 'roundover' | 'loading' | null;
+  server: { id: number; name: string } | null;
+  teamAScore: number;
+  teamBScore: number;
+  elapsedS: number;
+  spectate: SpectateInfo | null;
+  /** old_plugin: the server's pug-match predates 0.3.4 and has no clock control. */
+  leaveControl: 'ok' | 'old_plugin' | 'unknown';
+  /** False when the game server runs no reconnect clock for this match at
+   *  all, which is every match that was started in game. */
+  leaveTracking: boolean;
+  teamA: LiveBoardPlayer[];
+  teamB: LiveBoardPlayer[];
+  clocks: LiveBoardClock[];
+}
+export interface LiveBoard {
+  now: string;
+  holdMaxMinutes: number;
+  /** Where a countdown starts reading as nearly out, in seconds; 0 is off. */
+  lowAlertSeconds: number;
+  matches: LiveBoardMatch[];
+}
+export type LeaveClockAction = 'hold' | 'release' | 'add' | 'end';
+
 export interface AdminSetting {
   key: string; label: string; help: string; group: string; secret?: boolean; value: string;
   type:
@@ -1023,6 +1067,9 @@ export const adminApi = {
     post<{ ok: true; refreshed: number }>(`/api/admin/players/${steamid}/steam-refresh`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
+  live: (signal?: AbortSignal) => get<LiveBoard>('/api/admin/live', signal),
+  leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
+    post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),

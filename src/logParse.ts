@@ -31,7 +31,11 @@ export type LogEvent =
   // result is computed, but the pause records built from it are what an admin
   // sees when a team complains about the other side's pausing.
   | { kind: 'phase'; token: string; phase: Phase }
-  | { kind: 'leave'; token: string; steamid: string; remaining: number }
+  // held, holdLeft and auto are pug-match 0.3.4 and later, sent when an admin
+  // changes a dropped player's clock (sm_pug_leave) or the hold ceiling
+  // releases it. Present only when the line carried them, so a 0.3.3 line
+  // parses to exactly the object it always did.
+  | { kind: 'leave'; token: string; steamid: string; remaining: number; held?: boolean; holdLeft?: number; auto?: boolean }
   | { kind: 'return'; token: string; steamid: string; remaining: number }
   | { kind: 'abandon'; token: string; steamid: string }
   | { kind: 'problem'; token: string; code: string }
@@ -396,7 +400,15 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
     case 'RETURN': {
       const remaining = intOf(rest.remaining);
       if (!/^\d{17}$/.test(rest.steamid ?? '') || remaining === null) return null;
-      return { kind: verb === 'LEAVE' ? 'leave' : 'return', token, steamid: rest.steamid, remaining };
+      if (verb === 'RETURN') return { kind: 'return', token, steamid: rest.steamid, remaining };
+      const ev: Extract<LogEvent, { kind: 'leave' }> = { kind: 'leave', token, steamid: rest.steamid, remaining };
+      // A LEAVE starts the clock that ends a match, so an optional key this
+      // parser cannot read costs the key and never the line.
+      if (rest.held === '0' || rest.held === '1') ev.held = rest.held === '1';
+      const holdLeft = intOf(rest.hold_left);
+      if (holdLeft !== null && holdLeft >= 0) ev.holdLeft = holdLeft;
+      if (rest.auto === '1') ev.auto = true;
+      return ev;
     }
     case 'ABANDON':
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;

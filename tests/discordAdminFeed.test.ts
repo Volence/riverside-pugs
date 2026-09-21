@@ -61,6 +61,17 @@ describe('admin feed', () => {
     expect(t.live()).toHaveLength(0);
   });
 
+  it('a clock action names the player, the match and what was done', async () => {
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'hold', ok: true, remaining: 200, held: true });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'add', seconds: 300, ok: true, remaining: 500, held: false });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'end', ok: false, error: 'not dropped' });
+    await feed.idle();
+    expect(text(0)).toMatch(/player7.*put .*player2.*reconnect clock on hold/);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/gave .*player2.* 300 more seconds/);
+    expect(text(2)).toMatch(/failed: not dropped/);
+  });
+
   it('a button on an old report card answers instead of failing', async () => {
     const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7' });
     expect(r.ephemeral).toBe(true);
@@ -168,5 +179,16 @@ describe('admin feed', () => {
     publishAdminEvent({ kind: 'steam_signal', steamid: IDS[2], matchId, signal: { what: 'banned_lender', lenderId: IDS[6] } });
     await feed.idle();
     expect(t.live()).toHaveLength(0);
+  });
+
+  it('warns once that a dropped player is nearly out of time, with a link to the board', async () => {
+    publishAdminEvent({ kind: 'clock', what: 'low_allowance', steamid: IDS[2], matchId, remainingS: 85 });
+    publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: IDS[2], matchId, remainingS: 197 });
+    await feed.idle();
+    expect(text(0)).toMatch(/player2.* has 85 s left/);
+    expect(text(0)).toContain(`https://pug.test/admin?live=${matchId}`);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/hold on .*player2.* released itself/);
+    expect(text(1)).toContain('197 s');
   });
 });

@@ -93,6 +93,18 @@ export class AdminFeedPoster {
           text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
+      case 'clock': {
+        // /admin?live=N today. The admin routing plan moves the board to
+        // /admin/live, and whichever of the two lands second changes this.
+        const board = `[live board](${this.deps.publicUrl}/admin?live=${e.matchId})`;
+        const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        return {
+          text: e.what === 'low_allowance'
+            ? `**${this.name(e.steamid)}** has ${e.remainingS} s left to reconnect in ${match}. Hold the clock or add time on the ${board}.`
+            : `The hold on **${this.name(e.steamid)}**'s reconnect clock in ${match} released itself at the ceiling: ${e.remainingS} s left and counting. ${board}`,
+          color: COLOR.problem,
+        };
+      }
       case 'lilac_flag': {
         const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
         // "suspected" is LilAC's own word for the soft case and it is the right
@@ -178,6 +190,18 @@ export class AdminFeedPoster {
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``
         : `${who} changed the ${e.target} setting`;
+      case 'leave_clock': {
+        const where = `match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)})`;
+        if (d.ok === false) {
+          return `${who} tried to ${String(d.action)} ${target}'s reconnect clock in ${where}, and it failed: ${escapeName(String(d.error ?? ''))}`;
+        }
+        switch (d.action) {
+          case 'hold': return `${who} put ${target}'s reconnect clock on hold in ${where}`;
+          case 'release': return `${who} released the hold on ${target}'s reconnect clock in ${where}`;
+          case 'add': return `${who} gave ${target} ${String(d.seconds)} more seconds to reconnect in ${where}`;
+          default: return `${who} ended ${target}'s reconnect time in ${where}`;
+        }
+      }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': {
         const ticket = `ticket [#${e.target}](${this.deps.publicUrl}/admin?ticket=${e.target})`;

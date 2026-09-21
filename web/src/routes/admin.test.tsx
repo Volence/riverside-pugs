@@ -16,7 +16,7 @@ async function confirmDialog(name?: string | RegExp) {
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
-    players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), steamRefresh: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
+    players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), steamRefresh: vi.fn(), overview: vi.fn(), live: vi.fn(), leaveClock: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
@@ -46,15 +46,41 @@ beforeEach(() => {
     pending: 0,
     matchInFlight: false,
   });
+  // Live is the admin's landing tab now, so every render of <Admin> asks for
+  // the board and the overview before any test has clicked anything. These
+  // are the empty answers; a test that cares overrides them after this runs.
+  mockAdmin.live.mockResolvedValue({ now: '2026-09-21T20:00:00.000Z', holdMaxMinutes: 30, matches: [] });
+  mockAdmin.overview.mockResolvedValue({ open: [], servers: [], recent: [], aborted: [], voided: [], queue: [], slowToReady: [] });
+  // Node has a global WebSocket and happy-dom does not replace it, so without
+  // this the board's hub listener would dial ws://localhost from every test.
+  vi.stubGlobal('WebSocket', undefined);
 });
 
 const me = { steamid: '1', name: 'boss', avatar: null, status: 'active', isAdmin: true };
+
+/** Players was the default tab until Live became the landing page. */
+const openPlayers = () => fireEvent.click(screen.getByRole('tab', { name: 'Players' }));
 
 describe('Admin page', () => {
   it('refuses a non-admin without calling the admin API', () => {
     render(<Admin session={{ kind: 'active', me: { ...me, isAdmin: false } }} />);
     expect(screen.getByText('Staff only.')).toBeTruthy();
     expect(mockAdmin.players).not.toHaveBeenCalled();
+  });
+
+  it('lands an admin on the live board, which is the first tab', async () => {
+    render(<Admin session={{ kind: 'active', me }} />);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs[0].textContent).toBe('Live');
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(await screen.findByText('No match is running.')).toBeTruthy();
+    expect(mockAdmin.players).not.toHaveBeenCalled();
+  });
+
+  it('does not offer the live board to a moderator', () => {
+    render(<Admin session={{ kind: 'active', me: { ...me, isAdmin: false, isMod: true } }} />);
+    expect(screen.queryByRole('tab', { name: 'Live' })).toBeNull();
+    expect(mockAdmin.live).not.toHaveBeenCalled();
   });
 
   it('lists players, opens a detail and bans with a reason', async () => {
@@ -68,6 +94,7 @@ describe('Admin page', () => {
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
     render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('griefer')).toBeTruthy());
     fireEvent.click(screen.getByText('griefer'));
     await waitFor(() => expect(screen.getByPlaceholderText('Reason (shown to them)')).toBeTruthy());
@@ -97,6 +124,7 @@ describe('Admin page', () => {
       },
     });
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('skinner')).toBeTruthy());
     fireEvent.click(screen.getByText('skinner'));
 
@@ -127,6 +155,7 @@ describe('Admin page', () => {
       }],
     });
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('newcomer')).toBeTruthy());
     fireEvent.click(screen.getByText('newcomer'));
     await waitFor(() => expect(screen.getByText(/This Discord was previously linked to/)).toBeTruthy());
@@ -144,6 +173,7 @@ describe('Admin page', () => {
     });
     mockAdmin.signOutPlayer.mockResolvedValue({ ok: true });
     render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('phished')).toBeTruthy());
     fireEvent.click(screen.getByText('phished'));
     fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign out everywhere' })));
@@ -162,6 +192,7 @@ describe('Admin page', () => {
       inputCaps: [],
     });
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
     fireEvent.click(screen.getByText('clean'));
     await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
@@ -200,6 +231,7 @@ describe('Admin page', () => {
         },
       }));
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
     fireEvent.click(screen.getByText('borrower'));
 
@@ -237,6 +269,7 @@ describe('Admin page', () => {
       },
     });
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
     fireEvent.click(screen.getByText('borrower'));
     const section = await steamSection();
@@ -254,6 +287,7 @@ describe('Admin page', () => {
     mockAdmin.player.mockResolvedValue({ ...steamDetail, steamAccount: null });
     mockAdmin.steamRefresh.mockResolvedValue({ ok: true, refreshed: 1 });
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
     fireEvent.click(screen.getByText('borrower'));
     const section = await steamSection();
@@ -281,6 +315,7 @@ describe('Admin page', () => {
       }],
     });
     render(<Admin session={{ kind: 'active', me }} />);
+    openPlayers();
     await waitFor(() => expect(screen.getByText('clicker')).toBeTruthy());
     fireEvent.click(screen.getByText('clicker'));
     await waitFor(() => expect(document.getElementById('input-flags')).toBeTruthy());
