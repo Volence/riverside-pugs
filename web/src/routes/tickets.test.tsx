@@ -30,6 +30,13 @@ const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
   events: [{ id: 1, actorId: null, actorName: null, kind: 'opened', detail: {}, createdAt: '2026-09-21T10:00:00.000Z' }],
   bans: [], access: [], accessCandidates: [],
   caseFile: { steamid: '7', name: 'Walls', avatar: null, status: 'active', sr: 1500, games: 40, createdAt: '2026-08-01', activeBan: null, bans: [], penalties: [], timeout: null, inputFlags: [], aliases: [], sharesAddressWith: [], tickets: [summary] },
+  summary: {
+    steamid: '7', name: 'Walls', avatar: null, status: 'active', isAdmin: false, isMod: false,
+    sr: 1500, games: 40, createdAt: '2026-08-01', activeBan: null, bans: 0, penalties: 0,
+    timeout: null, openTickets: 1, aliases: 0, sharesAddressWith: [], steamFlags: [],
+    evidence: [{ source: 'lilac', count: 1 }], analyzer: null, lastReview: null,
+    fileUrl: '/admin/people/7',
+  },
   viewer: { isAdmin: false, banCapMinutes: 10080 },
   ...over,
 });
@@ -141,5 +148,17 @@ describe('the Tickets section', () => {
     fireEvent.change(screen.getByLabelText('Give access to'), { target: { value: '5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Give access' }));
     await waitFor(() => expect(mockMod.access).toHaveBeenCalledWith(12, '5'));
+  });
+
+  it('shows the accused\'s summary with a way into their file', async () => {
+    const { container } = renderAdmin('/admin/people/tickets/12', mod);
+    await screen.findByText('saw me through a wall');
+    // Scoped to .file-summary: the kept case-file section also says "About
+    // Walls", since both read the same accused's name.
+    const section = container.querySelector('.file-summary') as HTMLElement;
+    expect(section).toBeTruthy();
+    expect(within(section).getByText('About Walls')).toBeTruthy();
+    expect(within(section).getByText(/1 Little Anti-Cheat/)).toBeTruthy();
+    expect(within(section).getByRole('link', { name: 'Open full file' }).getAttribute('href')).toBe('/admin/people/7');
   });
 });

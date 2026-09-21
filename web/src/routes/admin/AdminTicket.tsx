@@ -5,6 +5,7 @@ import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
 import { reportLine } from './AdminTickets';
+import { FileSummary } from './file/FileSummary';
 
 const OUTCOMES = [['action_taken', 'Action taken'], ['warned', 'Warned'], ['no_action', 'No action'], ['invalid', 'Invalid report']] as const;
 const LENGTHS: [minutes: number | null, label: string][] = [
@@ -89,6 +90,8 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
           ))}
         </ul>
       </section>
+
+      {data.summary && <FileSummary s={data.summary} />}
 
       {c && (
         <section>

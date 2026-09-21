@@ -72,7 +72,9 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     if (!d) return reply.code(404).send({ error: 'no such ticket' });
     // One builder for the accused's record, shared with the Player File, so
     // a new evidence source appears in both places the day it lands.
-    // caseFile stays alongside until the web side has moved over.
+    // caseFile stays alongside for good: a moderator added to a restricted
+    // ticket about a colleague gets summary.fileUrl null, so caseFile is the
+    // only detailed record that viewer can see at all.
     return {
       ...d,
       caseFile: caseFile(db, d.ticket.targetId, me),

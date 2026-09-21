@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { AdminPlayerRow, NeedsALookRow, PeopleBan } from '../api';
+import { ConfirmHost } from '../components/Confirm';
 
 const { mockPeople, mockAdmin } = vi.hoisted(() => ({
   mockPeople: { people: vi.fn(), file: vi.fn(), review: vi.fn(), bans: vi.fn(), note: vi.fn(), lookedAt: vi.fn() },
@@ -129,6 +130,14 @@ describe('Needs a look', () => {
   });
 });
 
+const jobInfo = (over: Record<string, unknown> = {}) => ({
+  available: true,
+  job: { status: 'idle', mode: null, startedAt: null, finishedAt: null, exitCode: null, output: [] },
+  pending: 0,
+  matchInFlight: false,
+  ...over,
+});
+
 describe('the analysis panel', () => {
   it('runs an analysis and says where this panel is going', async () => {
     render(<AnalysisPanel />);
@@ -141,6 +150,68 @@ describe('the analysis panel', () => {
     mockAdmin.integrityJob.mockResolvedValue({ available: false });
     render(<AnalysisPanel />);
     expect(await screen.findByText(/nothing to analyse/)).toBeTruthy();
+  });
+
+  it('says how many rounds are waiting and that they are picked up automatically', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ pending: 3 }));
+    render(<AnalysisPanel />);
+    await waitFor(() => expect(screen.getByText(/3 rounds waiting to be measured/)).toBeTruthy());
+  });
+
+  // A replay that is gone or will not decode is given up on, and the panel has
+  // to say so: otherwise "everything has been measured" is quietly untrue.
+  it('says how many rounds could not be analysed, and why', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ unanalysable: { missing: 2, unreadable: 1 } }));
+    render(<AnalysisPanel />);
+    await waitFor(() => expect(screen.getByText(/3 rounds could not be analysed/)).toBeTruthy());
+    expect(screen.getByText(/2 with no replay on disk, 1 that would not decode/)).toBeTruthy();
+  });
+
+  it('says nothing about that when there are none', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo());
+    render(<AnalysisPanel />);
+    await waitFor(() => expect(screen.getByText(/Everything on disk has been measured/)).toBeTruthy());
+    expect(screen.queryByText(/could not be analysed/)).toBeNull();
+  });
+
+  // The guard that matters: this decodes every replay on disk on the same two
+  // cores holding 100 tick.
+  it('blocks the run while a match is in flight, and offers a deliberate force', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ matchInFlight: true }));
+    render(<><AnalysisPanel /><ConfirmHost /></>);
+    const btn = await screen.findByRole('button', { name: 'Re-analyse all replays' });
+    expect(btn).toHaveProperty('disabled', true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Force' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(mockAdmin.integrityRun).toHaveBeenCalledWith('full', true));
+  });
+
+  it('shows the running output and offers no force while a run is going', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({
+      matchInFlight: true,
+      job: {
+        status: 'running', mode: 'full', startedAt: '2026-09-18T05:00:00Z', finishedAt: null,
+        exitCode: null, output: ['Priors: 17 maps seen', 'Analysed 198 rounds, skipped 0.'],
+      },
+    }));
+    render(<AnalysisPanel />);
+    await waitFor(() => expect(screen.getByText(/Analysed 198 rounds/)).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Analysing...' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Force' })).toBeNull();
+  });
+
+  it('says a failed run failed, with its exit code', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({
+      job: {
+        status: 'failed', mode: 'full', startedAt: '2026-09-18T05:00:00Z',
+        finishedAt: '2026-09-18T05:01:00Z', exitCode: 1, output: ['Error: ENOENT'],
+      },
+    }));
+    render(<AnalysisPanel />);
+    await waitFor(() => expect(screen.getByText(/failed/)).toBeTruthy());
+    expect(screen.getByText(/exit 1/)).toBeTruthy();
   });
 });
 

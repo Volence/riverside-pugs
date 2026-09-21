@@ -1048,6 +1048,9 @@ export interface TicketDetail {
   access: { steamid: string; name: string }[];
   accessCandidates: { steamid: string; name: string }[];
   caseFile: CaseFile | null;
+  /** The accused as the Player File's glance row shows them. Null only if
+   *  the player row vanished under the ticket. */
+  summary: FileSummaryData | null;
   /** banCapMinutes null means no cap: the viewer is an admin. */
   viewer: { isAdmin: boolean; banCapMinutes: number | null };
 }
