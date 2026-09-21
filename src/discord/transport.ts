@@ -154,6 +154,10 @@ export interface ThreadOps {
   /** Everyone in the thread but the bot; null when the thread is gone. */
   memberIds(threadId: string): Promise<string[] | null>;
   setLocked(threadId: string, locked: boolean): Promise<void>;
+  /** Whether Discord currently has the thread archived, which it does on its
+   *  own after the auto-archive time passes, with nothing to say it did.
+   *  Rejects for a thread that is gone. */
+  isArchived(threadId: string): Promise<boolean>;
   /**
    * An archived thread refuses EVERY operation except setArchived(false):
    * no send, no edit, no tag, no lock, nobody added or removed. So closing a

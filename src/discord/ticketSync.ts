@@ -167,6 +167,9 @@ export class TicketSync {
     // Discord refuses a send or an edit in an archived thread.
     if (t.status === 'open') await this.syncLock(t, thread);
     if (thread.locked === 0) {
+      // The row says this thread is open for business, so whatever Discord
+      // did to it while nobody was talking is undone before the first write.
+      await this.makeWritable(thread.thread_id);
       // Members before the card, so the card arrives as a new message for
       // the people it is meant for.
       if (thread.surface === 'private') await this.syncMembers(t, thread);
@@ -297,9 +300,9 @@ export class TicketSync {
       try {
         const survivor = staffThread(db, th.ticket_id);
         if (survivor && (await transport.threads.exists(survivor.thread_id))) {
-          // Unarchive first: Discord may have auto-archived the survivor
-          // after a quiet week, whether or not its own ticket is closed.
-          await transport.threads.setArchived(survivor.thread_id, false);
+          // Writable first: the survivor is archived when its own ticket is
+          // closed, and Discord archives a quiet one whether it is or not.
+          await this.makeWritable(survivor.thread_id);
           await transport.send(survivor.thread_id, {
             embeds: [{ description: `Another ticket about this player was folded into this one. Its discussion was in <#${th.thread_id}>, which is now locked.` }],
             components: [], mentionUserIds: [],
@@ -319,14 +322,27 @@ export class TicketSync {
     }
   }
 
+  /**
+   * Discord archives a thread on its own once its auto-archive time passes,
+   * and an archived thread refuses every write there is: no send, no edit, no
+   * tag, no lock, nobody added or removed. Nothing in the database says it
+   * happened, so every write path asks here before its first write of a pass.
+   *
+   * It decides nothing about what the thread SHOULD be: a caller that
+   * unarchives a thread its row says is locked is the one that puts it back.
+   */
+  private async makeWritable(threadId: string): Promise<void> {
+    const { transport } = this.deps;
+    if (await transport.threads.isArchived(threadId)) await transport.threads.setArchived(threadId, false);
+  }
+
   /** Lock and archive a thread that is no longer the ticket's, saying why
    *  first when there is something to say. */
   private async endThread(th: ThreadRow, farewell: string | null): Promise<void> {
     const { db, transport } = this.deps;
     if (await transport.threads.exists(th.thread_id)) {
-      // Unarchive first: Discord may have auto-archived it after a quiet
-      // week, and an archived thread takes no message and no lock.
-      await transport.threads.setArchived(th.thread_id, false);
+      // Writable first: an archived thread takes no message and no lock.
+      await this.makeWritable(th.thread_id);
       if (farewell) await transport.send(th.thread_id, { embeds: [{ description: farewell }], components: [], mentionUserIds: [] });
       await transport.threads.setLocked(th.thread_id, true);
       await transport.threads.setArchived(th.thread_id, true);

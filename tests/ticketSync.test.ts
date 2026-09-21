@@ -163,6 +163,29 @@ describe('the staff forum post', () => {
     expect(buttons(threadId)[0]).toBe(`t:${id}:claim=Claim`);
   });
 
+  it('picks up a thread Discord archived on its own after a quiet week, and still closes it properly', async () => {
+    sync.start();
+    const id = file(IDS[0], { targetId: IDS[5], category: 'afk', text: '' });
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    // What Discord does to a quiet thread on its own. Nothing in the database
+    // says it happened, and every write into it is refused until it is undone.
+    t.threadsById.get(threadId)!.archived = true;
+    claimTicket(db, id, MOD, true);
+    await sync.idle();
+    expect(JSON.stringify(cardOf(threadId))).toContain('claimed by player6');
+    expect(t.threadsById.get(threadId)).toMatchObject({ archived: false, tags: ['claimed', 'afk'] });
+    expect(events.filter((e) => e.kind === 'problem')).toEqual([]);
+
+    t.threadsById.get(threadId)!.archived = true;
+    closeTicket(db, id, MOD, 'warned', '');
+    await sync.idle();
+    expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true, tags: ['closed', 'afk'] });
+    expect(JSON.stringify(cardOf(threadId))).toContain('closed: warned');
+    expect(staffThread(db, id)!.locked).toBe(1);
+    expect(events.filter((e) => e.kind === 'problem')).toEqual([]);
+  });
+
   it('never lets a player name become a link\'s destination', async () => {
     db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('x](http://evil.example)[y', IDS[5]);
     sync.start();

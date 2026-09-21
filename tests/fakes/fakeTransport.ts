@@ -135,6 +135,8 @@ export class FakeTransport implements BotTransport {
       return !th || th.deleted ? null : [...th.members];
     },
     setLocked: async (threadId, locked) => { this.threadOp(); this.writableThread(threadId).locked = locked; },
+    // A read, like exists and memberIds, so an outage does not fake it.
+    isArchived: async (threadId) => this.liveThread(threadId).archived,
     // Not writableThread: unarchiving is the way out of an archived thread.
     setArchived: async (threadId, archived) => { this.threadOp(); this.liveThread(threadId).archived = archived; },
     setTags: async (threadId, tags) => { this.threadOp(); this.writableThread(threadId).tags = [...tags]; },

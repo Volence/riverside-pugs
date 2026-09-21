@@ -366,6 +366,11 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     async setLocked(threadId, locked) {
       await (await needThread(threadId)).setLocked(locked);                   // ThreadChannel.setLocked :3980
     },
+    async isArchived(threadId) {
+      // Null is Discord saying it does not know, which is not "archived":
+      // unarchiving on a guess would unlock a thread that is meant to be shut.
+      return (await needThread(threadId)).archived === true;                  // ThreadChannel.archived :3935
+    },
     async setArchived(threadId, archived) {
       await (await needThread(threadId)).setArchived(archived);               // ThreadChannel.setArchived :3977
     },
