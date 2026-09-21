@@ -149,14 +149,19 @@ export async function finishWithRetry(
     (db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as
       { state: string } | undefined)?.state === 'live';
 
-  await orchestrator.finishMatch(matchId);
+  // `not_ended` is not a failed collection, and must not be treated as one:
+  // the plugin answered, and what it said is that the match is still being
+  // played. Everything below this loop aborts the match and releases its box,
+  // which sends sm_pug_abort, so falling through would let the forged
+  // MATCH_END that got us here kill the match it could no longer rate.
+  if (await orchestrator.finishMatch(matchId) === 'not_ended') return;
   for (const wait of delays) {
     if (!stillLive()) return;
     await sleep(wait);
     // Re-check after the wait: another path may have completed it meanwhile.
     if (!stillLive()) return;
     console.warn(`[orchestrator] retrying collection of match ${matchId}`);
-    await orchestrator.finishMatch(matchId);
+    if (await orchestrator.finishMatch(matchId) === 'not_ended') return;
   }
   if (!stillLive()) return;
 

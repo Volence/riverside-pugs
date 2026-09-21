@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.2"
+#define PLUGIN_VERSION "0.3.3"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -377,7 +377,7 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_match", Cmd_Match, "sm_pug_match <matchid> <token> <campaign> [stopaftermap]");
 	RegServerCmd("sm_pug_roster", Cmd_Roster, "sm_pug_roster <steamid64>:<a|b>");
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
-	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token>");
+	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token> [nonce]");
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
 
@@ -2313,11 +2313,48 @@ public Action Cmd_Abort(int args)
 	return Plugin_Handled;
 }
 
+/** sm_pug_dump <token> [nonce].
+ *
+ *  The nonce is the backend's, fresh for every pull, and comes back on the DUMP
+ *  and the END line next to the match state. An rcon response carries whatever
+ *  else reached the console while the command ran, so without it the backend
+ *  cannot tell this answer from an older dump or from somebody else's text; and
+ *  without the state it cannot tell a finished match from one that is merely
+ *  being asked about, since WriteDump answers in any state.
+ *
+ *  Optional, and TokenArgOk reads argument 1 only, so a backend that sends no
+ *  nonce gets the same block as ever, plus state=. Held to hex so that nothing
+ *  a caller types is ever printed back unexamined. */
 public Action Cmd_Dump(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
-	WriteDump();
+	char nonce[33];
+	nonce[0] = '\0';
+	if (args >= 2)
+	{
+		GetCmdArg(2, nonce, sizeof(nonce));
+		if (!NonceOk(nonce))
+		{
+			PrintToServer("PUGERR bad nonce");
+			return Plugin_Handled;
+		}
+	}
+	WriteDump(nonce);
 	return Plugin_Handled;
+}
+
+/** 1 to 32 lowercase hex digits. */
+bool NonceOk(const char[] nonce)
+{
+	int len = strlen(nonce);
+	if (len < 1 || len > 32) return false;
+	for (int i = 0; i < len; i++)
+	{
+		bool digit = nonce[i] >= '0' && nonce[i] <= '9';
+		bool hex = nonce[i] >= 'a' && nonce[i] <= 'f';
+		if (!digit && !hex) return false;
+	}
+	return true;
 }
 
 /** Full current state over the RCON response body. Takes no token, because the
@@ -4033,10 +4070,19 @@ public void Event_PlayerBotReplace(Event event, const char[] name, bool dontBroa
 }
 
 /** Authoritative match record over the RCON response body. Idempotent:
- *  the backend may call sm_pug_dump repeatedly. */
-void WriteDump()
+ *  the backend may call sm_pug_dump repeatedly.
+ *
+ *  `tail` rides on the first and the last line: the caller's nonce when one
+ *  was given, and always the match state. Appended after the existing keys,
+ *  which a backend that predates them reads past (its parser is key=value and
+ *  ignores keys it does not know). */
+void WriteDump(const char[] nonce)
 {
-	DumpLine("DUMP match=%d skilldetect=%d", g_iMatchId, g_bSkillDetect ? 1 : 0);
+	char tail[64];
+	if (nonce[0] != '\0') Format(tail, sizeof(tail), " nonce=%s state=%s", nonce, StateName(g_State));
+	else Format(tail, sizeof(tail), " state=%s", StateName(g_State));
+
+	DumpLine("DUMP match=%d skilldetect=%d%s", g_iMatchId, g_bSkillDetect ? 1 : 0, tail);
 	for (int i = 0; i < g_iMapCount; i++)
 	{
 		DumpLine("MAP map=%s a=%d b=%d", g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
@@ -4052,7 +4098,7 @@ void WriteDump()
 	TotalScores(a, b);
 	char winner[8];
 	WinnerOf(a, b, winner, sizeof(winner));
-	DumpLine("END winner=%s a=%d b=%d", winner, a, b);
+	DumpLine("END winner=%s a=%d b=%d%s", winner, a, b, tail);
 }
 
 /** choke_start: the smoker has stopped dragging and started choking. The

@@ -46,7 +46,7 @@ or when more than `MAX_ROSTER` (8) players are on teams.
 |---|---|---|
 | `sm_pug_match` | `<matchid> <token> <campaign>` | Starts match intake. Resets all match state, arms the roster. |
 | `sm_pug_roster` | `<steamid64>:<a\|b>` | Call once per player (×8). Team letters are lowercase `a`/`b`; convention: team `a` starts as survivors on map 1. |
-| `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. |
+| `sm_pug_dump` | `<token> [nonce]` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. `nonce` (1 to 32 hex digits, 0.3.3 and later) is echoed on the DUMP and END lines. |
 | `sm_pug_abort` | `<token> [teardown [<map>]]` | End the match. Plain form: reset plugin state, nothing else (the routine post-report call). With `teardown`: announce in chat, ask Rotoblin for an unpause and wait up to 10 s for it, kick every human (bots and SourceTV stay), then `ForceChangeLevel(<map>)` once the kicks have landed. Logs `PUG <token> PROBLEM code=unpause_timeout` if the game never unpaused. The backend sends the teardown form from the release path for abandon, no-show and admin abort; never for a clean finish. |
 | `sm_pug_status` | none | Full current plugin state over the RCON response body. Takes no token deliberately, since the moment you most want it is when setup went wrong and you do not trust your own idea of the token. Read-only, safe at any time. |
 | `sm_pug_setid` | `<token> <matchid>` | Backend assigns the match id for a **self-started** match. Keyed by token, because the id is exactly what the plugin does not know and so cannot be asked for. |
@@ -135,11 +135,19 @@ a score.
 ### Authoritative: RCON `sm_pug_dump` response body (`src/dumpParse.ts`)
 
 ```
-DUMP match=<id>
+DUMP match=<id> skilldetect=0|1 [nonce=<hex>] state=pending|live|ended
 MAP map=<m> a=<n> b=<n>              (one per completed map, in order)
-STAT steamid=<id64> team=a|b sidmg=<n> sikill=<n> ck=<n> ff=<n> rev=<n>   (x8)
-END winner=a|b|draw a=<total> b=<total>
+STAT steamid=<id64> team=a|b joined_map=<n> sidmg=<n> sikill=<n> ck=<n> ff=<n> rev=<n>   (one per roster slot)
+SKILL steamid=<id64> <key>=<n> ...   (one per roster slot)
+END winner=a|b|draw a=<total> b=<total> [nonce=<hex>] state=pending|live|ended
 ```
+
+`nonce=` and `state=` are 0.3.3 and later. The backend sends a fresh nonce with
+every pull and, when the answer echoes it, reads the LAST block that carries it
+(an rcon response also holds whatever else reached the console) and completes
+the match only on `state=ended`: the dump answers in any state, and the
+`MATCH_END` line that triggers the pull is UDP. An answer with no nonce is an
+older plugin and is read as it always was, first DUMP to first END.
 
 Both grammars are emitted from single central helpers in `pug-match.sp`
 (`EmitPug` for the live view, `DumpLine` for the dump) so the wire format

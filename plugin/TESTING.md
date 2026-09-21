@@ -172,7 +172,7 @@ With skill_detect loaded, set up a match and take it live, then:
 
     R "sm_pug_dump testtoken" | head -1
 
-Expected: `DUMP match=<id> skilldetect=1`
+Expected: `DUMP match=<id> skilldetect=1 state=live` (0.3.3 adds `state=`, and `nonce=` when a second argument is given)
 
 Then unload skill_detect (`sm plugins unload l4d2_skill_detect`), set up a fresh match, take it live, and dump again. **This unload will disrupt anyone playing with the plugin loaded; confirm no one is mid-match first.** Expected: `skilldetect=0`, and `SKILL` lines carrying only `tank_damage`, `damage_as_si` and `tank_punches`. This is the check that proves "not measured" cannot be persisted as zero.
 
