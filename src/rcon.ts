@@ -9,6 +9,43 @@ export interface RconOpts {
   port: number;
   password: string;
   timeoutMs?: number;
+  /** How long one client may keep its turn on a server. See `turns`. */
+  holdMaxMs?: number;
+}
+
+/**
+ * One connection per server at a time, process-wide.
+ *
+ * srcds drops every OTHER rcon connection the moment one of them closes: a
+ * second client that connects, runs one command and leaves silences the first
+ * in the middle of its batch, and the first sees nothing but an exec timeout.
+ * Reproduced ten rounds out of ten against a real L4D1 server on 2026-09-21;
+ * a second connection that stays open does no harm. In production it showed
+ * as the ban sweep failing on Dallas every fifteen minutes to the second,
+ * which is when the admin sync (same timer phase, no file transfer delay on
+ * the local box) closed its own connection. The same collision could take
+ * out a match setup, so the turn is taken here, where every caller passes,
+ * rather than in each of them.
+ *
+ * The value is the tail of the queue for that `host:port`: a promise that
+ * settles when the last client to ask has given its turn back.
+ */
+const turns = new Map<string, Promise<void>>();
+const HOLD_MAX_MS = 5 * 60 * 1000;
+
+/** Wait for the server to be free, then hold it. Returns the release. */
+async function takeTurn(key: string): Promise<() => void> {
+  const before = turns.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => { release = r; });
+  const tail = before.then(() => mine);
+  turns.set(key, tail);
+  await before;
+  return () => {
+    release();
+    // Nobody queued behind: forget the key rather than grow the map.
+    if (turns.get(key) === tail) turns.delete(key);
+  };
 }
 
 /**
@@ -36,12 +73,36 @@ export class RconClient {
   /** Marker id -> command id it terminates. */
   private markers = new Map<number, number>();
   private readonly timeoutMs: number;
+  private release: (() => void) | null = null;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private opts: RconOpts) {
     this.timeoutMs = opts.timeoutMs ?? 5000;
   }
 
-  connect(): Promise<void> {
+  /** The wait for a turn is not counted against the connect timeout: a
+   *  queued caller is waiting on us, not on the box. */
+  async connect(): Promise<void> {
+    const release = await takeTurn(`${this.opts.host}:${this.opts.port}`);
+    this.release = release;
+    // Every caller closes in a finally, so this only ever fires on a bug. It
+    // closes the socket before giving the turn away, because a holder that
+    // closed later would drop whoever came next.
+    const holdMaxMs = this.opts.holdMaxMs ?? HOLD_MAX_MS;
+    this.holdTimer = setTimeout(() => {
+      console.error(`[rcon] a connection to ${this.opts.host}:${this.opts.port} was held past ${holdMaxMs} ms; closing it`);
+      this.close();
+    }, holdMaxMs);
+    this.holdTimer.unref();
+    try {
+      await this.open();
+    } catch (err) {
+      this.close();
+      throw err;
+    }
+  }
+
+  private open(): Promise<void> {
     return new Promise((resolve, reject) => {
       const sock = net.createConnection({ host: this.opts.host, port: this.opts.port });
       this.sock = sock;
@@ -122,6 +183,10 @@ export class RconClient {
   close(): void {
     this.sock?.destroy();
     this.sock = null;
+    if (this.holdTimer) clearTimeout(this.holdTimer);
+    this.holdTimer = null;
+    this.release?.();
+    this.release = null;
     for (const [, w] of this.pending) w.reject(new Error('rcon closed'));
     this.pending.clear();
     this.parts.clear();
