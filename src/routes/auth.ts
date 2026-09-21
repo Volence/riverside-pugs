@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import type { DB } from '../db.js';
 import type { verifyLogin as VerifyFn, fetchPersona as PersonaFn } from '../steamAuth.js';
-import { loginUrl } from '../steamAuth.js';
+import { loginUrl, steamReturnUrl } from '../steamAuth.js';
 import { getSession, setSession } from '../session.js';
 import { activatePlayer, getPlayer, upsertPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
@@ -47,7 +47,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
   });
 
   app.get('/auth/steam/return', async (req, reply) => {
-    const steamid = await opts.verifyLogin(req.query as Record<string, string>);
+    const steamid = await opts.verifyLogin(req.query as Record<string, string>, steamReturnUrl(config.publicUrl));
     if (!steamid) return reply.code(403).send('Steam login failed');
     const persona = await opts.fetchPersona(steamid, config.steamApiKey);
     upsertPlayer(db, { steamid, name: persona.name, avatar: persona.avatar }, config.adminSteamIds);

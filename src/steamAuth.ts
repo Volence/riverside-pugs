@@ -1,5 +1,6 @@
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
 const CLAIMED_ID_RE = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d{17})$/;
+const REQUIRED_SIGNED = ['return_to', 'claimed_id', 'identity', 'response_nonce'];
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -23,11 +24,17 @@ function consumeNonce(nonce: string | undefined, now: number = Date.now()): bool
   return true;
 }
 
+/** Where Steam sends the browser back to. loginUrl asks for it and
+ *  verifyLogin demands it, so both must come from here. */
+export function steamReturnUrl(publicUrl: string): string {
+  return `${publicUrl.replace(/\/+$/, '')}/auth/steam/return`;
+}
+
 export function loginUrl(publicUrl: string): string {
   const params = new URLSearchParams({
     'openid.ns': 'http://specs.openid.net/auth/2.0',
     'openid.mode': 'checkid_setup',
-    'openid.return_to': `${publicUrl}/auth/steam/return`,
+    'openid.return_to': steamReturnUrl(publicUrl),
     'openid.realm': publicUrl,
     'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
     'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select',
@@ -37,10 +44,25 @@ export function loginUrl(publicUrl: string): string {
 
 export async function verifyLogin(
   query: Record<string, string>,
+  returnTo: string,
   fetchFn: FetchFn = fetch,
 ): Promise<string | null> {
   const match = CLAIMED_ID_RE.exec(query['openid.claimed_id'] ?? '');
   if (!match) return null;
+
+  // Steam will vouch for an assertion it issued to ANY site, so is_valid alone
+  // says nothing about who it was meant for. return_to does, but only if it is
+  // one of the fields the signature covers. A repeated parameter arrives as an
+  // array, which the string checks below refuse.
+  if (query['openid.return_to'] !== returnTo) return null;
+  const signed = query['openid.signed'];
+  if (typeof signed !== 'string') return null;
+  const signedFields = new Set(signed.split(','));
+  for (const f of REQUIRED_SIGNED) {
+    if (!signedFields.has(f)) return null;
+  }
+  const endpoint = query['openid.op_endpoint'];
+  if (endpoint !== undefined && endpoint !== STEAM_OPENID_URL) return null;
 
   if (!consumeNonce(query['openid.response_nonce'])) return null;
 

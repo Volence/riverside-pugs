@@ -31,6 +31,23 @@ describe('auth', () => {
     expect(res.headers.location).toContain('steamcommunity.com/openid/login');
   });
 
+  it('hands verifyLogin the return URL this site asked steam for', async () => {
+    let seen: string | undefined;
+    const local = await buildServer({
+      config: loadConfig({ PUBLIC_URL: 'https://pug.example' }),
+      db,
+      verifyLogin: async (_q, returnTo) => { seen = returnTo; return P1; },
+      fetchPersona: async () => ({ name: 'alice', avatar: null }),
+      orchestrator: stubOrchestrator(),
+      serverExec: async () => {},
+    });
+    const login = await local.inject({ method: 'GET', url: '/auth/steam' });
+    const asked = new URL(login.headers.location as string).searchParams.get('openid.return_to');
+    await local.inject({ method: 'GET', url: '/auth/steam/return?openid.mode=id_res' });
+    expect(seen).toBe('https://pug.example/auth/steam/return');
+    expect(seen).toBe(asked);
+  });
+
   it('GET /auth/steam/return creates player, sets cookie, redirects home', async () => {
     const res = await app.inject({ method: 'GET', url: '/auth/steam/return?openid.mode=id_res' });
     expect(res.statusCode).toBe(302);
