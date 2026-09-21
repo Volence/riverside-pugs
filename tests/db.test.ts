@@ -14,7 +14,7 @@ describe('openDb', () => {
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_messages', 'discord_voice', 'discord_voice_origin',
       'endorsements',
-      'input_bursts', 'input_detections',
+      'input_bursts', 'input_caps', 'input_detections',
       'integrity_clips', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'integrity_unanalysable',
       'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',

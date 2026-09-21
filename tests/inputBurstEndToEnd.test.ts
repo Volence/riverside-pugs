@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseLogDatagram } from '../src/logParse.js';
-import { burstStats, pounceSpam } from '../src/inputStats.js';
+import { DEFAULT_THRESHOLDS, burstStats, holdAnnotation, pounceSpam } from '../src/inputStats.js';
 
 /**
  * Lines captured off the real wire from l4d_inputstats.smx on the local test
@@ -18,9 +18,9 @@ const REAL = [
   // EVERY real bhop line would have been refused by the parser. Nothing caught
   // it but reading the wire.
   'L 09/21/2026 - 03:42:30: L4DM id=76561197960287930 k=bhop w=test_weapon n=1 g=4 a=2 st=101 ct=0 d=6',
-  // Live client, 2026-09-21. A REAL hunter pounce: three airborne presses, well
-  // under the threshold of 12. This is the human baseline the signature must
-  // never flag, and it is where `weapon_hunter_claw` was confirmed.
+  // Live client, 2026-09-21. A REAL hunter pounce: three airborne presses at
+  // 6.5/s. This is the human baseline the signature must never mark, and it is
+  // where `weapon_hunter_claw` was confirmed.
   'L 09/21/2026 - 10:40:36: L4DM id=STEAM_1:1:35074132 k=pounce w=weapon_hunter_claw n=2 g=203 a=3 st=41646 ct=0 d=A<',
   // Live client, same session. A SURVIVOR shooting mid-jump also produces a
   // pounce burst, which is why the signature filters on the weapon.
@@ -31,8 +31,8 @@ describe('lines the plugin actually emitted', () => {
   it('does not flag a real hunter pounce or an airborne survivor', () => {
     const hunter = parseLogDatagram(Buffer.from(REAL[4], 'utf8')) as never;
     const survivor = parseLogDatagram(Buffer.from(REAL[5], 'utf8')) as never;
-    expect(pounceSpam(hunter, 12)).toBe(false);
-    expect(pounceSpam(survivor, 12)).toBe(false);
+    expect(pounceSpam(hunter, DEFAULT_THRESHOLDS.pounceMinRate)).toBe(false);
+    expect(pounceSpam(survivor, DEFAULT_THRESHOLDS.pounceMinRate)).toBe(false);
   });
 
   it('the parser accepts every one of them', () => {
@@ -63,5 +63,44 @@ describe('lines the plugin actually emitted', () => {
     expect(s.n).toBe(21);
     expect(s.meanTicks).toBeCloseTo(8, 1);
     expect(s.ratePerSec).toBeCloseTo(12.5, 1);
+  });
+});
+
+/**
+ * Plugin 0.2.0 lines. NOT captured off a wire: nothing may start the shared
+ * test server while other sessions are using it, so these are written out from
+ * EmitLine's format string in plugin/l4d_inputstats.sp, field for field. They
+ * pin the parser to that format. Replace them with captured lines the first
+ * time 0.2.0 runs anywhere, exactly as REAL above was.
+ */
+const FORMAT_0_2 = [
+  'L 09/21/2026 - 14:00:00: L4DM id=76561197960287930 k=fire w=weapon_pistol n=6 g=0 a=0 st=52000 ct=51996 sp=46 v=2 d=787787 h=2323232',
+  'L 09/21/2026 - 14:00:01: L4DM id=STEAM_1:1:35074132 k=pounce w=weapon_hunter_claw n=6 g=61 a=7 st=52100 ct=52096 sp=46 v=2 d=787787 h=0000000',
+  'L 09/21/2026 - 14:00:02: L4DM id=76561197960287930 k=bhop w= n=1 g=2 a=0 st=52200 ct=52197 sp=0 v=2 d=0 h=0',
+];
+const CAP_0_2 = 'L 09/21/2026 - 14:00:03: L4DM id=76561197960287930 k=cap c=bhop st=52300 v=2';
+
+describe('lines in the 0.2.0 format', () => {
+  it('the parser accepts every one of them as wire 2', () => {
+    for (const line of FORMAT_0_2) {
+      expect(parseLogDatagram(Buffer.from(line, 'utf8')), line).toMatchObject({ kind: 'input_burst', wire: 2 });
+    }
+  });
+
+  it('reads both clocks and the server span off a fire burst', () => {
+    const ev = parseLogDatagram(Buffer.from(FORMAT_0_2[0], 'utf8'));
+    expect(ev).toMatchObject({ serverTick: 52000, clientTick: 51996, serverSpan: 46, intervals: [8, 9, 8, 8, 9, 8] });
+  });
+
+  it('reads one hold per press, and the annotation they add up to', () => {
+    const fire = parseLogDatagram(Buffer.from(FORMAT_0_2[0], 'utf8')) as { holds: number[] };
+    const pounce = parseLogDatagram(Buffer.from(FORMAT_0_2[1], 'utf8')) as { holds: number[] };
+    expect(fire.holds).toEqual([3, 4, 3, 4, 3, 4, 3]);
+    expect(holdAnnotation(fire.holds)).toBe('fixed-hold');
+    expect(holdAnnotation(pounce.holds)).toBe('wheel-like');
+  });
+
+  it('reads the budget marker', () => {
+    expect(parseLogDatagram(Buffer.from(CAP_0_2, 'utf8'))).toMatchObject({ kind: 'input_cap', burstKind: 'bhop' });
   });
 });

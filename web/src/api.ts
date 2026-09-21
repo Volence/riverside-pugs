@@ -649,7 +649,17 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   /** Input signatures that fired on this player's button timing. Evidence to
    *  read next to the replay, never a verdict: the only signature shipped is
    *  the one that needs no statistical tuning. */
-  inputFlags: { id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string }[];
+  inputCaps: { matchId: number | null; kind: string; serverTick: number; at: string }[];
+  inputFlags: {
+    id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string; hits: number;
+    /** What the holds across the evidence look like: wheel-like, fixed-hold, variable-hold, no-hold-data. */
+    note: string;
+    bursts: {
+      id: number; at: string; weapon: string; presses: number; ratePerSec: number; meanTicks: number;
+      wire: number; serverSpan: number | null; annotation: string;
+      hold: { n: number; medianTicks: number; minTicks: number; maxTicks: number; sdTicks: number; oneTickFrac: number; nearMedianFrac: number } | null;
+    }[];
+  }[];
   /** Second Steam accounts folded into this one by a merge. Their SteamIDs
    *  still resolve here on every line the game server sends. */
   aliases: { steamid: string; canonical: string; created_at: string; created_by: string }[];
@@ -804,6 +814,7 @@ export interface CaptureHealth {
   lastBurstAt: string | null;
   lastFlagAt: string | null;
   matchesWithBursts: number;
+  caps: number;
 }
 
 export interface IntegrityFlag {

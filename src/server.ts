@@ -45,7 +45,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
-import { isFirstDetectionInMatch, recordInputBurst, pounceSpamThreshold } from './inputBursts.js';
+import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
@@ -501,6 +501,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
+        if (ev.kind === 'input_cap') {
+          // Same rules as a burst: evidence only, live matches only, and never
+          // allowed to take the listener down.
+          try {
+            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            // The player's own match, like a burst: two live matches can share
+            // a server id while the Riverside boxes share an address.
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            if (matchId === null) return;
+            recordInputCap(deps.db, {
+              matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, serverTick: ev.serverTick,
+            });
+          } catch (err) {
+            console.error('[inputstats] failed to record a capture cap:', err);
+          }
+          return;
+        }
         if (ev.kind === 'input_burst') {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
@@ -516,12 +533,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
               airPresses: ev.airPresses, groundTicks: ev.groundTicks,
               serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
-            }, pounceSpamThreshold(deps.db));
-            for (const signature of stored.detections) {
-              if (!isFirstDetectionInMatch(deps.db, ev.steamid, matchId)) continue;
+              wire: ev.wire, serverSpan: ev.serverSpan, holds: ev.holds,
+            }, inputThresholds(deps.db));
+            // `detections` names a signature only on the burst that completed
+            // its repeat count, so this posts once per player, match and
+            // signature however many bursts qualify afterwards.
+            for (const { signature, note } of stored.created) {
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
-                detail: `${ev.burstKind}, ${ev.airPresses} presses in the air`,
+                detail: `repeated across separate ${ev.burstKind} bursts this match; holds: ${note}`,
               });
             }
           } catch (err) {

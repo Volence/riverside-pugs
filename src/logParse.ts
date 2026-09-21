@@ -1,5 +1,5 @@
 import { steamId64Of } from './steamId.js';
-import { decodeIntervals } from './inputStats.js';
+import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
@@ -113,7 +113,15 @@ export type LogEvent =
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
+      // Wire 1 (plugin 0.1.0) timed intervals by server tick; wire 2 times them
+      // by usercmd and adds the server ticks the burst spanned as a cross-check.
+      wire: 1 | 2; serverSpan: number | null;
+      // How long each press was held, one per PRESS; null from plugin 0.1.0.
+      holds: number[] | null;
     }
+  // The plugin's budget for one kind of burst ran out for this player this
+  // round: everything of that kind after it, until the round ends, is missing.
+  | { kind: 'input_cap'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; serverTick: number }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
   // Where a client connected from, emitted for EVERY human that joins the box
@@ -240,6 +248,14 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
   if (body.startsWith('L4DM ')) {
     const f = kv(body.split(/\s+/).slice(1));
     const steamid = steamId64Of(f.id ?? '');
+    // The budget marker: no burst on it, only which kind stopped being sent.
+    if (f.k === 'cap') {
+      const tick = intOf(f.st);
+      if (!steamid || tick === null || tick < 0) return null;
+      if (f.c !== 'fire' && f.c !== 'pounce' && f.c !== 'bhop') return null;
+      if (f.v !== undefined && f.v !== '2') return null;
+      return { kind: 'input_cap', steamid, burstKind: f.c, serverTick: tick };
+    }
     const burstKind = f.k;
     const weapon = (f.w ?? '').slice(0, 32);
     const n = intOf(f.n);
@@ -255,7 +271,23 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (airPresses === null || airPresses < 0 || airPresses > MAX_TICK_COUNTER) return null;
     if (serverTick === null || serverTick < 0 || clientTick === null || clientTick < 0) return null;
     if (!/^[a-z0-9_]*$/.test(weapon)) return null;
-    return { kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals };
+    // Every key below is optional, because plugin 0.1.0 sends none of them and
+    // stays live until 0.2.0 is staged. Present, each is held to the same
+    // standard as the rest: a value the plugin could not have produced refuses
+    // the whole line. A version this parser does not know may have changed
+    // what a field MEANS, so it is refused rather than guessed at.
+    const wire = f.v === undefined ? 1 : intOf(f.v);
+    if (wire !== 1 && wire !== 2) return null;
+    const serverSpan = f.sp === undefined ? null : intOf(f.sp);
+    if (f.sp !== undefined && (serverSpan === null || serverSpan < 0 || serverSpan > MAX_TICK_COUNTER)) return null;
+    // One hold per press, so one more than the gaps between them. A bhop line
+    // is a single jump whose one interval is a placeholder: one hold.
+    const holds = f.h === undefined ? null : decodeIntervals(f.h, MAX_HOLDS);
+    if (f.h !== undefined && (!holds || holds.length !== (burstKind === 'bhop' ? 1 : n + 1))) return null;
+    return {
+      kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals,
+      wire, serverSpan, holds,
+    };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the

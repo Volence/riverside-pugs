@@ -64,6 +64,7 @@ describe('Admin page', () => {
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
+      inputCaps: [],
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
     render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
@@ -86,6 +87,7 @@ describe('Admin page', () => {
     mockAdmin.player.mockResolvedValue({
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
       inputFlags: [],
+      inputCaps: [],
       signonDrops: {
         count: 2, lastAt: '2026-09-19T21:00:00.000Z',
         rows: [
@@ -118,12 +120,43 @@ describe('Admin page', () => {
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
+      inputCaps: [],
     });
     render(<Admin session={{ kind: 'active', me }} />);
     await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
     fireEvent.click(screen.getByText('clean'));
     await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
     expect(document.getElementById('connect-drops')).toBeNull();
+  });
+
+  it('shows what an input flag rests on, what its holds look like, and any truncated capture', async () => {
+    const row = { steamid: '2', name: 'clicker', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputCaps: [{ matchId: 41, kind: 'bhop', serverTick: 9000, at: '2026-09-21T12:00:00.000Z' }],
+      inputFlags: [{
+        id: 1, burstId: 9, matchId: 41, steamid: '2', kind: 'fire', signature: 'pistol_rate', severity: 'low',
+        at: '2026-09-21T12:05:00.000Z', hits: 2, note: 'wheel-like',
+        bursts: [{
+          id: 8, at: '2026-09-21T12:04:00.000Z', weapon: 'weapon_pistol', presses: 51, ratePerSec: 13.04, meanTicks: 7.67,
+          wire: 2, serverSpan: 384, annotation: 'wheel-like',
+          hold: { n: 51, medianTicks: 1, minTicks: 1, maxTicks: 2, sdTicks: 0.2, oneTickFrac: 0.96, nearMedianFrac: 1 },
+        }],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('clicker')).toBeTruthy());
+    fireEvent.click(screen.getByText('clicker'));
+    await waitFor(() => expect(document.getElementById('input-flags')).toBeTruthy());
+    const text = document.getElementById('input-flags')!.textContent!;
+    expect(text).toContain('pistol_rate on 2 fire bursts');
+    expect(text).toContain('low · holds: wheel-like');
+    expect(text).toContain('13.0/s over 51 presses');
+    expect(text).toContain('96% one-tick');
+    expect(text).toContain('Capture truncated');
+    expect(text).toContain('bhop in #41');
   });
 
   it('settings tab shows grouped settings', async () => {

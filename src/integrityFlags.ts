@@ -110,6 +110,8 @@ export interface CaptureHealth {
   lastBurstAt: string | null;
   lastFlagAt: string | null;
   matchesWithBursts: number;
+  /** Times a player's capture was cut short by the plugin's per-round budget. */
+  caps: number;
 }
 
 /**
@@ -131,6 +133,7 @@ export function captureHealth(db: DB): CaptureHealth {
     lastBurstAt: at('SELECT MAX(at) AS a FROM input_bursts'),
     lastFlagAt: at('SELECT MAX(at) AS a FROM integrity_flags'),
     matchesWithBursts: one('SELECT COUNT(DISTINCT match_id) AS c FROM input_bursts WHERE match_id IS NOT NULL'),
+    caps: one('SELECT COUNT(*) AS c FROM input_caps'),
   };
 }
 

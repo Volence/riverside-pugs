@@ -6,7 +6,7 @@ import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
-import { detectionsForPlayer } from '../inputBursts.js';
+import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
 import { publishBanChange } from '../banEvents.js';
 
 export interface BanRow {
@@ -168,6 +168,9 @@ export function playerDetail(db: DB, steamid: string) {
     // Input signatures that fired on this player. Evidence from button timing,
     // to be read next to the replay, never a verdict on its own.
     inputFlags: detectionsForPlayer(db, steamid),
+    // Rounds where the plugin stopped sending one kind of burst for this
+    // player. A quiet panel beside one of these is not a clean round.
+    inputCaps: capsForPlayer(db, steamid),
     // Second accounts folded into this one. Shown so an admin can see at a
     // glance that a player has been merged, and undo it.
     aliases: aliasesOf(db, steamid),

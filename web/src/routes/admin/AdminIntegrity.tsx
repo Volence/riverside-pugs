@@ -331,6 +331,7 @@ export function AdminIntegrity() {
           {data!.health.detections === 0 && data!.health.lilacFlags === 0
             ? 'Nothing flagged.'
             : `${data!.health.detections} input detection${data!.health.detections === 1 ? '' : 's'}, ${data!.health.lilacFlags} Little Anti-Cheat flag${data!.health.lilacFlags === 1 ? '' : 's'}.`}
+          {data!.health.caps > 0 && ` Capture was truncated ${data!.health.caps} time${data!.health.caps === 1 ? '' : 's'} by the per-round budget; the player's page says where.`}
         </p>
       )}
       {(data?.flags?.length ?? 0) === 0
