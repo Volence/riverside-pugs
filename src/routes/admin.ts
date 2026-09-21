@@ -32,6 +32,7 @@ import { endSessions } from '../session.js';
 import { applyLeaveState, isRostered } from '../presence.js';
 import { LEAVE_ACTIONS, LEAVE_ADD_MAX_S, leaveCommand, parseLeaveReply, type LeaveAction, type ServerQuery } from '../leaveControl.js';
 import { buildLiveBoard, type VoiceLookup } from '../admin/liveBoard.js';
+import { redactSecrets } from '../redact.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -359,11 +360,19 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!serverQuery) return reply.code(503).send({ error: 'clock control is not available here' });
 
     const detail = { matchId, action, ...(secs === undefined ? {} : { seconds: secs }) };
+    // Built OUTSIDE the try. leaveCommand asserts its arguments, and a throw
+    // from it means our own tables hold something that must never become a
+    // console line; reported as a 502 "could not reach Dallas" it would read
+    // as a box being down, and someone would go and look at the box.
+    const command = leaveCommand(match.token, steamid, action as LeaveAction, secs);
+    // Anything the box says back can quote the command, and the command holds
+    // the token, which is this match's sv_password.
+    const hide = (text: string): string => redactSecrets(text, [match.token]);
     let body: string;
     try {
-      body = await serverQuery(server, leaveCommand(match.token, steamid, action as LeaveAction, secs));
+      body = await serverQuery(server, command);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = hide(err instanceof Error ? err.message : String(err));
       logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error: message });
       return reply.code(502).send({ error: `could not reach ${server.name}: ${message}` });
     }
@@ -376,9 +385,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
         db.prepare('UPDATE matches SET leave_control = 0 WHERE id = ?').run(matchId);
         broadcast('refresh');
       }
-      logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error: answer.error });
+      const error = hide(answer.error);
+      logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error });
       return reply.code(409).send({
-        error: answer.oldPlugin ? answer.error : `${server.name} refused: ${answer.error}`,
+        error: answer.oldPlugin ? error : `${server.name} refused: ${error}`,
         code: answer.oldPlugin ? 'old_plugin' : 'refused',
       });
     }
@@ -467,8 +477,11 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     try {
       pushed = await logSecretPusher(server, secret);
     } catch (err) {
-      logAdmin(db, adminId, 'server_log_secret', id, { rotated: false, pushed: false, error: String(err) });
-      return reply.code(502).send({ error: `could not reach ${server.name}: ${err instanceof Error ? err.message : String(err)}` });
+      // The push is `sm_pug_log_secret "<secret>"`, and an rcon timeout names
+      // the command it gave up on, so the failure message is the secret.
+      const message = redactSecrets(err instanceof Error ? err.message : String(err), [secret]);
+      logAdmin(db, adminId, 'server_log_secret', id, { rotated: false, pushed: false, error: message });
+      return reply.code(502).send({ error: `could not reach ${server.name}: ${message}` });
     }
     const rotated = rotate && pushed;
     if (rotated) setLogSecret(db, id, secret);

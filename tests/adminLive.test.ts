@@ -5,6 +5,10 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { addServer } from '../src/serverPool.js';
 import { getPresence, recordPresenceLine } from '../src/presence.js';
+import { serverPasswordFor } from '../src/matchToken.js';
+import { setSetting } from '../src/settings.js';
+import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
+import { FakeTransport } from './fakes/fakeTransport.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -119,6 +123,50 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
     answer = `PUGOK leave steamid=${IDS[5]} absent=1 remaining=1 held=1 hold_left=9`;
     expect((await act({ action: 'hold' })).statusCode).toBe(409);
     expect(getPresence(db, matchId, DROPPED)).toMatchObject({ remaining_s: 210, held: 0 });
+  });
+});
+
+describe('a failure never carries the match secret out of the process', () => {
+  let transport: FakeTransport;
+  let feed: AdminFeedPoster;
+  beforeEach(() => {
+    setSetting(db, 'discord_admin_channel_id', 'admins');
+    transport = new FakeTransport();
+    feed = new AdminFeedPoster({ db, transport, publicUrl: 'https://pug.test' });
+    feed.start();
+  });
+  afterEach(() => feed.stop());
+
+  it('redacts the token, which is the live match\'s server password, from the reply, the audit row and the feed', async () => {
+    // RconClient.exec names the command it gave up on, and that command
+    // carries the match token: `rcon exec timeout: sm_pug_leave <token> ...`.
+    answer = new Error(`rcon exec timeout: sm_pug_leave ${TOKEN} ${DROPPED} hold`);
+    const res = await act({ action: 'hold' });
+    await feed.idle();
+
+    const detail = (db.prepare('SELECT detail FROM admin_actions ORDER BY id DESC LIMIT 1').get() as { detail: string }).detail;
+    const posted = JSON.stringify(transport.messages.map((m) => m.payload));
+    expect(res.statusCode).toBe(502);
+    for (const seen of [res.body, detail, posted]) {
+      expect(seen).not.toContain(TOKEN);
+      expect(seen).not.toContain(serverPasswordFor(TOKEN));
+    }
+    // Still says what happened, on all three.
+    expect(res.json().error).toContain('could not reach Dallas: rcon exec timeout');
+    expect(detail).toContain('rcon exec timeout');
+    expect(posted).toContain('rcon exec timeout');
+  });
+
+  it('redacts it from an unexpected console answer as well', async () => {
+    answer = `L 09/21/2026 - 20:00:00: rcon from "1.2.3.4:51000": command "sm_pug_leave ${TOKEN} ${DROPPED} hold"`;
+    const res = await act({ action: 'hold' });
+    await feed.idle();
+    const detail = (db.prepare('SELECT detail FROM admin_actions ORDER BY id DESC LIMIT 1').get() as { detail: string }).detail;
+    expect(res.statusCode).toBe(409);
+    for (const seen of [res.body, detail, JSON.stringify(transport.messages.map((m) => m.payload))]) {
+      expect(seen).not.toContain(TOKEN);
+      expect(seen).not.toContain(serverPasswordFor(TOKEN));
+    }
   });
 });
 
