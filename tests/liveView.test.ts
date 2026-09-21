@@ -965,4 +965,19 @@ describe('liveView: ready-up ledger', () => {
     expect(rows[1].totalSeconds).toBeGreaterThanOrEqual(29);
     expect(rows[1].totalSeconds).toBeLessThanOrEqual(32);
   });
+
+  // The admin table sorts in the browser (share of ready-ups they were last
+  // for, average, total), so the server must not pre-cut the list to the top
+  // few by one of those orders: the slowest average may never have been last.
+  it('returns everybody, not the top of one ordering', () => {
+    const id = seedLive();
+    clearLive(db, id);
+    const ru = Number(db.prepare(
+      "INSERT INTO match_readyups (match_id, map_ordinal, half, started_at, ended_at, last_unready) VALUES (?, 1, 1, datetime('now', '-60 seconds'), datetime('now'), '[]')",
+    ).run(id).lastInsertRowid);
+    const ins = db.prepare('INSERT INTO match_readyup_players (readyup_id, match_id, player_id, seconds) VALUES (?, ?, ?, ?)');
+    for (let i = 0; i < 40; i++) ins.run(ru, id, `7656119800009${String(i).padStart(4, '0')}`, i);
+    expect(slowToReady(db)).toHaveLength(40);
+  });
 });
+
