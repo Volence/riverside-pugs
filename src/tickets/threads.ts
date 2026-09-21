@@ -97,6 +97,31 @@ export function surfaceFor(
   return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? { surface: 'forum', why: 'ok' } : { surface: null, why: 'unconfigured' };
 }
 
+export interface PrivateThreadMember { steamid: string; discord_id: string; notified_at: string | null }
+
+/**
+ * Who may be in a restricted ticket's private staff thread: on its access
+ * list, active, still holding a staff flag, linked to Discord, and never the
+ * ticket's own target.
+ *
+ * One definition, for adding people, for telling them, and for taking out
+ * whoever is in there and should not be. The site asks the same question in
+ * two halves (makeRequireMod, then canSeeTicket), and nothing deletes an
+ * access row when somebody is demoted, banned or merged, so a membership
+ * built from the access list alone would leave a demoted moderator reading a
+ * case the site no longer opens for them.
+ */
+export function privateThreadAudience(db: DB, ticketId: number): PrivateThreadMember[] {
+  return db.prepare(
+    `SELECT a.steamid, p.discord_id, a.notified_at FROM ticket_access a
+       JOIN players p ON p.steamid = a.steamid
+       JOIN tickets t ON t.id = a.ticket_id
+     WHERE a.ticket_id = ? AND p.status = 'active' AND (p.is_admin = 1 OR p.is_mod = 1)
+       AND p.discord_id IS NOT NULL AND p.steamid != t.target_id
+     ORDER BY a.steamid`,
+  ).all(ticketId) as PrivateThreadMember[];
+}
+
 /**
  * The Discord ids that may read the staff forum: linked, active moderators
  * and admins. Minus anyone a forum post is still about: forbiddenForumThreads

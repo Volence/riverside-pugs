@@ -6,6 +6,7 @@ import { fileReport } from '../src/tickets/filing.js';
 import { addAccess, closeTicket, setRestricted } from '../src/tickets/actions.js';
 import { foldTicket, restrictOpenTicketAbout } from '../src/tickets/store.js';
 import { publishTicketSignal } from '../src/tickets/signals.js';
+import { publishBanChange } from '../src/banEvents.js';
 import { staffThread, threadByDiscordId } from '../src/tickets/threads.js';
 import { mergePlayers } from '../src/mergePlayers.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
@@ -95,7 +96,9 @@ describe('a restricted ticket in Discord', () => {
     // signals, and this test wants exactly one controlled pass.
     db.prepare('UPDATE players SET discord_id = NULL WHERE steamid = ?').run(MOD);
     db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?').run(ADMIN, id);
-    t.failThreadOps = 1;
+    // Three removals are attempted in one pass: the sweep at the top of it,
+    // this ticket's own sweep, and syncMembers. All three are refused.
+    t.failThreadOps = 3;
     await sync.reconcile();
     // The removal failed, but the card still picked up the claim: syncMembers
     // throwing did not abandon the rest of this ticket's pass.
@@ -340,6 +343,42 @@ describe('blanking the tickets channel setting ends nothing, on the private side
   });
 });
 
+describe('a thread member who is no longer entitled to be there', () => {
+  it('goes from an open thread and from a closed, locked one, which ends locked and archived', async () => {
+    const open = file(IDS[0], IDS[5], 'unsafe');
+    const closed = file(IDS[0], IDS[4], 'unsafe');
+    addAccess(db, open, ADMIN, MOD);
+    addAccess(db, closed, ADMIN, MOD);
+    await sync.idle();
+    const openThread = staffThread(db, open)!.thread_id;
+    const closedThread = staffThread(db, closed)!.thread_id;
+    expect(await members(openThread)).toEqual(['906', '907']);
+    closeTicket(db, closed, ADMIN, 'no_action', '');
+    await sync.idle();
+    expect(t.threadsById.get(closedThread)).toMatchObject({ locked: true, archived: true });
+    // Demoted and banned. Nothing deletes their access rows, and the site
+    // refuses them from here on, so the threads must too.
+    db.prepare("UPDATE players SET is_mod = 0, status = 'banned' WHERE steamid = ?").run(MOD);
+    publishBanChange({ kind: 'ban', steamid: MOD, reason: 'x' });
+    await sync.idle();
+    expect(await members(openThread)).toEqual(['907']);
+    expect(await members(closedThread)).toEqual(['907']);
+    expect(t.threadsById.get(closedThread)).toMatchObject({ locked: true, archived: true, deleted: false });
+  });
+
+  it('is never added and never DMed when the demotion came first', async () => {
+    const id = file(IDS[0], IDS[5], 'unsafe');
+    addAccess(db, id, ADMIN, MOD);
+    db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD);
+    await sync.idle();
+    expect(await members(staffThread(db, id)!.thread_id)).toEqual(['907']);
+    expect(t.dms.map((d) => d.userId)).toEqual(['907']);
+    // And nothing changes its mind about them on a later pass.
+    await sync.reconcile();
+    expect(t.dms.map((d) => d.userId)).toEqual(['907']);
+  });
+});
+
 describe('the accused must never be a member of their own thread', () => {
   it('a merge that repoints a locked, archived thread onto one of its own members ejects them and keeps it locked', async () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
@@ -410,22 +449,19 @@ describe('the accused must never be a member of their own thread', () => {
 
   it('a thread the ejection cannot clean still loses its forbidden forum post in the same pass', async () => {
     const restricted = file(IDS[0], IDS[5], 'unsafe');
-    // On the list by hand, so they are put in the thread before the merge that
-    // makes them the accused: addAccess itself would never allow it.
-    db.prepare('INSERT INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, ?, ?)')
-      .run(restricted, IDS[5], 'system', new Date().toISOString());
     const normal = file(IDS[1], IDS[5], 'griefing');
     await sync.idle();
     const priv = staffThread(db, restricted)!.thread_id;
     const post = staffThread(db, normal)!.thread_id;
-    expect(await members(priv)).toEqual(['905', '907']);
+    // Someone added to the private thread by hand in Discord: the sweep has
+    // to take them out, and Discord is about to refuse.
+    await t.threads.addMember(priv, '555');
     // The accused is promoted: the normal ticket folds into the restricted
     // one, so its forum post is now a post about a restricted case.
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
       expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded');
     })();
-    db.prepare('DELETE FROM ticket_access WHERE ticket_id = ? AND steamid = ?').run(restricted, IDS[5]);
     t.failThreadOps = 1;
     publishTicketSignal({ kind: 'ticket', ticketId: restricted });
     await sync.idle();

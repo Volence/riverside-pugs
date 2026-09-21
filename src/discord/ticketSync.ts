@@ -3,16 +3,20 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
 import { subscribeBanChanges } from '../banEvents.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
-import { getTicketRow, hasStaffFlag, type TicketRow } from '../tickets/store.js';
+import { getTicketRow, type TicketRow } from '../tickets/store.js';
 import {
-  forbiddenForumThreads, forumAudience, insertThread, setThreadCard, setThreadLocked, setThreadState, staffThread,
-  surfaceFor, threadsInState, type ThreadRow, type ThreadSurface,
+  forbiddenForumThreads, forumAudience, insertThread, privateThreadAudience, setThreadCard, setThreadLocked,
+  setThreadState, staffThread, surfaceFor, threadsInState, type ThreadRow, type ThreadSurface,
 } from '../tickets/threads.js';
 import { accessDm, reportLine, ticketCard } from './ticketCard.js';
 import type { BotTransport } from './transport.js';
 
 /** The spec's figure: "A reconciler on bot ready and every five minutes". */
 const RECONCILE_MS = 5 * 60_000;
+
+/** Every private staff thread that still stands, for the ejection sweep. */
+const PRIVATE_THREADS = `SELECT th.* FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
+   WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'`;
 
 export interface TicketSyncDeps {
   db: DB;
@@ -51,11 +55,18 @@ export class TicketSync {
     }));
     const every = this.deps.intervalMs ?? RECONCILE_MS;
     if (every > 0) {
-      this.timer = setInterval(() => this.enqueue(() => this.reconcile()), every);
+      // The timer pass leaves the threads of settled tickets alone: see
+      // reconcile's `scope`.
+      this.timer = setInterval(() => this.enqueue(() => this.reconcile('open')), every);
       this.timer.unref();
     }
-    // A banned moderator stops being active staff at once, not in five minutes.
-    this.offs.push(subscribeBanChanges(() => this.enqueue(() => this.step(() => this.syncAccess()))));
+    // A banned moderator stops being active staff at once, not in five
+    // minutes: out of the forum, and out of every private thread they were on,
+    // the threads of closed tickets included.
+    this.offs.push(subscribeBanChanges(() => this.enqueue(async () => {
+      await this.step(() => this.ejectOutsiders());
+      await this.step(() => this.syncAccess());
+    })));
     // "On bot ready": this is constructed once the transport is connected.
     this.enqueue(() => this.reconcile());
   }
@@ -96,17 +107,23 @@ export class TicketSync {
 
   /**
    * A full pass. The order is the point:
-   *   0. eject the accused from their own private thread if a merge left
-   *      them a member, whatever that thread's lock state;
+   *   0. take out of every private thread whoever is not entitled to be in
+   *      it, whatever that thread's lock state;
    *   1. delete forum posts that must not exist, BEFORE anything can widen
    *      who reads the forum;
    *   2. retire threads left behind by a fold;
    *   3. every open ticket, and every closed one not yet locked;
    *   4. last, sync the forum's access list, so a post that step 1 or the
    *      per-ticket pass failed to delete still keeps its subject out.
+   *
+   * `scope` is step 0's reach, and cost: reading a thread's members is a REST
+   * call each, so the sweep over every private thread there has ever been
+   * runs where it is worth paying for (the first pass after a restart, a
+   * staff change, a ban) and the five minute timer asks for the threads of
+   * open tickets only.
    */
-  async reconcile(): Promise<void> {
-    await this.step(() => this.ejectAccused());
+  async reconcile(scope: 'all' | 'open' = 'all'): Promise<void> {
+    await this.step(() => this.ejectOutsiders(undefined, scope));
     await this.step(() => this.removeForbiddenPosts());
     await this.step(() => this.retireFolded());
     const ids = (this.deps.db.prepare(
@@ -139,7 +156,7 @@ export class TicketSync {
     if (!t) return;
     // Its own stage, as in a full pass: an ejection Discord refuses must not
     // stop the deletion of a forum post that must not exist.
-    await this.step(() => this.ejectAccused(id));
+    await this.step(() => this.ejectOutsiders(id));
     await this.removeForbiddenPosts(id);
     await this.retireFolded(id);
     await this.notifyAccess(t);
@@ -242,46 +259,42 @@ export class TicketSync {
   }
 
   /**
-   * A merge can repoint a restricted ticket's target_id onto someone who was
-   * already a member of its private thread (an admin merged into the person
-   * they were investigating), and the database's own tidy-up only drops
-   * that person's now-self-referential ticket_access row: nothing else
-   * touches Discord for a thread the ticket's own closedness has already
-   * locked and archived, since syncMembers only ever runs on an unlocked
-   * one. So this runs first and unconditionally, whatever the lock state,
-   * and puts a locked thread back exactly as it found it. Bounded to
-   * hasStaffFlag targets: only staff can ever have been on an access list,
-   * so only they can end up the accused this way.
+   * Everyone in a private staff thread who is not entitled to be there:
+   * privateThreadAudience is the whole rule, and whoever is in the thread and
+   * not in it goes.
+   *
+   * It runs on threads syncMembers never touches, which is why it exists. A
+   * merge can repoint a restricted ticket's target_id onto one of its own
+   * thread's members (an admin merged into the person they were
+   * investigating), and a moderator on the list can be demoted or banned;
+   * neither deletes anything Discord would notice, and syncMembers only ever
+   * runs on the unlocked thread of a ticket still being worked. So this runs
+   * first and whatever the lock state, and puts a locked thread back exactly
+   * as it found it.
    */
-  private async ejectAccused(ticketId?: number): Promise<void> {
+  private async ejectOutsiders(ticketId?: number, scope: 'all' | 'open' = 'all'): Promise<void> {
     const { db, transport } = this.deps;
-    const rows = (ticketId === undefined
-      ? db.prepare(
-        `SELECT th.*, t.target_id AS accused FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
-         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'
-         ORDER BY th.id`,
-      ).all()
-      : db.prepare(
-        `SELECT th.*, t.target_id AS accused FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
-         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted' AND th.ticket_id = ?
-         ORDER BY th.id`,
-      ).all(ticketId)) as (ThreadRow & { accused: string })[];
+    const rows = (ticketId !== undefined
+      ? db.prepare(`${PRIVATE_THREADS} AND th.ticket_id = ? ORDER BY th.id`).all(ticketId)
+      : scope === 'open'
+        ? db.prepare(`${PRIVATE_THREADS} AND t.status = 'open' ORDER BY th.id`).all()
+        : db.prepare(`${PRIVATE_THREADS} ORDER BY th.id`).all()) as ThreadRow[];
     for (const th of rows) {
       // Each thread on its own: one Discord refuses must not leave the
       // accused of the next one sitting in their own case.
       try {
-        if (!hasStaffFlag(db, th.accused)) continue;
-        const p = db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(th.accused) as { discord_id: string | null } | undefined;
-        if (!p?.discord_id) continue;
         if (!(await transport.threads.exists(th.thread_id))) continue;
         const members = await transport.threads.memberIds(th.thread_id);
-        if (!members || !members.includes(p.discord_id)) continue;
+        if (!members) continue;
+        const entitled = new Set(privateThreadAudience(db, th.ticket_id).map((m) => m.discord_id));
+        const outsiders = members.filter((id) => !entitled.has(id));
+        if (outsiders.length === 0) continue;
         // Whatever state Discord has this thread in, it has to take a removal
         // now: a closed ticket's thread is archived, and so is one nobody has
         // written in for a week. The row says what it goes back to.
         await this.makeWritable(th.thread_id);
         try {
-          await transport.threads.removeMember(th.thread_id, p.discord_id);
+          for (const id of outsiders) await transport.threads.removeMember(th.thread_id, id);
         } finally {
           // In a finally: a removal that fails must not leave a closed
           // ticket's thread unlocked and unarchived until the next pass.
@@ -291,7 +304,7 @@ export class TicketSync {
           }
         }
       } catch (err) {
-        console.error('[discord] taking the accused out of their own ticket thread failed:', err);
+        console.error('[discord] taking someone out of a ticket thread failed:', err);
         this.problem(`Could not take someone out of a ticket's Discord thread: ${err instanceof Error ? err.message : String(err)}. It is tried again every few minutes.`);
       }
     }
@@ -368,17 +381,14 @@ export class TicketSync {
     setThreadLocked(db, th.id, true);
   }
 
-  /** Rule 1: the thread's members are the access list, no more and no fewer.
-   *  Someone on the list with no Discord linked simply is not in the thread;
-   *  the next pass after they link adds them. */
+  /** Rule 1: the thread's members are privateThreadAudience, no more and no
+   *  fewer. Someone on the list with no Discord linked simply is not in the
+   *  thread; the next pass after they link adds them. */
   private async syncMembers(t: TicketRow, thread: ThreadRow): Promise<void> {
     const { db, transport } = this.deps;
     const have = await transport.threads.memberIds(thread.thread_id);
     if (have === null) return;
-    const want = (db.prepare(
-      `SELECT p.discord_id FROM ticket_access a JOIN players p ON p.steamid = a.steamid
-       WHERE a.ticket_id = ? AND p.discord_id IS NOT NULL`,
-    ).all(t.id) as { discord_id: string }[]).map((r) => r.discord_id);
+    const want = privateThreadAudience(db, t.id).map((m) => m.discord_id);
     for (const id of want) {
       if (have.includes(id)) continue;
       try {
@@ -406,10 +416,9 @@ export class TicketSync {
   private async notifyAccess(t: TicketRow): Promise<void> {
     if (t.restricted !== 1 || t.status !== 'open') return;
     const { db, transport, publicUrl } = this.deps;
-    const rows = db.prepare(
-      `SELECT a.steamid, p.discord_id FROM ticket_access a JOIN players p ON p.steamid = a.steamid
-       WHERE a.ticket_id = ? AND a.notified_at IS NULL AND p.discord_id IS NOT NULL`,
-    ).all(t.id) as { steamid: string; discord_id: string }[];
+    // The same audience the thread has: someone demoted between being put on
+    // the list and this pass is never told about a ticket they cannot open.
+    const rows = privateThreadAudience(db, t.id).filter((m) => m.notified_at === null);
     for (const r of rows) {
       db.prepare('UPDATE ticket_access SET notified_at = ? WHERE ticket_id = ? AND steamid = ?')
         .run(new Date().toISOString(), t.id, r.steamid);

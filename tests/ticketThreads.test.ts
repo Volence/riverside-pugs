@@ -12,7 +12,9 @@ import { ensureTicketSchema } from '../src/tickets/schema.js';
 import { fileReport, openStaffTicket } from '../src/tickets/filing.js';
 import { claimTicket, closeTicket } from '../src/tickets/actions.js';
 import { foldTicket } from '../src/tickets/store.js';
-import { forbiddenForumThreads, insertThread, staffThread, threadByDiscordId, threadsInState } from '../src/tickets/threads.js';
+import {
+  forbiddenForumThreads, insertThread, privateThreadAudience, staffThread, threadByDiscordId, threadsInState,
+} from '../src/tickets/threads.js';
 import { subscribeTicketSignals, type TicketSignal } from '../src/tickets/signals.js';
 import { mergePlayers } from '../src/mergePlayers.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
@@ -137,6 +139,29 @@ describe('threads follow a fold', () => {
     db.transaction(() => foldTicket(db, gone, keep, 'merge'))();
     expect(staffThread(db, keep)?.thread_id).toBe('9002');
     expect(threadsInState(db, 'folded')).toEqual([]);
+  });
+});
+
+describe('who may be in a restricted ticket\'s private thread', () => {
+  it('is the access list, minus whoever is not active, flagged and linked, and never the accused', () => {
+    const id = file(R2, ACCUSED, 'unsafe');
+    linkDiscord(db, OWNER, '907', 'owner');
+    linkDiscord(db, ADMIN, '905', 'admin');
+    linkDiscord(db, MOD, '906', 'mod');
+    const add = db.prepare('INSERT OR IGNORE INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, ?, ?)');
+    // R1 is on the list holding no flag and no Discord; the accused is on it
+    // the way a merge leaves them there, pointing the ticket at a member.
+    for (const who of [ADMIN, MOD, R1, ACCUSED]) add.run(id, who, 'system', '2026-09-22T00:00:00.000Z');
+    expect(privateThreadAudience(db, id)).toEqual([
+      { steamid: ADMIN, discord_id: '905', notified_at: null },
+      { steamid: MOD, discord_id: '906', notified_at: null },
+      { steamid: OWNER, discord_id: '907', notified_at: null },
+    ].sort((a, b) => (a.steamid < b.steamid ? -1 : 1)));
+    // Banned, demoted, unlinked: three ways off it that no access row records.
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(ADMIN);
+    db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD);
+    unlinkDiscord(db, OWNER);
+    expect(privateThreadAudience(db, id)).toEqual([]);
   });
 });
 
