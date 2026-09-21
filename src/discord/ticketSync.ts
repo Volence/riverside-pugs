@@ -302,7 +302,7 @@ export class TicketSync {
    *
    * Once per process, on the first pass that manages it: from then on every
    * post the bot makes has its row written in the same tick, or is deleted
-   * again. Until it has managed it, syncAccess leaves the forum alone.
+   * again. Until it has managed it, syncAccess lets nobody new in but keeps taking people out.
    */
   private async sweepOrphanPosts(): Promise<void> {
     if (this.orphansSwept) return;
