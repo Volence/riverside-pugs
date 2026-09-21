@@ -164,6 +164,8 @@ export class AdminFeedPoster {
       case 'new_season': return `${who} started a new season: **${escapeName(String(d.name ?? ''))}**. Everyone's rating starts fresh.`;
       case 'rename_season': return `${who} renamed season ${e.target} to **${escapeName(String(d.name ?? ''))}**`;
       case 'server_idle': return `${who} set server ${e.target} idle`;
+      case 'server_restart_after_match':
+        return `${who} turned ${d.on ? 'on' : 'off'} restart-after-match for server ${e.target}`;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``

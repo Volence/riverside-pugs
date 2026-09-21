@@ -713,6 +713,11 @@ export function openDb(path: string): DB {
   // row stays claimable across this migration; taking a server out of rotation
   // has to be a deliberate act, never a side effect of upgrading.
   ensureColumn(db, 'servers', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
+  // Off by default, and turned on per box by an admin who can watch the
+  // first one. Asking a box to quit when nothing brings it back leaves it
+  // gone until someone opens its host's control panel, so this is not a
+  // switch to flip for four servers at once. See src/serverRestart.ts.
+  ensureColumn(db, 'servers', 'restart_after_match', 'INTEGER NOT NULL DEFAULT 0');
   // Object key once a demo has been copied to R2, NULL while it is still only
   // on disk. The row carries both states on purpose: the local file is deleted
   // only after the upload is verified, so for a moment a demo is in both places

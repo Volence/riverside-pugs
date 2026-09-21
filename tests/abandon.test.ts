@@ -110,7 +110,9 @@ describe('abandon teardown', () => {
       confirm: async () => true,
     };
     await handleAbandon(d, TOKEN, IDS[0]);
-    expect(calls).toEqual([{ id: serverId, opts: { teardown: true } }]);
+    // restart too: an abandon is a match ending on that box, and a box set to
+    // restart-after-match cycles before it can be claimed again.
+    expect(calls).toEqual([{ id: serverId, opts: { teardown: true, restart: true } }]);
   });
 });
 

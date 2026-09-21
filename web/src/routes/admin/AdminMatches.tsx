@@ -83,7 +83,7 @@ export function AdminMatches() {
           {data.servers.length === 0 ? <Empty>No servers.</Empty> : (
             <div class="table-wrap">
             <table class="admin-table admin-table--servers">
-              <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>SourceTV</th><th /></tr></thead>
+              <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>Restart after match</th><th>SourceTV</th><th /></tr></thead>
               <tbody>
                 {data.servers.map((s) => (
                   <tr key={s.id} class={s.enabled === 1 ? undefined : 'is-dim'}>
@@ -107,6 +107,7 @@ export function AdminMatches() {
                         </>
                       )}
                     </td>
+                    <td><RestartCell server={s} busy={busy} run={run} /></td>
                     <td><SourceTvCell server={s} busy={busy} run={run} /></td>
                     <td>{s.status !== 'idle' && (
                       <button class="chip" disabled={busy}
@@ -238,6 +239,36 @@ export function AdminMatches() {
         )}
       </Panel>
     </div>
+  );
+}
+
+/**
+ * Whether this box cycles srcds after each match.
+ *
+ * Off is the safe state and the default. Turning it on asks the box to `quit`
+ * and trusts its supervisor to start it again; where nothing does, the box is
+ * gone until someone opens its host's control panel. Hence the confirm, and
+ * hence doing it one box at a time.
+ */
+function RestartCell({ server: s, busy, run }: {
+  server: { id: number; name: string; restartAfterMatch?: number };
+  busy: boolean;
+  run: (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
+}) {
+  const on = s.restartAfterMatch === 1;
+  return (
+    <>
+      <span class={`admin-status admin-status--${on ? 'idle' : 'offline'}`}>{on ? 'on' : 'off'}</span>{' '}
+      <button class="chip" disabled={busy}
+        onClick={() => run(
+          () => adminApi.serverRestartAfterMatch(s.id, !on),
+          on
+            ? `Stop restarting ${s.name} after each match?`
+            : `Restart ${s.name} after every match? It is asked to quit and its supervisor starts it again, `
+              + 'about 10 to 20 seconds with nobody connected. If nothing restarts it, the server stays down '
+              + 'until someone brings it back from its host. Watch the first one.',
+        )}>{on ? 'Turn off' : 'Turn on'}</button>
+    </>
   );
 }
 

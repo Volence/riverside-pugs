@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
-import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, type ServerRow } from '../serverPool.js';
+import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
 import { abortMatch, adminOverview, voidMatch } from '../admin/matches.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
@@ -264,6 +264,26 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled must be true or false' });
     setEnabled(db, id, enabled);
     logAdmin(db, adminId, enabled ? 'server_enable' : 'server_disable', id);
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /** Restart srcds after every match on this box.
+   *
+   *  Per server and off by default. The lever is `quit` over rcon and the
+   *  box's own supervisor starting it again; on a box where nothing does, the
+   *  server is gone until someone opens its host's control panel. So this is
+   *  turned on one box at a time by an admin who can watch the first cycle,
+   *  never as a global default. */
+  app.post('/api/admin/servers/:id/restart-after-match', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!getServer(db, id)) return reply.code(404).send({ error: 'no such server' });
+    const { on } = (req.body ?? {}) as { on?: unknown };
+    if (typeof on !== 'boolean') return reply.code(400).send({ error: 'on must be true or false' });
+    setRestartAfterMatch(db, id, on);
+    logAdmin(db, adminId, 'server_restart_after_match', id, { on });
     broadcast('refresh');
     return { ok: true };
   });

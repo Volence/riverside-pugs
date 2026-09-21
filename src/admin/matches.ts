@@ -38,7 +38,7 @@ export function adminOverview(db: DB) {
   // Never the rcon password: this goes to a browser.
   const servers = db.prepare(
     `SELECT id, name, host, port, status, enabled, tv_port AS tvPort,
-            tv_password AS tvPassword, tv_enabled AS tvEnabled
+            tv_password AS tvPassword, tv_enabled AS tvEnabled, restart_after_match AS restartAfterMatch
      FROM servers ORDER BY id`,
   ).all();
   const recent = (db.prepare(
@@ -88,7 +88,7 @@ export function abortMatch(db: DB, releaser: ServerReleaser, matchId: number): A
   // Archive BEFORE releasing: the release tells the plugin to change level, and
   // a heartbeat naming the reset map must not land before the record is taken.
   archiveAborted(db, matchId);
-  if (m.server_id !== null) releaser.release(m.server_id, { teardown: true });
+  if (m.server_id !== null) releaser.release(m.server_id, { teardown: true, restart: true });
   return { ok: true };
 }
 

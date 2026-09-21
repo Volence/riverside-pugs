@@ -331,7 +331,10 @@ export class RealOrchestrator implements Orchestrator {
       // The authoritative match_maps rows were just written by completeMatch.
       clearLive(this.db, matchId);
       this.listener.unregister(match.token);
-      this.releaser.release(match.server_id);
+      // restart: the match is over, the plugin has already kicked everyone
+      // with the result, and the demo and replay scans above have run. A box
+      // set to restart cycles here, before it can be claimed again.
+      this.releaser.release(match.server_id, { restart: true });
       if (dump) {
         const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
         this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA}, Team B ${dump.totalB}. ${winnerText}!`);

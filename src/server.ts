@@ -50,6 +50,7 @@ import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
+import { rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
@@ -90,6 +91,8 @@ export interface ServerDeps {
   /** Runs a batch of console commands on one server, for the ban sync.
    *  Injected in tests so a ban never dials rcon. */
   serverExec?: ServerExec;
+  /** Injected in tests so nothing ever asks a real box to quit. */
+  serverRestarter?: ServerRestarter;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -319,6 +322,43 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Built unconditionally, not just in the RealOrchestrator branch: the orphan
   // reaper below needs it too, and construction itself dials no rcon.
+  // Cycling srcds between matches, for boxes that have it turned on. `quit`
+  // rather than ssh and systemctl: every box is supervised, and quit is the
+  // one lever that works on all of them, Chicago included, over the rcon we
+  // already have. See src/serverRestart.ts.
+  const restarter = deps.serverRestarter ?? rconRestarter({
+    quit: async (server) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        await rcon.exec('quit');
+      } finally {
+        rcon.close();
+      }
+    },
+    // sm_pug_status, not the engine's `status`: rcon answers as soon as the
+    // engine is up, which is before SourceMod has loaded the plugin, and a
+    // match set up in that gap would fail on its first sm_pug_match. Seeing
+    // the plugin's own STATUS block come back means it is loaded and ready to
+    // be handed a match.
+    //
+    // The body is matched, not merely measured. An rcon response carries
+    // whatever is sitting in the console buffer, so the FIRST call after a
+    // boot comes back full of unrelated plugin chatter (verified on the local
+    // test server 2026-09-21: the first sm_pug_status returned another
+    // plugin's bhop table and nothing else). A length check would read that as
+    // ready on a box where pug-match had not loaded at all.
+    ready: async (server) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return (await rcon.exec('sm_pug_status')).includes('STATUS state=');
+      } finally {
+        rcon.close();
+      }
+    },
+  });
+
   const releaser = new ServerReleaser(deps.db, deps.serverCleaner ?? (async (server, token, opts) => {
     const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     try {
@@ -373,7 +413,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
-  }));
+  }), restarter);
 
   // Every enabled box mirrors the website's bans. Built here, next to the
   // releaser, because both are the backend reaching into a game server

@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
-import { getServer, release, type ServerRow } from './serverPool.js';
+import { getServer, markOffline, release, type ServerRow } from './serverPool.js';
+import { restartsAfterMatch, type ServerRestarter } from './serverRestart.js';
 
 /** How a server is being freed. `teardown` is the ending that went wrong:
  *  abandon, no-show, admin abort. The roster is still on the box, possibly
@@ -10,6 +11,11 @@ import { getServer, release, type ServerRow } from './serverPool.js';
  *  who have nothing to do with any match. */
 export interface ReleaseOpts {
   teardown: boolean;
+  /** Restart srcds before the box goes back in the pool. Passed by the two
+   *  paths where a match has just finished with it, and never by the boot
+   *  reconcile, which may be looking at a box with people on it. Only acts
+   *  when that box also has restart_after_match set. */
+  restart: boolean;
 }
 
 /** Hands a server back: restore sv_password, and tell the plugin the match whose
@@ -35,7 +41,13 @@ export class ServerReleaser {
   private waiters: Array<() => void> = [];
   private inFlight = new Set<Promise<void>>();
 
-  constructor(private db: DB, private cleanServer: ServerCleaner) {}
+  constructor(
+    private db: DB,
+    private cleanServer: ServerCleaner,
+    /** Absent in tests and on an install that never restarts anything, in
+     *  which case `restart` is a no-op however the boxes are configured. */
+    private restarter: ServerRestarter | null = null,
+  ) {}
 
   /** Called when a box frees, so a match waiting for one can claim it. */
   onFreed(fn: () => void): void {
@@ -81,18 +93,31 @@ export class ServerReleaser {
   release(serverId: number, opts: Partial<ReleaseOpts> = {}): void {
     const server = getServer(this.db, serverId);
     if (!server) return;
-    const full: ReleaseOpts = { teardown: opts.teardown ?? false };
+    const full: ReleaseOpts = { teardown: opts.teardown ?? false, restart: opts.restart ?? false };
+    // A restarting box must not be claimable, and the window is now ten to
+    // twenty seconds rather than one rcon round trip, so it goes OFFLINE here
+    // and only becomes idle once it answers again. Without a restart the row
+    // still goes straight to idle, synchronously, exactly as before.
+    const restarting = full.restart && this.restarter !== null && restartsAfterMatch(this.db, serverId);
     // Read before the row is freed, though nothing here depends on the order:
     // release() writes only the servers table. The newest match on the box is
     // the one whose match the plugin may still be holding. A stale or already
     // aborted token is harmless: the plugin answers PUGERR and changes nothing.
     const token = lastTokenOn(this.db, serverId);
-    release(this.db, serverId);
+    if (restarting) markOffline(this.db, serverId);
+    else release(this.db, serverId);
     const done = this.cleanServer(server, token, full)
       .catch((err) => {
         // A dead rcon target must never wedge the queue: the waiters still
         // fire below even when the cleanup fails.
         console.error(`[serverRelease] could not clean up ${server.name}:`, err);
+      })
+      .then(async () => {
+        if (!restarting) return;
+        // A box that never came back stays offline on purpose: the matchmaker
+        // simply uses another, and the restarter has already said so in the
+        // admin feed. An admin puts it back with Set idle.
+        if (await this.restarter!.restart(server)) release(this.db, serverId);
       })
       .then(() => {
         for (const fn of this.waiters) {

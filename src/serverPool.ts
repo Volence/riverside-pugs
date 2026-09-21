@@ -20,6 +20,9 @@ export interface ServerRow {
   /** Whether this box carries the left4dead_dlc4 mappack. Set by the probe
    *  in setHasDlc4; present on the row because claimIdle does SELECT *. */
   has_dlc4: number;
+  /** 1 to restart srcds after every match on this box. Off by default; see
+   *  src/serverRestart.ts for why it is per server rather than global. */
+  restart_after_match: number;
 }
 
 export function addServer(
@@ -91,6 +94,10 @@ export function resolveServerBySource(db: DB, source: string, feedHost: string):
  *  the release at the end still runs and still marks it idle, where it sits
  *  unclaimed until someone enables it again.
  */
+export function setRestartAfterMatch(db: DB, id: number, on: boolean): void {
+  db.prepare('UPDATE servers SET restart_after_match = ? WHERE id = ?').run(on ? 1 : 0, id);
+}
+
 export function setEnabled(db: DB, id: number, enabled: boolean): void {
   db.prepare('UPDATE servers SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
 }

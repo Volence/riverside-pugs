@@ -74,7 +74,7 @@ export async function handleAbandon(deps: AbandonDeps, token: string, steamid: s
     // After the outer commit, never inside it: see insertBan's doc comment.
     publishBanChange({ kind: 'ban', steamid, reason });
     archiveAborted(db, match.id);
-    deps.releaser.release(match.server_id, { teardown: true });
+    deps.releaser.release(match.server_id, { teardown: true, restart: true });
     publishAdminEvent({ kind: 'abandon', steamid, matchId: match.id, minutes });
     console.warn(`[abandon] match ${match.id} ended: ${steamid} abandoned it; banned for ${minutes} minutes`);
     return match.id;
