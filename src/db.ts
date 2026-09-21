@@ -99,6 +99,21 @@ CREATE TABLE IF NOT EXISTS match_players (
   joined_map INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, player_id)
 );
+-- Post-match endorsements. The primary key is an anti abuse rule expressed
+-- structurally: one endorsement per giver per recipient per match, so nobody
+-- stacks all three kinds on one friend. Everything a CHECK cannot see (both
+-- rostered, match completed, inside the window, within the budget, not self)
+-- is enforced by src/endorsements.ts. from_id is never shown to anybody; it is
+-- kept so farming can be audited if it ever happens.
+CREATE TABLE IF NOT EXISTS endorsements (
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  from_id    TEXT NOT NULL REFERENCES players(steamid),
+  to_id      TEXT NOT NULL REFERENCES players(steamid),
+  kind       TEXT NOT NULL CHECK (kind IN ('caller','clutch','vibes')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (match_id, from_id, to_id)
+);
+CREATE INDEX IF NOT EXISTS idx_endorsements_to ON endorsements (to_id, kind);
 CREATE TABLE IF NOT EXISTS match_maps (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   ordinal INTEGER NOT NULL,
