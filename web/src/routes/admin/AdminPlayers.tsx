@@ -329,10 +329,41 @@ function MergeSection(
   const shared = d.sharesAddressWith ?? [];
   const networks = d.networks ?? [];
   const countries = [...new Set(networks.map((n) => n.country).filter(Boolean))];
+  const discordHistory = d.discordHistory ?? [];
 
   return (
     <section>
       <h4>Identity</h4>
+
+      {discordHistory.length > 0 && (
+        <div class="admin-shared">
+          <p class="muted">Discord accounts this player has linked:</p>
+          <ul>
+            {discordHistory.map((h) => (
+              <li key={`${h.discordId}-${h.linkedAt}`}>
+                {h.discordName || 'unknown'} <code>{h.discordId}</code>{' '}
+                <span class="muted">
+                  {h.linkedBy === 'backfill' ? 'linked before history was kept' : `linked ${fmtTime(h.linkedAt)}`}
+                  {h.unlinkedAt ? `, unlinked ${fmtTime(h.unlinkedAt)}${h.unlinkedBy === 'merge' ? ' by a merge' : ''}` : ', current'}
+                </span>
+                {h.others.length > 0 && (
+                  <ul>
+                    {h.others.map((o) => (
+                      <li key={`${o.steamid}-${o.linkedAt}`}>
+                        <strong>This Discord was {o.unlinkedAt ? 'previously' : 'also'} linked to</strong>{' '}
+                        <a href={`/player/${o.steamid}`}>{o.name ?? o.steamid}</a> <code>{o.steamid}</code>{' '}
+                        <span class="muted">
+                          {o.unlinkedAt ? `until ${fmtTime(o.unlinkedAt)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {(shared.length > 0 || countries.length > 0) && (
         <div class="admin-shared">

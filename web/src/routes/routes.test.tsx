@@ -1631,6 +1631,16 @@ describe('Profile Discord card', () => {
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
     expect(screen.queryByText('Connect Discord')).toBeNull();
   });
+
+  it('says why when the backend refuses to disconnect Discord', async () => {
+    const { ApiError } = await import('../api');
+    mockApi.profile.mockResolvedValue(profile);
+    mockApi.unlinkDiscord.mockRejectedValue(new ApiError(409, 'leave the queue before disconnecting Discord'));
+    const linked = { ...me, discord: { id: '111', name: 'Alice' } };
+    render(<Profile steamid="1" session={{ kind: 'active', me: linked }} refresh={() => {}} />);
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Disconnect' })));
+    await waitFor(() => expect(screen.getByText('leave the queue before disconnecting Discord')).toBeTruthy());
+  });
 });
 
 describe('loading state', () => {

@@ -631,6 +631,14 @@ export interface AdminReport {
 
 export interface AdminPlayerDetail extends AdminPlayerRow {
   discordId: string | null;
+  /** Every Discord account this player has linked, newest first, each with
+   *  the OTHER Steam accounts that have held it. `linkedBy` is 'backfill' for
+   *  a link older than the history table, whose real date nobody recorded. */
+  discordHistory?: {
+    discordId: string; discordName: string; linkedAt: string; linkedBy: string;
+    unlinkedAt: string | null; unlinkedBy: string | null;
+    others: { steamid: string; name: string | null; linkedAt: string; unlinkedAt: string | null }[];
+  }[];
   activeBan: AdminBan | null;
   bans: AdminBan[];
   notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];

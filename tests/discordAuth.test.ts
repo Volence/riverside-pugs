@@ -198,6 +198,92 @@ describe('discord auth, configured', () => {
     expect(getPlayer(db, P1)?.discord_id).toBeNull();
   });
 
+  // The Discord account is the anchor that makes "one person, one account"
+  // enforceable. Letting it go at will, while banned above all, lets one
+  // Discord serve any number of Steam accounts in sequence.
+  it('unlink is refused while banned, and the link stays', async () => {
+    const { banPlayer } = await import('../src/admin/players.js');
+    const cookies = authedCookie(app, db, P1);
+    linkDiscord(db, P1, '111', 'Alice');
+    banPlayer(db, P1, P2, 'griefing', 60);
+    const res = await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/banned/);
+    expect(getPlayer(db, P1)?.discord_id).toBe('111');
+  });
+
+  it('unlink is refused during a queue timeout', async () => {
+    const { recordPenalty } = await import('../src/penalties.js');
+    const cookies = authedCookie(app, db, P1);
+    linkDiscord(db, P1, '111', 'Alice');
+    recordPenalty(db, P1, 'ready_fail', null);
+    const res = await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/timeout/);
+    expect(getPlayer(db, P1)?.discord_id).toBe('111');
+  });
+
+  it('unlink is refused while queued, and works again after leaving', async () => {
+    const cookies = authedCookie(app, db, P1);
+    linkDiscord(db, P1, '111', 'Alice');
+    expect((await app.inject({ method: 'POST', url: '/api/queue/join', cookies })).statusCode).toBe(200);
+    const res = await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/queue/);
+    await app.inject({ method: 'POST', url: '/api/queue/leave', cookies });
+    expect((await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies })).statusCode).toBe(200);
+  });
+
+  it('unlink is refused while on the roster of a match that is being set up or played', async () => {
+    const cookies = authedCookie(app, db, P1);
+    linkDiscord(db, P1, '111', 'Alice');
+    for (const state of ['configuring', 'live']) {
+      const id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, ?, 'dead_air')").run(state).lastInsertRowid);
+      db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(id, P1);
+      const res = await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies });
+      expect(res.statusCode, state).toBe(409);
+      expect(res.json().error).toMatch(/match/);
+      db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(id);
+    }
+    expect((await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies })).statusCode).toBe(200);
+  });
+
+  it('a Discord last held by a banned Steam account cannot be linked, and the code is kept', async () => {
+    const { banPlayer } = await import('../src/admin/players.js');
+    const { unlinkDiscord } = await import('../src/players.js');
+    upsertPlayer(db, { steamid: P2, name: 'bob', avatar: null }, []);
+    linkDiscord(db, P2, '111', 'Alice');
+    unlinkDiscord(db, P2);
+    banPlayer(db, P2, P1, 'cheating', null);
+    const cookies = authedCookie(app, db, P1, { active: false });
+    const code = createLinkCode(db, '111', 'Alice');
+    const res = await app.inject({ method: 'POST', url: '/api/discord/link-code', cookies, payload: { code } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('discord_banned');
+    expect(getPlayer(db, P1)?.discord_id).toBeNull();
+  });
+
+  it('tells the admin feed when a Discord moves to a different Steam account inside 30 days', async () => {
+    const { subscribeAdminEvents } = await import('../src/adminFeed.js');
+    const { unlinkDiscord } = await import('../src/players.js');
+    upsertPlayer(db, { steamid: P2, name: 'bob', avatar: null }, []);
+    linkDiscord(db, P2, '111', 'Alice');
+    unlinkDiscord(db, P2);
+    const seen: string[] = [];
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') seen.push(e.text); });
+    try {
+      const cookies = authedCookie(app, db, P1, { active: false });
+      const code = createLinkCode(db, '111', 'Alice');
+      await app.inject({ method: 'POST', url: '/api/discord/link-code', cookies, payload: { code } });
+    } finally {
+      off();
+    }
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain(P1);
+    expect(seen[0]).toContain(P2);
+    expect(seen[0]).toContain('Alice');
+  });
+
   it('/api/me carries the link', async () => {
     const cookies = authedCookie(app, db, P1);
     linkDiscord(db, P1, '111', 'Alice');

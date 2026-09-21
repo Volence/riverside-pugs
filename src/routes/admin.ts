@@ -130,7 +130,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const t = target(req, reply);
     if (!t) return reply;
     const before = getPlayer(db, t.steamid)?.discord_name ?? null;
-    unlinkDiscord(db, t.steamid);
+    unlinkDiscord(db, t.steamid, t.adminId);
     logAdmin(db, t.adminId, 'unlink_discord', t.steamid, { was: before });
     return { ok: true };
   });

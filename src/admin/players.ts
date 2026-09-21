@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { aliasesOf } from '../aliases.js';
 import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { displaySr } from '../rating.js';
-import { currentSeasonId, getPlayer } from '../players.js';
+import { currentSeasonId, discordHistoryOf, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
@@ -156,6 +156,10 @@ export function playerDetail(db: DB, steamid: string) {
     ...(row ?? {}),
     steamid: p.steamid,
     discordId: p.discord_id,
+    // Every Discord account this player has held, and who else has held each
+    // one. One Discord passing between Steam accounts is the plainest sign of
+    // an alt this site has.
+    discordHistory: discordHistoryOf(db, steamid),
     activeBan: activeBan(db, steamid),
     bans,
     notes,

@@ -113,6 +113,26 @@ describe('Admin page', () => {
     expect(within(section).getByRole('link', { name: 'What players are told' }).getAttribute('href')).toBe('/help/consistency');
   });
 
+  it('says which other Steam account a player\'s Discord used to be on', async () => {
+    const row = { steamid: '2', name: 'newcomer', avatar: null, status: 'active', isAdmin: false, discordName: 'Alice', sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: '111', activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputFlags: [],
+      inputCaps: [],
+      discordHistory: [{
+        discordId: '111', discordName: 'Alice', linkedAt: '2026-09-20T00:00:00.000Z', linkedBy: '2', unlinkedAt: null, unlinkedBy: null,
+        others: [{ steamid: '9', name: 'banned main', linkedAt: '2026-08-01T00:00:00.000Z', unlinkedAt: '2026-09-19T00:00:00.000Z' }],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('newcomer')).toBeTruthy());
+    fireEvent.click(screen.getByText('newcomer'));
+    await waitFor(() => expect(screen.getByText(/This Discord was previously linked to/)).toBeTruthy());
+    expect((screen.getByText('banned main') as HTMLAnchorElement).getAttribute('href')).toBe('/player/9');
+  });
+
   it('says none, with no section, for a player with no connect drops', async () => {
     const row = { steamid: '2', name: 'clean', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });

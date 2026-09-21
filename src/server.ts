@@ -299,7 +299,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     discordApi,
     membership,
   });
-  await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
+  await app.register(discordAuthRoutes, {
+    config: deps.config, db: deps.db, api: discordApi,
+    // The matchmaker is built further down; by the time a request can arrive
+    // it exists.
+    engaged: () => matchmaker.engagedIds(),
+  });
 
   // Injectable for tests, built from config otherwise. Null when unconfigured,
   // which makes every twitch route 404 rather than half-work.
