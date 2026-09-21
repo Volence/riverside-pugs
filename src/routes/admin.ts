@@ -41,6 +41,9 @@ export interface AdminRouteOpts {
   /** Pushes the website's admin list to every box. Absent in tests that do
    *  not exercise it, where the route reports that rather than pretending. */
   adminSync?: ServerAdminSync;
+  /** Asks Steam about one player now and resolves with the rows written.
+   *  Absent on an install with no Steam api key, where the route says so. */
+  refreshSignals?: (steamid: string) => Promise<number>;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
@@ -195,6 +198,15 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const n = clearPenalties(db, t.steamid, t.adminId);
     logAdmin(db, t.adminId, 'clear_penalties', t.steamid, { cleared: n });
     return { ok: true, cleared: n };
+  });
+
+  /** Ask Steam about this account now, rather than wait for the weekly pass.
+   *  Not audited: it changes nothing an admin did, only how fresh the panel is. */
+  app.post('/api/admin/players/:steamid/steam-refresh', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    if (!opts.refreshSignals) return reply.code(503).send({ error: 'no Steam api key is configured' });
+    return { ok: true, refreshed: await opts.refreshSignals(t.steamid) };
   });
 
   app.post('/api/admin/players/:steamid/notes', async (req, reply) => {

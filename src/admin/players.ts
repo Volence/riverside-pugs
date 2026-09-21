@@ -8,6 +8,7 @@ import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
 import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
 import { publishBanChange } from '../banEvents.js';
+import { steamAccountView } from './steamAccount.js';
 
 export interface BanRow {
   id: number;
@@ -179,6 +180,10 @@ export function playerDetail(db: DB, steamid: string) {
     // a VPN, a shared house and two siblings all look the same here.
     networks: networksOf(db, steamid),
     sharesAddressWith: sharesAddressWith(db, steamid),
+    // What Steam says about the account: age, bans elsewhere, L4D1 hours,
+    // whose copy of the game it plays on. Null until Steam has been asked,
+    // and for good on an install with no api key. Context, never a verdict.
+    steamAccount: steamAccountView(db, steamid),
     timeout: (() => {
       const t = activeTimeout(db, steamid);
       return t ? { until: t.until.toISOString(), offenses: t.offenses } : null;

@@ -1006,6 +1006,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
     dlc4Probe: deps.dlc4Probe, adminSync,
+    // Sharing is asked too: the admin may be looking at someone who is in
+    // game right now. No match id, so a manual look never posts to the feed.
+    refreshSignals: deps.config.steamApiKey
+      ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
+      : undefined,
   });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
