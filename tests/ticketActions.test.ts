@@ -109,6 +109,14 @@ describe('ban from a ticket', () => {
     expect(kinds()).toContain('banned');
   });
 
+  it('a moderator cannot ban an admin, even from a ticket they were let into', () => {
+    const about = (fileReport(db, R1, { targetId: ADMIN, category: 'toxicity', text: 'x' }, deps) as { ticketId: number }).ticketId;
+    expect(addAccess(db, about, OWNER, MOD)).toEqual({ ok: true });
+    expect(banFromTicket(db, about, MOD, 'abuse', 60)).toMatchObject({ ok: false, status: 403 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 0 });
+    expect(banFromTicket(db, about, OWNER, 'abuse', 60)).toEqual({ ok: true });
+  });
+
   it('an admin bans for any length, permanent included', () => {
     expect(banFromTicket(db, ticket, ADMIN, 'walls', null)).toEqual({ ok: true });
     expect((db.prepare('SELECT expires_at FROM bans').get() as { expires_at: string | null }).expires_at).toBeNull();

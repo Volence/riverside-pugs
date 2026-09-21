@@ -116,6 +116,10 @@ export function banFromTicket(db: DB, id: number, by: string, reason: unknown, m
   }
   const actor = db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(by) as { is_admin: number } | undefined;
   if (actor?.is_admin !== 1) {
+    // A banned admin fails requireAdmin and no moderator can lift the ban, so
+    // one moderator on the access list could otherwise lock the admins out.
+    const target = db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(t.target_id) as { is_admin: number } | undefined;
+    if (target?.is_admin === 1) return fail(403, 'only an admin can ban an admin');
     const cap = Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080');
     if (mins === null || mins > cap) return fail(403, `moderators can ban for up to ${cap} minutes; ask an admin for longer`);
   }
