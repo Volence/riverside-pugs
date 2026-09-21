@@ -2061,6 +2061,6 @@ const bytes = async (u: string) => new Uint8Array(await (await fetch(u)).arrayBu
 
 - [ ] **Step 1: Full suite.** Run: `npm test && npm run typecheck && npm run build && bash scripts/check-hud-vpk.sh`. Everything must pass; report real output.
 - [ ] **Step 2: Screenshots.** Add `/hud` to the page list in `scripts/shoot-pages.mjs` and run `npm run shoot`. Read the desktop and phone-width shots; fix any overflow or overlap in the side panel.
-- [ ] **Step 3: No em dashes.** Run: `git diff master --name-only | xargs grep -l '—' || echo none`. Expected: `none`.
+- [ ] **Step 3: No em dashes.** Run: `git diff master --name-only | xargs grep -lP '\x{2014}' || echo none`. Expected: `none`.
 - [ ] **Step 4: Owner's in-game pass.** Build three samples from the dev page and give them to the owner with exact steps, in the final message: (a) stock preset, health panel moved bottom-left, team as a column at scale 1.25, chat moved, rounded panel backgrounds, normal VPK; (b) Modern preset untouched, normal VPK, to compare against the owner's own Modern HUD; (c) sample (a) in advanced mode with a recoloured health bar. Ask for a survivor screenshot of each, plus one infected screenshot of (b). Things to look for: chat stays put after a death and after a special infected intro (the `r160` inside an animation string was never confirmed); scaled text is the right size; no pink and black squares.
 - [ ] **Step 5: Stop.** Do not merge or deploy. Report what passed, what the screenshots showed, and that merging to master and `deploy-web.sh` wait for the owner's go-ahead.
