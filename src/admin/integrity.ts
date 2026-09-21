@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import type { RoundMetrics } from '../integrity/round.js';
 import { aggregate, scorePlayers, type ScoredPlayer } from '../integrity/score.js';
+import { ANALYZER_VERSION } from '../integrity/store.js';
 import { flagsForPlayer, type IntegrityFlagRow } from '../integrityFlags.js';
 
 export interface IntegrityRoundRow {
@@ -39,7 +40,14 @@ export interface IntegrityBoardRow extends ScoredPlayer {
 }
 
 /** The board: one row per player, ranked. Scores are computed here, never read
- *  from a column, so changing a threshold changes the page and nothing else. */
+ *  from a column, so changing a threshold changes the page and nothing else.
+ *
+ *  CURRENT ANALYZER VERSION ONLY, here and on the player page. A version bump
+ *  re-measures every round that still has a replay, but a round whose replay
+ *  was pruned can never be measured again, so its old row and its old clips
+ *  stay in the table for good. Two analyzers' numbers on one board is worse
+ *  than either alone, and an old clip is a claim the current analyzer does not
+ *  make. Nothing is deleted: the rows are simply not shown. */
 export function integrityBoard(db: DB, seasonId: number | null): IntegrityBoardRow[] {
   // The map comes from the round's share of the aim prior, which is the one
   // place a round's map is recorded, and a round with an occupancy measurement
@@ -52,16 +60,16 @@ export function integrityBoard(db: DB, seasonId: number | null): IntegrityBoardR
      LEFT JOIN players p ON p.steamid = r.steamid
      LEFT JOIN integrity_prior_rounds pr
        ON pr.match_id = r.match_id AND pr.ordinal = r.ordinal AND pr.half = r.half
-     WHERE (? IS NULL OR m.season_id = ?)`,
-  ).all(seasonId, seasonId) as { steamid: string; metrics: string; name: string | null; map: string | null; round: string }[];
+     WHERE r.analyzer_version = ? AND (? IS NULL OR m.season_id = ?)`,
+  ).all(ANALYZER_VERSION, seasonId, seasonId) as { steamid: string; metrics: string; name: string | null; map: string | null; round: string }[];
 
   const names = new Map(rows.map((r) => [r.steamid, r.name]));
   const clips = new Map((db.prepare(
     `SELECT c.steamid, COUNT(*) AS n
      FROM integrity_clips c JOIN matches m ON m.id = c.match_id
-     WHERE (? IS NULL OR m.season_id = ?)
+     WHERE c.analyzer_version = ? AND (? IS NULL OR m.season_id = ?)
      GROUP BY c.steamid`,
-  ).all(seasonId, seasonId) as { steamid: string; n: number }[]).map((r) => [r.steamid, r.n]));
+  ).all(ANALYZER_VERSION, seasonId, seasonId) as { steamid: string; n: number }[]).map((r) => [r.steamid, r.n]));
 
   // Names and clip counts are attached AFTER scoring rather than carried
   // through it, so score.ts stays a pure function of the measurements and
@@ -82,9 +90,9 @@ export function integrityPlayer(
      JOIN matches m ON m.id = r.match_id
      LEFT JOIN integrity_reviews v
        ON v.match_id = r.match_id AND v.ordinal = r.ordinal AND v.half = r.half AND v.slot = r.slot
-     WHERE r.steamid = ?
+     WHERE r.steamid = ? AND r.analyzer_version = ?
      ORDER BY r.match_id DESC, r.ordinal, r.half`,
-  ).all(steamid) as {
+  ).all(steamid, ANALYZER_VERSION) as {
     match_id: number; ordinal: number; half: number; slot: number; campaign: string | null;
     metrics: string; computed_at: string; state: string; note: string;
   }[]).map((r) => ({
@@ -95,8 +103,8 @@ export function integrityPlayer(
 
   const clips = (db.prepare(
     `SELECT id, match_id, ordinal, half, slot, start_ms, end_ms, kind, score, detail
-     FROM integrity_clips WHERE steamid = ? ORDER BY score DESC`,
-  ).all(steamid) as {
+     FROM integrity_clips WHERE steamid = ? AND analyzer_version = ? ORDER BY score DESC`,
+  ).all(steamid, ANALYZER_VERSION) as {
     id: number; match_id: number; ordinal: number; half: number; slot: number;
     start_ms: number; end_ms: number; kind: string; score: number; detail: string;
   }[]).map((c) => ({

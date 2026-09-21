@@ -138,6 +138,36 @@ describe('GET /api/admin/integrity', () => {
     expect(body.players[2]).toMatchObject({ ranked: false, composite: null });
   });
 
+  // A round whose replay has been pruned can never be measured again, so its
+  // old-version row and clips stay in the table for good. Two analyzers'
+  // numbers on one board is worse than either alone, and version 3's clips in
+  // particular are the false positives version 4 exists to remove.
+  it('leaves out anything measured by another analyzer version', async () => {
+    const OLD = '76561198000000004';
+    authedCookie(app, db, OLD);
+    const ins = db.prepare(
+      `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
+       VALUES (2, ?, 2, 6, ?, ?, ?, datetime('now'))`,
+    );
+    for (let ordinal = 1; ordinal <= TUNING.MIN_BOARD_ROUNDS; ordinal++) {
+      ins.run(ordinal, OLD, ANALYZER_VERSION - 1, metrics(0.99, 30));
+    }
+    db.prepare(
+      `INSERT INTO integrity_clips (match_id, ordinal, half, slot, steamid, start_ms, end_ms, kind, score, detail, analyzer_version)
+       VALUES (2, 1, 2, 6, ?, 1000, 3000, 'ghost_track', 0.99, '{}', ?), (2, 1, 1, 4, ?, 1000, 3000, 'ghost_track', 0.97, '{}', ?)`,
+    ).run(OLD, ANALYZER_VERSION - 1, SUS, ANALYZER_VERSION - 1);
+
+    const board = (await app.inject({ method: 'GET', url: '/api/admin/integrity', cookies: adminCookie }))
+      .json() as { players: { steamid: string; clips: number }[] };
+    expect(board.players.map((p) => p.steamid)).not.toContain(OLD);
+    expect(board.players.find((p) => p.steamid === SUS)!.clips).toBe(2);
+
+    const page = (await app.inject({ method: 'GET', url: `/api/admin/integrity/${OLD}`, cookies: adminCookie }))
+      .json() as { rounds: unknown[]; clips: unknown[] };
+    expect(page.rounds).toEqual([]);
+    expect(page.clips).toEqual([]);
+  });
+
   it('names the players and counts their clips, so nobody is a 17 digit number', async () => {
     db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('tino', SUS);
     const r = await app.inject({ method: 'GET', url: '/api/admin/integrity', cookies: adminCookie });
