@@ -5,6 +5,7 @@ import { addServer } from '../src/serverPool.js';
 import { recordPhase } from '../src/liveView.js';
 import { recordSignonDrop, markEntered } from '../src/signonDrops.js';
 import { recordPresenceLine } from '../src/presence.js';
+import { setSetting } from '../src/settings.js';
 import { buildLiveBoard, type BoardPlayer } from '../src/admin/liveBoard.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -49,6 +50,15 @@ describe('the match line', () => {
     });
     expect(b.matches[0].teamA).toHaveLength(4);
     expect(b.matches[0].teamB).toHaveLength(4);
+  });
+
+  it('carries the two settings the page cannot work out for itself', () => {
+    // The tooltip's hold ceiling, and the threshold the countdown turns red
+    // at, which must be the same figure the admin feed warns at rather than a
+    // number typed into a stylesheet.
+    expect(board()).toMatchObject({ holdMaxMinutes: 30, lowAlertSeconds: 90 });
+    setSetting(db, 'abandon_low_alert_seconds', '0');
+    expect(board().lowAlertSeconds).toBe(0);
   });
 
   it('says paused when the game is, and waiting when there is no server', () => {

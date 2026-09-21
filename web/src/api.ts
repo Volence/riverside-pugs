@@ -795,7 +795,13 @@ export interface LiveBoardMatch {
   teamB: LiveBoardPlayer[];
   clocks: LiveBoardClock[];
 }
-export interface LiveBoard { now: string; holdMaxMinutes: number; matches: LiveBoardMatch[] }
+export interface LiveBoard {
+  now: string;
+  holdMaxMinutes: number;
+  /** Where a countdown starts reading as nearly out, in seconds; 0 is off. */
+  lowAlertSeconds: number;
+  matches: LiveBoardMatch[];
+}
 export type LeaveClockAction = 'hold' | 'release' | 'add' | 'end';
 
 export interface AdminSetting {

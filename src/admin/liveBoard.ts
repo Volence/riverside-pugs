@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import type { PhaseState } from '../logParse.js';
 import { phaseFor } from '../liveView.js';
 import { spectateFor, type SpectateInfo } from '../spectate.js';
-import { holdMaxSeconds, remainingNow, type PresenceRow } from '../presence.js';
+import { holdMaxSeconds, lowAlertSeconds, remainingNow, type PresenceRow } from '../presence.js';
 
 /**
  * The admin live board: every ongoing match, who is missing from it, and the
@@ -59,7 +59,20 @@ export interface BoardMatch {
   clocks: BoardClock[];
 }
 
-export interface LiveBoard { now: string; holdMaxMinutes: number; matches: BoardMatch[] }
+export interface LiveBoard {
+  /** When this payload was built. The browser does not use it: it anchors
+   *  every countdown on the moment the payload arrived, so that a wrong clock
+   *  on an admin's PC cannot move one. Kept because it is the first thing
+   *  worth knowing when a countdown on the board is being argued about. */
+  now: string;
+  holdMaxMinutes: number;
+  /** The allowance, in seconds, at which a countdown reads as nearly out.
+   *  abandon_low_alert_seconds, the same figure the admin feed warns at, so
+   *  the red on the board and the line in the feed say the same thing. 0 is
+   *  the warning turned off, and then nothing goes red. */
+  lowAlertSeconds: number;
+  matches: BoardMatch[];
+}
 
 /** sqlite's datetime('now') or an ISO string, as epoch milliseconds. */
 const toMs = (t: string): number => Date.parse(t.includes('T') ? t : `${t.replace(' ', 'T')}Z`);
@@ -109,6 +122,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
   return {
     now: now.toISOString(),
     holdMaxMinutes: Math.round(holdMaxSeconds(db) / 60),
+    lowAlertSeconds: lowAlertSeconds(db),
     matches: matches.map((m) => {
       const poppedMs = toMs(m.createdAt);
       const poppedIso = new Date(poppedMs).toISOString();

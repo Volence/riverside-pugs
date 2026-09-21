@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { countdown, countUp, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
+import { countdown, countUp, isLow, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
 
 describe('countdown', () => {
   it('runs down from what the server said, by whole seconds since it said it', () => {
@@ -52,6 +52,16 @@ describe('liveFromUrl', () => {
     expect(liveFromUrl()).toBeNull();
     history.replaceState(null, '', '/admin');
     expect(liveFromUrl()).toBeNull();
+  });
+});
+
+describe('isLow', () => {
+  it('is the setting, inclusive, and never true when the warning is off', () => {
+    expect(isLow(90, 90)).toBe(true);
+    expect(isLow(91, 90)).toBe(false);
+    expect(isLow(0, 90)).toBe(true);
+    expect(isLow(0, 0)).toBe(false);
+    expect(isLow(1, 0)).toBe(false);
   });
 });
 

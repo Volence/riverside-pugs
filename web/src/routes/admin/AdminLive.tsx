@@ -8,7 +8,7 @@ import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
 import { AdminQueuePanel, AdminServersPanel, RecentResultsPanel } from './MatchPanels';
-import { OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, liveFromUrl, reasonText } from '../../liveBoard';
+import { OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
  *  the socket was reconnecting must not leave a countdown wrong for long. */
@@ -61,7 +61,7 @@ export function AdminLive() {
         <Panel><Empty>No match is running.</Empty></Panel>
       ) : board.data.matches.map((m) => (
         <MatchCard key={m.id} match={m} elapsedS={elapsedS} holdMaxMinutes={board.data.holdMaxMinutes}
-          reload={live.reload} isTarget={m.id === target} />
+          lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} />
       ))}
 
       {overview.data && (
@@ -78,8 +78,9 @@ export function AdminLive() {
   );
 }
 
-function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
-  match: LiveBoardMatch; elapsedS: number; holdMaxMinutes: number; reload: () => void; isTarget: boolean;
+function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload, isTarget }: {
+  match: LiveBoardMatch; elapsedS: number; holdMaxMinutes: number; lowAlertSeconds: number;
+  reload: () => void; isTarget: boolean;
 }) {
   // The error is per card, so a failure shows on the match it happened to.
   // Busy is per PLAYER: an rcon call can take the whole rcon timeout against
@@ -124,7 +125,7 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
         {m.clocks.length === 0 ? <span class="muted">No clocks running.</span> : m.clocks.map((c) => {
           const left = countdown(c.remainingS, !c.held, elapsedS) ?? 0;
           return (
-            <span key={c.steamid} class={`live-clock${c.held ? ' is-held' : left <= 90 ? ' is-low' : ''}`}>
+            <span key={c.steamid} class={`live-clock${c.held ? ' is-held' : isLow(left, lowAlertSeconds) ? ' is-low' : ''}`}>
               {c.name} <span class="mono">{fmtClock(left)}</span> {c.held ? 'on hold' : 'to reconnect'}
             </span>
           );
@@ -141,8 +142,8 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
             <ul class="live-roster">
               {team.map((p) => (
                 <PlayerRow key={p.steamid} match={m} player={p} elapsedS={elapsedS}
-                  holdMaxMinutes={holdMaxMinutes} busy={busyId === p.steamid} run={runFor(p.steamid)}
-                  blocked={blocked} />
+                  holdMaxMinutes={holdMaxMinutes} lowAlertSeconds={lowAlertSeconds}
+                  busy={busyId === p.steamid} run={runFor(p.steamid)} blocked={blocked} />
               ))}
             </ul>
           </div>
@@ -152,9 +153,9 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
   );
 }
 
-function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, busy, run, blocked }: {
+function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, lowAlertSeconds, busy, run, blocked }: {
   match: LiveBoardMatch; player: LiveBoardPlayer; elapsedS: number; holdMaxMinutes: number;
-  busy: boolean; run: Run; blocked: string | null;
+  lowAlertSeconds: number; busy: boolean; run: Run; blocked: string | null;
 }) {
   const s = p.status;
   const off = busy || blocked !== null;
@@ -180,7 +181,7 @@ function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, busy, run, b
             <>
               Dropped {fmtClock(countUp(s.sinceS, elapsedS))} ago
               {left !== null && (
-                <span class={`live-row__left mono${s.held ? ' is-held' : left <= 90 ? ' is-low' : ''}`}> {fmtClock(left)} left</span>
+                <span class={`live-row__left mono${s.held ? ' is-held' : isLow(left, lowAlertSeconds) ? ' is-low' : ''}`}> {fmtClock(left)} left</span>
               )}
               {s.held && (
                 <span class="admin-tag"> on hold{holdLeft !== null ? `, releases itself in ${fmtClock(holdLeft)}` : ''}</span>

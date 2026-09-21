@@ -31,6 +31,7 @@ const player = (steamid: string, name: string, team: 'a' | 'b', status: LiveBoar
 const board = (over: Partial<LiveBoard['matches'][number]> = {}): LiveBoard => ({
   now: '2026-09-21T20:10:00.000Z',
   holdMaxMinutes: 30,
+  lowAlertSeconds: 90,
   matches: [{
     id: 81, campaign: 'no_mercy', map: 'l4d_hospital02_subway', state: 'paused', phase: 'paused',
     server: { id: 1, name: 'Dallas' }, teamAScore: 412, teamBScore: 380, elapsedS: 1325,
@@ -177,6 +178,23 @@ describe('the live board', () => {
     expect(carol.disabled).toBe(false);
     fireEvent.click(carol);
     await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '3', 'hold'));
+  });
+
+  it('turns a countdown red at the threshold the admin feed warns at, not a number in the markup', async () => {
+    // bob has 4:18 left: not low under the default 90 seconds, low under 300.
+    mockAdmin.live.mockResolvedValue({ ...board(), lowAlertSeconds: 300 });
+    render(<AdminLive />);
+    const bob = await row('bob');
+    expect(bob.querySelector('.live-row__left.is-low')).toBeTruthy();
+    expect(document.querySelector('.live-clock.is-low')).toBeTruthy();
+  });
+
+  it('never goes red when the warning is turned off', async () => {
+    mockAdmin.live.mockResolvedValue({ ...board(), lowAlertSeconds: 0 });
+    render(<AdminLive />);
+    const bob = await row('bob');
+    expect(bob.querySelector('.live-row__left.is-low')).toBeNull();
+    expect(document.querySelector('.live-clock.is-low')).toBeNull();
   });
 
   it('puts a failure on the card it happened on', async () => {

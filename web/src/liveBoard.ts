@@ -20,6 +20,11 @@ export function countdown(startS: number | null, running: boolean, elapsedS: num
   return Math.max(0, startS - Math.floor(elapsedS));
 }
 
+/** Whether a countdown reads as nearly out. The threshold is the setting the
+ *  admin feed warns at, so the red on the board and the line in the feed mean
+ *  one thing; 0 is that warning turned off, and then nothing goes red. */
+export const isLow = (leftS: number, thresholdS: number): boolean => thresholdS > 0 && leftS <= thresholdS;
+
 /** The same, upward: "dropped 0:42 ago", "1:30 since the pop". */
 export function countUp(startS: number, elapsedS: number): number {
   return startS + Math.floor(elapsedS);
