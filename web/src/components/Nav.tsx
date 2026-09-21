@@ -44,8 +44,8 @@ export function Nav({ session, state }: { session: Session; state: StateSnapshot
         {me?.isAdmin && (
           <a href="/bans" aria-current={path === '/bans' ? 'page' : undefined}>Bans</a>
         )}
-        {me?.isAdmin && (
-          <a href="/admin" aria-current={path === '/admin' ? 'page' : undefined}>Admin</a>
+        {(me?.isAdmin || me?.isMod) && (
+          <a href="/admin" aria-current={path === '/admin' ? 'page' : undefined}>{me?.isAdmin ? 'Admin' : 'Moderation'}</a>
         )}
       </nav>
       {live && (

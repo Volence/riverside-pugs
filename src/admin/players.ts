@@ -4,10 +4,10 @@ import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { displaySr } from '../rating.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
-import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
 import { detectionsForPlayer } from '../inputBursts.js';
 import { publishBanChange } from '../banEvents.js';
+import { ticketsAbout } from '../tickets/views.js';
 
 export interface BanRow {
   id: number;
@@ -139,7 +139,7 @@ export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] 
   }));
 }
 
-export function playerDetail(db: DB, steamid: string) {
+export function playerDetail(db: DB, steamid: string, viewer: string = '') {
   const p = getPlayer(db, steamid);
   if (!p) return null;
   const [row] = searchPlayers(db, steamid, 1).filter((x) => x.steamid === steamid);
@@ -162,7 +162,9 @@ export function playerDetail(db: DB, steamid: string) {
     notes,
     matches,
     penalties: penaltyHistory(db, steamid),
-    reportsAgainst: listReports(db, 'all').filter((r) => r.targetId === steamid),
+    // Tickets about this player that the viewing admin may see. A restricted
+    // one is simply absent for an admin who is not on its list.
+    tickets: ticketsAbout(db, steamid, viewer),
     // Connects that ended before the player was in game, on a map that forced
     // files: likely a consistency rejection, possibly a cancelled load.
     signonDrops: signonDropSummary(db, steamid),

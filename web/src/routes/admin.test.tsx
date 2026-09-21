@@ -17,7 +17,7 @@ async function confirmDialog(name?: string | RegExp) {
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
     players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
-    reports: vi.fn(), audit: vi.fn(),
+    audit: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
@@ -53,7 +53,7 @@ const me = { steamid: '1', name: 'boss', avatar: null, status: 'active', isAdmin
 describe('Admin page', () => {
   it('refuses a non-admin without calling the admin API', () => {
     render(<Admin session={{ kind: 'active', me: { ...me, isAdmin: false } }} />);
-    expect(screen.getByText('Admins only.')).toBeTruthy();
+    expect(screen.getByText('Staff only.')).toBeTruthy();
     expect(mockAdmin.players).not.toHaveBeenCalled();
   });
 
@@ -61,7 +61,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'griefer', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 2 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
     });
@@ -84,7 +84,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'skinner', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       inputFlags: [],
       signonDrops: {
         count: 2, lastAt: '2026-09-19T21:00:00.000Z',
@@ -115,7 +115,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'clean', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
     });

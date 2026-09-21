@@ -55,8 +55,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.get('/api/admin/players/:steamid', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    const detail = playerDetail(db, (req.params as { steamid: string }).steamid);
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const detail = playerDetail(db, (req.params as { steamid: string }).steamid, adminId);
     if (!detail) return reply.code(404).send({ error: 'no such player' });
     return detail;
   });
