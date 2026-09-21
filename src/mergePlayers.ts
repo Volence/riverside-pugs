@@ -169,15 +169,17 @@ export function mergePlayers(
       db.prepare('DELETE FROM tickets WHERE id = ?').run(gone.id);
     }
     db.prepare('UPDATE tickets SET target_id = ? WHERE target_id = ?').run(into, from);
+    // Merging a player into a staff account makes an ordinary ticket a ticket
+    // about staff. No owner list is to hand here, so seedAccess falls back to
+    // every admin but the accused, as the legacy migration does. Before the
+    // access tidy-up below, so a seeded row naming the losing account is
+    // rewritten with the rest rather than left behind.
+    if (hasStaffFlag(db, into)) restrictOpenTicketAbout(db, into, []);
     // A merged account must never sit on the access list of a ticket that is
     // now about itself.
     db.prepare('UPDATE OR IGNORE ticket_access SET steamid = ? WHERE steamid = ?').run(into, from);
     db.prepare('DELETE FROM ticket_access WHERE steamid = ?').run(from);
     db.prepare('DELETE FROM ticket_access WHERE steamid = ? AND ticket_id IN (SELECT id FROM tickets WHERE target_id = ?)').run(into, into);
-    // Merging a player into a staff account makes an ordinary ticket a ticket
-    // about staff. No owner list is to hand here, so seedAccess falls back to
-    // every admin but the accused, as the legacy migration does.
-    if (hasStaffFlag(db, into)) restrictOpenTicketAbout(db, into, []);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
