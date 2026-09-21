@@ -4,6 +4,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction, type Run } from './useAction';
+import { SteamAccountPanel } from './SteamAccountPanel';
 
 export function AdminPlayers({ me }: { me: string }) {
   const [q, setQ] = useState('');
@@ -42,14 +43,16 @@ export function AdminPlayers({ me }: { me: string }) {
           </div>
         )}
       </Panel>
-      {selected ? <PlayerDetail steamid={selected} me={me} onChanged={list.reload} /> : (
+      {selected ? <PlayerDetail steamid={selected} me={me} onChanged={list.reload} onSelect={setSelected} /> : (
         <Panel><Empty>Pick a player to see their history and act on them.</Empty></Panel>
       )}
     </div>
   );
 }
 
-function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string; onChanged: () => void }) {
+function PlayerDetail(
+  { steamid, me, onChanged, onSelect }: { steamid: string; me: string; onChanged: () => void; onSelect: (steamid: string) => void },
+) {
   const { data, reload } = useFetch((s) => adminApi.player(steamid, s), [steamid]);
   const { busy, error, run } = useAction(() => { reload(); onChanged(); });
   const [reason, setReason] = useState('');
@@ -113,6 +116,8 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
       </div>
 
       <MergeSection d={d} busy={busy} run={run} />
+
+      <SteamAccountPanel d={d} busy={busy} run={run} onSelect={onSelect} />
 
       <section>
         <h4>Ban</h4>

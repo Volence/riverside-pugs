@@ -80,6 +80,8 @@ export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
   ['twitch_status', 'player_id'],
   ['endorsements', 'from_id'],
   ['endorsements', 'to_id'],
+  ['player_steam_signals', 'steamid'],
+  ['steam_signal_alerts', 'player_id'],
 ];
 
 export interface MergePlan {
@@ -121,6 +123,8 @@ export function mergePlayers(
   note('rating_history', count('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?', from));
   note('endorsements', count('SELECT COUNT(*) AS n FROM endorsements WHERE from_id = ? OR to_id = ?', from, from));
   note('twitch_status', count('SELECT COUNT(*) AS n FROM twitch_status WHERE player_id = ?', from));
+  note('player_steam_signals', count('SELECT COUNT(*) AS n FROM player_steam_signals WHERE steamid = ?', from));
+  note('steam_signal_alerts', count('SELECT COUNT(*) AS n FROM steam_signal_alerts WHERE player_id = ?', from));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -225,6 +229,13 @@ export function mergePlayers(
       db.prepare('UPDATE OR IGNORE twitch_status SET player_id = ? WHERE player_id = ?').run(into, from);
     }
     db.prepare('DELETE FROM twitch_status WHERE player_id = ?').run(from);
+
+    // Steam signals are dropped, never moved, even when `into` has none. They
+    // describe a Steam account rather than a person: the alt's age, bans and
+    // hours are not the main's, and the next refresh reads the main's own.
+    // The same goes for what the admin feed has already said about the alt.
+    db.prepare('DELETE FROM player_steam_signals WHERE steamid = ?').run(from);
+    db.prepare('DELETE FROM steam_signal_alerts WHERE player_id = ?').run(from);
 
     for (const [table, column] of KEYED) {
       db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

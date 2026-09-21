@@ -61,7 +61,7 @@ built frontend from `dist/public`, which is a build artifact and is gitignored.
 | DB_PATH | data/pug.db | SQLite; WAL mode |
 | COOKIE_SECRET | dev-secret-change-me | **set in production** |
 | ADMIN_STEAMIDS | (empty) | comma-separated SteamID64s, auto-active + admin |
-| STEAM_API_KEY | (none) | optional; enables persona names/avatars |
+| STEAM_API_KEY | (none) | optional; enables persona names/avatars and the admin-only Steam account signals |
 | DEV_MODE | off | `1` enables /api/dev/* and the dev panel |
 | LOG_LISTEN_PORT | 27500 | UDP port the backend binds for srcds logaddress traffic |
 | LOG_PUBLIC_ADDRESS | 127.0.0.1:27500 | host:port handed to `logaddress_add` (the server's view of the backend) |

@@ -678,6 +678,35 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   networks: { ipHash: string; country: string | null; firstSeen: string; lastSeen: string; seenCount: number }[];
   /** Other accounts seen on one of those connections. Evidence, not proof. */
   sharesAddressWith: { steamid: string; name: string; country: string | null; seenCount: number; lastSeen: string }[];
+  /** What Steam says about the account. Null until Steam has been asked, and
+   *  for good on an install with no api key. Context, never a verdict. */
+  steamAccount?: SteamAccount | null;
+}
+
+export interface SteamAccount {
+  checkedAt: string;
+  /** Null for a private profile: Steam does not give the date. */
+  createdAt: string | null;
+  ageDays: number | null;
+  /** What the age is measured against: the first match here, or the day they
+   *  joined when they have not played yet. */
+  reference: { kind: 'first_match' | 'joined'; at: string } | null;
+  daysBeforeReference: number | null;
+  visibility: 'public' | 'private' | 'unknown';
+  profileConfigured: boolean | null;
+  bans: { vac: number; game: number; daysSinceLast: number | null; community: boolean; economy: string; checkedAt: string } | null;
+  /** `hidden` is never zero hours: game details are private. */
+  l4d1:
+    | { state: 'visible'; hours: number }
+    | { state: 'not_owned' }
+    | { state: 'hidden'; lastSeenHours: number | null }
+    | null;
+  level: number | null;
+  /** Last account seen lending this one the game through Family Sharing, and
+   *  the player here it belongs to, if any. */
+  lender: { steamid: string; seenAt: string; player: { steamid: string; name: string; banned: boolean } | null } | null;
+  /** Plain-worded and already hedged by the server. */
+  flags: { kind: string; text: string }[];
 }
 
 /** Team SR, the gap and the paper odds. `source` says which ratings it came
@@ -936,6 +965,8 @@ export const adminApi = {
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
   unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),
+  steamRefresh: (steamid: string) =>
+    post<{ ok: true; refreshed: number }>(`/api/admin/players/${steamid}/steam-refresh`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),

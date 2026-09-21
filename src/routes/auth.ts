@@ -45,6 +45,9 @@ export interface AuthRouteOpts {
   db: DB;
   verifyLogin: typeof VerifyFn;
   fetchPersona: typeof PersonaFn;
+  /** Look up what Steam says about this account, for the admin player page.
+   *  Returns at once: a login never waits on it and never fails because of it. */
+  refreshSignals?: (steamid: string) => void;
   discordApi: DiscordApi | null;
   membership?: GuildMembership;
 }
@@ -77,6 +80,11 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
     const persona = await opts.fetchPersona(steamid, config.steamApiKey);
     upsertPlayer(db, { steamid, name: persona.name, avatar: persona.avatar }, config.adminSteamIds);
     setSession(reply, db, steamid, config.publicUrl.startsWith('https://'));
+    try {
+      opts.refreshSignals?.(steamid);
+    } catch (err) {
+      console.error('[steamSignals] could not start a refresh at login:', err);
+    }
     // Someone already linked who has since joined the guild is activated here
     // rather than having to relink.
     if (opts.discordApi) await applyGate(db, opts.discordApi, steamid);

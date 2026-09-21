@@ -651,6 +651,56 @@ CREATE TABLE IF NOT EXISTS input_detections (
 );
 CREATE INDEX IF NOT EXISTS input_detections_steamid ON input_detections(steamid, at);
 CREATE INDEX IF NOT EXISTS input_detections_match ON input_detections(match_id);
+
+-- What Steam itself says about an account: age, bans elsewhere, L4D1 hours,
+-- level, and whose copy of the game it plays on. One row per player, refreshed
+-- at login, at match start and slowly in the background (src/steamSignals.ts).
+-- Context for an admin reading a player page, never a verdict, and admin-only:
+-- nothing here may reach a public route, the WebSocket or a public embed.
+-- NULL always means "not known": a private profile or a failed call leaves the
+-- column alone rather than writing a zero that would read as a fact.
+CREATE TABLE IF NOT EXISTS player_steam_signals (
+  steamid TEXT PRIMARY KEY REFERENCES players(steamid),
+  -- Unix seconds, as Steam sends it. Absent from a private profile, and kept
+  -- once seen: an account's creation date does not change when it goes private.
+  time_created INTEGER,
+  -- communityvisibilitystate: 3 is public, anything else is not.
+  visibility INTEGER,
+  -- 1 once the account has set up a community profile.
+  profile_state INTEGER,
+  vac_banned INTEGER,
+  vac_bans INTEGER,
+  game_bans INTEGER,
+  -- As of bans_checked_at, not as of now: Steam sends an age, not a date.
+  days_since_last_ban INTEGER,
+  community_banned INTEGER,
+  economy_ban TEXT,
+  bans_checked_at TEXT,
+  -- 0: game details are private, so l4d1_minutes is whatever was last seen
+  -- (or NULL) and must be shown as hidden. 1 with NULL minutes: the library
+  -- is visible and L4D1 is not in it.
+  games_visible INTEGER,
+  l4d1_minutes INTEGER,
+  steam_level INTEGER,
+  -- Family Sharing. Steam only names a lender while the player is in game, so
+  -- this is the last NON-zero answer and when it was given, not the current one.
+  lender_id TEXT,
+  lender_seen_at TEXT,
+  checked_at TEXT NOT NULL
+);
+
+-- What has already been said in the admin feed about a player's Steam account,
+-- so the same fact is not posted again every match. The marker is what makes a
+-- condition news again: the ban count for recent_ban, the lender's id for
+-- banned_lender.
+CREATE TABLE IF NOT EXISTS steam_signal_alerts (
+  player_id TEXT NOT NULL REFERENCES players(steamid),
+  kind TEXT NOT NULL,
+  marker TEXT NOT NULL,
+  match_id INTEGER,
+  at TEXT NOT NULL,
+  PRIMARY KEY (player_id, kind, marker)
+);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
