@@ -6,6 +6,7 @@ import { reindexRecentMatches } from './reindex.js';
 import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
+import { TicketSync } from './discord/ticketSync.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
 import { GuildMembership } from './discord/membership.js';
@@ -891,6 +892,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // must never wait on, or fail because of, Discord.
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
+  let ticketSync: TicketSync | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -940,6 +942,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
+        // After the feed: a problem found on the first pass has somewhere to go.
+        ticketSync = new TicketSync({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        ticketSync.start();
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
@@ -954,6 +959,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
 
   app.addHook('onClose', async () => {
+    ticketSync?.stop();
     adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);
@@ -969,6 +975,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(ticketRoutes, {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
+    guildId: deps.config.discord?.guildId ?? null,
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,

@@ -916,6 +916,11 @@ export interface CaseFile {
   inputFlags: AdminPlayerDetail['inputFlags']; aliases: AdminPlayerDetail['aliases'];
   sharesAddressWith: AdminPlayerDetail['sharesAddressWith']; tickets: TicketSummary[];
 }
+export interface TicketDiscussion {
+  state: 'ready' | 'pending' | 'unconfigured' | 'about_staff' | 'none';
+  surface: 'forum' | 'private' | null;
+  url: string | null;
+}
 export interface TicketDetail {
   ticket: TicketSummary & { outcomeNote: string; openedBy: string | null; openedByName: string | null; closedBy: string | null; closedByName: string | null };
   reports: TicketReport[];
@@ -923,6 +928,7 @@ export interface TicketDetail {
   bans: { id: number; reason: string; createdBy: string; createdByName: string | null; createdAt: string; expiresAt: string | null; liftedAt: string | null }[];
   access: { steamid: string; name: string }[];
   accessCandidates: { steamid: string; name: string }[];
+  discussion: TicketDiscussion;
   caseFile: CaseFile | null;
   /** banCapMinutes null means no cap: the viewer is an admin. */
   viewer: { isAdmin: boolean; banCapMinutes: number | null };

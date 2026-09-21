@@ -1,11 +1,12 @@
 import type { DB } from '../db.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
+import { subscribeBanChanges } from '../banEvents.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
 import { getTicketRow, hasStaffFlag, type TicketRow } from '../tickets/store.js';
 import {
-  forbiddenForumThreads, insertThread, setThreadCard, setThreadLocked, setThreadState, staffThread, threadsInState,
-  type ThreadRow, type ThreadSurface,
+  forbiddenForumThreads, forumAudience, insertThread, setThreadCard, setThreadLocked, setThreadState, staffThread,
+  surfaceFor, threadsInState, type ThreadRow, type ThreadSurface,
 } from '../tickets/threads.js';
 import { accessDm, reportLine, ticketCard } from './ticketCard.js';
 import type { BotTransport } from './transport.js';
@@ -53,6 +54,8 @@ export class TicketSync {
       this.timer = setInterval(() => this.enqueue(() => this.reconcile()), every);
       this.timer.unref();
     }
+    // A banned moderator stops being active staff at once, not in five minutes.
+    this.offs.push(subscribeBanChanges(() => this.enqueue(() => this.step(() => this.syncAccess()))));
     // "On bot ready": this is constructed once the transport is connected.
     this.enqueue(() => this.reconcile());
   }
@@ -96,9 +99,11 @@ export class TicketSync {
    *   0. eject the accused from their own private thread if a merge left
    *      them a member, whatever that thread's lock state;
    *   1. delete forum posts that must not exist, BEFORE anything can widen
-   *      who reads the forum (Task 6 runs the access sync after this);
+   *      who reads the forum;
    *   2. retire threads left behind by a fold;
-   *   3. every open ticket, and every closed one not yet locked.
+   *   3. every open ticket, and every closed one not yet locked;
+   *   4. last, sync the forum's access list, so a post that step 1 or the
+   *      per-ticket pass failed to delete still keeps its subject out.
    */
   async reconcile(): Promise<void> {
     await this.step(() => this.ejectAccused());
@@ -112,6 +117,9 @@ export class TicketSync {
        ORDER BY 1`,
     ).all() as { id: number }[]).map((r) => r.id);
     for (const id of ids) await this.one(id);
+    // Last, on purpose: by now every post that must not exist is gone, or
+    // forumAudience is still leaving its subject out.
+    await this.step(() => this.syncAccess());
   }
 
   /** One stage of a pass, never throwing, so a failure in it cannot stop the
@@ -125,18 +133,6 @@ export class TicketSync {
     }
   }
 
-  /** Where this ticket's staff thread belongs, or null for nowhere. */
-  private surfaceFor(t: TicketRow): ThreadSurface | null {
-    const { db } = this.deps;
-    if (t.restricted === 1) return (getSetting(db, 'discord_tickets_channel_id') ?? '') ? 'private' : null;
-    // A normal ticket about staff has no Discord thread at all: the forum is
-    // readable by the accused, and with no access list there is nobody to put
-    // in a private one. It is worked on the site. This is the ticket that
-    // restrictOpenTicketAbout answered 'nobody' for.
-    if (hasStaffFlag(db, t.target_id)) return null;
-    return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? 'forum' : null;
-  }
-
   async reconcileTicket(id: number): Promise<void> {
     const { db, transport } = this.deps;
     const t = getTicketRow(db, id);
@@ -145,7 +141,7 @@ export class TicketSync {
     await this.removeForbiddenPosts(id);
     await this.retireFolded(id);
     await this.notifyAccess(t);
-    const surface = this.surfaceFor(t);
+    const { surface } = surfaceFor(db, t);
     let thread = staffThread(db, id);
     if (thread && !(await transport.threads.exists(thread.thread_id))) {
       // Deleted by hand in Discord. Remember that, and make another.
@@ -394,5 +390,16 @@ export class TicketSync {
     }
     setThreadLocked(db, thread.id, want);
     thread.locked = want ? 1 : 0;
+  }
+
+  /** The forum's member overwrites are exactly forumAudience. */
+  private async syncAccess(): Promise<void> {
+    const { db, transport } = this.deps;
+    const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
+    if (!forumId) return;
+    const r = await transport.threads.syncMemberAccess(forumId, forumAudience(db));
+    if (r.added.length || r.removed.length || r.failed.length) {
+      console.log(`[discord] tickets forum access: +${r.added.length} -${r.removed.length}, ${r.failed.length} not in the server`);
+    }
   }
 }

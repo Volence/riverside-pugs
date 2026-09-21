@@ -84,6 +84,11 @@ describe('working tickets over HTTP', () => {
     expect((await get(ADMIN, `/api/mod/tickets/${id}`)).json().viewer).toEqual({ isAdmin: true, banCapMinutes: null });
   });
 
+  it('says the Discord discussion is not configured when it is not', async () => {
+    const d = (await get(MOD, `/api/mod/tickets/${id}`)).json();
+    expect(d.discussion).toEqual({ state: 'unconfigured', surface: null, url: null });
+  });
+
   it('claim, ban, close and reopen work and are audited', async () => {
     expect((await post(MOD, `/api/mod/tickets/${id}/claim`, { claim: true })).statusCode).toBe(200);
     expect((await get(MOD, '/api/mod/tickets?filter=mine')).json().tickets).toHaveLength(1);

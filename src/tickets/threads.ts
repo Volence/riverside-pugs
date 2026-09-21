@@ -1,4 +1,6 @@
 import type { DB } from '../db.js';
+import { getSetting } from '../settings.js';
+import { hasStaffFlag } from './store.js';
 
 export type ThreadSurface = 'forum' | 'private';
 export type ThreadState = 'open' | 'ended' | 'folded' | 'deleted';
@@ -74,4 +76,41 @@ export function forbiddenForumThreads(db: DB, ticketId?: number): ThreadRow[] {
      ORDER BY th.id`,
   ).all() as ThreadRow[];
   return ticketId === undefined ? rows : rows.filter((r) => r.ticket_id === ticketId);
+}
+
+/**
+ * Where a ticket's staff thread belongs, and why nowhere when it is nowhere.
+ * One function, used by the reconciler to act and by the ticket page to
+ * explain, so the two cannot disagree.
+ */
+export function surfaceFor(
+  db: DB, t: { restricted: number; target_id: string },
+): { surface: ThreadSurface | null; why: 'ok' | 'unconfigured' | 'about_staff' } {
+  if (t.restricted === 1) {
+    return (getSetting(db, 'discord_tickets_channel_id') ?? '') ? { surface: 'private', why: 'ok' } : { surface: null, why: 'unconfigured' };
+  }
+  // A normal ticket about staff has no Discord thread at all: the forum is
+  // readable by the accused, and with no access list there is nobody to put
+  // in a private one. This is the ticket restrictOpenTicketAbout answered
+  // 'nobody' for. It is worked on the site.
+  if (hasStaffFlag(db, t.target_id)) return { surface: null, why: 'about_staff' };
+  return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? { surface: 'forum', why: 'ok' } : { surface: null, why: 'unconfigured' };
+}
+
+/**
+ * The Discord ids that may read the staff forum: linked, active moderators
+ * and admins. Minus anyone a forum post is still about: forbiddenForumThreads
+ * lists such posts for deletion, and until Discord has confirmed it (state
+ * 'deleted') that person is kept out, so a failed deletion can never become
+ * the accused reading their own case.
+ */
+export function forumAudience(db: DB): string[] {
+  return (db.prepare(
+    `SELECT p.discord_id FROM players p
+     WHERE p.status = 'active' AND (p.is_admin = 1 OR p.is_mod = 1) AND p.discord_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
+         WHERE t.target_id = p.steamid AND th.surface = 'forum' AND th.state != 'deleted')
+     ORDER BY p.discord_id`,
+  ).all() as { discord_id: string }[]).map((r) => r.discord_id);
 }

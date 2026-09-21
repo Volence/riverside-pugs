@@ -14,13 +14,15 @@ export interface TicketRouteOpts {
   matchmaker: Matchmaker;
   broadcast: (event: string) => void;
   adminSteamIds: string[];
+  /** The Discord server, for links to threads. Null when Discord is not configured. */
+  guildId: string | null;
 }
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
  *  ticket is restricted. */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
-  const { db, matchmaker, broadcast, adminSteamIds } = opts;
+  const { db, matchmaker, broadcast, adminSteamIds, guildId } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
@@ -66,7 +68,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
   app.get('/api/mod/tickets/:id', async (req, reply) => {
     const me = requireMod(req, reply);
     if (!me) return reply;
-    const d = ticketDetail(db, Number((req.params as { id: string }).id), me);
+    const d = ticketDetail(db, Number((req.params as { id: string }).id), me, { guildId });
     if (!d) return reply.code(404).send({ error: 'no such ticket' });
     return { ...d, caseFile: caseFile(db, d.ticket.targetId, me) };
   });

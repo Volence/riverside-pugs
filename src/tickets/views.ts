@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
 import { canSeeTicket, getTicketRow } from './store.js';
+import { staffThread, surfaceFor } from './threads.js';
 
 /** The visibility rule as SQL, for lists. Must say exactly what canSeeTicket
  *  says; tests/ticketRoutes.test.ts holds the two together. */
@@ -57,7 +58,7 @@ export function ticketsAbout(db: DB, targetId: string, viewer: string): TicketSu
     .all({ viewer, targetId }) as SummaryRow[]).map(toSummary);
 }
 
-export function ticketDetail(db: DB, id: number, viewer: string) {
+export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId?: string | null } = {}) {
   const row = getTicketRow(db, id);
   if (!row || !canSeeTicket(db, row, viewer)) return null;
   const s = db.prepare(`${SUMMARY} WHERE t.id = ?`).get(id) as SummaryRow;
@@ -95,12 +96,25 @@ export function ticketDetail(db: DB, id: number, viewer: string) {
   ).all(row.target_id, id) : [];
   const me = db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(viewer) as { is_admin: number } | undefined;
   const isAdmin = me?.is_admin === 1;
+  // What the page says about Discord. 'pending' is an open ticket whose
+  // thread the bot has not made yet; a closed ticket that never had one
+  // (every ticket migrated from the old reports) is simply 'none'.
+  const thread = staffThread(db, id);
+  const where = surfaceFor(db, row);
+  const discussion = {
+    state: thread ? 'ready' as const
+      : where.why === 'unconfigured' ? 'unconfigured' as const
+        : where.why === 'about_staff' ? 'about_staff' as const
+          : row.status === 'open' ? 'pending' as const : 'none' as const,
+    surface: thread?.surface ?? where.surface,
+    url: thread && opts.guildId ? `https://discord.com/channels/${opts.guildId}/${thread.thread_id}` : null,
+  };
   return {
     ticket: {
       ...toSummary(s), outcomeNote: s.outcome_note, openedBy: s.opened_by, openedByName: s.opened_name,
       closedBy: s.closed_by, closedByName: s.closed_name,
     },
-    reports, events, bans, access, accessCandidates,
+    reports, events, bans, access, accessCandidates, discussion,
     viewer: { isAdmin, banCapMinutes: isAdmin ? null : Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080') },
   };
 }

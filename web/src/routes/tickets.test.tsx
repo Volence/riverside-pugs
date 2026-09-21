@@ -28,6 +28,7 @@ const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
   reports: [{ id: 1, reporterId: '3', reporterName: 'Rep', category: 'cheating', text: 'saw me through a wall', matchId: 66, campaign: 'dead_air', moment: { ordinal: 2, half: 1, tMs: 61500 }, createdAt: '2026-09-21T10:00:00.000Z' }],
   events: [{ id: 1, actorId: null, actorName: null, kind: 'opened', detail: {}, createdAt: '2026-09-21T10:00:00.000Z' }],
   bans: [], access: [], accessCandidates: [],
+  discussion: { state: 'unconfigured', surface: null, url: null },
   caseFile: { steamid: '7', name: 'Walls', avatar: null, status: 'active', sr: 1500, games: 40, createdAt: '2026-08-01', activeBan: null, bans: [], penalties: [], timeout: null, inputFlags: [], aliases: [], sharesAddressWith: [], tickets: [summary] },
   viewer: { isAdmin: false, banCapMinutes: 10080 },
   ...over,
@@ -57,6 +58,17 @@ describe('the Tickets tab', () => {
     expect(screen.queryByRole('tab', { name: 'Players' })).toBeNull();
     expect(mockAdmin.players).not.toHaveBeenCalled();
     expect(screen.getByText(/2 reports from 2 people/)).toBeTruthy();
+  });
+
+  it('says when the Discord discussion is not configured, and links to it when it exists', async () => {
+    history.replaceState(null, '', '/admin?ticket=12');
+    const first = render(<Admin session={{ kind: 'active', me: mod }} />);
+    await screen.findByText(/Discord discussion is not configured/);
+    first.unmount();
+    mockMod.ticket.mockResolvedValue(detail({ discussion: { state: 'ready', surface: 'forum', url: 'https://discord.com/channels/g1/555' } }));
+    render(<Admin session={{ kind: 'active', me: mod }} />);
+    const link = await screen.findByRole('link', { name: /staff thread in Discord/i }) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('https://discord.com/channels/g1/555');
   });
 
   it('shows a count on each filter', async () => {

@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { modApi, type TicketDetail, type TicketEvent } from '../../api';
+import { modApi, type TicketDetail, type TicketDiscussion, type TicketEvent } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
@@ -10,6 +10,23 @@ const OUTCOMES = [['action_taken', 'Action taken'], ['warned', 'Warned'], ['no_a
 const LENGTHS: [minutes: number | null, label: string][] = [
   [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [43200, '30 days'], [null, 'Permanent'],
 ];
+
+/** What to say about Discord, in plain words, for each state. */
+function Discussion({ d }: { d: TicketDiscussion }) {
+  if (d.state === 'ready') {
+    return (
+      <p class="muted">
+        The discussion is in Discord{d.surface === 'private' ? ', in a private thread' : ''}.{' '}
+        {d.url ? <a href={d.url} target="_blank" rel="noreferrer">Open the staff thread in Discord</a> : null}
+      </p>
+    );
+  }
+  const text = d.state === 'unconfigured' ? 'Discord discussion is not configured. An admin can set the tickets forum and the tickets channel in Settings; until then this ticket is worked here.'
+    : d.state === 'pending' ? 'The Discord thread for this ticket has not been made yet. The bot makes it within a few minutes of being online.'
+      : d.state === 'about_staff' ? 'This ticket is about a member of staff and is not restricted, so it has no Discord thread. Work it here.'
+        : 'This ticket has no Discord thread.';
+  return <p class="muted">{text}</p>;
+}
 
 const eventText = (e: TicketEvent): string => {
   const who = e.actorName ?? 'A player';
@@ -59,7 +76,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
       {t.restricted && (
         <section class="ticket-restricted">
-          <p>Only the people listed here can see this ticket. Anyone with the Discord Administrator permission can read every channel on the Discord server, so keep the discussion of this one off Discord if that includes the accused.</p>
+          <p>Only the people listed here can see this ticket, and its Discord thread is private to the same people. Anyone with the Discord Administrator permission can read every channel and thread on the Discord server all the same, so if that includes the accused, keep the discussion here and out of Discord.</p>
           <ul class="admin-list">{data.access.map((a) => <li key={a.steamid}>{a.name}</li>)}</ul>
           {data.accessCandidates.length > 0 && (
             <div class="admin-form">
@@ -121,7 +138,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
         <ul class="admin-list">
           {data.events.map((e) => <li key={e.id}><span class="muted">{fmtTime(e.createdAt)}</span> {eventText(e)}</li>)}
         </ul>
-        <p class="muted">The moderators' discussion will appear here once the Discord forum is connected.</p>
+        <Discussion d={data.discussion} />
       </section>
 
       <section>
