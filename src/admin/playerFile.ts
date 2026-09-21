@@ -99,10 +99,14 @@ export function playerFile(
 
   const row = searchPlayers(db, canonical, 1).find((p) => p.steamid === canonical);
   const timeline = playerTimeline(db, canonical, viewer.steamid);
+  // Built here and handed on, like the timeline: both this section and the
+  // glance want the analyzer rank, and each call to it scores the whole
+  // board off every round row at the current version.
+  const ev = evidence(db, canonical);
   // canOpenFile above already refused any viewer who is neither admin nor
   // mod, which is the only reason playerFileSummary ever refuses one: a
   // staff viewer who reached this line always gets a summary back.
-  const glance = playerFileSummary(db, canonical, viewer, { now, timeline });
+  const glance = playerFileSummary(db, canonical, viewer, { now, timeline, analyzer: ev.analyzer });
   if (!glance) throw new Error(`playerFileSummary refused a staff viewer that canOpenFile already allowed for ${canonical}`);
   const redact = banRedactor(db, canonical, viewer.steamid);
   const ban = activeBan(db, canonical, now);
@@ -141,7 +145,7 @@ export function playerFile(
       matches,
       tickets: ticketsAbout(db, canonical, viewer.steamid),
       notes,
-      evidence: evidence(db, canonical),
+      evidence: ev,
     },
     actions: fileActions(db, viewer, canonical),
     lastReview: lastReviewOf(db, canonical),

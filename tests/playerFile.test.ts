@@ -77,6 +77,26 @@ describe('the Player File', () => {
     expect(playerFile(db, P, fileViewer(db, ADMIN))!.actions).toContain('ban');
   });
 
+  // The board reads every integrity_rounds row at the current analyzer
+  // version and JSON.parses each blob, synchronously, on the one thread that
+  // also holds the game servers' heartbeats. Opening a file used to do it
+  // twice: once for the evidence section and once for the glance.
+  it('builds the analyzer board once, not once per reader of it', () => {
+    const real = db.prepare.bind(db);
+    let boards = 0;
+    // The board's own query is the one that reaches for the round's map
+    // through the aim prior; integrityPlayer reads the same table without it.
+    db.prepare = ((sql: string) => {
+      if (sql.includes('FROM integrity_rounds r') && sql.includes('pr.map')) boards++;
+      return real(sql);
+    }) as typeof db.prepare;
+
+    const file = playerFile(db, P, fileViewer(db, ADMIN))!;
+    db.prepare = real;
+    expect(boards).toBe(1);
+    expect(file.glance.analyzer).toEqual(file.sections.evidence.analyzer);
+  });
+
   it('withholds a restricted ticket\'s ban reason in the standing section and on the ban list', () => {
     const t = openStaffTicket(db, ADMIN, { targetId: P, restricted: true }, { adminSteamIds: [ADMIN] }) as { ticketId: number };
     setRestricted(db, t.ticketId, ADMIN, true, [ADMIN]);

@@ -72,7 +72,7 @@ export interface PlayerFileSummary {
 
 export function playerFileSummary(
   db: DB, steamid: string, viewer: FileViewer,
-  opts: { now?: Date; timeline?: TimelineItem[] } = {},
+  opts: { now?: Date; timeline?: TimelineItem[]; analyzer?: AnalyzerRank | null } = {},
 ): PlayerFileSummary | null {
   if (!viewer.isAdmin && !viewer.isMod) return null;
   const canonical = resolveAlias(db, steamid);
@@ -83,6 +83,11 @@ export function playerFileSummary(
   // Reused when the caller has already built one: the file asks for the
   // timeline anyway and building it twice is the whole cost of this page.
   const timeline = opts.timeline ?? playerTimeline(db, canonical, viewer.steamid);
+  // Same bargain for the analyzer rank, and a sharper one: every call to
+  // analyzerRankOf scores the whole board, reading and parsing every round
+  // at the current version, synchronously. `null` is a real answer here, so
+  // this asks whether the caller passed one rather than whether it is set.
+  const analyzer = 'analyzer' in opts ? opts.analyzer ?? null : analyzerRankOf(db, canonical);
   const since = new Date(now.getTime() - EVIDENCE_WINDOW_DAYS * 86_400_000).toISOString();
 
   const counts = new Map<EvidenceSource, number>();
@@ -115,7 +120,7 @@ export function playerFileSummary(
     sharesAddressWith: sharesAddressWith(db, canonical).map((s) => ({ steamid: s.steamid, name: s.name })),
     steamFlags: steam?.flags ?? [],
     evidence: [...counts].map(([source, count]) => ({ source, count })).sort((a, b) => a.source.localeCompare(b.source)),
-    analyzer: analyzerRankOf(db, canonical),
+    analyzer,
     lastReview: lastReviewOf(db, canonical),
     fileUrl: canOpenFile(db, viewer, canonical) ? `/admin/people/${canonical}` : null,
   };
