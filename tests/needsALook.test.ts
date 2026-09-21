@@ -4,7 +4,9 @@ import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { addAlias } from '../src/aliases.js';
 import { fileViewer } from '../src/admin/fileAccess.js';
 import { markLookedAt } from '../src/admin/reviews.js';
-import { needsALook } from '../src/admin/needsALook.js';
+import { everyoneMeasured, needsALook } from '../src/admin/needsALook.js';
+import { ANALYZER_VERSION } from '../src/integrity/store.js';
+import { TUNING } from '../src/integrity/constants.js';
 
 const P = '76561199000000001';
 const ALT = '76561199000000002';
@@ -79,5 +81,63 @@ describe('Needs a look', () => {
   it('leaves off an id that has never signed in here, because it has no file to open', () => {
     flag(STRANGER, '2026-09-20T10:00:00.000Z');
     expect(needsALook(db, fileViewer(db, ADMIN))).toEqual([]);
+  });
+});
+
+/** `observed` on-target blocks out of 40 that the prior expects 4 of, as the
+ *  board's own fixtures write them. */
+const metrics = (fidMax: number, observed: number) =>
+  JSON.stringify({
+    fidMax, fidP95: fidMax / 2, windows: 12, scoreable: 10, fidSum: fidMax * 5, eligiblePairs: 200,
+    occ: { observed, expected: 4, expectedSq: 0.4, blocks: 40, pairs: 200 },
+    gates: { considered: 600, notLive: 50, notGhost: 150, inGrace: 100, tooClose: 50, occluded: 50, passed: 200 },
+  });
+
+/** Analysed rounds for one player, with no clip and nothing else attached:
+ *  the case the retired board listed and nothing else does. */
+function measure(steamid: string, slot: number, rounds: number, fidMax: number) {
+  db.prepare("INSERT OR IGNORE INTO matches (id, season_id, state, campaign) VALUES (1, 1, 'completed', 'farm')").run();
+  const ins = db.prepare(
+    `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
+     VALUES (1, ?, 1, ?, ?, ?, ?, datetime('now'))`,
+  );
+  const prior = db.prepare(
+    `INSERT OR IGNORE INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts, map, analyzer_version)
+     VALUES (1, ?, 1, 100, '[]', 'l4d_vs_farm01_hilltop', ?)`,
+  );
+  for (let ordinal = 1; ordinal <= rounds; ordinal++) {
+    ins.run(ordinal, slot, steamid, ANALYZER_VERSION, metrics(fidMax, Math.round(fidMax * 12)));
+    prior.run(ordinal, ANALYZER_VERSION);
+  }
+}
+
+describe('everyone the analyzer has measured', () => {
+  it('lists a ranked player who has no flagged clip and nothing waiting to be read', () => {
+    measure(P, 0, TUNING.MIN_BOARD_ROUNDS, 0.9);
+    measure(ALT, 1, TUNING.MIN_BOARD_ROUNDS, 0.2);
+
+    expect(needsALook(db, fileViewer(db, ADMIN))).toEqual([]);
+    const measured = everyoneMeasured(db, fileViewer(db, ADMIN));
+    expect(measured.map((m) => m.steamid).sort()).toEqual([P, ALT].sort());
+    const p = measured.find((m) => m.steamid === P)!;
+    expect(p).toMatchObject({ name: 'p001', ranked: true, of: 2, clips: 0 });
+    expect(p.rank).toBe(1);
+  });
+
+  it('carries an unranked player with ranked false rather than a rank of nothing', () => {
+    measure(P, 0, 1, 0.9);
+    const [only] = everyoneMeasured(db, fileViewer(db, ADMIN));
+    expect(only).toMatchObject({ steamid: P, ranked: false, rank: null, of: 0 });
+  });
+
+  it('never shows a moderator a colleague, themselves, or an id with no player row', () => {
+    measure(P, 0, TUNING.MIN_BOARD_ROUNDS, 0.9);
+    measure(MOD, 1, TUNING.MIN_BOARD_ROUNDS, 0.8);
+    measure(ADMIN, 2, TUNING.MIN_BOARD_ROUNDS, 0.7);
+    measure(STRANGER, 3, TUNING.MIN_BOARD_ROUNDS, 0.6);
+
+    expect(everyoneMeasured(db, fileViewer(db, MOD)).map((m) => m.steamid)).toEqual([P]);
+    expect(everyoneMeasured(db, fileViewer(db, ADMIN)).map((m) => m.steamid).sort())
+      .toEqual([P, MOD, ADMIN].sort());
   });
 });

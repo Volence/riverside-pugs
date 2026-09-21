@@ -1093,6 +1093,10 @@ export interface NeedsALookRow {
   openTickets: number; analyzer: AnalyzerRank | null;
 }
 
+/** One row of "everyone the analyzer has measured": the board's own columns
+ *  plus the name to print. Mirrors MeasuredRow in src/admin/needsALook.ts. */
+export type MeasuredRow = AnalyzerRank & { name: string };
+
 export interface PeopleBan {
   id: number; steamid: string; name: string; reason: string; length: string;
   createdAt: string; expiresAt: string | null; createdByName: string | null;
@@ -1108,7 +1112,9 @@ export const peopleApi = {
   file: (steamid: string, signal?: AbortSignal) =>
     get<PlayerFileData>(`/api/admin/people/${encodeURIComponent(steamid)}`, signal),
   review: (signal?: AbortSignal) =>
-    get<{ players: NeedsALookRow[]; health: CaptureHealth }>('/api/admin/people/review', signal),
+    get<{ players: NeedsALookRow[]; measured: MeasuredRow[]; health: CaptureHealth }>(
+      '/api/admin/people/review', signal,
+    ),
   bans: (filter: 'active' | 'expired' | 'all', q: string, signal?: AbortSignal) =>
     get<{ bans: PeopleBan[] }>(`/api/admin/people/bans?filter=${filter}&q=${encodeURIComponent(q)}`, signal),
   note: (steamid: string, text: string) =>

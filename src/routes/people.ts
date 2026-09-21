@@ -5,7 +5,8 @@ import { logAdmin } from '../admin/audit.js';
 import { addNote, searchPlayers } from '../admin/players.js';
 import { captureHealth } from '../integrityFlags.js';
 import { canDo, canOpenFile, fileViewer, type FileAction } from '../admin/fileAccess.js';
-import { needsALook } from '../admin/needsALook.js';
+import { everyoneMeasured, needsALook } from '../admin/needsALook.js';
+import { analyzerRanks } from '../admin/analyzerRanks.js';
 import { peopleBans } from '../admin/peopleBans.js';
 import { playerFile } from '../admin/playerFile.js';
 import { markLookedAt } from '../admin/reviews.js';
@@ -63,10 +64,21 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
   app.get('/api/admin/people/review', async (req, reply) => {
     const me = requireMod(req, reply);
     if (!me) return reply;
+    const viewer = fileViewer(db, me);
+    // Scored once and handed to both lists: the board reads and parses every
+    // round row at the current analyzer version, and the two lists want the
+    // same numbers.
+    const ranks = analyzerRanks(db);
     // Capture health rides along for the same reason it rides along with the
     // board today: an empty list cannot otherwise tell "nobody flagged"
     // apart from "the pipeline is silently broken".
-    return { players: needsALook(db, fileViewer(db, me)), health: captureHealth(db) };
+    return {
+      players: needsALook(db, viewer, { ranks }),
+      // Being measured is not evidence, so nobody here is in the queue for
+      // that reason alone; this is the population the retired board listed.
+      measured: everyoneMeasured(db, viewer, ranks),
+      health: captureHealth(db),
+    };
   });
 
   app.get('/api/admin/people/bans', async (req, reply) => {

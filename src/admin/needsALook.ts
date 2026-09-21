@@ -37,8 +37,10 @@ export interface NeedsALookRow {
  * here before anything is compared.
  */
 export function needsALook(
-  db: DB, viewer: FileViewer, adapters: TimelineAdapter[] = ADAPTERS,
+  db: DB, viewer: FileViewer,
+  opts: { adapters?: TimelineAdapter[]; ranks?: Map<string, AnalyzerRank> } = {},
 ): NeedsALookRow[] {
+  const adapters = opts.adapters ?? ADAPTERS;
   const newest = new Map<string, { at: string; sources: Set<EvidenceSource> }>();
   for (const adapter of adapters) {
     if (!adapter.evidence) continue;
@@ -61,7 +63,7 @@ export function needsALook(
     }
   }
 
-  const ranks = analyzerRanks(db);
+  const ranks = opts.ranks ?? analyzerRanks(db);
   const out: NeedsALookRow[] = [];
   for (const [steamid, { at, sources }] of newest) {
     const player = getPlayer(db, steamid);
@@ -83,4 +85,32 @@ export function needsALook(
     });
   }
   return out.sort((a, b) => (a.newestEvidenceAt < b.newestEvidenceAt ? 1 : -1));
+}
+
+/** One measured player, for the list that is only a sort key: the board's
+ *  own columns plus the name to print. */
+export type MeasuredRow = AnalyzerRank & { name: string };
+
+/**
+ * Everyone the replay analyzer has measured at all, in the board's order.
+ *
+ * The desk above lists only what nobody has read yet, which is the right
+ * default and leaves one gap: a player the analyzer ranks high who has no
+ * flagged clip and nothing else attached appears on no list at all, because
+ * being measured is not evidence and never puts a file in the queue. This is
+ * that population, under the same access rule, and it is a sort key and not
+ * a finding: the top of it is also a list of your best players.
+ */
+export function everyoneMeasured(
+  db: DB, viewer: FileViewer, ranks: Map<string, AnalyzerRank> = analyzerRanks(db),
+): MeasuredRow[] {
+  const out: MeasuredRow[] = [];
+  for (const [steamid, rank] of ranks) {
+    const player = getPlayer(db, steamid);
+    // As above: a row that 404s when clicked is worse than an absent one.
+    if (!player) continue;
+    if (!canOpenFile(db, viewer, steamid)) continue;
+    out.push({ ...rank, name: player.name });
+  }
+  return out;
 }

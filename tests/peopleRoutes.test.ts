@@ -157,6 +157,9 @@ describe('the People routes', () => {
   it('serves the review list with capture health, and the ban list with its filters', async () => {
     const review = (await get(ADMIN, '/api/admin/people/review')).json();
     expect(review.health).toMatchObject({ bursts: 0, detections: 0, lilacFlags: 0 });
+    // The second list rides on the same request: nothing is measured here, so
+    // it is empty, but the page must not have to ask twice to find that out.
+    expect(review.measured).toEqual([]);
 
     await post(ADMIN, `/api/admin/players/${PLAYER}/ban`, { reason: 'throwing', minutes: 1440 });
     const bans = (await get(MOD, '/api/admin/people/bans?filter=active')).json().bans;

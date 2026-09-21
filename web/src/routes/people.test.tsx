@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
-import type { AdminPlayerRow, NeedsALookRow, PeopleBan } from '../api';
+import type { AdminPlayerRow, MeasuredRow, NeedsALookRow, PeopleBan } from '../api';
 import { ConfirmHost } from '../components/Confirm';
 
 const { mockPeople, mockAdmin } = vi.hoisted(() => ({
@@ -38,17 +38,26 @@ const lookRow: NeedsALookRow = {
   },
 };
 
+const measured = (over: Partial<MeasuredRow> = {}): MeasuredRow => ({
+  steamid: '76561199000000002', name: 'measured only', ranked: true, rank: 1, of: 12,
+  rounds: 30, eligibleRounds: 28, clips: 0, trackShare: 0.31, occZ: 1.4, teamGap: 0.6,
+  pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8, ...over,
+});
+
 const ban: PeopleBan = {
   id: 1, steamid: '76561199000000001', name: 'griefer', reason: 'throwing', length: '1 day',
   createdAt: '2026-09-20T10:00:00.000Z', expiresAt: '2026-09-21T10:00:00.000Z', createdByName: 'boss',
   liftedAt: null, liftedByName: null, active: true, ticketId: 12, withheld: false, canOpen: true,
 };
 
+/** The first cell of every body row, which is the player in both views. */
+const names = () => screen.getAllByRole('row').slice(1).map((r) => r.querySelector('td')!.textContent?.split('765')[0]);
+
 afterEach(cleanup);
 beforeEach(() => {
   for (const fn of [...Object.values(mockPeople), ...Object.values(mockAdmin)]) fn.mockReset();
   mockPeople.people.mockResolvedValue({ players: [row] });
-  mockPeople.review.mockResolvedValue({ players: [], health: health() });
+  mockPeople.review.mockResolvedValue({ players: [], measured: [], health: health() });
   mockPeople.bans.mockResolvedValue({ bans: [] });
   mockPeople.lookedAt.mockResolvedValue({ ok: true, review: { id: 1, steamid: row.steamid, reviewedBy: '9', reviewedByName: 'boss', reviewedAt: '2026-09-21T00:00:00.000Z', note: '' } });
   mockAdmin.integrityJob.mockResolvedValue({
@@ -86,7 +95,7 @@ describe('People search', () => {
 
 describe('Needs a look', () => {
   it('lists a player with their sources, rank and a way into the file', async () => {
-    mockPeople.review.mockResolvedValue({ players: [lookRow], health: health() });
+    mockPeople.review.mockResolvedValue({ players: [lookRow], measured: [], health: health() });
     render(<NeedsALook isAdmin />);
     const link = await screen.findByRole('link', { name: 'griefer' });
     expect(link.getAttribute('href')).toBe('/admin/people/76561199000000001');
@@ -105,7 +114,7 @@ describe('Needs a look', () => {
   });
 
   it('marks a file looked at from the list', async () => {
-    mockPeople.review.mockResolvedValue({ players: [lookRow], health: health() });
+    mockPeople.review.mockResolvedValue({ players: [lookRow], measured: [], health: health() });
     render(<NeedsALook isAdmin />);
     fireEvent.click(await screen.findByRole('button', { name: 'Looked at' }));
     await waitFor(() => expect(mockPeople.lookedAt).toHaveBeenCalledWith('76561199000000001', ''));
@@ -124,6 +133,50 @@ describe('Needs a look', () => {
     render(<NeedsALook isAdmin />);
     expect(await screen.findByRole('button', { name: 'Re-analyse all replays' })).toBeTruthy();
     expect(mockAdmin.integrityJob).toHaveBeenCalled();
+  });
+
+  // The redesign retired the cross-player board, which left a gap: a player
+  // the analyzer ranks high with no flagged clip and nothing else attached
+  // was on no list at all.
+  it('swaps to everyone the analyzer has measured, and says what that list is not', async () => {
+    mockPeople.review.mockResolvedValue({
+      players: [lookRow],
+      measured: [measured(), measured({ steamid: '76561199000000003', name: 'slower', rank: 2, trackShare: 0.05 })],
+      health: health(),
+    });
+    render(<NeedsALook isAdmin />);
+    await screen.findByRole('link', { name: 'griefer' });
+    expect(screen.queryByText('measured only')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Everyone the analyzer has measured/ }));
+    expect(screen.getByText(/A sort key, not a claim/)).toBeTruthy();
+    expect(names()).toEqual(['measured only', 'slower']);
+    expect(screen.queryByText('griefer')).toBeNull();
+    // Nothing to mark looked at here: being measured is not evidence.
+    expect(screen.queryByRole('button', { name: 'Looked at' })).toBeNull();
+    const row = screen.getByText('measured only').closest('tr')!;
+    expect(within(row).getByText(/1 of 12/)).toBeTruthy();
+    expect(within(row).getByText('0.310')).toBeTruthy();
+  });
+
+  it('sorts the measured list by tracking, and says so when there is no rank', async () => {
+    mockPeople.review.mockResolvedValue({
+      players: [],
+      measured: [
+        measured({ ranked: false, rank: null, of: 0, trackShare: 0.05 }),
+        measured({ steamid: '76561199000000003', name: 'tracker', rank: 1, of: 1, trackShare: 0.42 }),
+      ],
+      health: health(),
+    });
+    render(<NeedsALook isAdmin />);
+    fireEvent.click(await screen.findByRole('button', { name: /Everyone the analyzer has measured/ }));
+    const row = screen.getByText('measured only').closest('tr')!;
+    expect(within(row).getByText('too few rounds')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tracking' }));
+    expect(names()).toEqual(['tracker', 'measured only']);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyzer rank' }));
+    expect(names()).toEqual(['tracker', 'measured only']);
   });
 
   it('says whether anything is being captured at all when the list is empty', async () => {
