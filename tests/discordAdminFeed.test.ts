@@ -207,5 +207,9 @@ describe('admin feed', () => {
     expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
     expect(text(1)).toMatch(/hold on .*player2.* released itself/);
     expect(text(1)).toContain('197 s');
+    // name() bolds the player itself, so a line that wraps it in its own
+    // asterisks renders four of them and no bold at all.
+    expect(text(0)).not.toContain('****');
+    expect(text(1)).not.toContain('****');
   });
 });

@@ -104,8 +104,8 @@ export class AdminFeedPoster {
         const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
         return {
           text: e.what === 'low_allowance'
-            ? `**${this.name(e.steamid)}** has ${e.remainingS} s left to reconnect in ${match}. Hold the clock or add time on the ${board}.`
-            : `The hold on **${this.name(e.steamid)}**'s reconnect clock in ${match} released itself at the ceiling: ${e.remainingS} s left and counting. ${board}`,
+            ? `${this.name(e.steamid)} has ${e.remainingS} s left to reconnect in ${match}. Hold the clock or add time on the ${board}.`
+            : `The hold on ${this.name(e.steamid)}'s reconnect clock in ${match} released itself at the ceiling: ${e.remainingS} s left and counting. ${board}`,
           color: COLOR.problem,
         };
       }
