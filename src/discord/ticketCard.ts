@@ -51,7 +51,12 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
   const claimedBy = t.claimed_by ? escapeName(getPlayer(db, t.claimed_by)?.name ?? t.claimed_by) : '';
 
   const fields: EmbedField[] = [
-    { name: 'Accused', value: `[${escapeName(accused)}](${publicUrl}/player/${t.target_id})`, inline: true },
+    // A player name is never anchor text: Steam allows [ ] ( ) in a name,
+    // which escapeName does not neutralise, and a name used as the link's
+    // own text could break out and point the link somewhere else. The name
+    // sits as plain escaped text; the link's anchor is the fixed word
+    // "profile" and its target holds nothing but publicUrl and the steamid.
+    { name: 'Accused', value: `${escapeName(accused)} ([profile](${publicUrl}/player/${t.target_id}))`, inline: true },
     {
       name: 'Status', inline: true,
       value: status === 'closed' ? `closed: ${(t.outcome ?? '').replace(/_/g, ' ')}` : status === 'claimed' ? `claimed by ${claimedBy}` : 'open, unclaimed',

@@ -163,6 +163,26 @@ describe('the staff forum post', () => {
     expect(buttons(threadId)[0]).toBe(`t:${id}:claim=Claim`);
   });
 
+  it('never lets a player name become a link\'s destination', async () => {
+    db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('x](http://evil.example)[y', IDS[5]);
+    sync.start();
+    const id = file(IDS[0], { targetId: IDS[5], category: 'griefing', text: '' });
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    const fields = cardOf(threadId).embeds[0].fields!;
+    const accused = fields.find((f) => f.name === 'Accused')!.value;
+    // A real markdown link is "[label](url)" with no nested brackets or
+    // parens on either side: loose enough that any actual clickable link in
+    // the field has to match it, whatever plain text surrounds it.
+    const links = [...accused.matchAll(/\[([^[\]]*)\]\(([^()]*)\)/g)];
+    expect(links).toHaveLength(1);
+    expect(links[0][0]).toBe(`[profile](https://pug.test/player/${IDS[5]})`);
+    // The hostile name is still shown verbatim, as inert plain text: nothing
+    // strips it, but with no unescaped "[" in front of it, it never becomes
+    // a second, attacker-controlled link.
+    expect(accused).toContain('](http://evil.example)');
+  });
+
   it('a post deleted by hand is made again', async () => {
     sync.start();
     const id = file(IDS[0], { targetId: IDS[5], category: 'afk', text: '' });
