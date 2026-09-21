@@ -6,6 +6,7 @@ import { currentSeasonId, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
+import { detectionsForPlayer } from '../inputBursts.js';
 import { publishBanChange } from '../banEvents.js';
 
 export interface BanRow {
@@ -164,6 +165,9 @@ export function playerDetail(db: DB, steamid: string) {
     // Connects that ended before the player was in game, on a map that forced
     // files: likely a consistency rejection, possibly a cancelled load.
     signonDrops: signonDropSummary(db, steamid),
+    // Input signatures that fired on this player. Evidence from button timing,
+    // to be read next to the replay, never a verdict on its own.
+    inputFlags: detectionsForPlayer(db, steamid),
     // Second accounts folded into this one. Shown so an admin can see at a
     // glance that a player has been merged, and undo it.
     aliases: aliasesOf(db, steamid),

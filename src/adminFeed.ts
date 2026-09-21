@@ -19,7 +19,12 @@ export type AdminEvent =
   // without getting in between. `name` is the in-game name off the drop line,
   // because the steamid is often nobody the site knows. `count` is the drops in
   // that window, `total` every drop on record.
-  | { kind: 'signon_drop'; steamid: string; name: string; count: number; total: number };
+  | { kind: 'signon_drop'; steamid: string; name: string; count: number; total: number }
+  // An input signature fired on a player for the first time in a match. Fires
+  // once per player per match, never per burst: a macro trips on every pounce
+  // and per-burst posting would bury the feed under one player's round. This is
+  // evidence to look at, not a verdict.
+  | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -30,6 +35,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   problem: 'admin_feed_problems',
   abandon: 'admin_feed_penalties',
   signon_drop: 'admin_feed_problems',
+  input_flag: 'admin_feed_problems',
 };
 
 type Listener = (e: AdminEvent) => void;

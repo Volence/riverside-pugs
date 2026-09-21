@@ -162,6 +162,25 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         )}
       </section>
 
+      {d.inputFlags.length > 0 && (
+        <section id="input-flags">
+          <h4>Input flags</h4>
+          <p class="muted">
+            Button timing that does not look like a hand. These are evidence to weigh against the
+            replay, not a verdict: watch the round before acting on one.
+          </p>
+          <ul class="admin-list">
+            {d.inputFlags.map((f) => (
+              <li key={f.id}>
+                {fmtTime(f.at)}: <code>{f.signature}</code> on a {f.kind} burst
+                {f.matchId ? <> in <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
+                <span class="muted"> · {f.severity}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {d.signonDrops.count > 0 && (
         <section id="connect-drops">
           <h4>Connect drops</h4>

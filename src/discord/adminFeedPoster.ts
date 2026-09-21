@@ -132,6 +132,15 @@ export class AdminFeedPoster {
           text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
+      case 'input_flag': {
+        // Deliberately worded as something to look at, not as a verdict. The
+        // signature is evidence from input timing, and the admin decides.
+        const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
+        return {
+          text: `🎛️ **${this.name(e.steamid)}** tripped the \`${e.signature}\` input check${match} (${e.detail}). Worth a look at the replay.`,
+          color: COLOR.problem,
+        };
+      }
       case 'signon_drop': {
         // The in-game name, not this.name(): most of these steamids have never
         // signed in, and an admin searching the server log needs the name the
