@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   BURST_MAX_TICKS, DEFAULT_THRESHOLDS, MAX_INTERVALS, PISTOL_REPEATS, POUNCE_REPEATS, burstStats, decodeIntervals,
-  encodeIntervals, matchDetections, pistolRate, pounceSpam,
+  encodeIntervals, holdAnnotation, holdStats, matchDetections, pistolRate, pounceSpam,
 } from '../src/inputStats.js';
 
 describe('encodeIntervals / decodeIntervals', () => {
@@ -196,5 +196,57 @@ describe('pistolRate', () => {
     expect(PISTOL_REPEATS).toBe(2);
     expect(one).toEqual([]);
     expect(two).toEqual([{ signature: 'pistol_rate', qualifying: [0, 2] }]);
+  });
+});
+
+describe('holdStats', () => {
+  // How long each press was held down, in usercmds. It is what separates the
+  // three things that all look the same by press rate.
+  const WHEEL = [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1];          // a wheel notch is down for one usercmd
+  const FIXED = [3, 4, 3, 3, 4, 3, 4, 3, 3, 4, 3, 30];         // a 35 ms scripted hold, aliased; last one cut short
+  const HAND = [6, 9, 5, 11, 7, 8, 12, 6, 10, 7, 5, 9];        // 5 to 12, never the same twice
+
+  it('reports the median, the spread and the share of one-tick holds', () => {
+    const w = holdStats(WHEEL)!;
+    expect(w.n).toBe(12);
+    expect(w.medianTicks).toBe(1);
+    expect(w.oneTickFrac).toBeCloseTo(11 / 12, 5);
+    const h = holdStats(HAND)!;
+    expect(h.medianTicks).toBe(7.5);
+    expect(h.minTicks).toBe(5);
+    expect(h.maxTicks).toBe(12);
+    expect(h.sdTicks).toBeGreaterThan(2);
+    expect(h.oneTickFrac).toBe(0);
+  });
+
+  it('has nothing to say about no holds', () => {
+    expect(holdStats([])).toBeNull();
+    expect(holdStats(null)).toBeNull();
+  });
+
+  it('calls one-tick holds wheel-like', () => {
+    expect(holdAnnotation(WHEEL)).toBe('wheel-like');
+  });
+
+  // The median, not the mean or the range: the last hold of a burst is often
+  // the player simply keeping the button down afterwards.
+  it('calls a constant hold fixed-hold, whatever the last press did', () => {
+    expect(holdAnnotation(FIXED)).toBe('fixed-hold');
+  });
+
+  it('calls a hand variable-hold', () => {
+    expect(holdAnnotation(HAND)).toBe('variable-hold');
+  });
+
+  it('says so when there is too little to judge, or nothing at all', () => {
+    expect(holdAnnotation([1, 1, 1])).toBe('no-hold-data');
+    expect(holdAnnotation(null)).toBe('no-hold-data');
+  });
+});
+
+describe('decodeIntervals as the hold decoder', () => {
+  it('allows one more hold than the interval cap, since holds are per press', () => {
+    expect(decodeIntervals('0'.repeat(MAX_INTERVALS + 1), MAX_INTERVALS + 1)).toHaveLength(MAX_INTERVALS + 1);
+    expect(decodeIntervals('0'.repeat(MAX_INTERVALS + 2), MAX_INTERVALS + 1)).toBeNull();
   });
 });

@@ -119,6 +119,52 @@ describe('pistol_rate', () => {
   });
 });
 
+describe('hold annotation', () => {
+  const held = Array.from({ length: 50 }, (_, i) => (i % 3 === 0 ? 7 : 8));
+  const fire = (holds: number[] | null) =>
+    burst({ kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0, intervals: held, holds, wire: 2 });
+
+  it('stores the holds and gives them back decoded, with their stats', () => {
+    const holds = Array.from({ length: 51 }, () => 1);
+    recordInputBurst(db, fire(holds));
+    recordInputBurst(db, fire(holds));
+    const d = detectionsForPlayer(db, A)[0];
+    expect(d.bursts).toHaveLength(2);
+    expect(d.bursts[0].hold).toMatchObject({ n: 51, medianTicks: 1, oneTickFrac: 1 });
+    expect(d.bursts[0].annotation).toBe('wheel-like');
+    expect(d.bursts[0].ratePerSec).toBeGreaterThan(12);
+  });
+
+  // The annotation rides on the detection. It is NOT a detection of its own
+  // and changes neither whether one exists nor its severity: whether a wheel
+  // bind is legal is a league ruling, not something a threshold decides.
+  it('annotates the detection without changing it', () => {
+    const wheel = Array.from({ length: 51 }, () => 1);
+    recordInputBurst(db, fire(wheel));
+    const second = recordInputBurst(db, fire(wheel));
+    expect(second.detections).toEqual(['pistol_rate']);
+    expect(second.created).toEqual([{ signature: 'pistol_rate', note: 'wheel-like' }]);
+    expect(detectionsForPlayer(db, A)[0]).toMatchObject({ severity: 'low', note: 'wheel-like', hits: 2 });
+  });
+
+  it('tells a scripted fixed hold from a hand', () => {
+    recordInputBurst(db, fire(Array.from({ length: 51 }, (_, i) => 3 + (i % 2))));
+    recordInputBurst(db, fire(Array.from({ length: 51 }, (_, i) => 3 + (i % 2))));
+    expect(detectionsForPlayer(db, A)[0].note).toBe('fixed-hold');
+    const hand = { ...fire(Array.from({ length: 51 }, (_, i) => 4 + ((i * 7) % 9))), steamid: B };
+    recordInputBurst(db, hand);
+    recordInputBurst(db, hand);
+    expect(detectionsForPlayer(db, B)[0].note).toBe('variable-hold');
+  });
+
+  // Plugin 0.1.0 sent no holds, timed by server tick, and captured ghosts.
+  // A detection resting on its bursts has to say so.
+  it('says when the evidence came from plugin 0.1.0', () => {
+    for (let i = 0; i < 2; i++) recordInputBurst(db, { ...fire(null), wire: 1 });
+    expect(detectionsForPlayer(db, A)[0].note).toBe('no-hold-data, plugin 0.1.0 capture');
+  });
+});
+
 describe('inputThresholds', () => {
   it('falls back to the defaults for an absent or nonsense setting', () => {
     expect(inputThresholds(db)).toEqual(DEFAULT_THRESHOLDS);

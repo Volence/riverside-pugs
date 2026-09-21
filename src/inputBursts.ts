@@ -1,8 +1,9 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import {
-  DEFAULT_THRESHOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, decodeIntervals, encodeIntervals,
-  matchDetections, type Thresholds,
+  DEFAULT_THRESHOLDS, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
+  encodeIntervals, holdAnnotation, holdStats, matchDetections,
+  type HoldAnnotation, type HoldStats, type Thresholds,
 } from './inputStats.js';
 
 /**
@@ -61,6 +62,8 @@ export interface InputBurstInput {
    *  sum of the intervals it shows lag bunching, or a client lying about its
    *  command numbers. */
   serverSpan?: number | null;
+  /** How long each press was held, one per press. Null from plugin 0.1.0. */
+  holds?: number[] | null;
 }
 
 export interface StoredBurst {
@@ -68,6 +71,8 @@ export interface StoredBurst {
   /** Signatures this burst COMPLETED: the detection row did not exist before
    *  it. Later qualifying bursts count on that row and are not news. */
   detections: string[];
+  /** The same, with what the holds across the evidence look like. */
+  created: { signature: string; note: string }[];
 }
 
 /** Store one burst and run the shipped signatures over its player's match. */
@@ -81,36 +86,54 @@ export function recordInputBurst(
   const encoded = encodeIntervals(b.intervals);
   const info = db.prepare(
     `INSERT INTO input_bursts (match_id, server_id, steamid, kind, weapon, n, ground_ticks,
-       air_presses, server_tick, client_tick, intervals, at, wire, server_span)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       air_presses, server_tick, client_tick, intervals, at, wire, server_span, holds)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(b.matchId, b.serverId, b.steamid, b.kind, b.weapon, b.intervals.length,
         b.groundTicks, b.airPresses, b.serverTick, b.clientTick, encoded, iso,
-        b.wire ?? 1, b.serverSpan ?? null);
+        b.wire ?? 1, b.serverSpan ?? null, b.holds ? encodeIntervals(b.holds) : null);
   const id = Number(info.lastInsertRowid);
   // A repeat needs a match to repeat within, and the group query below is only
   // worth running when this burst could have moved a count.
   if (b.matchId === null || !SIGNATURES.some((s) => s.qualifies(b, thresholds))) {
-    return { id, detections: [] };
+    return { id, detections: [], created: [] };
   }
-  return { id, detections: evaluateGroup(db, b.matchId, b.steamid, thresholds) };
+  const created = evaluateGroup(db, b.matchId, b.steamid, thresholds);
+  return { id, detections: created.map((c) => c.signature), created };
 }
 
-interface GroupRow { id: number; kind: string; weapon: string; intervals: string; at: string }
+interface GroupRow {
+  id: number; kind: string; weapon: string; intervals: string; at: string; wire: number; holds: string | null;
+}
+
+/**
+ * What the holds across a detection's evidence look like, plus a warning when
+ * any of it came from plugin 0.1.0: those bursts have no holds, were timed by
+ * server tick, and were captured before ghosts were excluded, so a pounce
+ * burst among them may be spawn mashing.
+ */
+function evidenceNote(evidence: readonly { wire: number; holds: string | null }[]): string {
+  const all: number[] = [];
+  for (const e of evidence) all.push(...(e.holds ? decodeIntervals(e.holds, MAX_HOLDS) ?? [] : []));
+  const note: string = holdAnnotation(all);
+  return evidence.some((e) => e.wire === 1) ? `${note}, plugin 0.1.0 capture` : note;
+}
 
 /**
  * Bring one player's detections in one match in line with their stored
  * bursts. Returns the signatures whose row was CREATED by this call.
  */
-function evaluateGroup(db: DB, matchId: number, steamid: string, thresholds: Thresholds): string[] {
+function evaluateGroup(
+  db: DB, matchId: number, steamid: string, thresholds: Thresholds,
+): { signature: string; note: string }[] {
   const rows = db.prepare(
-    `SELECT id, kind, weapon, intervals, at FROM input_bursts
+    `SELECT id, kind, weapon, intervals, at, wire, holds FROM input_bursts
      WHERE match_id = ? AND steamid = ? ORDER BY id`,
   ).all(matchId, steamid) as GroupRow[];
   const bursts = rows.flatMap((r) => {
     const intervals = decodeIntervals(String(r.intervals));
     return intervals ? [{ ...r, intervals }] : [];
   });
-  const created: string[] = [];
+  const created: { signature: string; note: string }[] = [];
   for (const d of matchDetections(bursts, thresholds)) {
     const sig = SIGNATURES.find((s) => s.name === d.signature)!;
     const evidence = d.qualifying.map((i) => bursts[i]);
@@ -118,22 +141,39 @@ function evaluateGroup(db: DB, matchId: number, steamid: string, thresholds: Thr
     // a rebuild from history lands on the same burst and the same time.
     const completing = evidence[sig.repeats - 1];
     const ids = JSON.stringify(evidence.map((e) => e.id));
+    const note = evidenceNote(evidence);
     const existing = db.prepare(
       'SELECT id FROM input_detections WHERE match_id = ? AND steamid = ? AND signature = ?',
     ).get(matchId, steamid, d.signature) as { id: number } | undefined;
     if (existing) {
-      db.prepare('UPDATE input_detections SET hits = ?, evidence = ? WHERE id = ?')
-        .run(evidence.length, ids, existing.id);
+      db.prepare('UPDATE input_detections SET hits = ?, evidence = ?, note = ? WHERE id = ?')
+        .run(evidence.length, ids, note, existing.id);
       continue;
     }
     db.prepare(
-      `INSERT INTO input_detections (burst_id, match_id, steamid, kind, signature, severity, at, hits, evidence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO input_detections (burst_id, match_id, steamid, kind, signature, severity, at, hits, evidence, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(completing.id, matchId, steamid, completing.kind, d.signature, SEVERITY, completing.at,
-          evidence.length, ids);
-    created.push(d.signature);
+          evidence.length, ids, note);
+    created.push({ signature: d.signature, note });
   }
   return created;
+}
+
+/** One qualifying burst, summarised for the admin panel. */
+export interface EvidenceBurst {
+  id: number;
+  at: string;
+  weapon: string;
+  presses: number;
+  ratePerSec: number;
+  meanTicks: number;
+  /** 1: timed by server tick (plugin 0.1.0). 2: timed by usercmd. */
+  wire: number;
+  /** Server ticks the burst spanned, to set against presses and rate. */
+  serverSpan: number | null;
+  hold: HoldStats | null;
+  annotation: HoldAnnotation;
 }
 
 export interface DetectionRow {
@@ -143,14 +183,40 @@ export interface DetectionRow {
   hits: number;
   /** Their ids. */
   evidence: number[];
+  /** What the holds across all of them look like. An annotation, not a verdict. */
+  note: string;
+  /** The first EVIDENCE_SHOWN of them, summarised. */
+  bursts: EvidenceBurst[];
 }
+
+const EVIDENCE_SHOWN = 12;
 
 export function detectionsForPlayer(db: DB, steamid: string, limit = 50): DetectionRow[] {
   const rows = db.prepare(
-    `SELECT id, burst_id AS burstId, match_id AS matchId, steamid, kind, signature, severity, at, hits, evidence
+    `SELECT id, burst_id AS burstId, match_id AS matchId, steamid, kind, signature, severity, at, hits, evidence, note
      FROM input_detections WHERE steamid = ? ORDER BY at DESC LIMIT ?`,
-  ).all(steamid, limit) as (Omit<DetectionRow, 'evidence'> & { evidence: string })[];
-  return rows.map((r) => ({ ...r, evidence: parseIds(r.evidence) }));
+  ).all(steamid, limit) as (Omit<DetectionRow, 'evidence' | 'bursts'> & { evidence: string })[];
+  return rows.map((r) => {
+    const evidence = parseIds(r.evidence);
+    return { ...r, evidence, bursts: evidenceBursts(db, evidence.slice(0, EVIDENCE_SHOWN)) };
+  });
+}
+
+function evidenceBursts(db: DB, ids: readonly number[]): EvidenceBurst[] {
+  if (ids.length === 0) return [];
+  const rows = db.prepare(
+    `SELECT id, at, weapon, intervals, wire, server_span AS serverSpan, holds
+     FROM input_bursts WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY id`,
+  ).all(...ids) as { id: number; at: string; weapon: string; intervals: string; wire: number; serverSpan: number | null; holds: string | null }[];
+  return rows.map((r) => {
+    const stats = burstStats(decodeIntervals(String(r.intervals)) ?? []);
+    const holds = r.holds ? decodeIntervals(r.holds, MAX_HOLDS) : null;
+    return {
+      id: r.id, at: r.at, weapon: r.weapon, presses: stats.n + 1,
+      ratePerSec: stats.ratePerSec, meanTicks: stats.meanTicks,
+      wire: r.wire, serverSpan: r.serverSpan, hold: holdStats(holds), annotation: holdAnnotation(holds),
+    };
+  });
 }
 
 function parseIds(json: string): number[] {

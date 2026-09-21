@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseLogDatagram } from '../src/logParse.js';
-import { DEFAULT_THRESHOLDS, burstStats, pounceSpam } from '../src/inputStats.js';
+import { DEFAULT_THRESHOLDS, burstStats, holdAnnotation, pounceSpam } from '../src/inputStats.js';
 
 /**
  * Lines captured off the real wire from l4d_inputstats.smx on the local test
@@ -74,10 +74,11 @@ describe('lines the plugin actually emitted', () => {
  * time 0.2.0 runs anywhere, exactly as REAL above was.
  */
 const FORMAT_0_2 = [
-  'L 09/21/2026 - 14:00:00: L4DM id=76561197960287930 k=fire w=weapon_pistol n=6 g=0 a=0 st=52000 ct=51996 sp=46 v=2 d=787787',
-  'L 09/21/2026 - 14:00:01: L4DM id=STEAM_1:1:35074132 k=pounce w=weapon_hunter_claw n=6 g=61 a=7 st=52100 ct=52096 sp=46 v=2 d=787787',
-  'L 09/21/2026 - 14:00:02: L4DM id=76561197960287930 k=bhop w= n=1 g=2 a=0 st=52200 ct=52197 sp=0 v=2 d=0',
+  'L 09/21/2026 - 14:00:00: L4DM id=76561197960287930 k=fire w=weapon_pistol n=6 g=0 a=0 st=52000 ct=51996 sp=46 v=2 d=787787 h=2323232',
+  'L 09/21/2026 - 14:00:01: L4DM id=STEAM_1:1:35074132 k=pounce w=weapon_hunter_claw n=6 g=61 a=7 st=52100 ct=52096 sp=46 v=2 d=787787 h=0000000',
+  'L 09/21/2026 - 14:00:02: L4DM id=76561197960287930 k=bhop w= n=1 g=2 a=0 st=52200 ct=52197 sp=0 v=2 d=0 h=0',
 ];
+const CAP_0_2 = 'L 09/21/2026 - 14:00:03: L4DM id=76561197960287930 k=cap c=bhop st=52300 v=2';
 
 describe('lines in the 0.2.0 format', () => {
   it('the parser accepts every one of them as wire 2', () => {
@@ -89,5 +90,17 @@ describe('lines in the 0.2.0 format', () => {
   it('reads both clocks and the server span off a fire burst', () => {
     const ev = parseLogDatagram(Buffer.from(FORMAT_0_2[0], 'utf8'));
     expect(ev).toMatchObject({ serverTick: 52000, clientTick: 51996, serverSpan: 46, intervals: [8, 9, 8, 8, 9, 8] });
+  });
+
+  it('reads one hold per press, and the annotation they add up to', () => {
+    const fire = parseLogDatagram(Buffer.from(FORMAT_0_2[0], 'utf8')) as { holds: number[] };
+    const pounce = parseLogDatagram(Buffer.from(FORMAT_0_2[1], 'utf8')) as { holds: number[] };
+    expect(fire.holds).toEqual([3, 4, 3, 4, 3, 4, 3]);
+    expect(holdAnnotation(fire.holds)).toBe('fixed-hold');
+    expect(holdAnnotation(pounce.holds)).toBe('wheel-like');
+  });
+
+  it('reads the budget marker', () => {
+    expect(parseLogDatagram(Buffer.from(CAP_0_2, 'utf8'))).toMatchObject({ kind: 'input_cap', burstKind: 'bhop' });
   });
 });

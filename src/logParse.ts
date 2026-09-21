@@ -1,5 +1,5 @@
 import { steamId64Of } from './steamId.js';
-import { decodeIntervals } from './inputStats.js';
+import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
@@ -116,6 +116,8 @@ export type LogEvent =
       // Wire 1 (plugin 0.1.0) timed intervals by server tick; wire 2 times them
       // by usercmd and adds the server ticks the burst spanned as a cross-check.
       wire: 1 | 2; serverSpan: number | null;
+      // How long each press was held, one per PRESS; null from plugin 0.1.0.
+      holds: number[] | null;
     }
   // The plugin's budget for one kind of burst ran out for this player this
   // round: everything of that kind after it, until the round ends, is missing.
@@ -270,9 +272,13 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
     if (wire !== 1 && wire !== 2) return null;
     const serverSpan = f.sp === undefined ? null : intOf(f.sp);
     if (f.sp !== undefined && (serverSpan === null || serverSpan < 0 || serverSpan > MAX_TICK_COUNTER)) return null;
+    // One hold per press, so one more than the gaps between them. A bhop line
+    // is a single jump whose one interval is a placeholder: one hold.
+    const holds = f.h === undefined ? null : decodeIntervals(f.h, MAX_HOLDS);
+    if (f.h !== undefined && (!holds || holds.length !== (burstKind === 'bhop' ? 1 : n + 1))) return null;
     return {
       kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals,
-      wire, serverSpan,
+      wire, serverSpan, holds,
     };
   }
 

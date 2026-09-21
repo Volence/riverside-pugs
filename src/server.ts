@@ -537,15 +537,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
               airPresses: ev.airPresses, groundTicks: ev.groundTicks,
               serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
-              wire: ev.wire, serverSpan: ev.serverSpan,
+              wire: ev.wire, serverSpan: ev.serverSpan, holds: ev.holds,
             }, inputThresholds(deps.db));
             // `detections` names a signature only on the burst that completed
             // its repeat count, so this posts once per player, match and
             // signature however many bursts qualify afterwards.
-            for (const signature of stored.detections) {
+            for (const { signature, note } of stored.created) {
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
-                detail: `repeated across separate ${ev.burstKind} bursts this match`,
+                detail: `repeated across separate ${ev.burstKind} bursts this match; holds: ${note}`,
               });
             }
           } catch (err) {

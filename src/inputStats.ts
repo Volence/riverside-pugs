@@ -37,8 +37,8 @@ export function encodeIntervals(ticks: readonly number[]): string {
  *  character, an empty string, or more intervals than the cap. Refusing rather
  *  than clamping keeps a forged or corrupt line out of the statistics instead
  *  of turning it into a plausible looking burst. */
-export function decodeIntervals(s: string): number[] | null {
-  if (s.length === 0 || s.length > MAX_INTERVALS) return null;
+export function decodeIntervals(s: string, maxLength = MAX_INTERVALS): number[] | null {
+  if (s.length === 0 || s.length > maxLength) return null;
   const out: number[] = [];
   for (let i = 0; i < s.length; i++) {
     const t = s.charCodeAt(i) - ENC_BASE + 1;
@@ -47,6 +47,11 @@ export function decodeIntervals(s: string): number[] | null {
   }
   return out;
 }
+
+/** Holds are per PRESS and intervals are between presses, so a full burst has
+ *  one more hold than it has intervals. Same alphabet, same 1..30 range: a hold
+ *  of 30 means "30 or more", or a press still down when the burst was cut. */
+export const MAX_HOLDS = MAX_INTERVALS + 1;
 
 export interface BurstStats {
   n: number;
@@ -93,6 +98,71 @@ export function burstStats(ticks: readonly number[]): BurstStats {
     sameAsNext: same,
     closeToNext: close,
   };
+}
+
+export interface HoldStats {
+  n: number;
+  medianTicks: number;
+  minTicks: number;
+  maxTicks: number;
+  /** Spread. A scripted hold has almost none; a hand has a couple of ticks. */
+  sdTicks: number;
+  /** Share of presses that were down for a single usercmd. */
+  oneTickFrac: number;
+  /** Share within one tick of the median: how constant the hold is, without
+   *  letting the last press of a burst (often simply kept down) decide it. */
+  nearMedianFrac: number;
+}
+
+export function holdStats(holds: readonly number[] | null | undefined): HoldStats | null {
+  if (!holds || holds.length === 0) return null;
+  const sorted = [...holds].sort((a, b) => a - b);
+  const n = sorted.length;
+  const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  let sum = 0, one = 0, near = 0;
+  for (const h of sorted) {
+    sum += h;
+    if (h === 1) one++;
+    if (Math.abs(h - median) <= 1) near++;
+  }
+  const mean = sum / n;
+  let sq = 0;
+  for (const h of sorted) sq += (h - mean) * (h - mean);
+  return {
+    n, medianTicks: median, minTicks: sorted[0], maxTicks: sorted[n - 1],
+    sdTicks: Math.sqrt(sq / n), oneTickFrac: one / n, nearMedianFrac: near / n,
+  };
+}
+
+/**
+ * What the holds look like. An ANNOTATION on evidence, never a detection and
+ * never an input to one: it changes neither whether a signature fires nor its
+ * severity.
+ *
+ *   wheel-like     nearly every press down for ONE usercmd. That is what a
+ *                  mouse wheel bound to +attack or +jump produces, because a
+ *                  wheel notch has no "held" state. A script that taps with no
+ *                  hold time looks the same, so this says "not a finger on a
+ *                  button", not "innocent": a free-spinning wheel decays and
+ *                  wobbles in RATE where a script is flat, and that is for the
+ *                  admin to read off the intervals. Whether a wheel bind is
+ *                  legal at all is a league ruling (see the spec).
+ *   fixed-hold     holds all within a tick of each other: an AutoHotkey-style
+ *                  macro with a set hold time. One tick of slack is the same
+ *                  aliasing that makes a flat 77 ms interval read 7,8,7,8.
+ *   variable-hold  what a hand does: measured 5 to 12 ticks, never the same.
+ *   no-hold-data   plugin 0.1.0 did not send holds, or there are too few.
+ */
+export type HoldAnnotation = 'wheel-like' | 'fixed-hold' | 'variable-hold' | 'no-hold-data';
+
+export const MIN_HOLDS_TO_ANNOTATE = 4;
+
+export function holdAnnotation(holds: readonly number[] | null | undefined): HoldAnnotation {
+  const h = holdStats(holds);
+  if (!h || h.n < MIN_HOLDS_TO_ANNOTATE) return 'no-hold-data';
+  if (h.oneTickFrac >= 0.8) return 'wheel-like';
+  if (h.nearMedianFrac >= 0.9) return 'fixed-hold';
+  return 'variable-hold';
 }
 
 /** What a signature reads. Storage and the wire both carry more. */

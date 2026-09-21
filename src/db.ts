@@ -571,7 +571,13 @@ CREATE TABLE IF NOT EXISTS input_bursts (
   wire INTEGER NOT NULL DEFAULT 1,
   -- Server ticks from first press to last; wire 2 only. A cross-check on the
   -- sum of the intervals, which is the client's own command sequence.
-  server_span INTEGER
+  server_span INTEGER,
+  -- How long each press was held down, one character per PRESS, same encoding
+  -- as intervals. NULL from plugin 0.1.0. It separates a mouse wheel (one
+  -- tick), a scripted hold (constant) and a hand (5 to 12 ticks, never the
+  -- same), and unlike a signature it cannot be backfilled: if it was not
+  -- captured, it is gone.
+  holds TEXT
 );
 CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
 CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
@@ -607,6 +613,9 @@ CREATE TABLE IF NOT EXISTS input_detections (
   -- the signature has repeated; burst_id is the burst that completed it.
   hits INTEGER NOT NULL DEFAULT 1,
   evidence TEXT NOT NULL DEFAULT '[]',
+  -- What the holds across the evidence look like (wheel-like, fixed-hold,
+  -- variable-hold, no-hold-data). An annotation for the admin, not a verdict.
+  note TEXT NOT NULL DEFAULT '',
   UNIQUE(burst_id, signature)
 );
 CREATE INDEX IF NOT EXISTS input_detections_steamid ON input_detections(steamid, at);
@@ -750,6 +759,8 @@ export function openDb(path: string): DB {
   // plugin 0.1.0, which is what the default says.
   ensureColumn(db, 'input_bursts', 'wire', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'input_bursts', 'server_span', 'INTEGER');
+  ensureColumn(db, 'input_bursts', 'holds', 'TEXT');
+  ensureColumn(db, 'input_detections', 'note', "TEXT NOT NULL DEFAULT ''");
   // How many survivors were still standing when the round ended. NULL, not 0,
   // as the default: every round recorded before the plugin emitted this was
   // simply not measured, and 0 is a real value here (a wipe). Defaulting to 0
