@@ -1639,6 +1639,8 @@ tbody tr.is-lifted td { opacity: 0.55; }
   /* The header's action chips wrap under the name on a phone rather than
      pushing the avatar and name into a squeeze to stay on one line. */
   .file-head .admin-actions { margin-left: 0; }
+}
+
 /* ---------- admin: live board ---------- */
 
 .live-card { padding: var(--sp-4); }
