@@ -22,3 +22,4 @@ web/public/overviews/
 # skypounce rig and playtest build output
 plugin/skypounce/**/*.smx
 plugin/skypounce/**/*.log
+plugin/skypounce/**/__pycache__/
