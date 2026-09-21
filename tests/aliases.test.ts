@@ -120,3 +120,22 @@ describe('canonicalise covers network sightings', () => {
     expect((ev as { steamid: string }).steamid).toBe(MAIN);
   });
 });
+
+// Evidence against an alt is evidence against the person. Left on the alt's
+// id it sits on an account that no longer has an admin page.
+describe('canonicalise covers anti-cheat evidence', () => {
+  it('rewrites a LilAC flag to the canonical account', () => {
+    addAlias(db, { steamid: ALT, canonical: MAIN, by: 'admin' });
+    const ev = canonicalise(db, { kind: 'lilac_flag', steamid: ALT, cheat: 3, banned: false });
+    expect(ev).toEqual({ kind: 'lilac_flag', steamid: MAIN, cheat: 3, banned: false });
+  });
+
+  it('rewrites an input burst to the canonical account', () => {
+    addAlias(db, { steamid: ALT, canonical: MAIN, by: 'admin' });
+    const burst: LogEvent = {
+      kind: 'input_burst', steamid: ALT, burstKind: 'fire', weapon: 'pistol',
+      groundTicks: 0, airPresses: 0, serverTick: 100, clientTick: 100, intervals: [3, 3, 3],
+    };
+    expect(canonicalise(db, burst)).toEqual({ ...burst, steamid: MAIN });
+  });
+});
