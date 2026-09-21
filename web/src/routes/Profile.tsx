@@ -202,14 +202,12 @@ export function Profile(
                           <td
                             class={`num${v ? '' : ' is-dim'}`}
                             key={k}
-                            // The spread goes in the title, not the cell. This
-                            // table is already twenty-odd numeric columns wide
-                            // and a range in every cell would make it
-                            // unreadable, which was the original complaint.
-                            // Playings of THIS map, not matches. A regular has
-                            // 40-odd matches and 7 to 15 goes at any one map,
-                            // so calling the smaller number "matches" would
-                            // overstate it by roughly four times.
+                            // The spread goes in the title, not the cell:
+                            // this table is already twenty-odd numeric columns
+                            // wide. Playings of THIS map, not matches. A
+                            // regular has 40-odd matches and 7 to 15 goes at
+                            // any one map, so calling the smaller number
+                            // "matches" would overstate it four times over.
                             title={q && mapMode === 'avg' ? spreadNote(q, 'playing') : undefined}
                           >
                             {v ?? <span class="muted">n/a</span>}
@@ -252,16 +250,14 @@ export function Profile(
  * players. A figure is omitted entirely when its denominator is zero, so
  * "never played boomer" reads as absent rather than as 0%.
  *
- * The rate is a MEDIAN over matches, not a career total divided by games. The
- * mean was moved by exactly the nights it should have been resistant to: a
- * player with one 40-skeet game and eleven quiet ones was shown a per-match
- * figure they had never once scored. Each tile carries its own quartiles and
- * sample size underneath, so a steady player and a streaky one on the same
- * median do not read identically.
+ * The rate is a MEDIAN over matches, not a career total divided by games, so
+ * one 40-skeet night does not become the figure. Each tile carries its own
+ * quartiles and sample size underneath, so a steady player and a streaky one
+ * on the same median do not read identically.
  *
- * Win rate and boomer % stay POOLED ratios. A median of per-match rates would
- * weigh a one-boomer night the same as a four-boomer night, which is the same
- * reason StatTable re-derives boomer_rate rather than averaging it.
+ * Win rate and boomer % are POOLED ratios. A median of per-match rates would
+ * weigh a one-boomer night the same as a four-boomer night, the same reason
+ * StatTable re-derives boomer_rate rather than averaging it.
  */
 function ProfileFigures(
   { totals, statTotals, rating, standings, statDefs, statQuantiles }: {
@@ -323,13 +319,9 @@ function ProfileFigures(
   ]) if (t) tiles.push(t);
 
   // Every other top-five place, best first, so a #1 in crowns is not lost
-  // just because crowns has no tile.
-  //
-  // `rank <= STANDING_TOP` is now this side's job. playerStandings used to
-  // truncate to the top five and this list took whatever it returned; it now
-  // returns every metric the player has scored in, so without the filter this
-  // row would list all twenty-odd of them and stop meaning anything. The
-  // heading still says "top five places" and this is what keeps it true.
+  // just because crowns has no tile. `rank <= STANDING_TOP` is what keeps the
+  // heading true: playerStandings returns every metric the player has scored
+  // in, and unfiltered this row would list all twenty-odd of them.
   const onTiles = new Set(tiles.map((t) => t.key));
   const labelOf = (k: string) =>
     STANDING_LABELS[k] ?? statDefs.find((d) => d.key === k)?.label ?? labelFor(k);

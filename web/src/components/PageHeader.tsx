@@ -46,8 +46,8 @@ export function Figure(
     tone?: 'rating' | 'win' | 'loss';
     /** Where this figure places this season. A top-five place is a badge
      *  beside the label; anything else becomes a percentile under the number,
-     *  because a figure with nothing beside it tells a reader only what they
-     *  scored and never whether that is any good. */
+     *  so a figure says whether the number is any good and not only what it
+     *  is. */
     standing?: Standing;
   },
 ) {

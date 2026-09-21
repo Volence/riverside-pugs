@@ -121,11 +121,9 @@ describe('stats routes', () => {
     expect(body.standings).not.toHaveProperty('ff');
   });
 
-  // A badge has to rank the number it is printed beside. The tiles became
-  // medians, and metricsOf was still dividing a season total by matches, so a
-  // streaky player showed "SI dmg / match 693" with a #1 badge earned by a
-  // mean of 1940. steady beats streaky on the median and loses on the mean,
-  // which is what makes this test able to tell the two apart.
+  // A badge has to rank the number it is printed beside, and the tile beside
+  // it shows a median. steady beats streaky on the median and loses on the
+  // mean, which is what lets this test tell the two apart.
   it('ranks standings on the median, the same figure the profile tile shows', async () => {
     setSetting(db, 'standing_min_games', '3');
     const streaky = IDS[0];
@@ -176,10 +174,9 @@ describe('stats routes', () => {
     expect(await standingsOf(never)).not.toHaveProperty('crowns');
   });
 
-  // Was: "rank 7 of 8 is outside the top five" and returned nothing at all.
-  // Truncating server side meant #6 of 40 and #39 of 40 were the same absent
-  // key, so a profile could not tell a near miss from a weakness. The top five
-  // still gets the badge, but that is now the page's decision to make.
+  // Truncating server side would make #6 of 40 and #39 of 40 the same absent
+  // key, leaving a profile unable to tell a near miss from a weakness. The top
+  // five still gets the badge, but that is the page's decision to make.
   it('profile standings report a place outside the top five rather than staying silent', async () => {
     setSetting(db, 'standing_min_games', '3');
     const ids = [1, 2, 3].map(() => playCompletedMatch(db, 'b'));
@@ -461,10 +458,10 @@ describe('stats routes', () => {
   });
 
   describe('stat leaderboard', () => {
-    // The whole point of the change: a season total ranks attendance. IDS[0]
-    // turns up to twice as many matches and out-totals IDS[1] while being the
-    // weaker player in every single one of them. Ordering by total puts IDS[0]
-    // top, which is the bug; ordering by the per-match median puts IDS[1] top.
+    // A season total ranks attendance. IDS[0] turns up to twice as many
+    // matches and out-totals IDS[1] while being the weaker player in every
+    // single one of them: ordering by total puts IDS[0] top, ordering by the
+    // per-match median puts IDS[1] top.
     it('ranks by the per-match median, so turning up more does not win the board', async () => {
       for (let i = 0; i < 6; i++) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: 3 });
       for (let i = 0; i < 3; i++) seedStats(db, playCompletedMatch(db), IDS[1], { skeets: 5 });
@@ -473,8 +470,8 @@ describe('stats routes', () => {
       const rows = res.json().rows;
       expect(rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
       expect(rows[0]).toMatchObject({ median: 5, matches: 3, total: 15 });
-      // The loser of the comparison still has the bigger season total, which is
-      // exactly what the old ordering was rewarding.
+      // The loser of the comparison has the bigger season total, which is
+      // what ordering on the total would reward.
       expect(rows[1]).toMatchObject({ median: 3, matches: 6, total: 18 });
     });
 

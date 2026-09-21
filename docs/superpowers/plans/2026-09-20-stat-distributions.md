@@ -99,16 +99,15 @@ Decided once here so every task agrees.
    numbers behind one "Per map" tab. `MapDetail.avgStats`, the pooled map
    baseline, is a different quantity and is left alone.
 4. **A percentile is a rank, not a score.** `pct` is a midrank:
-   `(below + half of those level with you, self included) / of`. Revised during
-   Task 3, which is why it is worth stating rather than leaving as the obvious
-   choice. Counting only those strictly below reads well until a column ties,
-   and on a quiet season whole columns tie: every player has the same commons,
-   so all eight share first. Strictly-below calls that field the 0th percentile
-   and `(of - rank) / (of - 1)` calls it the 100th, both confidently wrong about
-   the same common case. The midrank puts it at 50 and still leaves a clear
-   leader of twenty at 98. Computed only over the `standingMinGames` field,
-   which is the field `rank` and `of` are already taken against.
-5. **Absent beats zero, everywhere, still.** A stat with no samples is omitted
+   `(below + half of those level with you, self included) / of`. Worth stating
+   rather than leaving as the obvious choice, because ties are common here: on
+   a quiet season every player has the same commons and all eight share first.
+   Strictly-below calls that field the 0th percentile and `(of - rank) /
+   (of - 1)` calls it the 100th, both confidently wrong about the same case.
+   The midrank puts it at 50 and still leaves a clear leader of twenty at 98.
+   Computed only over the `standingMinGames` field, which is the field `rank`
+   and `of` are already taken against.
+5. **Absent beats zero, everywhere.** A stat with no samples is omitted
    from the bag rather than returned as a zero median, which is the rule
    `perMapAverages` and `leaderboardData` already follow.
 
@@ -199,49 +198,47 @@ league-wide sums. Replaced by an SR median and top decile over ranked players.
 The test a header figure has to pass, and the one those two failed: a figure
 must not grow simply because another match was played.
 
-### The league is three times bigger than this plan first assumed
+**Done: a tiebreak behind the median.** Measured against the live season, 13 of
+the 29 rankable stats have three or fewer distinct medians across the ranked
+field, because their per-match counts are small integers: `rev` put 14 of 15
+players in the top five and `insta_clears` tied 7 players at #1. Every ranking
+site now orders on the median and then the mean, and a standing is gated on the
+mean being above zero rather than the median, so a player who crowns in a third
+of their matches holds a place on that board. The season total cannot break the
+tie: among players on the same median it ranks attendance, which is what
+ordering on the median is there to avoid. After the change every stat has one
+leader and five badges.
 
-Corrected 2026-09-20 against live data from `riversidepug.com`, after the two
-entries below were first written off for lack of data. **Measure before
-declining something for want of a sample.**
+### League size, measured 2026-09-20
 
-The error: `MIN_SURVIVAL_SAMPLE`'s comment says the best-covered maps have 8
-measured rounds and most have 6. That was taken as current and it is stale, as
-that comment itself predicted it would become. It also counts a different thing
-from the one that matters here: rounds carrying a `survivors_alive` reading,
-which only started being written recently, not how often a map has been played.
+Live figures behind the decisions above and below. Measure before declining
+something for want of a sample.
 
-Season 0, live, at the time of writing:
-
-- 57 matches rated, 68 players, 33 of them ranked.
+- 58 matches rated, 59 players, 34 past `RANKED_MIN_GAMES`, 15 with 10 or more.
 - Regulars have 15 to 41 matches each; the top player has 41.
 - 16 maps in rotation, played 9 to 18 times each, 18 to 36 round attempts each.
-- Survival readings are now 14 to 24 per map, not 6 to 8.
+- Survival readings are 14 to 24 per map.
 - Per player per map, across six regulars: 85 percent of rows have 4 or more
-  playings, and a regular has 7 to 15 goes at any single map. Only 4 rows of 96
-  sat at n=2.
+  playings, and a regular has 7 to 15 goes at any single map.
+- Every player in the ranked field has at least 10 samples on every stat bar
+  `quad_caps` and `tongue_clears`, which were added recently.
 
-So the by-map medians are well supported, and the sample argument against a
-per-map league baseline does not hold either.
+Note that `MIN_SURVIVAL_SAMPLE`'s comment counts a different thing from either:
+rounds carrying a `survivors_alive` reading, which only started being written
+recently, not how often a map has been played.
 
-**Reopened: a league baseline on the match page** ("p92 for this map"). It was
-declined here for want of a sample and the sample exists: 9 to 18 playings per
-map, 8 players each, so 72 to 144 player-observations per map. That is a real
-distribution. The remaining costs are honest ones and unchanged: per-map
-distributions have to reach the wire, and the figure has to sit beside
-`markColumn`'s deliberately cautious marks without swamping them. Worth its own
-plan, on its merits rather than on this excuse.
+**Open: a league baseline on the match page** ("p92 for this map"). The sample
+supports it: 9 to 18 playings per map, 8 players each, so 72 to 144
+player-observations per map. The costs are per-map distributions reaching the
+wire, and the figure sitting beside `markColumn`'s deliberately cautious marks
+without swamping them. Worth its own plan.
 
-**Still not doing: recent form** (last 10 matches against the season median).
-The original objection was overlap, and the corrected numbers soften it without
-removing it: a regular has 15 to 41 matches, so for the top few players the last
-ten are a genuine minority of their history, but for most of the 33 ranked
-players they are still most of it. The comparison is only well formed when the
-two windows are disjoint, which means last-10 against prior-N with N large
-enough to mean something. That holds today for perhaps the top five players and
-for nobody else, and a figure that is sound for five players and misleading for
-twenty-eight is not one to ship. Revisit when the median ranked player is past
-roughly 30 matches.
+**Not doing: recent form** (last 10 matches against the season median). The
+comparison is only well formed when the two windows are disjoint, which means
+last-10 against prior-N with N large enough to mean something. That holds for
+about the top five players and for nobody else, and a figure sound for five
+players and misleading for twenty-eight is not one to ship. Revisit when the
+median ranked player is past roughly 30 matches.
 
 ## Explicitly not doing
 

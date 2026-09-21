@@ -62,8 +62,8 @@ export function Leaderboard({ me }: { me: string | null }) {
   const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
   const seasons = seasonList?.seasons ?? [];
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'sr', desc: true });
-  // Per match by default. A season total mostly reports who has turned up to
-  // the most PUGs, so sorting the board by skeets used to rank attendance.
+  // Per match by default: a season total mostly reports who has turned up to
+  // the most PUGs, so sorting the board by skeets would rank attendance.
   const [measure, setMeasure] = useState<StatMeasure>('median');
 
   const rows = (data?.rows ?? []) as Row[];
@@ -129,16 +129,10 @@ export function Leaderboard({ me }: { me: string | null }) {
   /**
    * What a rating on this board is worth, as a distribution.
    *
-   * This replaced a league-wide "Tank damage 79,180" and "Skeets 547". Those
-   * were sums of everything everybody has ever done, which no reader has a
-   * scale for and which grow forever whatever anyone does. Sitting above a
-   * table of medians they also contradicted it.
-   *
-   * SR is the one figure on the page every column is ultimately about, and a
-   * reader seeing 1,427 has no way to tell a good rating from an ordinary one.
-   * The median and the top decile give them the two reference points that
-   * answer it. Ranked players only, since a provisional SR after one match is
-   * not yet a rating.
+   * SR is the one figure every column here is ultimately about, and a reader
+   * seeing 1,427 has no way to tell a good rating from an ordinary one. The
+   * median and the top decile are the two reference points that answer it.
+   * Ranked players only: a provisional SR after one match is not yet a rating.
    */
   const srSpread = useMemo(() => {
     const srs = rows.filter((r) => r.ranked).map((r) => r.sr);
@@ -182,8 +176,8 @@ export function Leaderboard({ me }: { me: string | null }) {
             {srSpread && (
               <Figure label="Top 10%" value={`${srSpread.p90.toLocaleString()}+`} sub="SR" />
             )}
-            {/* Kept: a pooled rate over the whole league is a real figure and
-                does not grow just because another match was played. */}
+            {/* A pooled rate over the whole league is a real figure and does
+                not grow just because another match was played. */}
             {totals.boomer_rate !== undefined
               ? <Figure label="Boomer %" value={`${totals.boomer_rate}%`} sub="everyone" />
               : null}
@@ -270,16 +264,14 @@ export function Leaderboard({ me }: { me: string | null }) {
                                 key={k}
                                 // The other measure, on hover: the two are one
                                 // click apart, but a reader comparing a median
-                                // against a total should not have to lose their
-                                // place in the table to do it.
+                                // against a total should not lose their place
+                                // in the table to do it.
                                 //
-                                // No match count here. This said "over N
-                                // matches" using the player's GAME count, which
-                                // is not the median's sample: a stat is absent
-                                // from every match played without skill_detect,
-                                // so the two diverge and the tooltip was
-                                // asserting a denominator it does not have. The
-                                // profile carries the real per-stat n.
+                                // No match count: a stat is absent from every
+                                // match played without skill_detect, so the
+                                // player's game count is not the median's
+                                // sample. The profile carries the real
+                                // per-stat n.
                                 title={measure === 'median'
                                   ? `${(r.stats?.[k] ?? 0).toLocaleString()} total this season`
                                   : `${(r.medianStats?.[k] ?? 0).toLocaleString()} per match`}

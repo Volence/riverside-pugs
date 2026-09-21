@@ -373,39 +373,20 @@ export function deriveLiveStats(stats: Record<string, number>): Record<string, n
   return out;
 }
 
-/** Fewest measured rounds a survival percentage may be computed from before
- *  the UI will print it as a number.
- *
- *  A percentage carries no visible uncertainty: "100%" over two rounds and
- *  "100%" over two hundred render identically, and the first is the one the
- *  maps pages were showing. Four is one full playing of a map by both teams in
- *  both halves, which is the smallest sample that is not a single team's good
- *  night. Below it, `survivalLabel` reports the count instead of a rate. */
 /**
  * Rounds needed before a survival figure is stated as a percentage.
  *
- * Raised from 4 to 6 on 2026-09-18. Four is two coin flips: The Greenhouse sat
- * at exactly 4 measured and printed a confident "50%", which is what prompted
- * this. Six is not statistically comfortable either, and nothing about this
- * data will be for a while, which is why the sample size is PRINTED beside the
- * figure rather than left to a tooltip. This threshold only decides when to
- * stop showing a raw count instead.
+ * A percentage carries no visible uncertainty: "100%" over two rounds and
+ * "100%" over two hundred render identically. Four is two coin flips, and The
+ * Greenhouse sat at exactly 4 measured and printed a confident "50%". Six is
+ * not statistically comfortable either, and nothing about this data will be
+ * for a while, which is why the sample size is PRINTED beside the figure.
+ * Below this, `survivalLabel` reports the count instead of a rate.
  *
- * Was "deliberately not higher: the best-covered maps currently have 8 measured
- * rounds and most have 6, so 8 would blank almost every map on the site". That
- * was true when written and is not any more, which is the thing to know about
- * it: checked against live data on 2026-09-20, the maps in rotation now carry
- * 14 to 24 measured rounds each. The history filled in, exactly as the note
- * predicted it would.
- *
- * The threshold is left at 6 because raising it is a judgement about how much
- * evidence a survival percentage should need, not a fact to be read off the
- * data, and nothing in the stat-distributions work depended on it. It is now a
- * long way below what the maps can support and is worth revisiting on purpose.
- *
- * Do not quote the numbers above as current without checking them. Treating
- * this comment as fact is what led the stat-distributions plan to decline two
- * follow-ups for want of a sample that was already there.
+ * Six is well under what the maps now carry (14 to 24 measured rounds each as
+ * of 2026-09-20), so it is worth revisiting. Raising it is a judgement about
+ * how much evidence a percentage should need, not a number to read off the
+ * data. Measure before assuming what the history can support.
  */
 export const MIN_SURVIVAL_SAMPLE = 6;
 
@@ -414,16 +395,14 @@ export const MIN_SURVIVAL_SAMPLE = 6;
  *
  * Must match STANDING_TOP in src/standings.ts, which cannot be imported here:
  * that module reaches the database and the settings table, and web/tsconfig.json
- * only admits leaf modules from the backend. Kept beside MIN_SURVIVAL_SAMPLE
- * because it is the same kind of constant, a threshold for what to print.
+ * only admits leaf modules from the backend.
  *
- * The server no longer truncates at this number, it only ranks. Deciding what a
- * rank outside the top five looks like is this side's job.
+ * The server ranks every metric and truncates nothing, so what a rank outside
+ * the top five looks like is this side's decision.
  */
 export const STANDING_TOP = 5;
 
-/** English ordinal suffix. The teens are the exception and all take "th":
- *  11, 12 and 13 are eleventh, twelfth and thirteenth, not "eleven-first". */
+/** English ordinal suffix. The teens all take "th". */
 export function ordinal(n: number): string {
   const lastTwo = n % 100;
   if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
@@ -456,13 +435,11 @@ const SAMPLE_UNIT = { match: 'matches', playing: 'playings' } as const;
  *
  * Two nights of 300 and one of 4000 have the same median as three nights of
  * 300, and they are not the same player. The quartiles say which one you are
- * looking at, and `n` says how much to trust either: a median over three
- * matches and one over forty read identically and are not the same claim.
+ * looking at, and `n` says how much to trust either.
  *
  * Reads "290 to 510 · 23 matches", or just "3 matches" when the sample cannot
- * support a spread. The count is never dropped, because the median above it is
- * still worth showing at any n and still needs its denominator. What gets
- * dropped is the claim the sample cannot back.
+ * support a spread. The count is never dropped: the median above it is worth
+ * showing at any n and still needs its denominator.
  */
 export function spreadNote(
   q: { n: number; p25: number; p75: number },
@@ -688,7 +665,7 @@ export interface StatLeader { steamid: string; name: string; value: number }
  * `median` is per completed match and answers "what does this player usually
  * get". `total` is the season sum and answers "how much of this has happened",
  * which mostly reports who has turned up most. The median is the default
- * everywhere the question is about a player rather than about the season.
+ * wherever the question is about a player rather than about the season.
  */
 export type StatMeasure = 'median' | 'total';
 

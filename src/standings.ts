@@ -25,8 +25,8 @@ export function standingMinGames(db: DB): number {
   return Number.isInteger(raw) && raw > 0 ? raw : STANDING_MIN_GAMES_DEFAULT;
 }
 
-/** How many places earn a rank BADGE on a profile. No longer what decides
- *  whether a standing is returned at all: see playerStandings. */
+/** How many places earn a rank BADGE on a profile. Not what decides whether a
+ *  standing is returned at all: playerStandings answers for every metric. */
 export const STANDING_TOP = 5;
 
 export interface Standing {
@@ -59,18 +59,15 @@ const FIXED_KEYS = ['sidmg', 'sikill', 'ck', 'rev'] as const;
  * Where one player stands this season, among players past the badge gate
  * only, for every metric they have scored in.
  *
- * Every metric, not only the top five. Truncating here meant a player outside
- * the top five was told nothing at all: #6 of 40 and #39 of 40 were both an
- * absent key, and the profile could not tell a near miss from a weakness. The
- * top five still gets the badge, but STANDING_TOP is now the UI's test for
- * that and not this function's test for whether to answer at all.
+ * Every metric, not only the top five, so a profile can tell #6 of 40 from
+ * #39 of 40. STANDING_TOP is the UI's test for which of them earns a badge.
  *
- * Counts are ranked PER MATCH, as a MEDIAN, not as totals. A season total
- * mostly ranks who has played the most, and a mean is moved by exactly the one
- * enormous night it should be resistant to. The median is also the figure each
- * badge sits beside on the profile, which is the point: a badge that ranks a
- * different number from the one it is next to is worse than no badge. Win rate
- * and boomer % are pooled rates and rank as they are.
+ * Counts are ranked PER MATCH, as a MEDIAN. A season total mostly ranks who
+ * has played the most, and a mean is moved by exactly the one enormous night
+ * it should resist. The median is also the figure each badge sits beside on
+ * the profile: a badge that ranks a different number from the one it is next
+ * to is worse than no badge. Win rate and boomer % are pooled rates and rank
+ * as they are.
  *
  * Only `high_good` public stats rank: a "#1 in times skeeted" badge is what
  * the self visibility rule exists to prevent, and a neutral stat (a
@@ -95,9 +92,8 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
   if (!ranked.some((r) => r.steamid === steamid)) return {};
 
   // One row per match, not a SUM, because the metrics below are MEDIANS.
-  // `stats_json IS NOT NULL` is the captured test for the fixed columns: they
-  // default to 0 and matchResult.ts writes them and stats_json together, so a
-  // NULL marks a player the dump had no row for rather than a bad night.
+  // `stats_json IS NOT NULL` is the captured test for the fixed columns; see
+  // FIXED_STAT_KEYS in statKeys.ts.
   const fixedRows = db.prepare(
     `SELECT mp.player_id AS steamid, mp.si_damage AS sidmg, mp.si_kills AS sikill,
             mp.common_kills AS ck, mp.revives AS rev

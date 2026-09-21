@@ -347,9 +347,9 @@ describe('per-map medians', () => {
     expect(row.spread.ck).toEqual({ n: 2, p25: 125, p50: 150, p75: 175 });
   });
 
-  // The reason for the change. A mean lets one exceptional night become the
-  // figure a player is shown for the map, including nights they never had.
-  it('is not dragged off by a single exceptional playing, as a mean was', () => {
+  // A mean lets one exceptional night become the figure a player is shown for
+  // the map, including numbers they have never scored.
+  it('is not dragged off by a single exceptional playing', () => {
     seedMatch(db, 1, [
       { map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 },
       { map: 'airport01', a: 1, b: 0 },

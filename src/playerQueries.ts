@@ -27,17 +27,14 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
   // client side without a request per column. Two queries for the whole table
   // rather than one per player.
   //
-  // These pull one row PER MATCH rather than a SUM, because the table now
-  // offers a per-match median as well as a season total, and a median cannot be
-  // recovered from a sum. Both bags are then reduced from the same samples, so
-  // the two tabs can never disagree about what they are measuring. The season
-  // total is unchanged by the switch: it is the same addition, done here.
+  // One row PER MATCH rather than a SUM: the table offers a per-match median
+  // as well as a season total, and a median cannot be recovered from a sum.
+  // Both bags are reduced from the same samples, so the two tabs cannot
+  // disagree about what they are measuring.
   //
-  // `stats_json IS NOT NULL` is the captured test for the fixed columns. They
-  // live on match_players and default to 0, and matchResult.ts writes them and
-  // stats_json together in one UPDATE per player the dump carried, so a NULL
-  // there marks the fixed zeros as never recorded rather than as a bad night.
-  // The skill table needs no such test: a row that was not measured is absent.
+  // `stats_json IS NOT NULL` is the captured test for the fixed columns; see
+  // FIXED_STAT_KEYS. The skill table needs no such test: a row that was not
+  // measured is absent.
   const fixedRows = db.prepare(
     `SELECT mp.player_id AS steamid,
             mp.si_damage AS sidmg, mp.si_kills AS sikill, mp.common_kills AS ck,
@@ -170,13 +167,10 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
   }
   const isSelf = viewer === steamid;
 
-  // What this player USUALLY gets, per completed match, with the spread around
-  // it. The tiles above divided a career total by games played, which one
-  // enormous night distorts for the rest of the season: a player with a
-  // 40-skeet game and eleven quiet ones was shown a figure they had never once
-  // scored. The same two sample rules as leaderboardData, and for the same
-  // reasons: stats_json separates a real zero from a player the dump missed,
-  // and an absent match_player_stats row means the stat was not measured.
+  // What this player usually gets, per completed match, with the spread around
+  // it. The same two sample rules as leaderboardData: `stats_json IS NOT NULL`
+  // separates a real zero from a player the dump missed, and an absent
+  // match_player_stats row means the stat was not measured.
   const fixedSamples = db.prepare(
     `SELECT mp.si_damage AS sidmg, mp.si_kills AS sikill, mp.common_kills AS ck,
             mp.ff_dealt AS ff, mp.revives AS rev

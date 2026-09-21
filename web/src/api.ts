@@ -365,9 +365,9 @@ export interface MapLeaderRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
-  /** A median over this player's playings of the map, to one decimal. Note
-   *  that MapDetail.avgStats is still a pooled MEAN: that is the map's own
-   *  baseline over every player-map, which is a different question. */
+  /** A median over this player's playings of the map, to one decimal.
+   *  MapDetail.avgStats beside it is a pooled MEAN: the map's own baseline
+   *  over every player-map, which is a different question. */
   medianStats: Record<string, number>;
   /** The spread behind `medianStats`, same keys, for the hover. */
   spread?: Record<string, Quantiles>;
@@ -400,7 +400,7 @@ export interface MapBreakdownRow {
   stats: Record<string, number>;
   /** A median over the playings of this map, to one decimal. What the player
    *  usually gets here: a total mostly reports which maps come up most in the
-   *  rotation, and a mean lets one exceptional night become the figure. */
+   *  rotation. */
   medianStats: Record<string, number>;
   /** The spread behind `medianStats`, same keys, for the hover. */
   spread?: Record<string, Quantiles>;
@@ -437,10 +437,9 @@ export interface Profile {
   history: { matchId: number; sr: number }[];
   /** Public skill-stat lifetime totals, keyed by stat. */
   statTotals: Record<string, number>;
-  /** What this player usually gets per completed match, with the spread around
-   *  it. Keyed like `statTotals` plus the five fixed counters. The tiles read
-   *  this rather than dividing a career total by games played, which one
-   *  enormous night distorts for the rest of the season. */
+  /** What this player usually gets per completed match, with the spread
+   *  around it. Keyed like `statTotals` plus the five fixed counters. The
+   *  tiles read this rather than dividing a career total by games played. */
   statQuantiles?: Record<string, Quantiles>;
   /** Lifetime totals for self-visibility stats. Only ever populated for the
    *  subject themselves; null for anyone else, never an empty object. */
@@ -457,13 +456,12 @@ export interface Profile {
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share.
  *
- *  Carries every metric the player has scored in, not only their top-five
- *  places. STANDING_TOP decides which of them earns a badge; the rest are
- *  shown as a percentile, so #6 of 40 reads as a near miss rather than as
- *  silence. */
+ *  Sent for every metric the player has scored in, not only their top-five
+ *  places. STANDING_TOP decides which earns a badge; the rest show a
+ *  percentile, so #6 of 40 reads as a near miss rather than as silence. */
 /** A sample's shape, as src/quantiles.ts computes it. `n` travels with the
- *  numbers because none of them mean anything without it: a median over three
- *  matches and one over forty read identically and are not the same claim. */
+ *  numbers: a median over three matches and one over forty read identically
+ *  and are not the same claim. */
 export interface Quantiles {
   n: number;
   p25: number;

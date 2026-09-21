@@ -472,8 +472,8 @@ describe('Profile', () => {
       expect(screen.queryByText(/percentile/)).toBeNull();
     });
 
-    // The point of the change: #6 of 23 used to be an absent key, so the tile
-    // said 400 and nothing else, and a reader could not tell it from #22.
+    // Without this the tile says 400 and nothing else, and a reader cannot
+    // tell #6 of 23 from #22 of 23.
     it('shows a percentile for a place outside the top five', async () => {
       mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 6, of: 23, pct: 74 } }));
       render(<Profile steamid="1" />);
@@ -1934,8 +1934,8 @@ describe('leaderboard header figures', () => {
 describe('leaderboard measure', () => {
   const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
   // alice turns up to far more matches and out-totals bob while being the
-  // weaker player in every one of them. The two measures disagree about who is
-  // top, which is the bug the per-match default fixes.
+  // weaker player in every one of them, so the two measures disagree about
+  // who is top.
   const rows = [
     {
       steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 10, losses: 10, games: 20,

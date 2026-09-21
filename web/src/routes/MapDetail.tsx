@@ -9,9 +9,8 @@ export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
   const [tab, setTab] = useState('winrate');
   // Per map first: a total mostly reports who has played the most, while
-  // what someone usually gets on a map is the number that compares. That
-  // figure is a median over their playings, not a mean, so one exceptional
-  // night does not become the number they are shown for the map.
+  // what someone usually gets on a map is the number that compares. A median
+  // over their playings, so one exceptional night does not become it.
   const [mode, setMode] = useState<'avg' | 'total'>('avg');
 
   if (error) {
@@ -36,8 +35,8 @@ export function MapDetail({ map }: { map: string }) {
     return { ...p, stats, medianStats };
   });
   // The map's own baseline, pooled over EVERY player-map at once, so a player
-  // row has something to be read against. Still a mean, deliberately: pooling
-  // is what makes it the map's figure rather than an average of per-player
+  // row has something to be read against. A mean, deliberately: pooling is
+  // what makes it the map's figure rather than an average of per-player
   // averages weighted by who turned up most.
   const baseline = deriveLiveStats(data.avgStats ?? {});
   const cellsOf = (p: MapLeaderRow) => (mode === 'avg' ? p.medianStats : p.stats);

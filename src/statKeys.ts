@@ -162,14 +162,16 @@ export const STAT_DEFS: readonly StatDef[] = [
  * The five counters that are columns on `match_players` rather than rows in
  * `match_player_stats`, in the order the stat bags carry them.
  *
- * They are NOT entries in STAT_DEFS and never will be: this registry exists so
- * that a typo'd key in the narrow table fails loudly, and these have real
- * columns that a typo could not reach. They are listed here only so the read
- * models stop spelling the same five strings out by hand.
+ * Not entries in STAT_DEFS: that registry exists so a typo'd key in the narrow
+ * table fails loudly, and these have real columns a typo could not reach.
  *
- * Not to be confused with `standings.ts`'s own FIXED_KEYS, which is this list
- * minus `ff` because topping friendly fire is not an achievement. That list
- * answers a different question and stays where it is.
+ * All five default to 0, and matchResult.ts writes them and `stats_json`
+ * together in one UPDATE per player the dump carried. So `stats_json IS NOT
+ * NULL` is the test for whether these were captured at all, and a sample of
+ * them without it counts a player the dump missed as a bad night.
+ *
+ * Not `standings.ts`'s FIXED_KEYS, which is this list minus `ff` because
+ * topping friendly fire is not an achievement.
  */
 export const FIXED_STAT_KEYS = ['sidmg', 'sikill', 'ck', 'ff', 'rev'] as const;
 

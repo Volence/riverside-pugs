@@ -1,20 +1,14 @@
 /**
  * Quantiles over a sample of numbers. The only place the formula lives.
  *
- * Every stat surface on the site reported a sum, or a mean of sums, which
- * answers "who has played the most" rather than "what does this player usually
- * get". A median answers the second question and a season total cannot, because
- * one enormous night moves a total and a mean by the same amount and moves a
- * median hardly at all.
- *
- * Pure, and deliberately free of any database import: the read models decide
- * what a sample is, this decides nothing but the arithmetic.
+ * Pure, and free of any database import: the read models decide what a sample
+ * is, this decides nothing but the arithmetic.
  */
 
 /** A sample's shape. `n` travels with the numbers because none of them mean
- *  anything without it: a median over three matches and a median over forty
- *  read identically and are not the same claim. Every caller is expected to
- *  show it. */
+ *  anything without it: a median over three matches and one over forty read
+ *  identically and are not the same claim. Every caller is expected to show
+ *  it. */
 export interface Quantiles {
   n: number;
   p25: number;
@@ -27,11 +21,11 @@ export interface Quantiles {
  *
  * Null rather than zeros: an absent statistic must never arrive at a page as a
  * zero, which would read as "did this badly" instead of "was never measured".
- * That is the rule the rest of the stats path already follows.
+ * That is the rule the rest of the stats path follows.
  *
  * Linear interpolation between order statistics (the R-7 default, and numpy's),
  * one formula for all three rather than a median by one rule and hinges by
- * another. Rounded to one decimal, matching perMapAverages in playerStats.ts.
+ * another. Rounded to one decimal.
  *
  * The input is not mutated: a caller's array is usually the accumulator it is
  * still filling.
