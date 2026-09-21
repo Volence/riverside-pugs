@@ -1,10 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DB } from '../db.js';
-import { parseReplay, slotInfected, type ReplayHeader } from '../replayFormat.js';
+import { parseReplay, slotInfected, type Frame, type ReplayHeader } from '../replayFormat.js';
 import { PriorBuilder, subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
-import { analyzeRound, buildRoundPrior } from './round.js';
+import { analyzeRound, buildRoundPrior, unpausedFrames } from './round.js';
 import {
   ANALYZER_VERSION, loadPrior, loadRoundPrior, saveRound, saveRoundPrior, savePrior, type RoundKey,
 } from './store.js';
@@ -21,6 +21,25 @@ function survivorSlots(header: ReplayHeader): number[] {
   return out;
 }
 
+export interface DecodedRound { header: ReplayHeader; frames: Frame[]; slots: number[] }
+
+/**
+ * A replay's bytes as the analyzer sees them, or null when there is nothing to
+ * analyse.
+ *
+ * The ONE door between the file format and the analyzer. The pooling pass and
+ * the scoring pass both come through here, so whatever is decided about which
+ * frames count is decided once and they cannot disagree. Paused frames are
+ * dropped here and nowhere else: see `unpausedFrames`.
+ */
+export function decodeRound(buf: Uint8Array): DecodedRound | null {
+  const replay = parseReplay(buf);
+  if (!replay) return null;
+  const slots = survivorSlots(replay.header);
+  if (slots.length === 0) return null;
+  return { header: replay.header, frames: unpausedFrames(replay.frames), slots };
+}
+
 /**
  * Analyse one round from its bytes and persist the result.
  *
@@ -31,10 +50,9 @@ function survivorSlots(header: ReplayHeader): number[] {
  * reported rather than papered over.
  */
 export function analyzeOneRound(db: DB, key: RoundKey, buf: Uint8Array): boolean {
-  const replay = parseReplay(buf);
+  const replay = decodeRound(buf);
   if (!replay) return false;
-  const slots = survivorSlots(replay.header);
-  if (slots.length === 0) return false;
+  const { slots } = replay;
 
   const pooled = loadPrior(db, replay.header.map);
   let prior: PriorTable | null = null;
@@ -82,9 +100,9 @@ function findReplays(db: DB, dir: string): Found[] {
 export function rebuildPriors(db: DB, dir: string): Map<string, number> {
   const pools = new Map<string, { builder: PriorBuilder; rounds: number }>();
   for (const f of findReplays(db, dir)) {
-    const replay = parseReplay(readFileSync(f.path));
+    const replay = decodeRound(readFileSync(f.path));
     if (!replay) continue;
-    const slots = survivorSlots(replay.header);
+    const { slots } = replay;
     const entry = pools.get(replay.header.map) ?? { builder: new PriorBuilder(), rounds: 0 };
     // `buildRoundPrior` is the ONLY producer of a round's contribution. This
     // pass used to compute it a second time, byte for byte identical, and

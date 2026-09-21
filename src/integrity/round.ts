@@ -32,6 +32,32 @@ export interface RoundMetrics {
 }
 
 /**
+ * The frames in which time actually passed.
+ *
+ * An engine pause keeps the frame writer running with the clock stopped: 11 of
+ * the 189 replays in hand on 2026-09-21 hold a run of frames with tMs frozen,
+ * 5865 frames in all and the longest 1197, byte-identical in all but 22. Each
+ * copy used to count as a fresh look in the aim prior and as a fresh
+ * observation in metric B, which is how one 385 frame pause gave match 37 an
+ * occupancy of 62.8.
+ *
+ * A frame is kept only when its tMs is greater than the last KEPT frame's, so a
+ * clock that steps backwards is dropped along with one that stands still. No
+ * replay in hand has a backwards step; the rule covers it because the cost of
+ * being wrong is a delta taken across negative time.
+ */
+export function unpausedFrames(frames: Frame[]): Frame[] {
+  const out: Frame[] = [];
+  let last = -Infinity;
+  for (const f of frames) {
+    if (f.tMs <= last) continue;
+    out.push(f);
+    last = f.tMs;
+  }
+  return out;
+}
+
+/**
  * One round's contribution to its map's aim prior.
  *
  * The single producer of this number, on purpose. The backfill's pooling pass

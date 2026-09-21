@@ -11,7 +11,7 @@ import {
 import { TUNING } from '../src/integrity/constants.js';
 import { ANALYZER_VERSION } from '../src/integrity/store.js';
 import { bearing } from '../src/integrity/geometry.js';
-import { buildRoundPrior } from '../src/integrity/round.js';
+import { buildRoundPrior, unpausedFrames } from '../src/integrity/round.js';
 import { analyzeOneRound, analyzePending, backfillAll, rebuildPriors } from '../src/integrity/run.js';
 
 const TOKEN = 'a'.repeat(32);
@@ -22,8 +22,10 @@ function blank(slot: number): PlayerSample {
   return { slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: 0, health: 0, temp: 0, cls: 0, weapon: 0, clip: 0, reserve: 0 };
 }
 
-/** One round: survivor slot 0 tracks ghost slot 4 perfectly for n frames. */
-function replayBytes(n: number, map = 'l4d_vs_farm01_hilltop'): Uint8Array {
+/** One round: survivor slot 0 tracks ghost slot 4 perfectly for n frames.
+ *  `paused` appends that many byte-identical copies of the last frame, tMs
+ *  frozen, which is what an engine pause writes. */
+function replayBytes(n: number, map = 'l4d_vs_farm01_hilltop', paused = 0): Uint8Array {
   const header: ReplayHeader = {
     version: VERSION, token: TOKEN, ordinal: 1, half: 1, playerHz: 10, entityHz: 10,
     map, startedUnix: 1785956274, indexOffset: 0, indexCount: 0, frameCount: n,
@@ -39,6 +41,7 @@ function replayBytes(n: number, map = 'l4d_vs_farm01_hilltop'): Uint8Array {
     players[4] = { ...blank(4), state: STATE.PRESENT | STATE.GHOST, x: Math.round(gx), y: Math.round(gy) };
     const f: Frame = { tMs: TUNING.SPAWN_GRACE_MS + i * 100, offset: 0, players, entities: [] };
     parts.push(encodeFrame(f));
+    if (i === n - 1) for (let k = 0; k < paused; k++) parts.push(encodeFrame(f));
   }
   const total = parts.reduce((s, p) => s + p.length, 0);
   const out = new Uint8Array(total);
@@ -79,6 +82,32 @@ describe('analyzeOneRound', () => {
     analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, replayBytes(60));
     const row = db.prepare('SELECT metrics FROM integrity_rounds WHERE slot = 0').get() as { metrics: string };
     expect(JSON.parse(row.metrics).occZ).toBeNull();
+  });
+});
+
+// 11 of 189 real replays hold a run of frames with tMs frozen, one of them
+// 1197 frames long. Time did not pass, so nothing was looked at and nothing was
+// tracked, but each copy used to count as a fresh sample in the aim prior and
+// in metric B: match 37's occupancy of 62.8 was a single 385 frame pause.
+describe('paused frames', () => {
+  it('keeps them out of the aim prior', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60, undefined, 400));
+    rebuildPriors(db, dir);
+    expect(db.prepare('SELECT frames FROM integrity_prior').get()).toEqual({ frames: 60 });
+    expect(db.prepare('SELECT frames FROM integrity_prior_rounds').get()).toEqual({ frames: 60 });
+  });
+
+  it('keeps them out of the metrics, through the same door', () => {
+    analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, replayBytes(60, undefined, 400));
+    const row = db.prepare('SELECT metrics FROM integrity_rounds WHERE slot = 0').get() as { metrics: string };
+    expect(JSON.parse(row.metrics).eligiblePairs).toBe(60);
+    expect(db.prepare('SELECT frames FROM integrity_prior_rounds').get()).toEqual({ frames: 60 });
+  });
+
+  it('drops a frame whose clock went backwards, and keeps the first frame', () => {
+    const f = (tMs: number): Frame => ({ tMs, offset: 0, players: [], entities: [] });
+    expect(unpausedFrames([f(0), f(100), f(100), f(100), f(200), f(150), f(300)]).map((x) => x.tMs))
+      .toEqual([0, 100, 200, 300]);
   });
 });
 
