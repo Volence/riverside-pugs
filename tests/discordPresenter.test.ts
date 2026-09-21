@@ -181,10 +181,10 @@ describe('renderResult', () => {
     const p = renderResult({
       matchId: 1, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 5, scoreB: 5, winner: 'draw',
       teamA: [
-        { name: 'mira', discordId: '111', discordName: 'br1', srBefore: 1200, srAfter: 1180 },
-        { name: 'js', discordId: '222', discordName: 'JS', srBefore: 900, srAfter: 925 },
+        { name: 'mira', discordId: '111', discordName: 'br1', sr: null, srBefore: 1200, srAfter: 1180 },
+        { name: 'js', discordId: '222', discordName: 'JS', sr: null, srBefore: 900, srAfter: 925 },
       ],
-      teamB: [{ name: 'b*o_b', discordId: null, srBefore: 800, srAfter: 800 }],
+      teamB: [{ name: 'b*o_b', discordId: null, sr: null, srBefore: 800, srAfter: 800 }],
     });
     const t = text(p);
     expect(t).toContain('<@111> (mira) 1180 (-20)');
