@@ -46,12 +46,20 @@ ConVar g_cvBots;
 
 int  g_iPrevButtons[MAXPLAYERS + 1];
 bool g_bPrevGround[MAXPLAYERS + 1];
+/** Whether the last usercmd was captured: alive and not a ghost. The edge of
+ *  this is where a life ends, so it is where bursts in flight are emitted and
+ *  the ground and air state is thrown away instead of leaking into the next. */
+bool g_bCapturing[MAXPLAYERS + 1];
 int  g_iBurstsThisRound[MAXPLAYERS + 1];
 
 // +attack burst, the `fire` anchor.
 int g_iAtkTicks[MAXPLAYERS + 1][MAX_INTERVALS];
 int g_iAtkCount[MAXPLAYERS + 1];
 int g_iAtkLastTick[MAXPLAYERS + 1];
+/** The weapon in hand at the FIRST press of the burst. Read at emit time it
+ *  was whatever the player had switched to by then, so a pistol burst followed
+ *  by a swap to the shotgun was stored as a shotgun burst. */
+char g_sAtkWeapon[MAXPLAYERS + 1][32];
 
 // Airborne phase, the `pounce` anchor: presses between leaving the ground and
 // landing again. A human issues one or two; a held button issues dozens.
@@ -59,6 +67,7 @@ int g_iAirTicks[MAXPLAYERS + 1][MAX_INTERVALS];
 int g_iAirCount[MAXPLAYERS + 1];
 int g_iAirLastTick[MAXPLAYERS + 1];
 int g_iAirStartTick[MAXPLAYERS + 1];
+char g_sAirWeapon[MAXPLAYERS + 1][32];
 
 // Ground phase, the `bhop` anchor: how long a player stays on the ground before
 // jumping again. A script jumps on the exact tick of landing, every time.
@@ -85,6 +94,8 @@ public void OnPluginStart()
 		"TEST ONLY: also capture bots, so the pipeline can be exercised without a player.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
+	HookEvent("round_end", Event_RoundEnd, EventHookMode_PostNoCopy);
+	HookEvent("player_death", Event_PlayerDeath);
 	RegAdminCmd("sm_inputstats_emit", Cmd_Emit, ADMFLAG_ROOT,
 		"TEST: sm_inputstats_emit <fire|pounce|bhop> <presses> - ship a synthetic burst through the real encode and emit path.");
 }
@@ -123,10 +134,45 @@ int FirstHuman()
 	return -1;
 }
 
-public void OnClientDisconnect(int client) { ResetClient(client); }
+// A burst used to be emitted only by the NEXT press after it, or by a landing.
+// The last burst of a life, a round or a session has no next press, so it was
+// never emitted at all, and the last thing a player did before dying is not
+// the burst to lose. Each of these ends emits what is in flight first.
+public void OnClientDisconnect(int client)
+{
+	FlushAll(client);
+	ResetClient(client);
+}
+
+public void Event_PlayerDeath(Event e, const char[] n, bool b)
+{
+	int client = GetClientOfUserId(e.GetInt("userid"));
+	if (client < 1) return;
+	FlushAll(client);
+	ResetCapture(client);
+}
+
+public void Event_RoundEnd(Event e, const char[] n, bool b)
+{
+	for (int i = 1; i <= MaxClients; i++) {
+		FlushAll(i);
+		ResetCapture(i);
+	}
+}
+
 public void Event_RoundStart(Event e, const char[] n, bool b)
 {
 	for (int i = 1; i <= MaxClients; i++) ResetClient(i);
+}
+
+/** Emit whatever this client has in flight. Safe on anyone: a client with
+ *  nothing buffered, or who is no longer in game, emits nothing. */
+void FlushAll(int client)
+{
+	if (!g_bCapturing[client] || !IsClientInGame(client)) return;
+	int tick = GetGameTickCount();
+	FlushFire(client, tick, 0);
+	if (!g_bPrevGround[client]) FlushAir(client, tick);
 }
 
 void ResetClient(int c)
@@ -140,6 +186,7 @@ void ResetClient(int c)
  *  round's burst budget and the previous button state both outlive this. */
 void ResetCapture(int c)
 {
+	g_bCapturing[c] = false;
 	g_bPrevGround[c] = true;
 	g_iAtkCount[c] = 0; g_iAtkLastTick[c] = 0;
 	g_iAirCount[c] = 0; g_iAirLastTick[c] = 0; g_iAirStartTick[c] = 0;
@@ -165,7 +212,7 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 {
 	// Hot path: ~800 calls a second with eight players at 100 tick. Integer work
 	// only; nothing here formats a string. Formatting happens at burst close.
-	if (!g_cvEnabled.BoolValue || !IsClientInGame(client) || !IsPlayerAlive(client)
+	if (!g_cvEnabled.BoolValue || !IsClientInGame(client)
 	    || (IsFakeClient(client) && !g_cvBots.BoolValue)) {
 		return;
 	}
@@ -173,18 +220,37 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	// A ghost (an infected player who has not spawned yet) passes IsPlayerAlive,
 	// holds weapon_hunter_claw, and EVERYONE mashes M1 as a ghost because that
 	// is how you spawn. Captured, that mashing dominated the pounce bursts. A
-	// ghost cannot attack, pounce or hop, so nothing it presses is evidence:
-	// drop whatever was in flight, keep the button state current so the press
-	// that spawns the player is not read as an edge on their first live tick,
-	// and capture nothing.
-	if (GetClientTeam(client) == TEAM_INFECTED && GetEntProp(client, Prop_Send, "m_isGhost") != 0) {
-		ResetCapture(client);
+	// ghost cannot attack, pounce or hop, so nothing it presses is evidence.
+	//
+	// Dead or ghost, the button state is still kept current, so the press that
+	// spawns the player is not read as an edge on their first live tick.
+	if (!IsPlayerAlive(client)
+	    || (GetClientTeam(client) == TEAM_INFECTED && GetEntProp(client, Prop_Send, "m_isGhost") != 0)) {
+		if (g_bCapturing[client]) {
+			// The life just ended (player_death normally got here first).
+			FlushAll(client);
+			ResetCapture(client);
+		}
 		g_iPrevButtons[client] = buttons;
 		return;
 	}
 
 	int tick = GetGameTickCount();
 	int prev = g_iPrevButtons[client];
+	if (!g_bCapturing[client]) {
+		// First captured usercmd of a life. Nothing carries over from the last
+		// one: air presses from before a death used to merge into the first
+		// pounce after the respawn.
+		ResetCapture(client);
+		g_bCapturing[client] = true;
+	}
+
+	// A fire burst is over once the gap has passed, whether or not another
+	// press ever comes. Waiting for that next press is what labelled bursts
+	// with the wrong weapon and dropped the last one of every life.
+	if (g_iAtkLastTick[client] > 0 && tick - g_iAtkLastTick[client] > BURST_GAP_TICKS) {
+		FlushFire(client, tick, cmdnum);
+	}
 	// FL_ONGROUND is clear on a ladder, so a climb used to read as one long
 	// airborne phase and every press on it as a pounce press, and stepping off
 	// at the top as a landing for the bhop anchor. A ladder is not the air.
@@ -210,8 +276,10 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 
 	// --- +attack press edges ------------------------------------------------
 	if ((buttons & IN_ATTACK) && !(prev & IN_ATTACK)) {
-		Record(client, tick, g_iAtkTicks[client], g_iAtkCount[client], g_iAtkLastTick[client], cmdnum);
+		if (g_iAtkLastTick[client] == 0) GetActiveWeapon(client, g_sAtkWeapon[client], sizeof(g_sAtkWeapon[]));
+		Record(tick, g_iAtkTicks[client], g_iAtkCount[client], g_iAtkLastTick[client]);
 		if (!ground) {
+			if (g_iAirLastTick[client] == 0) GetActiveWeapon(client, g_sAirWeapon[client], sizeof(g_sAirWeapon[]));
 			// Same press also belongs to the airborne phase, counted separately
 			// because it is the signature that needs no tuning.
 			if (g_iAirCount[client] < MAX_INTERVALS) {
@@ -239,17 +307,14 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	g_iPrevButtons[client] = buttons;
 }
 
-/** Append one interval to a burst, closing and emitting the previous one when
- *  the gap is too long to belong to it. */
-void Record(int client, int tick, int[] ticks, int &count, int &lastTick, int cmdnum)
+/** Append one interval to the fire burst. The burst gap is enforced by the
+ *  caller before any press is looked at, so whatever reaches here belongs to
+ *  the burst in flight, or starts one. */
+void Record(int tick, int[] ticks, int &count, int &lastTick)
 {
 	if (lastTick > 0) {
 		int d = tick - lastTick;
-		if (d > BURST_GAP_TICKS) {
-			FlushFire(client, tick, cmdnum);
-		} else if (d >= 1 && count < MAX_INTERVALS) {
-			ticks[count++] = d;
-		}
+		if (d >= 1 && count < MAX_INTERVALS) ticks[count++] = d;
 	}
 	lastTick = tick;
 }
@@ -259,11 +324,10 @@ void FlushFire(int client, int tick, int cmdnum)
 	if (g_iAtkCount[client] >= MIN_BURST_PRESSES) {
 		char d[MAX_INTERVALS + 1];
 		Encode(g_iAtkTicks[client], g_iAtkCount[client], d, sizeof(d));
-		char weapon[32];
-		GetActiveWeapon(client, weapon, sizeof(weapon));
-		EmitBurst(client, "fire", weapon, g_iAtkCount[client], 0, 0, tick, cmdnum, d);
+		EmitBurst(client, "fire", g_sAtkWeapon[client], g_iAtkCount[client], 0, 0, tick, cmdnum, d);
 	}
 	g_iAtkCount[client] = 0;
+	g_iAtkLastTick[client] = 0;
 }
 
 void FlushAir(int client, int tick)
@@ -278,11 +342,9 @@ void FlushAir(int client, int tick)
 			int oneTick[1]; oneTick[0] = 1;
 			Encode(oneTick, 1, d, sizeof(d));
 		}
-		char weapon[32];
-		GetActiveWeapon(client, weapon, sizeof(weapon));
 		int airTicks = g_iAirStartTick[client] > 0 ? tick - g_iAirStartTick[client] : 0;
 		// air presses is count+1: intervals are the gaps BETWEEN presses.
-		EmitBurst(client, "pounce", weapon, g_iAirCount[client], airTicks,
+		EmitBurst(client, "pounce", g_sAirWeapon[client], g_iAirCount[client], airTicks,
 			g_iAirCount[client] + 1, tick, 0, d);
 	}
 	g_iAirCount[client] = 0;
