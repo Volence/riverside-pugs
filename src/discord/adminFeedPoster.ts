@@ -48,6 +48,17 @@ export class AdminFeedPoster {
     return escapeName(getPlayer(this.deps.db, steamid)?.name ?? steamid);
   }
 
+  /** Where a named player's record lives. Every post that names somebody
+   *  links here, so reading the feed and opening the file is one click
+   *  rather than a search through the panel. */
+  private file(steamid: string): string {
+    return `${this.deps.publicUrl}/admin/people/${steamid}`;
+  }
+
+  private ticket(id: string | number): string {
+    return `${this.deps.publicUrl}/admin/people/tickets/${id}`;
+  }
+
   private async deliver(e: AdminEvent): Promise<void> {
     const channelId = this.channel(e.kind);
     if (!channelId) return;
@@ -61,7 +72,7 @@ export class AdminFeedPoster {
   private line(e: AdminEvent): { text: string; color: number } | null {
     switch (e.kind) {
       case 'report': {
-        const link = `[#${e.ticketId}](${this.deps.publicUrl}/admin?ticket=${e.ticketId})`;
+        const link = `[#${e.ticketId}](${this.ticket(e.ticketId)})`;
         return {
           text: e.created
             ? `🎫 New ticket ${link} about **${this.name(e.targetId)}** (${e.category}).`
@@ -126,7 +137,7 @@ export class AdminFeedPoster {
           ].filter(Boolean).join(' and ');
           const when = s.daysSinceLastBan === 0 ? 'today' : `${s.daysSinceLastBan} day${s.daysSinceLastBan === 1 ? '' : 's'} ago`;
           return {
-            text: `🪪 ${who}${match} has ${parts} on their Steam account, the latest ${when}. Steam does not say which game, so this is context for their [admin page](${this.deps.publicUrl}/admin), not a finding about this one.`,
+            text: `🪪 ${who}${match} has ${parts} on their Steam account, the latest ${when}. Steam does not say which game, so this is context for their [file](${this.file(e.steamid)}), not a finding about this one.`,
             color: COLOR.problem,
           };
         }
@@ -141,7 +152,7 @@ export class AdminFeedPoster {
         // signed in, and an admin searching the server log needs the name the
         // player was actually using.
         const known = getPlayer(this.deps.db, e.steamid);
-        const id = known ? `[${e.steamid}](${this.deps.publicUrl}/player/${e.steamid})` : `\`${e.steamid}\``;
+        const id = known ? `[${e.steamid}](${this.file(e.steamid)})` : `\`${e.steamid}\``;
         return {
           text: `**${escapeName(e.name)}** (${id}) dropped while connecting ${e.count} times in ten minutes without getting in (${e.total} on record): likely rejected for a modified game file; the file name was shown on their screen. A cancelled loading screen looks the same, so this is a hint, not proof.`,
           color: COLOR.problem,
@@ -180,7 +191,7 @@ export class AdminFeedPoster {
         : `${who} changed the ${e.target} setting`;
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': {
-        const ticket = `ticket [#${e.target}](${this.deps.publicUrl}/admin?ticket=${e.target})`;
+        const ticket = `ticket [#${e.target}](${this.ticket(e.target)})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
           case 'ticket_claim': return `${who} ${d.claim === false ? 'released' : 'claimed'} ${ticket}`;
@@ -199,7 +210,7 @@ export class AdminFeedPoster {
   async handleButton(_i: Extract<BotInteraction, { kind: 'button' }>): Promise<InteractionReply> {
     return {
       ephemeral: true,
-      payload: { content: `Reports are tickets now. Open ${this.deps.publicUrl}/admin and use the Tickets tab.`, embeds: [], components: [], mentionUserIds: [] },
+      payload: { content: `Reports are tickets now. Open ${this.deps.publicUrl}/admin/people/tickets.`, embeds: [], components: [], mentionUserIds: [] },
     };
   }
 }

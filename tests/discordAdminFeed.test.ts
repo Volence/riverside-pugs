@@ -43,7 +43,7 @@ describe('admin feed', () => {
     await feed.idle();
     expect(t.live()).toHaveLength(2);
     expect(t.live()[0].channelId).toBe('admins');
-    expect(text(0)).toContain(`https://pug.test/admin?ticket=${a.ticketId}`);
+    expect(text(0)).toContain(`https://pug.test/admin/people/tickets/${a.ticketId}`);
     expect(text(0)).toContain('player5');
     expect(text(0)).toContain('griefing');
     expect(text(0)).toMatch(/new ticket/i);
@@ -71,7 +71,7 @@ describe('admin feed', () => {
     logAdmin(db, ADMIN, 'ticket_close', 12, { outcome: 'warned' });
     logAdmin(db, ADMIN, 'ticket_ban', 12, { reason: 'walls', minutes: 1440 });
     await feed.idle();
-    expect(text(0)).toContain('closed ticket [#12](https://pug.test/admin?ticket=12)');
+    expect(text(0)).toContain('closed ticket [#12](https://pug.test/admin/people/tickets/12)');
     expect(text(0)).toContain('warned');
     expect(text(1)).toContain('banned from ticket [#12]');
     expect(text(1)).toContain('1 day');
@@ -116,13 +116,13 @@ describe('admin feed', () => {
     expect(line).toContain('2 times in ten minutes');
     expect(line).toContain('5 on record');
     expect(line).toContain('likely rejected for a modified game file; the file name was shown on their screen');
-    expect(line).not.toContain('/player/');
+    expect(line).not.toContain('/admin/people/');
   });
 
   it('a connect drop by a known player links the steamid to their profile', async () => {
     publishAdminEvent({ kind: 'signon_drop', steamid: IDS[4], name: 'in game name', count: 2, total: 2 });
     await feed.idle();
-    expect(t.live()[0].payload.embeds[0].description).toContain(`[${IDS[4]}](https://pug.test/player/${IDS[4]})`);
+    expect(t.live()[0].payload.embeds[0].description).toContain(`[${IDS[4]}](https://pug.test/admin/people/${IDS[4]})`);
   });
 
   it('connect drops ride the problems toggle', async () => {
