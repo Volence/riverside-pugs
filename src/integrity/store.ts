@@ -12,8 +12,19 @@ import type { RoundMetrics } from './round.js';
  *
  *  3: the occlusion guard no longer lets an entity carrying the GHOST bit veto
  *  a frame. AI controlled special infected are recorded as entities and can be
- *  unspawned, so version 2 dropped frames because of something invisible. */
-export const ANALYZER_VERSION = 3;
+ *  unspawned, so version 2 dropped frames because of something invisible.
+ *
+ *  4: the 2026-09-21 audit. Nothing version 3 measured means the same thing.
+ *  Paused frames are dropped before anything sees them. Fidelity is measured
+ *  against the better of two innocent explanations, so a survivor's own
+ *  movement no longer scores as tracking, and only in windows holding
+ *  MIN_TRAVEL degrees of required motion. "On target" needs the pitch as well
+ *  as the yaw. Occupancy is stored as sums over 2 second blocks, bounded by
+ *  R_MAX, and scored at read time against a per-map calibration, with the team
+ *  gap; RoundMetrics lost occZ, teamRank and teamGap and gained occ, windows,
+ *  scoreable and fidSum. Pools and shares of the aim prior are versioned, so
+ *  this bump also rebuilds every prior as the rounds are re-measured. */
+export const ANALYZER_VERSION = 4;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
 export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[] }
