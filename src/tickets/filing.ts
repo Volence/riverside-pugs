@@ -77,14 +77,17 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
     .get(reporter, since) as { n: number }).n;
   if (recent >= perDay) return fail(429, `you can file ${perDay} reports a day; try again tomorrow`);
 
-  // Which ticket this report would land on, which is also which ticket the
-  // match-less limit of one open report is counted against: a safety report
-  // belongs to the restricted sibling and is not a duplicate of a normal one.
+  // Which ticket this report would land on, which is also which ticket both
+  // duplicate limits are counted against: a safety report belongs to the
+  // restricted sibling and is not a duplicate of a normal one, with or
+  // without a match. Without this a safety report about a match you had
+  // already reported would have to give up its match to get through.
   const restricted = category === 'unsafe' || hasStaffFlag(db, target.steamid);
   const dupe = matchId !== null
     ? db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
-       WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id = ?`).get(reporter, target.steamid, matchId)
+       WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id = ? AND t.restricted = ?`)
+      .get(reporter, target.steamid, matchId, restricted ? 1 : 0)
     : db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
        WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id IS NULL AND t.status = 'open' AND t.restricted = ?`)

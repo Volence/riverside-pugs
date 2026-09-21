@@ -124,7 +124,7 @@ The existing match page routes and `/report` become thin callers of the same fun
   text and makes the report restricted.
 - Reporter must be active and not the target. No match roster requirement and no 48 hour
   window any more. If a match is given it must exist and the target must be on its roster.
-- One report per reporter, target and match (and one match-less report per reporter and
+- One report per reporter, target, match and ticket flavour (and one match-less report per reporter and
   target per open ticket).
 - Rate limit: `ticket_reports_per_day` (default 5) per reporter, counted from
   `ticket_reports`, so it survives restarts.

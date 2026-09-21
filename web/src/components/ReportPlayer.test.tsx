@@ -44,6 +44,22 @@ describe('ReportPlayer on a profile', () => {
   });
 });
 
+describe('ReportPlayer on a match page', () => {
+  it('keeps a player you already reported selectable, so a safety report can still name that match', async () => {
+    mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [{ steamid: '7', name: 'Walls', alreadyReported: true }] });
+    mockApi.report.mockResolvedValue({ ok: true });
+    render(<ReportPlayer matchId={66} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Report a player' }));
+    const option = await screen.findByRole('option', { name: 'Walls (reported)' }) as HTMLOptionElement;
+    expect(option.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('Player'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'unsafe' } });
+    fireEvent.input(screen.getByLabelText('Details'), { target: { value: 'what happened' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send report' }));
+    await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(66, '7', 'unsafe', 'what happened'));
+  });
+});
+
 describe('MyReports', () => {
   it('lists what you filed and whether it is open, and nothing about the outcome', async () => {
     mockApi.myReports.mockResolvedValue({ reports: [

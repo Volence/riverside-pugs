@@ -70,8 +70,11 @@ export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; tar
           {!fixed && (
             <select value={target} aria-label="Player" onChange={(e) => setTarget((e.target as HTMLSelectElement).value)}>
               <option value="">Who?</option>
+              {/* Marked, never disabled: a safety report about someone you
+                  already reported for this match is a different report, and
+                  the server refuses the true duplicates. */}
               {elig!.targets!.map((t) => (
-                <option key={t.steamid} value={t.steamid} disabled={t.alreadyReported}>
+                <option key={t.steamid} value={t.steamid}>
                   {t.name}{t.alreadyReported ? ' (reported)' : ''}
                 </option>
               ))}
