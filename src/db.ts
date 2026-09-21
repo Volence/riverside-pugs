@@ -811,6 +811,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // What players.status was when the account was banned, so the end of the
+  // ban can put it back. NULL when the account is not banned, and on a row
+  // banned before this column existed, which restoreStatus in
+  // src/admin/players.ts works out from the evidence instead.
+  ensureColumn(db, 'players', 'status_before_ban', 'TEXT');
   // Every Discord link there has ever been, open or closed. The players row
   // only knows the link as it stands, which is what let one Discord account
   // serve any number of Steam accounts in sequence with nothing to show for
