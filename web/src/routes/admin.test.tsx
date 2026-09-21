@@ -16,7 +16,7 @@ async function confirmDialog(name?: string | RegExp) {
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
-    players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
+    players: vi.fn(), player: vi.fn(), ban: vi.fn(), steamRefresh: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     reports: vi.fn(), audit: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
@@ -127,6 +127,101 @@ describe('Admin page', () => {
     fireEvent.click(screen.getByText('clean'));
     await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
     expect(document.getElementById('connect-drops')).toBeNull();
+  });
+
+  const steamRow = { steamid: '2', name: 'borrower', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 2400, games: 9, createdAt: '2026-09-01', offenses: 0 };
+  const steamDetail = {
+    ...steamRow, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+    signonDrops: { count: 0, lastAt: null, rows: [] }, inputFlags: [], inputCaps: [],
+  };
+
+  const steamSection = () => waitFor(() => {
+    const el = document.getElementById('steam-account');
+    expect(el).toBeTruthy();
+    return el!;
+  });
+
+  it('shows the Steam account as context: age, bans, hours, level and the lender', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [steamRow] });
+    mockAdmin.player.mockImplementation(async (steamid: string) => (steamid === '99'
+      ? { ...steamDetail, steamid: '99', name: 'lenny', status: 'banned' }
+      : {
+        ...steamDetail,
+        steamAccount: {
+          checkedAt: '2026-09-21T10:00:00.000Z', createdAt: '2026-08-22T00:00:00.000Z', ageDays: 30,
+          reference: { kind: 'first_match', at: '2026-09-02T00:00:00.000Z' }, daysBeforeReference: 11,
+          visibility: 'public', profileConfigured: true,
+          bans: { vac: 1, game: 0, daysSinceLast: 105, community: false, economy: 'none', checkedAt: '2026-09-21T10:00:00.000Z' },
+          l4d1: { state: 'visible', hours: 12 }, level: 3,
+          lender: { steamid: '99', seenAt: '2026-09-20T20:00:00.000Z', player: { steamid: '99', name: 'lenny', banned: true } },
+          flags: [
+            { kind: 'new_account', text: 'New account: created 11 days before their first match here. New players are also new accounts.' },
+            { kind: 'borrowed_game', text: 'Borrowed game: last seen playing on a copy shared by lenny through Steam Family Sharing. lenny is banned here.' },
+          ],
+        },
+      }));
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
+    fireEvent.click(screen.getByText('borrower'));
+
+    const section = await steamSection();
+    const text = section.textContent ?? '';
+    expect(text).toContain('not a verdict');
+    expect(text).toContain('New account: created 11 days before their first match here.');
+    expect(text).toContain('30 days old');
+    expect(text).toContain('created 11 days before their first match here');
+    expect(text).toContain('1 VAC ban');
+    expect(text).toContain('105 days ago');
+    expect(text).toContain('12 h');
+    expect(text).toContain('Public');
+    expect(text).toContain('Level 3');
+    expect(text).toContain('BANNED here');
+    expect(within(section).getByRole('link', { name: 'Steam profile' }).getAttribute('href'))
+      .toBe('https://steamcommunity.com/profiles/2');
+
+    // The lender is a player here, so their name opens THEIR admin detail.
+    fireEvent.click(within(section).getByRole('button', { name: 'lenny' }));
+    await waitFor(() => expect(mockAdmin.player).toHaveBeenCalledWith('99', expect.anything()));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'lenny' })).toBeTruthy());
+  });
+
+  it('says hidden rather than zero for a private profile, and unknown lenders by id', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [steamRow] });
+    mockAdmin.player.mockResolvedValue({
+      ...steamDetail,
+      steamAccount: {
+        checkedAt: '2026-09-21T10:00:00.000Z', createdAt: null, ageDays: null, reference: null, daysBeforeReference: null,
+        visibility: 'private', profileConfigured: true, bans: { vac: 0, game: 0, daysSinceLast: null, community: false, economy: 'none', checkedAt: '2026-09-21T10:00:00.000Z' },
+        l4d1: { state: 'hidden', lastSeenHours: 4 }, level: null,
+        lender: { steamid: '76561198000000099', seenAt: '2026-09-20T20:00:00.000Z', player: null },
+        flags: [{ kind: 'private_profile', text: 'Private profile: Steam will not show this account\'s age, hours or level. Plenty of people keep it that way.' }],
+      },
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
+    fireEvent.click(screen.getByText('borrower'));
+    const section = await steamSection();
+    const text = section.textContent ?? '';
+    expect(text).toContain('hidden (4 h when last visible)');
+    expect(text).toContain('Private');
+    expect(text).toContain('No VAC or game bans');
+    expect(text).not.toMatch(/\b0 h\b/);
+    expect(within(section).getByRole('link', { name: '76561198000000099' }).getAttribute('href'))
+      .toBe('https://steamcommunity.com/profiles/76561198000000099');
+  });
+
+  it('says Steam has not been asked yet, and asks on request', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [steamRow] });
+    mockAdmin.player.mockResolvedValue({ ...steamDetail, steamAccount: null });
+    mockAdmin.steamRefresh.mockResolvedValue({ ok: true, refreshed: 1 });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
+    fireEvent.click(screen.getByText('borrower'));
+    const section = await steamSection();
+    expect(section.textContent).toContain('Steam has not been asked about this account yet');
+    fireEvent.click(within(section).getByRole('button', { name: 'Check now' }));
+    await waitFor(() => expect(mockAdmin.steamRefresh).toHaveBeenCalledWith('2'));
+    await waitFor(() => expect(mockAdmin.player.mock.calls.length).toBeGreaterThan(1));
   });
 
   it('shows what an input flag rests on, what its holds look like, and any truncated capture', async () => {
