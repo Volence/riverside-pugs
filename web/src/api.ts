@@ -462,6 +462,23 @@ export interface StreamsView {
   offlineTotal: number;
 }
 
+export type EndorseKind = 'caller' | 'clutch' | 'vibes';
+
+/** One player's endorse panel for one match. `given` is the viewer's OWN
+ *  choices; nothing anywhere says who endorsed whom. */
+export interface EndorseState {
+  eligible: boolean;
+  reason: string | null;
+  /** UTC, `YYYY-MM-DD HH:MM:SS`. */
+  closesAt: string | null;
+  budget: number;
+  remaining: number;
+  given: { to: string; kind: EndorseKind }[];
+  candidates: { steamid: string; name: string; team: Team }[];
+}
+
+export interface PendingEndorsement { matchId: number; remaining: number }
+
 /** One line of the profile's chemistry panel. `winRate` is 0 to 1. */
 export interface ChemistryLine { steamid: string; name: string; games: number; wins: number; winRate: number }
 
@@ -962,6 +979,12 @@ export const api = {
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
     get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
+  endorseState: (matchId: number, signal?: AbortSignal) =>
+    get<EndorseState>(`/api/matches/${matchId}/endorse`, signal),
+  endorse: (matchId: number, to: string, kind: EndorseKind) =>
+    post<{ ok: true; remaining: number; state: EndorseState }>(`/api/matches/${matchId}/endorse`, { to, kind }),
+  endorsePending: (signal?: AbortSignal) =>
+    get<{ pending: PendingEndorsement[] }>('/api/endorse/pending', signal),
   profile: (steamid: string, signal?: AbortSignal) =>
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 

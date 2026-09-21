@@ -8,6 +8,7 @@ import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { ReportPlayer } from '../components/ReportPlayer';
+import { EndorsePanel } from '../components/EndorsePanel';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
 
@@ -413,6 +414,11 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
         eyebrowA={eyebrowA}
         eyebrowB={eyebrowB}
       />
+
+      {/* Completed matches only, and only for a signed-in viewer: the panel
+          asks the server whether THIS viewer may endorse here, and renders
+          nothing when they may not. */}
+      {match.state === 'completed' && me && <EndorsePanel matchId={match.id} />}
 
       <div class="stack">
         {data.forecast && <ForecastPanel f={data.forecast} winner={match.winner} />}

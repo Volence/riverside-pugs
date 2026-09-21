@@ -5,6 +5,7 @@ import { LocationProvider, Route, Router, useLocation } from 'preact-iso';
 import { useLiveState } from './hooks/useLiveState';
 import { Nav } from './components/Nav';
 import { QueueBar } from './components/QueueBar';
+import { EndorseBar } from './components/EndorseBar';
 import { DevPanel } from './components/DevPanel';
 import { ConfirmHost } from './components/Confirm';
 import { Play } from './routes/Play';
@@ -71,6 +72,7 @@ function App() {
           you are reading the leaderboard. It also owns data-urgent and the
           tab title for the whole app, so nothing else may set them. */}
       <QueueBar state={state} path={path} />
+      <EndorseBar me={me} path={path} />
       <main>
         <Router>
           <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
