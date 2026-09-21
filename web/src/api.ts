@@ -727,6 +727,30 @@ export interface IntegrityPlayerRow {
 
 /** A flag raised live by another plugin (today Little Anti-Cheat) rather than
  *  by replay analysis. No clip behind it, so nothing to watch. */
+/** One row of the cross-player flag feed: LilAC hits and input-stat detections
+ *  merged, so the panel has a front door. */
+export interface RecentFlag {
+  id: number;
+  kind: string;
+  source: string;
+  severity: string;
+  steamid: string;
+  name: string;
+  matchId: number | null;
+  at: string;
+}
+
+/** Whether anything is being captured at all. An empty panel cannot otherwise
+ *  tell "nothing suspicious" apart from "silently broken". */
+export interface CaptureHealth {
+  bursts: number;
+  detections: number;
+  lilacFlags: number;
+  lastBurstAt: string | null;
+  lastFlagAt: string | null;
+  matchesWithBursts: number;
+}
+
 export interface IntegrityFlag {
   id: number;
   matchId: number | null;
@@ -832,7 +856,8 @@ export const adminApi = {
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
   integrity: (season: string, signal?: AbortSignal) =>
-    get<{ players: IntegrityPlayerRow[] }>(`/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
+    get<{ players: IntegrityPlayerRow[]; flags: RecentFlag[]; health: CaptureHealth }>(
+      `/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
   /** Flags raised live by another plugin (today Little Anti-Cheat). No replay
    *  behind them, so they are listed beside the clips rather than among them. */
   integrityPlayer: (steamid: string, signal?: AbortSignal) =>

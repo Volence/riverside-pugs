@@ -187,13 +187,16 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         )}
       </section>
 
-      {d.inputFlags.length > 0 && (
+      {(
         <section id="input-flags">
           <h4>Input flags</h4>
           <p class="muted">
             Button timing that does not look like a hand. These are evidence to weigh against the
             replay, not a verdict: watch the round before acting on one.
           </p>
+          {d.inputFlags.length === 0 && (
+            <p class="muted">Nothing flagged for this player by input timing.</p>
+          )}
           <ul class="admin-list">
             {d.inputFlags.map((f) => (
               <li key={f.id}>

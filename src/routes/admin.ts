@@ -18,6 +18,7 @@ import { clearPenalties } from '../penalties.js';
 import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
+import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
 import { setReview } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
@@ -425,7 +426,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const raw = (req.query as { season?: string }).season;
     const seasonId = raw === undefined || raw === '' ? null : Number(raw);
     if (seasonId !== null && !Number.isInteger(seasonId)) return reply.code(400).send({ error: 'bad season' });
-    return { players: integrityBoard(db, seasonId) };
+    // The feed and the health line ship with the board so the panel can show
+    // them before anyone clicks a player. Without them an empty page cannot
+    // distinguish "nothing suspicious" from "silently broken".
+    return {
+      players: integrityBoard(db, seasonId),
+      flags: recentFlagFeed(db),
+      health: captureHealth(db),
+    };
   });
 
   /**

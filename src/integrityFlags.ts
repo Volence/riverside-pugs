@@ -87,3 +87,61 @@ export function flagsForPlayer(db: DB, steamid: string, limit = 50): IntegrityFl
 export function recentFlags(db: DB, limit = 100): IntegrityFlagRow[] {
   return db.prepare(`${SELECT} ORDER BY at DESC, id DESC LIMIT ?`).all(limit) as IntegrityFlagRow[];
 }
+
+export interface CaptureHealth {
+  bursts: number;
+  detections: number;
+  lilacFlags: number;
+  lastBurstAt: string | null;
+  lastFlagAt: string | null;
+  matchesWithBursts: number;
+}
+
+/**
+ * Whether anything is being captured at all.
+ *
+ * Exists because an empty panel cannot tell you the difference between "nothing
+ * suspicious happened" and "the pipeline is silently broken", and on the first
+ * day of a detector that distinction is the only thing worth knowing.
+ */
+export function captureHealth(db: DB): CaptureHealth {
+  const one = (sql: string): number =>
+    (db.prepare(sql).get() as { c: number } | undefined)?.c ?? 0;
+  const at = (sql: string): string | null =>
+    (db.prepare(sql).get() as { a: string | null } | undefined)?.a ?? null;
+  return {
+    bursts: one('SELECT COUNT(*) AS c FROM input_bursts'),
+    detections: one('SELECT COUNT(*) AS c FROM input_detections'),
+    lilacFlags: one('SELECT COUNT(*) AS c FROM integrity_flags'),
+    lastBurstAt: at('SELECT MAX(at) AS a FROM input_bursts'),
+    lastFlagAt: at('SELECT MAX(at) AS a FROM integrity_flags'),
+    matchesWithBursts: one('SELECT COUNT(DISTINCT match_id) AS c FROM input_bursts WHERE match_id IS NOT NULL'),
+  };
+}
+
+export interface RecentFlag {
+  id: number;
+  kind: string;
+  source: string;
+  severity: string;
+  steamid: string;
+  name: string;
+  matchId: number | null;
+  at: string;
+}
+
+/** Everything flagged recently, across all players and both sources, so the
+ *  panel has a front door instead of requiring you to guess whom to open. */
+export function recentFlagFeed(db: DB, limit = 50): RecentFlag[] {
+  const rows = db.prepare(
+    `SELECT f.id, f.kind, f.source, f.severity, f.steamid, f.match_id AS matchId, f.at,
+            COALESCE(p.name, f.steamid) AS name
+     FROM integrity_flags f LEFT JOIN players p ON p.steamid = f.steamid
+     UNION ALL
+     SELECT d.id, d.signature AS kind, 'inputstats' AS source, d.severity, d.steamid,
+            d.match_id AS matchId, d.at, COALESCE(p.name, d.steamid) AS name
+     FROM input_detections d LEFT JOIN players p ON p.steamid = d.steamid
+     ORDER BY at DESC, id DESC LIMIT ?`,
+  ).all(limit) as RecentFlag[];
+  return rows;
+}
