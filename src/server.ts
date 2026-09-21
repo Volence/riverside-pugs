@@ -614,6 +614,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
           selfStarted?.handle(ev, source);
+          // A roster line for a match that is already live is a sub being put
+          // on a team, in game by definition, and the plugin sends no connect
+          // event for them. During the opening burst the match is not live
+          // yet, so this stays quiet and MATCH_START does the whole roster.
+          // Guarded like everything else here that is not the result path.
+          if (ev.kind === 'match_roster') {
+            try {
+              const rostered = deps.db.prepare(
+                `SELECT m.id FROM matches m JOIN match_players mp ON mp.match_id = m.id
+                  WHERE m.token = ? AND m.state = 'live' AND mp.player_id = ?`,
+              ).get(ev.token, ev.steamid) as { id: number } | undefined;
+              if (rostered) refreshSignals([ev.steamid], { sharing: true, matchId: rostered.id, freshMs: 60 * 60 * 1000 });
+            } catch (err) {
+              console.error('[steamSignals] could not check a late joiner:', err);
+            }
+          }
           return;
         }
         // Spectator feed. Cosmetic by design, so a throw here must never take

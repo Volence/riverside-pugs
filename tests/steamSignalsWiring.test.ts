@@ -129,6 +129,17 @@ describe('steam signals when a match goes live', () => {
     expect(getSteamSignals(db, P1)).toBeNull();
   });
 
+  it('checks a sub who is rostered into a match started in game', async () => {
+    const sub = '76561198000000003';
+    upsertPlayer(db, { steamid: sub, name: 'sub', avatar: 'http://a/1.jpg' }, []);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(sub);
+    const steam = fakeSteam({ [sub]: { lender: LENDER, level: 2 } });
+    const port = await build(steam.fetch);
+    await send(port, `PUG ${TOKEN} MATCH_ROSTER steamid=${sub} team=b joined_map=1 name=sub`);
+    await settle();
+    expect(getSteamSignals(db, sub)).toMatchObject({ lender_id: LENDER, steam_level: 2 });
+  });
+
   it('asks Steam nothing without an api key, and the match carries on', async () => {
     let asked = false;
     const port = await build(async () => { asked = true; throw new Error('must not fetch'); }, {});
