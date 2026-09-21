@@ -162,6 +162,32 @@ function parseIds(json: string): number[] {
   }
 }
 
+export interface InputCapInput {
+  matchId: number | null;
+  serverId: number | null;
+  steamid: string;
+  kind: 'fire' | 'pounce' | 'bhop';
+  serverTick: number;
+}
+
+/** The plugin ran out of budget for one kind of burst, for one player, this
+ *  round. Stored so an admin reading a quiet player sees "capture truncated"
+ *  rather than reading the silence as a clean round. */
+export function recordInputCap(db: DB, c: InputCapInput, now = new Date()): void {
+  db.prepare(
+    'INSERT INTO input_caps (match_id, server_id, steamid, kind, server_tick, at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(c.matchId, c.serverId, c.steamid, c.kind, c.serverTick, now.toISOString());
+}
+
+export interface CapRow { matchId: number | null; kind: string; serverTick: number; at: string }
+
+export function capsForPlayer(db: DB, steamid: string, limit = 50): CapRow[] {
+  return db.prepare(
+    `SELECT match_id AS matchId, kind, server_tick AS serverTick, at
+     FROM input_caps WHERE steamid = ? ORDER BY at DESC, id DESC LIMIT ?`,
+  ).all(steamid, limit) as CapRow[];
+}
+
 export interface RerunResult {
   bursts: number;
   /** Player-matches examined. */

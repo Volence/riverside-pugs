@@ -576,6 +576,21 @@ CREATE TABLE IF NOT EXISTS input_bursts (
 CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
 CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
 
+-- The plugin stops sending a kind of burst for a player once that kind's
+-- budget for the round is spent, and says so once. A row here means the
+-- capture for that player, kind and round is TRUNCATED, which is not the same
+-- thing as nothing having happened.
+CREATE TABLE IF NOT EXISTS input_caps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER,
+  server_id INTEGER,
+  steamid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  server_tick INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS input_caps_steamid ON input_caps(steamid, at);
+
 -- One row per signature that fired on a burst. Separate from the burst so that
 -- re-running an improved signature adds rows without rewriting the evidence.
 CREATE TABLE IF NOT EXISTS input_detections (

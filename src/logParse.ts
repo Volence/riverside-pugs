@@ -117,6 +117,9 @@ export type LogEvent =
       // by usercmd and adds the server ticks the burst spanned as a cross-check.
       wire: 1 | 2; serverSpan: number | null;
     }
+  // The plugin's budget for one kind of burst ran out for this player this
+  // round: everything of that kind after it, until the round ends, is missing.
+  | { kind: 'input_cap'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; serverTick: number }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
   // Where a client connected from, emitted for EVERY human that joins the box
@@ -235,6 +238,14 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
   if (body.startsWith('L4DM ')) {
     const f = kv(body.split(/\s+/).slice(1));
     const steamid = steamId64Of(f.id ?? '');
+    // The budget marker: no burst on it, only which kind stopped being sent.
+    if (f.k === 'cap') {
+      const tick = intOf(f.st);
+      if (!steamid || tick === null || tick < 0) return null;
+      if (f.c !== 'fire' && f.c !== 'pounce' && f.c !== 'bhop') return null;
+      if (f.v !== undefined && f.v !== '2') return null;
+      return { kind: 'input_cap', steamid, burstKind: f.c, serverTick: tick };
+    }
     const burstKind = f.k;
     const weapon = (f.w ?? '').slice(0, 32);
     const n = intOf(f.n);

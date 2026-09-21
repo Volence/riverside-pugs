@@ -198,6 +198,18 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
           {d.inputFlags.length === 0 && (
             <p class="muted">Nothing flagged for this player by input timing.</p>
           )}
+          {d.inputCaps.length > 0 && (
+            <p class="admin-warn">
+              Capture truncated: the game server's per-round budget ran out for this player
+              {' '}{d.inputCaps.length} time{d.inputCaps.length === 1 ? '' : 's'}, so bursts after that point
+              in the round were never sent. Most recent:{' '}
+              {d.inputCaps.slice(0, 3).map((c, i) => (
+                <span key={`${c.at}-${c.kind}`}>
+                  {i > 0 ? ', ' : ''}{c.kind}{c.matchId ? <> in <a href={`/match/${c.matchId}`}>#{c.matchId}</a></> : null} ({fmtTime(c.at)})
+                </span>
+              ))}. No flag below does not mean a clean round there.
+            </p>
+          )}
           <ul class="admin-list">
             {d.inputFlags.map((f) => (
               <li key={f.id}>

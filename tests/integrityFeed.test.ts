@@ -14,7 +14,7 @@ describe('captureHealth', () => {
   it('reports zeroes rather than throwing when nothing has been captured', () => {
     expect(captureHealth(db)).toEqual({
       bursts: 0, detections: 0, lilacFlags: 0,
-      lastBurstAt: null, lastFlagAt: null, matchesWithBursts: 0,
+      lastBurstAt: null, lastFlagAt: null, matchesWithBursts: 0, caps: 0,
     });
   });
 

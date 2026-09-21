@@ -43,8 +43,28 @@
  *  flood the wire or the table. */
 #define MAX_INTERVALS 256
 
-/** Bursts per player per round. Same reason. */
-#define MAX_BURSTS_PER_ROUND 64
+/**
+ * Bursts per player per round, PER KIND. Same reason.
+ *
+ * This was one budget of 64 shared by all three kinds, reset at round_start.
+ * round_start fires BEFORE ready-up, and every bunnyhop is its own line, so a
+ * player hopping around the saferoom while waiting to ready could spend the
+ * whole budget before the round was live, and then nothing they did in the
+ * round was captured, in silence. Now each kind has its own, so hopping cannot
+ * starve fire or pounce; the budgets are refilled when the round actually goes
+ * live (OnRoundIsLive, from l4dready); and the first burst a budget refuses
+ * emits one `cap` marker so the web can say "capture truncated" instead of
+ * showing a quiet player.
+ *
+ * Sized for a live round with room to spare: at most 320 lines per player per
+ * round, and a player who reaches any of them is worth a look for that alone.
+ */
+#define KIND_FIRE 0
+#define KIND_POUNCE 1
+#define KIND_BHOP 2
+#define KIND_COUNT 3
+int g_iBudget[KIND_COUNT] = { 128, 96, 96 };
+char g_sKind[KIND_COUNT][8] = { "fire", "pounce", "bhop" };
 
 /** Two presses is noise and most of the volume. */
 #define MIN_BURST_PRESSES 3
@@ -63,7 +83,8 @@ bool g_bPrevGround[MAXPLAYERS + 1];
  *  this is where a life ends, so it is where bursts in flight are emitted and
  *  the ground and air state is thrown away instead of leaking into the next. */
 bool g_bCapturing[MAXPLAYERS + 1];
-int  g_iBurstsThisRound[MAXPLAYERS + 1];
+int  g_iBurstsThisRound[MAXPLAYERS + 1][KIND_COUNT];
+bool g_bCapSent[MAXPLAYERS + 1][KIND_COUNT];
 
 /** The client tickcount of the last usercmd seen, for a line emitted from an
  *  event rather than from inside the hook. */
@@ -143,7 +164,8 @@ public Action Cmd_Emit(int client, int args)
 	Encode(ticks, n, d, sizeof(d));
 	int target = client > 0 ? client : FirstHuman();
 	if (target > 0) {
-		EmitBurst(target, kind, "test_weapon", n, 4, n + 1, 0, d);
+		int k = StrEqual(kind, "pounce") ? KIND_POUNCE : StrEqual(kind, "bhop") ? KIND_BHOP : KIND_FIRE;
+		EmitBurst(target, k, "test_weapon", n, 4, n + 1, 0, d);
 		ReplyToCommand(client, "[inputstats] emitted a synthetic %s burst of %d for %N", kind, n, target);
 	} else {
 		// Nobody connected: still exercise the real format, with a literal id.
@@ -190,6 +212,27 @@ public void Event_RoundStart(Event e, const char[] n, bool b)
 	for (int i = 1; i <= MaxClients; i++) ResetClient(i);
 }
 
+/**
+ * l4dready's global forward, fired when the ready-up countdown ends and the
+ * round is really live. A forward is only a public function with the right
+ * name, so this needs no include and no dependency: on a server without
+ * l4dready it is never called, and round_start above is the only refill.
+ *
+ * Budgets only. Bursts in flight are left alone.
+ */
+public void OnRoundIsLive()
+{
+	for (int i = 1; i <= MaxClients; i++) ResetBudget(i);
+}
+
+void ResetBudget(int c)
+{
+	for (int k = 0; k < KIND_COUNT; k++) {
+		g_iBurstsThisRound[c][k] = 0;
+		g_bCapSent[c][k] = false;
+	}
+}
+
 /** Emit whatever this client has in flight. Safe on anyone: a client with
  *  nothing buffered, or who is no longer in game, emits nothing. */
 void FlushAll(int client)
@@ -203,7 +246,7 @@ void ResetClient(int c)
 {
 	g_iPrevButtons[c] = 0;
 	ResetCapture(c);
-	g_iBurstsThisRound[c] = 0;
+	ResetBudget(c);
 }
 
 /** Forget every burst in flight without emitting it, and nothing else: the
@@ -329,7 +372,7 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 			char one[2];
 			int oneTick[1]; oneTick[0] = 1;
 			Encode(oneTick, 1, one, sizeof(one));
-			EmitBurst(client, "bhop", "", 1, onGround, 0, 0, one);
+			EmitBurst(client, KIND_BHOP, "", 1, onGround, 0, 0, one);
 		}
 		g_bGroundTimed[client] = false;
 	}
@@ -363,7 +406,7 @@ void FlushFire(int client)
 	if (g_iAtkPresses[client] >= MIN_BURST_PRESSES && g_iAtkCount[client] > 0) {
 		char d[MAX_INTERVALS + 1];
 		Encode(g_iAtkTicks[client], g_iAtkCount[client], d, sizeof(d));
-		EmitBurst(client, "fire", g_sAtkWeapon[client], g_iAtkCount[client], 0, 0,
+		EmitBurst(client, KIND_FIRE, g_sAtkWeapon[client], g_iAtkCount[client], 0, 0,
 			g_iAtkLastTick[client] - g_iAtkFirstTick[client], d);
 	}
 	g_iAtkCount[client] = 0;
@@ -382,7 +425,7 @@ void FlushAir(int client, int seq)
 		Encode(g_iAirTicks[client], g_iAirCount[client], d, sizeof(d));
 		int airCmds = seq - g_iAirStartSeq[client];
 		if (airCmds < 0) airCmds = 0;
-		EmitBurst(client, "pounce", g_sAirWeapon[client], g_iAirCount[client], airCmds,
+		EmitBurst(client, KIND_POUNCE, g_sAirWeapon[client], g_iAirCount[client], airCmds,
 			g_iAirPresses[client], g_iAirLastTick[client] - g_iAirFirstTick[client], d);
 	}
 	g_iAirCount[client] = 0;
@@ -426,23 +469,30 @@ void GetActiveWeapon(int client, char[] buf, int maxlen)
  * There is no name field at all, so there is nothing for a crafted name to
  * impersonate; the only identity on the line is a steamid.
  */
-void EmitBurst(int client, const char[] kind, const char[] weapon, int n, int groundTicks,
+void EmitBurst(int client, int kind, const char[] weapon, int n, int groundTicks,
 	int airPresses, int serverSpan, const char[] d)
 {
-	if (g_iBurstsThisRound[client] >= MAX_BURSTS_PER_ROUND) return;
-	g_iBurstsThisRound[client]++;
-
 	char id[32];
 	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) {
 		// Under sv_lan 1 the 64-bit form is unavailable. The web accepts the
 		// STEAM_ form too and normalises it, same as the consistency drop line.
 		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
 	}
+	if (g_iBurstsThisRound[client][kind] >= g_iBudget[kind]) {
+		// Out of budget for this kind. Say so ONCE, then go quiet: the marker is
+		// what lets the web tell a truncated capture from an uneventful round.
+		if (!g_bCapSent[client][kind]) {
+			g_bCapSent[client][kind] = true;
+			LogToGame("L4DM id=%s k=cap c=%s st=%d v=%d", id, g_sKind[kind], GetGameTickCount(), WIRE_VERSION);
+		}
+		return;
+	}
+	g_iBurstsThisRound[client][kind]++;
 	// Both clocks, read at the same moment for every kind: the server tick now
 	// and the tickcount of the usercmd being run. `ct` used to carry cmdnum on
 	// two kinds and a literal 0 on the third. The client value is attacker
 	// controlled and times nothing; its drift against `st` is its own signal.
-	EmitLine(id, kind, weapon, n, groundTicks, airPresses, GetGameTickCount(),
+	EmitLine(id, g_sKind[kind], weapon, n, groundTicks, airPresses, GetGameTickCount(),
 		g_iLastClientTick[client], serverSpan, d);
 }
 

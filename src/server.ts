@@ -45,7 +45,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, recordIntegrityFlag } from './integrityFlags.js';
-import { inputThresholds, recordInputBurst } from './inputBursts.js';
+import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
@@ -500,6 +500,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             }
           } catch (err) {
             console.error('[lilac] failed to record a flag:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'input_cap') {
+          // Same rules as a burst: evidence only, live matches only, and never
+          // allowed to take the listener down.
+          try {
+            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const live = serverId === null ? undefined : deps.db
+              .prepare("SELECT id FROM matches WHERE state = 'live' AND server_id = ? ORDER BY id DESC LIMIT 1")
+              .get(serverId) as { id: number } | undefined;
+            if (!live) return;
+            recordInputCap(deps.db, {
+              matchId: live.id, serverId, steamid: ev.steamid, kind: ev.burstKind, serverTick: ev.serverTick,
+            });
+          } catch (err) {
+            console.error('[inputstats] failed to record a capture cap:', err);
           }
           return;
         }

@@ -64,6 +64,7 @@ describe('Admin page', () => {
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
+      inputCaps: [],
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
     render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
@@ -86,6 +87,7 @@ describe('Admin page', () => {
     mockAdmin.player.mockResolvedValue({
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
       inputFlags: [],
+      inputCaps: [],
       signonDrops: {
         count: 2, lastAt: '2026-09-19T21:00:00.000Z',
         rows: [
@@ -118,6 +120,7 @@ describe('Admin page', () => {
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
+      inputCaps: [],
     });
     render(<Admin session={{ kind: 'active', me }} />);
     await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
