@@ -141,4 +141,28 @@ describe('restricted tickets over HTTP', () => {
     expect((await get(MOD2, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
     expect((await get(MOD2, '/api/mod/tickets')).json().tickets).toEqual([]);
   });
+
+  it('a ban issued from a restricted ticket is withheld from a case file opened via a different ticket', async () => {
+    await file(R1, { targetId: ACCUSED, category: 'unsafe', text: 'weapon threat' });
+    const restrictedId = (db.prepare('SELECT id FROM tickets WHERE restricted = 1').get() as { id: number }).id;
+    expect((await post(OWNER, `/api/mod/tickets/${restrictedId}/ban`, { reason: 'sensitive detail', minutes: 60 })).statusCode).toBe(200);
+    expect((await post(OWNER, `/api/mod/tickets/${restrictedId}/close`, { outcome: 'action_taken', note: '' })).statusCode).toBe(200);
+    // ACCUSED is now status banned; that does not stop someone else reporting them.
+    await file(R2, { targetId: ACCUSED, category: 'afk', text: '' });
+    const normalId = (db.prepare('SELECT id FROM tickets WHERE restricted = 0').get() as { id: number }).id;
+
+    const modBody = (await get(MOD, `/api/mod/tickets/${normalId}`)).json();
+    expect(modBody.caseFile.bans).toHaveLength(1);
+    expect(modBody.caseFile.bans[0]).toMatchObject({ reason: 'Withheld (restricted ticket)', createdByName: null });
+    expect(modBody.caseFile.bans[0].createdBy).toBeFalsy();
+    expect(JSON.stringify(modBody.caseFile.bans)).not.toContain('sensitive detail');
+    expect(JSON.stringify(modBody.caseFile.bans)).not.toContain(OWNER);
+    expect(JSON.stringify(modBody.caseFile.activeBan)).not.toContain('sensitive detail');
+    expect(JSON.stringify(modBody.caseFile.activeBan)).not.toContain(OWNER);
+    expect(modBody.caseFile.tickets.map((t: { id: number }) => t.id)).not.toContain(restrictedId);
+
+    const ownerBody = (await get(OWNER, `/api/mod/tickets/${normalId}`)).json();
+    expect(ownerBody.caseFile.bans[0]).toMatchObject({ reason: 'sensitive detail', createdBy: OWNER });
+    expect(ownerBody.caseFile.tickets.map((t: { id: number }) => t.id)).toContain(restrictedId);
+  });
 });
