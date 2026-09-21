@@ -178,6 +178,28 @@ describe('DiscordSync', () => {
     });
   });
 
+  it('retries a card edit that Discord rejected, instead of freezing it forever', async () => {
+    await build().start();
+    for (const id of IDS) mm.join(id);
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    await sync.pass();
+    const match = db.prepare('SELECT id FROM matches').get() as { id: number };
+    const cardId = getMessage(db, 'match', String(match.id))!.message_id;
+    db.prepare("INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('s','1.2.3.4',27015,27015,'x','live')").run();
+    db.prepare("UPDATE matches SET state = 'live', server_id = 1, token = 'abcdef1234567890' WHERE id = ?").run(match.id);
+
+    // The pass that first sees 'live' loses its edit to a transient failure.
+    t.failEdits = 1;
+    await sync.pass();
+    expect(JSON.stringify(t.byId(cardId)!.payload)).not.toContain('Server is ready');
+
+    // The next pass must put the live card up. It used to skip it: the hash of
+    // the payload Discord never got was cached as if it had landed.
+    await sync.pass();
+    expect(JSON.stringify(t.byId(cardId)!.payload)).toContain('Server is ready');
+  });
+
   it('pings the roster once when the server goes live, and posts one result on completion', async () => {
     await build().start();
     for (const id of IDS) mm.join(id);

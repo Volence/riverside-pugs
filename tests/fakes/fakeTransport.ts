@@ -28,6 +28,9 @@ export class FakeTransport implements BotTransport {
   /** Make the next N sends throw, for testing what a Discord outage does. */
   failSends = 0;
 
+  /** Make the next N edits throw, the transient that used to freeze a card. */
+  failEdits = 0;
+
   async send(channelId: string, payload: MessagePayload): Promise<string> {
     if (this.failSends > 0) { this.failSends--; throw new Error('discord down'); }
     const id = `m${++this.seq}`;
@@ -37,6 +40,7 @@ export class FakeTransport implements BotTransport {
   }
 
   async edit(_channelId: string, messageId: string, payload: MessagePayload): Promise<boolean> {
+    if (this.failEdits > 0) { this.failEdits--; throw new Error('discord down'); }
     const m = this.messages.find((x) => x.id === messageId && !x.deleted);
     if (!m) return false;
     this.edits++;
