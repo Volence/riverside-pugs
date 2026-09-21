@@ -985,6 +985,131 @@ export interface TicketDetail {
   viewer: { isAdmin: boolean; banCapMinutes: number | null };
 }
 
+// ---------- people ----------
+
+export type TimelineSource =
+  | 'input' | 'lilac' | 'analyzer' | 'drop' | 'ticket' | 'penalty' | 'ban'
+  | 'note' | 'steam' | 'discord_link';
+
+/** One row of a player's merged history. The summary is written on the
+ *  server so every surface says the same sentence about the same evidence. */
+export interface TimelineItem {
+  at: string;
+  source: TimelineSource;
+  kind: string;
+  summary: string;
+  matchId: number | null;
+  replay: { ordinal: number; half: number; tMs: number } | null;
+  ref: { type: string; id: number | string } | null;
+}
+
+/** Mirrors src/admin/fileAccess.ts. `review_round` is admin-only: it marks a
+ *  round reviewed from the replay analyzer. */
+export type FileAction =
+  | 'note' | 'looked_at' | 'open_ticket'
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round';
+
+/** The analyzer board's columns for one player. A sort key, never a claim. */
+export interface AnalyzerRank {
+  steamid: string; ranked: boolean; rank: number | null; of: number;
+  rounds: number; eligibleRounds: number; clips: number;
+  trackShare: number | null; occZ: number | null; teamGap: number | null;
+  pFid: number | null; pOcc: number | null; pGap: number | null; composite: number | null;
+}
+
+export interface FileReview {
+  id: number; steamid: string; reviewedBy: string; reviewedByName: string | null;
+  reviewedAt: string; note: string;
+}
+
+/** "Is there anything here": the file's own glance row, and the accused's
+ *  section of a ticket page. fileUrl is null when the viewer may not open
+ *  the whole file. */
+export interface FileSummaryData {
+  steamid: string; name: string; avatar: string | null; status: string;
+  isAdmin: boolean; isMod: boolean; sr: number | null; games: number; createdAt: string | null;
+  activeBan: AdminBan | null; bans: number; penalties: number;
+  timeout: { until: string; offenses: number } | null;
+  openTickets: number; aliases: number;
+  sharesAddressWith: { steamid: string; name: string }[];
+  steamFlags: { kind: string; text: string }[];
+  evidence: { source: TimelineSource; count: number }[];
+  analyzer: AnalyzerRank | null;
+  lastReview: FileReview | null;
+  fileUrl: string | null;
+}
+
+export interface PlayerFileData {
+  steamid: string;
+  header: {
+    steamid: string; name: string; avatar: string | null; status: string;
+    isAdmin: boolean; isMod: boolean; discordName: string | null;
+    sr: number | null; games: number; createdAt: string;
+  };
+  glance: FileSummaryData;
+  timeline: TimelineItem[];
+  sections: {
+    identity: {
+      aliases: AdminPlayerDetail['aliases'];
+      discordHistory: NonNullable<AdminPlayerDetail['discordHistory']>;
+      steamAccount: SteamAccount | null;
+      networks: AdminPlayerDetail['networks'];
+      sharesAddressWith: AdminPlayerDetail['sharesAddressWith'];
+    };
+    standing: {
+      activeBan: AdminBan | null;
+      bans: AdminBan[];
+      penalties: AdminPlayerDetail['penalties'];
+      timeout: AdminPlayerDetail['timeout'];
+    };
+    matches: AdminPlayerDetail['matches'];
+    tickets: TicketSummary[];
+    notes: AdminPlayerDetail['notes'];
+    evidence: {
+      analyzer: AnalyzerRank | null;
+      rounds: IntegrityRound[];
+      clips: IntegrityClip[];
+      flags: IntegrityFlag[];
+      inputFlags: AdminPlayerDetail['inputFlags'];
+      inputCaps: AdminPlayerDetail['inputCaps'];
+      signonDrops: AdminPlayerDetail['signonDrops'];
+    };
+  };
+  actions: FileAction[];
+  lastReview: FileReview | null;
+}
+
+export interface NeedsALookRow {
+  steamid: string; name: string; avatar: string | null; status: string;
+  newestEvidenceAt: string; sources: TimelineSource[];
+  lastReviewAt: string | null; lastReviewBy: string | null;
+  openTickets: number; analyzer: AnalyzerRank | null;
+}
+
+export interface PeopleBan {
+  id: number; steamid: string; name: string; reason: string; length: string;
+  createdAt: string; expiresAt: string | null; createdByName: string | null;
+  liftedAt: string | null; liftedByName: string | null; active: boolean;
+  ticketId: number | null; withheld: boolean; canOpen: boolean;
+}
+
+/** The People desk. Moderators may call all of it; the admin-only actions a
+ *  file offers stay on adminApi, which is where the server enforces them. */
+export const peopleApi = {
+  people: (q: string, signal?: AbortSignal) =>
+    get<{ players: AdminPlayerRow[] }>(`/api/admin/people?q=${encodeURIComponent(q)}`, signal),
+  file: (steamid: string, signal?: AbortSignal) =>
+    get<PlayerFileData>(`/api/admin/people/${encodeURIComponent(steamid)}`, signal),
+  review: (signal?: AbortSignal) =>
+    get<{ players: NeedsALookRow[]; health: CaptureHealth }>('/api/admin/people/review', signal),
+  bans: (filter: 'active' | 'expired' | 'all', q: string, signal?: AbortSignal) =>
+    get<{ bans: PeopleBan[] }>(`/api/admin/people/bans?filter=${filter}&q=${encodeURIComponent(q)}`, signal),
+  note: (steamid: string, text: string) =>
+    post<{ ok: true }>(`/api/admin/people/${steamid}/notes`, { text }),
+  lookedAt: (steamid: string, note: string) =>
+    post<{ ok: true; review: FileReview }>(`/api/admin/people/${steamid}/looked-at`, { note }),
+};
+
 export const modApi = {
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[] }>(`/api/mod/tickets?filter=${filter}`, signal),
