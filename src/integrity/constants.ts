@@ -114,6 +114,32 @@ export const TUNING = {
   MIN_TRAVEL: 4,
   /** "On target" for the occupancy metric, in degrees. */
   E_DWELL: 5,
+  /** Metric B counts in blocks of this many milliseconds per ghost, not in
+   *  frames, because frames are nowhere near independent. Over the 189 replays
+   *  in hand on 2026-09-21 (232826 eligible pair-frames) the on-target
+   *  indicator correlates with itself 0.70 one frame later, 0.29 at 1 s, 0.25
+   *  at 2 s, 0.16 at 5 s and 0.04 at 10 s.
+   *
+   *  The length is chosen by what it does to the per-round score, which has to
+   *  have a spread near 1 before anyone may call it a z-score. Same data, 708
+   *  player-rounds, calibrated per map as in score.ts:
+   *    frames  sd 3.42, 35.6% beyond 2 either way, max 38.0
+   *    1 s     sd 1.19,  5.1%, max 10.2
+   *    2 s     sd 0.95,  3.7%, max 6.4, p95 1.68
+   *    3 s     sd 0.87,  3.8%, max 4.7
+   *    5 s     sd 0.79,  3.0%, max 3.7
+   *  A normal gives 4.6% and a p95 of 1.64. 2 s is the shortest block under 1,
+   *  so what error is left is on the conservative side, and longer blocks only
+   *  give sensitivity away. The mean is -0.01 at every length; the median sits
+   *  at -0.27 because a count that cannot go below zero is skewed, which is
+   *  also why the low tail is short (p05 -1.03). */
+  OCC_BLOCK_MS: 2000,
+  /** A map calibrates its own occupancy level (see `calibrate` in score.ts)
+   *  once the rows on the board add up to this many EXPECTED on-target blocks
+   *  there. Under it the ratio is a handful of events over a handful, and the
+   *  whole board's ratio is used instead. A player-round expects about 2.5,
+   *  so this is roughly four of them. */
+  MIN_CAL_EXPECTED: 10,
   /** Windows above this fidelity become reviewable clips. */
   CLIP_MIN: 0.7,
   /** Most clips kept per player-round. */

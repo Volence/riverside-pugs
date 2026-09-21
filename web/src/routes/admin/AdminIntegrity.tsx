@@ -254,9 +254,14 @@ export function AdminIntegrity() {
             <dt>Occupancy</dt>
             <dd>
               How much more often they were aimed at a ghost than <em>this map's own looking
-              habits</em> predict, as a z-score. The baseline is built from everyone's rounds on
-              that map, so a player whose whole edge is knowing where infected spawn scores zero
-              by construction: that knowledge is already in the baseline. Only the excess counts.
+              habits</em> predict. The baseline is built from everyone's rounds on that map, so a
+              player whose whole edge is knowing where infected spawn scores zero by
+              construction: that knowledge is already in the baseline. Only the excess counts.
+              It is in standard deviations, averaged over their rounds: a stare counts once per
+              two seconds rather than once per frame, and the level is set by what the players
+              on this board actually do on that map, so an ordinary round reads about 0 and
+              roughly one honest round in twenty reads beyond 2 either way. One round at 2 is
+              therefore nothing. An average that stays there is.
             </dd>
             <dt>Team gap</dt>
             <dd>

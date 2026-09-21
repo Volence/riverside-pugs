@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { percentile, aggregate, scorePlayers } from '../src/integrity/score.js';
+import { percentile, aggregate, calibrate, occupancyZ, scorePlayers } from '../src/integrity/score.js';
+import type { OccResult } from '../src/integrity/occupancy.js';
 import type { RoundMetrics } from '../src/integrity/round.js';
 
 const m = (over: Partial<RoundMetrics> = {}): RoundMetrics => ({
-  fidMax: 0.2, fidP95: 0.1, occZ: 0, teamRank: 2, teamGap: 0, eligiblePairs: 100,
+  fidMax: 0.2, fidP95: 0.1, occ: null, eligiblePairs: 100,
   gates: { considered: 400, notLive: 20, notGhost: 100, inGrace: 50, tooClose: 30, occluded: 100, passed: 100 },
   ...over,
 });
@@ -33,19 +34,118 @@ describe('percentile', () => {
   });
 });
 
+/** `blocks` blocks, each with prior `p`, of which the player was on the ghost
+ *  for `observed` blocks' worth. */
+const occ = (observed: number, blocks = 100, p = 0.1): OccResult =>
+  ({ observed, expected: blocks * p, expectedSq: blocks * p * p, blocks, pairs: blocks * 50 });
+
+describe('occupancyZ', () => {
+  it('is the excess over expectation in binomial standard deviations', () => {
+    // 100 blocks at 0.1: expect 10, sd 3. Sixteen observed is two sd over.
+    expect(occupancyZ(occ(16), 1)).toBeCloseTo(2, 10);
+    expect(occupancyZ(occ(10), 1)).toBeCloseTo(0, 10);
+  });
+
+  it('scales the prior by the calibration before comparing', () => {
+    // The prior says 10 but players on this map really manage half that. Five
+    // observed is then exactly what was expected.
+    expect(occupancyZ(occ(5), 0.5)).toBeCloseTo(0, 10);
+    expect(occupancyZ(occ(10), 0.5)!).toBeGreaterThan(2);
+  });
+
+  it('is null rather than a division by nothing', () => {
+    expect(occupancyZ({ observed: 1, expected: 1, expectedSq: 1, blocks: 1, pairs: 10 }, 1)).toBeNull();
+    expect(occupancyZ(occ(0, 0), 1)).toBeNull();
+  });
+});
+
+/**
+ * Why there is a calibration at all. The aim prior is not a probability that
+ * "this player is within E_DWELL of that ghost": it is how often ANY survivor's
+ * wedge touched the ghost's 256 unit cell, from anywhere, walls ignored, and the
+ * frames it is compared against have already lost every moment something
+ * visible stood near the ghost's bearing, which is exactly when people look
+ * that way. Over the real history players were on a ghost 0.47 times as often
+ * as the prior said, and by map that ran from 0.20 to 0.97. Against the raw
+ * prior the typical honest player-round scored -0.6 and a player's pooled
+ * history -3.9. So what the prior is asked for is its SHAPE, and the level is
+ * taken from what the players on the board actually did on that map.
+ */
+describe('calibrate', () => {
+  it('is observed over expected, per map', () => {
+    const cal = calibrate([
+      { steamid: 'a', map: 'm1', metrics: m({ occ: occ(5, 100) }) },
+      { steamid: 'b', map: 'm1', metrics: m({ occ: occ(7, 100) }) },
+      { steamid: 'a', map: 'm2', metrics: m({ occ: occ(18, 200) }) },
+    ]);
+    expect(cal('m1')).toBeCloseTo(12 / 20, 10);
+    expect(cal('m2')).toBeCloseTo(18 / 20, 10);
+  });
+
+  it('falls back to the whole board for a map with too little on it to calibrate, or no map', () => {
+    const cal = calibrate([
+      { steamid: 'a', map: 'big', metrics: m({ occ: occ(10, 200) }) },
+      { steamid: 'a', map: 'thin', metrics: m({ occ: occ(3, 10) }) },
+      { steamid: 'a', map: null, metrics: m({ occ: occ(1, 10) }) },
+    ]);
+    const all = (10 + 3 + 1) / (20 + 1 + 1);
+    expect(cal('thin')).toBeCloseTo(all, 10);
+    expect(cal(null)).toBeCloseTo(all, 10);
+    expect(cal('never seen')).toBeCloseTo(all, 10);
+  });
+
+  it('is 1, the prior taken at its word, when nothing has been measured', () => {
+    expect(calibrate([{ steamid: 'a', map: 'm', metrics: m() }])('m')).toBe(1);
+  });
+});
+
 describe('aggregate', () => {
   it('takes a player HIGHEST round for fidMax and their mean for the rest', () => {
     const got = aggregate([
-      { steamid: 'a', metrics: m({ fidMax: 0.4, occZ: 1 }) },
-      { steamid: 'a', metrics: m({ fidMax: 0.9, occZ: 3 }) },
+      { steamid: 'a', metrics: m({ fidMax: 0.4, fidP95: 0.2 }) },
+      { steamid: 'a', metrics: m({ fidMax: 0.9, fidP95: 0.4 }) },
     ]);
     expect(got[0].rounds).toBe(2);
     expect(got[0].fidMax).toBeCloseTo(0.9);
-    expect(got[0].occZ).toBeCloseTo(2);
+    expect(got[0].fidP95).toBeCloseTo(0.3);
   });
 
   it('leaves occZ null for a player whose rounds were all on unscored maps', () => {
-    expect(aggregate([{ steamid: 'a', metrics: m({ occZ: null, teamGap: null }) }])[0].occZ).toBeNull();
+    expect(aggregate([{ steamid: 'a', metrics: m() }])[0].occZ).toBeNull();
+  });
+
+  it('centres occupancy on what the board actually does, so an ordinary player reads about zero', () => {
+    // Everyone manages half of what the prior predicts. Nobody stands out.
+    const rows = ['a', 'b', 'c', 'd'].map((steamid) => ({ steamid, map: 'm', metrics: m({ occ: occ(5) }) }));
+    for (const p of aggregate(rows)) expect(p.occZ).toBeCloseTo(0, 10);
+  });
+
+  it('shows the one player who is on ghosts far more than the rest of the board', () => {
+    const rows = [
+      ...['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((steamid) => ({ steamid, map: 'm', metrics: m({ occ: occ(5) }) })),
+      { steamid: 'sus', map: 'm', metrics: m({ occ: occ(25) }) },
+    ];
+    const got = aggregate(rows);
+    expect(got.find((p) => p.steamid === 'sus')!.occZ!).toBeGreaterThan(5);
+    expect(got.find((p) => p.steamid === 'a')!.occZ!).toBeLessThan(0);
+  });
+
+  // Metric C. It used to be worked out when the round was analysed, from the
+  // uncalibrated number, where a player with more eligible time was pushed
+  // further negative than a teammate with less for no reason but exposure.
+  it('takes the team gap from the calibrated scores of the same round', () => {
+    const rows = [
+      { steamid: 'a', map: 'm', round: '1/1/1', metrics: m({ occ: occ(14) }) },
+      { steamid: 'b', map: 'm', round: '1/1/1', metrics: m({ occ: occ(2) }) },
+      { steamid: 'c', map: 'm', round: '1/1/1', metrics: m({ occ: occ(2) }) },
+      // Another round entirely: not a's teammate.
+      { steamid: 'd', map: 'm', round: '1/2/1', metrics: m({ occ: occ(2) }) },
+    ];
+    const got = aggregate(rows);
+    const k = 20 / 40;
+    const gap = occupancyZ(occ(14), k)! - occupancyZ(occ(2), k)!;
+    expect(got.find((p) => p.steamid === 'a')!.teamGap).toBeCloseTo(gap, 10);
+    expect(got.find((p) => p.steamid === 'd')!.teamGap).toBeNull();
   });
 });
 

@@ -1,3 +1,5 @@
+import { TUNING } from './constants.js';
+import type { OccResult } from './occupancy.js';
 import type { RoundMetrics } from './round.js';
 
 /**
@@ -20,6 +22,73 @@ export function percentile(values: number[], v: number): number {
   return below / (values.length - 1);
 }
 
+/** One stored player-round as the board reads it. `map` and `round` come from
+ *  the query, not from the measurements: which map the round was on, for the
+ *  calibration, and which round it was, so teammates can be found. */
+export interface ScoreRow {
+  steamid: string;
+  metrics: RoundMetrics;
+  map?: string | null;
+  round?: string;
+}
+
+/**
+ * Metric B as a score: the excess of observed over expected on-target blocks,
+ * in binomial standard deviations, with the prior scaled by `k` first.
+ *
+ * Null when the variance is nothing, which means the prior claims certainty
+ * about every block and dividing by that would manufacture a number.
+ */
+export function occupancyZ(occ: OccResult, k: number): number | null {
+  const variance = k * occ.expected - k * k * occ.expectedSq;
+  if (variance <= 1e-9) return null;
+  return (occ.observed - k * occ.expected) / Math.sqrt(variance);
+}
+
+/**
+ * How much of what the prior predicts the players on this board actually do,
+ * per map: observed over expected, summed over every row on that map.
+ *
+ * WHY THE PRIOR CANNOT BE TAKEN AT ITS WORD. It is not the probability that a
+ * player is within E_DWELL of a ghost. It is how often any survivor's wedge
+ * touched the ghost's 256 unit cell, from anywhere on the map, through walls;
+ * and the frames it is compared against have already lost every moment
+ * something visible stood near the ghost's bearing, which is exactly when
+ * people look that way. Measured over the 189 replays in hand on 2026-09-21,
+ * players were on a ghost 0.47 times as often as the prior said, and by map
+ * that ran from 0.20 (airport01) to 0.97 (smalltown03). Uncalibrated, the
+ * typical honest player-round scored -0.6 and a whole player's history pooled
+ * to -3.9. So the prior is asked for its SHAPE, which cells are stared at more
+ * than others, and the level comes from here.
+ *
+ * The subject's own rows are in their map's ratio. One player among dozens
+ * moves it by a few percent at most, and it moves AGAINST them: being on
+ * ghosts more raises what is expected of everyone, themselves included.
+ *
+ * A map with under MIN_CAL_EXPECTED expected blocks on the board uses the whole
+ * board's ratio, and a board with nothing measured uses 1.
+ */
+export function calibrate(rows: ScoreRow[]): (map: string | null | undefined) => number {
+  const byMap = new Map<string, { observed: number; expected: number }>();
+  const all = { observed: 0, expected: 0 };
+  for (const r of rows) {
+    const occ = r.metrics.occ;
+    if (!occ) continue;
+    all.observed += occ.observed;
+    all.expected += occ.expected;
+    if (r.map == null) continue;
+    const m = byMap.get(r.map) ?? { observed: 0, expected: 0 };
+    m.observed += occ.observed;
+    m.expected += occ.expected;
+    byMap.set(r.map, m);
+  }
+  const board = all.expected > 0 ? all.observed / all.expected : 1;
+  return (map) => {
+    const m = map == null ? undefined : byMap.get(map);
+    return m && m.expected >= TUNING.MIN_CAL_EXPECTED ? m.observed / m.expected : board;
+  };
+}
+
 export interface PlayerAgg {
   steamid: string;
   rounds: number;
@@ -39,21 +108,39 @@ function meanOrNull(xs: (number | null)[]): number | null {
  *  fidMax is a MAXIMUM across rounds, not a mean: one round of following an
  *  invisible target is the thing worth looking at, and averaging it away with
  *  twenty clean rounds is how a detector misses. The rest are means, because a
- *  single high occupancy round really can be luck. */
-export function aggregate(rows: { steamid: string; metrics: RoundMetrics }[]): PlayerAgg[] {
-  const by = new Map<string, { steamid: string; metrics: RoundMetrics }[]>();
-  for (const r of rows) {
-    const list = by.get(r.steamid) ?? [];
-    list.push(r);
-    by.set(r.steamid, list);
+ *  single high occupancy round really can be luck.
+ *
+ *  Occupancy and the team gap are SCORED here, not read: each round's sums
+ *  become a z against its map's calibration, and metric C is that z minus the
+ *  mean of the teammates' in the same round. C is a second control on a
+ *  different axis from the prior. The prior removes what is normal for this
+ *  MAP across all history; this removes what was normal for this ROUND,
+ *  including whatever the director happened to do. */
+export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
+  const k = calibrate(rows);
+  const scored = rows.map((r) => ({ ...r, z: r.metrics.occ ? occupancyZ(r.metrics.occ, k(r.map)) : null }));
+
+  const byRound = new Map<string, number[]>();
+  for (const r of scored) {
+    if (r.round == null || r.z == null) continue;
+    byRound.set(r.round, [...(byRound.get(r.round) ?? []), r.z]);
   }
+  const gapOf = (r: typeof scored[number]): number | null => {
+    const team = r.round == null ? undefined : byRound.get(r.round);
+    if (r.z == null || !team || team.length < 2) return null;
+    // The others' mean, from the round's sum less this player's own score.
+    return r.z - (team.reduce((a, b) => a + b, 0) - r.z) / (team.length - 1);
+  };
+
+  const by = new Map<string, typeof scored>();
+  for (const r of scored) by.set(r.steamid, [...(by.get(r.steamid) ?? []), r]);
   return [...by.values()].map((list) => ({
     steamid: list[0].steamid,
     rounds: list.length,
     fidMax: Math.max(...list.map((r) => r.metrics.fidMax)),
     fidP95: meanOrNull(list.map((r) => r.metrics.fidP95)) ?? 0,
-    occZ: meanOrNull(list.map((r) => r.metrics.occZ)),
-    teamGap: meanOrNull(list.map((r) => r.metrics.teamGap)),
+    occZ: meanOrNull(list.map((r) => r.z)),
+    teamGap: meanOrNull(list.map(gapOf)),
   }));
 }
 

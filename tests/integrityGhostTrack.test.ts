@@ -4,7 +4,8 @@ import { TUNING } from '../src/integrity/constants.js';
 import { bearing, wrapDeg } from '../src/integrity/geometry.js';
 import { trackFidelity, trackWindows, pickClips, scanPairs, visibleOthers, type TrackWindow } from '../src/integrity/ghostTrack.js';
 import { pairEligible } from '../src/integrity/geometry.js';
-import { occupancy } from '../src/integrity/occupancy.js';
+import { occupancy, occupancyWithGates } from '../src/integrity/occupancy.js';
+import { occupancyZ } from '../src/integrity/score.js';
 import { analyzeRound, buildRoundPrior } from '../src/integrity/round.js';
 import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 
@@ -598,26 +599,70 @@ describe('occupancy', () => {
     const frames = round(40, (_i, b) => b);
     const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.01));
     expect(r).not.toBeNull();
-    expect(r!.z).toBeGreaterThan(3);
+    expect(occupancyZ(r!, 1)!).toBeGreaterThan(3);
   });
 
   it('is near zero when the player is on a ghost that sits where everyone stares', () => {
     // This is the owner's objection made into a test: a famous spawn spot must
     // earn almost nothing, because the prior already contains it.
     // 0.99, not 1.0. A prior of exactly 1 asserts the cell is stared at with
-    // CERTAINTY, which has zero variance, and `occupancy` correctly returns null
-    // rather than dividing by it. Near-certainty is what a famous doorway
+    // CERTAINTY, which has zero variance, and `occupancyZ` correctly returns
+    // null rather than dividing by it. Near-certainty is what a famous doorway
     // actually looks like in real data, and it leaves the variance real.
     const frames = round(40, (_i, b) => b);
     const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.99));
     expect(r).not.toBeNull();
-    expect(Math.abs(r!.z)).toBeLessThan(1);
+    expect(Math.abs(occupancyZ(r!, 1)!)).toBeLessThan(1);
   });
 
   it('counts no observation when the player looks away from the ghost', () => {
     const frames = round(40, (_i, b) => b + 90);
     const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.01));
     expect(r!.observed).toBe(0);
+  });
+
+  // The statistic used to treat every 10 Hz frame as an independent draw. They
+  // are nothing of the kind: in real history the on-target indicator correlates
+  // 0.70 with itself a frame later and still 0.16 five seconds later, so one
+  // four second stare was counted as forty pieces of evidence and the "z-score"
+  // ranged from -9.6 to 62.8.
+  /** `round`, moved so its first frame opens a block, `blocks` blocks long. */
+  const PER_BLOCK = TUNING.OCC_BLOCK_MS / 100;
+  const blocksOf = (blocks: number, yawOf: (i: number, b: number) => number) => {
+    const frames = round(blocks * PER_BLOCK, yawOf);
+    const shift = TUNING.OCC_BLOCK_MS - (frames[0].tMs % TUNING.OCC_BLOCK_MS || TUNING.OCC_BLOCK_MS);
+    for (const f of frames) f.tMs += shift;
+    return frames;
+  };
+
+  it('counts a long stare once per block, not once per frame', () => {
+    const one = blocksOf(1, (_i, b) => b);
+    expect(occupancy(one, 0, priorWhereGhostIs(one, 0.01))).toMatchObject({ observed: 1, blocks: 1, pairs: PER_BLOCK });
+    const three = blocksOf(3, (_i, b) => b);
+    expect(occupancy(three, 0, priorWhereGhostIs(three, 0.01))).toMatchObject({ observed: 3, blocks: 3 });
+  });
+
+  it('counts a stare that covers part of a block as that fraction of it', () => {
+    const frames = blocksOf(1, (i, b) => (i < PER_BLOCK / 4 ? b : b + 90));
+    expect(occupancy(frames, 0, priorWhereGhostIs(frames, 0.01))!.observed).toBeCloseTo(0.25, 10);
+  });
+
+  it('sums the prior per block too, so expected and observed are in the same unit', () => {
+    const frames = blocksOf(2, (_i, b) => b + 90);
+    const r = occupancy(frames, 0, priorWhereGhostIs(frames, 0.2))!;
+    expect(r.expected).toBeCloseTo(0.4, 10);
+    expect(r.expectedSq).toBeCloseTo(0.08, 10);
+  });
+
+  // The prior's wedge stops at R_MAX, so by its own definition a survivor
+  // cannot be "looking at" a cell further off than that. Counting an
+  // observation the prior had no way to predict is a rigged comparison.
+  it('ignores a ghost beyond R_MAX, which the prior could never have covered', () => {
+    const frames = round(40, (_i, b) => b, TUNING.R_MAX + 300, 2);
+    const { occ, gates } = occupancyWithGates(frames, 0, priorWhereGhostIs(frames, 0.01));
+    expect(occ).toBeNull();
+    // Still eligible, still coverage: the bound belongs to this metric alone.
+    expect(gates.passed).toBe(40);
   });
 });
 
@@ -629,19 +674,18 @@ describe('analyzeRound', () => {
     expect(clips.get(0)!.length).toBeGreaterThan(0);
   });
 
-  it('ranks a tracking survivor above a teammate who is not', () => {
+  it('measures occupancy for every survivor, so the team comparison has something to compare', () => {
     const frames = round(40, (_i, b) => b);
     for (const f of frames) {
       f.players[1] = { ...f.players[1], slot: 1, state: STATE.PRESENT | STATE.ALIVE, yaw: 0 };
     }
     const { metrics } = analyzeRound(frames, [0, 1], priorWhereGhostIs(frames, 0.01));
-    expect(metrics.get(0)!.teamRank).toBe(1);
-    expect(metrics.get(0)!.teamGap!).toBeGreaterThan(0);
+    expect(metrics.get(0)!.occ!.observed).toBeGreaterThan(metrics.get(1)!.occ!.observed);
   });
 
   it('leaves occupancy null and still reports fidelity when there is no prior', () => {
     const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
-    expect(metrics.get(0)!.occZ).toBeNull();
+    expect(metrics.get(0)!.occ).toBeNull();
     expect(metrics.get(0)!.fidMax).toBeGreaterThan(0.9);
   });
 
@@ -652,7 +696,7 @@ describe('analyzeRound', () => {
     // clips" was unreadable.
     const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
     const m = metrics.get(0)!;
-    expect(m.occZ).toBeNull();
+    expect(m.occ).toBeNull();
     expect(m.eligiblePairs).toBe(40);
     expect(m.gates.passed).toBe(40);
     expect(m.gates.considered).toBe(40);

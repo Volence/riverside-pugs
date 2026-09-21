@@ -41,13 +41,19 @@ export interface IntegrityBoardRow extends ScoredPlayer {
 /** The board: one row per player, ranked. Scores are computed here, never read
  *  from a column, so changing a threshold changes the page and nothing else. */
 export function integrityBoard(db: DB, seasonId: number | null): IntegrityBoardRow[] {
+  // The map comes from the round's share of the aim prior, which is the one
+  // place a round's map is recorded, and a round with an occupancy measurement
+  // always has one: there is no prior without pooling.
   const rows = db.prepare(
-    `SELECT r.steamid, r.metrics, p.name
+    `SELECT r.steamid, r.metrics, p.name, pr.map,
+            r.match_id || '/' || r.ordinal || '/' || r.half AS round
      FROM integrity_rounds r
      JOIN matches m ON m.id = r.match_id
      LEFT JOIN players p ON p.steamid = r.steamid
+     LEFT JOIN integrity_prior_rounds pr
+       ON pr.match_id = r.match_id AND pr.ordinal = r.ordinal AND pr.half = r.half
      WHERE (? IS NULL OR m.season_id = ?)`,
-  ).all(seasonId, seasonId) as { steamid: string; metrics: string; name: string | null }[];
+  ).all(seasonId, seasonId) as { steamid: string; metrics: string; name: string | null; map: string | null; round: string }[];
 
   const names = new Map(rows.map((r) => [r.steamid, r.name]));
   const clips = new Map((db.prepare(
@@ -60,7 +66,9 @@ export function integrityBoard(db: DB, seasonId: number | null): IntegrityBoardR
   // Names and clip counts are attached AFTER scoring rather than carried
   // through it, so score.ts stays a pure function of the measurements and
   // cannot start ranking on anything but them.
-  return scorePlayers(aggregate(rows.map((r) => ({ steamid: r.steamid, metrics: JSON.parse(r.metrics) as RoundMetrics }))))
+  return scorePlayers(aggregate(rows.map((r) => ({
+    steamid: r.steamid, metrics: JSON.parse(r.metrics) as RoundMetrics, map: r.map, round: r.round,
+  }))))
     .map((p) => ({ ...p, name: names.get(p.steamid) || p.steamid, clips: clips.get(p.steamid) ?? 0 }));
 }
 

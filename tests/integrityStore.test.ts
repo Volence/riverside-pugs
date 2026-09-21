@@ -9,7 +9,7 @@ import type { RoundMetrics } from '../src/integrity/round.js';
 let db: DB;
 const KEY = { matchId: 1, ordinal: 1, half: 1 };
 const M: RoundMetrics = {
-  fidMax: 0.9, fidP95: 0.5, occZ: 2.5, teamRank: 1, teamGap: 1.2, eligiblePairs: 300,
+  fidMax: 0.9, fidP95: 0.5, occ: { observed: 4, expected: 2, expectedSq: 0.2, blocks: 40, pairs: 300 }, eligiblePairs: 300,
   gates: { considered: 900, notLive: 100, notGhost: 200, inGrace: 100, tooClose: 100, occluded: 100, passed: 300 },
 };
 const clip = { startMs: 1000, endMs: 3000, ghostSlot: 4, fidelity: 0.9, travel: 20, meanErr: 2, meanDist: 900 };

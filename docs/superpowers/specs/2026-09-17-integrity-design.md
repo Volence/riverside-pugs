@@ -175,6 +175,37 @@ a player-round, with the ghost in cell `c`:
 - The statistic is the excess of observed over expected, as a z-score against the binomial
   spread of `expected`.
 
+**Amended 2026-09-21 (analyzer version 4): what it took to make that a z-score.** The first
+implementation did the arithmetic above frame by frame and the result was not one. Three
+things were wrong, all measured on the 189 replays then in hand.
+
+- *Frames are not independent draws.* The on-target indicator correlates 0.70 with itself
+  one frame later, 0.25 at 2 s and 0.16 at 5 s, so a four second stare was forty pieces of
+  evidence and real values ran from -9.6 to 62.8. The unit is now a **block**: one ghost
+  over one `OCC_BLOCK_MS` (2 s) stretch. Within a block the frames count as one draw,
+  `observed` as the fraction of them on target and `expected` as their mean prior. 2 s is
+  the shortest block at which the per-round spread comes in under 1 (0.95; 1 s gives 1.19,
+  frames 3.42).
+- *The prior is not the probability it was used as.* It records how often any survivor's
+  wedge touched the ghost's 256 unit cell, from anywhere, through walls, and it is compared
+  against frames that have already lost every moment something visible stood near the
+  ghost's bearing, which is when people look that way. Players were on a ghost 0.47 times
+  as often as the prior said, from 0.20 on one map to 0.97 on another, so the typical honest
+  round scored -0.6 and a player's pooled history -3.9. The prior is therefore used for its
+  shape and **calibrated per map at read time**: `k` is observed over expected across the
+  rows on the board for that map, and the score is
+  `(observed - k * expected) / sqrt(k * expected - k^2 * expectedSq)`. The analyzer stores
+  the three sums and the block count; `score.ts` does the rest, so the calibration can
+  never be stale.
+- *`observed` had no range limit and the prior does.* The wedge stops at `R_MAX`, so a pair
+  further apart than that is left out of metric B altogether (it still counts as coverage).
+
+Result over 708 player-rounds: mean -0.01, sd 0.95, p05 -1.03, median -0.27, p95 1.68,
+3.7 percent beyond 2 either way (a normal gives 4.6), maximum 6.4. The median is below the
+mean and the low tail is short because a count that cannot go below zero is skewed. Paused
+frames, which produced the 62.8, are dropped before any of this (see `unpausedFrames`).
+Metric C moved to read time with it, since it is a difference of these scores.
+
 A player exploiting nothing but map knowledge scores zero excess **by construction**,
 because the prior already contains their map knowledge. Aiming at a ghost sitting in the
 famous doorway earns almost nothing, since everyone aims there. Being on a ghost that is
@@ -289,7 +320,8 @@ distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows p
 player-round are kept.
 
 The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
-`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `EYE_Z`, `TARGET_Z`, `PITCH_TOL`, `MIN_TRAVEL`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
+`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `EYE_Z`, `TARGET_Z`, `PITCH_TOL`, `MIN_TRAVEL`, `E_DWELL`,
+`OCC_BLOCK_MS`, `MIN_CAL_EXPECTED`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
 in one exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring

@@ -59,7 +59,7 @@ function addRound(ordinal: number, half: number): void {
 
 function scoredForOccupancy(): number {
   return (db.prepare('SELECT metrics FROM integrity_rounds').all() as { metrics: string }[])
-    .filter((r) => JSON.parse(r.metrics).occZ != null).length;
+    .filter((r) => JSON.parse(r.metrics).occ != null).length;
 }
 
 beforeEach(() => {
@@ -93,7 +93,7 @@ describe('analyzeOneRound', () => {
   it('leaves occupancy null while the map is under MIN_PRIOR_ROUNDS', () => {
     analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, replayBytes(60));
     const row = db.prepare('SELECT metrics FROM integrity_rounds WHERE slot = 0').get() as { metrics: string };
-    expect(JSON.parse(row.metrics).occZ).toBeNull();
+    expect(JSON.parse(row.metrics).occ).toBeNull();
   });
 });
 

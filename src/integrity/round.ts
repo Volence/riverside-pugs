@@ -9,18 +9,17 @@ import { PriorBuilder, type PriorTable } from './aimPrior.js';
  *
  * Kept apart from the metric primitives because it sits at a different
  * abstraction level. `ghostTrack.ts` answers "what did this one crosshair do";
- * this answers "what does that mean next to the four other people in the
- * round", which is metric C.
+ * this runs it for everyone in the round. What a player's numbers mean next to
+ * their teammates', which is metric C, is a read-time question: see `score.ts`.
  */
 
 export interface RoundMetrics {
   fidMax: number;
   fidP95: number;
-  occZ: number | null;
-  /** 1 is the highest occupancy z on this side this round. Null without a prior. */
-  teamRank: number | null;
-  /** This player's z minus the mean of their teammates'. Null without a prior. */
-  teamGap: number | null;
+  /** Metric B as sums, null without a prior. The score, and the team gap that
+   *  is metric C, are worked out from these at read time in `score.ts`: both
+   *  need a calibration only the whole board can supply. */
+  occ: OccResult | null;
   /** Pairs that cleared every gate. Always `gates.passed`; kept as its own
    *  field because it is the one coverage number every consumer wants and
    *  because it predates the tally. It used to be read off the occupancy
@@ -96,38 +95,19 @@ export function analyzeRound(
 ): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]> } {
   const metrics = new Map<number, RoundMetrics>();
   const clips = new Map<number, TrackWindow[]>();
-  const occ = new Map<number, OccResult | null>();
 
   for (const slot of survivorSlots) {
     const windows = trackWindows(frames, slot);
     clips.set(slot, pickClips(windows));
-    const { occ: o, gates } = occupancyWithGates(frames, slot, prior);
-    occ.set(slot, o);
+    const { occ, gates } = occupancyWithGates(frames, slot, prior);
     const fids = windows.map((w) => w.fidelity);
     metrics.set(slot, {
       fidMax: fids.length ? Math.max(...fids) : 0,
       fidP95: p95(fids),
-      occZ: o?.z ?? null,
-      teamRank: null,
-      teamGap: null,
+      occ,
       eligiblePairs: gates.passed,
       gates,
     });
-  }
-
-  // Metric C. A second control on a different axis from the prior: the prior
-  // removes what is normal for this MAP across all history, this removes what
-  // was normal for this ROUND, including whatever the director happened to do.
-  const scored = survivorSlots.filter((s) => occ.get(s) != null);
-  if (scored.length > 1) {
-    const byZ = [...scored].sort((a, b) => (occ.get(b)!.z) - (occ.get(a)!.z));
-    for (const slot of scored) {
-      const mine = occ.get(slot)!.z;
-      const others = scored.filter((s) => s !== slot).map((s) => occ.get(s)!.z);
-      const m = metrics.get(slot)!;
-      m.teamRank = byZ.indexOf(slot) + 1;
-      m.teamGap = mine - (others.reduce((a, b) => a + b, 0) / others.length);
-    }
   }
   return { metrics, clips };
 }

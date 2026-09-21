@@ -782,8 +782,10 @@ export interface IntegrityRound {
   slot: number;
   campaign: string | null;
   metrics: {
-    fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null;
-    teamGap: number | null;
+    fidMax: number; fidP95: number;
+    /** Metric B as sums over 2 second blocks, null on a map with no baseline
+     *  yet. The score on the board is worked out from these on the server. */
+    occ: { observed: number; expected: number; expectedSq: number; blocks: number; pairs: number } | null;
     /** Pairs that cleared every eligibility gate: how many chances the
      *  detector actually had. Zero here means it never ran, which is a very
      *  different statement from a clean round. */

@@ -14,9 +14,11 @@ let app: FastifyInstance;
 let adminCookie: Record<string, string>;
 let userCookie: Record<string, string>;
 
-const metrics = (fidMax: number, occZ: number | null) =>
+/** `observed` on-target blocks out of 40 that the prior expects 4 of. */
+const metrics = (fidMax: number, observed: number | null) =>
   JSON.stringify({
-    fidMax, fidP95: fidMax / 2, occZ, teamRank: 1, teamGap: occZ, eligiblePairs: 200,
+    fidMax, fidP95: fidMax / 2, eligiblePairs: 200,
+    occ: observed == null ? null : { observed, expected: 4, expectedSq: 0.4, blocks: 40, pairs: 200 },
     gates: { considered: 600, notLive: 50, notGhost: 150, inGrace: 100, tooClose: 50, occluded: 50, passed: 200 },
   });
 
@@ -32,13 +34,20 @@ beforeEach(async () => {
     `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
      VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))`,
   );
-  ins.run(1, 1, 0, SUS, ANALYZER_VERSION, metrics(0.95, 4.2));
-  ins.run(1, 1, 1, CLEAN, ANALYZER_VERSION, metrics(0.2, 0.1));
+  ins.run(1, 1, 0, SUS, ANALYZER_VERSION, metrics(0.95, 12));
+  ins.run(1, 1, 1, CLEAN, ANALYZER_VERSION, metrics(0.2, 1));
   // A SECOND player-round for the same player, differing only in slot. With one
   // round in the fixture a partial-key lookup that dropped half or slot would
   // still match and the review tests would still pass, while an admin was being
   // shown that a moment had already been cleared when it had not.
-  ins.run(2, 1, 3, SUS, ANALYZER_VERSION, metrics(0.8, 3.0));
+  ins.run(2, 1, 3, SUS, ANALYZER_VERSION, metrics(0.8, 9));
+  // The rounds' shares of the aim prior, which is where the board learns the map.
+  const insShare = db.prepare(
+    `INSERT INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts, map, analyzer_version)
+     VALUES (1, ?, 1, 100, '[]', 'l4d_vs_farm01_hilltop', ?)`,
+  );
+  insShare.run(1, ANALYZER_VERSION);
+  insShare.run(2, ANALYZER_VERSION);
   const insClip = db.prepare(
     `INSERT INTO integrity_clips (match_id, ordinal, half, slot, steamid, start_ms, end_ms, kind, score, detail, analyzer_version)
      VALUES (1, ?, ?, ?, ?, ?, ?, 'ghost_track', ?, '{"ghostSlot":4}', ?)`,
@@ -86,6 +95,21 @@ describe('GET /api/admin/integrity', () => {
     const body = r.json() as { players: { steamid: string; composite: number }[] };
     expect(body.players[0].steamid).toBe(SUS);
     expect(body.players[0].composite).toBeGreaterThan(body.players[1].composite);
+  });
+
+  // Occupancy is stored as sums and scored here, against what the players on
+  // the board actually did on that map. Team gap is the same score against the
+  // teammates of the same round.
+  it('scores occupancy and the team gap from the stored sums', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/admin/integrity', cookies: adminCookie });
+    const body = r.json() as { players: { steamid: string; occZ: number | null; teamGap: number | null }[] };
+    const sus = body.players.find((p) => p.steamid === SUS)!;
+    const clean = body.players.find((p) => p.steamid === CLEAN)!;
+    expect(sus.occZ!).toBeGreaterThan(0);
+    expect(clean.occZ!).toBeLessThan(0);
+    // Round 1/1/1 held both of them; round 1/2/1 held SUS alone and has no gap.
+    expect(sus.teamGap!).toBeGreaterThan(0);
+    expect(clean.teamGap!).toBeCloseTo(-sus.teamGap!, 10);
   });
 
   it('names the players and counts their clips, so nobody is a 17 digit number', async () => {

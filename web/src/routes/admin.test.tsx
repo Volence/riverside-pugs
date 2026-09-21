@@ -367,7 +367,7 @@ describe('AdminIntegrity', () => {
   const round = (over: Partial<IntegrityRound> = {}): IntegrityRound => ({
     matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
     metrics: {
-      fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10,
+      fidMax: 0.5, fidP95: 0.3, occ: null, eligiblePairs: 10,
       gates: { considered: 40, notLive: 5, notGhost: 10, inGrace: 5, tooClose: 5, occluded: 5, passed: 10 },
     },
     computedAt: '2026-09-17T00:00:00Z', reviewState: 'new', reviewNote: '', ...over,
