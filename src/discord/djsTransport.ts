@@ -416,7 +416,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         if (codeOf(err) !== UNKNOWN_CHANNEL) throw err;
       });
     },
-    async syncMemberAccess(channelId, userIds) {
+    async syncMemberAccess(channelId, userIds, opts) {
       const ch = await channelById(channelId);
       // A forum and nothing else, exactly as createForumPost insists: the
       // tickets channel setting sits beside the forum one, and a mis-pasted
@@ -445,6 +445,9 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           failed.push(id);
         }
       }
+      // Revoke-only asks for the loop above and nothing else: the caller is
+      // sure who must lose access and not yet sure who may be given it.
+      if (opts?.revokeOnly) return { added, removed, failed };
       for (const id of want) {
         if (have.includes(id)) continue;
         try {

@@ -159,7 +159,7 @@ export class FakeTransport implements BotTransport {
       const th = this.threadsById.get(threadId);
       if (th) th.deleted = true;
     },
-    syncMemberAccess: async (channelId, userIds) => {
+    syncMemberAccess: async (channelId, userIds, opts) => {
       this.threadOp();
       this.needChannelId(channelId, 'cannot hold permission overwrites');
       const have = this.channelAccess.get(channelId) ?? new Set<string>();
@@ -174,10 +174,13 @@ export class FakeTransport implements BotTransport {
         if (this.accessRemovalsRefused.has(id)) failed.push(id);
         else { have.delete(id); removed.push(id); }
       }
-      for (const id of want) {
-        if (have.has(id)) continue;
-        if (this.notInGuild.has(id)) failed.push(id);
-        else { have.add(id); added.push(id); }
+      // Revoke-only stops here: nobody is added, as the real transport does.
+      if (!opts?.revokeOnly) {
+        for (const id of want) {
+          if (have.has(id)) continue;
+          if (this.notInGuild.has(id)) failed.push(id);
+          else { have.add(id); added.push(id); }
+        }
       }
       this.channelAccess.set(channelId, have);
       return { added, removed, failed };

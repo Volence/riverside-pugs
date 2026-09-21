@@ -240,14 +240,16 @@ describe('the staff forum post', () => {
     expect(t.threadsById.get(staffThread(db, id)!.thread_id)!.deleted).toBe(false);
   });
 
-  it('holds the forum\'s access list back until that sweep has worked once', async () => {
+  it('lets nobody into the forum until that sweep has worked once', async () => {
     const orphan = (await t.threads.createForumPost('forum1', { name: 'orphan', message: card, tags: [] })).threadId;
     // Discord refuses the listing itself on the first pass.
     t.failThreadOps = 1;
     sync.start();
     await sync.idle();
     expect(t.threadsById.get(orphan)!.deleted).toBe(false);
-    expect(t.channelAccess.get('forum1')).toBeUndefined();
+    // The access sync still ran, and granted nobody: revocations are never
+    // held back, so the call is made with nothing but its removals.
+    expect([...(t.channelAccess.get('forum1') ?? [])]).toEqual([]);
     await sync.reconcile();
     expect(t.threadsById.get(orphan)!.deleted).toBe(true);
     expect([...t.channelAccess.get('forum1')!].sort()).toEqual(['906', '907']);

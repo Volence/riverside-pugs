@@ -191,8 +191,15 @@ export interface ThreadOps {
    * added, which is ordinary (they have left the server), together with
    * anyone whose overwrite could not be deleted, which is not: an id in
    * `failed` that is not in `userIds` still has access it should have lost.
+   *
+   * `revokeOnly` does the revocations and nothing else: everyone whose
+   * overwrite should go, goes, and nobody is added, so `added` comes back
+   * empty. It is for a caller that knows who must lose access but cannot yet
+   * be sure that giving it to somebody new is safe.
    */
-  syncMemberAccess(channelId: string, userIds: string[]): Promise<{ added: string[]; removed: string[]; failed: string[] }>;
+  syncMemberAccess(
+    channelId: string, userIds: string[], opts?: { revokeOnly?: boolean },
+  ): Promise<{ added: string[]; removed: string[]; failed: string[] }>;
 }
 
 export interface BotTransport {

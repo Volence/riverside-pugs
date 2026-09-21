@@ -82,6 +82,13 @@ describe('FakeTransport threads', () => {
     expect([...t.channelAccess.get('forum1')!].sort()).toEqual(['902', '903']);
   });
 
+  it('a revoke-only access sync adds nobody and still takes the extras out', async () => {
+    expect(await t.threads.syncMemberAccess('forum1', ['901', '902'])).toEqual({ added: ['901', '902'], removed: [], failed: [] });
+    expect(await t.threads.syncMemberAccess('forum1', ['902', '903'], { revokeOnly: true }))
+      .toEqual({ added: [], removed: ['901'], failed: [] });
+    expect([...t.channelAccess.get('forum1')!]).toEqual(['902']);
+  });
+
   it('failThreadOps makes the next thread calls throw, as an outage would', async () => {
     t.failThreadOps = 1;
     await expect(t.threads.createForumPost('forum1', { name: 'x', message: card('x'), tags: [] })).rejects.toThrow(/discord down/);

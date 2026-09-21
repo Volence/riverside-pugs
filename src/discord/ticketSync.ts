@@ -313,7 +313,17 @@ export class TicketSync {
     if (!forumId) return;
     const known = new Set((db.prepare("SELECT thread_id FROM ticket_threads WHERE surface = 'forum'")
       .all() as { thread_id: string }[]).map((r) => r.thread_id));
-    for (const th of await transport.threads.listThreads(forumId)) {
+    let posts: { threadId: string; ownerId: string | null }[];
+    try {
+      posts = await transport.threads.listThreads(forumId);
+    } catch (err) {
+      // Its own line, not the generic one: this failure has a consequence
+      // that goes on until somebody fixes it, and a cause worth naming.
+      console.error('[discord] could not list the tickets forum posts:', err);
+      this.problem(`Could not list the posts in the tickets forum: ${err instanceof Error ? err.message : String(err)}. Until that works, nobody new is let into the staff forum, because a post with no ticket behind it could be standing in there; anyone who should lose access is still taken out of it every few minutes. The usual cause is the bot missing Read Message History or Manage Threads on the tickets forum.`);
+      return;
+    }
+    for (const th of posts) {
       if (known.has(th.threadId)) continue;
       await transport.threads.deleteThread(th.threadId);
       console.log('[discord] deleted a tickets forum post with no ticket behind it');
@@ -535,18 +545,22 @@ export class TicketSync {
     thread.locked = want ? 1 : 0;
   }
 
-  /** The forum's member overwrites are exactly forumAudience. */
+  /** The forum's member overwrites are exactly forumAudience, or, while the
+   *  orphan sweep has never worked, forumAudience minus everyone not already
+   *  in: the revocations still happen, the grants wait. */
   private async syncAccess(): Promise<void> {
     const { db, transport } = this.deps;
     const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
     if (!forumId) return;
-    // Not while a post nothing in the database knows about may be standing in
-    // the forum: forumAudience cannot leave out the subject of a post it
-    // cannot see, so letting anyone in first could let them into their own
-    // case. The sweep runs ahead of this in every pass.
-    if (!this.orphansSwept) return;
     const want = forumAudience(db);
-    const r = await transport.threads.syncMemberAccess(forumId, want);
+    // While a post nothing in the database knows about may be standing in the
+    // forum, NOBODY IS LET IN: forumAudience cannot leave out the subject of
+    // a post it cannot see, so a grant could be a grant to someone's own
+    // case. Taking access away is never held back for that, or a bot that
+    // cannot read the forum would leave a banned moderator in it for the life
+    // of the process. The sweep runs ahead of this in every pass.
+    const revokeOnly = !this.orphansSwept;
+    const r = await transport.threads.syncMemberAccess(forumId, want, { revokeOnly });
     if (r.added.length || r.removed.length || r.failed.length) {
       console.log(`[discord] tickets forum access: +${r.added.length} -${r.removed.length}, ${r.failed.length} refused`);
     }

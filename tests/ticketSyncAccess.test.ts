@@ -101,6 +101,42 @@ describe('forum access', () => {
     }
   });
 
+  it('goes on revoking while the orphan sweep keeps failing, but grants nobody', async () => {
+    const events: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => events.push(e));
+    // Overwrites Discord has been holding since before this process started.
+    t.channelAccess.set('forum1', new Set(['906', '907']));
+    const list = t.threads.listThreads;
+    // The bot cannot read the forum's own posts, so it can never rule out a
+    // post with no ticket behind it.
+    t.threads.listThreads = async () => { throw new Error('Missing Access'); };
+    try {
+      sync.start();
+      await sync.idle();
+      db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[1]);
+      publishTicketSignal({ kind: 'staff' });
+      await sync.idle();
+      // Nobody new is let in, because a post about them may be standing there.
+      expect(access()).toEqual(['906', '907']);
+      // Somebody who should lose the forum still loses it, every pass.
+      db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD);
+      await sync.reconcile();
+      expect(access()).toEqual(['907']);
+      const problems = events.filter((e) => e.kind === 'problem').map((e) => (e as { text: string }).text);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(/Could not list the posts in the tickets forum/);
+      expect(problems[0]).toMatch(/Read Message History/);
+      expect(problems[0]).not.toMatch(/90\d|player\d/);
+      // And once Discord answers, the promotion takes effect on the next pass.
+      t.threads.listThreads = list;
+      await sync.reconcile();
+      expect(access()).toEqual(['901', '907']);
+    } finally {
+      t.threads.listThreads = list;
+      off();
+    }
+  });
+
   it('touches nothing while the forum is not configured', async () => {
     setSetting(db, 'discord_tickets_forum_id', '');
     sync.start();
