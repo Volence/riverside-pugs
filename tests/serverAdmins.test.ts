@@ -178,6 +178,15 @@ describe('ServerAdminSync', () => {
     expect(renderAdminsCfg(db)).toContain(BONE_ID);
   });
 
+  // Moderators work tickets and nothing else: the flag must never reach a box.
+  it('gives a moderator nothing on the game servers', () => {
+    const MOD = '76561197960265731';
+    upsertPlayer(db, { steamid: MOD, name: 'ticket mod', avatar: null }, []);
+    db.prepare("UPDATE players SET is_mod = 1, status = 'active' WHERE steamid = ?").run(MOD);
+    expect(websiteAdmins(db).map((a) => a.steamid)).not.toContain(MOD);
+    expect(renderAdminsCfg(db)).not.toContain('ticket mod');
+  });
+
   it('asks the bans table, not only the cached status', () => {
     banPlayer(db, BONE, MAL, 'abuse', null);
     db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(BONE);

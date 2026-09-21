@@ -148,6 +148,18 @@ describe('working tickets over HTTP', () => {
     expect(audit.actions[0].target).toBe(String(id));
   });
 
+  it('a ban from a ticket pulls the player out of a ready check, not only out of the queue', async () => {
+    const others = Array.from({ length: 7 }, (_, i) => `7656119800000010${i}`);
+    for (const p of others) await app.inject({ method: 'POST', url: '/api/queue/join', cookies: authedCookie(app, db, p) });
+    await post(ACCUSED, '/api/queue/join');
+    expect((await get(ACCUSED, '/api/state')).json().lobby).not.toBeNull();
+    expect((await post(MOD, `/api/mod/tickets/${id}/ban`, { reason: 'walls', minutes: 60 })).statusCode).toBe(200);
+    const seat = (await app.inject({ method: 'GET', url: '/api/state', cookies: authedCookie(app, db, others[0]) })).json();
+    expect(seat.lobby).toBeNull();
+    expect(seat.queue.count).toBe(7);
+    expect(seat.queue.players.map((p: { steamid: string }) => p.steamid)).not.toContain(ACCUSED);
+  });
+
   it('staff open a ticket by hand', async () => {
     const r = await post(MOD, '/api/mod/tickets', { targetId: R1, note: 'said something in discord' });
     expect(r.statusCode).toBe(200);
