@@ -25,6 +25,36 @@ describe('FakeTransport threads', () => {
     expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: false, surface: 'private' });
   });
 
+  it('an archived thread refuses every other thread operation until it is unarchived', async () => {
+    const { threadId } = await t.threads.createPrivateThread('chan1', { name: 'Ticket #2b' });
+    await t.threads.addMember(threadId, '901');
+    await t.threads.setArchived(threadId, true);
+    await expect(t.threads.setLocked(threadId, true)).rejects.toThrow(/archived/i);
+    await expect(t.threads.setTags(threadId, ['open'])).rejects.toThrow(/archived/i);
+    await expect(t.threads.addMember(threadId, '902')).rejects.toThrow(/archived/i);
+    await expect(t.threads.removeMember(threadId, '901')).rejects.toThrow(/archived/i);
+    // Unarchiving is the one way out, and then the same calls land.
+    await t.threads.setArchived(threadId, false);
+    await t.threads.setLocked(threadId, true);
+    await t.threads.setTags(threadId, ['open']);
+    await t.threads.addMember(threadId, '902');
+    await t.threads.removeMember(threadId, '901');
+    expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, tags: ['open'] });
+    expect(await t.threads.memberIds(threadId)).toEqual(['902']);
+  });
+
+  it('a locked thread still takes a message from the bot, which is what lock and archive differ on', async () => {
+    const { threadId } = await t.threads.createPrivateThread('chan1', { name: 'Ticket #2c' });
+    await t.threads.setLocked(threadId, true);
+    await expect(t.send(threadId, card('staff can still be told'))).resolves.toBeTruthy();
+  });
+
+  it('a channel id that is not there is refused, as Discord refuses it', async () => {
+    await expect(t.threads.createForumPost('', { name: 'x', message: card('x'), tags: [] })).rejects.toThrow(/is not a forum/);
+    await expect(t.threads.createPrivateThread('', { name: 'x' })).rejects.toThrow(/is not a text channel/);
+    await expect(t.threads.syncMemberAccess('', ['901'])).rejects.toThrow(/permission overwrites/);
+  });
+
   it('members are explicit, and someone outside the server cannot be added', async () => {
     const { threadId } = await t.threads.createPrivateThread('chan1', { name: 'Ticket #3' });
     t.notInGuild.add('999');

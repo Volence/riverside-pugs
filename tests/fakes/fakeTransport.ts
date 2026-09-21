@@ -76,6 +76,20 @@ export class FakeTransport implements BotTransport {
     return th;
   }
 
+  /** Every thread operation but setArchived goes through here: an archived
+   *  thread refuses them all, and unarchiving is the only way out. */
+  private writableThread(threadId: string): FakeThread {
+    const th = this.liveThread(threadId);
+    if (th.archived) throw new Error('Thread is archived');
+    return th;
+  }
+
+  /** The real transport fetches the channel and throws when it is not there,
+   *  which is what an unset channel setting looks like. */
+  private needChannelId(channelId: string, complaint: string): void {
+    if (!channelId) throw new Error(`channel ${channelId} ${complaint}`);
+  }
+
   /** Snowflake-shaped on purpose: phase 2b orders messages by id. */
   private snowflake(): string {
     return String(100000 + ++this.seq);
@@ -84,6 +98,7 @@ export class FakeTransport implements BotTransport {
   threads: ThreadOps = {
     createForumPost: async (forumId, post) => {
       this.threadOp();
+      this.needChannelId(forumId, 'is not a forum');
       const id = this.snowflake();
       this.threadsById.set(id, { id, parentId: forumId, surface: 'forum', name: post.name, tags: [...post.tags], members: new Set(), locked: false, archived: false, deleted: false });
       // Discord gives a forum post's first message the thread's own id.
@@ -92,6 +107,7 @@ export class FakeTransport implements BotTransport {
     },
     createPrivateThread: async (channelId, thread) => {
       this.threadOp();
+      this.needChannelId(channelId, 'is not a text channel');
       const id = this.snowflake();
       this.threadsById.set(id, { id, parentId: channelId, surface: 'private', name: thread.name, tags: [], members: new Set(), locked: false, archived: false, deleted: false });
       return { threadId: id };
@@ -102,20 +118,22 @@ export class FakeTransport implements BotTransport {
     },
     addMember: async (threadId, userId) => {
       this.threadOp();
+      const th = this.writableThread(threadId);
       if (this.notInGuild.has(userId)) throw new Error('Unknown Member');
-      this.liveThread(threadId).members.add(userId);
+      th.members.add(userId);
     },
     removeMember: async (threadId, userId) => {
       this.threadOp();
-      this.liveThread(threadId).members.delete(userId);
+      this.writableThread(threadId).members.delete(userId);
     },
     memberIds: async (threadId) => {
       const th = this.threadsById.get(threadId);
       return !th || th.deleted ? null : [...th.members];
     },
-    setLocked: async (threadId, locked) => { this.threadOp(); this.liveThread(threadId).locked = locked; },
+    setLocked: async (threadId, locked) => { this.threadOp(); this.writableThread(threadId).locked = locked; },
+    // Not writableThread: unarchiving is the way out of an archived thread.
     setArchived: async (threadId, archived) => { this.threadOp(); this.liveThread(threadId).archived = archived; },
-    setTags: async (threadId, tags) => { this.threadOp(); this.liveThread(threadId).tags = [...tags]; },
+    setTags: async (threadId, tags) => { this.threadOp(); this.writableThread(threadId).tags = [...tags]; },
     deleteThread: async (threadId) => {
       this.threadOp();
       const th = this.threadsById.get(threadId);
@@ -123,6 +141,7 @@ export class FakeTransport implements BotTransport {
     },
     syncMemberAccess: async (channelId, userIds) => {
       this.threadOp();
+      this.needChannelId(channelId, 'cannot hold permission overwrites');
       const have = this.channelAccess.get(channelId) ?? new Set<string>();
       const want = new Set(userIds);
       const added: string[] = [];

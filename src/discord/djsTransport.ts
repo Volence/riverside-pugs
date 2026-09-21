@@ -1,7 +1,8 @@
 import {
   ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
-  OverwriteType, PermissionFlagsBits, ThreadAutoArchiveDuration,
-  type AnyThreadChannel, type ForumChannel, type Guild, type Interaction, type TextBasedChannel,
+  OverwriteType, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
+  type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type ForumChannel, type Guild, type Interaction,
+  type TextBasedChannel,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
 import type {
@@ -44,23 +45,31 @@ function toMessage(p: MessagePayload) {
 }
 
 /**
- * A modal as raw API JSON, like toButton. Every field is wrapped in a Label
- * (component type 18), the only way a select can sit in a modal. A text input
- * inside a Label must NOT carry its own `label`: discord-api-types says so at
- * payloads/v10/message.d.ts:1463 ("Cannot be used in a label component").
- * Verified: LabelComponentData typings/index.d.ts:401, ModalComponentData
- * :2846, StringSelectMenuComponentData :7483, TextInputComponentData :7532.
+ * A modal as raw API JSON, like toButton, but with the real component enums so
+ * the compiler checks the shape. Every field is wrapped in a Label, the only
+ * way a select can sit in a modal. A text input inside a Label must NOT carry
+ * its own `label`: discord-api-types says so at payloads/v10/message.d.ts:1463
+ * ("Cannot be used in a label component"). Verified: LabelComponentData
+ * typings/index.d.ts:401, ModalComponentData :2846,
+ * StringSelectMenuComponentData :7483, TextInputComponentData :7532.
  */
-function toModal(m: ModalDef) {
+function toModal(m: ModalDef): APIModalInteractionResponseCallbackData {
   return {
     custom_id: m.customId,
     title: m.title.slice(0, 45),
     components: m.fields.map((f) => ({
-      type: 18,
+      type: ComponentType.Label,
       label: f.label.slice(0, 45),
       component: f.kind === 'select'
-        ? { type: 3, custom_id: f.id, required: true, options: f.options.map((o) => ({ label: o.label, value: o.value })) }
-        : { type: 4, custom_id: f.id, style: f.style === 'paragraph' ? 2 : 1, required: f.required ?? false, max_length: f.maxLength },
+        ? {
+            type: ComponentType.StringSelect, custom_id: f.id, required: true,
+            options: f.options.map((o) => ({ label: o.label, value: o.value })),
+          }
+        : {
+            type: ComponentType.TextInput, custom_id: f.id,
+            style: f.style === 'paragraph' ? TextInputStyle.Paragraph : TextInputStyle.Short,
+            required: f.required ?? false, max_length: f.maxLength,
+          },
     })),
   };
 }

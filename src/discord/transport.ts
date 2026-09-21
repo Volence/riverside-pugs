@@ -154,18 +154,23 @@ export interface ThreadOps {
   /** Everyone in the thread but the bot; null when the thread is gone. */
   memberIds(threadId: string): Promise<string[] | null>;
   setLocked(threadId: string, locked: boolean): Promise<void>;
-  /** An archived thread accepts no send and no edit until it is unarchived. */
+  /**
+   * An archived thread refuses EVERY operation except setArchived(false):
+   * no send, no edit, no tag, no lock, nobody added or removed. So closing a
+   * thread locks first and archives last, and anything that touches a closed
+   * thread unarchives first. Nothing unarchives on a caller's behalf.
+   */
   setArchived(threadId: string, archived: boolean): Promise<void>;
   setTags(threadId: string, tags: string[]): Promise<void>;
   /** Deleting a thread that is already gone is not an error. */
   deleteThread(threadId: string): Promise<void>;
   /**
    * Make the channel's per-member permission overwrites exactly this set:
-   * view, read history, talk inside threads, attach files. Overwrites on one
-   * channel and never a role, so a bug here cannot hand anyone anything
-   * anywhere else. The bot's own overwrite and every role overwrite are left
-   * alone. `failed` is who could not be added, which is ordinary: they have
-   * left the server.
+   * view, read history, talk inside threads, attach files, embed links and
+   * add reactions. Overwrites on one channel and never a role, so a bug here
+   * cannot hand anyone anything anywhere else. The bot's own overwrite and
+   * every role overwrite are left alone. `failed` is who could not be added,
+   * which is ordinary: they have left the server.
    */
   syncMemberAccess(channelId: string, userIds: string[]): Promise<{ added: string[]; removed: string[]; failed: string[] }>;
 }
