@@ -311,6 +311,30 @@ describe('MatchDetail', () => {
     await waitFor(() => expect(screen.getByText(/match not found/i)).toBeTruthy());
   });
 
+  // 2026-09-21: the same /match/:id link an admin-feed post gives out while
+  // the match is still running, so it has to say something other than "Match
+  // not found." until it ends.
+  it('says a match still being played is in progress, with the campaign and a link to Live', async () => {
+    mockApi.match.mockResolvedValue({ ongoing: true, id: 103, campaign: 'no_mercy', state: 'live' });
+    render(<MatchDetail id="103" me={null} />);
+    await waitFor(() => expect(screen.getByText(/Match #103 is still being played/)).toBeTruthy());
+    expect(screen.getByText('Match #103: No Mercy')).toBeTruthy();
+    const live = screen.getByText('Live page') as HTMLAnchorElement;
+    expect(live.getAttribute('href')).toBe('/live');
+    // None of the fields a finished match renders are on the page.
+    expect(screen.queryByText('Match totals')).toBeNull();
+  });
+
+  it('says a match is waiting for a server, or being set up, in those words', async () => {
+    mockApi.match.mockResolvedValue({ ongoing: true, id: 104, campaign: 'no_mercy', state: 'waiting' });
+    render(<MatchDetail id="104" me={null} />);
+    await waitFor(() => expect(screen.getByText(/Waiting for a server/)).toBeTruthy());
+
+    mockApi.match.mockResolvedValue({ ongoing: true, id: 105, campaign: 'no_mercy', state: 'configuring' });
+    render(<MatchDetail id="105" me={null} />);
+    await waitFor(() => expect(screen.getByText(/Setting up the server/)).toBeTruthy());
+  });
+
   it('shows one map at a time, with a chip row to pick another', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },

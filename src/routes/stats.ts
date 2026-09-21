@@ -168,6 +168,20 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   app.get('/api/matches/:id', async (req, reply) => {
     const viewer = viewerOf(req);
     const id = Number((req.params as { id: string }).id);
+    // A match still being played has no result yet, and everything below
+    // (rounds, per-map stats, the forecast) is built for a finished one.
+    // Every admin-feed post about a live match links here, so rather than
+    // 404 until it ends, a match still in progress gets a small payload of
+    // its own: just enough to say so and point at the live view. Never the
+    // server address, the token or anything else live-only.
+    const inProgress = db.prepare(
+      'SELECT campaign, state, server_id AS serverId FROM matches WHERE id = ?',
+    ).get(id) as { campaign: string; state: string; serverId: number | null } | undefined;
+    if (!inProgress) return reply.code(404).send({ error: 'no such match' });
+    if (inProgress.state === 'configuring' || inProgress.state === 'live') {
+      const state = inProgress.state === 'live' ? 'live' : inProgress.serverId === null ? 'waiting' : 'configuring';
+      return { ongoing: true, id, campaign: inProgress.campaign, state };
+    }
     // 'aborted' as well as 'completed'. An abandoned or reaped match used to
     // 404 here, which meant the Discord card's own "Match page" link led
     // nowhere and there was no record anywhere of who was in it or how far it
@@ -267,7 +281,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // non-admin, so the client cannot tell a forecast exists at all.
     const forecast = viewer && isAdminViewer(viewer) ? matchForecast(db, id) : undefined;
 
-    return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, ...(forecast ? { forecast } : {}) };
+    return {
+      ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS,
+      ...(forecast ? { forecast } : {}),
+    };
   });
 
   /** One player's endorse panel for one match: who they may endorse, what

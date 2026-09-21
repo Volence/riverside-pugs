@@ -259,6 +259,45 @@ describe('stats routes', () => {
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
   });
 
+  // 2026-09-21: match 103 was live and https://riversidepug.com/match/103 said
+  // "Match not found." even though every admin-feed post about it links
+  // exactly there. The link has to work while the match is still running.
+  it('a match still being played answers with a small ongoing payload, not a 404', async () => {
+    const configuring = Number(
+      db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'configuring', 'dead_air')").run().lastInsertRowid,
+    );
+    const res1 = await app.inject({ method: 'GET', url: `/api/matches/${configuring}` });
+    expect(res1.statusCode).toBe(200);
+    expect(res1.json()).toEqual({ ongoing: true, id: configuring, campaign: 'dead_air', state: 'waiting' });
+
+    db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('t','127.0.0.1',27015,27015,'x','live')",
+    ).run();
+    const serverId = db.prepare('SELECT id FROM servers').get() as { id: number };
+    const assigned = Number(
+      db.prepare('INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, ?, ?, ?)')
+        .run('configuring', 'dead_air', serverId.id).lastInsertRowid,
+    );
+    const res2 = await app.inject({ method: 'GET', url: `/api/matches/${assigned}` });
+    expect(res2.json()).toEqual({ ongoing: true, id: assigned, campaign: 'dead_air', state: 'configuring' });
+
+    const live = Number(
+      db.prepare("INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, 'live', 'dead_air', ?)")
+        .run(serverId.id).lastInsertRowid,
+    );
+    const res3 = await app.inject({ method: 'GET', url: `/api/matches/${live}` });
+    expect(res3.json()).toEqual({ ongoing: true, id: live, campaign: 'dead_air', state: 'live' });
+    // Never the server, the token, or a password: this is a public link.
+    expect(res3.body).not.toMatch(/rcon|token|password|127\.0\.0\.1/i);
+
+    // A finished match still gets the full payload, and an unknown id still 404s.
+    const matchId = playCompletedMatch(db, 'b');
+    const res4 = await app.inject({ method: 'GET', url: `/api/matches/${matchId}` });
+    expect(res4.json().ongoing).toBe(false);
+    expect(res4.json().match.id).toBe(matchId);
+    expect((await app.inject({ method: 'GET', url: '/api/matches/12345' })).statusCode).toBe(404);
+  });
+
   // 2026-09-20: three abandons in a row, and every one of them 404'd here, so
   // the Discord card's own "Match page" link led nowhere and nobody could see
   // who was in it or how far it got.

@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { api, type MatchDetail as MatchDetailData, type MatchPlayerStats, type Team } from '../api';
+import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
@@ -206,6 +206,38 @@ function ForecastPanel(
   );
 }
 
+/** Mirrors the wording on the Discord card (src/discord/presenter.ts
+ *  STATE_LINE) so a player reads the same sentence on the site as in Discord. */
+const ONGOING_LINE: Record<MatchOngoing['state'], string> = {
+  waiting: 'Waiting for a server to free up.',
+  configuring: 'Setting up the server.',
+  live: 'The match is live right now.',
+};
+
+/**
+ * What /match/:id shows while the match named in the URL is still being
+ * played rather than finished.
+ *
+ * Every admin-feed post about a live match links to this same URL, and the
+ * link has to keep working once the match ends: this is the page it shows in
+ * between, not a dead end. There is no roster or score here on purpose: the
+ * server only ever sends id, campaign and state for a match still in
+ * progress, never the server address, the token or a password.
+ */
+function OngoingMatch({ data }: { data: MatchOngoing }) {
+  return (
+    <div class="page page--match">
+      <Panel>
+        <PageHeader eyebrow="In progress" title={`Match #${data.id}: ${campaignName(data.campaign)}`} />
+        <Empty>
+          Match #{data.id} is still being played. {ONGOING_LINE[data.state]}
+          {' '}Watch it on the <a href="/live">Live page</a>, or come back here once it has finished.
+        </Empty>
+      </Panel>
+    </div>
+  );
+}
+
 export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
@@ -217,6 +249,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     );
   }
   if (!data) return <PageSkeleton variant="match" panels={3} />;
+
+  if (data.ongoing) return <OngoingMatch data={data} />;
 
   const { match, maps, players } = data;
   // Roster names for the viewer's follow row and timeline rail, keyed by
