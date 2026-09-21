@@ -56,6 +56,20 @@ describe('migrateLegacyReports', () => {
     expect(db.prepare('SELECT steamid FROM ticket_access').all()).toEqual([{ steamid: ADMIN }]);
   });
 
+  // A match row removed by hand (the sqlite3 CLI runs with foreign keys off)
+  // must not stop the site booting: the report keeps its text and loses only
+  // the match it pointed at.
+  it('drops a match id that no longer exists rather than failing the insert', () => {
+    db.pragma('foreign_keys = OFF');
+    db.prepare(
+      `INSERT INTO reports (match_id, reporter_id, target_id, category, text, status, created_at)
+       VALUES (9999, ?, ?, 'cheating', 'old text', 'open', '2026-09-18T10:00:00.000Z')`,
+    ).run(R1, T1);
+    db.pragma('foreign_keys = ON');
+    expect(migrateLegacyReports(db)).toBe(1);
+    expect(db.prepare('SELECT match_id FROM ticket_reports').get()).toEqual({ match_id: null });
+  });
+
   // openDb(':memory:') cannot be reopened over the same handle, so this
   // proves the wiring with a real file: seed a legacy report, wipe the
   // tables migrateLegacyReports would have populated, close the handle, and

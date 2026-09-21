@@ -37,6 +37,9 @@ export function migrateLegacyReports(db: DB): number {
     `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, created_at, legacy_report_id)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
+  // An old report can point at a match that was deleted by hand, and
+  // ticket_reports.match_id is a foreign key: keep the report, lose the match.
+  const matchExists = db.prepare('SELECT 1 FROM matches WHERE id = ?');
   db.transaction(() => {
     for (const r of rows) {
       const restricted = hasStaffFlag(db, r.target_id) ? 1 : 0;
@@ -52,7 +55,8 @@ export function migrateLegacyReports(db: DB): number {
         ).lastInsertRowid);
       }
       if (restricted) seedAccess(db, ticketId, r.target_id, []);
-      insReport.run(ticketId, r.reporter_id, r.category, r.text, r.match_id, r.created_at, r.id);
+      const matchId = matchExists.get(r.match_id) ? r.match_id : null;
+      insReport.run(ticketId, r.reporter_id, r.category, r.text, matchId, r.created_at, r.id);
     }
   })();
   return rows.length;
