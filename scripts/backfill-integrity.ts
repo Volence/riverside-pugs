@@ -16,6 +16,7 @@ import { loadConfig } from '../src/config.js';
 import { openDb } from '../src/db.js';
 import { analyzePending, backfillAll } from '../src/integrity/run.js';
 import { TUNING } from '../src/integrity/constants.js';
+import { ANALYZER_VERSION } from '../src/integrity/store.js';
 
 const config = loadConfig(process.env);
 const db = openDb(config.dbPath);
@@ -46,7 +47,9 @@ console.log(`Analysed ${rounds} rounds, skipped ${skipped}.`);
 // all, and the first backfill over real history could not tell the two apart.
 const totals = { considered: 0, notLive: 0, notGhost: 0, inGrace: 0, tooClose: 0, occluded: 0, passed: 0 };
 let withCoverage = 0, playerRounds = 0;
-for (const r of db.prepare('SELECT metrics FROM integrity_rounds').all() as { metrics: string }[]) {
+// Current version only: rows an older analyzer wrote for rounds whose replay is
+// gone are still in the table, and their coverage is not this run's.
+for (const r of db.prepare('SELECT metrics FROM integrity_rounds WHERE analyzer_version = ?').all(ANALYZER_VERSION) as { metrics: string }[]) {
   const g = (JSON.parse(r.metrics) as { gates?: typeof totals }).gates;
   playerRounds++;
   if (!g) continue;
