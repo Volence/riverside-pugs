@@ -3,16 +3,17 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive, makeRequireAdmin } from './guards.js';
 import { publicBans } from '../admin/players.js';
-import { fileReport, reportEligibility } from '../reports.js';
+import { fileReport, matchReportTargets } from '../tickets/filing.js';
 import { streamsView } from '../streamsView.js';
 
 export interface ApiRouteOpts {
   db: DB;
   matchmaker: Matchmaker;
+  adminSteamIds: string[];
 }
 
 export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promise<void> {
-  const { db, matchmaker } = opts;
+  const { db, matchmaker, adminSteamIds } = opts;
   const requireActive = makeRequireActive(db);
 
   /** Who is streaming, in three tiers. Public: a page anyone can open is the
@@ -74,14 +75,15 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
   app.get('/api/matches/:id/report-eligibility', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return;
-    const e = reportEligibility(db, Number((req.params as { id: string }).id), steamid);
+    const e = matchReportTargets(db, Number((req.params as { id: string }).id), steamid);
     return e.canReport ? e : { canReport: false, reason: e.reason };
   });
 
   app.post('/api/matches/:id/reports', async (req, reply) => {
     const steamid = requireActive(req, reply);
     if (!steamid) return;
-    const r = fileReport(db, Number((req.params as { id: string }).id), steamid, (req.body ?? {}) as object);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const r = fileReport(db, steamid, { ...body, matchId: Number((req.params as { id: string }).id) }, { adminSteamIds });
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
     return { ok: true };
   });

@@ -58,3 +58,22 @@ export function makeRequireAdmin(db: DB) {
     return steamid;
   };
 }
+
+/** Per-route guard for tickets: an active moderator or admin's steamid, or
+ *  the 401/403 reply sent and null. Which tickets that person may see is a
+ *  separate question, answered per ticket by canSeeTicket. */
+export function makeRequireMod(db: DB) {
+  return function requireMod(req: FastifyRequest, reply: FastifyReply): string | null {
+    const steamid = getSession(req);
+    if (!steamid) {
+      reply.code(401).send({ error: 'not logged in' });
+      return null;
+    }
+    const player = getPlayer(db, steamid);
+    if (!player || player.status !== 'active' || (player.is_admin !== 1 && player.is_mod !== 1)) {
+      reply.code(403).send({ error: 'staff only' });
+      return null;
+    }
+    return steamid;
+  };
+}

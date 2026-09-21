@@ -15,7 +15,6 @@ import {
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { clearPenalties } from '../penalties.js';
-import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { setReview } from '../integrity/store.js';
@@ -407,25 +406,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     setSetting(db, key, v.value);
     logAdmin(db, adminId, 'setting', key, def.secret ? { changed: true } : { from, to: v.value });
     return { ok: true, value: v.value };
-  });
-
-  app.get('/api/admin/reports', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    const status = String((req.query as { status?: string }).status ?? 'open');
-    if (!['open', 'resolved', 'dismissed', 'all'].includes(status)) return reply.code(400).send({ error: 'bad status' });
-    return { reports: listReports(db, status) };
-  });
-
-  app.post('/api/admin/reports/:id/resolve', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
-    if (!adminId) return reply;
-    const id = Number((req.params as { id: string }).id);
-    const { status, note } = (req.body ?? {}) as { status?: unknown; note?: unknown };
-    if (status !== 'resolved' && status !== 'dismissed') return reply.code(400).send({ error: 'status must be resolved or dismissed' });
-    const text = typeof note === 'string' ? note.trim().slice(0, 1000) : '';
-    if (!resolveReport(db, id, adminId, status, text)) return reply.code(404).send({ error: 'no such report' });
-    logAdmin(db, adminId, 'resolve_report', id, { status, note: text });
-    return { ok: true };
   });
 
   const REVIEW_STATES = new Set(['new', 'reviewed', 'dismissed']);
