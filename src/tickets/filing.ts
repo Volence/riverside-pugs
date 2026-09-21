@@ -77,16 +77,20 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
     .get(reporter, since) as { n: number }).n;
   if (recent >= perDay) return fail(429, `you can file ${perDay} reports a day; try again tomorrow`);
 
+  // Which ticket this report would land on, which is also which ticket the
+  // match-less limit of one open report is counted against: a safety report
+  // belongs to the restricted sibling and is not a duplicate of a normal one.
+  const restricted = category === 'unsafe' || hasStaffFlag(db, target.steamid);
   const dupe = matchId !== null
     ? db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
        WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id = ?`).get(reporter, target.steamid, matchId)
     : db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
-       WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id IS NULL AND t.status = 'open'`).get(reporter, target.steamid);
+       WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id IS NULL AND t.status = 'open' AND t.restricted = ?`)
+      .get(reporter, target.steamid, restricted ? 1 : 0);
   if (dupe) return fail(409, matchId !== null ? 'you already reported this player for this match' : 'you already have an open report about this player');
 
-  const restricted = category === 'unsafe' || hasStaffFlag(db, target.steamid);
   const result = db.transaction((): FileResult => {
     const ticket = findOrOpen(db, target.steamid, restricted, null, deps);
     const reportId = Number(db.prepare(

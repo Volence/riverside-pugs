@@ -89,6 +89,13 @@ describe('fileReport', () => {
     expect(fileReport(db, R1, { targetId: ACCUSED, category: 'other' }, deps)).toMatchObject({ ok: false, status: 409 });
   });
 
+  it('the one match-less report per ticket is per flavour, so a safety report still lands', () => {
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'afk' }, deps).ok).toBe(true);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'weapon threat' }, deps).ok).toBe(true);
+    expect(tickets().map((t) => t.restricted)).toEqual([0, 1]);
+    expect(fileReport(db, R1, { targetId: ACCUSED, category: 'unsafe', text: 'again' }, deps)).toMatchObject({ ok: false, status: 409 });
+  });
+
   it('rate limits per reporter over 24 hours', () => {
     setSetting(db, 'ticket_reports_per_day', '2');
     const now = new Date('2026-09-21T12:00:00.000Z');
