@@ -4,8 +4,9 @@
 #include <sourcemod>
 #include <sdktools>
 #include <l4d_consistency>
+#include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.2.1"
+#define PLUGIN_VERSION "0.2.2"
 
 /**
  * Phase 2: force the generated list (configs/l4d_consistency.cfg) on every map,
@@ -60,6 +61,9 @@ public void OnPluginStart()
 {
 	CreateConVar("l4d_consistency_version", PLUGIN_VERSION, "L4D1 file consistency version",
 		FCVAR_NOTIFY | FCVAR_DONTRECORD);
+	// Signs the SIGNON_DROP line once the backend has pushed a secret. The
+	// include lives in pug/plugin; the build copies it beside this file.
+	PugLogAuth_Init();
 
 	// Two independent off switches on purpose, this one and sv_consistency.
 	// The failure mode of this feature is disconnecting legitimate players, and
@@ -228,7 +232,7 @@ public Action Event_PlayerDisconnect(Event event, const char[] name, bool dontBr
 		return Plugin_Continue;
 	}
 	int secs = (client > 0 && IsClientConnected(client)) ? RoundToFloor(GetClientTime(client)) : -1;
-	LogToGame("L4DC SIGNON_DROP steamid=%s secs=%d forced=%d name=%s", steamid, secs, g_iForcedThisMap, player);
+	PugLog("L4DC SIGNON_DROP steamid=%s secs=%d forced=%d name=%s", steamid, secs, g_iForcedThisMap, player);
 	return Plugin_Continue;
 }
 

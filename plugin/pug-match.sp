@@ -288,6 +288,7 @@ bool g_bHasBoomLanded;
 // pug-stats.inc consumes them directly (array sizes and global-variable
 // references are resolved by textual/declaration order, unlike function
 // calls), so the include must sit below them.
+#include "pug-logauth.inc"
 #include "pug-stats.inc"
 
 // ---------- replay recording ----------
@@ -374,6 +375,8 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
+	// First, so every line this plugin ever logs can be signed; see the include.
+	PugLogAuth_Init();
 	RegServerCmd("sm_pug_match", Cmd_Match, "sm_pug_match <matchid> <token> <campaign> [stopaftermap]");
 	RegServerCmd("sm_pug_roster", Cmd_Roster, "sm_pug_roster <steamid64>:<a|b>");
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
@@ -563,7 +566,9 @@ bool InReadyUp()
 // ---------- emission helpers: the wire grammar lives here and only here ----------
 
 /** Live-view line over the logaddress UDP stream. LogToGame is the ONLY native
- *  that reaches logaddress. LogMessage/LogAction stay on the box. */
+ *  that reaches logaddress. LogMessage/LogAction stay on the box. Every line
+ *  goes through PugLog (pug-logauth.inc), which is LogToGame plus a signature
+ *  once the backend has pushed a secret. */
 /**
  * Report one client's connecting address and country.
  *
@@ -586,8 +591,8 @@ void EmitClientNet(int client, const char[] id)
 		if (!GeoipCode2(ip, cc)) cc[0] = '\0';
 	}
 
-	if (cc[0] == '\0') LogToGame("PUGNET steamid=%s ip=%s", id, ip);
-	else LogToGame("PUGNET steamid=%s ip=%s cc=%s", id, ip, cc);
+	if (cc[0] == '\0') PugLog("PUGNET steamid=%s ip=%s", id, ip);
+	else PugLog("PUGNET steamid=%s ip=%s cc=%s", id, ip, cc);
 }
 
 void EmitPug(const char[] fmt, any ...)
@@ -598,7 +603,7 @@ void EmitPug(const char[] fmt, any ...)
 	// trailing stats, which is the same failure WriteSkillLines was bitten by.
 	char body[768];
 	VFormat(body, sizeof(body), fmt, 2);
-	LogToGame("PUG %s %s", g_sToken, body);
+	PugLog("PUG %s %s", g_sToken, body);
 }
 
 /** Which pug team is on the survivor side right now, as "a"/"b", or "" when
@@ -2031,7 +2036,7 @@ public Action Timer_Teardown(Handle timer)
 		{
 			// Not EmitPug: the match state is already reset, so it would be
 			// dropped. The token was saved for exactly this line.
-			LogToGame("PUG %s PROBLEM code=unpause_timeout", g_sTeardownToken);
+			PugLog("PUG %s PROBLEM code=unpause_timeout", g_sTeardownToken);
 			LogMessage("pug-match: teardown gave up waiting for an unpause after %d ticks", g_iTeardownTicks);
 		}
 		KickHumans(g_sTeardownReason);
