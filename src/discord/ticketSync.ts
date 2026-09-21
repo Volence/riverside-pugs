@@ -137,7 +137,9 @@ export class TicketSync {
     const { db, transport } = this.deps;
     const t = getTicketRow(db, id);
     if (!t) return;
-    await this.ejectAccused(id);
+    // Its own stage, as in a full pass: an ejection Discord refuses must not
+    // stop the deletion of a forum post that must not exist.
+    await this.step(() => this.ejectAccused(id));
     await this.removeForbiddenPosts(id);
     await this.retireFolded(id);
     await this.notifyAccess(t);
@@ -256,26 +258,41 @@ export class TicketSync {
     const rows = (ticketId === undefined
       ? db.prepare(
         `SELECT th.*, t.target_id AS accused FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
-         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'`,
+         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'
+         ORDER BY th.id`,
       ).all()
       : db.prepare(
         `SELECT th.*, t.target_id AS accused FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
-         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted' AND th.ticket_id = ?`,
+         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted' AND th.ticket_id = ?
+         ORDER BY th.id`,
       ).all(ticketId)) as (ThreadRow & { accused: string })[];
     for (const th of rows) {
-      if (!hasStaffFlag(db, th.accused)) continue;
-      const p = db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(th.accused) as { discord_id: string | null } | undefined;
-      if (!p?.discord_id) continue;
-      if (!(await transport.threads.exists(th.thread_id))) continue;
-      const members = await transport.threads.memberIds(th.thread_id);
-      if (!members || !members.includes(p.discord_id)) continue;
-      const wasLocked = th.locked === 1;
-      // Unarchive first: an archived thread refuses removeMember too.
-      if (wasLocked) await transport.threads.setArchived(th.thread_id, false);
-      await transport.threads.removeMember(th.thread_id, p.discord_id);
-      if (wasLocked) {
-        await transport.threads.setLocked(th.thread_id, true);
-        await transport.threads.setArchived(th.thread_id, true);
+      // Each thread on its own: one Discord refuses must not leave the
+      // accused of the next one sitting in their own case.
+      try {
+        if (!hasStaffFlag(db, th.accused)) continue;
+        const p = db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(th.accused) as { discord_id: string | null } | undefined;
+        if (!p?.discord_id) continue;
+        if (!(await transport.threads.exists(th.thread_id))) continue;
+        const members = await transport.threads.memberIds(th.thread_id);
+        if (!members || !members.includes(p.discord_id)) continue;
+        // Whatever state Discord has this thread in, it has to take a removal
+        // now: a closed ticket's thread is archived, and so is one nobody has
+        // written in for a week. The row says what it goes back to.
+        await this.makeWritable(th.thread_id);
+        try {
+          await transport.threads.removeMember(th.thread_id, p.discord_id);
+        } finally {
+          // In a finally: a removal that fails must not leave a closed
+          // ticket's thread unlocked and unarchived until the next pass.
+          if (th.locked === 1) {
+            await transport.threads.setLocked(th.thread_id, true);
+            await transport.threads.setArchived(th.thread_id, true);
+          }
+        }
+      } catch (err) {
+        console.error('[discord] taking the accused out of their own ticket thread failed:', err);
+        this.problem(`Could not take someone out of a ticket's Discord thread: ${err instanceof Error ? err.message : String(err)}. It is tried again every few minutes.`);
       }
     }
   }

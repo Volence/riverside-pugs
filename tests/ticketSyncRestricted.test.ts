@@ -360,4 +360,82 @@ describe('the accused must never be a member of their own thread', () => {
     expect(await members(threadId)).toEqual(['907']);
     expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true, deleted: false });
   });
+
+  it('is ejected from a thread Discord archived on its own, which stays open for business', async () => {
+    const id = file(IDS[0], IDS[5], 'unsafe');
+    addAccess(db, id, ADMIN, MOD);
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    // Discord archived it after a quiet week: the row still says unlocked, and
+    // an archived thread refuses a removal until something undoes that.
+    t.threadsById.get(threadId)!.archived = true;
+    db.prepare('UPDATE tickets SET target_id = ? WHERE id = ?').run(MOD, id);
+    db.prepare('DELETE FROM ticket_access WHERE ticket_id = ? AND steamid = ?').run(id, MOD);
+    await sync.reconcile();
+    expect(await members(threadId)).toEqual(['907']);
+    expect(t.threadsById.get(threadId)).toMatchObject({ locked: false, archived: false, deleted: false });
+  });
+
+  it('one thread Discord refuses does not stop the next thread in the same pass', async () => {
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[4]);
+    const a = file(IDS[0], IDS[1], 'unsafe');
+    const b = file(IDS[0], IDS[2], 'unsafe');
+    addAccess(db, a, ADMIN, MOD);
+    addAccess(db, b, ADMIN, IDS[4]);
+    await sync.idle();
+    const tha = staffThread(db, a)!.thread_id;
+    const thb = staffThread(db, b)!.thread_id;
+    expect(await members(tha)).toEqual(['906', '907']);
+    expect(await members(thb)).toEqual(['904', '907']);
+    // Closed and locked, so only the once-per-pass stage ever touches these:
+    // that is what makes one failure able to strand the other.
+    closeTicket(db, a, ADMIN, 'no_action', '');
+    closeTicket(db, b, ADMIN, 'no_action', '');
+    await sync.idle();
+    for (const [ticket, who] of [[a, MOD], [b, IDS[4]]] as const) {
+      db.prepare('UPDATE tickets SET target_id = ? WHERE id = ?').run(who, ticket);
+      db.prepare('DELETE FROM ticket_access WHERE ticket_id = ? AND steamid = ?').run(ticket, who);
+    }
+    // The first thread's unarchive throws; the second must still be cleaned.
+    t.failThreadOps = 1;
+    await sync.reconcile();
+    expect(await members(thb)).toEqual(['907']);
+    expect(t.threadsById.get(thb)).toMatchObject({ locked: true, archived: true, deleted: false });
+    expect(await members(tha)).toEqual(['906', '907']);
+    // And the next pass finishes what the failure left behind.
+    await sync.reconcile();
+    expect(await members(tha)).toEqual(['907']);
+    expect(t.threadsById.get(tha)).toMatchObject({ locked: true, archived: true, deleted: false });
+  });
+
+  it('a thread the ejection cannot clean still loses its forbidden forum post in the same pass', async () => {
+    const restricted = file(IDS[0], IDS[5], 'unsafe');
+    // On the list by hand, so they are put in the thread before the merge that
+    // makes them the accused: addAccess itself would never allow it.
+    db.prepare('INSERT INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, ?, ?)')
+      .run(restricted, IDS[5], 'system', new Date().toISOString());
+    const normal = file(IDS[1], IDS[5], 'griefing');
+    await sync.idle();
+    const priv = staffThread(db, restricted)!.thread_id;
+    const post = staffThread(db, normal)!.thread_id;
+    expect(await members(priv)).toEqual(['905', '907']);
+    // The accused is promoted: the normal ticket folds into the restricted
+    // one, so its forum post is now a post about a restricted case.
+    db.transaction(() => {
+      db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
+      expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded');
+    })();
+    db.prepare('DELETE FROM ticket_access WHERE ticket_id = ? AND steamid = ?').run(restricted, IDS[5]);
+    t.failThreadOps = 1;
+    publishTicketSignal({ kind: 'ticket', ticketId: restricted });
+    await sync.idle();
+    // The ejection failed and said so, and the post about the restricted
+    // ticket still went, which is the one that must not wait for a retry.
+    const problems = events.filter((e) => e.kind === 'problem').map((e) => (e as { text: string }).text);
+    expect(problems.some((p) => p.startsWith("Could not take someone out of a ticket's Discord thread"))).toBe(true);
+    expect(t.threadsById.get(post)!.deleted).toBe(true);
+    expect(threadByDiscordId(db, post)!.state).toBe('deleted');
+    await sync.reconcile();
+    expect(await members(priv)).toEqual(['907']);
+  });
 });
