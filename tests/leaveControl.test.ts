@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isUnknownCommand, leaveCommand, parseLeaveReply, OLD_PLUGIN_ERROR } from '../src/leaveControl.js';
+import { isUnknownCommand, isUnknownCvar, leaveCommand, parseLeaveReply, OLD_PLUGIN_ERROR } from '../src/leaveControl.js';
 
 const TOKEN = 'a'.repeat(32);
 const ID = '76561199000000002';
@@ -49,5 +49,37 @@ describe('parseLeaveReply', () => {
   it('assumes nothing from silence or from a half line', () => {
     expect(parseLeaveReply('')).toEqual({ ok: false, oldPlugin: false, error: 'no answer' });
     expect(parseLeaveReply(`PUGOK leave steamid=${ID} absent=1`)).toMatchObject({ ok: false, oldPlugin: false });
+  });
+});
+
+describe('isUnknownCvar', () => {
+  it('is true for the exact line', () => {
+    expect(isUnknownCvar('Unknown command "sm_pug_leave_hold_max"', 'sm_pug_leave_hold_max')).toBe(true);
+  });
+
+  it('is true with extra surrounding console lines', () => {
+    const body = 'L 09/21/2026 - 20:00:00: rcon from "1.2.3.4"\nUnknown command "sm_pug_leave_hold_max"\nsome other line';
+    expect(isUnknownCvar(body, 'sm_pug_leave_hold_max')).toBe(true);
+  });
+
+  it('is false when the unknown command names something else', () => {
+    expect(isUnknownCvar('Unknown command "sm_cvar"', 'sm_pug_leave_hold_max')).toBe(false);
+  });
+
+  it('is false for unrelated console noise mentioning "unknown command" about something else, mixed with other lines', () => {
+    const body = 'some line\nUnknown command "sm_cvar"\nanother line';
+    expect(isUnknownCvar(body, 'sm_pug_leave_hold_max')).toBe(false);
+  });
+
+  it('tolerates no quotes', () => {
+    expect(isUnknownCvar('Unknown command sm_pug_leave_hold_max', 'sm_pug_leave_hold_max')).toBe(true);
+  });
+
+  it('matches case insensitively', () => {
+    expect(isUnknownCvar('UNKNOWN COMMAND "SM_PUG_LEAVE_HOLD_MAX"', 'sm_pug_leave_hold_max')).toBe(true);
+  });
+
+  it('is false on an empty reply', () => {
+    expect(isUnknownCvar('', 'sm_pug_leave_hold_max')).toBe(false);
   });
 });

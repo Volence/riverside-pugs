@@ -135,6 +135,26 @@ describe('RealOrchestrator', () => {
     expect(m).toEqual({ state: 'live', leave_control: 0 });
   });
 
+  it('unrelated "Unknown command" console noise in the same reply is not read as an old plugin', async () => {
+    // A real console can answer an unrelated command with "Unknown command"
+    // in the same window an rcon reply is collected from; the probe must key
+    // on the cvar it actually asked about, not on the words anywhere in the body.
+    const srv = await fakeServer('', { sm_pug_leave_hold_max: 'Unknown command "sm_cvar"' });
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+
+    const m = db.prepare('SELECT state, leave_control FROM matches WHERE id = ?').get(mid) as { state: string; leave_control: number | null };
+    expect(m).toEqual({ state: 'live', leave_control: 1 });
+  });
+
 
   it('stamps went_live_at when the match goes live', async () => {
     const srv = await fakeServer('');

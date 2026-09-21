@@ -24,7 +24,25 @@ export const LEAVE_ADD_MAX_S = 3600;
 export const OLD_PLUGIN_ERROR =
   'This server runs a pug-match older than 0.3.4, which has no clock control. Update the plugin on it to use these.';
 
+// Broad on purpose, and only safe where it is used: parseLeaveReply checks
+// every line for PUGOK/PUGERR first, so by the time this runs the reply is
+// already known to hold no such line, and "unknown command" anywhere in the
+// rest is the plugin's own console echo of the one command just sent. Do not
+// reuse this for a probe that shares a console with other traffic; that is
+// what isUnknownCvar is for.
 export const isUnknownCommand = (body: string): boolean => /unknown command/i.test(body);
+
+/** True only when some LINE of the reply is srcds's "Unknown command" answer
+ *  naming exactly `name`, quoted or not. A setup-time cvar probe shares its
+ *  rcon reply with whatever else the console printed in that window, so an
+ *  unrelated "Unknown command" about something else must not be read as this
+ *  cvar being unknown; matching per line and by name is what keeps a false
+ *  "old plugin" verdict from sticking for the rest of the match. */
+export function isUnknownCvar(reply: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^unknown command\\s+"?${escaped}"?\\s*$`, 'i');
+  return reply.split('\n').some((line) => re.test(line.trim()));
+}
 
 /** Asserted rather than trusted: this becomes a line on a game server's
  *  console, where a space or a semicolon is another argument or another
