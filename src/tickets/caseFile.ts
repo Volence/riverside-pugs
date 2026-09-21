@@ -13,7 +13,10 @@ import { ticketsAbout } from './views.js';
  */
 export function caseFile(db: DB, steamid: string, viewer: string) {
   const p = getPlayer(db, steamid);
-  const d = playerDetail(db, steamid);
+  // playerDetail now redacts bans itself, so it needs the real viewer too:
+  // its default '' viewer would over-redact a ban this viewer is actually
+  // allowed to see, which the redact() below could not undo.
+  const d = playerDetail(db, steamid, viewer);
   if (!p || !d) return null;
   const redact = banRedactor(db, steamid, viewer);
   return {

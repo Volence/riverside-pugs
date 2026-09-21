@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import type { BanRow } from './players.js';
+import type { BanRow } from './banTypes.js';
 import { canSeeTicket, getTicketRow } from '../tickets/store.js';
 
 export const WITHHELD_REASON = 'Withheld (restricted ticket)';

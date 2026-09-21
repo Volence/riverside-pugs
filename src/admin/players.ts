@@ -9,18 +9,14 @@ import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
 import { publishBanChange } from '../banEvents.js';
 import { steamAccountView } from './steamAccount.js';
 import { ticketsAbout } from '../tickets/views.js';
+import type { BanRow } from './banTypes.js';
+import { banIsWithheld, banRedactor, WITHHELD_REASON } from './banRedaction.js';
 
-export interface BanRow {
-  id: number;
-  reason: string;
-  createdBy: string;
-  createdAt: string;
-  expiresAt: string | null;
-  liftedBy: string | null;
-  liftedAt: string | null;
-  createdByName?: string | null;
-  liftedByName?: string | null;
-}
+// BanRow lives in its own leaf module: banRedaction.ts redacts the BanRow
+// shape this file produces, so importing banRedaction here and BanRow there
+// from players.ts would be a cycle. Re-exported so every existing importer
+// of BanRow from players.js keeps working.
+export type { BanRow } from './banTypes.js';
 
 const toBan = (r: {
   id: number; reason: string; created_by: string; created_at: string; expires_at: string | null;
@@ -200,8 +196,9 @@ export interface PlayerNoteRow {
 }
 
 /** A player's own bans, newest first, unredacted: callers who must not show
- *  a restricted ticket's reason (the file, the panel ban list) redact at
- *  their own call site rather than here, since only they know their viewer. */
+ *  a restricted ticket's reason (the file, the panel ban list, playerDetail)
+ *  redact at their own call site rather than here, since only they know
+ *  their viewer. */
 export function bansOf(db: DB, steamid: string): BanRow[] {
   return (db.prepare(`${BAN_SELECT} WHERE b.player_id = ? ORDER BY b.id DESC`).all(steamid) as Parameters<typeof toBan>[0][]).map(toBan);
 }
@@ -235,6 +232,12 @@ export function playerDetail(db: DB, steamid: string, viewer: string = '') {
   const p = getPlayer(db, steamid);
   if (!p) return null;
   const [row] = searchPlayers(db, steamid, 1).filter((x) => x.steamid === steamid);
+  // Same rule the file and the panel ban list use: a ban tied to a ticket
+  // this viewer may not open loses its reason and its issuer. The default
+  // viewer '' is on no ticket's access list, so a caller that forgets to
+  // pass the real one gets the safe, over-redacted answer rather than a leak.
+  const redact = banRedactor(db, steamid, viewer);
+  const ban = activeBan(db, steamid);
   return {
     ...(row ?? {}),
     steamid: p.steamid,
@@ -243,8 +246,8 @@ export function playerDetail(db: DB, steamid: string, viewer: string = '') {
     // one. One Discord passing between Steam accounts is the plainest sign of
     // an alt this site has.
     discordHistory: discordHistoryOf(db, steamid),
-    activeBan: activeBan(db, steamid),
-    bans: bansOf(db, steamid),
+    activeBan: ban ? redact(ban) : null,
+    bans: bansOf(db, steamid).map(redact),
     notes: notesOf(db, steamid),
     matches: recentMatchesOf(db, steamid),
     penalties: penaltyHistory(db, steamid),
@@ -312,12 +315,17 @@ export interface PublicBan {
  * Lifted and expired bans stay listed. A record that quietly deletes its
  * mistakes is not a record, and "unbanned by, and when" is the part that
  * shows the process works.
+ *
+ * A ban issued from a restricted ticket is the one exception: `viewer` goes
+ * through the same rule the file and the panel ban list use, so a ban whose
+ * ticket this viewer may not open keeps who is banned, when and for how
+ * long, and loses the reason and the issuer.
  */
-export function publicBans(db: DB, q = '', now = new Date()): PublicBan[] {
+export function publicBans(db: DB, viewer: string, q = '', now = new Date()): PublicBan[] {
   const like = `%${q.trim().toLowerCase()}%`;
   const rows = db.prepare(
     `SELECT b.player_id AS steamid, p.name AS name, b.reason, b.created_at AS createdAt,
-            b.expires_at AS expiresAt, b.lifted_at AS liftedAt,
+            b.expires_at AS expiresAt, b.lifted_at AS liftedAt, b.ticket_id AS ticketId,
             pc.name AS bannedByName, pl.name AS liftedByName
        FROM bans b
        LEFT JOIN players p  ON p.steamid  = b.player_id
@@ -326,12 +334,21 @@ export function publicBans(db: DB, q = '', now = new Date()): PublicBan[] {
       WHERE (? = '' OR b.player_id = ? OR LOWER(COALESCE(p.name, '')) LIKE ?)
       ORDER BY b.id DESC
       LIMIT 500`,
-  ).all(q.trim(), q.trim(), like) as (Omit<PublicBan, 'permanent' | 'active'> & { name: string | null })[];
+  ).all(q.trim(), q.trim(), like) as (Omit<PublicBan, 'permanent' | 'active'> & { name: string | null; ticketId: number | null })[];
 
-  return rows.map((r) => ({
-    ...r,
-    name: r.name ?? r.steamid,
-    permanent: r.expiresAt === null,
-    active: r.liftedAt === null && (r.expiresAt === null || Date.parse(r.expiresAt) > now.getTime()),
-  }));
+  return rows.map((r) => {
+    const withheld = banIsWithheld(db, r.ticketId, viewer);
+    return {
+      steamid: r.steamid,
+      name: r.name ?? r.steamid,
+      reason: withheld ? WITHHELD_REASON : r.reason,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      liftedAt: r.liftedAt,
+      bannedByName: withheld ? null : r.bannedByName,
+      liftedByName: withheld ? null : r.liftedByName,
+      permanent: r.expiresAt === null,
+      active: r.liftedAt === null && (r.expiresAt === null || Date.parse(r.expiresAt) > now.getTime()),
+    };
+  });
 }
