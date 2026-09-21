@@ -89,6 +89,32 @@ describe('slash commands', () => {
     const t = text(await run('leaderboard'));
     expect(t).toContain('player0');
     expect(t.indexOf('player0')).toBeLessThan(t.indexOf('player4'));
+    // IDS[0]'s linked discord name ("p0") differs from its steam name
+    // ("player0"), so the row says both.
+    expect(t).toContain('player0 (Discord: p0)');
+  });
+
+  it('/leaderboard escapes a hostile steam or discord name', async () => {
+    upsertPlayer(db, { steamid: IDS[6], name: '[Nitro](http://evil.tk)', avatar: null }, []);
+    activatePlayer(db, IDS[6]);
+    linkDiscord(db, IDS[6], '906', '[click](http://evil.tk)');
+    play('a'); play('a'); play('a');
+    const t = text(await run('leaderboard'));
+    expect(t).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
+  });
+
+  it('stays under the 4096-char embed description limit with realistic long names for every ranked row', async () => {
+    // Every one of the 8 rostered players gets a 32-char steam name and a
+    // differing 32-char linked discord name (an 18-digit snowflake for the
+    // id), so every row shows both names at once, the worst case for length.
+    IDS.forEach((id, i) => {
+      db.prepare('UPDATE players SET name = ?, discord_id = ?, discord_name = ? WHERE steamid = ?')
+        .run('s'.repeat(30) + String(i).padStart(2, '0'), `10000000000000000${i}`, 'd'.repeat(30) + String(i).padStart(2, '0'), id);
+    });
+    play('a'); play('a'); play('a');
+    const t = text(await run('leaderboard'));
+    const description = JSON.parse(t).embeds[0].description as string;
+    expect(description.length).toBeLessThanOrEqual(4096);
   });
 
   it('/matches lists recent matches overall, or for a user', async () => {
@@ -97,12 +123,23 @@ describe('slash commands', () => {
     expect(text(await run('matches', { user: '905' }))).toContain(`${URL_}/match/${id}`);
   });
 
-  it('/queue shows the queue privately', async () => {
+  it('/queue shows the queue privately, both names when the queued player has them and they differ', async () => {
     mm.join(IDS[1]);
+    mm.join(IDS[0]);
     const r = await run('queue');
     expect(r.ephemeral).toBe(true);
-    expect(text(r)).toContain('1/8');
+    expect(text(r)).toContain('2/8');
     expect(text(r)).toContain('player1');
+    expect(text(r)).toContain('player0 (Discord: p0)');
+  });
+
+  it('/queue escapes a hostile steam or discord name', async () => {
+    upsertPlayer(db, { steamid: IDS[6], name: '[Nitro](http://evil.tk)', avatar: null }, []);
+    activatePlayer(db, IDS[6]);
+    linkDiscord(db, IDS[6], '906', '[click](http://evil.tk)');
+    mm.join(IDS[6]);
+    const t = text(await run('queue'));
+    expect(t).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
   });
 
   it('/link says who you are linked to, or hands out a link', async () => {

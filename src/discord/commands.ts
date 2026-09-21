@@ -157,7 +157,10 @@ function leaderboard(deps: CommandDeps): InteractionReply {
   const ranked = data.rows.filter((r) => r.ranked).slice(0, 10);
   const url = `${deps.publicUrl}/leaderboard`;
   const body = ranked.length
-    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${escapeName(r.name)} · ${r.wins}W ${r.losses}L`).join('\n')
+    // Escaped plain form, not a mention: a row of up to ten of these next to
+    // each other is noisy as mentions, and this is an embed description,
+    // which still renders markdown, so the name still needs escaping.
+    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${plainLabelEscaped(identityOf(deps.db, r.steamid))} · ${r.wins}W ${r.losses}L`).join('\n')
     : 'Nobody is ranked yet. It takes 3 matches.';
   return pub({
     embeds: [{ title: `Leaderboard · ${data.season.name}`, url, color: COLOR, description: body }],
@@ -192,7 +195,9 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
 
 function queue(deps: CommandDeps): InteractionReply {
   const q = deps.matchmaker.publicQueue();
-  const names = q.players.map((p, n) => `\`${n + 1}\` ${escapeName(p.name)}`).join('\n') || '_empty_';
+  // Escaped plain form, same reasoning as /leaderboard: an embed description
+  // still renders markdown, and a queue of eight mentions is noisy.
+  const names = q.players.map((p, n) => `\`${n + 1}\` ${plainLabelEscaped(identityOf(deps.db, p.steamid))}`).join('\n') || '_empty_';
   return priv({
     embeds: [{ title: `Queue ${q.count}/${QUEUE_SIZE}`, color: COLOR, description: names }],
   });
