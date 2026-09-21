@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
-import { addTicketEvent, hasStaffFlag, seedAccess } from './store.js';
+import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess } from './store.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other'] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -24,7 +24,7 @@ const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isI
 /** The open ticket about this player in this flavour, or a new one. Runs
  *  inside the caller's transaction. */
 function findOrOpen(
-  db: DB, targetId: string, restricted: boolean, openedBy: string | null, deps: FilingDeps, extraAccess: string[] = [],
+  db: DB, targetId: string, restricted: boolean, openedBy: string | null, deps: FilingDeps,
 ): { id: number; created: boolean } {
   const now = deps.now ?? new Date();
   const open = db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
@@ -32,7 +32,7 @@ function findOrOpen(
   if (open) return { id: open.id, created: false };
   const id = Number(db.prepare('INSERT INTO tickets (target_id, restricted, opened_by, created_at) VALUES (?, ?, ?, ?)')
     .run(targetId, restricted ? 1 : 0, openedBy, now.toISOString()).lastInsertRowid);
-  if (restricted) seedAccess(db, id, targetId, deps.adminSteamIds, extraAccess, now);
+  if (restricted) seedAccess(db, id, targetId, deps.adminSteamIds, [], now);
   addTicketEvent(db, id, openedBy, 'opened', {}, now);
   return { id, created: true };
 }
@@ -107,11 +107,23 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
   return result;
 }
 
-/** A ticket opened by staff with no report behind it: something seen in
- *  Discord, or told to a moderator in person. */
+/**
+ * A ticket opened by staff with no report behind it: something seen in
+ * Discord, or told to a moderator in person.
+ *
+ * Opening by hand grants the opener nothing: the access list is seeded the
+ * same way filing seeds it, and a restricted ticket the opener is not on
+ * comes back as a null `ticketId`. The answer is then the same whether the
+ * ticket was just created or already existed, so this cannot be used to ask
+ * whether a player has an open restricted case. The note is still recorded on
+ * the ticket, as a player's report is when it attaches to one they cannot see.
+ *
+ * `auditId` is the real id, for the caller's audit row only. Never answer a
+ * request with it.
+ */
 export function openStaffTicket(
   db: DB, by: string, body: { targetId?: unknown; note?: unknown; restricted?: unknown }, deps: FilingDeps,
-): { ok: true; ticketId: number } | Fail {
+): { ok: true; ticketId: number | null; auditId: number } | Fail {
   const now = deps.now ?? new Date();
   if (typeof body.targetId !== 'string' || !getPlayer(db, body.targetId)) return fail(404, 'no such player');
   if (body.targetId === by) return fail(400, 'you cannot open a ticket about yourself');
@@ -119,9 +131,10 @@ export function openStaffTicket(
   const targetId = body.targetId;
   const restricted = body.restricted === true || hasStaffFlag(db, targetId);
   return db.transaction(() => {
-    const ticket = findOrOpen(db, targetId, restricted, by, deps, [by]);
+    const ticket = findOrOpen(db, targetId, restricted, by, deps);
     if (note) addTicketEvent(db, ticket.id, by, 'note', { text: note }, now);
-    return { ok: true as const, ticketId: ticket.id };
+    const row = getTicketRow(db, ticket.id)!;
+    return { ok: true as const, ticketId: canSeeTicket(db, row, by) ? ticket.id : null, auditId: ticket.id };
   })();
 }
 

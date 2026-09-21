@@ -132,6 +132,17 @@ describe('restricted tickets over HTTP', () => {
     expect((db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'ticket_access'").get() as { n: number }).n).toBe(1);
   });
 
+  it('opening a restricted ticket by hand answers the same whether or not one already exists', async () => {
+    const first = await post(MOD, '/api/mod/tickets', { targetId: ACCUSED, restricted: true, note: 'told in person' });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ ok: true, ticketId: null });
+    const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
+    expect((await post(MOD, '/api/mod/tickets', { targetId: ACCUSED, restricted: true })).json()).toEqual({ ok: true, ticketId: null });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tickets').get()).toEqual({ n: 1 });
+    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
+    expect((await get(OWNER, `/api/mod/tickets/${id}`)).json().events.map((e: { kind: string }) => e.kind)).toEqual(['opened', 'note']);
+  });
+
   it('audit rows about a restricted ticket reach only its access list', async () => {
     await file(R1, { targetId: MOD, category: 'toxicity', text: 'abusive' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;

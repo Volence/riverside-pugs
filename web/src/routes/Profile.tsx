@@ -22,6 +22,7 @@ export function Profile(
   // which maps come up most in the rotation, not how the player does on them.
   const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [ticketPassed, setTicketPassed] = useState(false);
 
   if (error) {
     return (
@@ -87,9 +88,13 @@ export function Profile(
               <button class="chip" type="button"
                 onClick={async () => {
                   setTicketError(null);
+                  setTicketPassed(false);
                   try {
                     const r = await modApi.open(steamid, '', false);
-                    location.href = `/admin?ticket=${r.ticketId}`;
+                    // No id means the case is restricted and this account is
+                    // not on its list, so there is nothing to navigate to.
+                    if (r.ticketId === null) setTicketPassed(true);
+                    else location.href = `/admin?ticket=${r.ticketId}`;
                   } catch (err) {
                     setTicketError(err instanceof ApiError ? err.message : 'Could not open a ticket.');
                   }
@@ -97,6 +102,7 @@ export function Profile(
                 Open a ticket
               </button>
             )}
+            {ticketPassed && <p class="muted">Passed to the owners. They will add you to the ticket if they need you.</p>}
             {ticketError && <p class="error">{ticketError}</p>}
           </div>
         )}

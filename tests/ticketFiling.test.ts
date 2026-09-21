@@ -117,10 +117,24 @@ describe('openStaffTicket', () => {
     expect(openStaffTicket(db, MOD, { targetId: MOD }, deps)).toMatchObject({ ok: false, status: 400 });
   });
 
-  it('a hand-restricted ticket lets its opener in', () => {
-    const r = openStaffTicket(db, MOD, { targetId: ACCUSED, restricted: true }, deps) as { ticketId: number };
-    const access = (db.prepare('SELECT steamid FROM ticket_access WHERE ticket_id = ? ORDER BY steamid').all(r.ticketId) as { steamid: string }[]).map((a) => a.steamid);
-    expect(access).toEqual([MOD, OWNER].sort());
+  it('opening a restricted ticket by hand grants the opener nothing and says the same whether or not one existed', () => {
+    const first = openStaffTicket(db, MOD, { targetId: ACCUSED, restricted: true, note: 'told in person' }, deps);
+    expect(first).toEqual({ ok: true, ticketId: null, auditId: expect.any(Number) });
+    const id = (first as { auditId: number }).auditId;
+    const access = (db.prepare('SELECT steamid FROM ticket_access WHERE ticket_id = ?').all(id) as { steamid: string }[]).map((a) => a.steamid);
+    expect(access).toEqual([OWNER]);
+    // A second open must be indistinguishable from the first, or it is a way
+    // of asking whether the player already has a restricted ticket.
+    const second = openStaffTicket(db, MOD, { targetId: ACCUSED, restricted: true }, deps);
+    expect(second).toEqual({ ok: true, ticketId: null, auditId: id });
+    expect(tickets()).toHaveLength(1);
+    expect(openStaffTicket(db, OWNER, { targetId: ACCUSED, restricted: true }, deps)).toEqual({ ok: true, ticketId: id, auditId: id });
+  });
+
+  it('a normal hand-opened ticket comes back with its id', () => {
+    const r = openStaffTicket(db, MOD, { targetId: ACCUSED }, deps) as { ticketId: number; auditId: number };
+    expect(r.ticketId).toBe(r.auditId);
+    expect(tickets()[0].id).toBe(r.ticketId);
   });
 });
 

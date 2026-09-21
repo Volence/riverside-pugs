@@ -55,7 +55,10 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     if (!me) return reply;
     const r = openStaffTicket(db, me, (req.body ?? {}) as object, filing);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, me, 'ticket_open', r.ticketId, {}, { quiet: getTicketRow(db, r.ticketId)?.restricted === 1 });
+    // auditId goes in the log and nowhere else: ticketId is null when the
+    // opener is off a restricted ticket's access list, and telling them the
+    // id would be telling them the ticket exists.
+    logAdmin(db, me, 'ticket_open', r.auditId, {}, { quiet: getTicketRow(db, r.auditId)?.restricted === 1 });
     broadcast('refresh');
     return { ok: true, ticketId: r.ticketId };
   });

@@ -834,8 +834,10 @@ export const modApi = {
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[] }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),
+  /** ticketId is null when the ticket is restricted and the opener is not on
+   *  its access list: the note landed, and there is nothing to open. */
   open: (targetId: string, note: string, restricted: boolean) =>
-    post<{ ok: true; ticketId: number }>('/api/mod/tickets', { targetId, note, restricted }),
+    post<{ ok: true; ticketId: number | null }>('/api/mod/tickets', { targetId, note, restricted }),
   claim: (id: number, claim: boolean) => post(`/api/mod/tickets/${id}/claim`, { claim }),
   restrict: (id: number, restricted: boolean) => post(`/api/mod/tickets/${id}/restrict`, { restricted }),
   access: (id: number, steamid: string) => post(`/api/mod/tickets/${id}/access`, { steamid }),
