@@ -109,6 +109,7 @@ export type LogEvent =
   // cancelled loading screen looks like. `secs` is -1 when the plugin could
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
+  | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean }
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
@@ -170,6 +171,9 @@ const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
  *  plugin caps bursts long before here. Keeps an absurd value out of the data. */
 const MAX_TICK_COUNTER = 100000;
 
+/** LilAC's CHEAT_MAX. A number at or above it is not something it can report. */
+const LILAC_CHEAT_MAX = 11;
+
 const ENTERED_RE = /^".*<\d+><(STEAM_\d:[01]:\d{1,10})><[^<>"]*>" entered the game$/;
 
 /**
@@ -204,6 +208,20 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
     const name = body.slice(at + ' name='.length).trim().slice(0, 64);
     if (!steamid || secs === null || secs < -1 || forced === null || forced < 1 || !name) return null;
     return { kind: 'signon_drop', steamid, secs, forced, name };
+  }
+
+  // Flags from l4d_lilac_report.smx, which bridges Little Anti-Cheat's own
+  // forwards onto this stream. Same anchoring as every other token-less line,
+  // and again nothing free-text on it: the only identity is a steamid.
+  if (body.startsWith('L4DL ')) {
+    const f = kv(body.split(/\s+/).slice(1));
+    const steamid = steamId64Of(f.id ?? '');
+    const cheat = intOf(f.cheat);
+    const banned = f.banned;
+    if (!steamid) return null;
+    if (cheat === null || cheat < 0 || cheat >= LILAC_CHEAT_MAX) return null;
+    if (banned !== '0' && banned !== '1') return null;
+    return { kind: 'lilac_flag', steamid, cheat, banned: banned === '1' };
   }
 
   // Input bursts from l4d_inputstats.smx. Same anchoring as SIGNON_DROP and for

@@ -132,6 +132,17 @@ export class AdminFeedPoster {
           text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
+      case 'lilac_flag': {
+        const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
+        // "suspected" is LilAC's own word for the soft case and it is the right
+        // one: its docs say few and rare suspicions are likely false positives.
+        return {
+          text: e.banned
+            ? `🛑 **${this.name(e.steamid)}** was BANNED by Little Anti-Cheat for \`${e.cheat}\`${match}.`
+            : `🎛️ **${this.name(e.steamid)}** is suspected by Little Anti-Cheat of \`${e.cheat}\`${match}. Few and rare suspicions are usually false positives.`,
+          color: COLOR.problem,
+        };
+      }
       case 'input_flag': {
         // Deliberately worded as something to look at, not as a verdict. The
         // signature is evidence from input timing, and the admin decides.

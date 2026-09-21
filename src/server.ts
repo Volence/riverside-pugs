@@ -44,6 +44,7 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
+import { cheatName, recordIntegrityFlag } from './integrityFlags.js';
 import { isFirstDetectionInMatch, recordInputBurst, pounceSpamThreshold } from './inputBursts.js';
 import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
@@ -473,6 +474,33 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         // cannot take down the listener that also carries match_end.
         if (ev.kind === 'signon_drop') {
           signonDrops?.onDrop(ev).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
+          return;
+        }
+        if (ev.kind === 'lilac_flag') {
+          // Evidence only, and never on the critical path: a failure here must
+          // not take down the listener that also carries match_end.
+          try {
+            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const live = serverId === null ? undefined : deps.db
+              .prepare("SELECT id FROM matches WHERE state = 'live' AND server_id = ? ORDER BY id DESC LIMIT 1")
+              .get(serverId) as { id: number } | undefined;
+            const kind = cheatName(ev.cheat);
+            // Stored whether or not a match is live: unlike an input burst,
+            // a LilAC flag is worth keeping even in warmup, and there is one
+            // row per event rather than thousands.
+            const stored = recordIntegrityFlag(deps.db, {
+              matchId: live?.id ?? null, serverId, steamid: ev.steamid, source: 'lilac',
+              kind, severity: ev.banned ? 'banned' : 'suspected', detail: '',
+            });
+            if (stored) {
+              publishAdminEvent({
+                kind: 'lilac_flag', steamid: ev.steamid, cheat: kind,
+                banned: ev.banned, matchId: live?.id ?? null,
+              });
+            }
+          } catch (err) {
+            console.error('[lilac] failed to record a flag:', err);
+          }
           return;
         }
         if (ev.kind === 'input_burst') {

@@ -725,6 +725,19 @@ export interface IntegrityPlayerRow {
   composite: number;
 }
 
+/** A flag raised live by another plugin (today Little Anti-Cheat) rather than
+ *  by replay analysis. No clip behind it, so nothing to watch. */
+export interface IntegrityFlag {
+  id: number;
+  matchId: number | null;
+  steamid: string;
+  source: string;
+  kind: string;
+  severity: 'suspected' | 'banned';
+  detail: string;
+  at: string;
+}
+
 export interface IntegrityClip {
   id: number;
   matchId: number;
@@ -820,8 +833,10 @@ export const adminApi = {
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
   integrity: (season: string, signal?: AbortSignal) =>
     get<{ players: IntegrityPlayerRow[] }>(`/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
+  /** Flags raised live by another plugin (today Little Anti-Cheat). No replay
+   *  behind them, so they are listed beside the clips rather than among them. */
   integrityPlayer: (steamid: string, signal?: AbortSignal) =>
-    get<{ rounds: IntegrityRound[]; clips: IntegrityClip[] }>(`/api/admin/integrity/${steamid}`, signal),
+    get<{ rounds: IntegrityRound[]; clips: IntegrityClip[]; flags: IntegrityFlag[] }>(`/api/admin/integrity/${steamid}`, signal),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
   integrityJob: (signal?: AbortSignal) =>

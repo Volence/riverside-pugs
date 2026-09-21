@@ -337,6 +337,24 @@ CREATE TABLE IF NOT EXISTS integrity_clips (
   analyzer_version INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS integrity_clips_player ON integrity_clips (steamid);
+-- Flags raised by something other than the replay analyser: today Little
+-- Anti-Cheat, reported live from the game server by l4d_lilac_report.smx.
+-- Separate from integrity_clips because a clip is a span of a recorded round an
+-- admin can watch, while a flag is a moment another plugin shouted about with no
+-- replay behind it. Evidence for an admin; never shown to players.
+CREATE TABLE IF NOT EXISTS integrity_flags (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id  INTEGER,
+  server_id INTEGER,
+  steamid   TEXT NOT NULL,
+  source    TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  severity  TEXT NOT NULL,
+  detail    TEXT NOT NULL DEFAULT '',
+  at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS integrity_flags_player ON integrity_flags (steamid, at);
+CREATE INDEX IF NOT EXISTS integrity_flags_at ON integrity_flags (at);
 -- Survives every re-analysis. Keyed by the player-round because that is stable
 -- no matter how the clips inside it are recomputed.
 CREATE TABLE IF NOT EXISTS integrity_reviews (

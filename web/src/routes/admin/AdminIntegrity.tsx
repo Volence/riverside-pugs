@@ -148,6 +148,27 @@ export function AdminIntegrity() {
       <Panel>
         <button class="chip" onClick={() => setSteamid(null)}>Back to board</button>
         {error && <p class="error">{error}</p>}
+        {(detail.data.flags?.length ?? 0) > 0 && (
+          <section class="integrity-flags">
+            <h4>Live anti-cheat flags</h4>
+            <p class="muted">
+              Raised by Little Anti-Cheat during play, not by replay analysis, so there is no clip to
+              watch. Its own documentation says few and rare suspicions are usually false positives;
+              a pattern is what matters.
+            </p>
+            <ul class="admin-list">
+              {detail.data.flags.map((f) => (
+                <li key={f.id}>
+                  {fmtTime(f.at)}: <code>{f.kind}</code>
+                  {f.severity === 'banned'
+                    ? <strong class="admin-warn"> · banned by LilAC</strong>
+                    : <span class="muted"> · suspected</span>}
+                  {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {detail.data.clips.length === 0 && <Empty>No flagged moments for this player.</Empty>}
         <ul class="admin-list">
           {groupByRound(detail.data.clips).map((g) => {
