@@ -23,6 +23,7 @@ import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
 import { listSeasons } from '../seasons.js';
+import { sameName } from '../identity.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -206,7 +207,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     }
     const titles = allTitles(db);
     const players = (db.prepare(
-      `SELECT mp.player_id AS steamid, p.name, mp.team, mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
+      `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team,
+              mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
               rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
        FROM match_players mp
        JOIN players p ON p.steamid = mp.player_id
@@ -214,6 +216,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        WHERE mp.match_id = ?`,
     ).all(id) as any[]).map((p) => ({
       steamid: p.steamid, name: p.name, team: p.team,
+      // Only when it says something the steam name does not: an unlinked or
+      // matching Discord name is not worth a second field on every player.
+      discordName: p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
       title: titles.get(p.steamid) ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       srDelta: p.mu_after === null ? 0

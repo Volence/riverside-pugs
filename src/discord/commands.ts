@@ -8,6 +8,7 @@ import { leaderboardData, profileData } from '../playerQueries.js';
 import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
+import { identityOf, plainLabel, plainLabelEscaped, type Identity } from '../identity.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
 export interface CommandDeps {
@@ -77,6 +78,11 @@ const standingLabel = (key: string) => FIXED_LABELS[key] ?? `${statDef(key)?.lab
 // Module scope, so it takes the db explicitly rather than closing over one.
 const campaign = (db: DB, slug: string) => campaignDisplayName(db, slug);
 
+/** A player row this module already has, as an Identity: avoids a second
+ *  lookup for a steamid we just fetched. */
+const idOf = (p: { steamid: string; name: string; discord_id: string | null; discord_name: string | null }): Identity =>
+  ({ steamid: p.steamid, steamName: p.name, discordId: p.discord_id, discordName: p.discord_name });
+
 type Cmd = Extract<BotInteraction, { kind: 'command' }>;
 
 export async function handleCommand(deps: CommandDeps, i: Cmd): Promise<InteractionReply> {
@@ -141,7 +147,7 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   if (recentLines.length) fields.push({ name: 'Recent matches', value: recentLines.join('\n') });
 
   return pub({
-    embeds: [{ title: player.name, url, color: COLOR, description: lines.join('\n'), fields }],
+    embeds: [{ title: plainLabel(identityOf(deps.db, player.steamid)), url, color: COLOR, description: lines.join('\n'), fields }],
     components: [[{ kind: 'link', url, label: 'Full profile' }]],
   });
 }
@@ -166,7 +172,7 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
     const who = target(deps, i);
     if ('reply' in who) return who.reply;
     const data = profileData(deps.db, who.steamid, null)!;
-    title = `Recent matches · ${data.player.name}`;
+    title = `Recent matches · ${plainLabel(identityOf(deps.db, data.player.steamid))}`;
     rows = data.matches.slice(0, 5).map((m) => ({
       id: m.id, campaign: m.campaign, teamAScore: m.teamAScore, teamBScore: m.teamBScore,
       extra: m.result === 'win' ? ' · won' : m.result === 'loss' ? ' · lost' : ' · draw',
@@ -234,5 +240,5 @@ function report(deps: CommandDeps, i: Cmd): InteractionReply {
   }, { adminSteamIds: deps.adminSteamIds ?? [] });
   if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
   const about = matchId === null ? '' : ` for match #${matchId}`;
-  return priv({ content: `Reported ${escapeName(target.name)}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
+  return priv({ content: `Reported ${plainLabelEscaped(idOf(target))}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
 }

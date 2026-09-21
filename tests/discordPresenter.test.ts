@@ -17,6 +17,22 @@ describe('playerLabel', () => {
     expect(playerLabel(alice)).toBe('<@111> (1200)');
     expect(playerLabel(bob)).toBe('b\\*o\\_b');
   });
+
+  it('mentions alone when the discord name is the same as the steam name', () => {
+    expect(playerLabel({ ...alice, discordName: 'Alice' })).toBe('<@111> (1200)');
+  });
+
+  it('adds the steam name beside the mention when the discord name reads differently', () => {
+    expect(playerLabel({ ...alice, discordName: 'br1' })).toBe('<@111> (alice) (1200)');
+  });
+
+  it('eight players with long, differing names still fit an embed field (1024 chars)', () => {
+    const roster = Array.from({ length: 8 }, (_, i) => ({
+      name: 'x'.repeat(32), discordId: String(1000 + i), discordName: 'y'.repeat(32), sr: 1234,
+    }));
+    const field = roster.map((p) => playerLabel(p)).join('\n');
+    expect(field.length).toBeLessThanOrEqual(1024);
+  });
 });
 
 describe('renderPanel', () => {
@@ -120,6 +136,14 @@ describe('renderMatch', () => {
     expect(text(p)).toContain('<#va>');
     expect(text(p)).toContain('<#vb>');
     expect(text(p)).toContain('not linked');
+  });
+
+  it('eight rostered players with 32-char names on both sides still fit each embed field', () => {
+    const team = (offset: number) => Array.from({ length: 4 }, (_, i) => ({
+      name: 'x'.repeat(32), discordId: String(2000 + offset + i), discordName: 'y'.repeat(32), sr: 1234,
+    }));
+    const p = renderMatch({ ...base, state: 'live', teamA: team(0), teamB: team(4) });
+    for (const f of p.embeds[0].fields ?? []) expect(f.value.length).toBeLessThanOrEqual(1024);
   });
 
   it('finished and aborted drop the buttons except the match page', () => {

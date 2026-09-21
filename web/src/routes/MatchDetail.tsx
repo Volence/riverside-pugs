@@ -298,6 +298,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const rowFor = (p: typeof players[number]): StatRow => ({
     steamid: p.steamid,
     name: p.name,
+    discordName: p.discordName,
     title: p.title,
     captured: wasCaptured(p),
     stats: deriveLiveStats({
@@ -324,6 +325,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
     players.filter((p) => p.team === team).map((p) => ({
       steamid: p.steamid,
       name: p.name,
+      discordName: p.discordName,
       title: p.title,
       captured: mp.stats?.[p.steamid] !== undefined,
       stats: deriveLiveStats(mp.stats?.[p.steamid] ?? {}),

@@ -91,6 +91,23 @@ describe('admin feed', () => {
     expect(text(3)).toContain('Match #9 aborted for no-shows.');
   });
 
+  it('names both the steam identity and the linked discord account, and never pings', async () => {
+    logAdmin(db, ADMIN, 'ban', IDS[3], { reason: 'throwing', minutes: 1440 });
+    await feed.idle();
+    // Every player linked in beforeEach: steam name plus a discord mention.
+    expect(text(0)).toContain('**player7** (<@907>)');
+    expect(text(0)).toContain('**player3** (<@903>)');
+    // The bot's transport pings only ids listed in mentionUserIds; the admin
+    // feed lists none, so the mention above renders but never notifies.
+    expect(t.live()[0].payload.mentionUserIds).toEqual([]);
+  });
+
+  it('a steamid with no player row shows no Discord linked', async () => {
+    publishAdminEvent({ kind: 'penalty', steamid: '76561198009999999', penalty: 'ready_fail', matchId: null });
+    await feed.idle();
+    expect(text(0)).toContain('(no Discord linked)');
+  });
+
   it('each kind can be switched off, and no channel means no feed', async () => {
     setSetting(db, 'admin_feed_penalties', '0');
     recordPenalty(db, IDS[2], 'ready_fail', null);

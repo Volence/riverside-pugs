@@ -1,5 +1,6 @@
 import { publishAdminEvent } from './adminFeed.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
+import { sameName } from './identity.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent, Phase } from './logParse.js';
@@ -14,6 +15,10 @@ export const STALE_AFTER_MS = 120_000;
 export interface LivePlayer {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, when it differs from `name`: Steam
+   *  and Discord names drift apart, and a viewer watching voice channels
+   *  needs both to tell who is who. Null when unlinked or the same name. */
+  discordName: string | null;
   /** Cosmetic counters from the UDP feed. Empty until the first LIVESTAT
    *  arrives, and missing keys mean "not measured", never zero. */
   stats: Record<string, number>;
@@ -819,7 +824,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
   if (matches.length === 0) return [];
 
   const playersOf = db.prepare(
-    `SELECT mp.player_id AS steamid, p.name, mp.team
+    `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team
      FROM match_players mp JOIN players p ON p.steamid = mp.player_id
      WHERE mp.match_id = ? ORDER BY mp.player_id`,
   );
@@ -840,7 +845,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
 
   const now = Date.now();
   return matches.map((m) => {
-    const ps = playersOf.all(m.id) as { steamid: string; name: string; team: 'a' | 'b' }[];
+    const ps = playersOf.all(m.id) as { steamid: string; name: string; discordName: string | null; team: 'a' | 'b' }[];
     const rawMaps = mapsOf.all(m.id) as Omit<LiveMap, 'stats'>[];
     const byMap = mapStatsFor(db, m.id);
     const maps: LiveMap[] = rawMaps.map((mp) => ({ ...mp, stats: byMap.get(mp.ordinal) ?? {} }));
@@ -854,8 +859,10 @@ export function getLiveMatches(db: DB): LiveMatch[] {
       }
     }
     const nameOf = (id: string) => ps.find((p) => p.steamid === id)?.name ?? id;
-    const named = (p: { steamid: string; name: string }): LivePlayer => ({
-      steamid: p.steamid, name: p.name, stats: statsBy.get(p.steamid) ?? {},
+    const named = (p: { steamid: string; name: string; discordName: string | null }): LivePlayer => ({
+      steamid: p.steamid, name: p.name,
+      discordName: p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
+      stats: statsBy.get(p.steamid) ?? {},
     });
     return {
       id: m.id,

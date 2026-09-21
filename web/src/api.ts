@@ -176,6 +176,9 @@ export interface MatchSummary {
 export interface MatchPlayerStats {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   team: Team;
   siDamage: number;
   siKills: number;
@@ -200,6 +203,9 @@ export interface StatDef {
 }
 
 export interface LivePlayer extends NamedPlayer {
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   /** Missing key means "not measured", never zero. skill_detect keys are
    *  absent entirely when that plugin is not loaded. */
   stats: Record<string, number>;
