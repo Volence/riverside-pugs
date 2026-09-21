@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { parseLogDatagram } from '../src/logParse.js';
 
 /** The plugin half of the abandon hold. Nothing here can run SourcePawn, so
  *  like the other parity tests this reads the source as text. It pins the
@@ -99,5 +100,26 @@ describe('the hold itself', () => {
 
   it('keeps the STATUS line abandon.ts reads, and only appends to it', () => {
     expect(leaveSrc).toContain('DumpLine("STATUS leave abandoner=%s budget=%d autounpause=%d paused=%d holdmax=%d"');
+  });
+});
+
+/** printf the way SourcePawn would, for the two conversions these lines use. */
+const render = (fmt: string, args: (string | number)[]): string => {
+  let i = 0;
+  return fmt.replace(/%[sd]/g, () => String(args[i++]));
+};
+
+describe('the state echo is a line the parser reads', () => {
+  const fmt = leaveSrc.match(/EmitPug\(\s*"(LEAVE steamid=%s remaining=%d held=[^"]*)"/)?.[1] ?? '';
+
+  it('finds the emit at all', () => {
+    expect(fmt).toMatch(/^LEAVE /);
+  });
+
+  it('carries every key the parser reads, under the names it reads them by', () => {
+    for (const key of ['steamid', 'remaining', 'held', 'hold_left', 'auto']) expect(fmt).toContain(`${key}=`);
+    const line = `PUG ${'b'.repeat(32)} ${render(fmt, ['76561199000000002', 120, 1, 1500, 0])}`;
+    expect(parseLogDatagram(Buffer.from(line, 'utf8')))
+      .toEqual({ kind: 'leave', token: 'b'.repeat(32), steamid: '76561199000000002', remaining: 120, held: true, holdLeft: 1500 });
   });
 });
