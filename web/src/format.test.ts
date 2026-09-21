@@ -4,7 +4,8 @@ import {
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
-  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName,
+  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName, spreadNote, ordinal,
+  MIN_SPREAD_SAMPLE,
 } from './format';
 
 describe('campaignName', () => {
@@ -553,19 +554,31 @@ describe('FEATURED_STAT_KEYS', () => {
 });
 
 describe('statLeaders', () => {
-  const rows: { steamid: string; name: string; stats?: Record<string, number> }[] = [
-    { steamid: '1', name: 'alice', stats: { skeets: 10, crowns: 0 } },
-    { steamid: '2', name: 'bob', stats: { skeets: 25, crowns: 3 } },
-    { steamid: '3', name: 'carol', stats: { skeets: 25 } },
+  // The real payload always carries both bags, reduced from one set of samples
+  // server side, so a fixture with only one of them is not a shape the cards
+  // ever see. `medianStats` is deliberately NOT a rescaling of `stats` here:
+  // the two orders disagree, which is the whole reason the measure exists.
+  type Row = {
+    steamid: string; name: string;
+    stats?: Record<string, number>; medianStats?: Record<string, number>;
+  };
+  const rows: Row[] = [
+    { steamid: '1', name: 'alice', stats: { skeets: 10, crowns: 0 }, medianStats: { skeets: 5, crowns: 0 } },
+    { steamid: '2', name: 'bob', stats: { skeets: 25, crowns: 3 }, medianStats: { skeets: 2, crowns: 1 } },
+    { steamid: '3', name: 'carol', stats: { skeets: 25 }, medianStats: { skeets: 2 } },
     { steamid: '4', name: 'dave' },
   ];
 
-  it('ranks by value, highest first', () => {
-    expect(statLeaders(rows, 'skeets').map((r) => r.name)).toEqual(['bob', 'carol', 'alice']);
+  it('ranks by the per-match median by default, highest first', () => {
+    expect(statLeaders(rows, 'skeets').map((r) => r.name)).toEqual(['alice', 'bob', 'carol']);
+  });
+
+  it('ranks by season total when asked for totals, which is a different order', () => {
+    expect(statLeaders(rows, 'skeets', 3, 'total').map((r) => r.name)).toEqual(['bob', 'carol', 'alice']);
   });
 
   it('breaks a tie by name so the order is stable across renders', () => {
-    const [a, b] = statLeaders(rows, 'skeets');
+    const [, a, b] = statLeaders(rows, 'skeets');
     expect(a.value).toBe(b.value);
     expect(a.name).toBe('bob');
     expect(b.name).toBe('carol');
@@ -582,7 +595,7 @@ describe('statLeaders', () => {
   });
 
   it('honours the limit', () => {
-    expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['bob', 'carol']);
+    expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['alice', 'bob']);
   });
 });
 
@@ -684,5 +697,62 @@ describe('chapterName', () => {
   // Stripping must never leave an empty label.
   it('keeps the raw value when stripping would empty it', () => {
     expect(chapterName('1:', 'ignored')).toBe('1:');
+  });
+});
+
+describe('spreadNote', () => {
+  it('reads as a range over a sample size', () => {
+    expect(spreadNote({ n: 23, p25: 290, p75: 510 })).toBe('290 to 510 · 23 matches');
+  });
+
+  it('groups thousands so a four-figure range stays readable', () => {
+    expect(spreadNote({ n: 8, p25: 1200, p75: 4400 })).toBe('1,200 to 4,400 · 8 matches');
+  });
+
+  it('says only the sample size when there is no spread to report', () => {
+    // "300 to 300" reads as a broken template rather than as consistency.
+    expect(spreadNote({ n: 5, p25: 300, p75: 300 })).toBe('5 matches');
+  });
+
+  it('counts one match as a match', () => {
+    expect(spreadNote({ n: 1, p25: 4, p75: 4 })).toBe('1 match');
+  });
+
+  // At n=2 both quartiles are interpolated inside the single gap between the
+  // only two observations, so the range restates those two numbers and calls
+  // it a spread.
+  it('withholds a range the sample cannot support, keeping the count', () => {
+    expect(spreadNote({ n: 2, p25: 82.5, p75: 227.5 })).toBe('2 matches');
+    expect(spreadNote({ n: 3, p25: 30, p75: 175 })).toBe('3 matches');
+  });
+
+  it('prints the range from the first size that brackets it with real values', () => {
+    expect(MIN_SPREAD_SAMPLE).toBe(4);
+    expect(spreadNote({ n: 4, p25: 40, p75: 120 })).toBe('40 to 120 · 4 matches');
+  });
+
+  // A by-map row counts playings of one map. A regular has 40-odd matches and
+  // 7 to 15 goes at any single map, so the wrong noun overstates it fourfold.
+  it('counts playings of a map as playings, not matches', () => {
+    expect(spreadNote({ n: 15, p25: 4, p75: 9 }, 'playing')).toBe('4 to 9 · 15 playings');
+    expect(spreadNote({ n: 1, p25: 4, p75: 4 }, 'playing')).toBe('1 playing');
+  });
+});
+
+describe('ordinal', () => {
+  it('uses st, nd and rd for 1, 2 and 3', () => {
+    expect([1, 2, 3, 4].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th']);
+  });
+
+  it('gives the teens th, which is the whole reason this exists', () => {
+    expect([11, 12, 13].map(ordinal)).toEqual(['11th', '12th', '13th']);
+  });
+
+  it('resumes st, nd and rd past the teens', () => {
+    expect([21, 31, 32, 43].map(ordinal)).toEqual(['21st', '31st', '32nd', '43rd']);
+  });
+
+  it('handles a percentile of zero', () => {
+    expect(ordinal(0)).toBe('0th');
   });
 });

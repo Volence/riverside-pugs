@@ -329,8 +329,8 @@ describe('combined team averages', () => {
   });
 });
 
-describe('per-map averages', () => {
-  it('divides a player total by the maps they played', () => {
+describe('per-map medians', () => {
+  it('takes the middle of a player\'s playings, not their total', () => {
     // Cumulative snapshots: 100 then 300 means the second map contributed 200.
     seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 100 } },
@@ -341,10 +341,32 @@ describe('per-map averages', () => {
     const row = playerMapBreakdown(db, ME)[0];
     expect(row.games).toBe(2);
     expect(row.stats.ck).toBe(300);
-    expect(row.avgStats.ck).toBe(150);
+    // Playings of 100 and 200: with two samples the median sits between them,
+    // which is also what the mean was. The next test is where they part.
+    expect(row.medianStats.ck).toBe(150);
+    expect(row.spread.ck).toEqual({ n: 2, p25: 125, p50: 150, p75: 175 });
   });
 
-  it('averages every stat, not a chosen few', () => {
+  // A mean lets one exceptional night become the figure a player is shown for
+  // the map, including numbers they have never scored.
+  it('is not dragged off by a single exceptional playing', () => {
+    seedMatch(db, 1, [
+      { map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 },
+      { map: 'airport01', a: 1, b: 0 },
+    ], {
+      0: { [ME]: { tank_damage: 300 } },
+      1: { [ME]: { tank_damage: 600 } },
+      2: { [ME]: { tank_damage: 4600 } },
+    });
+    for (let i = 0; i < 3; i++) seedRounds(1, i);
+    const row = playerMapBreakdown(db, ME)[0];
+    // Playings of 300, 300 and 4000. The mean is 1533, a number this player
+    // has never scored here; the median is what they actually do.
+    expect(row.stats.tank_damage).toBe(4600);
+    expect(row.medianStats.tank_damage).toBe(300);
+  });
+
+  it('reduces every stat, not a chosen few', () => {
     seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 10, sidmg: 500, tank_damage: 40 } },
       1: { [ME]: { ck: 30, sidmg: 700, tank_damage: 60 } },
@@ -353,18 +375,19 @@ describe('per-map averages', () => {
     seedRounds(1, 1);
     // Diffed: ck 10 then 20, sidmg 500 then 200, tank 40 then 20.
     const row = playerMapBreakdown(db, ME)[0];
-    expect(row.avgStats).toMatchObject({ ck: 15, sidmg: 350, tank_damage: 30 });
+    expect(row.medianStats).toMatchObject({ ck: 15, sidmg: 350, tank_damage: 30 });
   });
 
-  it('omits an average for a stat that was never measured', () => {
-    // Absent must stay absent: a zero average would claim the player did the
-    // thing badly rather than that nobody recorded it.
+  it('omits a median for a stat that was never measured', () => {
+    // Absent must stay absent: a zero would claim the player did the thing
+    // badly rather than that nobody recorded it.
     seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
     seedRounds(1, 0);
-    expect(playerMapBreakdown(db, ME)[0].avgStats).toEqual({});
+    expect(playerMapBreakdown(db, ME)[0].medianStats).toEqual({});
+    expect(playerMapBreakdown(db, ME)[0].spread).toEqual({});
   });
 
-  it('gives the map page a per-player average too', () => {
+  it('gives the map page a per-player median too', () => {
     seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {
       0: { [ME]: { ck: 100 } },
       1: { [ME]: { ck: 300 } },
@@ -373,9 +396,13 @@ describe('per-map averages', () => {
     seedRounds(1, 1);
     const me = mapDetail(db, 'airport01')!.players.find((p) => p.steamid === ME)!;
     expect(me.stats.ck).toBe(300);
-    expect(me.avgStats.ck).toBe(150);
+    expect(me.medianStats.ck).toBe(150);
   });
 
+  // Still a pooled MEAN, unlike the per-player rows above. The question here
+  // is "what does anyone get here", over every player-map at once, and pooling
+  // is what makes it the map's baseline rather than an average of averages
+  // weighted by who turned up most.
   it('gives the map an overall average across everyone who played it', () => {
     // "What does anyone usually get here", the map's own baseline, as opposed
     // to any one player's.
@@ -401,7 +428,7 @@ describe('a player who joined partway through a match', () => {
 
     const rows = playerMapBreakdown(db, ME);
     expect(rows.map((r) => r.map).sort()).toEqual(['airport03', 'airport04']);
-    expect(rows.find((r) => r.map === 'airport03')!.avgStats.ck).toBe(100);
+    expect(rows.find((r) => r.map === 'airport03')!.medianStats.ck).toBe(100);
   });
 
   it('is left off the map page for maps played before they arrived', () => {

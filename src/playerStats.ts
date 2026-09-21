@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { mapStatsFor } from './liveView.js';
 import { campaignRegistry, resolveCampaignForMap } from './campaignRegistry.js';
 import { unrecordedOrdinals } from './roundStats.js';
+import { quantiles, type Quantiles } from './quantiles.js';
 
 /** Which of a match's maps have a real score. Same rule as the match page's
  *  `recorded` flag (roundStats.ts). An unrecorded map still counts as played
@@ -37,11 +38,36 @@ function avgOrNull(sum: number, n: number): number | null {
  *
  *  A key that was never measured stays absent rather than becoming a zero
  *  average: absent means nobody recorded it, zero would claim the player did
- *  it badly. */
+ *  it badly.
+ *
+ *  The right tool for a POOLED baseline (MapDetail.avgStats), where the whole
+ *  point is one figure over every player-map. A single player's own row uses
+ *  perMapMedians instead. */
 function perMapAverages(stats: Record<string, number>, games: number): Record<string, number> {
   if (games === 0) return {};
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(stats)) out[k] = Math.round((v / games) * 10) / 10;
+  return out;
+}
+
+/** What one player usually does on a map, from the per-playing values rather
+ *  than from their sum, so one exceptional playing does not become the figure.
+ *
+ *  The same divisor argument as perMapAverages applies, and the same
+ *  absent-is-not-zero rule: a key with no samples is not in the bag. */
+function perMapMedians(samples: Map<string, number[]>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, values] of samples) out[k] = quantiles(values)!.p50;
+  return out;
+}
+
+/** The spread behind those medians, keyed the same way, so a page can say how
+ *  consistent a player is here and not only what their middle night looks
+ *  like. Carried separately from the medians because most readers of a
+ *  twenty-column table want one number per cell and the rest on hover. */
+function perMapSpread(samples: Map<string, number[]>): Record<string, Quantiles> {
+  const out: Record<string, Quantiles> = {};
+  for (const [k, values] of samples) out[k] = quantiles(values)!;
   return out;
 }
 
@@ -162,10 +188,12 @@ export interface MapBreakdownRow {
    *  is yours on survivors. */
   survivalMeasured: number;
   survived: number;
-  /** The same keys divided by `games`, to one decimal. What a player usually
-   *  gets here, which is the comparable number: a total just says who has
-   *  played the most. */
-  avgStats: Record<string, number>;
+  /** The same keys as a median over the playings of this map, to one decimal.
+   *  What a player usually gets here, which is the comparable number: a total
+   *  just says which maps come up most in the rotation. */
+  medianStats: Record<string, number>;
+  /** The spread behind `medianStats`, same keys, for the hover. */
+  spread: Record<string, Quantiles>;
   /** Not set here: this module is pure statistics over the database and has
    *  no campaign import. playerQueries.ts fills it in once this row leaves
    *  here, so every caller of playerMapBreakdown still gets the field. */
@@ -210,6 +238,11 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
 
   const recorded = recordedFor(db);
   const acc = new Map<string, MapBreakdownRow>();
+  /** Per map, per stat, one entry per playing. Beside `acc` rather than on
+   *  the row because it is working state: the rows carry the reduction, and
+   *  for a heavy player the raw samples would be thousands of numbers on a
+   *  payload nobody reads them from. */
+  const samplesByMap = new Map<string, Map<string, number[]>>();
   for (const { id, team, joinedMap } of played) {
     const maps = mapsOf.all(id) as { ordinal: number; map: string; a: number; b: number }[];
     const byOrdinal = mapStatsFor(db, id);
@@ -227,8 +260,12 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
       if (!playedMap(joinedMap, mp.ordinal)) continue;
       let row = acc.get(mp.map);
       if (!row) {
-        row = { map: mp.map, games: 0, wins: 0, losses: 0, survivalMeasured: 0, survived: 0, stats: {}, avgStats: {} };
+        row = {
+          map: mp.map, games: 0, wins: 0, losses: 0, survivalMeasured: 0, survived: 0,
+          stats: {}, medianStats: {}, spread: {},
+        };
         acc.set(mp.map, row);
+        samplesByMap.set(mp.map, new Map());
       }
       row.games++;
       const mine = myRounds.get(mp.ordinal);
@@ -246,16 +283,26 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
         else if (theirs > mine) row.losses++;
       }
 
+      const perPlaying = samplesByMap.get(mp.map)!;
       for (const [k, v] of Object.entries(byOrdinal.get(mp.ordinal)?.[steamid] ?? {})) {
         // hp is a level: summing "health at end of map" across maps would be
         // meaningless, so it is left out of the aggregate entirely.
         if (k === 'hp') continue;
         row.stats[k] = (row.stats[k] ?? 0) + v;
+        // Alongside the sum, not derived from it: a median needs the
+        // individual playings and a sum has thrown them away.
+        const bag = perPlaying.get(k);
+        if (bag) bag.push(v);
+        else perPlaying.set(k, [v]);
       }
     }
   }
 
-  for (const row of acc.values()) row.avgStats = perMapAverages(row.stats, row.games);
+  for (const [map, row] of acc) {
+    const perPlaying = samplesByMap.get(map)!;
+    row.medianStats = perMapMedians(perPlaying);
+    row.spread = perMapSpread(perPlaying);
+  }
   // Weakest first. The reason to read this list is to find the maps you lose
   // on, so the answer belongs at the top rather than at the bottom of a list
   // ordered by how often you happened to draw each map. A map with no decided
@@ -276,8 +323,12 @@ export interface MapLeaderRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
-  /** Per map played, to one decimal. See perMapAverages. */
-  avgStats: Record<string, number>;
+  /** A median over this player's playings of the map, to one decimal. See
+   *  perMapMedians. MapDetail.avgStats beside it is a pooled MEAN: that is the
+   *  map's baseline over every player-map, a different question. */
+  medianStats: Record<string, number>;
+  /** The spread behind `medianStats`, same keys, for the hover. */
+  spread: Record<string, Quantiles>;
 }
 
 export interface MapDetail {
@@ -337,6 +388,9 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
 
   const recorded = recordedFor(db);
   const acc = new Map<string, MapLeaderRow>();
+  /** Per player, per stat, one entry per playing. Working state, not payload:
+   *  see samplesByMap in playerMapBreakdown. */
+  const samplesByPlayer = new Map<string, Map<string, number[]>>();
   let sumA = 0;
   let sumB = 0;
   let recordedCount = 0;
@@ -360,9 +414,10 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
         const n = nameOf.get(p.player_id) as { name: string } | undefined;
         row = {
           steamid: p.player_id, name: n?.name ?? p.player_id,
-          games: 0, wins: 0, losses: 0, stats: {}, avgStats: {},
+          games: 0, wins: 0, losses: 0, stats: {}, medianStats: {}, spread: {},
         };
         acc.set(p.player_id, row);
+        samplesByPlayer.set(p.player_id, new Map());
       }
       row.games++;
       if (isRecorded) {
@@ -372,19 +427,27 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
         else if (theirs > mine) row.losses++;
       }
 
+      const perPlaying = samplesByPlayer.get(p.player_id)!;
       for (const [k, v] of Object.entries(stats[p.player_id] ?? {})) {
         if (k === 'hp') continue;
         row.stats[k] = (row.stats[k] ?? 0) + v;
+        const bag = perPlaying.get(k);
+        if (bag) bag.push(v);
+        else perPlaying.set(k, [v]);
       }
     }
   }
 
   // Pooled across every player-map, which is what makes it the map's baseline
-  // rather than an average of averages weighted by who turned up most.
+  // rather than an average of averages weighted by who turned up most. A MEAN,
+  // deliberately: pooling every playing by everyone is the question asked here,
+  // and a median of that pool would answer a different one.
   const pooled: Record<string, number> = {};
   let playerMaps = 0;
-  for (const row of acc.values()) {
-    row.avgStats = perMapAverages(row.stats, row.games);
+  for (const [steamid, row] of acc) {
+    const perPlaying = samplesByPlayer.get(steamid)!;
+    row.medianStats = perMapMedians(perPlaying);
+    row.spread = perMapSpread(perPlaying);
     playerMaps += row.games;
     for (const [k, v] of Object.entries(row.stats)) pooled[k] = (pooled[k] ?? 0) + v;
   }

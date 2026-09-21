@@ -17,6 +17,8 @@ import { currentSeasonId } from '../players.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
+import { quantiles } from '../quantiles.js';
+import { RANKED_MIN_GAMES } from '../standings.js';
 import { listSeasons } from '../seasons.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
@@ -88,16 +90,46 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const seasonId = q.season ? Number(q.season) : currentSeasonId(db);
     const limit = Math.min(Math.max(Math.trunc(Number(q.limit ?? 25) || 25), 1), 100);
 
-    const rows = db.prepare(
-      `SELECT mps.player_id AS steamid, p.name, p.avatar, SUM(mps.value) AS total
+    // One row per match rather than a SUM: this ladder orders by the per-match
+    // median and a median cannot be recovered from a sum. A season total ranks
+    // attendance, whoever turned up most being top of every board. The total
+    // still travels, so a caller that wants it has it.
+    const samples = db.prepare(
+      `SELECT mps.player_id AS steamid, p.name, p.avatar, mps.value
        FROM match_player_stats mps
        JOIN matches m ON m.id = mps.match_id
        JOIN players p ON p.steamid = mps.player_id
-       WHERE mps.stat = ? AND m.season_id = ? AND m.state = 'completed'
-       GROUP BY mps.player_id
-       ORDER BY total DESC, p.name ASC
-       LIMIT ?`,
-    ).all(key, seasonId, limit);
+       WHERE mps.stat = ? AND m.season_id = ? AND m.state = 'completed'`,
+    ).all(key, seasonId) as
+      { steamid: string; name: string; avatar: string | null; value: number }[];
+
+    const by = new Map<string, { name: string; avatar: string | null; values: number[] }>();
+    for (const s of samples) {
+      const cur = by.get(s.steamid);
+      if (cur) cur.values.push(s.value);
+      else by.set(s.steamid, { name: s.name, avatar: s.avatar, values: [s.value] });
+    }
+
+    const rows = [...by.entries()]
+      .map(([steamid, r]) => {
+        const q = quantiles(r.values)!;
+        const total = r.values.reduce((a, b) => a + b, 0);
+        return {
+          steamid, name: r.name, avatar: r.avatar, total,
+          median: q.p50, mean: total / q.n, p25: q.p25, p75: q.p75, matches: q.n,
+        };
+      })
+      // A median over one match is that match. The ladder is a top-N list with
+      // no provisional section to demote anyone into, unlike the leaderboard
+      // table, so the gate has to be here or a single lucky night tops it.
+      .filter((r) => r.matches >= RANKED_MIN_GAMES)
+      // Median first, then the mean. Rare-event stats have few distinct
+      // medians, so without the mean most of this ladder ties and the order
+      // among the tied comes down to whatever the map iterated first. The
+      // season total cannot break the tie: it ranks attendance, which is what
+      // ordering on the median is here to avoid.
+      .sort((a, b) => b.median - a.median || b.mean - a.mean || a.name.localeCompare(b.name))
+      .slice(0, limit);
 
     return { stat: def, seasonId, rows };
   });

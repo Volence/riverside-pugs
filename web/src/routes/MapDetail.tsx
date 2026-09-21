@@ -1,6 +1,6 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, survivalLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, spreadNote, survivalLabel } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
@@ -8,8 +8,9 @@ import { PageHeader, Figures, Figure } from '../components/PageHeader';
 export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
   const [tab, setTab] = useState('winrate');
-  // Averages first: a total mostly reports who has played the most, while
-  // what someone usually gets on a map is the number that compares.
+  // Per map first: a total mostly reports who has played the most, while
+  // what someone usually gets on a map is the number that compares. A median
+  // over their playings, so one exceptional night does not become it.
   const [mode, setMode] = useState<'avg' | 'total'>('avg');
 
   if (error) {
@@ -21,15 +22,26 @@ export function MapDetail({ map }: { map: string }) {
   }
   if (!data) return <PageSkeleton variant="list" panels={2} />;
 
-  const players: MapLeaderRow[] = data.players.map((p) => ({
-    ...p,
-    stats: deriveLiveStats(p.stats ?? {}),
-    avgStats: deriveLiveStats(p.avgStats ?? {}),
-  }));
-  // The map's own baseline, pooled over everyone, so a player row has
-  // something to be read against.
+  const players: MapLeaderRow[] = data.players.map((p) => {
+    const stats = deriveLiveStats(p.stats ?? {});
+    // boomer_rate is a pooled ratio under both tabs. Deriving it from the
+    // medians instead divides one median by another, which is not a rate the
+    // player ever landed and can read above 100%: a median of 2 successes
+    // over a median of 1 spawn is 200%. The pooled figure is the same rule
+    // StatTable applies, and the same one the profile tile follows.
+    const medianStats = { ...(p.medianStats ?? {}) };
+    delete medianStats.boomer_rate;
+    if (stats.boomer_rate !== undefined) medianStats.boomer_rate = stats.boomer_rate;
+    return { ...p, stats, medianStats };
+  });
+  // The map's own baseline, pooled over EVERY player-map at once, so a player
+  // row has something to be read against. A mean, deliberately: pooling is
+  // what makes it the map's figure rather than an average of per-player
+  // averages weighted by who turned up most.
   const baseline = deriveLiveStats(data.avgStats ?? {});
-  const cellsOf = (p: MapLeaderRow) => (mode === 'avg' ? p.avgStats : p.stats);
+  const cellsOf = (p: MapLeaderRow) => (mode === 'avg' ? p.medianStats : p.stats);
+  const spreadOf = (p: MapLeaderRow, k: string) =>
+    (mode === 'avg' ? p.spread?.[k] : undefined);
   const cols = orderLiveStatKeys(
     Array.from(new Set(players.flatMap((p) => Object.keys(p.stats)))),
   );
@@ -158,8 +170,15 @@ export function MapDetail({ map }: { map: string }) {
                     </td>
                     {cols.map((k) => {
                       const v = cellsOf(p)[k];
+                      const q = spreadOf(p, k);
                       return (
-                        <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                        <td
+                          class={`num${v ? '' : ' is-dim'}`}
+                          key={k}
+                          // Spread on hover rather than in the cell: this table
+                          // is already twenty-odd numeric columns wide.
+                          title={q ? spreadNote(q, 'playing') : undefined}
+                        >
                           {v ?? <span class="muted">n/a</span>}
                         </td>
                       );

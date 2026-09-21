@@ -2,7 +2,8 @@ import type { DB } from './db.js';
 import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
 import { getPlayer, currentSeasonId } from './players.js';
-import { STAT_DEFS, statDef } from './statKeys.js';
+import { FIXED_STAT_KEYS, STAT_DEFS, statDef } from './statKeys.js';
+import { quantiles, type Quantiles } from './quantiles.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 
@@ -22,40 +23,71 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
      FROM player_ratings pr JOIN players p ON p.steamid = pr.player_id
      WHERE pr.season_id = ?`,
   ).all(seasonId) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
-  // Per-player season totals, so the leaderboard can be sorted by any stat
-  // client side without a request per column. Two queries for the whole
-  // table rather than one per player.
-  const fixed = db.prepare(
+  // Per-player season stats, so the leaderboard can be sorted by any stat
+  // client side without a request per column. Two queries for the whole table
+  // rather than one per player.
+  //
+  // One row PER MATCH rather than a SUM: the table offers a per-match median
+  // as well as a season total, and a median cannot be recovered from a sum.
+  // Both bags are reduced from the same samples, so the two tabs cannot
+  // disagree about what they are measuring.
+  //
+  // `stats_json IS NOT NULL` is the captured test for the fixed columns; see
+  // FIXED_STAT_KEYS. The skill table needs no such test: a row that was not
+  // measured is absent.
+  const fixedRows = db.prepare(
     `SELECT mp.player_id AS steamid,
-            COALESCE(SUM(mp.si_damage),0)    AS sidmg,
-            COALESCE(SUM(mp.si_kills),0)     AS sikill,
-            COALESCE(SUM(mp.common_kills),0) AS ck,
-            COALESCE(SUM(mp.ff_dealt),0)     AS ff,
-            COALESCE(SUM(mp.revives),0)      AS rev
+            mp.si_damage AS sidmg, mp.si_kills AS sikill, mp.common_kills AS ck,
+            mp.ff_dealt AS ff, mp.revives AS rev
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
-     GROUP BY mp.player_id`,
-  ).all(seasonId) as Record<string, number | string>[];
+     WHERE m.season_id = ? AND m.state = 'completed' AND mp.stats_json IS NOT NULL`,
+  ).all(seasonId) as ({ steamid: string } & Record<string, number>)[];
 
-  const skill = db.prepare(
-    `SELECT mps.player_id AS steamid, mps.stat, SUM(mps.value) AS total
+  const skillRows = db.prepare(
+    `SELECT mps.player_id AS steamid, mps.stat, mps.value
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE m.season_id = ? AND m.state = 'completed'
-     GROUP BY mps.player_id, mps.stat`,
-  ).all(seasonId) as { steamid: string; stat: string; total: number }[];
+     WHERE m.season_id = ? AND m.state = 'completed'`,
+  ).all(seasonId) as { steamid: string; stat: string; value: number }[];
 
-  const statsBy = new Map<string, Record<string, number>>();
-  for (const r of fixed) {
-    const { steamid, ...rest } = r as { steamid: string } & Record<string, number>;
-    statsBy.set(steamid, { ...rest });
-  }
-  for (const r of skill) {
+  const samplesBy = new Map<string, Map<string, number[]>>();
+  const sample = (steamid: string, key: string, value: number) => {
+    let bags = samplesBy.get(steamid);
+    if (!bags) { bags = new Map(); samplesBy.set(steamid, bags); }
+    const bag = bags.get(key);
+    if (bag) bag.push(value);
+    else bags.set(key, [value]);
+  };
+  for (const r of fixedRows) for (const k of FIXED_STAT_KEYS) sample(r.steamid, k, r[k]);
+  for (const r of skillRows) {
     // self-visibility stats are never rankable and must not ride along on a
     // public payload, so they are dropped here rather than filtered in the UI.
     if (statDef(r.stat)?.visibility === 'self') continue;
-    const bucket = statsBy.get(r.steamid) ?? {};
-    bucket[r.stat] = r.total;
-    statsBy.set(r.steamid, bucket);
+    sample(r.steamid, r.stat, r.value);
+  }
+
+  const statsBy = new Map<string, Record<string, number>>();
+  const medianBy = new Map<string, Record<string, number>>();
+  const meanBy = new Map<string, Record<string, number>>();
+  for (const [steamid, bags] of samplesBy) {
+    const totals: Record<string, number> = {};
+    const medians: Record<string, number> = {};
+    const means: Record<string, number> = {};
+    for (const [key, values] of bags) {
+      const total = values.reduce((a, b) => a + b, 0);
+      totals[key] = total;
+      // Never null here: a bag only exists once something has been pushed into
+      // it. A key nobody recorded has no bag and so appears in neither result,
+      // which is the absent-is-not-zero rule the rest of this file follows.
+      medians[key] = quantiles(values)!.p50;
+      // Over the matches that MEASURED the key, not over games played: a stat
+      // is absent from every match the plugin ran without skill_detect, so the
+      // two denominators diverge. Three decimals is enough to separate a field
+      // of this size and keeps the payload small.
+      means[key] = Math.round((total / values.length) * 1000) / 1000;
+    }
+    statsBy.set(steamid, totals);
+    medianBy.set(steamid, medians);
+    meanBy.set(steamid, means);
   }
 
   // How many matches have produced ratings this season. The page used to
@@ -74,6 +106,8 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
         sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games,
         ranked: r.games >= RANKED_MIN_GAMES,
         stats: statsBy.get(r.steamid) ?? {},
+        medianStats: medianBy.get(r.steamid) ?? {},
+        meanStats: meanBy.get(r.steamid) ?? {},
       }))
       .sort((x, y) => y.sr - x.sr),
   };
@@ -133,11 +167,46 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
   }
   const isSelf = viewer === steamid;
 
+  // What this player usually gets, per completed match, with the spread around
+  // it. The same two sample rules as leaderboardData: `stats_json IS NOT NULL`
+  // separates a real zero from a player the dump missed, and an absent
+  // match_player_stats row means the stat was not measured.
+  const fixedSamples = db.prepare(
+    `SELECT mp.si_damage AS sidmg, mp.si_kills AS sikill, mp.common_kills AS ck,
+            mp.ff_dealt AS ff, mp.revives AS rev
+     FROM match_players mp JOIN matches m ON m.id = mp.match_id
+     WHERE mp.player_id = ? AND m.state = 'completed' AND mp.stats_json IS NOT NULL`,
+  ).all(steamid) as Record<string, number>[];
+
+  const skillSamples = db.prepare(
+    `SELECT mps.stat, mps.value
+     FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
+     WHERE mps.player_id = ? AND m.state = 'completed'`,
+  ).all(steamid) as { stat: string; value: number }[];
+
+  const samples = new Map<string, number[]>();
+  const sample = (key: string, value: number) => {
+    const bag = samples.get(key);
+    if (bag) bag.push(value);
+    else samples.set(key, [value]);
+  };
+  for (const r2 of fixedSamples) for (const k of FIXED_STAT_KEYS) sample(k, r2[k]);
+  for (const r2 of skillSamples) {
+    // Self-visibility stats keep the same split they have in the totals above:
+    // never on the public bag. They have no private quantiles of their own,
+    // since the private panel is a lifetime list and asks a different question.
+    if (statDef(r2.stat)?.visibility === 'self') continue;
+    sample(r2.stat, r2.value);
+  }
+  const statQuantiles: Record<string, Quantiles> = {};
+  for (const [key, values] of samples) statQuantiles[key] = quantiles(values)!;
+
   return {
     player: { steamid: player.steamid, name: player.name, avatar: player.avatar, createdAt: player.created_at },
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
     totals, matches, history,
     statTotals,
+    statQuantiles,
     // Top-5 places this season, per match, among ranked players. Keyed like
     // the stat bag plus `winrate` and `boomer_rate`.
     standings: playerStandings(db, seasonId, steamid),

@@ -2,8 +2,12 @@ import { Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { api, type LeaderboardRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders } from '../format';
-import { Empty, Panel, PlayerLink } from '../components/bits';
+import {
+  deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders,
+  STAT_MEASURE_TABS, type StatMeasure,
+} from '../format';
+import { Empty, Panel, PlayerLink, Tabs } from '../components/bits';
+import { percentile } from '../../../src/quantiles';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 
@@ -24,8 +28,12 @@ const BASE_COLS = [
 type Row = LeaderboardRow & { stats?: Record<string, number> };
 
 /** Everything sortable resolves through here, so a column header and the
- *  comparator can never disagree about what a column means. */
-function valueOf(r: Row, key: string): number | null {
+ *  comparator can never disagree about what a column means.
+ *
+ *  `measure` only reaches the stat columns. The five base columns are counts
+ *  and rates of the season itself: a median SR or a median win rate is not a
+ *  thing, and `games` is the count the medians are taken over. */
+function valueOf(r: Row, key: string, measure: StatMeasure): number | null {
   switch (key) {
     case 'sr': return r.sr;
     case 'wins': return r.wins;
@@ -37,8 +45,15 @@ function valueOf(r: Row, key: string): number | null {
       // cell must not claim a 0% win rate for someone who has not lost.
       return decided > 0 ? (r.wins / decided) * 100 : null;
     }
-    default: return r.stats?.[key] ?? null;
+    default: return (measure === 'median' ? r.medianStats : r.stats)?.[key] ?? null;
   }
+}
+
+/** What separates two rows that `valueOf` scores the same. Zero everywhere it
+ *  has nothing to add, so equal values keep falling through to the name. The
+ *  base columns are never in `meanStats`, so they need no test here. */
+function tiebreak(r: Row, key: string, measure: StatMeasure): number {
+  return measure === 'median' ? r.meanStats?.[key] ?? 0 : 0;
 }
 
 export function Leaderboard({ me }: { me: string | null }) {
@@ -47,11 +62,16 @@ export function Leaderboard({ me }: { me: string | null }) {
   const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
   const seasons = seasonList?.seasons ?? [];
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'sr', desc: true });
+  // Per match by default: a season total mostly reports who has turned up to
+  // the most PUGs, so sorting the board by skeets would rank attendance.
+  const [measure, setMeasure] = useState<StatMeasure>('median');
 
   const rows = (data?.rows ?? []) as Row[];
 
   // Stat columns come from the data present, so a season with no skill_detect
-  // matches shows no permanently empty columns.
+  // matches shows no permanently empty columns. Read off `stats`, which carries
+  // the same keys as `medianStats`, so the columns do not move when the measure
+  // is toggled.
   const statCols = useMemo(
     () => orderLiveStatKeys(Array.from(new Set(rows.flatMap((r) => Object.keys(r.stats ?? {}))))),
     [rows],
@@ -62,21 +82,31 @@ export function Leaderboard({ me }: { me: string | null }) {
   // player is not on the board yet, whichever column is being compared.
   const { ranked, provisional } = useMemo(() => {
     const cmp = (x: Row, y: Row) => {
-      const a = valueOf(x, sort.key);
-      const b = valueOf(y, sort.key);
+      const a = valueOf(x, sort.key, measure);
+      const b = valueOf(y, sort.key, measure);
       // Absent always sorts last, whichever direction, rather than being
       // treated as zero and beating real low scores.
       if (a === null && b === null) return x.name.localeCompare(y.name);
       if (a === null) return 1;
       if (b === null) return -1;
-      if (a === b) return x.name.localeCompare(y.name);
+      if (a === b) {
+        // Rare-event columns have only a handful of distinct medians across
+        // the whole board, so a median sort leaves most of the table tied and
+        // ordered by name. The mean separates them by the same thing the
+        // median measures. Only under the median measure: totals are already
+        // distinct, and their ties are genuine.
+        const ax = tiebreak(x, sort.key, measure);
+        const bx = tiebreak(y, sort.key, measure);
+        if (ax !== bx) return sort.desc ? bx - ax : ax - bx;
+        return x.name.localeCompare(y.name);
+      }
       return sort.desc ? b - a : a - b;
     };
     return {
       ranked: rows.filter((r) => r.ranked).sort(cmp),
       provisional: rows.filter((r) => !r.ranked).sort(cmp),
     };
-  }, [rows, sort]);
+  }, [rows, sort, measure]);
 
   const th = (key: string, label: string, cls = '') => (
     <th
@@ -94,6 +124,23 @@ export function Leaderboard({ me }: { me: string | null }) {
     const t: Record<string, number> = {};
     for (const r of rows) for (const [k, v] of Object.entries(r.stats ?? {})) t[k] = (t[k] ?? 0) + v;
     return deriveLiveStats(t);
+  }, [rows]);
+
+  /**
+   * What a rating on this board is worth, as a distribution.
+   *
+   * SR is the one figure every column here is ultimately about, and a reader
+   * seeing 1,427 has no way to tell a good rating from an ordinary one. The
+   * median and the top decile are the two reference points that answer it.
+   * Ranked players only: a provisional SR after one match is not yet a rating.
+   */
+  const srSpread = useMemo(() => {
+    const srs = rows.filter((r) => r.ranked).map((r) => r.sr);
+    const median = percentile(srs, 0.5);
+    const p90 = percentile(srs, 0.9);
+    return median === null || p90 === null
+      ? null
+      : { median: Math.round(median), p90: Math.round(p90), n: srs.length };
   }, [rows]);
 
   return (
@@ -120,8 +167,17 @@ export function Leaderboard({ me }: { me: string | null }) {
                 game count, which is only right while everyone has played
                 every match. */}
             {data && <Figure label="Matches rated" value={data.matchesRated} />}
-            {totals.tank_damage ? <Figure label="Tank damage" value={totals.tank_damage} /> : null}
-            {totals.skeets ? <Figure label="Skeets" value={totals.skeets} /> : null}
+            {srSpread && (
+              <Figure
+                label="Median SR" value={srSpread.median.toLocaleString()}
+                sub={`${srSpread.n} ranked`}
+              />
+            )}
+            {srSpread && (
+              <Figure label="Top 10%" value={`${srSpread.p90.toLocaleString()}+`} sub="SR" />
+            )}
+            {/* A pooled rate over the whole league is a real figure and does
+                not grow just because another match was played. */}
             {totals.boomer_rate !== undefined
               ? <Figure label="Boomer %" value={`${totals.boomer_rate}%`} sub="everyone" />
               : null}
@@ -129,7 +185,13 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
-      <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />
+      {/* Ranked players only, the same rule the Top rated card below already
+          applies. Under the median measure a provisional player's figure is
+          one match, which would otherwise take every card on a quiet season. */}
+      <StatLeaders
+        rows={ranked} sortKey={sort.key} measure={measure}
+        onPick={(k) => setSort({ key: k, desc: true })}
+      />
 
       <div class="lb-layout">
         <Panel class="panel--table">
@@ -140,6 +202,15 @@ export function Leaderboard({ me }: { me: string | null }) {
           ) : rows.length === 0 ? (
             <Empty>No rated players yet.</Empty>
           ) : (
+            <>
+            {/* Which measure every stat column is showing. The labels carry it;
+                a paragraph explaining what a median is does not belong on a
+                page whose readers already sort this table by twenty columns. */}
+            <Tabs
+              active={measure}
+              onSelect={(k) => setMeasure(k as StatMeasure)}
+              tabs={[...STAT_MEASURE_TABS]}
+            />
             <div class={`table-wrap lb${sort.key === 'sr' && sort.desc && ranked.length > 0 ? ' lb--ranked' : ''}`}>
               <table>
                 <thead>
@@ -186,10 +257,26 @@ export function Leaderboard({ me }: { me: string | null }) {
                               : <span class="muted">n/a</span>}
                           </td>
                           {statCols.map((k) => {
-                            const v = r.stats?.[k];
+                            const v = valueOf(r, k, measure);
                             return (
-                              <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                                {v === undefined ? <span class="muted">n/a</span> : v}
+                              <td
+                                class={`num${v ? '' : ' is-dim'}`}
+                                key={k}
+                                // The other measure, on hover: the two are one
+                                // click apart, but a reader comparing a median
+                                // against a total should not lose their place
+                                // in the table to do it.
+                                //
+                                // No match count: a stat is absent from every
+                                // match played without skill_detect, so the
+                                // player's game count is not the median's
+                                // sample. The profile carries the real
+                                // per-stat n.
+                                title={measure === 'median'
+                                  ? `${(r.stats?.[k] ?? 0).toLocaleString()} total this season`
+                                  : `${(r.medianStats?.[k] ?? 0).toLocaleString()} per match`}
+                              >
+                                {v === null ? <span class="muted">n/a</span> : v}
                               </td>
                             );
                           })}
@@ -200,6 +287,7 @@ export function Leaderboard({ me }: { me: string | null }) {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </Panel>
         {/* Top rated is chosen among RANKED players only: a provisional SR
@@ -239,19 +327,23 @@ export function Leaderboard({ me }: { me: string | null }) {
  * which is the discoverability the column headers were missing.
  */
 function StatLeaders(
-  { rows, sortKey, onPick }: {
+  { rows, sortKey, measure, onPick }: {
     rows: Row[];
     sortKey: string;
+    /** The table's measure. A card is the table's sort control, so the two must
+     *  name the same leader: clicking "skeets" and landing on a table topped by
+     *  somebody else reads as a bug. */
+    measure: StatMeasure;
     onPick: (key: string) => void;
   },
 ) {
   const cards = useMemo(
     () => FEATURED_STAT_KEYS
-      .map((key) => ({ key, leaders: statLeaders(rows, key) }))
+      .map((key) => ({ key, leaders: statLeaders(rows, key, 3, measure) }))
       // A stat nobody has scored in yet gets no card, rather than a card
       // reading "nobody, 0". Keeps a fresh season honest.
       .filter((c) => c.leaders.length > 0),
-    [rows],
+    [rows, measure],
   );
   if (cards.length === 0) return null;
 

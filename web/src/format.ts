@@ -373,29 +373,85 @@ export function deriveLiveStats(stats: Record<string, number>): Record<string, n
   return out;
 }
 
-/** Fewest measured rounds a survival percentage may be computed from before
- *  the UI will print it as a number.
- *
- *  A percentage carries no visible uncertainty: "100%" over two rounds and
- *  "100%" over two hundred render identically, and the first is the one the
- *  maps pages were showing. Four is one full playing of a map by both teams in
- *  both halves, which is the smallest sample that is not a single team's good
- *  night. Below it, `survivalLabel` reports the count instead of a rate. */
 /**
  * Rounds needed before a survival figure is stated as a percentage.
  *
- * Raised from 4 to 6 on 2026-09-18. Four is two coin flips: The Greenhouse sat
- * at exactly 4 measured and printed a confident "50%", which is what prompted
- * this. Six is not statistically comfortable either, and nothing about this
- * data will be for a while, which is why the sample size is PRINTED beside the
- * figure rather than left to a tooltip. This threshold only decides when to
- * stop showing a raw count instead.
+ * A percentage carries no visible uncertainty: "100%" over two rounds and
+ * "100%" over two hundred render identically. Four is two coin flips, and The
+ * Greenhouse sat at exactly 4 measured and printed a confident "50%". Six is
+ * not statistically comfortable either, and nothing about this data will be
+ * for a while, which is why the sample size is PRINTED beside the figure.
+ * Below this, `survivalLabel` reports the count instead of a rate.
  *
- * Deliberately not higher. The best-covered maps currently have 8 measured
- * rounds and most have 6, so 8 would blank almost every map on the site. Worth
- * revisiting upward as the history fills in.
+ * Six is well under what the maps now carry (14 to 24 measured rounds each as
+ * of 2026-09-20), so it is worth revisiting. Raising it is a judgement about
+ * how much evidence a percentage should need, not a number to read off the
+ * data. Measure before assuming what the history can support.
  */
 export const MIN_SURVIVAL_SAMPLE = 6;
+
+/**
+ * How many places earn a rank badge rather than a percentile.
+ *
+ * Must match STANDING_TOP in src/standings.ts, which cannot be imported here:
+ * that module reaches the database and the settings table, and web/tsconfig.json
+ * only admits leaf modules from the backend.
+ *
+ * The server ranks every metric and truncates nothing, so what a rank outside
+ * the top five looks like is this side's decision.
+ */
+export const STANDING_TOP = 5;
+
+/** English ordinal suffix. The teens all take "th". */
+export function ordinal(n: number): string {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
+/**
+ * Samples before a spread is worth printing at all.
+ *
+ * The same idea as MIN_SURVIVAL_SAMPLE above, applied to quartiles, and set by
+ * the arithmetic rather than by taste. At n=2 both p25 and p75 are
+ * interpolated inside the single gap between the only two observations, so the
+ * "range" is a fraction of that gap and carries nothing the two numbers did
+ * not. At n=3 each quartile is pinned by the median and one extreme, so one
+ * unusual night moves an end directly. n=4 is the first size where the two
+ * ends are bracketed by disjoint pairs of real observations.
+ *
+ * A floor, not a comfort level. Four samples still make a coarse spread; it is
+ * simply the point below which the spread is arithmetic rather than evidence.
+ */
+export const MIN_SPREAD_SAMPLE = 4;
+
+/** What one sample IS, for the places these figures appear. A profile tile
+ *  counts matches; a by-map row counts playings of that one map, which is a
+ *  different and much smaller thing and must not be called a match. */
+const SAMPLE_UNIT = { match: 'matches', playing: 'playings' } as const;
+
+/**
+ * The spread behind a median, as a line under a figure.
+ *
+ * Two nights of 300 and one of 4000 have the same median as three nights of
+ * 300, and they are not the same player. The quartiles say which one you are
+ * looking at, and `n` says how much to trust either.
+ *
+ * Reads "290 to 510 · 23 matches", or just "3 matches" when the sample cannot
+ * support a spread. The count is never dropped: the median above it is worth
+ * showing at any n and still needs its denominator.
+ */
+export function spreadNote(
+  q: { n: number; p25: number; p75: number },
+  unit: keyof typeof SAMPLE_UNIT = 'match',
+): string {
+  const count = `${q.n} ${q.n === 1 ? unit : SAMPLE_UNIT[unit]}`;
+  // Too thin to quote a range, or a player who does the same thing every time
+  // and has no range to quote. "300 to 300" reads as a broken template rather
+  // than as consistency.
+  if (q.n < MIN_SPREAD_SAMPLE || q.p25 === q.p75) return count;
+  return `${q.p25.toLocaleString()} to ${q.p75.toLocaleString()} · ${count}`;
+}
 
 /** How to render a survival rate, given how many rounds it is over.
  *
@@ -604,6 +660,23 @@ export const FEATURED_STAT_KEYS: readonly string[] = [
 export interface StatLeader { steamid: string; name: string; value: number }
 
 /**
+ * Which of the two stat bags a surface is reading.
+ *
+ * `median` is per completed match and answers "what does this player usually
+ * get". `total` is the season sum and answers "how much of this has happened",
+ * which mostly reports who has turned up most. The median is the default
+ * wherever the question is about a player rather than about the season.
+ */
+export type StatMeasure = 'median' | 'total';
+
+/** Tabs for the two, in the order they are offered. Shared so the leaderboard
+ *  and the map pages cannot drift into different wording for the same toggle. */
+export const STAT_MEASURE_TABS = [
+  { key: 'median', label: 'Per match' },
+  { key: 'total', label: 'Totals' },
+] as const;
+
+/**
  * Top `limit` players for one stat, from rows already loaded.
  *
  * Computed client-side on purpose. /api/leaderboard/stat/:key exists and does
@@ -616,14 +689,31 @@ export interface StatLeader { steamid: string; name: string; value: number }
  * "third best, with none" is not a standing.
  */
 export function statLeaders(
-  rows: { steamid: string; name: string; stats?: Record<string, number> }[],
+  rows: {
+    steamid: string; name: string;
+    stats?: Record<string, number>;
+    medianStats?: Record<string, number>;
+    meanStats?: Record<string, number>;
+  }[],
   key: string,
   limit = 3,
+  /** Which bag the cards lead on. The cards are also the table's sort control,
+   *  so they have to measure whatever the table is currently showing: a card
+   *  reading one name and a table sorting to a different one, from one click on
+   *  that same card, is worse than either measure on its own. */
+  measure: StatMeasure = 'median',
 ): StatLeader[] {
   return rows
-    .map((r) => ({ steamid: r.steamid, name: r.name, value: r.stats?.[key] ?? 0 }))
+    .map((r) => ({
+      steamid: r.steamid, name: r.name,
+      value: (measure === 'median' ? r.medianStats : r.stats)?.[key] ?? 0,
+      // Same tiebreak as the table's comparator, for the same reason: a median
+      // of 1 skeet is half the board, and a podium ordered alphabetically
+      // inside it would not match the table the card sorts.
+      tie: measure === 'median' ? r.meanStats?.[key] ?? 0 : 0,
+    }))
     .filter((r) => r.value > 0)
-    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .sort((a, b) => b.value - a.value || b.tie - a.tie || a.name.localeCompare(b.name))
     .slice(0, limit);
 }
 

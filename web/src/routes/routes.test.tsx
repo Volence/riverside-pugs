@@ -445,11 +445,94 @@ describe('Profile', () => {
     mockApi.profile.mockResolvedValue({
       ...profile,
       byMap: [
-        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 3, wins: 1, losses: 2, stats: {}, avgStats: {} },
+        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 3, wins: 1, losses: 2, stats: {}, medianStats: {} },
       ],
     });
     render(<Profile steamid="1" />);
     expect(await screen.findByText(/Dead Center 2 · Streets/)).toBeTruthy();
+  });
+
+  describe('standings', () => {
+    const withStandings = (standings: Record<string, { rank: number; of: number; pct: number }>) => ({
+      ...profile,
+      totals: { ...profile.totals, games: 12, siDamage: 4800, commonKills: 1200 },
+      statTotals: {},
+      statDefs: [],
+      // The tiles read these rather than dividing a career total by games, so
+      // a standings fixture has to carry them or there is no tile to badge.
+      statQuantiles: { sidmg: { n: 12, p25: 320, p50: 400, p75: 510 } },
+      standings,
+    });
+
+    it('shows a badge for a top-five place and no percentile beside it', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 2, of: 23, pct: 96 } }));
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('SI dmg / match')).toBeTruthy());
+      expect(screen.getByText('#2')).toBeTruthy();
+      expect(screen.queryByText(/percentile/)).toBeNull();
+    });
+
+    // Without this the tile says 400 and nothing else, and a reader cannot
+    // tell #6 of 23 from #22 of 23.
+    it('shows a percentile for a place outside the top five', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 6, of: 23, pct: 74 } }));
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('74th percentile, #6 of 23')).toBeTruthy());
+      expect(screen.queryByText('#6')).toBeNull();
+    });
+
+    it('says nothing about a place taken against a field of one', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({ sidmg: { rank: 1, of: 1, pct: 50 } }));
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('SI dmg / match')).toBeTruthy());
+      expect(screen.queryByText(/percentile/)).toBeNull();
+    });
+
+    // playerStandings returns every metric now rather than the top five, so
+    // without a filter on the page this row lists the player's whole stat bag
+    // under a heading that promises their top five places.
+    // The mean was moved by exactly the nights it should have resisted. This
+    // player has one enormous game in twelve: 4800 career SI damage over 12
+    // matches is a 400 mean, which they have never once scored.
+    it('shows the median per match, not the career total divided by games', async () => {
+      mockApi.profile.mockResolvedValue({
+        ...withStandings({}),
+        statQuantiles: { sidmg: { n: 12, p25: 180, p50: 210, p75: 260 } },
+      });
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('SI dmg / match')).toBeTruthy());
+      expect(screen.getByText('210')).toBeTruthy();
+      expect(screen.queryByText('400')).toBeNull();
+    });
+
+    it('puts the spread and the sample size under the figure', async () => {
+      mockApi.profile.mockResolvedValue({
+        ...withStandings({}),
+        statQuantiles: { sidmg: { n: 12, p25: 180, p50: 210, p75: 260 } },
+      });
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('180 to 260 · 12 matches')).toBeTruthy());
+    });
+
+    // Absent is not zero. A stat nobody has measured for this player must not
+    // become a tile reading 0, which says they are bad at it.
+    it('drops a tile entirely when the stat was never measured', async () => {
+      mockApi.profile.mockResolvedValue({ ...withStandings({}), statQuantiles: {} });
+      render(<Profile steamid="1" />);
+      await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
+      expect(screen.queryByText('SI dmg / match')).toBeNull();
+    });
+
+    it('keeps the other-places row to actual top-five places', async () => {
+      mockApi.profile.mockResolvedValue(withStandings({
+        crowns: { rank: 3, of: 23, pct: 91 },
+        clears: { rank: 19, of: 23, pct: 20 },
+      }));
+      render(<Profile steamid="1" />);
+      const row = await screen.findByLabelText(/other top five places/i);
+      expect(within(row).getByText(/crowns/i)).toBeTruthy();
+      expect(within(row).queryByText(/clears/i)).toBeNull();
+    });
   });
 });
 
@@ -938,9 +1021,10 @@ describe('MapDetail', () => {
     rounds: { attempts: 6, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50 },
     players: [
       { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
-        stats: { ck: 30, tank_damage: 900 }, avgStats: { ck: 10, tank_damage: 300 } },
+        stats: { ck: 30, tank_damage: 900 }, medianStats: { ck: 10, tank_damage: 300 },
+        spread: { ck: { n: 3, p25: 8, p50: 10, p75: 12 }, tank_damage: { n: 3, p25: 250, p50: 300, p75: 400 } } },
       { steamid: '2', name: 'bob', games: 3, wins: 0, losses: 3,
-        stats: { ck: 10 }, avgStats: { ck: 3.3 } },
+        stats: { ck: 10 }, medianStats: { ck: 3.3 } },
     ],
   };
 
@@ -1013,6 +1097,26 @@ describe('MapDetail', () => {
     const foot = container.querySelector('.lb tfoot') as HTMLElement;
     expect(foot).toBeTruthy();
     expect(within(foot).getByText('6.7')).toBeTruthy();
+  });
+
+  it('keeps boomer % a pooled rate under the per-map tab', async () => {
+    // A median over a median is not a rate: this player landed 5 of 12, which
+    // is 42%, but their median match was 2 successes from 1 spawn. Dividing
+    // those gives 200%, a figure no player can score.
+    mockApi.map.mockResolvedValue({
+      ...mapData,
+      players: [{
+        steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
+        stats: { boomer_spawns: 12, boom_successes: 5 },
+        medianStats: { boomer_spawns: 1, boom_successes: 2 },
+      }],
+    });
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Records on this map')).toBeTruthy());
+
+    const body = container.querySelector('.lb tbody') as HTMLElement;
+    expect(within(body).getByText('42')).toBeTruthy();
+    expect(within(body).queryByText('200')).toBeNull();
   });
 });
 
@@ -1717,8 +1821,13 @@ describe('Live with nothing running', () => {
 
 describe('leaderboard stat leaders', () => {
   const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
-  const row = (steamid: string, name: string, stats: Record<string, number>) =>
-    ({ steamid, name, avatar: null, sr: 1200, wins: 5, losses: 5, games: 10, ranked: true, stats });
+  // medianStats defaults to the same bag so the cases that are not ABOUT the
+  // measure read the same either way. The cases that are about it pass a
+  // different bag, which is the shape the real payload has.
+  const row = (
+    steamid: string, name: string,
+    stats: Record<string, number>, medianStats: Record<string, number> = stats,
+  ) => ({ steamid, name, avatar: null, sr: 1200, wins: 5, losses: 5, games: 10, ranked: true, stats, medianStats });
 
   beforeEach(() => {
     mockApi.seasons.mockResolvedValue({ seasons: [] });
@@ -1771,5 +1880,144 @@ describe('leaderboard stat leaders', () => {
     expect(card.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(card);
     await waitFor(() => expect(card.getAttribute('aria-pressed')).toBe('true'));
+  });
+});
+
+describe('leaderboard header figures', () => {
+  const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
+  const player = (steamid: string, sr: number, ranked: boolean) => ({
+    steamid, name: `p${steamid}`, avatar: null, sr, wins: 5, losses: 5,
+    games: ranked ? 10 : 1, ranked, stats: { skeets: 40 }, medianStats: { skeets: 4 },
+  });
+
+  beforeEach(() => {
+    mockApi.seasons.mockResolvedValue({ seasons: [] });
+  });
+
+  // These were league-wide sums ("Tank damage 79,180"), which no reader has a
+  // scale for, grow forever whatever anyone does, and contradicted the table
+  // of medians underneath them.
+  it('describes the SR distribution rather than summing the league', async () => {
+    mockApi.leaderboard.mockResolvedValue(board(
+      [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]
+        .map((sr, i) => player(String(i), sr, true)),
+    ));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Median SR')).toBeTruthy());
+    expect(screen.getByText('1,450')).toBeTruthy();
+    expect(screen.getByText('10 ranked')).toBeTruthy();
+    expect(screen.getByText('1,810+')).toBeTruthy();
+    expect(screen.queryByText(/Tank damage/)).toBeNull();
+  });
+
+  // A provisional SR after one match is not yet a rating, so it must not drag
+  // the league's own reference points around.
+  it('takes the distribution over ranked players only', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([
+      player('1', 1000, true), player('2', 1000, true), player('3', 1000, true),
+      player('4', 9999, false),
+    ]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Median SR')).toBeTruthy());
+    expect(screen.getByText('3 ranked')).toBeTruthy();
+    expect(screen.queryByText('9,999+')).toBeNull();
+  });
+
+  it('shows no SR figures on a season where nobody is ranked yet', async () => {
+    mockApi.leaderboard.mockResolvedValue(board([player('1', 1200, false)]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByText('Leaderboard')).toBeTruthy());
+    expect(screen.queryByText('Median SR')).toBeNull();
+  });
+});
+
+describe('leaderboard measure', () => {
+  const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
+  // alice turns up to far more matches and out-totals bob while being the
+  // weaker player in every one of them, so the two measures disagree about
+  // who is top.
+  const rows = [
+    {
+      steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 10, losses: 10, games: 20,
+      ranked: true, stats: { skeets: 60 }, medianStats: { skeets: 3 },
+    },
+    {
+      steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 3, losses: 2, games: 5,
+      ranked: true, stats: { skeets: 40 }, medianStats: { skeets: 8 },
+    },
+  ];
+
+  beforeEach(() => {
+    mockApi.seasons.mockResolvedValue({ seasons: [] });
+    mockApi.leaderboard.mockResolvedValue(board(rows));
+  });
+
+  const skeetCells = () =>
+    Array.from(document.querySelectorAll('tbody tr')).map(
+      (tr) => tr.querySelectorAll('td')[7]?.textContent,
+    );
+  const tableReady = () =>
+    waitFor(() => expect(document.querySelectorAll('tbody tr').length).toBe(2));
+
+  it('shows the per-match median by default, not the season total', async () => {
+    render(<Leaderboard me={null} />);
+    await tableReady();
+    expect(screen.getByRole('tab', { name: 'Per match' }).getAttribute('aria-selected')).toBe('true');
+    expect(skeetCells()).toEqual(['3', '8']);
+  });
+
+  it('switches every stat column to season totals on the Totals tab', async () => {
+    render(<Leaderboard me={null} />);
+    await tableReady();
+    fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
+    await waitFor(() => expect(skeetCells()).toEqual(['60', '40']));
+  });
+
+  it('reorders the table when the measure changes, because the two disagree', async () => {
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Skeets')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('Sort the table by Skeets'));
+
+    const names = () => Array.from(document.querySelectorAll('tbody tr .pname'))
+      .map((td) => td.textContent);
+    await waitFor(() => expect(names()).toEqual(['bob', 'alice']));
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
+    await waitFor(() => expect(names()).toEqual(['alice', 'bob']));
+  });
+
+  it('carries the other measure in the cell title so it can be read without switching', async () => {
+    render(<Leaderboard me={null} />);
+    await tableReady();
+    const cell = document.querySelectorAll('tbody tr')[0].querySelectorAll('td')[7];
+    expect(cell.getAttribute('title')).toBe('60 total this season');
+  });
+
+  it('separates players who share a median on the mean behind it', async () => {
+    // Rare-event columns have few distinct medians, so a median sort leaves
+    // most of the board tied. Both of these sit on one crown a match. zoe
+    // scores more of them per match; alice's bigger total is attendance,
+    // which is what sorting on the median is here to keep out. zoe sorts
+    // second alphabetically, so a tie left to the name would not put her top.
+    mockApi.leaderboard.mockResolvedValue(board([
+      {
+        steamid: '3', name: 'alice', avatar: null, sr: 1200, wins: 5, losses: 5, games: 20,
+        ranked: true, stats: { crowns: 20 }, medianStats: { crowns: 1 }, meanStats: { crowns: 1 },
+      },
+      {
+        steamid: '4', name: 'zoe', avatar: null, sr: 1200, wins: 5, losses: 5, games: 5,
+        ranked: true, stats: { crowns: 10 }, medianStats: { crowns: 1 }, meanStats: { crowns: 2 },
+      },
+    ]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Crowns')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('Sort the table by Crowns'));
+
+    const names = () => Array.from(document.querySelectorAll('tbody tr .pname'))
+      .map((td) => td.textContent);
+    await waitFor(() => expect(names()).toEqual(['zoe', 'alice']));
+    // The totals are not tied, so that tab still orders on the number itself.
+    fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
+    await waitFor(() => expect(names()).toEqual(['alice', 'zoe']));
   });
 });

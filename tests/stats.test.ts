@@ -8,6 +8,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { upsertPlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
 import { statDef, STAT_DEFS } from '../src/statKeys.js';
+import { RANKED_MIN_GAMES } from '../src/standings.js';
 import { getSetting, setSetting } from '../src/settings.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -92,7 +93,7 @@ describe('stats routes', () => {
     }
   });
 
-  it('profile standings: top-5 places per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
+  it('profile standings: a place per match among ranked players, ties shared, zeros and bad stats never ranked', async () => {
     // Three matches each, so the badge gate has to be down at three for any
     // of this to rank at all. The shipped default is higher; see the two
     // tests below for what it is and what it does.
@@ -105,16 +106,86 @@ describe('stats routes', () => {
     seedStats(db, ids[0], ME, { times_skeeted: 50, boomer_spawns: 4, boom_successes: 4 });
 
     const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
-    expect(body.standings.skeets).toEqual({ rank: 2, of: 8 });
-    // Every player has the same commons, so all eight share first.
-    expect(body.standings.ck).toEqual({ rank: 1, of: 8 });
-    expect(body.standings.boomer_rate).toEqual({ rank: 1, of: 1 });
+    // ME is on 2 skeets a match: one player above, five level including ME,
+    // two below. Midrank puts that at (2 + 5/2) / 8.
+    expect(body.standings.skeets).toEqual({ rank: 2, of: 8, pct: 56 });
+    // Every player has the same commons, so all eight share first. An
+    // undifferentiated field is the 50th percentile, not the 100th: sharing
+    // first place with everyone is not evidence of being good at it.
+    expect(body.standings.ck).toEqual({ rank: 1, of: 8, pct: 50 });
+    // Only ME has drawn a boomer, so the field is one player: rank 1 of 1 and
+    // a percentile against nobody, which the UI suppresses rather than shows.
+    expect(body.standings.boomer_rate).toEqual({ rank: 1, of: 1, pct: 50 });
     expect(body.standings).not.toHaveProperty('tongue_cuts');
     expect(body.standings).not.toHaveProperty('times_skeeted');
     expect(body.standings).not.toHaveProperty('ff');
-    // Rank 7 of 8 in skeets is outside the top five.
+  });
+
+  // A badge has to rank the number it is printed beside, and the tile beside
+  // it shows a median. steady beats streaky on the median and loses on the
+  // mean, which is what lets this test tell the two apart.
+  it('ranks standings on the median, the same figure the profile tile shows', async () => {
+    setSetting(db, 'standing_min_games', '3');
+    const streaky = IDS[0];
+    const steady = IDS[1];
+    const perMatch: Record<string, number[]> = {
+      [streaky]: [100, 100, 100, 100, 5000],
+      [steady]: [400, 400, 400, 400, 400],
+    };
+    for (let i = 0; i < 5; i++) {
+      const m = playCompletedMatch(db, 'b');
+      for (const id of [streaky, steady]) seedStats(db, m, id, { skeets: perMatch[id][i] });
+    }
+
+    // The mean favours streaky (1080 against 400); the median favours steady.
+    const standingsOf = async (id: string) =>
+      (await app.inject({ method: 'GET', url: `/api/players/${id}` })).json().standings;
+
+    expect((await standingsOf(steady)).skeets).toMatchObject({ rank: 1 });
+    expect((await standingsOf(streaky)).skeets).toMatchObject({ rank: 2 });
+  });
+
+  it('separates players who share a median on the mean behind it', async () => {
+    // Crowns come once or twice a season, so on the live board every player
+    // but one has a median of 0 and the whole field shares a rank. The mean
+    // is what tells a player who crowns in two matches of five from one who
+    // has never done it, and it measures the same thing the median does.
+    setSetting(db, 'standing_min_games', '3');
+    const often = IDS[0];
+    const once = IDS[1];
+    const never = IDS[2];
+    const perMatch: Record<string, number[]> = {
+      [often]: [1, 0, 1, 0, 0],
+      [once]: [0, 0, 1, 0, 0],
+      [never]: [0, 0, 0, 0, 0],
+    };
+    for (let i = 0; i < 5; i++) {
+      const m = playCompletedMatch(db, 'b');
+      for (const id of [often, once, never]) seedStats(db, m, id, { crowns: perMatch[id][i] });
+    }
+
+    const standingsOf = async (id: string) =>
+      (await app.inject({ method: 'GET', url: `/api/players/${id}` })).json().standings;
+
+    // All three medians are 0, so without the tiebreak all three share rank 1.
+    expect((await standingsOf(often)).crowns).toMatchObject({ rank: 1 });
+    expect((await standingsOf(once)).crowns).toMatchObject({ rank: 2 });
+    // A player who has never done it holds no place on that board at all.
+    expect(await standingsOf(never)).not.toHaveProperty('crowns');
+  });
+
+  // Truncating server side would make #6 of 40 and #39 of 40 the same absent
+  // key, leaving a profile unable to tell a near miss from a weakness. The top
+  // five still gets the badge, but that is the page's decision to make.
+  it('profile standings report a place outside the top five rather than staying silent', async () => {
+    setSetting(db, 'standing_min_games', '3');
+    const ids = [1, 2, 3].map(() => playCompletedMatch(db, 'b'));
+    for (const m of ids) {
+      IDS.forEach((id, i) => seedStats(db, m, id, { skeets: i === 1 ? 3 : i <= 5 ? 2 : 1 }));
+    }
+
     const low = (await app.inject({ method: 'GET', url: `/api/players/${IDS[7]}` })).json();
-    expect(low.standings.skeets).toBeUndefined();
+    expect(low.standings.skeets).toEqual({ rank: 7, of: 8, pct: 13 });
   });
 
   it('profile standings are empty for a provisional player', async () => {
@@ -387,14 +458,53 @@ describe('stats routes', () => {
   });
 
   describe('stat leaderboard', () => {
-    it('ranks players by summed stat across completed matches in a season', async () => {
-      const matchId = playCompletedMatch(db);
-      seedStats(db, matchId, IDS[0], { skeets: 5 });
-      seedStats(db, matchId, IDS[1], { skeets: 9 });
+    // A season total ranks attendance. IDS[0] turns up to twice as many
+    // matches and out-totals IDS[1] while being the weaker player in every
+    // single one of them: ordering by total puts IDS[0] top, ordering by the
+    // per-match median puts IDS[1] top.
+    it('ranks by the per-match median, so turning up more does not win the board', async () => {
+      for (let i = 0; i < 6; i++) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: 3 });
+      for (let i = 0; i < 3; i++) seedStats(db, playCompletedMatch(db), IDS[1], { skeets: 5 });
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
       expect(res.statusCode).toBe(200);
-      expect(res.json().rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
-      expect(res.json().rows[0].total).toBe(9);
+      const rows = res.json().rows;
+      expect(rows.map((r: any) => r.steamid)).toEqual([IDS[1], IDS[0]]);
+      expect(rows[0]).toMatchObject({ median: 5, matches: 3, total: 15 });
+      // The loser of the comparison has the bigger season total, which is
+      // what ordering on the total would reward.
+      expect(rows[1]).toMatchObject({ median: 3, matches: 6, total: 18 });
+    });
+
+    it('breaks a tied median on the mean, not on the season total', async () => {
+      // Both players' median match is one crown, so the median alone cannot
+      // order them. IDS[0] is the better crowner per match; IDS[1] only
+      // out-totals them by turning up to twice as many matches, which is what
+      // ordering on the total would have rewarded.
+      for (const v of [1, 1, 1, 5]) seedStats(db, playCompletedMatch(db), IDS[0], { crowns: v });
+      for (let i = 0; i < 10; i++) seedStats(db, playCompletedMatch(db), IDS[1], { crowns: 1 });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/crowns', cookies });
+      const rows = res.json().rows;
+      expect(rows.map((r: any) => r.steamid)).toEqual([IDS[0], IDS[1]]);
+      // Tied on the median. The mean favours IDS[0], the total favours IDS[1],
+      // so an ordering that used the total would reverse these two.
+      expect(rows[0]).toMatchObject({ median: 1, mean: 2, total: 8 });
+      expect(rows[1]).toMatchObject({ median: 1, mean: 1, total: 10 });
+    });
+
+    it('carries the spread beside the median so a reader can see how steady it is', async () => {
+      for (const v of [1, 1, 10, 10]) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: v });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
+      expect(res.json().rows[0]).toMatchObject({ p25: 1, median: 5.5, p75: 10, matches: 4 });
+    });
+
+    // There is no provisional section on this route to demote anyone into, the
+    // way the leaderboard table has, so a one-match median has to be excluded
+    // here or a single lucky night tops the board outright.
+    it('leaves out a player with fewer matches than a median can rest on', async () => {
+      for (let i = 0; i < 3; i++) seedStats(db, playCompletedMatch(db), IDS[0], { skeets: 2 });
+      seedStats(db, playCompletedMatch(db), IDS[1], { skeets: 99 });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets', cookies });
+      expect(res.json().rows.map((r: any) => r.steamid)).toEqual([IDS[0]]);
     });
 
     // times_skeeted is public now, and must STILL not be rankable: a board of
@@ -411,20 +521,34 @@ describe('stats routes', () => {
       expect(res.statusCode).toBe(404);
     });
 
+    // Three matches each, not one: a single match leaves every player under
+    // RANKED_MIN_GAMES, and these would then assert a limit against an empty
+    // list and pass whatever the limit parsing did.
+    const seedEveryoneRankable = () => {
+      for (let i = 0; i < RANKED_MIN_GAMES; i++) {
+        const matchId = playCompletedMatch(db);
+        IDS.forEach((id, n) => seedStats(db, matchId, id, { skeets: n + 1 }));
+      }
+    };
+
     it('truncates a fractional limit instead of passing it to SQLite unchanged', async () => {
-      const matchId = playCompletedMatch(db);
-      IDS.forEach((id, i) => seedStats(db, matchId, id, { skeets: i + 1 }));
+      seedEveryoneRankable();
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=50.7', cookies });
       expect(res.statusCode).toBe(200);
-      expect(res.json().rows.length).toBeLessThanOrEqual(50);
+      expect(res.json().rows.length).toBe(IDS.length);
     });
 
     it('falls back to the default limit on a garbage limit string', async () => {
-      const matchId = playCompletedMatch(db);
-      IDS.forEach((id, i) => seedStats(db, matchId, id, { skeets: i + 1 }));
+      seedEveryoneRankable();
       const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=abc', cookies });
       expect(res.statusCode).toBe(200);
-      expect(res.json().rows.length).toBeLessThanOrEqual(25);
+      expect(res.json().rows.length).toBe(IDS.length);
+    });
+
+    it('applies a real limit', async () => {
+      seedEveryoneRankable();
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets?limit=3', cookies });
+      expect(res.json().rows.length).toBe(3);
     });
   });
   it('carries per-player season totals so the table can sort by any column', async () => {

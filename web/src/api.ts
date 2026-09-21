@@ -146,6 +146,18 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** The same keys as `stats`, as a median over the completed matches that
+   *  measured them. The table's default measure: a season total ranks whoever
+   *  has played the most, which is not what any of these columns is asked.
+   *
+   *  A key is absent here exactly when it is absent from `stats`, since both
+   *  are reduced from one set of per-match samples. */
+  medianStats?: Record<string, number>;
+  /** The same keys again, as a mean over the matches that measured them. Not
+   *  displayed: it breaks ties in the median, which most of the rare-event
+   *  columns are full of. The season total cannot do that job, since among
+   *  players on the same median it ranks whoever has played most. */
+  meanStats?: Record<string, number>;
 }
 
 export interface Leaderboard {
@@ -353,8 +365,12 @@ export interface MapLeaderRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
-  /** Per map played, to one decimal. */
-  avgStats: Record<string, number>;
+  /** A median over this player's playings of the map, to one decimal.
+   *  MapDetail.avgStats beside it is a pooled MEAN: the map's own baseline
+   *  over every player-map, which is a different question. */
+  medianStats: Record<string, number>;
+  /** The spread behind `medianStats`, same keys, for the hover. */
+  spread?: Record<string, Quantiles>;
 }
 
 export interface MapDetail {
@@ -382,8 +398,12 @@ export interface MapBreakdownRow {
   wins: number;
   losses: number;
   stats: Record<string, number>;
-  /** Per map played, to one decimal. */
-  avgStats: Record<string, number>;
+  /** A median over the playings of this map, to one decimal. What the player
+   *  usually gets here: a total mostly reports which maps come up most in the
+   *  rotation. */
+  medianStats: Record<string, number>;
+  /** The spread behind `medianStats`, same keys, for the hover. */
+  spread?: Record<string, Quantiles>;
   /** Which campaign this map belongs to, so a list that mixes every campaign
    *  a player has touched can label a bare chapter name that no longer
    *  identifies anything on its own. Null for a map the registry can't place.
@@ -417,6 +437,10 @@ export interface Profile {
   history: { matchId: number; sr: number }[];
   /** Public skill-stat lifetime totals, keyed by stat. */
   statTotals: Record<string, number>;
+  /** What this player usually gets per completed match, with the spread
+   *  around it. Keyed like `statTotals` plus the five fixed counters. The
+   *  tiles read this rather than dividing a career total by games played. */
+  statQuantiles?: Record<string, Quantiles>;
   /** Lifetime totals for self-visibility stats. Only ever populated for the
    *  subject themselves; null for anyone else, never an empty object. */
   privateStatTotals: Record<string, number> | null;
@@ -424,14 +448,35 @@ export interface Profile {
   /** Per-map performance across every completed match. `stats` can be empty
    *  for matches played before per-map capture existed, while `games` is not. */
   byMap?: MapBreakdownRow[];
-  /** Top-five places this season among ranked players, ranked per match.
-   *  Keyed like the stat bag, plus `winrate` and `boomer_rate`. Empty for a
-   *  provisional player. */
+  /** Where this player stands this season among ranked players, per match, for
+   *  every metric they have scored in. Keyed like the stat bag, plus `winrate`
+   *  and `boomer_rate`. Empty for a provisional player. */
   standings?: Record<string, Standing>;
 }
 
-/** A place on this season's board: `rank` of `of` ranked players. Ties share. */
-export interface Standing { rank: number; of: number }
+/** A place on this season's board: `rank` of `of` ranked players. Ties share.
+ *
+ *  Sent for every metric the player has scored in, not only their top-five
+ *  places. STANDING_TOP decides which earns a badge; the rest show a
+ *  percentile, so #6 of 40 reads as a near miss rather than as silence. */
+/** A sample's shape, as src/quantiles.ts computes it. `n` travels with the
+ *  numbers: a median over three matches and one over forty read identically
+ *  and are not the same claim. */
+export interface Quantiles {
+  n: number;
+  p25: number;
+  p50: number;
+  p75: number;
+}
+
+export interface Standing {
+  rank: number;
+  of: number;
+  /** Percentile rank, 0 to 100, by midrank so that a tied field lands at 50
+   *  rather than at either extreme. Meaningless at `of` 1 and suppressed
+   *  there: a sole qualifier is the whole distribution. */
+  pct: number;
+}
 
 /** Thrown for any non-OK response, carrying the status so callers can tell
  *  "not logged in" (401/403) and "no such thing" (404) apart from a real fault. */
