@@ -104,4 +104,34 @@ describe('escapeName', () => {
   it('neutralises discord markdown', () => {
     expect(escapeName('b*o_b')).toBe('b\\*o\\_b');
   });
+
+  // A Steam name is attacker-controlled text with no length or character
+  // limit worth trusting. `\@` and `\<` both render literally in Discord, so
+  // escaping them is free; today's only backstop is the transport sending
+  // allowedMentions: { parse: [] }, and a name is shown in more places than
+  // the transport touches (embed titles, button labels).
+  const hostile: [string, RegExp][] = [
+    ['@everyone', /@everyone/],
+    ['@here', /@here/],
+    ['<@123456789012345678>', /<@/],
+    ['<@&123456789012345678>', /<@&|<@/],
+    ['<#123456789012345678>', /<#/],
+    ['`rm -rf /`', /`/],
+    ['[Free Nitro](http://evil.tk)', /\]\(/],
+    ['**bold**', /\*\*/],
+  ];
+  it.each(hostile)('escapes every unescaped occurrence in %s', (name, unescaped) => {
+    const out = escapeName(name);
+    // The escaped output must contain no UNESCAPED instance of the hostile
+    // pattern: every character the pattern matches is preceded by a backslash.
+    const stripped = out.replace(/\\(.)/g, ''); // drop every escaped char
+    expect(stripped).not.toMatch(unescaped);
+  });
+
+  it('does not touch a mention discordLabel or playerLabel builds themselves', () => {
+    // escapeName only ever runs on the raw name text before a caller appends
+    // "<@id>" or "(<@id>)"; it must never be run on that appended mention.
+    expect(discordLabel({ steamid: '1', steamName: '@everyone', discordId: '111', discordName: null }))
+      .toBe('**\\@everyone** (<@111>)');
+  });
 });

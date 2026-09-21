@@ -18,10 +18,15 @@ export interface Identity {
   discordName: string | null;
 }
 
-const MARKDOWN = /([\\*_~`|>[\]()])/g;
+const MARKDOWN = /([\\*_~`|>[\]()@<])/g;
 
-/** A plain name with Discord markdown neutralised, so "b*o_b" is not italic
- *  and "[x](http://evil)" is not a link. */
+/** A plain name with Discord markdown neutralised, so "b*o_b" is not italic,
+ *  "[x](http://evil)" is not a link, and "@everyone" or "<@123>" is not a
+ *  mention: `\@` and `\<` both render as the literal character in Discord.
+ *  Today's only backstop against a name like that is the transport sending
+ *  allowedMentions: { parse: [] }, and a name is shown in places that never
+ *  touch the transport (embed titles, button labels), so this escapes it at
+ *  the source instead of relying on that alone. */
 export function escapeName(name: string): string {
   return name.replace(MARKDOWN, '\\$1');
 }
@@ -47,6 +52,13 @@ export function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+/** Whether an identity is linked AND its Discord name says something the
+ *  Steam name does not, which is the one condition under which plainLabel
+ *  and plainLabelEscaped both show both names. */
+function hasDistinctDiscordName(id: Identity): boolean {
+  return Boolean(id.discordId && id.discordName && !sameName(id.steamName, id.discordName));
+}
+
 /**
  * For Discord message text and embed descriptions/fields, where mentions
  * render as the member's server nickname. Always names the steam identity in
@@ -66,17 +78,13 @@ export function discordLabel(id: Identity): string {
  * together. Not escaped: callers escape for their own medium.
  */
 export function plainLabel(id: Identity): string {
-  if (id.discordId && id.discordName && !sameName(id.steamName, id.discordName)) {
-    return `${id.steamName} (Discord: ${id.discordName})`;
-  }
+  if (hasDistinctDiscordName(id)) return `${id.steamName} (Discord: ${id.discordName})`;
   return id.steamName;
 }
 
 /** plainLabel, markdown-escaped for a Discord surface that does not render
  *  mentions. */
 export function plainLabelEscaped(id: Identity): string {
-  if (id.discordId && id.discordName && !sameName(id.steamName, id.discordName)) {
-    return `${escapeName(id.steamName)} (Discord: ${escapeName(id.discordName)})`;
-  }
+  if (hasDistinctDiscordName(id)) return `${escapeName(id.steamName)} (Discord: ${escapeName(id.discordName!)})`;
   return escapeName(id.steamName);
 }
