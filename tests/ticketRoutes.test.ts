@@ -132,6 +132,20 @@ describe('restricted tickets over HTTP', () => {
     expect((db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'ticket_access'").get() as { n: number }).n).toBe(1);
   });
 
+  it('audit rows about a restricted ticket reach only its access list', async () => {
+    await file(R1, { targetId: MOD, category: 'toxicity', text: 'abusive' });
+    const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
+    expect((await post(OWNER, `/api/mod/tickets/${id}/claim`, { claim: true })).statusCode).toBe(200);
+    expect((await post(OWNER, `/api/mod/tickets/${id}/close`, { outcome: 'no_action', note: 'nothing in it' })).statusCode).toBe(200);
+    const ticketRows = async (as: string) => (await get(as, '/api/admin/audit')).json().actions
+      .filter((a: { action: string; target: string }) => a.action.startsWith('ticket_') && a.target === String(id));
+    expect(await ticketRows(ADMIN)).toEqual([]);
+    expect((await ticketRows(OWNER)).map((a: { action: string }) => a.action)).toEqual(['ticket_close', 'ticket_claim']);
+    // The accused, promoted to admin, must learn nothing from the log either.
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(MOD);
+    expect(await ticketRows(MOD)).toEqual([]);
+  });
+
   it('an accused mod does not see an ordinary ticket about themselves either', async () => {
     db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD2);
     await file(R1, { targetId: MOD2, category: 'afk', text: '' });

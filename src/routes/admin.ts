@@ -510,7 +510,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.get('/api/admin/audit', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    return { actions: recentActions(db) };
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    return { actions: recentActions(db, adminId) };
   });
 }
