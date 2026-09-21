@@ -5,6 +5,11 @@ import { lilacAdapter } from './timeline/lilac.js';
 import { analyzerAdapter } from './timeline/analyzer.js';
 import { dropsAdapter } from './timeline/drops.js';
 import { steamAdapter } from './timeline/steam.js';
+import { ticketsAdapter } from './timeline/tickets.js';
+import { penaltiesAdapter } from './timeline/penalties.js';
+import { bansAdapter } from './timeline/bans.js';
+import { notesAdapter } from './timeline/notes.js';
+import { discordLinksAdapter } from './timeline/discordLinks.js';
 import type { TimelineAdapter, TimelineItem } from './timeline/types.js';
 
 /** Every source, in no particular order: the result is sorted by time. A new
@@ -15,6 +20,11 @@ export const ADAPTERS: TimelineAdapter[] = [
   analyzerAdapter,
   dropsAdapter,
   steamAdapter,
+  ticketsAdapter,
+  penaltiesAdapter,
+  bansAdapter,
+  notesAdapter,
+  discordLinksAdapter,
 ];
 
 /** Items on one file. Well above what a page shows, and a bound all the same. */
