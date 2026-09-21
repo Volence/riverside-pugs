@@ -1644,6 +1644,38 @@ tbody tr.is-lifted td { opacity: 0.55; }
   /* The header's action chips wrap under the name on a phone rather than
      pushing the avatar and name into a squeeze to stay on one line. */
   .file-head .admin-actions { margin-left: 0; }
+/* ---------- admin: live board ---------- */
+
+.live-card { padding: var(--sp-4); }
+/* The card the admin feed linked to. */
+.live-card.is-target { border-color: var(--accent); }
+.live-card__line { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: baseline; }
+.live-card__line h3 { margin: 0; }
+.live-card__clocks { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); font-size: var(--fs-dense); }
+.live-clock.is-low { color: var(--loss); }
+.live-clock.is-held { color: var(--rating); }
+.live-card__teams { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); }
+@media (max-width: 900px) { .live-card__teams { grid-template-columns: minmax(0, 1fr); } }
+
+.live-roster { list-style: none; margin: 0; padding: 0; }
+/* name | status | actions | the reserved sub slot. The last column has a
+ * fixed width and nothing in it, so the day a sub button arrives the other
+ * three do not move. */
+.live-row {
+  display: grid; grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) auto 6rem;
+  gap: var(--sp-2); align-items: center; padding: var(--sp-2) 0; border-bottom: 1px solid var(--border);
+}
+.live-row--connected .live-row__status { color: var(--win); }
+.live-row--never_connected .live-row__status, .live-row--dropped .live-row__status { color: var(--text); }
+.live-row__left { font-size: 1.15em; }
+.live-row__left.is-low { color: var(--loss); }
+.live-row__left.is-held { color: var(--rating); }
+.live-row__reason { display: block; font-size: var(--fs-dense); }
+.live-row__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; }
+@media (max-width: 640px) {
+  .live-row { grid-template-columns: minmax(0, 1fr); }
+  .live-row__actions { justify-content: flex-start; }
+  .live-row__sub { display: none; }
 }
 
 /* ---------- report dialog (match page) ---------- */

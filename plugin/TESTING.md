@@ -656,6 +656,92 @@ Put `sm_pug_pause_seconds` back to 120 when you are done:
 
     R "sm_pug_pause_seconds 120"
 
+## Reconnect clock control (`sm_pug_leave`, 0.3.4)
+
+There is no unit harness for SourcePawn in this repo, so this is the test for
+the admin hold in `pug-leave.inc`. It needs one real client, and that client
+can be you: you are the player who drops, and the rcon shell keeps working while
+you are disconnected.
+
+`T` below is any throwaway 32 hex token and `ME` is your SteamID64:
+
+    T=$(openssl rand -hex 16); ME=76561198030413993
+
+### A. Empty server: the command exists and refuses correctly
+
+No client needed. Only with the server empty (`R status` shows 0 humans).
+
+    R "sm_pug_match 999999 $T NoMercy"
+    R "sm_pug_leave"
+    R "sm_pug_leave 00000000000000000000000000000000 $ME hold"
+    R "sm_pug_leave $T"
+    R "sm_pug_leave $T $ME hold"
+    R "sm_pug_leave_hold_max"
+    R "sm_pug_status"
+    R "sm_pug_abort $T"
+
+- [ ] `PUGOK match=999999`: ____
+- [ ] no arguments answers `PUGERR token required`: ____
+- [ ] the wrong token answers `PUGERR bad token`: ____
+- [ ] the token alone answers `PUGERR usage: sm_pug_leave ...`: ____
+- [ ] an unrostered id answers `PUGERR not rostered`: ____
+- [ ] the cvar prints `1800`: ____
+- [ ] status has `STATUS leave abandoner=none ... holdmax=1800`: ____
+- [ ] `PUGOK aborted`: ____
+
+Hold, release and end need a rostered player who has actually dropped, so they
+cannot be checked on an empty server. That is part B.
+
+### B. Real client
+
+Shorten both clocks first so the whole thing takes five minutes, not forty:
+
+    R "sm_pug_match 999 $T no_mercy"
+    R "sm_pug_roster \"$ME:a\""
+    R "sm_pug_leave_budget 180"
+    R "sm_pug_leave_hold_max 20"
+
+Join the server. `R sm_pug_status` must show your slot with `connected=1`.
+To watch the log lines, use the `nc -ul 27500` recipe from section 4.
+
+1. **Pre-grant.** While connected: `R "sm_pug_leave $T $ME add 60"`.
+   - [ ] `PUGOK leave steamid=... absent=0 remaining=240 held=0 hold_left=0`: ____
+   - [ ] a `RETURN steamid=... remaining=240` line, and a chat line about more reconnect time: ____
+2. **Hold is refused while connected.** `R "sm_pug_leave $T $ME hold"`.
+   - [ ] `PUGERR not dropped`: ____
+3. **Drop.** Disconnect from the game. Wait ten seconds.
+   - [ ] status shows `absent=1 remaining=` near 230 and falling: ____
+4. **Hold.** `R "sm_pug_leave $T $ME hold"`, then status twice, ten seconds apart.
+   - [ ] `PUGOK ... absent=1 remaining=N held=1 hold_left=20`: ____
+   - [ ] `remaining` is the SAME in both status reads: ____
+   - [ ] a `LEAVE ... held=1 hold_left=... auto=0` line: ____
+5. **The ceiling.** Wait until 25 seconds after the hold.
+   - [ ] a `LEAVE ... held=0 hold_left=0 auto=1` line: ____
+   - [ ] status shows `held=0` and `remaining` falling again: ____
+6. **Release is idempotent.** `R "sm_pug_leave $T $ME release"` twice.
+   - [ ] both answer `PUGOK ... held=0`: ____
+7. **Hold across a map change.** `R "sm_pug_leave_hold_max 600"`, hold again, note `remaining`, then
+   `R "changelevel l4d_hospital02_subway"`. After the map loads:
+   - [ ] status still shows `held=1` and the same `remaining`: ____
+   - [ ] the SourceMod error log has no `Invalid timer handle` or `Invalid Handle` from pug-match: ____
+8. **Return while held.** Still held, join the server again.
+   - [ ] chat says you are back; status shows `absent=0 held=0`: ____
+   - [ ] `remaining` is what it was at the hold, not less: ____
+9. **Match end while held.** Disconnect, hold, then `R "sm_pug_abort $T"`. Set the same match up again
+   (`sm_pug_match`, `sm_pug_roster`).
+   - [ ] status shows no `STATUS leave slot=` line at all: ____
+10. **End now.** Join, disconnect, then `R "sm_pug_leave $T $ME end"`.
+    - [ ] `PUGOK ... absent=1 remaining=0 held=0`: ____
+    - [ ] within two seconds: the "did not reconnect in time" chat line and a `PUG ... ABANDON steamid=...` line: ____
+    - [ ] status shows `STATUS leave abandoner=<your id>`: ____
+    - [ ] a further `R "sm_pug_leave $T $ME add 60"` answers `PUGERR match already abandoned`: ____
+
+Put everything back:
+
+    R "sm_pug_abort $T"
+    R "sm_pug_leave_budget 300"
+    R "sm_pug_leave_hold_max 1800"
+
 ## Teardown (`sm_pug_abort <token> teardown <map>`)
 
 Needs a REAL client connected to the local test server (`/home/volence/l4d1-ds`,

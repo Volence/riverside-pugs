@@ -50,10 +50,11 @@ or when more than `MAX_ROSTER` (8) players are on teams.
 | `sm_pug_abort` | `<token> [teardown [<map>]]` | End the match. Plain form: reset plugin state, nothing else (the routine post-report call). With `teardown`: announce in chat, ask Rotoblin for an unpause and wait up to 10 s for it, kick every human (bots and SourceTV stay), then `ForceChangeLevel(<map>)` once the kicks have landed. Logs `PUG <token> PROBLEM code=unpause_timeout` if the game never unpaused. The backend sends the teardown form from the release path for abandon, no-show and admin abort; never for a clean finish. |
 | `sm_pug_status` | none | Full current plugin state over the RCON response body. Takes no token deliberately, since the moment you most want it is when setup went wrong and you do not trust your own idea of the token. Read-only, safe at any time. |
 | `sm_pug_setid` | `<token> <matchid>` | Backend assigns the match id for a **self-started** match. Keyed by token, because the id is exactly what the plugin does not know and so cannot be asked for. |
+| `sm_pug_leave` | `<token> <steamid64> hold\|release\|add <seconds>\|end` | 0.3.4 and later. Admin control of one rostered player's reconnect allowance, sent by the website's live board. `hold` freezes it (dropped players only) until `release`, their return, or `sm_pug_leave_hold_max`; `release` is idempotent; `add` grants 1 to 3600 more seconds to anyone rostered, connected or not, capped so the allowance never exceeds an hour; `end` zeroes it so the ordinary ABANDON path fires within a second (dropped players only). Answers `PUGOK leave steamid=<id64> absent=<0\|1> remaining=<s> held=<0\|1> hold_left=<s>` or `PUGERR <reason>`, then echoes the state on the log stream. Backend matches only: refused with `PUGERR leave tracking is off` for a self-started match. |
 
-`sm_pug_dump` and `sm_pug_abort` both check `<token>` against the token set by
-the most recent `sm_pug_match` and reply `PUGERR bad token` if it doesn't
-match.
+`sm_pug_dump`, `sm_pug_abort` and `sm_pug_leave` all check `<token>` against the
+token set by the most recent `sm_pug_match` and reply `PUGERR bad token` if it
+doesn't match.
 
 ## Cvars
 
@@ -66,6 +67,9 @@ without eight people in the server.
 | `sm_pug_debug` | `0` | `1` logs orientation flips, team-lock moves, score reads and attribution to the SourceMod log. |
 | `sm_pug_config` | `pug_match.cfg` | Config `!load_4v4p` execs. `pug_match.cfg` execs the pinned ruleset (`rotoblin_pug_4v4.cfg`, a clone of hardcore 4v4), loads `skill_detect` as a data source, and restores `sm_pug_min_orient 3`. Changing this changes the rules under every rating earned from here on. |
 | `sm_pug_record_demos` | `1` | `1` stops `tv_autorecord`'s file and records `pug_<token>_<ordinal>_<map>.dem` for each map of a match, so the demo is linked to the match by name rather than guessed at by timestamp. |
+| `sm_pug_leave_budget` | `300` | Seconds each rostered player may spend disconnected over a whole backend match before it ends as an abandon. `0` disables leave tracking. The backend sets it at match setup from the `leave_budget_seconds` setting. |
+| `sm_pug_leave_autounpause` | `1` | `1` unpauses on a 10 second countdown once every disconnected player is back. `0` makes both teams type `!ready`. Set at match setup from `leave_auto_unpause`. |
+| `sm_pug_leave_hold_max` | `1800` | 0.3.4 and later. Longest an admin hold (`sm_pug_leave ... hold`) may freeze one player's allowance. The hold releases itself after this and says so, so a release that never arrives cannot pin a server paused. Set at match setup from `clock_hold_max_minutes`. Bounds 10 to 7200; the low bound exists so the ceiling can be tested in under a minute. |
 
 Debug output goes to the SourceMod log, not the `logaddress` stream, because the
 UDP grammar is parsed by `src/logParse.ts` and free-text lines there would be
@@ -106,8 +110,18 @@ PUG <token> MATCH_START map=<map>
 PUG <token> MAP_RESULT map=<map> a=<n> b=<n>
 PUG <token> HEARTBEAT
 PUG <token> PLAYER steamid=<id64> event=connect|disconnect
+PUG <token> LEAVE steamid=<id64> remaining=<s> [held=0|1 hold_left=<s> auto=0|1]
+PUG <token> RETURN steamid=<id64> remaining=<s>
+PUG <token> ABANDON steamid=<id64>
 PUG <token> MATCH_END a=<n> b=<n> winner=a|b|draw
 ```
+
+`LEAVE` is sent when a rostered player really disconnects, and again (0.3.4 and
+later, with the bracketed keys) whenever an admin changes that player's clock
+with `sm_pug_leave` or the hold ceiling releases it (`auto=1`). The bracketed
+keys are optional on purpose: a backend older than the plugin ignores them, and
+a plugin older than the backend never sends them. `RETURN` is also what
+`sm_pug_leave ... add` echoes for a player who is connected.
 
 Self-started matches (`!load_4v4p`) emit one more burst, once, up front:
 

@@ -129,7 +129,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
               <h4>Team {label}</h4>
               <ul class="live__roster">
                 {players.map((p) => (
-                  <li key={p.steamid}><PlayerLink steamid={p.steamid} name={p.name} /></li>
+                  <li key={p.steamid}><PlayerLink steamid={p.steamid} name={p.name} discordName={p.discordName} /></li>
                 ))}
               </ul>
             </div>

@@ -18,6 +18,11 @@ export type AdminEvent =
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
   | { kind: 'problem'; text: string; matchId?: number }
   | { kind: 'abandon'; steamid: string; matchId: number; minutes: number }
+  // The live board's clocks. low_allowance: a dropped player is nearly out of
+  // reconnect time, once per drop, so an admin can hold the clock before it
+  // ends the match. hold_expired: a hold reached its ceiling and released
+  // itself. Both link to the board, where the buttons are.
+  | { kind: 'clock'; what: 'low_allowance' | 'hold_expired'; steamid: string; matchId: number; remainingS: number }
   // A steamid dropped while connecting for the second time in ten minutes
   // without getting in between. `name` is the in-game name off the drop line,
   // because the steamid is often nobody the site knows. `count` is the drops in
@@ -51,6 +56,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   account: 'admin_feed_accounts',
   problem: 'admin_feed_problems',
   abandon: 'admin_feed_penalties',
+  clock: 'admin_feed_problems',
   signon_drop: 'admin_feed_problems',
   input_flag: 'admin_feed_problems',
   lilac_flag: 'admin_feed_problems',

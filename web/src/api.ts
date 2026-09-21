@@ -176,6 +176,9 @@ export interface MatchSummary {
 export interface MatchPlayerStats {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   team: Team;
   siDamage: number;
   siKills: number;
@@ -200,6 +203,9 @@ export interface StatDef {
 }
 
 export interface LivePlayer extends NamedPlayer {
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   /** Missing key means "not measured", never zero. skill_detect keys are
    *  absent entirely when that plugin is not loaded. */
   stats: Record<string, number>;
@@ -290,7 +296,19 @@ export interface MatchDemo {
   bytes: number;
 }
 
+/** A match still being played: 'waiting' for a server, 'configuring' one, or
+ *  'live'. Deliberately tiny; never the server address, the token or a
+ *  password, none of which belong in a link anyone can open. The same id
+ *  answers with a MatchDetail once the match ends. */
+export interface MatchOngoing {
+  ongoing: true;
+  id: number;
+  campaign: string;
+  state: 'waiting' | 'configuring' | 'live';
+}
+
 export interface MatchDetail {
+  ongoing: false;
   /** `winner` is null on an aborted match: it never reached a result. The
    *  void fields are set only when a COMPLETED match was voided afterwards,
    *  which the schema also records as state 'aborted'. */
@@ -328,6 +346,11 @@ export interface MatchDetail {
     byPlayer: Record<string, Record<string, number>>;
   }[];
 }
+
+/** What GET /api/matches/:id answers, narrowed by `ongoing` so a caller has
+ *  to handle the in-progress case before it can reach the finished one's
+ *  fields. */
+export type MatchApiResult = MatchOngoing | MatchDetail;
 
 export interface RoundAggregate {
   attempts: number;
@@ -760,6 +783,50 @@ export interface AdminOverview {
   slowToReady: SlowToReady[];
 }
 
+/** The admin live board. Mirrors src/admin/liveBoard.ts field for field.
+ *  Every `...S` figure is whole seconds as of the moment the server answered;
+ *  the page counts on from when the payload arrived and never compares
+ *  anything here against its own wall clock. */
+export type LiveBoardReason = { kind: 'signon_drop'; at: string } | { kind: 'not_in_voice' };
+export type LiveBoardStatus =
+  | { kind: 'connected'; remainingS: number | null }
+  | { kind: 'never_connected'; sincePopS: number }
+  | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
+export interface LiveBoardPlayer {
+  steamid: string; name: string; team: 'a' | 'b'; status: LiveBoardStatus; reason: LiveBoardReason | null;
+}
+export interface LiveBoardClock {
+  kind: 'abandon'; steamid: string; name: string; remainingS: number; held: boolean; holdLeftS: number | null;
+}
+export interface LiveBoardMatch {
+  id: number;
+  campaign: string;
+  map: string | null;
+  state: 'waiting' | 'configuring' | 'live' | 'paused';
+  phase: 'live' | 'paused' | 'readyup' | 'roundover' | 'loading' | null;
+  server: { id: number; name: string } | null;
+  teamAScore: number;
+  teamBScore: number;
+  elapsedS: number;
+  spectate: SpectateInfo | null;
+  /** old_plugin: the server's pug-match predates 0.3.4 and has no clock control. */
+  leaveControl: 'ok' | 'old_plugin' | 'unknown';
+  /** False when the game server runs no reconnect clock for this match at
+   *  all, which is every match that was started in game. */
+  leaveTracking: boolean;
+  teamA: LiveBoardPlayer[];
+  teamB: LiveBoardPlayer[];
+  clocks: LiveBoardClock[];
+}
+export interface LiveBoard {
+  now: string;
+  holdMaxMinutes: number;
+  /** Where a countdown starts reading as nearly out, in seconds; 0 is off. */
+  lowAlertSeconds: number;
+  matches: LiveBoardMatch[];
+}
+export type LeaveClockAction = 'hold' | 'release' | 'add' | 'end';
+
 export interface AdminSetting {
   key: string; label: string; help: string; group: string; secret?: boolean; value: string;
   type:
@@ -1149,6 +1216,9 @@ export const adminApi = {
     post<{ ok: true; refreshed: number }>(`/api/admin/players/${steamid}/steam-refresh`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
+  live: (signal?: AbortSignal) => get<LiveBoard>('/api/admin/live', signal),
+  leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
+    post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
@@ -1262,7 +1332,7 @@ export const api = {
   map: (map: string, signal?: AbortSignal) =>
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
-    get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
+    get<MatchApiResult>(`/api/matches/${encodeURIComponent(id)}`, signal),
   endorseState: (matchId: number, signal?: AbortSignal) =>
     get<EndorseState>(`/api/matches/${matchId}/endorse`, signal),
   endorse: (matchId: number, to: string, kind: EndorseKind) =>

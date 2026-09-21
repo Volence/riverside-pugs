@@ -23,6 +23,7 @@ import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
 import { listSeasons } from '../seasons.js';
+import { sameName } from '../identity.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -138,9 +139,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   /** What is being played right now. Public: the whole point is that someone
-   *  who is not in the game, and may not have an account, can watch. Carries
-   *  no stats, so there is nothing viewer-dependent to redact. */
-  app.get('/api/live', async () => ({ matches: getLiveMatches(db) }));
+   *  who is not in the game, and may not have an account, can watch. A
+   *  player's linked Discord name is the one thing here that is
+   *  viewer-dependent: it goes out only to a signed-in player in good
+   *  standing, never to an anonymous visitor or one who is banned, inactive,
+   *  or merged (see standing.ts inGoodStanding, which viewerOf already
+   *  applies). discord_id itself is never selected at all. */
+  app.get('/api/live', async (req) => ({ matches: getLiveMatches(db, viewerOf(req) !== null) }));
 
   /** Every map that has been played, so the map pages are discoverable. */
   // `pool` is the current vote rotation, so the page can put what you might
@@ -167,6 +172,20 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   app.get('/api/matches/:id', async (req, reply) => {
     const viewer = viewerOf(req);
     const id = Number((req.params as { id: string }).id);
+    // A match still being played has no result yet, and everything below
+    // (rounds, per-map stats, the forecast) is built for a finished one.
+    // Every admin-feed post about a live match links here, so rather than
+    // 404 until it ends, a match still in progress gets a small payload of
+    // its own: just enough to say so and point at the live view. Never the
+    // server address, the token or anything else live-only.
+    const inProgress = db.prepare(
+      'SELECT campaign, state, server_id AS serverId FROM matches WHERE id = ?',
+    ).get(id) as { campaign: string; state: string; serverId: number | null } | undefined;
+    if (!inProgress) return reply.code(404).send({ error: 'no such match' });
+    if (inProgress.state === 'configuring' || inProgress.state === 'live') {
+      const state = inProgress.state === 'live' ? 'live' : inProgress.serverId === null ? 'waiting' : 'configuring';
+      return { ongoing: true, id, campaign: inProgress.campaign, state };
+    }
     // 'aborted' as well as 'completed'. An abandoned or reaped match used to
     // 404 here, which meant the Discord card's own "Match page" link led
     // nowhere and there was no record anywhere of who was in it or how far it
@@ -206,7 +225,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     }
     const titles = allTitles(db);
     const players = (db.prepare(
-      `SELECT mp.player_id AS steamid, p.name, mp.team, mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
+      `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team,
+              mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
               rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
        FROM match_players mp
        JOIN players p ON p.steamid = mp.player_id
@@ -214,6 +234,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        WHERE mp.match_id = ?`,
     ).all(id) as any[]).map((p) => ({
       steamid: p.steamid, name: p.name, team: p.team,
+      // Only when it says something the steam name does not, AND only for a
+      // signed-in viewer in good standing: an anonymous request, or one from
+      // a banned/inactive/merged account, gets null here for every player,
+      // same as an unlinked or matching Discord name does.
+      discordName: viewer !== null && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
       title: titles.get(p.steamid) ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       srDelta: p.mu_after === null ? 0
@@ -262,7 +287,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // non-admin, so the client cannot tell a forecast exists at all.
     const forecast = viewer && isAdminViewer(viewer) ? matchForecast(db, id) : undefined;
 
-    return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, ...(forecast ? { forecast } : {}) };
+    return {
+      ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS,
+      ...(forecast ? { forecast } : {}),
+    };
   });
 
   /** One player's endorse panel for one match: who they may endorse, what

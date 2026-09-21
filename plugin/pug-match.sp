@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.3"
+#define PLUGIN_VERSION "0.3.4"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -383,6 +383,7 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token> [nonce]");
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
+	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
 
 	// The in-game entry point. RegAdminCmd, not RegServerCmd: this one is meant
 	// to be typed as !load_4v4p in chat, which server commands cannot be.

@@ -12,6 +12,10 @@ import { enrichEvents, enrichmentText, fromLiveEvents } from '../eventEnrich';
 export interface StatRow {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Absent on the live scoreboard's derived rows, which is the same
+   *  as null to PlayerLink. */
+  discordName?: string | null;
   stats: Record<string, number>;
   /** False when nothing was ever recorded for this player (rostered too late
    *  for the dump, match 18). Their bag is then fixed-column zeros, which
@@ -104,7 +108,7 @@ export function StatTable(
       </tr>,
       ...players.map((p, i) => (
         <tr key={p.steamid} title={p.captured === false ? UNCAPTURED_TITLE : undefined}>
-          <td class="live__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /><TitleTag kind={p.title} /></td>
+          <td class="live__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} discordName={p.discordName} /><TitleTag kind={p.title} /></td>
           {cols.map((k) => {
             if (p.captured === false) {
               return <td class={`${cls(k)} is-dim`} key={k}>{UNCAPTURED}</td>;

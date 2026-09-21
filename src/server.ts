@@ -53,6 +53,7 @@ import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './s
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
 import { rconRestarter, type ServerRestarter } from './serverRestart.js';
@@ -67,6 +68,7 @@ import {
   recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
+import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
@@ -126,6 +128,9 @@ export interface ServerDeps {
   /** Pushes one server its log secret, for the admin's log-secret route.
    *  Injected in tests so it never dials a real box. */
   logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Runs one console command on one server and returns the reply, for the
+   *  live board's clock actions. Injected in tests so they never dial a box. */
+  serverQuery?: ServerQuery;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -639,6 +644,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             .catch((err) => console.error('[abandon] failed:', err));
           return;
         }
+        if (ev.kind === 'leave' || ev.kind === 'return') {
+          // The live board's view of who is missing. Guarded like everything
+          // here that is not the result path: a database error must not take
+          // down the listener that also carries match_end.
+          try {
+            const change = recordPresenceLine(deps.db, ev);
+            if (change?.changed) hub.broadcast('refresh');
+            // The plugin released a hold at its ceiling. Announced only on the
+            // held to not held transition, so whichever of this line and the
+            // sweep below gets there first is the one that speaks.
+            if (change?.holdReleased && ev.kind === 'leave' && ev.auto) {
+              publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: ev.steamid, matchId: change.matchId, remainingS: ev.remaining });
+            }
+          } catch (err) {
+            console.error('[presence] failed to record', ev.kind, err);
+          }
+          return;
+        }
         if (ev.kind === 'problem') {
           // The plugin could not do part of a teardown (today: the game never
           // unpaused). The match is already aborted; this is for the admin
@@ -708,6 +731,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
             recordPlayerConnect(deps.db, ev.token, ev.steamid);
+            // A 'refresh' on top of the 'live' every feed line ends with: the
+            // admin board listens for refresh only, because 'live' fires ten
+            // times a second. Only a real change, so the connect pulse of a map
+            // change wakes nobody.
+            if (recordPresenceLine(deps.db, ev)?.changed) hub.broadcast('refresh');
             // The plugin emits this from OnClientPostAdminCheck, which only
             // fires once the client is fully in game, so it is an entry too.
             // The engine's own "entered the game" line normally gets here
@@ -942,6 +970,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 60_000);
   reaper.unref();
 
+  // The live board's clocks. Five seconds because the warning it posts is
+  // about a countdown measured in tens of seconds; the pass is one indexed
+  // read when nobody is dropped, which is nearly always.
+  const presenceSweep = setInterval(() => {
+    try {
+      const events = sweepPresence(deps.db);
+      for (const e of events) publishAdminEvent({ kind: 'clock', ...e });
+      if (events.length > 0) hub.broadcast('refresh');
+    } catch (err) {
+      console.error('[presence] sweep failed:', err);
+    }
+  }, 5_000);
+  presenceSweep.unref();
+
   // Daily replay prune. Interval rather than cron because there is no
   // scheduler here and the exact hour does not matter: the window is 90 days.
   // unref so the timer never holds the process open in tests.
@@ -1057,6 +1099,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);
+    clearInterval(presenceSweep);
     clearInterval(pruneTimer);
     stopTwitchPoll?.();
     stopSignalRefresh?.();
@@ -1078,11 +1121,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
     dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
+    voice: deps.config.discord !== null ? presence : null,
     logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
         await rcon.connect();
         return await pushLogSecret(rcon, secret);
+      } finally {
+        rcon.close();
+      }
+    }),
+    serverQuery: deps.serverQuery ?? (async (server, command) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await rcon.exec(command);
       } finally {
         rcon.close();
       }

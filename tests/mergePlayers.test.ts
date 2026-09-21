@@ -353,6 +353,18 @@ describe('mergePlayers', () => {
     for (const ref of refs) expect(MERGE_HANDLED_PLAYER_COLUMNS).toContainEqual(ref);
   });
 
+  it('carries a live presence row over to the surviving account', () => {
+    match(1, 'live');
+    rosters(1, ALT, 'a');
+    db.prepare(
+      "INSERT INTO match_presence (match_id, steamid, state, since, updated_at) VALUES (1, ?, 'dropped', '2026-09-21T20:00:00.000Z', '2026-09-21T20:00:00.000Z')",
+    ).run(ALT);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT steamid FROM match_presence WHERE match_id = 1').all()).toEqual([{ steamid: MAIN }]);
+  });
+
   it('moves player_links and twitch_status onto the surviving account', () => {
     db.prepare("INSERT INTO player_links (player_id, platform, handle) VALUES (?, 'twitter', 'alt_handle')").run(ALT);
     // The cached status follows the Twitch link and nothing else, so the alt

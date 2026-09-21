@@ -61,6 +61,17 @@ describe('admin feed', () => {
     expect(t.live()).toHaveLength(0);
   });
 
+  it('a clock action names the player, the match and what was done', async () => {
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'hold', ok: true, remaining: 200, held: true });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'add', seconds: 300, ok: true, remaining: 500, held: false });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'end', ok: false, error: 'not dropped' });
+    await feed.idle();
+    expect(text(0)).toMatch(/player7.*put .*player2.*reconnect clock on hold/);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/gave .*player2.* 300 more seconds/);
+    expect(text(2)).toMatch(/failed: not dropped/);
+  });
+
   it('a button on an old report card answers instead of failing', async () => {
     const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7' });
     expect(r.ephemeral).toBe(true);
@@ -89,6 +100,23 @@ describe('admin feed', () => {
     expect(text(1)).toMatch(/5 min/);
     expect(text(2)).toMatch(/player1.*linked Discord/);
     expect(text(3)).toContain('Match #9 aborted for no-shows.');
+  });
+
+  it('names both the steam identity and the linked discord account, and never pings', async () => {
+    logAdmin(db, ADMIN, 'ban', IDS[3], { reason: 'throwing', minutes: 1440 });
+    await feed.idle();
+    // Every player linked in beforeEach: steam name plus a discord mention.
+    expect(text(0)).toContain('**player7** (<@907>)');
+    expect(text(0)).toContain('**player3** (<@903>)');
+    // The bot's transport pings only ids listed in mentionUserIds; the admin
+    // feed lists none, so the mention above renders but never notifies.
+    expect(t.live()[0].payload.mentionUserIds).toEqual([]);
+  });
+
+  it('a steamid with no player row shows no Discord linked', async () => {
+    publishAdminEvent({ kind: 'penalty', steamid: '76561198009999999', penalty: 'ready_fail', matchId: null });
+    await feed.idle();
+    expect(text(0)).toContain('(no Discord linked)');
   });
 
   it('each kind can be switched off, and no channel means no feed', async () => {
@@ -168,5 +196,20 @@ describe('admin feed', () => {
     publishAdminEvent({ kind: 'steam_signal', steamid: IDS[2], matchId, signal: { what: 'banned_lender', lenderId: IDS[6] } });
     await feed.idle();
     expect(t.live()).toHaveLength(0);
+  });
+
+  it('warns once that a dropped player is nearly out of time, with a link to the board', async () => {
+    publishAdminEvent({ kind: 'clock', what: 'low_allowance', steamid: IDS[2], matchId, remainingS: 85 });
+    publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: IDS[2], matchId, remainingS: 197 });
+    await feed.idle();
+    expect(text(0)).toMatch(/player2.* has 85 s left/);
+    expect(text(0)).toContain(`https://pug.test/admin?live=${matchId}`);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/hold on .*player2.* released itself/);
+    expect(text(1)).toContain('197 s');
+    // name() bolds the player itself, so a line that wraps it in its own
+    // asterisks renders four of them and no bold at all.
+    expect(text(0)).not.toContain('****');
+    expect(text(1)).not.toContain('****');
   });
 });
