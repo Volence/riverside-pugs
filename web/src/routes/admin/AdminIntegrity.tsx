@@ -136,6 +136,7 @@ export function AdminIntegrity() {
   const detail = useFetch((s) => (steamid ? adminApi.integrityPlayer(steamid, s) : Promise.resolve(null)), [steamid]);
   const { busy, error, run } = useAction(() => { reload(); detail.reload(); });
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState('');
 
   if (steamid && detail.data) {
     // Review state is keyed by player-round (matchId/ordinal/half/slot), and each
@@ -148,9 +149,12 @@ export function AdminIntegrity() {
       <Panel>
         <button class="chip" onClick={() => setSteamid(null)}>Back to board</button>
         {error && <p class="error">{error}</p>}
-        {(detail.data.flags?.length ?? 0) > 0 && (
-          <section class="integrity-flags">
-            <h4>Live anti-cheat flags</h4>
+        <section class="integrity-flags">
+          <h4>Live anti-cheat flags</h4>
+          {(detail.data.flags?.length ?? 0) === 0 ? (
+            <p class="muted">Nothing flagged for this player by the live anti-cheat.</p>
+          ) : (
+          <>
             <p class="muted">
               Raised by Little Anti-Cheat during play, not by replay analysis, so there is no clip to
               watch. Its own documentation says few and rare suspicions are usually false positives;
@@ -167,9 +171,12 @@ export function AdminIntegrity() {
                 </li>
               ))}
             </ul>
-          </section>
+          </>
+          )}
+        </section>
+        {detail.data.clips.length === 0 && (
+          <Empty>No flagged moments from replay analysis for this player.</Empty>
         )}
-        {detail.data.clips.length === 0 && <Empty>No flagged moments for this player.</Empty>}
         <ul class="admin-list">
           {groupByRound(detail.data.clips).map((g) => {
             const first = g.clips[0];
@@ -218,6 +225,14 @@ export function AdminIntegrity() {
 
   const players = data?.players ?? [];
   const noClips = players.length > 0 && players.every((p) => p.clips === 0);
+  // Rank is the player's place in the WHOLE board. Taking it from the filtered
+  // array index would renumber everyone the moment you typed in the search box,
+  // turning a search into a different-looking ranking.
+  const ranked = players.map((p, i) => ({ ...p, rank: i + 1 }));
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? ranked.filter((p) => p.name.toLowerCase().includes(needle) || p.steamid.includes(needle))
+    : ranked;
 
   return (
     <>
@@ -274,6 +289,39 @@ export function AdminIntegrity() {
         </details>
       </Panel>
     <Panel>
+      <h3>Live anti-cheat</h3>
+      {data?.health && (
+        // Rendered even when everything is zero. An empty panel that shows
+        // nothing cannot tell "capturing, nobody flagged" apart from "silently
+        // broken", and on a new detector that is the only thing worth knowing.
+        <p class="muted">
+          {data!.health.bursts === 0
+            ? 'No input bursts captured yet. Bursts are only recorded during a live match, so this stays empty until a PUG runs.'
+            : `${data!.health.bursts.toLocaleString()} input bursts across ${data!.health.matchesWithBursts} match${data!.health.matchesWithBursts === 1 ? '' : 'es'}, most recent ${fmtTime(data!.health.lastBurstAt!)}.`}
+          {' '}
+          {data!.health.detections === 0 && data!.health.lilacFlags === 0
+            ? 'Nothing flagged.'
+            : `${data!.health.detections} input detection${data!.health.detections === 1 ? '' : 's'}, ${data!.health.lilacFlags} Little Anti-Cheat flag${data!.health.lilacFlags === 1 ? '' : 's'}.`}
+        </p>
+      )}
+      {(data?.flags?.length ?? 0) === 0
+        ? <Empty>Nothing flagged by the live anti-cheat. This is the normal, healthy state.</Empty>
+        : (
+          <ul class="admin-list">
+            {data!.flags.map((f) => (
+              <li key={`${f.source}-${f.id}`}>
+                {fmtTime(f.at)}: <button class="linklike" onClick={() => setSteamid(f.steamid)}>{f.name}</button>
+                {' '}<code>{f.kind}</code>
+                <span class="muted"> · {f.source === 'lilac' ? 'Little Anti-Cheat' : 'input timing'}</span>
+                {f.severity === 'banned' && <strong class="admin-warn"> · banned</strong>}
+                {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+    </Panel>
+
+    <Panel>
       <p class="muted">
         Theoretical only. These numbers rank who is worth watching a clip of; they are not
         evidence of anything on their own, and nothing here is visible outside this panel.
@@ -292,7 +340,23 @@ export function AdminIntegrity() {
           over clean measurements, not a suspicion list, and nobody on it has been flagged.
         </p>
       )}
-      {players.length > 0 && (
+      {players.length > 8 && (
+        <div class="admin-row">
+          <input
+            class="admin-search"
+            type="search"
+            placeholder={`Search ${players.length} players`}
+            aria-label="Search players"
+            value={filter}
+            onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
+          />
+          {filter && <span class="muted">{shown.length} of {players.length}</span>}
+        </div>
+      )}
+      {players.length > 0 && shown.length === 0 && (
+        <Empty>No player on this board matches "{filter}".</Empty>
+      )}
+      {shown.length > 0 && (
         <div class={noClips ? 'table-wrap muted' : 'table-wrap'}>
           <table class="admin-table">
             <thead>
@@ -302,12 +366,12 @@ export function AdminIntegrity() {
               </tr>
             </thead>
             <tbody>
-              {players.map((p, i) => (
+              {shown.map((p) => (
                 <tr key={p.steamid} class="is-clickable" onClick={() => setSteamid(p.steamid)}>
                   <td>{p.name}</td>
                   <td>{p.rounds}</td>
                   <td>{p.clips}</td>
-                  <td>{`${i + 1} of ${players.length}`}</td>
+                  <td>{`${p.rank} of ${players.length}`}</td>
                   <td>{num(p.fidMax)} <span class="muted">({pct(p.pFid)})</span></td>
                   <td>{num(p.occZ)} <span class="muted">({pct(p.pOcc)})</span></td>
                   <td>{num(p.teamGap)} <span class="muted">({pct(p.pGap)})</span></td>

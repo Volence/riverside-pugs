@@ -61,9 +61,14 @@ export interface ScoredPlayer extends PlayerAgg {
   pFid: number;
   pOcc: number | null;
   pGap: number | null;
-  /** Mean of whichever percentiles this player has. A sort key, not a claim. */
+  /** Mean of the three percentiles, with a MISSING one counted as the middle of
+   *  the population rather than dropped. A sort key, not a claim. */
   composite: number;
 }
+
+/** The middle of the population. An unmeasured metric says nothing about a
+ *  player, so it should move their composite neither up nor down. */
+export const NEUTRAL_PERCENTILE = 0.5;
 
 export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
   const fids = aggs.map((a) => a.fidMax);
@@ -74,7 +79,13 @@ export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
     const pFid = percentile(fids, a.fidMax);
     const pOcc = a.occZ == null ? null : percentile(occs, a.occZ);
     const pGap = a.teamGap == null ? null : percentile(gaps, a.teamGap);
-    const parts = [pFid, pOcc, pGap].filter((x): x is number => x != null);
+    // A missing metric counts as NEUTRAL, not as absent. Averaging only the
+    // parts a player happens to have meant that having less evidence made it
+    // easier to reach the top: a player with one metric at the 95th percentile
+    // and two n/a scored 0.95, while a player measured on all three had to be
+    // high on all three to match. Seen live on 2026-09-21, where a 3-round
+    // player with two n/a ranked 1 of 82 on a single number.
+    const parts = [pFid, pOcc, pGap].map((x) => (x == null ? NEUTRAL_PERCENTILE : x));
     return { ...a, pFid, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
   }).sort((x, y) => y.composite - x.composite);
 }

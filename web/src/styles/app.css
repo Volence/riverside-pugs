@@ -2008,3 +2008,19 @@ tbody tr.is-lifted td { opacity: 0.55; }
   .modal__actions { flex-direction: column-reverse; }
   .modal__actions .btn, .modal__actions .btn--ghost { width: 100%; }
 }
+
+/* A button that reads as a link: used where a name opens a detail view rather
+   than navigating, so it must be a <button> for keyboard and screen readers
+   while still looking like the link it behaves as. */
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linklike:hover { color: var(--fg); }
+.linklike:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
