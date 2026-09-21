@@ -15,7 +15,7 @@ export class FakeTransport implements BotTransport {
   private seq = 0;
 
   // Voice world.
-  channels = new Map<string, { name: string; members: Set<string>; allowed: string[] }>();
+  channels = new Map<string, { name: string; members: Set<string>; allowed: string[]; staffRoleId: string | null }>();
   voiceOf = new Map<string, string>();
   /** userId -> roles they hold. The queue-alert toggle is the only user. */
   rolesOf = new Map<string, Set<string>>();
@@ -108,14 +108,14 @@ export class FakeTransport implements BotTransport {
   };
 
   voice: VoiceOps = {
-    createMatchChannels: async (name, teamA, teamB) => {
+    createMatchChannels: async (name, teamA, teamB, staffRoleId) => {
       if (this.failVoice) throw new Error('missing permissions');
       const categoryId = `cat${++this.seq}`;
       const teamAId = `va${++this.seq}`;
       const teamBId = `vb${++this.seq}`;
-      this.channels.set(categoryId, { name, members: new Set(), allowed: [] });
-      this.channels.set(teamAId, { name: teamA.label, members: new Set(), allowed: teamA.userIds });
-      this.channels.set(teamBId, { name: teamB.label, members: new Set(), allowed: teamB.userIds });
+      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleId: null });
+      this.channels.set(teamAId, { name: teamA.label, members: new Set(), allowed: teamA.userIds, staffRoleId });
+      this.channels.set(teamBId, { name: teamB.label, members: new Set(), allowed: teamB.userIds, staffRoleId });
       return { categoryId, teamAId, teamBId };
     },
     memberVoiceChannel: async (userId) => this.voiceOf.get(userId) ?? null,

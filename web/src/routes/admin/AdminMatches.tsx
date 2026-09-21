@@ -118,6 +118,7 @@ export function AdminMatches() {
             </table>
             </div>
           )}
+          <AdminSyncButton />
         </Panel>
         <Panel class="panel--table">
           <h3>Queue</h3>
@@ -236,6 +237,42 @@ export function AdminMatches() {
           </>
         )}
       </Panel>
+    </div>
+  );
+}
+
+/**
+ * Push every website admin onto every game box, now.
+ *
+ * The push is automatic: it runs whenever someone is made or unmade an admin,
+ * on a sweep, and at boot. This button exists for the moment that automation
+ * cannot help with, which is a box that was down when its turn came. It shows
+ * a line per server rather than one "done", because the answer worth having
+ * is which box did NOT take it.
+ */
+function AdminSyncButton() {
+  const [results, setResults] = useState<{ server: string; ok: boolean; error?: string }[] | null>(null);
+  const { busy, error, run } = useAction(() => {});
+  return (
+    <div class="admin-setting__notice">
+      <p>
+        Every admin on this site gets admin on every server in the list. That happens by itself
+        whenever admin is given or taken away; push it again here if a server was offline at the time.
+      </p>
+      <button class="btn" type="button" disabled={busy}
+        onClick={() => void run(() => adminApi.syncServerAdmins().then((r) => setResults(r.results)))}>
+        {busy ? 'Pushing...' : 'Push admins to servers'}
+      </button>
+      {error && <span class="error">{error}</span>}
+      {results && (
+        <ul class="admin-list">
+          {results.length === 0 ? <li class="muted">No servers are in the pool.</li> : results.map((r) => (
+            <li key={r.server}>
+              {r.server}: {r.ok ? 'up to date' : <span class="error">{r.error ?? 'failed'}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -84,6 +84,7 @@ export class VoiceChannels implements VoiceHook {
         `PUG #${matchId}`,
         { label: 'Team A', userIds: ids('a') },
         { label: 'Team B', userIds: ids('b') },
+        getSetting(db, 'discord_staff_role_id') || null,
       );
       db.prepare('INSERT INTO discord_voice (match_id, category_id, team_a_id, team_b_id) VALUES (?, ?, ?, ?)')
         .run(matchId, made.categoryId, made.teamAId, made.teamBId);

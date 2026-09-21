@@ -29,6 +29,22 @@ beforeEach(() => {
 });
 
 describe('VoiceChannels', () => {
+  // Owner, 2026-09-21: staff should be able to drop into either team's
+  // channel without being on the roster.
+  it('lets the configured staff role into both team channels', async () => {
+    setSetting(db, 'discord_staff_role_id', '1539967662388551791');
+    await v.ensure(matchId);
+    const ids = v.channelsFor(matchId)!;
+    expect(t.channels.get(ids.teamAId)!.staffRoleId).toBe('1539967662388551791');
+    expect(t.channels.get(ids.teamBId)!.staffRoleId).toBe('1539967662388551791');
+  });
+
+  it('leaves the channels role-free when no staff role is set', async () => {
+    await v.ensure(matchId);
+    const ids = v.channelsFor(matchId)!;
+    expect(t.channels.get(ids.teamAId)!.staffRoleId).toBeNull();
+  });
+
   it('creates one category with team channels open only to linked players, once', async () => {
     await v.ensure(matchId);
     await v.ensure(matchId);
@@ -114,7 +130,7 @@ describe('VoiceChannels', () => {
   describe('handing players back before the channels go', () => {
     /** Park a real channel in the fake for someone to have come from. */
     const parkIn = (userId: string, channelId: string) => {
-      if (!t.channels.has(channelId)) t.channels.set(channelId, { name: channelId, members: new Set(), allowed: [] });
+      if (!t.channels.has(channelId)) t.channels.set(channelId, { name: channelId, members: new Set(), allowed: [], staffRoleId: null });
       t.channels.get(channelId)!.members.add(userId);
       t.voiceOf.set(userId, channelId);
     };
@@ -129,7 +145,7 @@ describe('VoiceChannels', () => {
 
     it('hands everyone back the moment the match ends, not ten minutes later', async () => {
       setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
-      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
       parkIn('900', 'general');
       await v.ensure(matchId);
       t.moves.length = 0;
@@ -155,7 +171,7 @@ describe('VoiceChannels', () => {
 
     it('sends a player with no remembered origin to the configured lobby', async () => {
       setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
-      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
       await v.ensure(matchId);
       // Walked into the team channel on their own, so nothing was remembered.
       // voiceOf as well as members: that pair is what the fake keeps
@@ -171,7 +187,7 @@ describe('VoiceChannels', () => {
 
     it('falls back to the lobby when the channel they came from is gone', async () => {
       setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
-      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [] });
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
       parkIn('900', 'general');
       await v.ensure(matchId);
       t.channels.delete('general');

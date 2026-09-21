@@ -23,6 +23,7 @@ import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
+import type { ServerAdminSync } from '../serverAdmins.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -36,12 +37,15 @@ export interface AdminRouteOpts {
   /** Probes one server for the dlc4 mappack. Injected in tests so the check
    *  never dials a real box; defaults to the real serverHasDlc4, which does. */
   dlc4Probe?: (server: ServerRow) => Promise<boolean>;
+  /** Pushes the website's admin list to every box. Absent in tests that do
+   *  not exercise it, where the route reports that rather than pretending. */
+  adminSync?: ServerAdminSync;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -304,6 +308,24 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     // target id, unlike server_idle/server_enable which target one.
     logAdmin(db, adminId, 'server_dlc4_check', 'all', { results });
     broadcast('refresh');
+    return { results };
+  });
+
+  /**
+   * Put every website admin on every box now.
+   *
+   * There is a sweep and a push on every `set_admin`, so this is the manual
+   * repair: an admin who has just been told "I still have no admin on
+   * Chicago" wants to fix it and see per-box confirmation, not wait fifteen
+   * minutes and hope. Returns a row per server, failures included, because
+   * "it worked on three of four" is the answer that actually needs showing.
+   */
+  app.post('/api/admin/servers/admins-sync', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    if (!adminSync) return reply.code(503).send({ error: 'admin sync is not configured on this server' });
+    const results = await adminSync.sync();
+    logAdmin(db, adminId, 'server_admins_sync', 'all', { results });
     return { results };
   });
 

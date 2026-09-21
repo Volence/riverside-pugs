@@ -113,7 +113,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
   };
 
   const voice: VoiceOps = {
-    async createMatchChannels(name, teamA, teamB) {
+    async createMatchChannels(name, teamA, teamB, staffRoleId) {
       const me = client.user!.id;
       // An overwrite for someone who is not in the guild is rejected by
       // Discord, which would fail the whole channel; keep members only.
@@ -128,7 +128,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         return out;
       };
       const category = await guild.channels.create({ name, type: ChannelType.GuildCategory });
-      const make = async (label: string, ids: string[]) => guild.channels.create({
+      const make = async (label: string, ids: string[], staff: string | null) => guild.channels.create({
         name: label,
         type: ChannelType.GuildVoice,
         parent: category.id,
@@ -138,14 +138,34 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
             id, type: OverwriteType.Member,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
           })),
+          // MoveMembers as well as Connect: sorting someone into the right
+          // team channel is the reason staff are in here at all.
+          ...(staff ? [{
+            id: staff, type: OverwriteType.Role,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.MoveMembers],
+          }] : []),
           {
             id: me, type: OverwriteType.Member,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.MoveMembers, PermissionFlagsBits.ManageChannels],
           },
         ],
       });
-      const a = await make(teamA.label, teamA.userIds);
-      const b = await make(teamB.label, teamB.userIds);
+      // The staff overwrite is the one part of this that depends on a setting
+      // naming a role the bot may not be allowed to grant, and a rejected
+      // overwrite fails the whole channel. Team voice for a live match must
+      // not be lost over it, so a failure retries once without staff and says
+      // so, rather than taking the match's voice down with it.
+      const makeSafe = async (label: string, ids: string[]) => {
+        if (!staffRoleId) return make(label, ids, null);
+        try {
+          return await make(label, ids, staffRoleId);
+        } catch (err) {
+          console.error(`[discord] staff role ${staffRoleId} could not be added to ${label}; creating it without:`, err);
+          return make(label, ids, null);
+        }
+      };
+      const a = await makeSafe(teamA.label, teamA.userIds);
+      const b = await makeSafe(teamB.label, teamB.userIds);
       return { categoryId: category.id, teamAId: a.id, teamBId: b.id };
     },
     async memberVoiceChannel(userId) {

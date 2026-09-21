@@ -49,6 +49,7 @@ import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
+import { ServerAdminSync } from './serverAdmins.js';
 import { LogListener } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
@@ -390,6 +391,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }),
   });
 
+  // Website admins get the same rights on every box. Same replica model as
+  // banSync above and the same injected exec, but it writes a file (SourceMod
+  // has no console command that adds an admin) and then asks for a reload.
+  const adminSync = new ServerAdminSync({
+    db: deps.db,
+    exec: deps.serverExec ?? (async (server, commands) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        for (const c of commands) await rcon.exec(c);
+      } finally {
+        rcon.close();
+      }
+    }),
+  });
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
@@ -687,6 +704,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   if (!deps.config.devMode) {
     banSync.start();
     banSync.sweep().catch((err) => console.error('[serverBans] boot sweep failed:', err));
+    adminSync.start();
+    void adminSync.sync();
   }
 
   const reaper = setInterval(() => {
@@ -839,12 +858,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     stopTwitchPoll?.();
     clearTimeout(pruneOnBoot);
     banSync.stop();
+    adminSync.stop();
     if (logListener) await logListener.close();
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
-    dlc4Probe: deps.dlc4Probe,
+    dlc4Probe: deps.dlc4Probe, adminSync,
   });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });

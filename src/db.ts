@@ -551,6 +551,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   require_voice_to_ready: '1',
   discord_invite_url: '',
   // Private channel the bot posts the admin feed to; empty turns the feed off.
+  // Empty is the off state: no role is let into the team voice channels.
+  discord_staff_role_id: '',
   discord_admin_channel_id: '',
   // Where match results are posted. Empty keeps them in the queue channel.
   discord_results_channel_id: '',
@@ -575,6 +577,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // Where a server is sent after a cancelled match empties it. No Mercy 1 is
   // the stock default map, so an idle box looks the way a fresh one does.
   reset_map: 'l4d_hospital01_apartment',
+  // SourceMod flags a website admin gets on every game box. Root, to match
+  // the hand-written entries already in admins_simple.ini rather than create
+  // a second tier nobody can keep straight (owner, 2026-09-21).
+  server_admin_flags: 'z',
   // Reconnect allowance per player per match, and whether the game unpauses
   // itself once everyone is back. Pushed to the plugin at match setup.
   leave_budget_seconds: '300',

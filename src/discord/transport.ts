@@ -82,6 +82,9 @@ export interface VoiceOps {
     name: string,
     teamA: { label: string; userIds: string[] },
     teamB: { label: string; userIds: string[] },
+    /** A role let into BOTH team channels, or null for none. Staff, so an
+     *  admin can drop into either side without being on the roster. */
+    staffRoleId: string | null,
   ): Promise<{ categoryId: string; teamAId: string; teamBId: string }>;
   /** The voice channel a guild member is sitting in, or null. */
   memberVoiceChannel(userId: string): Promise<string | null>;
