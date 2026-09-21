@@ -66,6 +66,7 @@ import {
   recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
+import { recordPresenceLine } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
@@ -638,6 +639,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             .catch((err) => console.error('[abandon] failed:', err));
           return;
         }
+        if (ev.kind === 'leave' || ev.kind === 'return') {
+          // The live board's view of who is missing. Guarded like everything
+          // here that is not the result path: a database error must not take
+          // down the listener that also carries match_end.
+          try {
+            const change = recordPresenceLine(deps.db, ev);
+            if (change?.changed) hub.broadcast('refresh');
+          } catch (err) {
+            console.error('[presence] failed to record', ev.kind, err);
+          }
+          return;
+        }
         if (ev.kind === 'problem') {
           // The plugin could not do part of a teardown (today: the game never
           // unpaused). The match is already aborted; this is for the admin
@@ -707,6 +720,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
             recordPlayerConnect(deps.db, ev.token, ev.steamid);
+            // A 'refresh' on top of the 'live' every feed line ends with: the
+            // admin board listens for refresh only, because 'live' fires ten
+            // times a second. Only a real change, so the connect pulse of a map
+            // change wakes nobody.
+            if (recordPresenceLine(deps.db, ev)?.changed) hub.broadcast('refresh');
             // The plugin emits this from OnClientPostAdminCheck, which only
             // fires once the client is fully in game, so it is an entry too.
             // The engine's own "entered the game" line normally gets here
