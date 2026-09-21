@@ -1098,6 +1098,26 @@ describe('MapDetail', () => {
     expect(foot).toBeTruthy();
     expect(within(foot).getByText('6.7')).toBeTruthy();
   });
+
+  it('keeps boomer % a pooled rate under the per-map tab', async () => {
+    // A median over a median is not a rate: this player landed 5 of 12, which
+    // is 42%, but their median match was 2 successes from 1 spawn. Dividing
+    // those gives 200%, a figure no player can score.
+    mockApi.map.mockResolvedValue({
+      ...mapData,
+      players: [{
+        steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
+        stats: { boomer_spawns: 12, boom_successes: 5 },
+        medianStats: { boomer_spawns: 1, boom_successes: 2 },
+      }],
+    });
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Records on this map')).toBeTruthy());
+
+    const body = container.querySelector('.lb tbody') as HTMLElement;
+    expect(within(body).getByText('42')).toBeTruthy();
+    expect(within(body).queryByText('200')).toBeNull();
+  });
 });
 
 const markDefs = [

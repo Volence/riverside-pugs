@@ -23,11 +23,18 @@ export function MapDetail({ map }: { map: string }) {
   }
   if (!data) return <PageSkeleton variant="list" panels={2} />;
 
-  const players: MapLeaderRow[] = data.players.map((p) => ({
-    ...p,
-    stats: deriveLiveStats(p.stats ?? {}),
-    medianStats: deriveLiveStats(p.medianStats ?? {}),
-  }));
+  const players: MapLeaderRow[] = data.players.map((p) => {
+    const stats = deriveLiveStats(p.stats ?? {});
+    // boomer_rate is a pooled ratio under both tabs. Deriving it from the
+    // medians instead divides one median by another, which is not a rate the
+    // player ever landed and can read above 100%: a median of 2 successes
+    // over a median of 1 spawn is 200%. The pooled figure is the same rule
+    // StatTable applies, and the same one the profile tile follows.
+    const medianStats = { ...(p.medianStats ?? {}) };
+    delete medianStats.boomer_rate;
+    if (stats.boomer_rate !== undefined) medianStats.boomer_rate = stats.boomer_rate;
+    return { ...p, stats, medianStats };
+  });
   // The map's own baseline, pooled over EVERY player-map at once, so a player
   // row has something to be read against. Still a mean, deliberately: pooling
   // is what makes it the map's figure rather than an average of per-player
