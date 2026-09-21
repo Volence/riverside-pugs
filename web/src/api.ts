@@ -698,6 +698,11 @@ export interface ReportEligibility {
   targets?: { steamid: string; name: string; alreadyReported: boolean }[];
 }
 
+export interface MyReport {
+  id: number; targetId: string; targetName: string | null; category: string;
+  matchId: number | null; createdAt: string; status: 'open' | 'closed';
+}
+
 /** One row of the integrity board. occZ, teamGap, pOcc and pGap are nullable:
  *  a map with too little recorded history gets no occupancy score at all, and
  *  that must never be confused with an average (0) score. composite is a sort
@@ -980,6 +985,9 @@ export const api = {
     get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
   report: (matchId: number, targetId: string, category: string, text: string) =>
     post(`/api/matches/${matchId}/reports`, { targetId, category, text }),
+  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: { ordinal: number; half: number; tMs: number } }) =>
+    post('/api/reports', body),
+  myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   ready: () => post('/api/lobby/ready'),

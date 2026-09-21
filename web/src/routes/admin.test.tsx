@@ -188,7 +188,7 @@ describe('ReportPlayer', () => {
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'afk' } });
     fireEvent.click(screen.getByText('Send report'));
     await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(7, '5', 'afk', ''));
-    await waitFor(() => expect(screen.getByText(/An admin will look at it/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/The moderators will look at it/)).toBeTruthy());
   });
 
   it('shows why reporting is closed', async () => {

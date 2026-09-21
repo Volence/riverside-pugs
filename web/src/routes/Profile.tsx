@@ -1,4 +1,4 @@
-import { api } from '../api';
+import { api, ApiError, modApi } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
 import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
@@ -8,6 +8,8 @@ import { Headliner } from '../components/Headliner';
 import { Figures, Figure, RankBadge } from '../components/PageHeader';
 import { DiscordLinkCard } from '../components/DiscordLink';
 import { ProfileEdit } from '../components/ProfileEdit';
+import { ReportPlayer } from '../components/ReportPlayer';
+import { MyReports } from '../components/MyReports';
 import { SocialChips } from '../components/SocialChips';
 import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
@@ -19,6 +21,7 @@ export function Profile(
   // Per map by default: a career total on the per-map table mostly reports
   // which maps come up most in the rotation, not how the player does on them.
   const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
+  const [ticketError, setTicketError] = useState<string | null>(null);
 
   if (error) {
     return (
@@ -77,6 +80,27 @@ export function Profile(
 
         <SocialChips links={data.social} twitchName={player.twitchName} />
 
+        {session?.kind === 'active' && session.me.steamid !== steamid && (
+          <div class="admin-actions">
+            <ReportPlayer target={{ steamid, name: player.name }} />
+            {(session.me.isAdmin || session.me.isMod) && (
+              <button class="chip" type="button"
+                onClick={async () => {
+                  setTicketError(null);
+                  try {
+                    const r = await modApi.open(steamid, '', false);
+                    location.href = `/admin?ticket=${r.ticketId}`;
+                  } catch (err) {
+                    setTicketError(err instanceof ApiError ? err.message : 'Could not open a ticket.');
+                  }
+                }}>
+                Open a ticket
+              </button>
+            )}
+            {ticketError && <p class="error">{ticketError}</p>}
+          </div>
+        )}
+
         {session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid && (
           <Panel>
             <DiscordLinkCard me={session.me} onChange={refresh} />
@@ -88,6 +112,7 @@ export function Profile(
             />
           </Panel>
         )}
+        {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}
 
         <Panel>
           <h3>Rating over time</h3>
