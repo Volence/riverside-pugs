@@ -28,8 +28,8 @@ describe('ChemistryPanel', () => {
     );
     expect(screen.getByText('Most played with')).toBeTruthy();
     expect(screen.getByText('12 games')).toBeTruthy();
-    expect(screen.getByText('71% over 7')).toBeTruthy();
-    expect(screen.getByText('17% over 6')).toBeTruthy();
+    expect(screen.getByText('won 71% of 7 games')).toBeTruthy();
+    expect(screen.getByText('won 17% of 6 games')).toBeTruthy();
     expect((screen.getByText('ann') as HTMLAnchorElement).getAttribute('href')).toContain('/player/');
   });
 

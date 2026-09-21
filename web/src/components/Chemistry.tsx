@@ -2,7 +2,10 @@ import type { Chemistry, ChemistryLine } from '../api';
 import { Panel, PlayerLink } from './bits';
 
 const games = (n: number) => `${n} game${n === 1 ? '' : 's'}`;
-const rate = (l: ChemistryLine) => `${Math.round(l.winRate * 100)}% over ${l.games}`;
+// Says whose percentage it is and of what. "90% over 10" left people asking
+// whether 47% against somebody meant games won or games lost: it is always
+// this player's own win rate, in the games shared with the one named.
+const rate = (l: ChemistryLine) => `won ${Math.round(l.winRate * 100)}% of ${games(l.games)}`;
 
 /**
  * Who this player wins with and loses to. Three lines and no more.
