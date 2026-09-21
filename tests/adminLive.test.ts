@@ -121,3 +121,20 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
     expect(getPresence(db, matchId, DROPPED)).toMatchObject({ remaining_s: 210, held: 0 });
   });
 });
+
+describe('GET /api/admin/live', () => {
+  it('is admin only', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[PLAYER] })).statusCode).toBe(403);
+  });
+
+  it('shows the dropped player, and shows the hold the moment the plugin confirms it', async () => {
+    const get = async () => (await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[ADMIN] })).json();
+    const before = await get();
+    expect(before.matches).toHaveLength(1);
+    expect(before.matches[0].teamA.find((p: { steamid: string }) => p.steamid === DROPPED).status).toMatchObject({ kind: 'dropped', held: false });
+    await act({ action: 'hold' });
+    const after = await get();
+    expect(after.matches[0].teamA.find((p: { steamid: string }) => p.steamid === DROPPED).status).toMatchObject({ kind: 'dropped', held: true, remainingS: 200 });
+    expect(after.matches[0].leaveControl).toBe('ok');
+  });
+});

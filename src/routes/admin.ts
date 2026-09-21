@@ -31,6 +31,7 @@ import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAut
 import { endSessions } from '../session.js';
 import { applyLeaveState, isRostered } from '../presence.js';
 import { LEAVE_ACTIONS, LEAVE_ADD_MAX_S, leaveCommand, parseLeaveReply, type LeaveAction, type ServerQuery } from '../leaveControl.js';
+import { buildLiveBoard, type VoiceLookup } from '../admin/liveBoard.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -55,6 +56,10 @@ export interface AdminRouteOpts {
   /** Runs one console command on one server and returns its reply. Absent in
    *  tests that do not exercise it, where the route says so. */
   serverQuery?: ServerQuery;
+  /** Who is in a Discord voice channel, for the live board's "not in a voice
+   *  channel" reason. Null or absent when Discord is not configured, and then
+   *  the board simply never gives that reason. */
+  voice?: VoiceLookup | null;
   /** Asks Steam about one player now and resolves with the rows written.
    *  Absent on an install with no Steam api key, where the route says so. */
   refreshSignals?: (steamid: string) => Promise<number>;
@@ -312,6 +317,11 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     logAdmin(db, adminId, 'void_match', id, { reason: reason.trim() });
     broadcast('refresh');
     return { ok: true };
+  });
+
+  app.get('/api/admin/live', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return buildLiveBoard(db, { voice: opts.voice ?? null });
   });
 
   /**

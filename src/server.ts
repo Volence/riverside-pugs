@@ -1099,6 +1099,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
     dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
+    voice: deps.config.discord !== null ? presence : null,
     logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
