@@ -35,6 +35,10 @@ function resolve(
   deps: TicketButtonDeps, userId: string, ticketId: number,
 ): { me: string; ticket: TicketRow } | { reply: InteractionReply } {
   const p = playerByDiscordId(deps.db, userId);
+  // Staff first, before the ticket is so much as looked up: the two refusals
+  // read differently, so anyone who is not staff must always get the same one,
+  // whatever ticket id they press. Otherwise the pair is a probe for which
+  // ticket ids exist.
   if (!p || p.status !== 'active' || (p.is_admin !== 1 && p.is_mod !== 1)) return { reply: say(STAFF_ONLY) };
   const ticket = getTicketRow(deps.db, ticketId);
   if (!ticket || !canSeeTicket(deps.db, ticket, p.steamid)) return { reply: say(NO_TICKET) };
