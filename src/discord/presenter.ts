@@ -1,4 +1,5 @@
 import type { ActionRow, Button, Embed, MessagePayload } from './transport.js';
+import { ENDORSE_KINDS, ENDORSE_LABEL, type EndorseKind } from '../endorsements.js';
 
 /**
  * Pure renderers: state in, Discord message payload out.
@@ -302,7 +303,70 @@ export function renderResult(v: ResultView): MessagePayload {
         { name: `Team B · ${v.scoreB}`, value: v.teamB.map(srChange).join('\n') || '_nobody_', inline: true },
       ],
     }],
-    components: [[link(`${v.publicUrl}/match/${v.matchId}`, 'Match page')]],
+    // Endorse rides the card the bot already posts, and everything after the
+    // click is ephemeral. No DM, nothing added to the channel: a player who
+    // never clicks it is never contacted about it.
+    components: [[
+      link(`${v.publicUrl}/match/${v.matchId}`, 'Match page'),
+      { kind: 'button', customId: `m:${v.matchId}:endorse`, label: 'Endorse', style: 'secondary' },
+    ]],
+    mentionUserIds: [],
+  };
+}
+
+// ---------- endorsements (ephemeral) ----------
+
+export interface EndorsePickerView {
+  matchId: number;
+  budget: number;
+  remaining: number;
+  /** What just happened, shown above the prompt. Already safe to print. */
+  notice?: string;
+  candidates: { steamid: string; name: string; given: EndorseKind | null }[];
+}
+
+/** Discord refuses a button label over 80 characters. */
+const LABEL_MAX = 80;
+
+/**
+ * The seven other players as buttons. Seven is two rows, well inside
+ * Discord's five by five, so this needs no new component type.
+ *
+ * Button labels are plain text, not markdown, so names are not escaped here.
+ */
+export function renderEndorsePicker(v: EndorsePickerView): MessagePayload {
+  const head = v.remaining > 0
+    ? `**Endorse players from PUG #${v.matchId}.** ${v.remaining} of ${v.budget} left. It is anonymous: nobody is told who endorsed them.`
+    : `You have given all your endorsements for PUG #${v.matchId}. Thanks.`;
+  const rows: ActionRow[] = [];
+  for (let i = 0; i < v.candidates.length && rows.length < 5; i += 5) {
+    rows.push(v.candidates.slice(i, i + 5).map((c) => ({
+      kind: 'button' as const,
+      customId: `e:${v.matchId}:p:${c.steamid}`,
+      label: (c.given ? `${c.name || c.steamid}: ${ENDORSE_LABEL[c.given]}` : (c.name || c.steamid)).slice(0, LABEL_MAX),
+      style: c.given ? 'success' as const : 'secondary' as const,
+      disabled: c.given !== null || v.remaining <= 0,
+    })));
+  }
+  return {
+    content: v.notice ? `${v.notice}\n${head}` : head,
+    embeds: [],
+    components: rows,
+    mentionUserIds: [],
+  };
+}
+
+/** Step two: which kind. There is no negative option, by design. */
+export function renderEndorseKinds(v: { matchId: number; steamid: string; name: string }): MessagePayload {
+  return {
+    content: `Endorse **${escapeName(v.name)}** for:`,
+    embeds: [],
+    components: [[
+      ...ENDORSE_KINDS.map((k) => ({
+        kind: 'button' as const, customId: `e:${v.matchId}:k:${v.steamid}:${k}`, label: ENDORSE_LABEL[k], style: 'primary' as const,
+      })),
+      { kind: 'button' as const, customId: `m:${v.matchId}:endorse`, label: 'Back', style: 'secondary' as const },
+    ]],
     mentionUserIds: [],
   };
 }

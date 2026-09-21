@@ -149,6 +149,8 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** The endorsement title they have earned, if any. */
+  title?: EndorseKind | null;
 }
 
 export interface Leaderboard {
@@ -180,6 +182,8 @@ export interface MatchPlayerStats {
   /** Skill-detect stats, already filtered server-side for the viewer: a
    *  self-visibility stat is present only when the viewer is the subject. */
   stats: Record<string, number>;
+  /** The endorsement title they have earned, if any. */
+  title?: EndorseKind | null;
 }
 
 export interface StatDef {
@@ -462,6 +466,42 @@ export interface StreamsView {
   offlineTotal: number;
 }
 
+export type EndorseKind = 'caller' | 'clutch' | 'vibes';
+
+/** One player's endorse panel for one match. `given` is the viewer's OWN
+ *  choices; nothing anywhere says who endorsed whom. */
+export interface EndorseState {
+  eligible: boolean;
+  reason: string | null;
+  /** UTC, `YYYY-MM-DD HH:MM:SS`. */
+  closesAt: string | null;
+  budget: number;
+  remaining: number;
+  given: { to: string; kind: EndorseKind }[];
+  candidates: { steamid: string; name: string; team: Team }[];
+}
+
+export interface PendingEndorsement { matchId: number; remaining: number }
+
+/** One line of the profile's chemistry panel. `winRate` is 0 to 1. */
+export interface ChemistryLine { steamid: string; name: string; games: number; wins: number; winRate: number }
+
+/** Null lines are absent lines: the two rates are gated by a minimum number
+ *  of shared games and are simply not shown until somebody clears it. */
+export interface Chemistry {
+  mostPlayedWith: ChemistryLine | null;
+  bestWith: ChemistryLine | null;
+  worstAgainst: ChemistryLine | null;
+}
+
+/** Aggregate and anonymous: what was received, never from whom. */
+export interface EndorsementSummary {
+  counts: Record<EndorseKind, number>;
+  total: number;
+  perMatch: number;
+  title: EndorseKind | null;
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -499,6 +539,10 @@ export interface Profile {
    *  Keyed like the stat bag, plus `winrate` and `boomer_rate`. Empty for a
    *  provisional player. */
   standings?: Record<string, Standing>;
+  /** Optional only for a server older than the feature. */
+  chemistry?: Chemistry;
+  /** Optional only for a server older than the feature. */
+  endorsements?: EndorsementSummary;
 }
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share. */
@@ -949,6 +993,12 @@ export const api = {
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
     get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
+  endorseState: (matchId: number, signal?: AbortSignal) =>
+    get<EndorseState>(`/api/matches/${matchId}/endorse`, signal),
+  endorse: (matchId: number, to: string, kind: EndorseKind) =>
+    post<{ ok: true; remaining: number; state: EndorseState }>(`/api/matches/${matchId}/endorse`, { to, kind }),
+  endorsePending: (signal?: AbortSignal) =>
+    get<{ pending: PendingEndorsement[] }>('/api/endorse/pending', signal),
   profile: (steamid: string, signal?: AbortSignal) =>
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 

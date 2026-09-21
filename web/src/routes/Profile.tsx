@@ -9,6 +9,8 @@ import { Figures, Figure, RankBadge } from '../components/PageHeader';
 import { DiscordLinkCard } from '../components/DiscordLink';
 import { ProfileEdit } from '../components/ProfileEdit';
 import { SocialChips } from '../components/SocialChips';
+import { ChemistryPanel } from '../components/Chemistry';
+import { EndorsementCounts } from '../components/TitleTag';
 import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 
@@ -66,6 +68,7 @@ export function Profile(
           countryLabel={countryName(player.country)}
           countryFlag={countryFlag(player.country)}
           bio={player.bio}
+          title={data.endorsements?.title}
           rating={rating ? rating.sr : null}
           delta={lastDelta}
           stats={rating ? [
@@ -98,6 +101,9 @@ export function Profile(
           totals={totals} statTotals={statTotals} rating={rating}
           standings={data.standings ?? {}} statDefs={data.statDefs}
         />
+
+        <ChemistryPanel chemistry={data.chemistry} />
+        <EndorsementCounts endorsements={data.endorsements} />
 
         <div class="profile-grid">
           <Panel>

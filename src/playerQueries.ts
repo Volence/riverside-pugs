@@ -5,6 +5,8 @@ import { getPlayer, currentSeasonId, getProfileFields, socialLinks } from './pla
 import { STAT_DEFS, statDef } from './statKeys.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
+import { chemistryFor } from './chemistry.js';
+import { allTitles, endorsementSummary } from './endorsements.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
  *  number on the site and the same number in Discord come from one query. */
@@ -65,6 +67,10 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
     'SELECT COUNT(DISTINCT match_id) AS matchesRated FROM rating_history WHERE season_id = ?',
   ).get(seasonId) as { matchesRated: number };
 
+  // The title is the part of an endorsement that travels. One pass over the
+  // whole table, not a lookup per row.
+  const titles = allTitles(db);
+
   return {
     season,
     matchesRated,
@@ -73,6 +79,7 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
         steamid: r.steamid, name: r.name, avatar: r.avatar,
         sr: displaySr(r.mu, r.sigma), wins: r.wins, losses: r.losses, games: r.games,
         ranked: r.games >= RANKED_MIN_GAMES,
+        title: titles.get(r.steamid) ?? null,
         stats: statsBy.get(r.steamid) ?? {},
       }))
       .sort((x, y) => y.sr - x.sr),
@@ -155,6 +162,12 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // Top-5 places this season, per match, among ranked players. Keyed like
     // the stat bag plus `winrate` and `boomer_rate`.
     standings: playerStandings(db, seasonId, steamid),
+    // Who they win with and lose to. Three lines, computed per request: it is
+    // one grouped query over an indexed primary key.
+    chemistry: chemistryFor(db, steamid),
+    // Aggregate and anonymous: counts per kind, a per match rate and the
+    // title. Never who gave them.
+    endorsements: endorsementSummary(db, steamid),
     // How this player does on each map, across every match. Only meaningful
     // once per-map capture exists, so older matches contribute win/loss with
     // an empty stat bag rather than being omitted.

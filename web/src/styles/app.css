@@ -2024,3 +2024,20 @@ tbody tr.is-lifted td { opacity: 0.55; }
 }
 .linklike:hover { color: var(--fg); }
 .linklike:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- endorsements ---------- */
+
+.endorse { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.endorse__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.endorse__name { font-weight: 600; }
+.endorse__kinds { display: inline-flex; gap: var(--sp-2); flex-wrap: wrap; }
+.endorse__error { color: var(--loss); margin: var(--sp-2) 0 0; }
+
+.endorsebar { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4); font-size: var(--fs-dense); border-bottom: 1px solid var(--border); }
+.endorsebar__dismiss { background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: inherit; padding: 0 var(--sp-1); }
+.endorsebar__dismiss:hover { color: var(--text-bright); }
+
+/* The earned word beside a name. Also used inside the endorse panel for a
+   choice already made. One neutral treatment for all three kinds: the word is
+   the payoff, and three colours would turn rosters into confetti. */
+.titletag { display: inline-block; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); border: 1px solid var(--border-strong); border-radius: 2px; padding: 0 var(--sp-1); margin-left: var(--sp-2); vertical-align: middle; white-space: nowrap; }

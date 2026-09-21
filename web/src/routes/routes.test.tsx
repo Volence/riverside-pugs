@@ -26,6 +26,7 @@ const { mockApi } = vi.hoisted(() => ({
     linkDiscordCode: vi.fn(),
     site: vi.fn(),
     unlinkDiscord: vi.fn(),
+    endorseState: vi.fn(),
   },
 }));
 
@@ -59,6 +60,12 @@ beforeEach(() => {
   // mock existed; tests that care about the queue panel override it.
   mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
   mockApi.seasons.mockResolvedValue({ seasons: [] });
+  // Every MatchDetail fixture rendered with a signed-in viewer reaches
+  // EndorsePanel, which polls this on mount. Without a default it rejects and
+  // exercises only the panel's failure path, whichever test happens to render it.
+  mockApi.endorseState.mockResolvedValue({
+    eligible: false, reason: 'not_rostered', closesAt: null, budget: 2, remaining: 0, given: [], candidates: [],
+  });
 });
 
 describe('Leaderboard', () => {

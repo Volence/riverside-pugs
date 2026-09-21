@@ -43,12 +43,36 @@ const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
   ['match_live_map_stats', 'player_id'],
   ['match_readyup_players', 'player_id'],
+  // Both predate this branch. player_id is the whole key on twitch_status and
+  // part of it on player_links, so the same keep-the-occupied-slot rule
+  // applies: whichever account already has a link for a platform, or a
+  // cached Twitch row, keeps it.
+  ['player_links', 'player_id'],
+  ['twitch_status', 'player_id'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
  *  a fault. Routes turn this into a 400 and let everything else be a 500, so
  *  a programming error is never disguised as bad input. */
 export class MergeError extends Error {}
+
+/** Every (table, column) pair the merge rewrites when folding `from` into
+ *  `into`: PLAIN and KEYED, plus the tables handled by hand because their key
+ *  or their arithmetic does not fit either list. A test enumerates every
+ *  foreign key that actually points at players and checks it against this,
+ *  so a table added later without being taught to the merge fails loudly
+ *  instead of throwing at merge time on whoever happens to hold a row in it. */
+export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
+  ...PLAIN,
+  ...KEYED,
+  ['match_players', 'player_id'],
+  ['match_player_stats', 'player_id'],
+  ['player_ratings', 'player_id'],
+  ['rating_history', 'player_id'],
+  ['player_aliases', 'canonical_id'],
+  ['endorsements', 'from_id'],
+  ['endorsements', 'to_id'],
+];
 
 export interface MergePlan {
   from: string;
@@ -87,6 +111,7 @@ export function mergePlayers(
   note('match_player_stats', count('SELECT COUNT(*) AS n FROM match_player_stats WHERE player_id = ?', from));
   note('player_ratings', count('SELECT COUNT(*) AS n FROM player_ratings WHERE player_id = ?', from));
   note('rating_history', count('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?', from));
+  note('endorsements', count('SELECT COUNT(*) AS n FROM endorsements WHERE from_id = ? OR to_id = ?', from, from));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -159,6 +184,18 @@ export function mergePlayers(
     //    recompute below rebuilds them from the merged rosters.
     db.prepare('DELETE FROM rating_history WHERE player_id IN (?, ?)').run(from, into);
     db.prepare('DELETE FROM player_ratings WHERE player_id = ?').run(from);
+
+    // 4. Endorsements have TWO player columns inside one primary key
+    //    (match_id, from_id, to_id), so they fit neither PLAIN nor KEYED: a
+    //    row can collide on either column independently of the other. Each
+    //    column is moved and its leftovers dropped in turn, the same way
+    //    KEYED does it, then a row that now points at the same player on
+    //    both sides is dropped rather than survive as a self endorsement.
+    db.prepare('UPDATE OR IGNORE endorsements SET from_id = ? WHERE from_id = ?').run(into, from);
+    db.prepare('DELETE FROM endorsements WHERE from_id = ?').run(from);
+    db.prepare('UPDATE OR IGNORE endorsements SET to_id = ? WHERE to_id = ?').run(into, from);
+    db.prepare('DELETE FROM endorsements WHERE to_id = ?').run(from);
+    db.prepare('DELETE FROM endorsements WHERE from_id = to_id').run();
 
     // The alias outlives the player row and is the whole reason this merge
     // is not a one-off tidy-up: without it the same person logs in on the
