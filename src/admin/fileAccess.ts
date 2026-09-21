@@ -46,17 +46,20 @@ export function canOpenFile(db: DB, viewer: FileViewer, targetSteamid: string): 
  *  is listed here so the Standing section has one name to ask about.
  *  `review_round` marks a round reviewed from the replay analyzer; it is
  *  admin-only so that control comes from an explicit permission rather than
- *  the viewer inferring "this is an admin" from `actions.includes('ban')`. */
+ *  the viewer inferring "this is an admin" from `actions.includes('ban')`.
+ *  `steam_refresh` is the same idea for the Steam account panel's "Check
+ *  now": it used to borrow `merge`, an unrelated permission, to decide who
+ *  may re-query Steam for an account. */
 export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
-  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round';
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
 
 /** A moderator writes a note, marks a file looked at, and opens a ticket. A
  *  moderator bans only from a ticket and only up to the configured cap,
  *  which is the tickets route and is not reachable from here. */
 const MOD_ACTIONS: FileAction[] = ['note', 'looked_at', 'open_ticket'];
 const ADMIN_ACTIONS: FileAction[] = [
-  ...MOD_ACTIONS, 'ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags', 'review_round',
+  ...MOD_ACTIONS, 'ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags', 'review_round', 'steam_refresh',
 ];
 
 export function fileActions(db: DB, viewer: FileViewer, target: string): FileAction[] {

@@ -1610,6 +1610,42 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .admin-checks label, .admin-toggle { display: inline-flex; gap: var(--sp-2); align-items: center; }
 @media (max-width: 640px) { .admin-setting { grid-template-columns: minmax(0, 1fr); } }
 
+/* ---- Player File (People desk) ---- */
+
+.file { display: flex; flex-direction: column; gap: var(--sp-3); }
+.file-head { display: flex; gap: var(--sp-3); align-items: flex-start; flex-wrap: wrap; }
+.file-head__avatar { width: 56px; height: 56px; border-radius: 2px; }
+.file-head h2 { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.file-head .admin-actions { margin-left: auto; margin-top: 0; }
+.file-glance { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+.file-glance p { margin: var(--sp-1) 0; }
+.file-section h3 { margin-top: 0; }
+
+/* One neutral badge for every source, the same shape as .titletag: colouring
+   "LilAC" differently from "note" would read as a severity, and nothing on
+   this page is a verdict. */
+.source-badge {
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted);
+  border: 1px solid var(--border-strong); border-radius: 2px;
+  padding: 0 var(--sp-1); white-space: nowrap;
+}
+
+.timeline__chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-2); }
+.timeline { list-style: none; margin: 0; padding: 0; font-size: var(--fs-dense); }
+.timeline__row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem;
+  padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere;
+}
+.timeline__when { white-space: nowrap; }
+.timeline__text { flex: 1 1 18rem; }
+
+@media (max-width: 480px) {
+  /* The header's action chips wrap under the name on a phone rather than
+     pushing the avatar and name into a squeeze to stay on one line. */
+  .file-head .admin-actions { margin-left: 0; }
+}
+
 /* ---------- report dialog (match page) ---------- */
 
 .report { margin-top: var(--sp-4); }

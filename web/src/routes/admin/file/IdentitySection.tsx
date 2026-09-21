@@ -87,7 +87,7 @@ export function IdentitySection(
         d={{ steamid: d.steamid, steamAccount: id.steamAccount }}
         busy={busy}
         run={run}
-        canRefresh={can('merge')}
+        canRefresh={can('steam_refresh')}
         onSelect={(steamid) => { location.href = fileUrl(steamid); }}
       />
 

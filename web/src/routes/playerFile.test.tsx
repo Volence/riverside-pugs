@@ -26,7 +26,13 @@ vi.mock('../api', async (importOriginal) => {
 const { PlayerFile } = await import('./admin/file/PlayerFile');
 
 const P = '76561199000000001';
-const ADMIN_ACTIONS = ['note', 'looked_at', 'open_ticket', 'ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags'] as const;
+// Mirrors src/admin/fileAccess.ts's ADMIN_ACTIONS: review_round and
+// steam_refresh are both admin-only gates the file's controls read directly,
+// so a file() built with anything less would under-test them by accident.
+const ADMIN_ACTIONS = [
+  'note', 'looked_at', 'open_ticket', 'ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags',
+  'review_round', 'steam_refresh',
+] as const;
 
 const file = (over: Partial<PlayerFileData> = {}): PlayerFileData => ({
   steamid: P,
@@ -148,9 +154,18 @@ describe('the Player File', () => {
     expect(screen.queryByLabelText('Ban reason')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign out everywhere' })).toBeNull();
     expect(screen.queryByPlaceholderText('SteamID64 to keep')).toBeNull();
+    // Check now is gated on the dedicated steam_refresh action, not merge:
+    // a moderator has neither, so it should not appear either way.
+    expect(screen.queryByRole('button', { name: 'Check now' })).toBeNull();
     // The sections themselves are not hidden from a moderator: only actions.
     expect(screen.getByText(/Seen on the same connection as/)).toBeTruthy();
     expect(screen.getByText('throwing')).toBeTruthy();
+  });
+
+  it('offers an admin "Check now" on the Steam account panel', async () => {
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeTruthy();
   });
 
   it('previews a merge before offering to run one', async () => {
@@ -164,5 +179,98 @@ describe('the Player File', () => {
     // flag; pin this to the plan's own bolded matchesMoved count instead.
     expect(await screen.findByText((_, el) => el?.tagName === 'STRONG' && el.textContent === '3')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Merge and recompute' })).toBeTruthy();
+  });
+});
+
+describe('the evidence timeline', () => {
+  const withTimeline = () => file({
+    timeline: [
+      {
+        at: '2026-09-21T10:00:00.000Z', source: 'analyzer', kind: 'track',
+        summary: 'Analyzer clip: track, fidelity 0.82 over 6.0 s. Watch it before deciding anything.',
+        matchId: 7, replay: { ordinal: 2, half: 1, tMs: 61500 }, ref: { type: 'integrity_clip', id: 4 },
+      },
+      {
+        at: '2026-09-20T10:00:00.000Z', source: 'lilac', kind: 'aimbot',
+        summary: 'Little Anti-Cheat suspected aimbot. Few and rare suspicions are usually false positives; a run of them is what matters.',
+        matchId: 7, replay: null, ref: { type: 'integrity_flag', id: 2 },
+      },
+      {
+        at: '2026-09-19T10:00:00.000Z', source: 'note', kind: 'note',
+        summary: 'boss: had a word', matchId: null, replay: null, ref: { type: 'note', id: 1 },
+      },
+    ],
+  });
+
+  it('lists every row newest first, with its source and its links', async () => {
+    mockPeople.file.mockResolvedValue(withTimeline());
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    const rows = await screen.findAllByRole('listitem');
+    const timeline = rows.filter((r) => r.className.includes('timeline__row'));
+    expect(timeline).toHaveLength(3);
+    expect(timeline[0].textContent).toContain('Replay analyzer');
+    expect(within(timeline[0]).getByRole('link', { name: 'replay moment' }).getAttribute('href'))
+      .toBe('/match/7?ordinal=2&half=1&t=61500');
+    expect(within(timeline[1]).queryByRole('link', { name: 'replay moment' })).toBeNull();
+    expect(within(timeline[1]).getByRole('link', { name: '#7' })).toBeTruthy();
+  });
+
+  it('filters by source and back again', async () => {
+    mockPeople.file.mockResolvedValue(withTimeline());
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Note/ }));
+    await waitFor(() => {
+      const shown = screen.getAllByRole('listitem').filter((r) => r.className.includes('timeline__row'));
+      expect(shown).toHaveLength(1);
+      expect(shown[0].textContent).toContain('had a word');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Everything/ }));
+    await waitFor(() => {
+      expect(screen.getAllByRole('listitem').filter((r) => r.className.includes('timeline__row'))).toHaveLength(3);
+    });
+  });
+
+  it('says when there is nothing rather than showing an empty list', async () => {
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    expect(await screen.findByText('Nothing has been recorded about this player.')).toBeTruthy();
+  });
+});
+
+describe('the evidence detail', () => {
+  it('shows the input bursts, the drops and the clips, and lets an admin review a round', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: {
+            steamid: P, ranked: true, rank: 3, of: 40, rounds: 20, eligibleRounds: 18, clips: 1,
+            trackShare: 0.21, occZ: 1.1, teamGap: 0.4, pFid: 0.9, pOcc: 0.8, pGap: 0.7, composite: 0.8,
+          },
+          rounds: [],
+          clips: [{ id: 4, matchId: 7, ordinal: 2, half: 1, slot: 3, startMs: 61500, endMs: 67500, kind: 'track', score: 0.82, detail: {} }],
+          flags: [{ id: 2, matchId: 7, steamid: P, source: 'lilac', kind: 'aimbot', severity: 'suspected', detail: '', at: '2026-09-20T10:00:00.000Z' }],
+          inputFlags: [{
+            id: 1, burstId: 1, matchId: 7, steamid: P, kind: 'attack', signature: 'pistol_rate',
+            severity: 'low', at: '2026-09-20T10:00:00.000Z', hits: 3, note: 'wheel-like', bursts: [],
+          }],
+          inputCaps: [],
+          signonDrops: { count: 1, lastAt: '2026-09-18T10:00:00.000Z', rows: [{ id: 1, name: 'ingame', secsConnected: 12, forcedCount: 651, at: '2026-09-18T10:00:00.000Z', enteredAfterAt: null }] },
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.getByText(/pistol_rate/)).toBeTruthy();
+    expect(screen.getByText(/3 of 40/)).toBeTruthy();
+    expect(screen.getByText(/651 files enforced/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Mark this round reviewed/ }));
+    await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(7, 2, 1, 3, 'reviewed', ''));
+  });
+
+  it('offers a moderator the same evidence with no review buttons', async () => {
+    mockPeople.file.mockResolvedValue(file({ actions: ['note', 'looked_at', 'open_ticket'] }));
+    render(<PlayerFile steamid={P} me="76561199000000008" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByRole('button', { name: /Mark this round reviewed/ })).toBeNull();
   });
 });

@@ -9,6 +9,8 @@ import { GlanceRow } from './GlanceRow';
 import { IdentitySection } from './IdentitySection';
 import { StandingSection } from './StandingSection';
 import { NotesSection } from './NotesSection';
+import { Timeline } from './Timeline';
+import { EvidenceDetail } from './EvidenceDetail';
 
 /**
  * Everything known about one player, at one URL.
@@ -32,6 +34,9 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
   const d: PlayerFileData = data;
   const can = (action: FileAction) => d.actions.includes(action);
+  // review_round is its own admin-only permission (src/admin/fileAccess.ts),
+  // asked directly rather than inferred from another action like 'ban'.
+  const canReview = can('review_round');
 
   return (
     <div class="file">
@@ -41,8 +46,14 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
         <GlanceRow d={d} />
       </Panel>
 
+      <Panel class="file-section">
+        <h3>Evidence timeline</h3>
+        <Timeline items={d.timeline} />
+      </Panel>
+
       <IdentitySection d={d} busy={busy} run={run} can={can} />
       <StandingSection d={d} busy={busy} run={run} can={can} />
+      <EvidenceDetail d={d} busy={busy} run={run} canReview={canReview} />
 
       <Panel class="file-section">
         <h3>Tickets</h3>

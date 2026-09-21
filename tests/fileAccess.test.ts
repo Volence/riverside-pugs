@@ -57,7 +57,7 @@ describe('what a viewer may do on a file', () => {
     for (const action of ['note', 'looked_at', 'open_ticket'] as const) {
       expect(canDo(db, v, PLAYER, action)).toBe(true);
     }
-    for (const action of ['ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags', 'review_round'] as const) {
+    for (const action of ['ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags', 'review_round', 'steam_refresh'] as const) {
       expect(canDo(db, v, PLAYER, action)).toBe(false);
     }
   });
@@ -73,5 +73,11 @@ describe('what a viewer may do on a file', () => {
     expect(fileActions(db, fileViewer(db, ADMIN), PLAYER)).toContain('review_round');
     expect(fileActions(db, fileViewer(db, MOD), PLAYER)).not.toContain('review_round');
     expect(canDo(db, fileViewer(db, MOD), PLAYER, 'review_round')).toBe(false);
+  });
+
+  it('steam_refresh is admin-only', () => {
+    expect(fileActions(db, fileViewer(db, ADMIN), PLAYER)).toContain('steam_refresh');
+    expect(fileActions(db, fileViewer(db, MOD), PLAYER)).not.toContain('steam_refresh');
+    expect(canDo(db, fileViewer(db, MOD), PLAYER, 'steam_refresh')).toBe(false);
   });
 });

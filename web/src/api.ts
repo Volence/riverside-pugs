@@ -1004,10 +1004,11 @@ export interface TimelineItem {
 }
 
 /** Mirrors src/admin/fileAccess.ts. `review_round` is admin-only: it marks a
- *  round reviewed from the replay analyzer. */
+ *  round reviewed from the replay analyzer. `steam_refresh` is admin-only
+ *  too: it gates the Steam account panel's "Check now". */
 export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
-  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round';
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
 
 /** The analyzer board's columns for one player. A sort key, never a claim. */
 export interface AnalyzerRank {
