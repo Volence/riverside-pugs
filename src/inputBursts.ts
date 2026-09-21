@@ -54,6 +54,13 @@ export interface InputBurstInput {
   serverTick: number;
   clientTick: number;
   intervals: number[];
+  /** 1: plugin 0.1.0, intervals in SERVER TICKS. 2: intervals in USERCMDS,
+   *  which is what a press rate actually is. Absent means 1. */
+  wire?: 1 | 2;
+  /** Server ticks from the first press to the last; wire 2 only. Against the
+   *  sum of the intervals it shows lag bunching, or a client lying about its
+   *  command numbers. */
+  serverSpan?: number | null;
 }
 
 export interface StoredBurst {
@@ -74,10 +81,11 @@ export function recordInputBurst(
   const encoded = encodeIntervals(b.intervals);
   const info = db.prepare(
     `INSERT INTO input_bursts (match_id, server_id, steamid, kind, weapon, n, ground_ticks,
-       air_presses, server_tick, client_tick, intervals, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       air_presses, server_tick, client_tick, intervals, at, wire, server_span)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(b.matchId, b.serverId, b.steamid, b.kind, b.weapon, b.intervals.length,
-        b.groundTicks, b.airPresses, b.serverTick, b.clientTick, encoded, iso);
+        b.groundTicks, b.airPresses, b.serverTick, b.clientTick, encoded, iso,
+        b.wire ?? 1, b.serverSpan ?? null);
   const id = Number(info.lastInsertRowid);
   // A repeat needs a match to repeat within, and the group query below is only
   // worth running when this burst could have moved a count.

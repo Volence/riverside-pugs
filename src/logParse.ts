@@ -113,6 +113,9 @@ export type LogEvent =
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
+      // Wire 1 (plugin 0.1.0) timed intervals by server tick; wire 2 times them
+      // by usercmd and adds the server ticks the burst spanned as a cross-check.
+      wire: 1 | 2; serverSpan: number | null;
     }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
@@ -247,7 +250,19 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
     if (airPresses === null || airPresses < 0 || airPresses > MAX_TICK_COUNTER) return null;
     if (serverTick === null || serverTick < 0 || clientTick === null || clientTick < 0) return null;
     if (!/^[a-z0-9_]*$/.test(weapon)) return null;
-    return { kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals };
+    // Every key below is optional, because plugin 0.1.0 sends none of them and
+    // stays live until 0.2.0 is staged. Present, each is held to the same
+    // standard as the rest: a value the plugin could not have produced refuses
+    // the whole line. A version this parser does not know may have changed
+    // what a field MEANS, so it is refused rather than guessed at.
+    const wire = f.v === undefined ? 1 : intOf(f.v);
+    if (wire !== 1 && wire !== 2) return null;
+    const serverSpan = f.sp === undefined ? null : intOf(f.sp);
+    if (f.sp !== undefined && (serverSpan === null || serverSpan < 0 || serverSpan > MAX_TICK_COUNTER)) return null;
+    return {
+      kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals,
+      wire, serverSpan,
+    };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the

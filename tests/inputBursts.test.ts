@@ -145,6 +145,16 @@ describe('inputThresholds', () => {
 });
 
 describe('storage round trip', () => {
+  // Wire 1 intervals are server ticks and wire 2 are usercmds. They are close
+  // but not the same clock, so a stored burst has to say which it is.
+  it('keeps the wire version and the server tick span beside the intervals', () => {
+    const two = recordInputBurst(db, burst({ wire: 2, serverSpan: 77 }));
+    const one = recordInputBurst(db, burst());
+    const get = (id: number) => db.prepare('SELECT wire, server_span AS serverSpan FROM input_bursts WHERE id = ?').get(id);
+    expect(get(two.id)).toEqual({ wire: 2, serverSpan: 77 });
+    expect(get(one.id)).toEqual({ wire: 1, serverSpan: null });
+  });
+
   // This exists because recordInputBurst once carried its own inlined copy of
   // the encoder. When the alphabet changed, storage wrote one base and the
   // decoder read another, every stored burst decoded to nothing, and re-run

@@ -65,3 +65,29 @@ describe('lines the plugin actually emitted', () => {
     expect(s.ratePerSec).toBeCloseTo(12.5, 1);
   });
 });
+
+/**
+ * Plugin 0.2.0 lines. NOT captured off a wire: nothing may start the shared
+ * test server while other sessions are using it, so these are written out from
+ * EmitLine's format string in plugin/l4d_inputstats.sp, field for field. They
+ * pin the parser to that format. Replace them with captured lines the first
+ * time 0.2.0 runs anywhere, exactly as REAL above was.
+ */
+const FORMAT_0_2 = [
+  'L 09/21/2026 - 14:00:00: L4DM id=76561197960287930 k=fire w=weapon_pistol n=6 g=0 a=0 st=52000 ct=51996 sp=46 v=2 d=787787',
+  'L 09/21/2026 - 14:00:01: L4DM id=STEAM_1:1:35074132 k=pounce w=weapon_hunter_claw n=6 g=61 a=7 st=52100 ct=52096 sp=46 v=2 d=787787',
+  'L 09/21/2026 - 14:00:02: L4DM id=76561197960287930 k=bhop w= n=1 g=2 a=0 st=52200 ct=52197 sp=0 v=2 d=0',
+];
+
+describe('lines in the 0.2.0 format', () => {
+  it('the parser accepts every one of them as wire 2', () => {
+    for (const line of FORMAT_0_2) {
+      expect(parseLogDatagram(Buffer.from(line, 'utf8')), line).toMatchObject({ kind: 'input_burst', wire: 2 });
+    }
+  });
+
+  it('reads both clocks and the server span off a fire burst', () => {
+    const ev = parseLogDatagram(Buffer.from(FORMAT_0_2[0], 'utf8'));
+    expect(ev).toMatchObject({ serverTick: 52000, clientTick: 51996, serverSpan: 46, intervals: [8, 9, 8, 8, 9, 8] });
+  });
+});

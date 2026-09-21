@@ -520,6 +520,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
               airPresses: ev.airPresses, groundTicks: ev.groundTicks,
               serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
+              wire: ev.wire, serverSpan: ev.serverSpan,
             }, inputThresholds(deps.db));
             // `detections` names a signature only on the burst that completed
             // its repeat count, so this posts once per player, match and

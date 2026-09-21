@@ -22,8 +22,21 @@
 
 /** A burst closes after this much silence. 30 ticks at 100 tick = 300ms.
  *  Measured, not guessed: a human sample containing one 31-second idle gap had
- *  its coefficient of variation dragged to 6.85, hiding everything. */
+ *  its coefficient of variation dragged to 6.85, hiding everything.
+ *
+ *  Counted in USERCMDS, like every interval here. A client sends one usercmd
+ *  per tick, so for a healthy connection the two are the same number. They
+ *  part company after a lag spike, when the server runs a backlog of usercmds
+ *  inside one tick: timed by GetGameTickCount those presses were zero ticks
+ *  apart and were silently dropped, which bent exactly the bursts of the
+ *  players with the worst connections. cmdnum counts the commands the client
+ *  actually generated, survives loss (it skips, the hook does not fire for a
+ *  command that never arrived) and is the clock the button samples are on. */
 #define BURST_GAP_TICKS 30
+
+/** Must match the newest `v` src/logParse.ts accepts. 2: intervals in
+ *  usercmds, `ct` really is the client tickcount, `sp` added. */
+#define WIRE_VERSION 2
 
 /** Matches MAX_INTERVALS in src/inputStats.ts. A burst longer than this stops
  *  recording rather than wrapping, so one pathological or hostile player cannot
@@ -52,9 +65,17 @@ bool g_bPrevGround[MAXPLAYERS + 1];
 bool g_bCapturing[MAXPLAYERS + 1];
 int  g_iBurstsThisRound[MAXPLAYERS + 1];
 
-// +attack burst, the `fire` anchor.
+/** The client tickcount of the last usercmd seen, for a line emitted from an
+ *  event rather than from inside the hook. */
+int  g_iLastClientTick[MAXPLAYERS + 1];
+
+// +attack burst, the `fire` anchor. Seq is the usercmd sequence (cmdnum), Tick
+// is the server tick; intervals come from the first, the second rides along.
 int g_iAtkTicks[MAXPLAYERS + 1][MAX_INTERVALS];
 int g_iAtkCount[MAXPLAYERS + 1];
+int g_iAtkPresses[MAXPLAYERS + 1];
+int g_iAtkLastSeq[MAXPLAYERS + 1];
+int g_iAtkFirstTick[MAXPLAYERS + 1];
 int g_iAtkLastTick[MAXPLAYERS + 1];
 /** The weapon in hand at the FIRST press of the burst. Read at emit time it
  *  was whatever the player had switched to by then, so a pistol burst followed
@@ -65,13 +86,17 @@ char g_sAtkWeapon[MAXPLAYERS + 1][32];
 // landing again. A human issues one or two; a held button issues dozens.
 int g_iAirTicks[MAXPLAYERS + 1][MAX_INTERVALS];
 int g_iAirCount[MAXPLAYERS + 1];
+int g_iAirPresses[MAXPLAYERS + 1];
+int g_iAirLastSeq[MAXPLAYERS + 1];
+int g_iAirStartSeq[MAXPLAYERS + 1];
+int g_iAirFirstTick[MAXPLAYERS + 1];
 int g_iAirLastTick[MAXPLAYERS + 1];
-int g_iAirStartTick[MAXPLAYERS + 1];
 char g_sAirWeapon[MAXPLAYERS + 1][32];
 
 // Ground phase, the `bhop` anchor: how long a player stays on the ground before
 // jumping again. A script jumps on the exact tick of landing, every time.
-int g_iGroundStartTick[MAXPLAYERS + 1];
+bool g_bGroundTimed[MAXPLAYERS + 1];
+int  g_iGroundStartSeq[MAXPLAYERS + 1];
 
 public Plugin myinfo = {
 	name = "L4D1 Input Stats",
@@ -118,11 +143,11 @@ public Action Cmd_Emit(int client, int args)
 	Encode(ticks, n, d, sizeof(d));
 	int target = client > 0 ? client : FirstHuman();
 	if (target > 0) {
-		EmitBurst(target, kind, "test_weapon", n, 4, n + 1, GetGameTickCount(), 0, d);
+		EmitBurst(target, kind, "test_weapon", n, 4, n + 1, 0, d);
 		ReplyToCommand(client, "[inputstats] emitted a synthetic %s burst of %d for %N", kind, n, target);
 	} else {
 		// Nobody connected: still exercise the real format, with a literal id.
-		EmitLine("76561197960287930", kind, "test_weapon", n, 4, n + 1, GetGameTickCount(), 0, d);
+		EmitLine("76561197960287930", kind, "test_weapon", n, 4, n + 1, GetGameTickCount(), 0, 0, d);
 		ReplyToCommand(client, "[inputstats] emitted a synthetic %s burst of %d for a test steamid", kind, n);
 	}
 	return Plugin_Handled;
@@ -170,9 +195,8 @@ public void Event_RoundStart(Event e, const char[] n, bool b)
 void FlushAll(int client)
 {
 	if (!g_bCapturing[client] || !IsClientInGame(client)) return;
-	int tick = GetGameTickCount();
-	FlushFire(client, tick, 0);
-	if (!g_bPrevGround[client]) FlushAir(client, tick);
+	FlushFire(client);
+	if (!g_bPrevGround[client]) FlushAir(client, g_iAirLastSeq[client]);
 }
 
 void ResetClient(int c)
@@ -188,9 +212,9 @@ void ResetCapture(int c)
 {
 	g_bCapturing[c] = false;
 	g_bPrevGround[c] = true;
-	g_iAtkCount[c] = 0; g_iAtkLastTick[c] = 0;
-	g_iAirCount[c] = 0; g_iAirLastTick[c] = 0; g_iAirStartTick[c] = 0;
-	g_iGroundStartTick[c] = 0;
+	g_iAtkCount[c] = 0; g_iAtkPresses[c] = 0;
+	g_iAirCount[c] = 0; g_iAirPresses[c] = 0; g_iAirStartSeq[c] = 0;
+	g_bGroundTimed[c] = false;
 }
 
 /**
@@ -237,6 +261,11 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 
 	int tick = GetGameTickCount();
 	int prev = g_iPrevButtons[client];
+	// The usercmd's own sequence number times every interval. A bot's usercmds
+	// are made by the server and carry no sequence, so the TEST ONLY bot path
+	// falls back to the server tick, which for a bot is the same thing.
+	int seq = IsFakeClient(client) ? tick : cmdnum;
+	g_iLastClientTick[client] = tickcount;
 	if (!g_bCapturing[client]) {
 		// First captured usercmd of a life. Nothing carries over from the last
 		// one: air presses from before a death used to merge into the first
@@ -248,9 +277,8 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	// A fire burst is over once the gap has passed, whether or not another
 	// press ever comes. Waiting for that next press is what labelled bursts
 	// with the wrong weapon and dropped the last one of every life.
-	if (g_iAtkLastTick[client] > 0 && tick - g_iAtkLastTick[client] > BURST_GAP_TICKS) {
-		FlushFire(client, tick, cmdnum);
-	}
+	if (g_iAtkPresses[client] > 0 && GapPassed(seq, g_iAtkLastSeq[client])) FlushFire(client);
+
 	// FL_ONGROUND is clear on a ladder, so a climb used to read as one long
 	// airborne phase and every press on it as a pounce press, and stepping off
 	// at the top as a landing for the bhop anchor. A ladder is not the air.
@@ -261,94 +289,104 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	if (ground && !g_bPrevGround[client]) {
 		// Landed. The airborne phase just ended, so that pounce attempt is
 		// complete and its press count is final.
-		FlushAir(client, tick);
+		FlushAir(client, seq);
 		// Grabbing a ladder ends the airborne phase but is not a landing: a
 		// jump off a ladder is not a bunnyhop.
-		g_iGroundStartTick[client] = onLadder ? 0 : tick;
+		g_bGroundTimed[client] = !onLadder;
+		g_iGroundStartSeq[client] = seq;
 	} else if (!ground && g_bPrevGround[client]) {
 		// Left the ground. Anything pressed from here until landing belongs to
 		// this airborne phase.
 		g_iAirCount[client] = 0;
-		g_iAirLastTick[client] = 0;
-		g_iAirStartTick[client] = tick;
+		g_iAirPresses[client] = 0;
+		g_iAirStartSeq[client] = seq;
 	}
 	g_bPrevGround[client] = ground;
 
 	// --- +attack press edges ------------------------------------------------
 	if ((buttons & IN_ATTACK) && !(prev & IN_ATTACK)) {
-		if (g_iAtkLastTick[client] == 0) GetActiveWeapon(client, g_sAtkWeapon[client], sizeof(g_sAtkWeapon[]));
-		Record(tick, g_iAtkTicks[client], g_iAtkCount[client], g_iAtkLastTick[client]);
+		if (g_iAtkPresses[client] == 0) {
+			GetActiveWeapon(client, g_sAtkWeapon[client], sizeof(g_sAtkWeapon[]));
+			g_iAtkFirstTick[client] = tick;
+		}
+		Record(seq, g_iAtkTicks[client], g_iAtkCount[client], g_iAtkPresses[client], g_iAtkLastSeq[client]);
+		g_iAtkLastTick[client] = tick;
 		if (!ground) {
-			if (g_iAirLastTick[client] == 0) GetActiveWeapon(client, g_sAirWeapon[client], sizeof(g_sAirWeapon[]));
-			// Same press also belongs to the airborne phase, counted separately
-			// because it is the signature that needs no tuning.
-			if (g_iAirCount[client] < MAX_INTERVALS) {
-				if (g_iAirLastTick[client] > 0) {
-					int d = tick - g_iAirLastTick[client];
-					if (d >= 1 && d <= BURST_GAP_TICKS) g_iAirTicks[client][g_iAirCount[client]++] = d;
-				}
+			// Same press also belongs to the airborne phase, counted separately.
+			if (g_iAirPresses[client] == 0) {
+				GetActiveWeapon(client, g_sAirWeapon[client], sizeof(g_sAirWeapon[]));
+				g_iAirFirstTick[client] = tick;
 			}
+			Record(seq, g_iAirTicks[client], g_iAirCount[client], g_iAirPresses[client], g_iAirLastSeq[client]);
 			g_iAirLastTick[client] = tick;
 		}
 	}
 
 	// --- +jump press edges, the bhop anchor ---------------------------------
-	if ((buttons & IN_JUMP) && !(prev & IN_JUMP) && g_iGroundStartTick[client] > 0 && ground && !onLadder) {
-		int onGround = tick - g_iGroundStartTick[client];
+	if ((buttons & IN_JUMP) && !(prev & IN_JUMP) && g_bGroundTimed[client] && ground && !onLadder) {
+		int onGround = seq - g_iGroundStartSeq[client];
 		if (onGround >= 0 && onGround <= BURST_GAP_TICKS) {
 			char one[2];
 			int oneTick[1]; oneTick[0] = 1;
 			Encode(oneTick, 1, one, sizeof(one));
-			EmitBurst(client, "bhop", "", 1, onGround, 0, tick, cmdnum, one);
+			EmitBurst(client, "bhop", "", 1, onGround, 0, 0, one);
 		}
-		g_iGroundStartTick[client] = 0;
+		g_bGroundTimed[client] = false;
 	}
 
 	g_iPrevButtons[client] = buttons;
 }
 
-/** Append one interval to the fire burst. The burst gap is enforced by the
- *  caller before any press is looked at, so whatever reaches here belongs to
- *  the burst in flight, or starts one. */
-void Record(int tick, int[] ticks, int &count, int &lastTick)
+/** Whether the burst whose last press was at `last` is over. A sequence that
+ *  runs BACKWARDS is a new connection's numbering, never the same burst. */
+bool GapPassed(int seq, int last)
 {
-	if (lastTick > 0) {
-		int d = tick - lastTick;
-		if (d >= 1 && count < MAX_INTERVALS) ticks[count++] = d;
-	}
-	lastTick = tick;
+	return seq - last > BURST_GAP_TICKS || seq < last;
 }
 
-void FlushFire(int client, int tick, int cmdnum)
+/** Count one press, and the interval since the previous one in the same
+ *  burst. The burst gap is enforced by the caller before any press is looked
+ *  at, so whatever reaches here belongs to the burst in flight, or starts one.
+ *  Past the cap a burst stops recording rather than wrapping, but stays open. */
+void Record(int seq, int[] ticks, int &count, int &presses, int &lastSeq)
 {
-	if (g_iAtkCount[client] >= MIN_BURST_PRESSES) {
+	if (presses > 0 && count < MAX_INTERVALS) {
+		int d = seq - lastSeq;
+		if (d >= 1 && d <= BURST_GAP_TICKS) ticks[count++] = d;
+	}
+	presses++;
+	lastSeq = seq;
+}
+
+void FlushFire(int client)
+{
+	if (g_iAtkPresses[client] >= MIN_BURST_PRESSES && g_iAtkCount[client] > 0) {
 		char d[MAX_INTERVALS + 1];
 		Encode(g_iAtkTicks[client], g_iAtkCount[client], d, sizeof(d));
-		EmitBurst(client, "fire", g_sAtkWeapon[client], g_iAtkCount[client], 0, 0, tick, cmdnum, d);
+		EmitBurst(client, "fire", g_sAtkWeapon[client], g_iAtkCount[client], 0, 0,
+			g_iAtkLastTick[client] - g_iAtkFirstTick[client], d);
 	}
 	g_iAtkCount[client] = 0;
-	g_iAtkLastTick[client] = 0;
+	g_iAtkPresses[client] = 0;
 }
 
-void FlushAir(int client, int tick)
+/** `seq` is the usercmd that ended the phase: the landing, or the last press
+ *  when the phase is cut short by a death. */
+void FlushAir(int client, int seq)
 {
 	// An airborne phase with three or more presses is the interesting case: a
 	// human pounces with one press, so anything past a couple means the button
 	// was being held or spammed through the air.
-	if (g_iAirCount[client] >= MIN_BURST_PRESSES - 1) {
+	if (g_iAirPresses[client] >= MIN_BURST_PRESSES && g_iAirCount[client] > 0) {
 		char d[MAX_INTERVALS + 1];
 		Encode(g_iAirTicks[client], g_iAirCount[client], d, sizeof(d));
-		if (d[0] == '\0') {
-			int oneTick[1]; oneTick[0] = 1;
-			Encode(oneTick, 1, d, sizeof(d));
-		}
-		int airTicks = g_iAirStartTick[client] > 0 ? tick - g_iAirStartTick[client] : 0;
-		// air presses is count+1: intervals are the gaps BETWEEN presses.
-		EmitBurst(client, "pounce", g_sAirWeapon[client], g_iAirCount[client], airTicks,
-			g_iAirCount[client] + 1, tick, 0, d);
+		int airCmds = seq - g_iAirStartSeq[client];
+		if (airCmds < 0) airCmds = 0;
+		EmitBurst(client, "pounce", g_sAirWeapon[client], g_iAirCount[client], airCmds,
+			g_iAirPresses[client], g_iAirLastTick[client] - g_iAirFirstTick[client], d);
 	}
 	g_iAirCount[client] = 0;
-	g_iAirLastTick[client] = 0;
+	g_iAirPresses[client] = 0;
 }
 
 /** One printable character per interval. A burst closes at BURST_GAP_TICKS, so
@@ -389,7 +427,7 @@ void GetActiveWeapon(int client, char[] buf, int maxlen)
  * impersonate; the only identity on the line is a steamid.
  */
 void EmitBurst(int client, const char[] kind, const char[] weapon, int n, int groundTicks,
-	int airPresses, int serverTick, int clientTick, const char[] d)
+	int airPresses, int serverSpan, const char[] d)
 {
 	if (g_iBurstsThisRound[client] >= MAX_BURSTS_PER_ROUND) return;
 	g_iBurstsThisRound[client]++;
@@ -400,14 +438,20 @@ void EmitBurst(int client, const char[] kind, const char[] weapon, int n, int gr
 		// STEAM_ form too and normalises it, same as the consistency drop line.
 		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
 	}
-	EmitLine(id, kind, weapon, n, groundTicks, airPresses, serverTick, clientTick, d);
+	// Both clocks, read at the same moment for every kind: the server tick now
+	// and the tickcount of the usercmd being run. `ct` used to carry cmdnum on
+	// two kinds and a literal 0 on the third. The client value is attacker
+	// controlled and times nothing; its drift against `st` is its own signal.
+	EmitLine(id, kind, weapon, n, groundTicks, airPresses, GetGameTickCount(),
+		g_iLastClientTick[client], serverSpan, d);
 }
 
 /** The ONE place the wire format exists, so the test path cannot drift from the
- *  real one. */
+ *  real one. New keys go BEFORE d=, which stays last as the long one. */
 void EmitLine(const char[] id, const char[] kind, const char[] weapon, int n, int groundTicks,
-	int airPresses, int serverTick, int clientTick, const char[] d)
+	int airPresses, int serverTick, int clientTick, int serverSpan, const char[] d)
 {
-	LogToGame("L4DM id=%s k=%s w=%s n=%d g=%d a=%d st=%d ct=%d d=%s",
-		id, kind, weapon, n, groundTicks, airPresses, serverTick, clientTick, d);
+	LogToGame("L4DM id=%s k=%s w=%s n=%d g=%d a=%d st=%d ct=%d sp=%d v=%d d=%s",
+		id, kind, weapon, n, groundTicks, airPresses, serverTick, clientTick, serverSpan,
+		WIRE_VERSION, d);
 }

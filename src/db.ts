@@ -565,7 +565,13 @@ CREATE TABLE IF NOT EXISTS input_bursts (
   server_tick INTEGER NOT NULL,
   client_tick INTEGER NOT NULL,
   intervals TEXT NOT NULL,
-  at TEXT NOT NULL
+  at TEXT NOT NULL,
+  -- 1: plugin 0.1.0, intervals are SERVER TICKS, and usercmds bunched into one
+  -- tick after lag were dropped. 2: intervals are USERCMDS (cmdnum deltas).
+  wire INTEGER NOT NULL DEFAULT 1,
+  -- Server ticks from first press to last; wire 2 only. A cross-check on the
+  -- sum of the intervals, which is the client's own command sequence.
+  server_span INTEGER
 );
 CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
 CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
@@ -725,6 +731,10 @@ export function openDb(path: string): DB {
   // hit and no evidence list; scripts/rerun-input-signatures.ts rebuilds them.
   ensureColumn(db, 'input_detections', 'hits', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'input_detections', 'evidence', "TEXT NOT NULL DEFAULT '[]'");
+  // Which clock a burst's intervals are in. Everything stored before this was
+  // plugin 0.1.0, which is what the default says.
+  ensureColumn(db, 'input_bursts', 'wire', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'input_bursts', 'server_span', 'INTEGER');
   // How many survivors were still standing when the round ended. NULL, not 0,
   // as the default: every round recorded before the plugin emitted this was
   // simply not measured, and 0 is a real value here (a wipe). Defaulting to 0
