@@ -8,7 +8,7 @@ import { leaderboardData, profileData } from '../playerQueries.js';
 import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
-import { identityOf, plainLabel, plainLabelEscaped, type Identity } from '../identity.js';
+import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
 export interface CommandDeps {
@@ -147,7 +147,7 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   if (recentLines.length) fields.push({ name: 'Recent matches', value: recentLines.join('\n') });
 
   return pub({
-    embeds: [{ title: plainLabel(identityOf(deps.db, player.steamid)), url, color: COLOR, description: lines.join('\n'), fields }],
+    embeds: [{ title: plainLabelEscaped(identityOf(deps.db, player.steamid)), url, color: COLOR, description: lines.join('\n'), fields }],
     components: [[{ kind: 'link', url, label: 'Full profile' }]],
   });
 }
@@ -172,7 +172,7 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
     const who = target(deps, i);
     if ('reply' in who) return who.reply;
     const data = profileData(deps.db, who.steamid, null)!;
-    title = `Recent matches · ${plainLabel(identityOf(deps.db, data.player.steamid))}`;
+    title = `Recent matches · ${plainLabelEscaped(identityOf(deps.db, data.player.steamid))}`;
     rows = data.matches.slice(0, 5).map((m) => ({
       id: m.id, campaign: m.campaign, teamAScore: m.teamAScore, teamBScore: m.teamBScore,
       extra: m.result === 'win' ? ' · won' : m.result === 'loss' ? ' · lost' : ' · draw',

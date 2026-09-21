@@ -70,6 +70,18 @@ describe('slash commands', () => {
     expect(text(r)).toContain('/link/discord?code=');
   });
 
+  // Embed titles render a subset of markdown, masked links included, and both
+  // the Steam name and the linked Discord display name are attacker text.
+  it('/profile and /matches escape a hostile steam or discord name in the title', async () => {
+    upsertPlayer(db, { steamid: IDS[6], name: '[Free Nitro](http://evil.tk)', avatar: null }, []);
+    activatePlayer(db, IDS[6]);
+    linkDiscord(db, IDS[6], '906', '[Click here](http://evil.tk)');
+    const profile = text(await run('profile', { user: '906' }));
+    expect(profile).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
+    const matches = text(await run('matches', { user: '906' }));
+    expect(matches).not.toMatch(/\]\(http:\/\/evil\.tk\)/);
+  });
+
   it('/leaderboard lists ranked players only, best first', async () => {
     play('a'); play('a');
     expect(text(await run('leaderboard'))).toMatch(/nobody is ranked yet/i);
