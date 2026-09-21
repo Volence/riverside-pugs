@@ -58,3 +58,36 @@ export function seedAccess(
   const ins = db.prepare('INSERT OR IGNORE INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, ?, ?)');
   for (const id of new Set([...ids, ...extra.filter((e) => e !== targetId)])) ins.run(ticketId, id, 'system', now.toISOString());
 }
+
+/**
+ * Close the gap between "this player is now staff" and "the case about them
+ * is readable by every moderator". Called when a player is promoted and when
+ * one is merged into a staff account.
+ *
+ * tickets_one_open allows one open ticket of each flavour, so where the
+ * player already has an open restricted ticket the normal one is folded into
+ * it rather than restricted, the way a merge folds two open tickets together.
+ * Runs inside the caller's transaction.
+ */
+export function restrictOpenTicketAbout(
+  db: DB, targetId: string, adminSteamIds: string[], now = new Date(),
+): void {
+  const open = (restricted: number) => db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
+    .get(targetId, restricted) as { id: number } | undefined;
+  const normal = open(0);
+  if (!normal) return;
+  const sibling = open(1);
+  if (!sibling) {
+    db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(normal.id);
+    seedAccess(db, normal.id, targetId, adminSteamIds, [], now);
+    addTicketEvent(db, normal.id, null, 'restricted', {}, now);
+    return;
+  }
+  db.prepare('UPDATE ticket_reports SET ticket_id = ? WHERE ticket_id = ?').run(sibling.id, normal.id);
+  db.prepare('UPDATE ticket_events SET ticket_id = ? WHERE ticket_id = ?').run(sibling.id, normal.id);
+  db.prepare('UPDATE bans SET ticket_id = ? WHERE ticket_id = ?').run(sibling.id, normal.id);
+  // A ticket that was restricted once and is no longer keeps its old list;
+  // the sibling has its own, so those rows go rather than travel.
+  db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(normal.id);
+  db.prepare('DELETE FROM tickets WHERE id = ?').run(normal.id);
+}

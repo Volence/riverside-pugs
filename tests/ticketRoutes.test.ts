@@ -157,6 +157,29 @@ describe('restricted tickets over HTTP', () => {
     expect(await ticketRows(MOD)).toEqual([]);
   });
 
+  it('promoting a player restricts the open ticket about them', async () => {
+    await file(R1, { targetId: R2, category: 'griefing', text: 'threw' });
+    const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
+    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(200);
+    expect((await post(OWNER, `/api/admin/players/${R2}/mod`, { isMod: true })).statusCode).toBe(200);
+    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 1 });
+    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
+    expect((await get(OWNER, `/api/mod/tickets/${id}`)).json().events.map((e: { kind: string }) => e.kind))
+      .toEqual(['opened', 'restricted']);
+  });
+
+  it('promoting a player with both flavours open leaves one restricted ticket holding both reports', async () => {
+    await file(R1, { targetId: R2, category: 'griefing', text: 'threw' });
+    await file(R1, { targetId: R2, category: 'unsafe', text: 'threats' });
+    const normalId = (db.prepare('SELECT id FROM tickets WHERE restricted = 0').get() as { id: number }).id;
+    const restrictedId = (db.prepare('SELECT id FROM tickets WHERE restricted = 1').get() as { id: number }).id;
+    expect((await post(OWNER, `/api/admin/players/${R2}/admin`, { isAdmin: true })).statusCode).toBe(200);
+    expect(db.prepare('SELECT id FROM tickets').all()).toEqual([{ id: restrictedId }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(restrictedId)).toEqual({ n: 2 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(normalId)).toEqual({ n: 0 });
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+  });
+
   it('an accused mod does not see an ordinary ticket about themselves either', async () => {
     db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD2);
     await file(R1, { targetId: MOD2, category: 'afk', text: '' });

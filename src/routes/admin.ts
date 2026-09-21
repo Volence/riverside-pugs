@@ -22,6 +22,7 @@ import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
+import { restrictOpenTicketAbout } from '../tickets/store.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 
 export interface AdminRouteOpts {
@@ -39,12 +40,15 @@ export interface AdminRouteOpts {
   /** Pushes the website's admin list to every box. Absent in tests that do
    *  not exercise it, where the route reports that rather than pretending. */
   adminSync?: ServerAdminSync;
+  /** config.adminSteamIds: who is let into a ticket that becomes restricted
+   *  because the player it is about was just promoted. */
+  adminSteamIds: string[];
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, adminSteamIds } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -120,7 +124,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { isAdmin } = (req.body ?? {}) as { isAdmin?: unknown };
     if (typeof isAdmin !== 'boolean') return reply.code(400).send({ error: 'isAdmin must be true or false' });
     if (t.steamid === t.adminId && !isAdmin) return reply.code(400).send({ error: 'you cannot remove your own admin' });
-    db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
+    db.transaction(() => {
+      db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
+      if (isAdmin) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+    })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
     return { ok: true };
   });
@@ -130,7 +137,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!t) return reply;
     const { isMod } = (req.body ?? {}) as { isMod?: unknown };
     if (typeof isMod !== 'boolean') return reply.code(400).send({ error: 'isMod must be true or false' });
-    db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
+    db.transaction(() => {
+      db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
+      if (isMod) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+    })();
     logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
     return { ok: true };
   });

@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { addAlias } from './aliases.js';
 import { recomputeSeasonRatings } from './rating.js';
+import { hasStaffFlag, restrictOpenTicketAbout } from './tickets/store.js';
 
 /**
  * Fold one Steam account into another, as if the second had always been the
@@ -173,6 +174,10 @@ export function mergePlayers(
     db.prepare('UPDATE OR IGNORE ticket_access SET steamid = ? WHERE steamid = ?').run(into, from);
     db.prepare('DELETE FROM ticket_access WHERE steamid = ?').run(from);
     db.prepare('DELETE FROM ticket_access WHERE steamid = ? AND ticket_id IN (SELECT id FROM tickets WHERE target_id = ?)').run(into, into);
+    // Merging a player into a staff account makes an ordinary ticket a ticket
+    // about staff. No owner list is to hand here, so seedAccess falls back to
+    // every admin but the accused, as the legacy migration does.
+    if (hasStaffFlag(db, into)) restrictOpenTicketAbout(db, into, []);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
