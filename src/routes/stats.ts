@@ -139,9 +139,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   /** What is being played right now. Public: the whole point is that someone
-   *  who is not in the game, and may not have an account, can watch. Carries
-   *  no stats, so there is nothing viewer-dependent to redact. */
-  app.get('/api/live', async () => ({ matches: getLiveMatches(db) }));
+   *  who is not in the game, and may not have an account, can watch. A
+   *  player's linked Discord name is the one thing here that is
+   *  viewer-dependent: it goes out only to a signed-in player in good
+   *  standing, never to an anonymous visitor or one who is banned, inactive,
+   *  or merged (see standing.ts inGoodStanding, which viewerOf already
+   *  applies). discord_id itself is never selected at all. */
+  app.get('/api/live', async (req) => ({ matches: getLiveMatches(db, viewerOf(req) !== null) }));
 
   /** Every map that has been played, so the map pages are discoverable. */
   // `pool` is the current vote rotation, so the page can put what you might
@@ -230,9 +234,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        WHERE mp.match_id = ?`,
     ).all(id) as any[]).map((p) => ({
       steamid: p.steamid, name: p.name, team: p.team,
-      // Only when it says something the steam name does not: an unlinked or
-      // matching Discord name is not worth a second field on every player.
-      discordName: p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
+      // Only when it says something the steam name does not, AND only for a
+      // signed-in viewer in good standing: an anonymous request, or one from
+      // a banned/inactive/merged account, gets null here for every player,
+      // same as an unlinked or matching Discord name does.
+      discordName: viewer !== null && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
       title: titles.get(p.steamid) ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       srDelta: p.mu_after === null ? 0

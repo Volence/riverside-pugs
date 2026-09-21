@@ -811,7 +811,13 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
  *  that pair to a file server-side. The token bytes in the replay header are
  *  zeroed on the way out by routes/replays.ts, so the file contents do not
  *  leak it either. */
-export function getLiveMatches(db: DB): LiveMatch[] {
+/** `showDiscordNames` defaults to false: /api/live has no session at all, and
+ *  the only safe default for an anonymous, unauthenticated payload is to
+ *  leave a player's linked Discord name out of it. The route decides when to
+ *  pass true, after checking the viewer is a signed-in player in good
+ *  standing (see routes/guards.ts makeOptionalViewer / standing.ts
+ *  inGoodStanding); this function never re-derives that itself. */
+export function getLiveMatches(db: DB, showDiscordNames = false): LiveMatch[] {
   const matches = db
     .prepare(
       `SELECT m.id, m.campaign, m.server_id AS serverId, l.current_map AS currentMap, l.last_seen AS lastSeen
@@ -861,7 +867,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
     const nameOf = (id: string) => ps.find((p) => p.steamid === id)?.name ?? id;
     const named = (p: { steamid: string; name: string; discordName: string | null }): LivePlayer => ({
       steamid: p.steamid, name: p.name,
-      discordName: p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
+      discordName: showDiscordNames && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
       stats: statsBy.get(p.steamid) ?? {},
     });
     return {

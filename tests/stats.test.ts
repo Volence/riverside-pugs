@@ -5,10 +5,11 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { completeMatch } from '../src/matchResult.js';
-import { upsertPlayer } from '../src/players.js';
+import { upsertPlayer, linkDiscord, activatePlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
 import { statDef, STAT_DEFS } from '../src/statKeys.js';
 import { getSetting, setSetting } from '../src/settings.js';
+import { banPlayer } from '../src/admin/players.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -79,6 +80,49 @@ describe('stats routes', () => {
       .run(ME, 'times_skeeted');
     const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
     expect(body.privateStatTotals).toBeNull();
+  });
+
+  it('shows a player\'s linked discord name only to a signed-in viewer in good standing', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    linkDiscord(db, IDS[1], '111', 'a totally different name');
+    const sameName = (db.prepare('SELECT name FROM players WHERE steamid = ?').get(IDS[2]) as { name: string }).name;
+    linkDiscord(db, IDS[2], '222', sameName); // same name as steam: null for everyone either way
+
+    // Anonymous: null for everyone, and the name never rides along at all.
+    const anon = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(anon.players.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
+    expect(JSON.stringify(anon)).not.toContain('a totally different name');
+    expect(JSON.stringify(anon)).not.toContain('discordId');
+
+    // Signed in and active: filled in, but only where it differs.
+    const good = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect(good.players.find((p: any) => p.steamid === IDS[1]).discordName).toBe('a totally different name');
+    expect(good.players.find((p: any) => p.steamid === IDS[2]).discordName).toBeNull();
+
+    // Signed in but banned: same as anonymous.
+    banPlayer(db, ME, 'admin', 'testing', null);
+    const banned = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect(banned.players.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
+  });
+
+  it('shows a player\'s linked discord name on the live roster only to a signed-in viewer in good standing', async () => {
+    const matchId = Number(
+      db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'no_mercy')").run().lastInsertRowid,
+    );
+    db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)').run(matchId, IDS[1], 'a');
+    linkDiscord(db, IDS[1], '111', 'a totally different name');
+
+    const anon = (await app.inject({ method: 'GET', url: '/api/live' })).json();
+    expect(anon.matches[0].teamA.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
+    expect(JSON.stringify(anon)).not.toContain('a totally different name');
+    expect(JSON.stringify(anon)).not.toContain('discordId');
+
+    const good = (await app.inject({ method: 'GET', url: '/api/live', cookies })).json();
+    expect(good.matches[0].teamA.find((p: any) => p.steamid === IDS[1]).discordName).toBe('a totally different name');
+
+    banPlayer(db, ME, 'admin', 'testing', null);
+    const banned = (await app.inject({ method: 'GET', url: '/api/live', cookies })).json();
+    expect(banned.matches[0].teamA.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
   });
 
   it('shows a formerly private stat to everyone, logged in or not', async () => {
