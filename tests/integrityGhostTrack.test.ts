@@ -390,6 +390,42 @@ describe('trackWindows and the survivor\'s own movement', () => {
 });
 
 /**
+ * Pitch, the loose secondary gate the spec called for and version 3 never had.
+ * Yaw alone cannot tell a ghost on this floor from one two floors up.
+ */
+describe('pitch gate', () => {
+  /** `round`, with the ghost lifted `up` units and the survivor's pitch set. */
+  const lifted = (up: number, pitch: number, yawOf: (i: number, b: number) => number = (_i, b) => b) =>
+    round(40, yawOf).map((f) => {
+      f.players[0].pitch = pitch;
+      f.players[4].z = up;
+      return f;
+    });
+
+  it('forms no tracking window on a ghost far above a level crosshair', () => {
+    // 1200 out, 900 up: 36 degrees of elevation, followed perfectly in yaw.
+    expect(trackWindows(lifted(900, 0), 0)).toEqual([]);
+  });
+
+  it('forms the window when the pitch is on the ghost as well', () => {
+    const w = trackWindows(lifted(900, -36), 0);
+    expect(w.length).toBeGreaterThan(0);
+    expect(Math.max(...w.map((x) => x.fidelity))).toBeGreaterThan(0.9);
+  });
+
+  it('counts no occupancy observation for a ghost the pitch is nowhere near', () => {
+    const frames = lifted(900, 0);
+    expect(occupancy(frames, 0, priorWhereGhostIs(frames, 0.01))!.observed).toBe(0);
+    const looking = lifted(900, -36);
+    expect(occupancy(looking, 0, priorWhereGhostIs(looking, 0.01))!.observed).toBeGreaterThan(0);
+  });
+
+  it('leaves the eligibility tally alone, because where they looked is not a gate', () => {
+    expect(scanPairs(lifted(900, 0), 0).passed).toBe(scanPairs(lifted(900, -36), 0).passed);
+  });
+});
+
+/**
  * A window has to contain something to follow.
  *
  * Positions are int16, so one unit of rounding is 0.19 degrees of bearing at

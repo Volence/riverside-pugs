@@ -1,7 +1,7 @@
 import { STATE, type Frame, type PlayerSample } from '../replayFormat.js';
 import { TUNING } from './constants.js';
 import {
-  aimError, bearing, dist2d, isGhost, isLiveSurvivor, pairEligible, pairGate, wrapDeg, type Pt,
+  aimError, bearing, dist2d, isGhost, isLiveSurvivor, onTarget, pairEligible, pairGate, wrapDeg, type Pt,
 } from './geometry.js';
 
 /**
@@ -183,8 +183,10 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
       if (!pairEligible({ survivor: s, ghost: g, others: visibleOthers(f, slot, gs), tMs: f.tMs, roundStartMs })) {
         flush(); continue;
       }
+      // Yaw and pitch both. A ghost two floors up shares a bearing with the
+      // doorway under it, and following that doorway is not following the ghost.
+      if (!onTarget(s, g, TUNING.E_TRACK)) { flush(); continue; }
       const err = aimError(s.yaw, s, g);
-      if (Math.abs(err) > TUNING.E_TRACK) { flush(); continue; }
       run.push({ tMs: f.tMs, yaw: s.yaw, bear: bearing(s, g), err, dist: dist2d(s, g), s: { x: s.x, y: s.y }, g: { x: g.x, y: g.y } });
     }
     flush();

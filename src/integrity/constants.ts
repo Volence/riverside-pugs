@@ -66,6 +66,31 @@ export const TUNING = {
   /** A fidelity window requires the aim to stay inside this many degrees of
    *  the ghost for its whole length. */
   E_TRACK: 12,
+  /** Heights above an entity's origin, world units: the survivor's eye, and the
+   *  point on a ghost a crosshair would rest on. Positions in the file are
+   *  origins, which is the feet.
+   *
+   *  Used only to turn a height difference into the pitch that would look at
+   *  it, for the PITCH_TOL gate. Both are rough (the file has no crouch state,
+   *  and a hunter is not a smoker), which is why the gate is loose.
+   *
+   *  The SIGN was verified, not assumed. Over the 189 replays in hand on
+   *  2026-09-21, 13261 frames where a survivor's clip dropped while their yaw
+   *  was inside 3 degrees of a spawned special infected 300 or more units away:
+   *  pitch against elevation has slope -0.87, r = -0.84, and targets 15 degrees
+   *  or more BELOW the survivor read a median pitch of +23. Negative is up. With
+   *  these two heights the median residual is -0.8 degrees. */
+  EYE_Z: 62,
+  TARGET_Z: 36,
+  /** On target means the pitch is within this many degrees of the ghost as well
+   *  as the yaw. Loose on purpose: at D_MIN a crouch is worth 3 degrees, the
+   *  choice of aim point on the body another 7, and pitch is stored in whole
+   *  degrees. In the same 13261 firing frames the residual is inside 8.0 at
+   *  p90 and 16.2 at p95, and the tail beyond that is mostly shots at something
+   *  else that happened to share the yaw. What this removes is a ghost on
+   *  another floor: 9% of version 3's windows (121 of 1325) held a frame with
+   *  the pitch more than 20 degrees off the ghost supposedly being followed. */
+  PITCH_TOL: 20,
   /** A fidelity window scores only when the motion it required, summed frame to
    *  frame, comes to at least this many degrees. "Required" is the series
    *  `trackFidelity` normalises by, so it is already net of the survivor's own

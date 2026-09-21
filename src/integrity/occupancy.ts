@@ -1,6 +1,6 @@
 import type { Frame } from '../replayFormat.js';
 import { TUNING } from './constants.js';
-import { aimError } from './geometry.js';
+import { onTarget } from './geometry.js';
 import { scanPairs, type GateTally } from './ghostTrack.js';
 import { cellKey, cellOf, priorAt, type PriorTable } from './aimPrior.js';
 
@@ -52,7 +52,10 @@ export function occupancyWithGates(
     const p = priorAt(prior, cellKey(c.cx, c.cy));
     expected += p;
     variance += p * (1 - p);
-    if (Math.abs(aimError(s.yaw, s, g)) <= TUNING.E_DWELL) observed++;
+    // Pitch counts here and not in the prior, which has no target to take an
+    // elevation to. That can only lower `observed` against `expected`, so the
+    // asymmetry costs sensitivity and cannot flag anyone.
+    if (onTarget(s, g, TUNING.E_DWELL)) observed++;
   });
 
   // Null, never zero. No prior means the map has too little history to say

@@ -90,6 +90,19 @@ metric is defined on yaw alone, which is unaffected by eye height entirely. This
 deliberate limitation of the 10 Hz retrospective pass; the plugin phase has real eye
 positions and real traces and does not inherit it.
 
+**The pitch gate (added in version 4; version 3 shipped without it).** "On target", for
+metric A's `E_TRACK` and metric B's `E_DWELL` alike, also requires the survivor's pitch to
+be within `PITCH_TOL` (20 degrees) of the pitch that would look at the ghost, taking the eye
+as 62 units above the survivor's origin and the aim point as 36 above the ghost's. Source
+pitch is negative up. That was verified against the replays rather than assumed: over 13261
+frames in which a survivor fired with their yaw inside 3 degrees of a spawned special
+infected, pitch against elevation has slope -0.87 and r = -0.84, and the residual with those
+two heights is inside 8.0 degrees at p90 and 16.2 at p95. The gate is not an eligibility
+gate and does not appear in the gate tally, because where the player looked is the thing
+being measured, not a reason to discard the frame. The aim prior has no pitch, having no
+target to take an elevation to, so in metric B the gate can only lower `observed` against
+`expected`: it costs sensitivity and cannot flag anyone.
+
 For a survivor `s` and ghost `g` in frame `f`:
 
 - `bearing(s, g, f)` is `atan2` of the XY offset, in degrees.
@@ -276,7 +289,7 @@ distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows p
 player-round are kept.
 
 The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
-`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `MIN_TRAVEL`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
+`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `EYE_Z`, `TARGET_Z`, `PITCH_TOL`, `MIN_TRAVEL`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
 in one exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring

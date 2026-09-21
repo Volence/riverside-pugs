@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { STATE, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
 import {
-  wrapDeg, bearing, aimError, dist2d, isLiveSurvivor, isGhost, pairEligible,
+  wrapDeg, bearing, aimError, dist2d, isLiveSurvivor, isGhost, pairEligible, pitchError, onTarget,
 } from '../src/integrity/geometry.js';
 
 function p(over: Partial<PlayerSample> = {}): PlayerSample {
@@ -105,5 +105,49 @@ describe('pairEligible', () => {
 
   it('accepts when the visible thing is well off the ghost bearing', () => {
     expect(pairEligible({ ...base, others: [{ x: 0, y: 700 }] })).toBe(true);
+  });
+});
+
+/**
+ * Source pitch is NEGATIVE UP. Checked against the 189 real replays rather than
+ * trusted: over 13261 frames where a survivor fired with their yaw inside 3
+ * degrees of a spawned special infected, pitch against elevation has slope
+ * -0.87 and r = -0.84, and targets 15 degrees or more BELOW read a median pitch
+ * of +23.
+ */
+describe('pitchError', () => {
+  it('is near zero looking level at a ghost on the same floor', () => {
+    expect(Math.abs(pitchError(p(), { x: 1200, y: 0, z: 0 }))).toBeLessThan(2);
+  });
+
+  it('is near zero looking UP, which is negative pitch, at a ghost above', () => {
+    // 1000 out and 1000 up, less the eye and aim point heights: about 44 degrees.
+    expect(Math.abs(pitchError(p({ pitch: -44 }), { x: 1000, y: 0, z: 1000 }))).toBeLessThan(2);
+  });
+
+  it('is large for the same ghost when looking level or down', () => {
+    expect(pitchError(p({ pitch: 0 }), { x: 1000, y: 0, z: 1000 })).toBeGreaterThan(40);
+    expect(pitchError(p({ pitch: 44 }), { x: 1000, y: 0, z: 1000 })).toBeGreaterThan(80);
+  });
+});
+
+describe('onTarget', () => {
+  it('needs the yaw inside the tolerance it is given', () => {
+    expect(onTarget(p({ yaw: 4 }), { x: 1200, y: 0, z: 0 }, 5)).toBe(true);
+    expect(onTarget(p({ yaw: 6 }), { x: 1200, y: 0, z: 0 }, 5)).toBe(false);
+  });
+
+  it('needs the pitch inside PITCH_TOL too, so a ghost two floors up is not being looked at', () => {
+    const above = { x: 600, y: 0, z: 500 };
+    expect(onTarget(p({ pitch: 0 }), above, 5)).toBe(false);
+    expect(onTarget(p({ pitch: -36 }), above, 5)).toBe(true);
+  });
+
+  it('is loose: eye height, crouching and whole-degree pitch must not cost a real frame', () => {
+    // A crouched survivor's eye is about 18 units lower than assumed and a
+    // hunter's body is lower than the aim point, at D_MIN, with the pitch
+    // rounded away from the truth. Still on target.
+    expect(onTarget(p({ pitch: 10 }), { x: TUNING.D_MIN, y: 0, z: 0 }, 5)).toBe(true);
+    expect(onTarget(p({ pitch: -10 }), { x: TUNING.D_MIN, y: 0, z: 0 }, 5)).toBe(true);
   });
 });
