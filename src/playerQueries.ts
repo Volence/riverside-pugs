@@ -5,6 +5,7 @@ import { getPlayer, currentSeasonId, getProfileFields, socialLinks } from './pla
 import { STAT_DEFS, statDef } from './statKeys.js';
 import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
+import { chemistryFor } from './chemistry.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
  *  number on the site and the same number in Discord come from one query. */
@@ -155,6 +156,9 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // Top-5 places this season, per match, among ranked players. Keyed like
     // the stat bag plus `winrate` and `boomer_rate`.
     standings: playerStandings(db, seasonId, steamid),
+    // Who they win with and lose to. Three lines, computed per request: it is
+    // one grouped query over an indexed primary key.
+    chemistry: chemistryFor(db, steamid),
     // How this player does on each map, across every match. Only meaningful
     // once per-map capture exists, so older matches contribute win/loss with
     // an empty stat bag rather than being omitted.
