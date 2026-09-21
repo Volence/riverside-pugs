@@ -4,10 +4,14 @@ import { addServer, setEnabled, type ServerRow } from '../src/serverPool.js';
 import { banPlayer, unbanPlayer } from '../src/admin/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { ServerBanSync, banCommand, unbanCommand, UNBAN_WINDOW_MS } from '../src/serverBans.js';
+import { addAlias } from '../src/aliases.js';
 
 // 76561198030413993 is STEAM_1:1:35074132 (the verified pair).
 const P1 = '76561198030413993';
 const P2 = '76561197960265730'; // STEAM_1:0:1
+// Second accounts merged into P1. A merged alt has no player row.
+const ALT1 = '76561197960265732'; // STEAM_1:0:2
+const ALT2 = '76561197960265733'; // STEAM_1:1:2
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
@@ -84,6 +88,39 @@ describe('ServerBanSync.commands', () => {
 });
 
 describe('ServerBanSync pushing', () => {
+  // The engine ban is per SteamID. Banning only the main left every account
+  // merged into it free to walk onto the server.
+  it('bans every alias of a banned player too, with the same reason', () => {
+    addAlias(db, { steamid: ALT1, canonical: P1, by: 'test' });
+    addAlias(db, { steamid: ALT2, canonical: P1, by: 'test' });
+    banPlayer(db, P1, 'admin', 'Griefing; "twice"', null, new Date(clock));
+    expect(sync().commands()).toEqual([
+      banCommand(P1, 'Griefing; "twice"'),
+      banCommand(ALT1, 'Griefing; "twice"'),
+      banCommand(ALT2, 'Griefing; "twice"'),
+    ]);
+    expect(sync().commands()[1]).toBe('sm_addban 0 "STEAM_1:0:2" "Griefing   twice"');
+  });
+
+  it('lifts every alias when the ban is lifted, and none while another ban is open', () => {
+    addAlias(db, { steamid: ALT1, canonical: P1, by: 'test' });
+    banPlayer(db, P1, 'admin', 'first', null, new Date(clock - 2 * DAY));
+    unbanPlayer(db, P1, 'admin', new Date(clock - DAY));
+    expect(sync().commands()).toEqual([unbanCommand(P1), unbanCommand(ALT1)]);
+    banPlayer(db, P1, 'admin', 'second', null, new Date(clock));
+    expect(sync().commands()).toEqual([banCommand(P1, 'second'), banCommand(ALT1, 'second')]);
+  });
+
+  it('onChange carries the aliases too, both ways', async () => {
+    addAlias(db, { steamid: ALT1, canonical: P1, by: 'test' });
+    await sync().onChange({ kind: 'ban', steamid: P1, reason: 'Griefing' });
+    await sync().onChange({ kind: 'unban', steamid: P1 });
+    expect(sent.filter((x) => x.server === 'dallas').map((x) => x.commands)).toEqual([
+      [banCommand(P1, 'Griefing'), banCommand(ALT1, 'Griefing')],
+      [unbanCommand(P1), unbanCommand(ALT1)],
+    ]);
+  });
+
   it('sweep sends the full command set to every enabled server and skips disabled ones', async () => {
     banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
     setEnabled(db, s2, false);

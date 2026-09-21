@@ -188,6 +188,21 @@ describe('admin merge', () => {
     expect((await get(`/api/admin/players/${P2}`, admin)).json().aliases).toEqual([]);
   });
 
+  it('separating an alias from a banned account lifts the engine ban that alias was carrying', async () => {
+    const { subscribeBanChanges } = await import('../src/banEvents.js');
+    await post(`/api/admin/players/${P3}/merge`, admin, { into: P2 });
+    await post(`/api/admin/players/${P2}/ban`, admin, { reason: 'griefing' });
+    const seen: unknown[] = [];
+    const off = subscribeBanChanges((e) => seen.push(e));
+    try {
+      await post(`/api/admin/players/${P3}/unalias`, admin);
+    } finally {
+      off();
+    }
+    // Only the freed id. The main is still banned and stays banned.
+    expect(seen).toEqual([{ kind: 'unban', steamid: P3 }]);
+  });
+
   it('is admin-only, like every other action here', async () => {
     expect((await post(`/api/admin/players/${P3}/merge`, user, { into: P2 })).statusCode).toBe(403);
     expect((await post(`/api/admin/players/${P3}/unalias`, user)).statusCode).toBe(403);

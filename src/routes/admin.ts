@@ -23,6 +23,8 @@ import { setReview, unanalysableCounts } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
+import { publishBanChange } from '../banEvents.js';
+import { hasActiveBan } from '../banState.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 
@@ -181,10 +183,16 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
     const { steamid } = req.params as { steamid: string };
-    if (resolveAlias(db, steamid) === steamid) {
+    const canonical = resolveAlias(db, steamid);
+    if (canonical === steamid) {
       return reply.code(404).send({ error: 'that account is not an alias' });
     }
     removeAlias(db, steamid);
+    // While it was an alias this id carried its main's engine ban, which is
+    // permanent on the box and which the sweep will never lift now that the
+    // two are no longer connected. The main stays banned; only this id is
+    // freed, because on the website it is now an account with no ban at all.
+    if (hasActiveBan(db, canonical)) publishBanChange({ kind: 'unban', steamid });
     logAdmin(db, adminId, 'unalias_player', steamid);
     return { ok: true };
   });
