@@ -912,6 +912,8 @@ export const adminApi = {
   activate: (steamid: string) => post(`/api/admin/players/${steamid}/activate`),
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
+  /** Ends every session the player holds, on every device. */
+  signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
@@ -1049,6 +1051,8 @@ export const api = {
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),
+  /** Sign out of this browser. */
+  logout: () => post<{ ok: true }>('/auth/logout'),
   saveProfile: (body: ProfileFieldsInput) => post<{ ok: true }>('/api/profile', body),
   unlinkTwitch: () => post<{ ok: true }>('/api/twitch/unlink'),
   reportEligibility: (matchId: number, signal?: AbortSignal) =>

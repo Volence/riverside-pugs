@@ -17,7 +17,7 @@ import { inGoodStanding } from '../standing.js';
  */
 export function makeOptionalViewer(db: DB) {
   return function optionalViewer(req: FastifyRequest): string | null {
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid) return null;
     return inGoodStanding(db, steamid) ? steamid : null;
   };
@@ -29,7 +29,7 @@ export function makeOptionalViewer(db: DB) {
  *  not a SteamID that has been merged into another account. */
 export function makeRequireActive(db: DB) {
   return function requireActive(req: FastifyRequest, reply: FastifyReply): string | null {
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid) {
       reply.code(401).send({ error: 'not logged in' });
       return null;
@@ -46,7 +46,7 @@ export function makeRequireActive(db: DB) {
  *  401/403 reply sent and null. */
 export function makeRequireAdmin(db: DB) {
   return function requireAdmin(req: FastifyRequest, reply: FastifyReply): string | null {
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid) {
       reply.code(401).send({ error: 'not logged in' });
       return null;

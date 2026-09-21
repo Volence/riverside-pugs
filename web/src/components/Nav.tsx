@@ -1,5 +1,6 @@
+import { useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import type { StateSnapshot } from '../api';
+import { api, type StateSnapshot } from '../api';
 import { campaignName } from '../format';
 import type { Session } from '../hooks/useLiveState';
 
@@ -26,8 +27,28 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/how-to-play', 'How to play'],
 ];
 
-export function Nav({ session, state }: { session: Session; state: StateSnapshot | null }) {
+export function Nav(
+  { session, state, onSignedOut }: {
+    session: Session;
+    state: StateSnapshot | null;
+    /** Called once the session is gone, to re-read who is signed in. */
+    onSignedOut?: () => void;
+  },
+) {
   const { path } = useLocation();
+  const [leaving, setLeaving] = useState(false);
+  // Offered to a pending or banned account as well: signing out is never
+  // something to withhold. On failure the control comes back so they can
+  // try again; on success the session re-read removes it.
+  const signOut = async () => {
+    setLeaving(true);
+    try {
+      await api.logout();
+      onSignedOut?.();
+    } finally {
+      setLeaving(false);
+    }
+  };
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   const live = state?.match && state.match.state === 'live' ? state.match : null;
 
@@ -58,6 +79,7 @@ export function Nav({ session, state }: { session: Session; state: StateSnapshot
         <div class="nav__me">
           {me.avatar && <img src={me.avatar} alt="" />}
           <a href={`/player/${encodeURIComponent(me.steamid)}`}>{me.name}</a>
+          <button type="button" class="nav__signout" onClick={signOut} disabled={leaving}>Sign out</button>
         </div>
       )}
     </header>

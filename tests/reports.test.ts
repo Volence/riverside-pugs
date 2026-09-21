@@ -60,6 +60,8 @@ describe('player reports', () => {
     expect(fileReport(db, matchId, IDS[0], body)).toMatchObject({ ok: false, status: 403 });
     banPlayer(db, IDS[1], ADMIN, 'toxic', 60);
     expect(fileReport(db, matchId, IDS[1], body)).toMatchObject({ ok: false, status: 403 });
+    // Signed in again after the ban, which ended the session they had.
+    cookie[IDS[1]] = authedCookie(app, db, IDS[1], { active: false });
     expect((await report(IDS[1], body)).statusCode).toBe(403);
     expect(fileReport(db, matchId, IDS[2], body)).toMatchObject({ ok: true });
   });

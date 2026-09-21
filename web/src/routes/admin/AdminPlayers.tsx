@@ -105,6 +105,11 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
           danger: true,
         })}>Unlink Discord</button>}
         {d.timeout && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.clearPenalties(d.steamid))}>Clear penalties</button>}
+        <button class="chip" disabled={busy} onClick={() => run(() => adminApi.signOutPlayer(d.steamid), {
+          title: `Sign ${d.name} out everywhere?`,
+          body: 'Every browser they are signed in on stops working at once and has to sign in through Steam again. Use it when an account may be in somebody else\'s hands.',
+          confirmLabel: 'Sign out',
+        })}>Sign out everywhere</button>
       </div>
 
       <MergeSection d={d} busy={busy} run={run} />

@@ -203,9 +203,11 @@ describe('discord auth, configured', () => {
   // Discord serve any number of Steam accounts in sequence.
   it('unlink is refused while banned, and the link stays', async () => {
     const { banPlayer } = await import('../src/admin/players.js');
-    const cookies = authedCookie(app, db, P1);
+    authedCookie(app, db, P1);
     linkDiscord(db, P1, '111', 'Alice');
     banPlayer(db, P1, P2, 'griefing', 60);
+    // A ban ends the sessions that were open, so this is them signed in again.
+    const cookies = authedCookie(app, db, P1, { active: false });
     const res = await app.inject({ method: 'POST', url: '/api/discord/unlink', cookies });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatch(/banned/);

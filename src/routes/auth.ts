@@ -3,7 +3,7 @@ import type { Config } from '../config.js';
 import type { DB } from '../db.js';
 import type { verifyLogin as VerifyFn, fetchPersona as PersonaFn } from '../steamAuth.js';
 import { loginUrl, steamReturnUrl } from '../steamAuth.js';
-import { getSession, setSession } from '../session.js';
+import { clearSession, getSession, setSession } from '../session.js';
 import { activatePlayer, getPlayer, upsertPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
 import type { DiscordApi } from '../discord/api.js';
@@ -76,7 +76,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
     }
     const persona = await opts.fetchPersona(steamid, config.steamApiKey);
     upsertPlayer(db, { steamid, name: persona.name, avatar: persona.avatar }, config.adminSteamIds);
-    setSession(reply, steamid, config.publicUrl.startsWith('https://'));
+    setSession(reply, db, steamid, config.publicUrl.startsWith('https://'));
     // Someone already linked who has since joined the guild is activated here
     // rather than having to relink.
     if (opts.discordApi) await applyGate(db, opts.discordApi, steamid);
@@ -87,8 +87,17 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
     return reply.redirect(next ?? '/');
   });
 
+  /** Sign out of this browser. A POST, so a link or an image tag on another
+   *  site cannot do it, and open to anyone: clearing a cookie that is not
+   *  there is harmless, and a stale tab must always be able to sign out.
+   *  Other devices keep their sessions; ending those is session_epoch's job. */
+  app.post('/auth/logout', async (_req, reply) => {
+    clearSession(reply);
+    return { ok: true };
+  });
+
   app.get('/api/me', async (req, reply) => {
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid) return reply.code(401).send({ error: 'not logged in' });
     let player = getPlayer(db, steamid);
     if (!player) return reply.code(401).send({ error: 'unknown player' });
@@ -131,7 +140,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
   }));
 
   app.post('/api/register', async (req, reply) => {
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid) return reply.code(401).send({ error: 'not logged in' });
     const player = getPlayer(db, steamid);
     if (!player) return reply.code(401).send({ error: 'unknown player' });

@@ -127,7 +127,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    *  that has been banned, has no business publishing any. Reading your own
    *  profile is a different route and stays open. */
   app.post('/api/profile', async (req, reply) => {
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid || !getPlayer(db, steamid)) {
       return reply.code(401).send({ error: 'not logged in' });
     }

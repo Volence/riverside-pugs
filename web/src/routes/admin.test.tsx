@@ -16,7 +16,7 @@ async function confirmDialog(name?: string | RegExp) {
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
-    players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
+    players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     reports: vi.fn(), audit: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
@@ -131,6 +131,25 @@ describe('Admin page', () => {
     fireEvent.click(screen.getByText('newcomer'));
     await waitFor(() => expect(screen.getByText(/This Discord was previously linked to/)).toBeTruthy());
     expect((screen.getByText('banned main') as HTMLAnchorElement).getAttribute('href')).toBe('/player/9');
+  });
+
+  it('signs a player out everywhere, after asking', async () => {
+    const row = { steamid: '2', name: 'phished', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputFlags: [],
+      inputCaps: [],
+    });
+    mockAdmin.signOutPlayer.mockResolvedValue({ ok: true });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    await waitFor(() => expect(screen.getByText('phished')).toBeTruthy());
+    fireEvent.click(screen.getByText('phished'));
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign out everywhere' })));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(mockAdmin.signOutPlayer).toHaveBeenCalledWith('2'));
   });
 
   it('says none, with no section, for a player with no connect drops', async () => {

@@ -46,7 +46,7 @@ export async function twitchAuthRoutes(app: FastifyInstance, opts: TwitchAuthOpt
       reply.code(404).send({ error: 'not found' });
       return null;
     }
-    const steamid = getSession(req);
+    const steamid = getSession(req, db);
     if (!steamid || !getPlayer(db, steamid)) {
       reply.code(401).send({ error: 'not logged in' });
       return null;

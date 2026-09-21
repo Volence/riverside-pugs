@@ -35,8 +35,10 @@ describe('POST /api/profile', () => {
     const invited = authedCookie(app, db, P1, { active: false });
     const a = await app.inject({ method: 'POST', url: '/api/profile', cookies: invited, payload: { bio: 'buy gold at evil' } });
     expect(a.statusCode).toBe(403);
-    const banned = authedCookie(app, db, P2);
+    authedCookie(app, db, P2);
     banPlayer(db, P2, P1, 'toxic', 60);
+    // Signed in again after the ban, which ended the session they had.
+    const banned = authedCookie(app, db, P2, { active: false });
     const b = await app.inject({ method: 'POST', url: '/api/profile', cookies: banned, payload: { bio: 'still here' } });
     expect(b.statusCode).toBe(403);
     expect(db.prepare('SELECT bio FROM players WHERE bio IS NOT NULL').all()).toEqual([]);

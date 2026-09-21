@@ -816,6 +816,9 @@ export function openDb(path: string): DB {
   // banned before this column existed, which restoreStatus in
   // src/admin/players.ts works out from the evidence instead.
   ensureColumn(db, 'players', 'status_before_ban', 'TEXT');
+  // Bumped to end every session a player holds at once: the signed cookie
+  // carries the value it was issued under. See src/session.ts.
+  ensureColumn(db, 'players', 'session_epoch', 'INTEGER NOT NULL DEFAULT 0');
   // Every Discord link there has ever been, open or closed. The players row
   // only knows the link as it stands, which is what let one Discord account
   // serve any number of Steam accounts in sequence with nothing to show for

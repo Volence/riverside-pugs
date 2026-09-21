@@ -105,6 +105,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .nav__me { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-dense); }
 .nav__me a { color: var(--text); }
 .nav__me img { width: 24px; height: 24px; border-radius: 4px; }
+.nav__signout { background: none; border: 0; padding: 0; font: inherit; color: var(--text-muted); cursor: pointer; text-decoration: underline; }
+.nav__signout:hover { color: var(--text); }
+.nav__signout:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- crosshair maker ---------- */
 

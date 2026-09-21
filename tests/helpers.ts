@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
-import { SESSION_COOKIE } from '../src/session.js';
+import { SESSION_COOKIE, sessionValue } from '../src/session.js';
 import type { Orchestrator } from '../src/orchestrator.js';
 
 export function authedCookie(
@@ -12,7 +12,11 @@ export function authedCookie(
 ): Record<string, string> {
   upsertPlayer(db, { steamid, name: `p${steamid.slice(-3)}`, avatar: null }, []);
   if (opts.active !== false) activatePlayer(db, steamid);
-  return { [SESSION_COOKIE]: app.signCookie(steamid) };
+  // Issued under the player's current epoch, exactly as a login would be, so
+  // a cookie made before a ban or a sign-out is a cookie that no longer works.
+  const { session_epoch: epoch } = db.prepare('SELECT session_epoch FROM players WHERE steamid = ?')
+    .get(steamid) as { session_epoch: number };
+  return { [SESSION_COOKIE]: app.signCookie(sessionValue(steamid, epoch)) };
 }
 
 /** No-op orchestrator for tests that don't exercise match orchestration.

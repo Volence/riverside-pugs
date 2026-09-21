@@ -57,10 +57,16 @@ export function insertBan(
   // Remember what the ban is interrupting, so its end can put that back. A
   // second ban on an account that is already banned keeps the first memory:
   // what it interrupts is a ban, and "banned" is never what to restore to.
+  //
+  // session_epoch goes up in the same statement, which ends every session the
+  // player holds (src/session.ts). They can sign straight back in, and will
+  // then be shown the ban; what they cannot do is carry on in a tab that was
+  // open when it landed.
   db.prepare(
     `UPDATE players SET
        status_before_ban = CASE WHEN status = 'banned' THEN status_before_ban ELSE status END,
-       status = 'banned'
+       status = 'banned',
+       session_epoch = session_epoch + 1
      WHERE steamid = ?`,
   ).run(steamid);
 }
