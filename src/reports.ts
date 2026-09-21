@@ -1,5 +1,4 @@
 import type { DB } from './db.js';
-import { publishAdminEvent } from './adminFeed.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'other'] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -54,7 +53,6 @@ export function fileReport(
     `INSERT INTO reports (match_id, reporter_id, target_id, category, text, status, created_at)
      VALUES (?, ?, ?, ?, ?, 'open', ?)`,
   ).run(matchId, reporter, target.steamid, body.category, text, new Date().toISOString()).lastInsertRowid);
-  publishAdminEvent({ kind: 'report', reportId: id });
   return { ok: true, id };
 }
 

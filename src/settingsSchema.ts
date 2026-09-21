@@ -52,7 +52,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'discord_staff_role_id', group: 'Discord', label: 'Staff role id', help: 'Role given access to every match\'s team voice channels, so staff can drop into either side. Empty gives no role access.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'discord_admin_channel_id', group: 'Discord', label: 'Admin channel id', help: 'Private channel for the admin feed. Empty turns the feed off.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'discord_results_channel_id', group: 'Discord', label: 'Results channel id', help: 'Where match results are posted. Empty keeps them in the queue channel. Set it and the queue channel is left for queueing: a finished match\'s card and server-ready ping are removed once its result is posted.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
-  { key: 'admin_feed_reports', group: 'Admin feed', label: 'Reports', help: 'Post new player reports with Resolve and Dismiss buttons.', type: { kind: 'bool' } },
+  { key: 'admin_feed_reports', group: 'Admin feed', label: 'Reports', help: 'Post a line when a ticket opens or gets another report. Restricted tickets never post.', type: { kind: 'bool' } },
   { key: 'admin_feed_actions', group: 'Admin feed', label: 'Admin actions', help: 'Bans, unbans, voids, aborts, setting changes.', type: { kind: 'bool' } },
   { key: 'admin_feed_penalties', group: 'Admin feed', label: 'Penalties', help: 'Missed ready checks and no-shows.', type: { kind: 'bool' } },
   { key: 'admin_feed_accounts', group: 'Admin feed', label: 'Accounts', help: 'Players linking Discord and being activated.', type: { kind: 'bool' } },

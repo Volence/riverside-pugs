@@ -2,12 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
-import { fileReport } from '../src/reports.js';
+import { fileReport } from '../src/tickets/filing.js';
 import { recordPenalty } from '../src/penalties.js';
 import { logAdmin } from '../src/admin/audit.js';
 import { publishAdminEvent } from '../src/adminFeed.js';
 import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
-import { getMessage } from '../src/discord/messageStore.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -38,41 +37,44 @@ afterEach(() => feed.stop());
 const text = (i: number) => JSON.stringify(t.live()[i]?.payload);
 
 describe('admin feed', () => {
-  it('posts a new report with resolve and dismiss buttons to the admin channel', async () => {
-    const r = fileReport(db, matchId, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us' });
+  it('posts one plain line for a new ticket and another for a further report, never naming the reporter', async () => {
+    const a = fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId }, { adminSteamIds: [] }) as { ticketId: number };
+    fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });
     await feed.idle();
-    expect(t.live()).toHaveLength(1);
+    expect(t.live()).toHaveLength(2);
     expect(t.live()[0].channelId).toBe('admins');
+    expect(text(0)).toContain(`https://pug.test/admin?ticket=${a.ticketId}`);
     expect(text(0)).toContain('player5');
     expect(text(0)).toContain('griefing');
-    expect(text(0)).toContain('kept killing us');
-    const ids = t.live()[0].payload.components.flat().map((b) => (b.kind === 'button' ? b.customId : ''));
-    expect(ids).toEqual(expect.arrayContaining([`r:${(r as { id: number }).id}:resolve`, `r:${(r as { id: number }).id}:dismiss`]));
-  });
-
-  it('a resolve button needs an admin, resolves, and updates the post without a second message', async () => {
-    const r = fileReport(db, matchId, IDS[0], { targetId: IDS[5], category: 'afk', text: '' }) as { id: number };
-    await feed.idle();
-    const denied = await feed.handleButton({ kind: 'button', customId: `r:${r.id}:resolve`, userId: '901', userName: 'd1' });
-    expect(JSON.stringify(denied.payload)).toMatch(/admins only/i);
-    const ok = await feed.handleButton({ kind: 'button', customId: `r:${r.id}:resolve`, userId: '907', userName: 'd7' });
-    expect(ok.ephemeral).toBe(true);
-    await feed.idle();
-    expect(t.live()).toHaveLength(1);
-    expect(text(0)).toMatch(/Resolved\*\* by player7/);
+    expect(text(0)).toMatch(/new ticket/i);
+    expect(text(1)).toMatch(/another report/i);
+    expect(text(0) + text(1)).not.toContain('player0');
+    expect(text(0) + text(1)).not.toContain('player1');
+    expect(text(0)).not.toContain('kept killing us');
     expect(t.live()[0].payload.components).toEqual([]);
-    expect((db.prepare('SELECT status FROM reports WHERE id = ?').get(r.id) as { status: string }).status).toBe('resolved');
   });
 
-  it('a report resolved on the website also updates the post', async () => {
-    const r = fileReport(db, matchId, IDS[0], { targetId: IDS[5], category: 'afk', text: '' }) as { id: number };
+  it('a restricted ticket posts nothing', async () => {
+    fileReport(db, IDS[0], { targetId: IDS[5], category: 'unsafe', text: 'details' }, { adminSteamIds: [] });
+    fileReport(db, IDS[0], { targetId: ADMIN, category: 'toxicity', text: '' }, { adminSteamIds: [] });
     await feed.idle();
-    db.prepare("UPDATE reports SET status = 'dismissed', resolved_by = ? WHERE id = ?").run(ADMIN, r.id);
-    logAdmin(db, ADMIN, 'resolve_report', r.id, { status: 'dismissed', note: 'not afk' });
+    expect(t.live()).toHaveLength(0);
+  });
+
+  it('a button on an old report card answers instead of failing', async () => {
+    const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7' });
+    expect(r.ephemeral).toBe(true);
+    expect(JSON.stringify(r.payload)).toMatch(/tickets/i);
+  });
+
+  it('ticket actions read as sentences with a link', async () => {
+    logAdmin(db, ADMIN, 'ticket_close', 12, { outcome: 'warned' });
+    logAdmin(db, ADMIN, 'ticket_ban', 12, { reason: 'walls', minutes: 1440 });
     await feed.idle();
-    expect(t.live()).toHaveLength(1);
-    expect(text(0)).toMatch(/dismissed/i);
-    expect(getMessage(db, 'report', String(r.id))).toBeTruthy();
+    expect(text(0)).toContain('closed ticket [#12](https://pug.test/admin?ticket=12)');
+    expect(text(0)).toContain('warned');
+    expect(text(1)).toContain('banned from ticket [#12]');
+    expect(text(1)).toContain('1 day');
   });
 
   it('admin actions, penalties, accounts and problems post one line each, with names', async () => {

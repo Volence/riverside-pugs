@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
 import { addTicketEvent, hasStaffFlag, seedAccess } from './store.js';
@@ -50,6 +51,7 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
   if (typeof body.category !== 'string' || !(REPORT_CATEGORIES as readonly string[]).includes(body.category)) {
     return fail(400, 'pick a category');
   }
+  const category = body.category;
   const text = typeof body.text === 'string' ? body.text.trim() : '';
   if (text.length > MAX_TEXT) return fail(400, `keep it under ${MAX_TEXT} characters`);
   if (body.category === 'unsafe' && !text) return fail(400, 'say what happened, so the right people can look into it');
@@ -84,16 +86,21 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
        WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id IS NULL AND t.status = 'open'`).get(reporter, target.steamid);
   if (dupe) return fail(409, matchId !== null ? 'you already reported this player for this match' : 'you already have an open report about this player');
 
-  const restricted = body.category === 'unsafe' || hasStaffFlag(db, target.steamid);
-  return db.transaction((): FileResult => {
+  const restricted = category === 'unsafe' || hasStaffFlag(db, target.steamid);
+  const result = db.transaction((): FileResult => {
     const ticket = findOrOpen(db, target.steamid, restricted, null, deps);
     const reportId = Number(db.prepare(
       `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, map_ordinal, half, t_ms, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(ticket.id, reporter, body.category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null, now.toISOString()).lastInsertRowid);
+    ).run(ticket.id, reporter, category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null, now.toISOString()).lastInsertRowid);
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };
   })();
+  // After the commit, and only for a ticket the whole team may read.
+  if (result.ok && !result.restricted) {
+    publishAdminEvent({ kind: 'report', ticketId: result.ticketId, targetId: target.steamid, category, created: result.created });
+  }
+  return result;
 }
 
 /** A ticket opened by staff with no report behind it: something seen in
