@@ -86,17 +86,17 @@ function p95(xs: number[]): number {
 /**
  * One round, every survivor.
  *
- * Also returns the round's own contribution to the aim prior, which the caller
- * subtracts before scoring so nobody is measured against a baseline they helped
- * build. See `subtractRound`.
+ * `prior` is the map's pool with this round already taken out, so nobody is
+ * measured against a baseline they helped build. Taking it out is the caller's
+ * job (`analyzeOneRound`), because only the caller knows whether the pool ever
+ * contained this round.
  */
 export function analyzeRound(
   frames: Frame[], survivorSlots: number[], prior: PriorTable | null,
-): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; roundPrior: PriorBuilder } {
+): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]> } {
   const metrics = new Map<number, RoundMetrics>();
   const clips = new Map<number, TrackWindow[]>();
   const occ = new Map<number, OccResult | null>();
-  const roundPrior = buildRoundPrior(frames, survivorSlots);
 
   for (const slot of survivorSlots) {
     const windows = trackWindows(frames, slot);
@@ -129,5 +129,5 @@ export function analyzeRound(
       m.teamGap = mine - (others.reduce((a, b) => a + b, 0) / others.length);
     }
   }
-  return { metrics, clips, roundPrior };
+  return { metrics, clips };
 }

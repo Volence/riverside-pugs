@@ -313,7 +313,7 @@ integrity_prior    map PRIMARY KEY
                    frames INTEGER, rounds INTEGER, counts TEXT (JSON), analyzer_version
 
 integrity_prior_rounds (match_id, ordinal, half) PRIMARY KEY
-                   frames INTEGER, counts TEXT (JSON)
+                   frames INTEGER, counts TEXT (JSON), map, analyzer_version
 ```
 
 `integrity_prior` is the cached grid from section 1, one row per map with the whole cell
@@ -331,6 +331,22 @@ contribution from the pool, so the contribution has to survive as the exact numb
 added, not as something re-derived later from a file that may no longer parse the same way.
 One producer writes it, `src/integrity/round.ts` `buildRoundPrior`, and both the pooling
 pass and the scoring pass use that one function.
+
+**The pool is the sum of its shares, by construction (version 4).** A map's row in
+`integrity_prior` is defined as the sum of that map's `integrity_prior_rounds` rows at the
+current analyzer version, and `poolRounds` in `store.ts` is the only writer of either table,
+in one transaction. The first implementation let them drift in two ways. The automatic
+post-match pass wrote shares and never pooled them, so a map only crossed
+`MIN_PRIOR_ROUNDS` when somebody ran a full backfill by hand. And after an
+`ANALYZER_VERSION` bump that same pass subtracted each round's new share from the OLD
+analyzer's pool, which had never contained it; `subtractRound` clamps that to zero rather
+than failing, so nothing reported it. Now the post-match pass pools what it measures before
+it scores, a share or pool written by another version is never loaded, and leave-one-out is
+applied only to a round that has a current share, which is the same thing as a round the
+pool contains. When a pass carries a map over `MIN_PRIOR_ROUNDS`, the rounds of that map
+measured earlier without a prior are measured again in the same pass. A side effect worth
+having: a round whose replay has been pruned stays in its map's prior for as long as its
+share is current.
 
 Order matters when recomputing: the prior must be rebuilt before any round is scored
 against it, because a player's own frames are excluded from their prior and the exclusion

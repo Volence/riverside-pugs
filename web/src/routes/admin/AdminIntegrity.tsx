@@ -48,8 +48,8 @@ export function groupByRound(clips: IntegrityClip[]): { key: string; clips: Inte
  * Until this existed the only caller of the integrity analysis anywhere was a
  * script someone had to SSH in and run, so the board was empty until somebody
  * remembered and stale again after the next match. The automatic per-match
- * pass fixes the staleness; this button is for the other case, re-measuring
- * everything against rebuilt priors or a changed threshold.
+ * pass fixes the staleness, priors included; this button is for the other
+ * case, re-measuring everything after a changed threshold.
  *
  * The run happens in its own process (see src/integrity/job.ts) and this polls
  * its state while it goes, showing the script's own output, which already
@@ -86,8 +86,9 @@ function BackfillControl() {
         {pending > 0
           ? ` ${pending} round${pending === 1 ? '' : 's'} waiting to be measured; the next pass picks ${pending === 1 ? 'it' : 'them'} up within a minute.`
           : ' Everything on disk has been measured.'}
-        {' '}Re-analysing everything is for after a threshold change, or once more maps have
-        enough rounds to score against.
+        {' '}Each pass also adds what it measured to that map's baseline, so a map starts being
+        scored for occupancy by itself once it has enough rounds. Re-analysing everything is
+        for after a threshold change.
       </p>
       <div class="admin-row">
         <button

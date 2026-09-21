@@ -20,7 +20,8 @@ import { ANALYZER_VERSION } from './store.js';
 export type JobStatus = 'idle' | 'running' | 'done' | 'failed';
 
 /** What mode the analysis ran in. `full` re-measures everything against
- *  rebuilt priors; `pending` measures only rounds nothing has looked at. */
+ *  rebuilt priors; `pending` pools and measures only rounds nothing has looked
+ *  at. */
 export type JobMode = 'full' | 'pending';
 
 export interface JobState {

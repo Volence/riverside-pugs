@@ -50,6 +50,18 @@ function replayBytes(n: number, map = 'l4d_vs_farm01_hilltop', paused = 0): Uint
   return out;
 }
 
+/** Another round of match 1, on disk and indexed. */
+function addRound(ordinal: number, half: number): void {
+  db.prepare('INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz) VALUES (1, ?, ?, ?, 0, 0, 10)')
+    .run(ordinal, half, `pug_${TOKEN}_${ordinal}_${half}.rpl`);
+  writeFileSync(join(dir, `pug_${TOKEN}_${ordinal}_${half}.rpl`), replayBytes(60));
+}
+
+function scoredForOccupancy(): number {
+  return (db.prepare('SELECT metrics FROM integrity_rounds').all() as { metrics: string }[])
+    .filter((r) => JSON.parse(r.metrics).occZ != null).length;
+}
+
 beforeEach(() => {
   db = openDb(':memory:');
   dir = mkdtempSync(join(tmpdir(), 'itg-'));
@@ -98,7 +110,8 @@ describe('paused frames', () => {
   });
 
   it('keeps them out of the metrics, through the same door', () => {
-    analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, replayBytes(60, undefined, 400));
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60, undefined, 400));
+    backfillAll(db, dir);
     const row = db.prepare('SELECT metrics FROM integrity_rounds WHERE slot = 0').get() as { metrics: string };
     expect(JSON.parse(row.metrics).eligiblePairs).toBe(60);
     expect(db.prepare('SELECT frames FROM integrity_prior_rounds').get()).toEqual({ frames: 60 });
@@ -138,15 +151,64 @@ describe('analyzePending', () => {
     expect(v).toEqual([{ v: ANALYZER_VERSION }]);
   });
 
-  // Unlike backfillAll, which exists to re-measure everything against fresh
-  // priors. This one runs after every match and must not re-read 250 MB.
-  it('does not touch the map priors', () => {
+  // This used to be the opposite test. The pending pass never touched the
+  // priors, so a map only ever crossed MIN_PRIOR_ROUNDS when somebody ran a
+  // full backfill by hand, and on a quiet week that is nobody.
+  it('pools the rounds it measures into the map prior', () => {
     writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
-    rebuildPriors(db, dir);
-    const before = db.prepare('SELECT rounds, frames FROM integrity_prior').get();
-    db.prepare('DELETE FROM integrity_rounds').run();
     analyzePending(db, dir);
-    expect(db.prepare('SELECT rounds, frames FROM integrity_prior').get()).toEqual(before);
+    expect(db.prepare('SELECT rounds, frames FROM integrity_prior').get()).toEqual({ rounds: 1, frames: 60 });
+    addRound(1, 2);
+    analyzePending(db, dir);
+    expect(db.prepare('SELECT rounds, frames FROM integrity_prior').get()).toEqual({ rounds: 2, frames: 120 });
+  });
+
+  // What keeps it cheap: it runs after every match and must not re-read 250 MB.
+  it('never reads a replay it is not going to measure', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    analyzePending(db, dir);
+    // If the pass opened this file again it would fail to decode it.
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), new Uint8Array(16));
+    addRound(1, 2);
+    expect(analyzePending(db, dir)).toEqual({ rounds: 1, skipped: 0 });
+    expect(db.prepare('SELECT rounds FROM integrity_prior').get()).toEqual({ rounds: 2 });
+  });
+
+  it('carries a map over MIN_PRIOR_ROUNDS by itself, and goes back for the rounds that were waiting', () => {
+    for (let ordinal = 2; ordinal < TUNING.MIN_PRIOR_ROUNDS; ordinal++) addRound(ordinal, 1);
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    expect(analyzePending(db, dir).rounds).toBe(TUNING.MIN_PRIOR_ROUNDS - 1);
+    expect(scoredForOccupancy()).toBe(0);
+    addRound(TUNING.MIN_PRIOR_ROUNDS, 1);
+    // The one new round, and the 19 that had been measured without a prior.
+    expect(analyzePending(db, dir).rounds).toBe(TUNING.MIN_PRIOR_ROUNDS);
+    expect(scoredForOccupancy()).toBe(TUNING.MIN_PRIOR_ROUNDS);
+  });
+
+  it('keeps the pool equal to the sum of the shares it would subtract', () => {
+    for (let i = 2; i <= 4; i++) addRound(i, 1);
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    analyzePending(db, dir);
+    addRound(5, 1);
+    analyzePending(db, dir);
+    const pool = db.prepare('SELECT frames, rounds FROM integrity_prior').get();
+    const shares = db.prepare('SELECT SUM(frames) AS frames, COUNT(*) AS rounds FROM integrity_prior_rounds').get();
+    expect(pool).toEqual(shares);
+  });
+
+  // The bug this replaces: after an ANALYZER_VERSION bump the pending pass
+  // subtracted each round's share from a pool built by the OLD analyzer, which
+  // had never contained it, and subtractRound clamped the nonsense to zero.
+  it('after a version bump, rebuilds the pool from what it measures instead of reusing the old one', () => {
+    for (let i = 2; i <= 3; i++) addRound(i, 1);
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    analyzePending(db, dir);
+    db.prepare('UPDATE integrity_rounds SET analyzer_version = ?').run(ANALYZER_VERSION - 1);
+    db.prepare('UPDATE integrity_prior_rounds SET analyzer_version = ?, frames = 999').run(ANALYZER_VERSION - 1);
+    db.prepare('UPDATE integrity_prior SET analyzer_version = ?, frames = 999').run(ANALYZER_VERSION - 1);
+    analyzePending(db, dir);
+    expect(db.prepare('SELECT frames, rounds, analyzer_version AS v FROM integrity_prior').get())
+      .toEqual({ frames: 180, rounds: 3, v: ANALYZER_VERSION });
   });
 });
 
@@ -179,6 +241,7 @@ describe('backfillAll', () => {
     // One round, so the pool IS that round.
     expect(map.frames).toBe(pooled.frames);
 
+    // Scoring reads the share and must leave it exactly as pooled.
     analyzeOneRound(db, { matchId: 1, ordinal: 1, half: 1 }, readFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`)));
     const after = db.prepare('SELECT frames, counts FROM integrity_prior_rounds').get() as { frames: number; counts: string };
     expect(after).toEqual(pooled);

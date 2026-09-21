@@ -383,6 +383,8 @@ CREATE TABLE IF NOT EXISTS integrity_prior_rounds (
   half     INTEGER NOT NULL,
   frames   INTEGER NOT NULL,
   counts   TEXT    NOT NULL,
+  map      TEXT,
+  analyzer_version INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, ordinal, half)
 );
 -- One-time codes a Discord user follows to link their Steam account from
@@ -700,6 +702,13 @@ export function openDb(path: string): DB {
   // millisecond of a round). -1 means "recorded before round timing existed".
   ensureColumn(db, 'match_live_events', 'half', 'INTEGER NOT NULL DEFAULT -1');
   ensureColumn(db, 'match_live_events', 't_ms', 'INTEGER NOT NULL DEFAULT -1');
+  // Which map a round's share of the aim prior belongs to, and which analyzer
+  // built it. A map's pool is DEFINED as the sum of its current-version shares
+  // (see poolRounds in src/integrity/store.ts), so a share has to say both. A
+  // row from before these existed reads as map NULL, version 0, which no pool
+  // will ever sum: it is rebuilt the next time its round is measured.
+  ensureColumn(db, 'integrity_prior_rounds', 'map', 'TEXT');
+  ensureColumn(db, 'integrity_prior_rounds', 'analyzer_version', 'INTEGER NOT NULL DEFAULT 0');
   // Which map a player was rostered on: 0 for the starting roster, later for a
   // sub rostered at a go-live. The rating step skips anyone who played under
   // half the maps.

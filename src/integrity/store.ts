@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import type { PriorTable } from './aimPrior.js';
+import { PriorBuilder, type PriorTable } from './aimPrior.js';
 import type { TrackWindow } from './ghostTrack.js';
 import type { RoundMetrics } from './round.js';
 
@@ -54,33 +54,85 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
   tx();
 }
 
-export function savePrior(db: DB, map: string, pool: PriorTable, rounds: number): void {
-  db.prepare(
+export interface PoolEntry { key: RoundKey; map: string; prior: PriorTable }
+
+/**
+ * Store some rounds' shares of the aim prior and re-pool the maps they touch.
+ *
+ * THE INVARIANT, and the only writer that can break it: a map's pool is the
+ * sum of that map's shares at the current analyzer version, exactly. Both
+ * tables are written here, in one transaction, and nowhere else.
+ *
+ * That is what leave-one-round-out rests on. `subtractRound` clamps a share
+ * the pool never contained to zero instead of failing, so a pool and a share
+ * that disagree shift every occupancy score silently. Version 3 had two ways
+ * to get there: the pending pass wrote shares and never pooled them, and after
+ * a version bump it subtracted new shares from the old analyzer's pool. With
+ * the invariant, "this share can be loaded" means "the pool contains it".
+ *
+ * The pool is re-summed from the stored shares rather than adjusted in place,
+ * so a round pooled twice is counted once, and a round whose replay has since
+ * been pruned stays in its map's prior for as long as its share is current.
+ *
+ * Returns how many rounds each touched map had before and after, which is how
+ * a caller notices a map crossing MIN_PRIOR_ROUNDS.
+ */
+export function poolRounds(db: DB, entries: PoolEntry[]): Map<string, { before: number; after: number }> {
+  const out = new Map<string, { before: number; after: number }>();
+  const upsert = db.prepare(
+    `INSERT INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts, map, analyzer_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(match_id, ordinal, half) DO UPDATE SET frames = excluded.frames, counts = excluded.counts,
+       map = excluded.map, analyzer_version = excluded.analyzer_version`,
+  );
+  const shares = db.prepare('SELECT frames, counts FROM integrity_prior_rounds WHERE map = ? AND analyzer_version = ?');
+  const savePool = db.prepare(
     `INSERT INTO integrity_prior (map, frames, rounds, counts, analyzer_version) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(map) DO UPDATE SET frames = excluded.frames, rounds = excluded.rounds,
        counts = excluded.counts, analyzer_version = excluded.analyzer_version`,
-  ).run(map, pool.frames, rounds, countsToJson(pool.counts), ANALYZER_VERSION);
+  );
+  db.transaction(() => {
+    for (const map of new Set(entries.map((e) => e.map))) {
+      out.set(map, { before: loadPrior(db, map)?.rounds ?? 0, after: 0 });
+    }
+    for (const e of entries) {
+      upsert.run(e.key.matchId, e.key.ordinal, e.key.half, e.prior.frames, countsToJson(e.prior.counts), e.map, ANALYZER_VERSION);
+    }
+    for (const [map, n] of out) {
+      const pool = new PriorBuilder();
+      const rows = shares.all(map, ANALYZER_VERSION) as { frames: number; counts: string }[];
+      for (const r of rows) pool.add({ frames: r.frames, counts: countsFromJson(r.counts) });
+      savePool.run(map, pool.frames, rows.length, countsToJson(pool.counts), ANALYZER_VERSION);
+      n.after = rows.length;
+    }
+  })();
+  return out;
 }
 
+/** A map's pool, or null when there is none THIS analyzer built. An older
+ *  version's pool is a different measurement and is never handed back. */
 export function loadPrior(db: DB, map: string): { table: PriorTable; rounds: number } | null {
-  const row = db.prepare('SELECT frames, rounds, counts FROM integrity_prior WHERE map = ?').get(map) as
-    { frames: number; rounds: number; counts: string } | undefined;
+  const row = db.prepare('SELECT frames, rounds, counts FROM integrity_prior WHERE map = ? AND analyzer_version = ?')
+    .get(map, ANALYZER_VERSION) as { frames: number; rounds: number; counts: string } | undefined;
   if (!row) return null;
   return { table: { frames: row.frames, counts: countsFromJson(row.counts) }, rounds: row.rounds };
 }
 
-export function saveRoundPrior(db: DB, key: RoundKey, p: PriorTable): void {
-  db.prepare(
-    `INSERT INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(match_id, ordinal, half) DO UPDATE SET frames = excluded.frames, counts = excluded.counts`,
-  ).run(key.matchId, key.ordinal, key.half, p.frames, countsToJson(p.counts));
-}
-
+/** A round's share, or null when it has none at this version, which by the
+ *  invariant above is the same as "its map's pool does not contain it". */
 export function loadRoundPrior(db: DB, key: RoundKey): PriorTable | null {
-  const row = db.prepare('SELECT frames, counts FROM integrity_prior_rounds WHERE match_id = ? AND ordinal = ? AND half = ?')
-    .get(key.matchId, key.ordinal, key.half) as { frames: number; counts: string } | undefined;
+  const row = db.prepare(
+    'SELECT frames, counts FROM integrity_prior_rounds WHERE match_id = ? AND ordinal = ? AND half = ? AND analyzer_version = ?',
+  ).get(key.matchId, key.ordinal, key.half, ANALYZER_VERSION) as { frames: number; counts: string } | undefined;
   if (!row) return null;
   return { frames: row.frames, counts: countsFromJson(row.counts) };
+}
+
+/** Round keys whose share is in this map's pool. */
+export function pooledRounds(db: DB, map: string): RoundKey[] {
+  return (db.prepare('SELECT match_id, ordinal, half FROM integrity_prior_rounds WHERE map = ? AND analyzer_version = ?')
+    .all(map, ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
+    .map((r) => ({ matchId: r.match_id, ordinal: r.ordinal, half: r.half }));
 }
 
 export function setReview(db: DB, key: RoundKey, slot: number, state: string, note: string, adminId: string): void {

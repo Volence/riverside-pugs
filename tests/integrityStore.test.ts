@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
-  ANALYZER_VERSION, saveRound, savePrior, loadPrior, saveRoundPrior, loadRoundPrior, setReview,
+  ANALYZER_VERSION, saveRound, poolRounds, loadPrior, loadRoundPrior, setReview,
 } from '../src/integrity/store.js';
 import type { RoundMetrics } from '../src/integrity/round.js';
 
@@ -48,29 +48,66 @@ describe('saveRound', () => {
   });
 });
 
+/**
+ * The pool for a map IS the sum of its rounds' shares at the current analyzer
+ * version, and `poolRounds` is the only writer of either, in one transaction.
+ * That invariant is what makes leave-one-round-out safe: a share that can be
+ * loaded is a share the pool contains.
+ */
 describe('priors', () => {
-  it('round-trips a pooled prior', () => {
-    savePrior(db, 'l4d_vs_farm01_hilltop', { frames: 500, counts: new Map([['1,2', 10]]) }, 25);
-    const got = loadPrior(db, 'l4d_vs_farm01_hilltop');
-    expect(got!.rounds).toBe(25);
-    expect(got!.table.frames).toBe(500);
-    expect(got!.table.counts.get('1,2')).toBe(10);
+  const MAP = 'l4d_vs_farm01_hilltop';
+  const share = (n: number, cell = '1,2') => ({ frames: n, counts: new Map([[cell, n]]) });
+
+  it('stores each round\'s share and pools the map as their sum', () => {
+    poolRounds(db, [
+      { key: KEY, map: MAP, prior: share(40) },
+      { key: { ...KEY, half: 2 }, map: MAP, prior: share(60, '3,4') },
+    ]);
+    const got = loadPrior(db, MAP)!;
+    expect(got.rounds).toBe(2);
+    expect(got.table.frames).toBe(100);
+    expect(got.table.counts.get('1,2')).toBe(40);
+    expect(got.table.counts.get('3,4')).toBe(60);
+    expect(loadRoundPrior(db, KEY)!.counts.get('1,2')).toBe(40);
+  });
+
+  it('adds a later round to the pool that is already there', () => {
+    poolRounds(db, [{ key: KEY, map: MAP, prior: share(40) }]);
+    const grew = poolRounds(db, [{ key: { ...KEY, half: 2 }, map: MAP, prior: share(60) }]);
+    expect(grew.get(MAP)).toEqual({ before: 1, after: 2 });
+    expect(loadPrior(db, MAP)!.table.frames).toBe(100);
+  });
+
+  it('replaces a round pooled twice instead of counting it twice', () => {
+    poolRounds(db, [{ key: KEY, map: MAP, prior: share(40) }]);
+    poolRounds(db, [{ key: KEY, map: MAP, prior: share(50) }]);
+    const got = loadPrior(db, MAP)!;
+    expect(got.rounds).toBe(1);
+    expect(got.table.frames).toBe(50);
   });
 
   it('returns null for a map never analysed', () => {
     expect(loadPrior(db, 'nope')).toBeNull();
   });
 
-  it('replaces a map prior wholesale rather than merging', () => {
-    savePrior(db, 'm', { frames: 500, counts: new Map([['1,2', 10]]) }, 25);
-    savePrior(db, 'm', { frames: 100, counts: new Map([['3,4', 1]]) }, 5);
-    const got = loadPrior(db, 'm')!;
-    expect(got.table.counts.has('1,2')).toBe(false);
-    expect(got.table.frames).toBe(100);
+  // After an ANALYZER_VERSION bump the old pool and the old shares are still in
+  // the table. Neither may be used: the pending pass used to subtract a round's
+  // share from a pool that had never contained it, and subtractRound clamps
+  // that to zero instead of failing.
+  it('does not hand back a pool or a share written by another analyzer version', () => {
+    poolRounds(db, [{ key: KEY, map: MAP, prior: share(40) }]);
+    db.prepare('UPDATE integrity_prior SET analyzer_version = ?').run(ANALYZER_VERSION - 1);
+    db.prepare('UPDATE integrity_prior_rounds SET analyzer_version = ?').run(ANALYZER_VERSION - 1);
+    expect(loadPrior(db, MAP)).toBeNull();
+    expect(loadRoundPrior(db, KEY)).toBeNull();
   });
 
-  it('round-trips a per-round prior contribution', () => {
-    saveRoundPrior(db, KEY, { frames: 40, counts: new Map([['0,0', 40]]) });
-    expect(loadRoundPrior(db, KEY)!.counts.get('0,0')).toBe(40);
+  it('pools only the shares of the current version', () => {
+    poolRounds(db, [{ key: KEY, map: MAP, prior: share(40) }]);
+    db.prepare('UPDATE integrity_prior_rounds SET analyzer_version = ?').run(ANALYZER_VERSION - 1);
+    poolRounds(db, [{ key: { ...KEY, half: 2 }, map: MAP, prior: share(60) }]);
+    const got = loadPrior(db, MAP)!;
+    expect(got.rounds).toBe(1);
+    expect(got.table.frames).toBe(60);
   });
 });

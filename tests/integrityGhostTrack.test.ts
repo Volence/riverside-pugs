@@ -5,7 +5,7 @@ import { bearing, wrapDeg } from '../src/integrity/geometry.js';
 import { trackFidelity, trackWindows, pickClips, scanPairs, visibleOthers, type TrackWindow } from '../src/integrity/ghostTrack.js';
 import { pairEligible } from '../src/integrity/geometry.js';
 import { occupancy } from '../src/integrity/occupancy.js';
-import { analyzeRound } from '../src/integrity/round.js';
+import { analyzeRound, buildRoundPrior } from '../src/integrity/round.js';
 import { cellKey, cellOf, type PriorTable } from '../src/integrity/aimPrior.js';
 
 function blank(slot: number): PlayerSample {
@@ -659,7 +659,6 @@ describe('analyzeRound', () => {
   });
 
   it('builds a round prior from the survivors it saw, for leave-one-round-out', () => {
-    const { roundPrior } = analyzeRound(round(40, (_i, b) => b), [0], null);
-    expect(roundPrior.frames).toBe(40);
+    expect(buildRoundPrior(round(40, (_i, b) => b), [0]).frames).toBe(40);
   });
 });

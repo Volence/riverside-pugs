@@ -2,11 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DB } from '../db.js';
 import { parseReplay, slotInfected, type Frame, type ReplayHeader } from '../replayFormat.js';
-import { PriorBuilder, subtractRound, type PriorTable } from './aimPrior.js';
+import { subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
 import { analyzeRound, buildRoundPrior, unpausedFrames } from './round.js';
 import {
-  ANALYZER_VERSION, loadPrior, loadRoundPrior, saveRound, saveRoundPrior, savePrior, type RoundKey,
+  ANALYZER_VERSION, loadPrior, loadRoundPrior, pooledRounds, poolRounds, saveRound, type PoolEntry, type RoundKey,
 } from './store.js';
 
 const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
@@ -44,10 +44,16 @@ export function decodeRound(buf: Uint8Array): DecodedRound | null {
  * Analyse one round from its bytes and persist the result.
  *
  * The prior handed to the metrics is the map pool MINUS this round, so nobody
- * is measured against a baseline they helped build. A map that has not yet
- * reached MIN_PRIOR_ROUNDS gets no prior at all and therefore no occupancy
- * score, only fidelity. That is the honest answer for a thin map and it is
- * reported rather than papered over.
+ * is measured against a baseline they helped build. The subtraction happens
+ * only when this round has a share at the current version, which `poolRounds`
+ * guarantees is a share the pool contains: a round that was never pooled is
+ * scored against the pool as it stands, because there is nothing of its own in
+ * there to take out. Pooling is the caller's job and comes first; see
+ * `analyzePending` and `backfillAll`.
+ *
+ * A map that has not yet reached MIN_PRIOR_ROUNDS gets no prior at all and
+ * therefore no occupancy score, only fidelity. That is the honest answer for a
+ * thin map and it is reported rather than papered over.
  */
 export function analyzeOneRound(db: DB, key: RoundKey, buf: Uint8Array): boolean {
   const replay = decodeRound(buf);
@@ -61,8 +67,7 @@ export function analyzeOneRound(db: DB, key: RoundKey, buf: Uint8Array): boolean
     prior = own ? subtractRound(pooled.table, own) : pooled.table;
   }
 
-  const { metrics, clips, roundPrior } = analyzeRound(replay.frames, slots, prior);
-  saveRoundPrior(db, key, roundPrior);
+  const { metrics, clips } = analyzeRound(replay.frames, slots, prior);
   saveRound(db, key, slots.map((slot) => ({
     slot,
     steamid: replay.header.slots[slot],
@@ -95,33 +100,91 @@ function findReplays(db: DB, dir: string): Found[] {
   return out;
 }
 
-/** Pass one: pool the aim prior per map and remember each round's share.
- *  Returns rounds pooled per map. */
-export function rebuildPriors(db: DB, dir: string): Map<string, number> {
-  const pools = new Map<string, { builder: PriorBuilder; rounds: number }>();
-  for (const f of findReplays(db, dir)) {
+const keyOf = (k: RoundKey): string => `${k.matchId}/${k.ordinal}/${k.half}`;
+
+/**
+ * Pool these replays into their maps' aim priors. Returns, per map touched,
+ * the rounds pooled before and after.
+ *
+ * `buildRoundPrior` is the ONLY producer of a round's share and `poolRounds`
+ * the only writer of one, so the pool and what is later subtracted from it
+ * cannot drift apart.
+ *
+ * The shares are built first and written in one short transaction at the end.
+ * Decoding is the slow part, and holding a write lock across it would stall
+ * the web process, which shares this database and is recording live matches.
+ */
+function poolReplays(db: DB, files: Found[]): Map<string, { before: number; after: number }> {
+  const entries: PoolEntry[] = [];
+  for (const f of files) {
     const replay = decodeRound(readFileSync(f.path));
     if (!replay) continue;
-    const { slots } = replay;
-    const entry = pools.get(replay.header.map) ?? { builder: new PriorBuilder(), rounds: 0 };
-    // `buildRoundPrior` is the ONLY producer of a round's contribution. This
-    // pass used to compute it a second time, byte for byte identical, and
-    // `analyzeRound` then overwrote the row with its own copy. A drift between
-    // the two would not fail: subtractRound clamps a mismatch to zero, so the
-    // pool and the subtraction would silently disagree and every occupancy
-    // z-score would shift.
-    const own = buildRoundPrior(replay.frames, slots);
-    entry.builder.add(own);
-    entry.rounds++;
-    pools.set(replay.header.map, entry);
-    saveRoundPrior(db, f.key, own);
+    entries.push({ key: f.key, map: replay.header.map, prior: buildRoundPrior(replay.frames, replay.slots) });
   }
+  return poolRounds(db, entries);
+}
+
+/** Pool every replay on disk. Returns rounds pooled per map. */
+export function rebuildPriors(db: DB, dir: string): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const [map, e] of pools) {
-    savePrior(db, map, e.builder, e.rounds);
-    counts.set(map, e.rounds);
-  }
+  for (const [map, n] of poolReplays(db, findReplays(db, dir))) counts.set(map, n.after);
   return counts;
+}
+
+function scoreAll(db: DB, files: Found[]): { rounds: number; skipped: number } {
+  let rounds = 0, skipped = 0;
+  for (const f of files) {
+    if (analyzeOneRound(db, f.key, readFileSync(f.path))) rounds++;
+    else skipped++;
+  }
+  return { rounds, skipped };
+}
+
+/**
+ * Analyse only the rounds nothing has measured yet.
+ *
+ * The counterpart to `backfillAll`, and the reason the board can stop going
+ * stale. This runs after a match finishes, so it must be cheap: it reads only
+ * the files it is actually going to measure, twice each, once to pool and once
+ * to score.
+ *
+ * It pools what it measures. Until version 4 it did not, so a map only crossed
+ * MIN_PRIOR_ROUNDS when somebody ran a full backfill by hand, and after an
+ * ANALYZER_VERSION bump it subtracted each round's share from the OLD
+ * analyzer's pool, which had never contained it. Pooling first, through
+ * `poolRounds`, fixes both: every round scored here is in the pool it is
+ * subtracted from, and a version bump rebuilds the pools as a side effect of
+ * re-measuring, because old-version shares are never summed.
+ *
+ * When a map crosses MIN_PRIOR_ROUNDS in this pass, its earlier rounds are
+ * measured again. They were scored with no prior and would otherwise read
+ * "no occupancy" until the next full backfill. This happens once per map and
+ * costs at most MIN_PRIOR_ROUNDS files.
+ *
+ * "Not measured yet" includes a round measured by an older analyzer. The
+ * version is stored per row precisely so a change to the analyzer can be
+ * noticed, and mixing two analyzers' numbers on one board is worse than
+ * either of them alone.
+ */
+export function analyzePending(db: DB, dir: string): { rounds: number; skipped: number } {
+  const done = new Set(
+    (db.prepare(
+      'SELECT DISTINCT match_id, ordinal, half FROM integrity_rounds WHERE analyzer_version = ?',
+    ).all(ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
+      .map((r) => keyOf({ matchId: r.match_id, ordinal: r.ordinal, half: r.half })),
+  );
+  const found = findReplays(db, dir);
+  const pending = found.filter((f) => !done.has(keyOf(f.key)));
+  if (pending.length === 0) return { rounds: 0, skipped: 0 };
+
+  const waiting = new Set<string>();
+  for (const [map, n] of poolReplays(db, pending)) {
+    if (n.before < TUNING.MIN_PRIOR_ROUNDS && n.after >= TUNING.MIN_PRIOR_ROUNDS) {
+      for (const k of pooledRounds(db, map)) waiting.add(keyOf(k));
+    }
+  }
+  const again = found.filter((f) => done.has(keyOf(f.key)) && waiting.has(keyOf(f.key)));
+  return scoreAll(db, [...pending, ...again]);
 }
 
 /**
@@ -132,46 +195,9 @@ export function rebuildPriors(db: DB, dir: string): Map<string, number> {
  * not contain it yet. Two passes over the files is the price of getting
  * leave-one-round-out right.
  */
-/**
- * Analyse only the rounds nothing has measured yet.
- *
- * The counterpart to `backfillAll`, and the reason the board can stop going
- * stale. This runs after a match finishes, so it must be cheap: it never
- * touches the map priors, which would mean re-reading every replay on disk,
- * and it reads only the files it is actually going to measure.
- *
- * "Not measured yet" includes a round measured by an older analyzer. The
- * version is stored per row precisely so a change to the analyzer can be
- * noticed, and mixing two analyzers' numbers on one board is worse than
- * either of them alone.
- *
- * Scores from here are measured against whatever priors already exist, which
- * for a map under MIN_PRIOR_ROUNDS means no occupancy score at all. That is
- * the same answer `backfillAll` gives, and it improves for everyone the next
- * time the priors are rebuilt.
- */
-export function analyzePending(db: DB, dir: string): { rounds: number; skipped: number } {
-  const done = new Set(
-    (db.prepare(
-      'SELECT DISTINCT match_id, ordinal, half FROM integrity_rounds WHERE analyzer_version = ?',
-    ).all(ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
-      .map((r) => `${r.match_id}/${r.ordinal}/${r.half}`),
-  );
-  let rounds = 0, skipped = 0;
-  for (const f of findReplays(db, dir)) {
-    if (done.has(`${f.key.matchId}/${f.key.ordinal}/${f.key.half}`)) continue;
-    if (analyzeOneRound(db, f.key, readFileSync(f.path))) rounds++;
-    else skipped++;
-  }
-  return { rounds, skipped };
-}
-
-export function backfillAll(db: DB, dir: string): { rounds: number; skipped: number } {
-  rebuildPriors(db, dir);
-  let rounds = 0, skipped = 0;
-  for (const f of findReplays(db, dir)) {
-    if (analyzeOneRound(db, f.key, readFileSync(f.path))) rounds++;
-    else skipped++;
-  }
-  return { rounds, skipped };
+export function backfillAll(db: DB, dir: string): { rounds: number; skipped: number; perMap: Map<string, number> } {
+  const files = findReplays(db, dir);
+  const perMap = new Map<string, number>();
+  for (const [map, n] of poolReplays(db, files)) perMap.set(map, n.after);
+  return { ...scoreAll(db, files), perMap };
 }

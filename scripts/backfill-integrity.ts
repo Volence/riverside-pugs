@@ -9,12 +9,12 @@
  *   npx tsx scripts/backfill-integrity.ts --pending  # only unmeasured rounds
  *
  * --pending is what the server runs by itself after a match, so it must stay
- * cheap: it skips the prior rebuild, which is the pass that reads every file
- * on disk, and measures only rounds no current-version analysis has touched.
+ * cheap: it reads only the rounds no current-version analysis has touched,
+ * pools them into their maps' priors and measures them.
  */
 import { loadConfig } from '../src/config.js';
 import { openDb } from '../src/db.js';
-import { analyzePending, backfillAll, rebuildPriors } from '../src/integrity/run.js';
+import { analyzePending, backfillAll } from '../src/integrity/run.js';
 import { TUNING } from '../src/integrity/constants.js';
 
 const config = loadConfig(process.env);
@@ -31,14 +31,14 @@ if (process.argv.includes('--pending')) {
   process.exit(0);
 }
 
-const perMap = rebuildPriors(db, dir);
+// One call, and the priors are reported after the fact. This used to call
+// rebuildPriors and then backfillAll, which rebuilt them a second time.
+const { rounds, skipped, perMap } = backfillAll(db, dir);
 const usable = [...perMap.entries()].filter(([, n]) => n >= TUNING.MIN_PRIOR_ROUNDS);
 console.log(`Priors: ${perMap.size} maps seen, ${usable.length} at or above MIN_PRIOR_ROUNDS (${TUNING.MIN_PRIOR_ROUNDS}).`);
 for (const [map, n] of [...perMap.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`  ${n >= TUNING.MIN_PRIOR_ROUNDS ? 'scored ' : 'skipped'} ${map}: ${n} rounds`);
 }
-
-const { rounds, skipped } = backfillAll(db, dir);
 console.log(`Analysed ${rounds} rounds, skipped ${skipped}.`);
 
 // Coverage, printed because "zero clips" is not a result on its own. It reads
