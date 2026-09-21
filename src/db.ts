@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureTicketSchema } from './tickets/schema.js';
+import { migrateLegacyReports } from './tickets/migrate.js';
 
 export type DB = Database.Database;
 
@@ -820,6 +821,7 @@ export function openDb(path: string): DB {
   // each other. Null for every ban issued from the Players tab.
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
   ensureTicketSchema(db);
+  migrateLegacyReports(db);
   seed(db);
   return db;
 }

@@ -32,6 +32,11 @@ const PLAIN: [table: string, column: string][] = [
   ['reports', 'target_id'],
   ['integrity_rounds', 'steamid'],
   ['integrity_clips', 'steamid'],
+  ['ticket_reports', 'reporter_id'],
+  ['ticket_events', 'actor_id'],
+  ['tickets', 'claimed_by'],
+  ['tickets', 'opened_by'],
+  ['tickets', 'closed_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -144,6 +149,30 @@ export function mergePlayers(
          (SELECT match_id, stat FROM match_player_stats WHERE player_id = ?)`,
     ).run(from, into);
     db.prepare('UPDATE match_player_stats SET player_id = ? WHERE player_id = ?').run(into, from);
+
+    // Tickets ABOUT the merged account. tickets_one_open allows one open
+    // ticket per player per flavour, so where both accounts have one the
+    // alt's reports and history move into the main's and the empty shell
+    // goes. Closed tickets cannot collide and are simply repointed.
+    for (const restricted of [0, 1]) {
+      const open = (id: string) => db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
+        .get(id, restricted) as { id: number } | undefined;
+      const gone = open(from);
+      const keep = open(into);
+      if (!gone || !keep) continue;
+      db.prepare('UPDATE ticket_reports SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('UPDATE ticket_events SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('UPDATE OR IGNORE ticket_access SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone.id);
+      db.prepare('UPDATE bans SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('DELETE FROM tickets WHERE id = ?').run(gone.id);
+    }
+    db.prepare('UPDATE tickets SET target_id = ? WHERE target_id = ?').run(into, from);
+    // A merged account must never sit on the access list of a ticket that is
+    // now about itself.
+    db.prepare('UPDATE OR IGNORE ticket_access SET steamid = ? WHERE steamid = ?').run(into, from);
+    db.prepare('DELETE FROM ticket_access WHERE steamid = ?').run(from);
+    db.prepare('DELETE FROM ticket_access WHERE steamid = ? AND ticket_id IN (SELECT id FROM tickets WHERE target_id = ?)').run(into, into);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
