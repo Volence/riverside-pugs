@@ -29,6 +29,8 @@ import { restrictOpenTicketAbout } from '../tickets/store.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
 import { endSessions } from '../session.js';
+import { applyLeaveState, isRostered } from '../presence.js';
+import { LEAVE_ACTIONS, LEAVE_ADD_MAX_S, leaveCommand, parseLeaveReply, type LeaveAction, type ServerQuery } from '../leaveControl.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -50,6 +52,9 @@ export interface AdminRouteOpts {
   /** Pushes one server its log secret over rcon; true when the box knew the
    *  cvar. Absent in tests that do not exercise it, where the route says so. */
   logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Runs one console command on one server and returns its reply. Absent in
+   *  tests that do not exercise it, where the route says so. */
+  serverQuery?: ServerQuery;
   /** Asks Steam about one player now and resolves with the rows written.
    *  Absent on an install with no Steam api key, where the route says so. */
   refreshSignals?: (steamid: string) => Promise<number>;
@@ -61,7 +66,7 @@ export interface AdminRouteOpts {
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, adminSteamIds } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, serverQuery, adminSteamIds } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -307,6 +312,71 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     logAdmin(db, adminId, 'void_match', id, { reason: reason.trim() });
     broadcast('refresh');
     return { ok: true };
+  });
+
+  /**
+   * Hold, release, extend or end one dropped player's reconnect allowance.
+   *
+   * The allowance lives in the plugin, so this is an rcon command and its
+   * answer. Only a PUGOK changes the board. A refusal, an old plugin, an
+   * unreachable box and an unreadable answer all leave presence exactly as it
+   * was and come back as the error the card shows. The attempt is audited
+   * either way, the same way the log secret push is.
+   */
+  app.post('/api/admin/live/:matchId/players/:steamid/leave', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { matchId: rawId, steamid } = req.params as { matchId: string; steamid: string };
+    const matchId = Number(rawId);
+    const { action, seconds } = (req.body ?? {}) as { action?: unknown; seconds?: unknown };
+    if (typeof action !== 'string' || !(LEAVE_ACTIONS as readonly string[]).includes(action)) {
+      return reply.code(400).send({ error: 'action must be hold, release, add or end' });
+    }
+    let secs: number | undefined;
+    if (action === 'add') {
+      secs = Number(seconds);
+      if (!Number.isInteger(secs) || secs < 1 || secs > LEAVE_ADD_MAX_S) {
+        return reply.code(400).send({ error: `seconds must be a whole number between 1 and ${LEAVE_ADD_MAX_S}` });
+      }
+    }
+    const match = db.prepare('SELECT state, token, server_id FROM matches WHERE id = ?').get(matchId) as
+      | { state: string; token: string | null; server_id: number | null } | undefined;
+    if (!match) return reply.code(404).send({ error: 'no such match' });
+    if (match.state !== 'configuring' && match.state !== 'live') return reply.code(409).send({ error: `match is ${match.state}` });
+    if (!isRostered(db, matchId, steamid)) return reply.code(404).send({ error: 'not on that match\'s roster' });
+    const server = match.server_id !== null ? getServer(db, match.server_id) : undefined;
+    if (!match.token || !server) return reply.code(409).send({ error: 'that match has no server yet' });
+    if (!serverQuery) return reply.code(503).send({ error: 'clock control is not available here' });
+
+    const detail = { matchId, action, ...(secs === undefined ? {} : { seconds: secs }) };
+    let body: string;
+    try {
+      body = await serverQuery(server, leaveCommand(match.token, steamid, action as LeaveAction, secs));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error: message });
+      return reply.code(502).send({ error: `could not reach ${server.name}: ${message}` });
+    }
+    let answer = parseLeaveReply(body);
+    // An rcon response carries whatever else was on the console. An answer
+    // about another player is somebody else's answer.
+    if (answer.ok && answer.steamid !== steamid) answer = { ok: false, oldPlugin: false, error: 'the answer was about another player' };
+    if (!answer.ok) {
+      if (answer.oldPlugin) {
+        db.prepare('UPDATE matches SET leave_control = 0 WHERE id = ?').run(matchId);
+        broadcast('refresh');
+      }
+      logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: false, error: answer.error });
+      return reply.code(409).send({
+        error: answer.oldPlugin ? answer.error : `${server.name} refused: ${answer.error}`,
+        code: answer.oldPlugin ? 'old_plugin' : 'refused',
+      });
+    }
+    db.prepare('UPDATE matches SET leave_control = 1 WHERE id = ?').run(matchId);
+    applyLeaveState(db, matchId, steamid, answer.state);
+    logAdmin(db, adminId, 'leave_clock', steamid, { ...detail, ok: true, remaining: answer.state.remaining, held: answer.state.held });
+    broadcast('refresh');
+    return { ok: true, reply: answer.line, state: answer.state };
   });
 
   app.post('/api/admin/servers/:id/idle', async (req, reply) => {

@@ -18,6 +18,7 @@ import { CAMPAIGNS, isMapName } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { stopAfterMap } from './stopPoint.js';
+import { isUnknownCommand } from './leaveControl.js';
 import { pushLogSecret } from './logAuth.js';
 
 /** What one attempt to collect a match came to.
@@ -167,6 +168,13 @@ export class RealOrchestrator implements Orchestrator {
       // The leaver rules for this match, from the admin settings.
       await rcon.exec(`sm_pug_leave_budget ${settingInt(this.db, 'leave_budget_seconds', 300)}`);
       await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
+      // The ceiling on an admin hold of one player's reconnect clock. The
+      // plugin enforces it itself, so a release that never arrives cannot pin
+      // a box paused. The reply doubles as a free capability probe: a
+      // pug-match older than 0.3.4 has no such cvar and says so, and the live
+      // board then greys its clock controls out with the reason. Never fatal.
+      const holdMax = await rcon.exec(`sm_pug_leave_hold_max ${settingInt(this.db, 'clock_hold_max_minutes', 30) * 60}`);
+      this.db.prepare('UPDATE matches SET leave_control = ? WHERE id = ?').run(isUnknownCommand(holdMax) ? 0 : 1, matchId);
       await rcon.exec(`sv_password "${serverPasswordFor(token)}"`);
       // The map to stop after, when we know the campaign's chapters. Omitted
       // rather than guessed when we do not: the plugin then keeps using its own

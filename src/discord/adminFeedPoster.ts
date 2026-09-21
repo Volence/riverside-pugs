@@ -178,6 +178,18 @@ export class AdminFeedPoster {
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``
         : `${who} changed the ${e.target} setting`;
+      case 'leave_clock': {
+        const where = `match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)})`;
+        if (d.ok === false) {
+          return `${who} tried to ${String(d.action)} ${target}'s reconnect clock in ${where}, and it failed: ${escapeName(String(d.error ?? ''))}`;
+        }
+        switch (d.action) {
+          case 'hold': return `${who} put ${target}'s reconnect clock on hold in ${where}`;
+          case 'release': return `${who} released the hold on ${target}'s reconnect clock in ${where}`;
+          case 'add': return `${who} gave ${target} ${String(d.seconds)} more seconds to reconnect in ${where}`;
+          default: return `${who} ended ${target}'s reconnect time in ${where}`;
+        }
+      }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': {
         const ticket = `ticket [#${e.target}](${this.deps.publicUrl}/admin?ticket=${e.target})`;

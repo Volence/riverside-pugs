@@ -52,6 +52,7 @@ import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './s
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
 import { rconRestarter, type ServerRestarter } from './serverRestart.js';
@@ -126,6 +127,9 @@ export interface ServerDeps {
   /** Pushes one server its log secret, for the admin's log-secret route.
    *  Injected in tests so it never dials a real box. */
   logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Runs one console command on one server and returns the reply, for the
+   *  live board's clock actions. Injected in tests so they never dial a box. */
+  serverQuery?: ServerQuery;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -1100,6 +1104,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       try {
         await rcon.connect();
         return await pushLogSecret(rcon, secret);
+      } finally {
+        rcon.close();
+      }
+    }),
+    serverQuery: deps.serverQuery ?? (async (server, command) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await rcon.exec(command);
       } finally {
         rcon.close();
       }

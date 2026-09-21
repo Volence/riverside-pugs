@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseLogDatagram } from '../src/logParse.js';
+import { parseLeaveReply } from '../src/leaveControl.js';
 
 /** The plugin half of the abandon hold. Nothing here can run SourcePawn, so
  *  like the other parity tests this reads the source as text. It pins the
@@ -121,5 +122,19 @@ describe('the state echo is a line the parser reads', () => {
     const line = `PUG ${'b'.repeat(32)} ${render(fmt, ['76561199000000002', 120, 1, 1500, 0])}`;
     expect(parseLogDatagram(Buffer.from(line, 'utf8')))
       .toEqual({ kind: 'leave', token: 'b'.repeat(32), steamid: '76561199000000002', remaining: 120, held: true, holdLeft: 1500 });
+  });
+});
+
+describe('the rcon answer is one the backend reads', () => {
+  const fmt = leaveSrc.match(/PrintToServer\(\s*"(PUGOK leave [^"]*)"/)?.[1] ?? '';
+
+  it('finds the answer at all', () => {
+    expect(fmt).toMatch(/^PUGOK leave steamid=%s /);
+  });
+
+  it('round trips', () => {
+    expect(parseLeaveReply(render(fmt, ['76561199000000002', 1, 142, 1, 900]))).toMatchObject({
+      ok: true, steamid: '76561199000000002', state: { absent: true, remaining: 142, held: true, holdLeft: 900 },
+    });
   });
 });

@@ -61,6 +61,17 @@ describe('admin feed', () => {
     expect(t.live()).toHaveLength(0);
   });
 
+  it('a clock action names the player, the match and what was done', async () => {
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'hold', ok: true, remaining: 200, held: true });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'add', seconds: 300, ok: true, remaining: 500, held: false });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'end', ok: false, error: 'not dropped' });
+    await feed.idle();
+    expect(text(0)).toMatch(/player7.*put .*player2.*reconnect clock on hold/);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/gave .*player2.* 300 more seconds/);
+    expect(text(2)).toMatch(/failed: not dropped/);
+  });
+
   it('a button on an old report card answers instead of failing', async () => {
     const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7' });
     expect(r.ephemeral).toBe(true);
