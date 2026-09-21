@@ -328,6 +328,48 @@ describe('liveView: event feed', () => {
   });
 });
 
+describe('the current map on /live', () => {
+  const mapOf = (id: number) => (db.prepare('SELECT current_map FROM match_live WHERE match_id = ?')
+    .get(id) as { current_map: string | null } | undefined)?.current_map ?? null;
+
+  // The bug this replaces, watched live on 2026-09-21: MATCH_START fires once
+  // per match, so the label froze on map 1. It was patched by reading the
+  // newest demo FILE on disk, which is current only on a box the web app
+  // shares a filesystem with. On Chicago the demos arrive over FTP after a map
+  // has FINISHED, so match 96's page read l4d_vs_airport01_greenhouse while
+  // the match was on airport03. ROUND_START carries the name on the wire.
+  it('follows the map ROUND_START names, with no file on disk anywhere', () => {
+    const id = seedLive();
+    recordMatchStart(db, TOKEN, 'l4d_vs_airport01_greenhouse');
+    expect(mapOf(id)).toBe('l4d_vs_airport01_greenhouse');
+
+    recordRoundStart(db, TOKEN, {
+      kind: 'round_start', token: TOKEN, half: 1, map: 'l4d_vs_airport02_offices', surv: 'a',
+    });
+
+    expect(mapOf(id)).toBe('l4d_vs_airport02_offices');
+  });
+
+  it('keeps the map a heartbeat does not carry', () => {
+    const id = seedLive();
+    recordRoundStart(db, TOKEN, {
+      kind: 'round_start', token: TOKEN, half: 1, map: 'l4d_vs_airport02_offices', surv: 'a',
+    });
+    recordHeartbeat(db, TOKEN);
+    expect(mapOf(id)).toBe('l4d_vs_airport02_offices');
+  });
+
+  it('advances on the second half too, so a lost datagram self-corrects', () => {
+    const id = seedLive();
+    recordMatchStart(db, TOKEN, 'l4d_vs_airport01_greenhouse');
+    // Half 1's ROUND_START never arrived; half 2's still names the map.
+    recordRoundStart(db, TOKEN, {
+      kind: 'round_start', token: TOKEN, half: 2, map: 'l4d_vs_airport02_offices', surv: 'b',
+    });
+    expect(mapOf(id)).toBe('l4d_vs_airport02_offices');
+  });
+});
+
 describe('reapOrphanedMatches', () => {
   const stamp = (agoMs: number) =>
     new Date(Date.now() - agoMs).toISOString().replace('T', ' ').slice(0, 19);

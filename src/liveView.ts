@@ -530,7 +530,22 @@ export function recordRoundStart(
     // DO NOTHING, not an update: a duplicated ROUND_START must not reset the
     // started_at that t_ms values are already measured against.
   ).run(id, currentOrdinal(db, id), ev.half, ev.surv ?? PLACEHOLDER_SIDE, ev.surv === null ? 0 : 1);
-  touch(db, id);
+  // ev.map, not a bare touch: ROUND_START names the map and arrives at the top
+  // of every round, which makes it the wire's own answer to "what is being
+  // played right now".
+  //
+  // MATCH_START fires exactly once per match, so current_map used to freeze on
+  // map 1 and /live claimed you were still on the opening map three maps later.
+  // That was patched in server.ts by reading the name off the newest demo FILE
+  // on disk, which is current only on a box the web app shares a filesystem
+  // with: Chicago's demos arrive over FTP and the puller only takes a file once
+  // it has stopped growing, so the label could only ever name a map that had
+  // already FINISHED. Watched live on 2026-09-21, match 96 read
+  // l4d_vs_airport01_greenhouse while the match was on airport03.
+  //
+  // No file, no readdir, no per-box difference, and right on all four servers
+  // within a round of the map loading.
+  touch(db, id, ev.map);
 }
 
 /** Which map a ROUND_END belongs to.

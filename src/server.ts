@@ -61,7 +61,7 @@ import {
   recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
-import { recordMatchDemos, discoverMatchDemos } from './demos.js';
+import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
 import { apiRoutes } from './routes/api.js';
@@ -543,19 +543,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (hb) {
               recordMatchDemos(deps.db, hb.id, ev.token, deps.config.demoDir,
                 { excludeInProgress: true });
-
-              // Keep the current map honest. MATCH_START fires exactly once per
-              // match, so current_map froze on map 1 and the page claimed you
-              // were still on the opening map three maps later. The plugin
-              // names every demo pug_<token>_<ordinal>_<map>.dem INCLUDING the
-              // one it is still writing, so the highest-ordinal demo names the
-              // map being played right now. Costs one readdir we were already
-              // doing, and needs no plugin change.
-              const all = discoverMatchDemos(deps.config.demoDir, ev.token);
-              if (all.length > 0) {
-                const current = all.reduce((a, b) => (b.ordinal > a.ordinal ? b : a));
-                recordMatchStart(deps.db, ev.token, current.map);
-              }
             }
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
