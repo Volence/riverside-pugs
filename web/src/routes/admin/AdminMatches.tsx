@@ -3,7 +3,7 @@ import { adminApi, type AdminOverview, type Forecast } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
-import { fmtTime, useAction } from './useAction';
+import { fmtTime, useAction, type Run } from './useAction';
 import { formatTime } from '../../replay/ReplayControls';
 import type { MatchPause, MatchReadyup } from '../../api';
 
@@ -68,7 +68,12 @@ export function AdminMatches() {
                       : <span class="muted">no server yet</span>}</td>
                     <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
                     <td><button class="chip" disabled={busy}
-                      onClick={() => run(() => adminApi.abortMatch(m.id), `Abort match #${m.id}? The server is freed and nothing is rated.`)}>Abort</button></td>
+                      onClick={() => run(() => adminApi.abortMatch(m.id), {
+                        title: `Abort match #${m.id}?`,
+                        body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page.',
+                        confirmLabel: 'Abort match',
+                        danger: true,
+                      })}>Abort</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -97,7 +102,11 @@ export function AdminMatches() {
                         <button class="chip" disabled={busy}
                           onClick={() => run(
                             () => adminApi.serverEnabled(s.id, false),
-                            `Take ${s.name} out of the pool? Any match already on it finishes normally; it just will not be picked for the next one.`,
+                            {
+                              title: `Take ${s.name} out of the pool?`,
+                              body: 'Any match already on it finishes normally. It just will not be picked for the next one.',
+                              confirmLabel: 'Take out',
+                            },
                           )}>Take out</button>
                       ) : (
                         <>
@@ -111,7 +120,11 @@ export function AdminMatches() {
                     <td><SourceTvCell server={s} busy={busy} run={run} /></td>
                     <td>{s.status !== 'idle' && (
                       <button class="chip" disabled={busy}
-                        onClick={() => run(() => adminApi.serverIdle(s.id), `Set ${s.name} idle? Only do this when no match is really running on it.`)}>Set idle</button>
+                        onClick={() => run(() => adminApi.serverIdle(s.id), {
+                          title: `Set ${s.name} idle?`,
+                          body: 'Only do this when no match is really running on it. An idle server can be claimed by the next queue pop.',
+                          confirmLabel: 'Set idle',
+                        })}>Set idle</button>
                     )}</td>
                   </tr>
                 ))}
@@ -175,7 +188,12 @@ export function AdminMatches() {
                       {voiding === m.id ? (
                         <form class="admin-form" onSubmit={(e) => {
                           e.preventDefault();
-                          void run(() => adminApi.voidMatch(m.id, reason), `Void match #${m.id}? Ratings for the whole season are recomputed.`)
+                          void run(() => adminApi.voidMatch(m.id, reason), {
+                            title: `Void match #${m.id}?`,
+                            body: 'It stops counting anywhere and every rating for the season is recomputed without it.',
+                            confirmLabel: 'Void match',
+                            danger: true,
+                          })
                             .then(() => { setVoiding(null); setReason(''); });
                         }}>
                           <input value={reason} placeholder="Why" aria-label="Void reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
@@ -253,7 +271,7 @@ export function AdminMatches() {
 function RestartCell({ server: s, busy, run }: {
   server: { id: number; name: string; restartAfterMatch?: number };
   busy: boolean;
-  run: (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
+  run: Run;
 }) {
   const on = s.restartAfterMatch === 1;
   return (
@@ -263,10 +281,18 @@ function RestartCell({ server: s, busy, run }: {
         onClick={() => run(
           () => adminApi.serverRestartAfterMatch(s.id, !on),
           on
-            ? `Stop restarting ${s.name} after each match?`
-            : `Restart ${s.name} after every match? It is asked to quit and its supervisor starts it again, `
-              + 'about 10 to 20 seconds with nobody connected. If nothing restarts it, the server stays down '
-              + 'until someone brings it back from its host. Watch the first one.',
+            ? {
+              title: `Stop restarting ${s.name} after each match?`,
+              body: 'It will keep whatever uptime it has between matches, as it did before.',
+              confirmLabel: 'Turn off',
+            }
+            : {
+              title: `Restart ${s.name} after every match?`,
+              body: 'It is asked to quit and its supervisor starts it again, about 10 to 20 seconds with '
+                + 'nobody connected. If nothing restarts it, the server stays down until someone brings it '
+                + 'back from its host. Watch the first one.',
+              confirmLabel: 'Turn on',
+            },
         )}>{on ? 'Turn off' : 'Turn on'}</button>
     </>
   );
@@ -329,7 +355,7 @@ function SourceTvCell(
   { server, busy, run }: {
     server: AdminOverview['servers'][number];
     busy: boolean;
-    run: (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
+    run: Run;
   },
 ) {
   const [port, setPort] = useState(server.tvPort ? String(server.tvPort) : '27020');

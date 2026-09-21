@@ -6,6 +6,7 @@ import { useLiveState } from './hooks/useLiveState';
 import { Nav } from './components/Nav';
 import { QueueBar } from './components/QueueBar';
 import { DevPanel } from './components/DevPanel';
+import { ConfirmHost } from './components/Confirm';
 import { Play } from './routes/Play';
 import { Leaderboard } from './routes/Leaderboard';
 import { Matches } from './routes/Matches';
@@ -93,6 +94,9 @@ function App() {
         </Router>
       </main>
       <DevPanel refresh={refresh} />
+      {/* Last, and outside <main>: it renders nothing until something calls
+          confirm(), and when it does it must sit above the whole shell. */}
+      <ConfirmHost />
     </>
   );
 }

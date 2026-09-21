@@ -3,7 +3,7 @@ import { adminApi, type AdminPlayerDetail, type MergePlan } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
-import { fmtTime, useAction } from './useAction';
+import { fmtTime, useAction, type Run } from './useAction';
 
 export function AdminPlayers({ me }: { me: string }) {
   const [q, setQ] = useState('');
@@ -85,11 +85,25 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         {d.status === 'invited' && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.activate(d.steamid))}>Activate</button>}
         {!self && (
           <button class="chip" disabled={busy}
-            onClick={() => run(() => adminApi.setAdmin(d.steamid, !d.isAdmin), d.isAdmin ? `Remove admin from ${d.name}?` : `Make ${d.name} an admin?`)}>
+            onClick={() => run(() => adminApi.setAdmin(d.steamid, !d.isAdmin), d.isAdmin ? {
+              title: `Remove admin from ${d.name}?`,
+              body: 'They lose the admin panel and their admin on every game server.',
+              confirmLabel: 'Remove admin',
+              danger: true,
+            } : {
+              title: `Make ${d.name} an admin?`,
+              body: 'They get the admin panel here and the same admin rights on every game server.',
+              confirmLabel: 'Make admin',
+            })}>
             {d.isAdmin ? 'Remove admin' : 'Make admin'}
           </button>
         )}
-        {d.discordName && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.unlinkDiscord(d.steamid), `Unlink ${d.name}'s Discord?`)}>Unlink Discord</button>}
+        {d.discordName && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.unlinkDiscord(d.steamid), {
+          title: `Unlink ${d.name}'s Discord?`,
+          body: 'They will have to link it again before they can queue, if Discord is required to queue.',
+          confirmLabel: 'Unlink',
+          danger: true,
+        })}>Unlink Discord</button>}
         {d.timeout && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.clearPenalties(d.steamid))}>Clear penalties</button>}
       </div>
 
@@ -103,12 +117,23 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
               Banned by {d.activeBan.createdByName ?? d.activeBan.createdBy} on {fmtTime(d.activeBan.createdAt)}: <strong>{d.activeBan.reason}</strong>
               {d.activeBan.expiresAt ? `, until ${fmtTime(d.activeBan.expiresAt)}` : ', permanently'}.
             </p>
-            <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.unban(d.steamid), `Unban ${d.name}?`)}>Unban</button>
+            <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.unban(d.steamid), {
+              title: `Unban ${d.name}?`,
+              body: 'The ban is lifted here and on every game server.',
+              confirmLabel: 'Unban',
+            })}>Unban</button>
           </div>
         ) : self ? <p class="muted">You cannot ban yourself.</p> : (
           <form class="admin-form" onSubmit={(e) => {
             e.preventDefault();
-            void run(() => adminApi.ban(d.steamid, reason, minutes ? Number(minutes) : null), `Ban ${d.name}?`).then(() => { setReason(''); setMinutes(''); });
+            void run(() => adminApi.ban(d.steamid, reason, minutes ? Number(minutes) : null), {
+              title: `Ban ${d.name}?`,
+              body: reason.trim()
+                ? `They are banned here and kicked from every game server. They will be shown: "${reason.trim()}"`
+                : 'They are banned here and kicked from every game server.',
+              confirmLabel: 'Ban',
+              danger: true,
+            }).then(() => { setReason(''); setMinutes(''); });
           }}>
             <input value={reason} placeholder="Reason (shown to them)" aria-label="Ban reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
             <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
@@ -225,7 +250,7 @@ function MergeSection(
   { d, busy, run }: {
     d: AdminPlayerDetail;
     busy: boolean;
-    run: (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
+    run: Run;
   },
 ) {
   const [into, setInto] = useState('');

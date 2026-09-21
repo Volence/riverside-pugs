@@ -3,7 +3,7 @@ import { adminApi, type AdminCampaign, type AdminChapter, type AdminInstall } fr
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { chapterName } from '../../format';
-import { useAction } from './useAction';
+import { useAction, type Run } from './useAction';
 
 /** These are hundreds-of-megabytes VPKs; nobody sizing free disk against an
  *  upload wants to read it in bytes. */
@@ -23,7 +23,6 @@ function installedEverywhere(c: AdminCampaign, serverIds: number[]): boolean {
   return serverIds.length > 0 && serverIds.every((id) => ok.has(id));
 }
 
-type Run = (fn: () => Promise<unknown>, confirmText?: string) => Promise<void>;
 
 /** `playCount` dims the chapters a stop-point rule drops, so the chapter list
  *  and the MapsToPlay control right below it visibly agree about which

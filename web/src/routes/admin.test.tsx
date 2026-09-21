@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { AdminOverview, IntegrityClip, IntegrityPlayerRow, IntegrityRound } from '../api';
+import { ConfirmHost } from '../components/Confirm';
+
+/** Click the affirmative button of the app's confirm dialog.
+ *
+ *  These used to stub window.confirm. The dialog is the app's own now, so the
+ *  tests press it, which also means a broken dialog fails the tests that
+ *  depend on it rather than passing on a stub.
+ */
+async function confirmDialog(name?: string | RegExp) {
+  const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+  fireEvent.click(within(dialog).getByRole('button', { name: name ?? 'Confirm' }));
+}
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
@@ -53,13 +65,17 @@ describe('Admin page', () => {
       signonDrops: { count: 0, lastAt: null, rows: [] },
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
-    window.confirm = () => true;
-    render(<Admin session={{ kind: 'active', me }} />);
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('griefer')).toBeTruthy());
     fireEvent.click(screen.getByText('griefer'));
     await waitFor(() => expect(screen.getByPlaceholderText('Reason (shown to them)')).toBeTruthy());
     fireEvent.input(screen.getByPlaceholderText('Reason (shown to them)'), { target: { value: 'throwing' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
+    // The reason goes into the dialog, so it is confirmed rather than guessed.
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    expect(dialog.textContent).toContain('Ban griefer?');
+    expect(dialog.textContent).toContain('throwing');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ban' }));
     await waitFor(() => expect(mockAdmin.ban).toHaveBeenCalledWith('2', 'throwing', null));
   });
 
@@ -375,7 +391,7 @@ describe('AdminIntegrity', () => {
   const openTab = async () => {
     mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [] });
-    render(<Admin session={{ kind: 'active', me }} />);
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
     fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
   };
 
@@ -419,11 +435,9 @@ describe('AdminIntegrity', () => {
     const btn = await waitFor(() => screen.getByRole('button', { name: 'Re-analyse all replays' }));
     expect(btn).toHaveProperty('disabled', true);
 
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: 'Force' }));
+    await confirmDialog();
     await waitFor(() => expect(mockAdmin.integrityRun).toHaveBeenCalledWith('full', true));
-    expect(confirm).toHaveBeenCalled();
-    confirm.mockRestore();
   });
 
   it('shows the running output and offers no force while a run is going', async () => {
