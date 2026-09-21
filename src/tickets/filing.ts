@@ -3,6 +3,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess } from './store.js';
+import { publishTicketSignal } from './signals.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other'] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -103,7 +104,10 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };
   })();
-  // After the commit, and only for a ticket the whole team may read.
+  // After the commit. The signal goes out for a restricted ticket too: it
+  // carries an id, stays in this process, and is how the private thread gets
+  // made. The admin feed line does not.
+  if (result.ok) publishTicketSignal({ kind: 'ticket', ticketId: result.ticketId });
   if (result.ok && !result.restricted) {
     publishAdminEvent({ kind: 'report', ticketId: result.ticketId, targetId: target.steamid, category, created: result.created });
   }
@@ -133,12 +137,14 @@ export function openStaffTicket(
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, MAX_TEXT) : '';
   const targetId = body.targetId;
   const restricted = body.restricted === true || hasStaffFlag(db, targetId);
-  return db.transaction(() => {
+  const opened = db.transaction(() => {
     const ticket = findOrOpen(db, targetId, restricted, by, deps);
     if (note) addTicketEvent(db, ticket.id, by, 'note', { text: note }, now);
     const row = getTicketRow(db, ticket.id)!;
     return { ok: true as const, ticketId: canSeeTicket(db, row, by) ? ticket.id : null, auditId: ticket.id };
   })();
+  publishTicketSignal({ kind: 'ticket', ticketId: opened.auditId });
+  return opened;
 }
 
 export type MatchTargets =

@@ -3,6 +3,7 @@ import { insertBan } from '../admin/players.js';
 import { publishBanChange } from '../banEvents.js';
 import { getSetting } from '../settings.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess, type TicketRow } from './store.js';
+import { publishTicketSignal } from './signals.js';
 
 export const TICKET_OUTCOMES = ['action_taken', 'warned', 'no_action', 'invalid'] as const;
 export type TicketOutcome = (typeof TICKET_OUTCOMES)[number];
@@ -10,6 +11,12 @@ export type ActionResult = { ok: true } | { ok: false; status: number; error: st
 
 const fail = (status: number, error: string): ActionResult => ({ ok: false, status, error });
 const OK: ActionResult = { ok: true };
+
+/** Tell the Discord side, after the commit and only when something changed. */
+const told = (id: number, r: ActionResult): ActionResult => {
+  if (r.ok) publishTicketSignal({ kind: 'ticket', ticketId: id });
+  return r;
+};
 
 /** Missing and invisible are the same answer on purpose. */
 function visible(db: DB, id: number, by: string): TicketRow | null {
@@ -37,7 +44,7 @@ export function claimTicket(db: DB, id: number, by: string, claim: boolean): Act
     db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?').run(claim ? by : null, id);
     addTicketEvent(db, id, by, claim ? 'claimed' : 'unclaimed');
   })();
-  return OK;
+  return told(id, OK);
 }
 
 export function setRestricted(db: DB, id: number, by: string, restricted: boolean, adminSteamIds: string[]): ActionResult {
@@ -50,11 +57,11 @@ export function setRestricted(db: DB, id: number, by: string, restricted: boolea
       return fail(400, 'a ticket holding a safety report stays restricted');
     }
   }
-  return guardUnique(() => db.transaction(() => {
+  return told(id, guardUnique(() => db.transaction(() => {
     db.prepare('UPDATE tickets SET restricted = ? WHERE id = ?').run(restricted ? 1 : 0, id);
     if (restricted) seedAccess(db, id, t.target_id, adminSteamIds, [by]);
     addTicketEvent(db, id, by, restricted ? 'restricted' : 'unrestricted');
-  })(), `there is already an open ${restricted ? 'restricted' : 'normal'} ticket about this player`);
+  })(), `there is already an open ${restricted ? 'restricted' : 'normal'} ticket about this player`));
 }
 
 export function addAccess(db: DB, id: number, by: string, steamid: string): ActionResult {
@@ -68,7 +75,7 @@ export function addAccess(db: DB, id: number, by: string, steamid: string): Acti
       .run(id, steamid, by, new Date().toISOString());
     addTicketEvent(db, id, by, 'access_added', { steamid });
   })();
-  return OK;
+  return told(id, OK);
 }
 
 export function closeTicket(db: DB, id: number, by: string, outcome: unknown, note: unknown): ActionResult {
@@ -82,17 +89,17 @@ export function closeTicket(db: DB, id: number, by: string, outcome: unknown, no
       .run(outcome, text, new Date().toISOString(), by, id);
     addTicketEvent(db, id, by, 'closed', { outcome, note: text });
   })();
-  return OK;
+  return told(id, OK);
 }
 
 export function reopenTicket(db: DB, id: number, by: string): ActionResult {
   const t = visible(db, id, by);
   if (!t) return fail(404, 'no such ticket');
   if (t.status === 'open') return fail(409, 'the ticket is already open');
-  return guardUnique(() => db.transaction(() => {
+  return told(id, guardUnique(() => db.transaction(() => {
     db.prepare("UPDATE tickets SET status = 'open', outcome = NULL, outcome_note = '', closed_at = NULL, closed_by = NULL WHERE id = ?").run(id);
     addTicketEvent(db, id, by, 'reopened');
-  })(), 'there is a newer open ticket about this player; work that one');
+  })(), 'there is a newer open ticket about this player; work that one'));
 }
 
 /**
@@ -130,5 +137,5 @@ export function banFromTicket(db: DB, id: number, by: string, reason: unknown, m
     addTicketEvent(db, id, by, 'banned', { reason: text, minutes: mins }, now);
   })();
   publishBanChange({ kind: 'ban', steamid: t.target_id, reason: text });
-  return OK;
+  return told(id, OK);
 }

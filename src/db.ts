@@ -691,6 +691,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_admin_channel_id: '',
   // Where match results are posted. Empty keeps them in the queue channel.
   discord_results_channel_id: '',
+  discord_tickets_forum_id: '',
+  discord_tickets_channel_id: '',
   // Games before a player's per-match figures are ranked for the profile
   // badges. Deliberately higher than RANKED_MIN_GAMES: three games is enough
   // for a rating to be worth showing and nowhere near enough for a per-match
@@ -909,7 +911,21 @@ export function openDb(path: string): DB {
   // each other. Null for every ban issued from the Players tab.
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
   ensureTicketSchema(db);
+  // When a report was said in Discord: in its ticket's thread, or as a line
+  // in the admin channel while no forum is set. NULL means "not yet", which
+  // is what lets a report filed while the bot was down be announced when it
+  // comes back. Every report older than the column is marked announced, or
+  // the first start after this deploy would replay the whole history.
+  const announcedIsNew = !(db.prepare('PRAGMA table_info(ticket_reports)').all() as { name: string }[])
+    .some((c) => c.name === 'announced_at');
+  ensureColumn(db, 'ticket_reports', 'announced_at', 'TEXT');
+  // When this person was sent the DM saying they are on a restricted
+  // ticket's access list. Charged before the send, so a refused DM is never
+  // retried.
+  ensureColumn(db, 'ticket_access', 'notified_at', 'TEXT');
   migrateLegacyReports(db);
+  // After the migration, so reports it has just created are covered too.
+  if (announcedIsNew) db.exec('UPDATE ticket_reports SET announced_at = created_at WHERE announced_at IS NULL');
   seed(db);
   return db;
 }

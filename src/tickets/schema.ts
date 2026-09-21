@@ -10,6 +10,14 @@ import type { DB } from '../db.js';
  * than a convention. It is keyed on restricted as well, so a restricted
  * report never has to attach to a ticket the whole team can read: it opens a
  * restricted sibling instead.
+ *
+ * ticket_threads says which Discord thread belongs to which ticket. `surface`
+ * is where it lives ('forum' for the staff forum, 'private' for a private
+ * thread in the tickets channel) and is stored rather than worked out from
+ * channel_id, so changing the forum setting cannot change what an old row
+ * means. `locked` is what the bot last did in Discord, which is how the
+ * reconciler knows a closed ticket's post still needs locking. `card_hash`
+ * is written only after Discord accepted the edit it stands for.
  */
 export function ensureTicketSchema(db: DB): void {
   db.exec(`
@@ -61,5 +69,21 @@ export function ensureTicketSchema(db: DB): void {
       created_at TEXT NOT NULL,
       PRIMARY KEY (ticket_id, steamid)
     );
+
+    CREATE TABLE IF NOT EXISTS ticket_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+      kind TEXT NOT NULL,
+      reporter_id TEXT REFERENCES players(steamid),
+      channel_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL UNIQUE,
+      state TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      surface TEXT NOT NULL,
+      card_message_id TEXT,
+      card_hash TEXT NOT NULL DEFAULT '',
+      locked INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_threads_ticket ON ticket_threads (ticket_id);
   `);
 }

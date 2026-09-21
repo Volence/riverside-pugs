@@ -24,6 +24,7 @@ import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 import { reseedOrphanedTickets, restrictOpenTicketAbout, type RestrictOutcome } from '../tickets/store.js';
+import { publishTicketSignal } from '../tickets/signals.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 
 export interface AdminRouteOpts {
@@ -140,6 +141,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       }
     })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
+    publishTicketSignal({ kind: 'staff' });
     if (outcome === 'nobody') publishAdminEvent({ kind: 'problem', text: NOBODY_TO_RESTRICT });
     return { ok: true };
   });
@@ -157,6 +159,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       if (isMod) outcome = restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
     })();
     logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
+    publishTicketSignal({ kind: 'staff' });
     if (outcome === 'nobody') publishAdminEvent({ kind: 'problem', text: NOBODY_TO_RESTRICT });
     return { ok: true };
   });

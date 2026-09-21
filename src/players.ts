@@ -5,6 +5,7 @@ import {
   LINK_PLATFORMS, isPlatform, linkUrl,
   validateBio, validateCountry, validateHandle, validatePronouns,
 } from './profileFields.js';
+import { publishTicketSignal } from './tickets/signals.js';
 
 export interface PlayerRow {
   steamid: string;
@@ -100,11 +101,14 @@ export function linkDiscord(db: DB, steamid: string, discordId: string, discordN
   if (owner && owner.steamid !== steamid) return { ok: false, error: 'discord_taken' };
   db.prepare('UPDATE players SET discord_id = ?, discord_name = ? WHERE steamid = ?')
     .run(discordId, discordName, steamid);
+  // Forum access and private thread membership are keyed on the Discord id.
+  publishTicketSignal({ kind: 'staff' });
   return { ok: true };
 }
 
 export function unlinkDiscord(db: DB, steamid: string): void {
   db.prepare('UPDATE players SET discord_id = NULL, discord_name = NULL WHERE steamid = ?').run(steamid);
+  publishTicketSignal({ kind: 'staff' });
 }
 
 export function playerByDiscordId(db: DB, discordId: string): PlayerRow | undefined {

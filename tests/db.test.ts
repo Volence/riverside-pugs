@@ -23,7 +23,7 @@ describe('openDb', () => {
       'matches', 'matchmaker_state',
       'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings', 'players',
       'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops',
-      'ticket_access', 'ticket_events', 'ticket_reports', 'tickets', 'twitch_status',
+      'ticket_access', 'ticket_events', 'ticket_reports', 'ticket_threads', 'tickets', 'twitch_status',
     ]);
   });
 

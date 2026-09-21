@@ -3,6 +3,7 @@ import { addAlias } from './aliases.js';
 import { recomputeSeasonRatings } from './rating.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { foldTicket, hasStaffFlag, reseedOrphanedTickets, restrictOpenTicketAbout, type RestrictOutcome } from './tickets/store.js';
+import { publishTicketSignal } from './tickets/signals.js';
 
 /**
  * Fold one Steam account into another, as if the second had always been the
@@ -39,6 +40,7 @@ const PLAIN: [table: string, column: string][] = [
   ['tickets', 'claimed_by'],
   ['tickets', 'opened_by'],
   ['tickets', 'closed_by'],
+  ['ticket_threads', 'reporter_id'],
   // Evidence. None of it has a foreign key, so leaving it behind never
   // failed: it just stayed on an id with no player row and no admin page.
   ['integrity_flags', 'steamid'],
@@ -304,6 +306,9 @@ export function mergePlayers(
   if (orphaned > 0) {
     publishAdminEvent({ kind: 'problem', text: `${orphaned} restricted ticket${orphaned === 1 ? ' has' : 's have'} nobody on the access list after a merge. It is handed to the next admin that is created.` });
   }
+  // Tickets may have been folded or restricted, and a Discord link may have
+  // moved: let the reconciler look at everything.
+  publishTicketSignal({ kind: 'staff' });
 
   // Outside the transaction above because it opens its own.
   for (const season of seasons) recomputeSeasonRatings(db, season);

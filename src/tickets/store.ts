@@ -89,6 +89,18 @@ export function foldTicket(db: DB, gone: number, keep: number, access: 'merge' |
   db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone);
   db.prepare("UPDATE admin_actions SET target = ? WHERE target = ? AND action LIKE 'ticket\\_%' ESCAPE '\\'")
     .run(String(keep), String(gone));
+  // Discord threads follow the ticket. Where the survivor already has a staff
+  // thread, the other is marked 'folded': TicketSync posts one line in the
+  // survivor naming it, then locks and archives it. Where it has none, the
+  // moved thread simply becomes the survivor's. A forum thread that lands on
+  // a restricted ticket this way is deleted by the reconciler, whatever its
+  // state: see forbiddenForumThreads.
+  const keepHasThread = db.prepare("SELECT 1 FROM ticket_threads WHERE ticket_id = ? AND kind = 'staff' AND state = 'open'").get(keep) ? 1 : 0;
+  db.prepare(
+    `UPDATE ticket_threads SET ticket_id = ?,
+       state = CASE WHEN kind = 'staff' AND state = 'open' AND ? = 1 THEN 'folded' ELSE state END
+     WHERE ticket_id = ?`,
+  ).run(keep, keepHasThread, gone);
   db.prepare('DELETE FROM tickets WHERE id = ?').run(gone);
   addTicketEvent(db, keep, null, 'folded', { from: gone }, now);
 }
