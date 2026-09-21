@@ -46,6 +46,10 @@ describe('migrateLegacyReports', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = 1').get()).toEqual({ n: 2 });
     expect(db.prepare('SELECT match_id, text, created_at FROM ticket_reports WHERE id = 1').get())
       .toEqual({ match_id: matchId, text: 'old text', created_at: '2026-09-18T10:00:00.000Z' });
+    // A migrated report is never news: it is marked said as of the day it was
+    // filed, so the admin feed announces nothing the first time the site boots.
+    expect(db.prepare('SELECT feed_held, announced_at FROM ticket_reports ORDER BY id').all())
+      .toEqual(Array.from({ length: 4 }, () => ({ feed_held: 0, announced_at: '2026-09-18T10:00:00.000Z' })));
     // A migrated ticket gets the timeline its history implies, dated then.
     expect(db.prepare('SELECT ticket_id, actor_id, kind, detail, created_at FROM ticket_events ORDER BY id').all()).toEqual([
       { ticket_id: 1, actor_id: null, kind: 'opened', detail: '{}', created_at: '2026-09-18T10:00:00.000Z' },
@@ -62,6 +66,9 @@ describe('migrateLegacyReports', () => {
     migrateLegacyReports(db);
     expect(db.prepare('SELECT restricted FROM tickets').get()).toEqual({ restricted: 1 });
     expect(db.prepare('SELECT steamid FROM ticket_access').all()).toEqual([{ steamid: ADMIN }]);
+    // Restricted: held from the feed for good, as filing holds a live one.
+    expect(db.prepare('SELECT feed_held, announced_at FROM ticket_reports').get())
+      .toEqual({ feed_held: 1, announced_at: '2026-09-18T10:00:00.000Z' });
   });
 
   // A match row removed by hand (the sqlite3 CLI runs with foreign keys off)
