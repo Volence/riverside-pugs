@@ -182,6 +182,49 @@ After regenerating, in this order:
 The drop line reaches the web over the same `logaddress_add` feed `pug-match.smx`
 uses, so it needs `log on` and nothing new in the server cfg.
 
+## Older SourceMod versions
+
+Verified 2026-09-20 against SourceMod 1.9, for a server locked to 1.9 by another
+plugin. The split is that the **extension is fine as shipped and the plugin is
+not**, and the fix is a recompile of the plugin with no source changes.
+
+**The extension binary loads on 1.9 unchanged.** It is built against the 1.12
+SDK, but an extension reaches SourceMod only through vtables (`nm -D` shows no
+undefined SourceMod or Metamod symbols, and the only `NEEDED` entries are
+`libstdc++` and `libc`), so what matters is whether those vtables match:
+
+- `SMINTERFACE_EXTENSIONAPI_VERSION` is `8` on every branch from 1.9 to 1.12,
+  and core rejects an extension only when its version is *greater* than core's.
+- `IExtensionInterface` and `IShareSys`, the two this extension implements and
+  calls, have byte-identical virtual lists in 1.9 and 1.12.
+- `IPluginContext` in 1.9 is a strict prefix of 1.12's: the first 56 slots are
+  identical and 1.12 only appends. `LocalToString` and `ThrowNativeError`, the
+  only two this extension calls, sit at the same slots in both.
+- `ISmmAPI` slots 1 (`GetEngineFactory`) and 19 (`VInterfaceMatch`), the only
+  two `GET_V_IFACE_CURRENT` touches, are identical from Metamod 1.10 up. The one
+  1.10-vs-1.12 difference is `FormatIface`'s parameter type at slot 14, same
+  width on i386 and never called here.
+- Highest versioned symbol required is `GLIBC_2.4`, so an old distro is fine too.
+
+**The shipped `.smx` does not load on 1.9, and this is not negotiable.** It is
+compiled by spcomp 1.12 and carries code version 13 with the `DirectArrays`,
+`HeapScopes` and `NullFunctions` feature flags. SourcePawn in 1.9 accepts code
+versions 9 and 10 only (`CODE_VERSION_SP1_MAX`), and refuses anything higher
+with `code version is too new, not supported`.
+
+Recompiling `plugin/l4d_consistency.sp` with the 1.9 spcomp is the whole fix:
+
+    <sm1.9>/addons/sourcemod/scripting/spcomp \
+      -i<sm1.9>/addons/sourcemod/scripting/include \
+      -iplugin \
+      plugin/l4d_consistency.sp -ol4d_consistency.smx
+
+It compiles clean, no errors and no warnings, and emits code version 10. The
+plugin only uses natives that have been in SourceMod since 1.7 (`ConVar` and
+`File` methodmaps, `FindStringTable`, `BuildPath`, `RegAdminCmd`, `HookEvent`),
+so there is nothing to port. `plugin/l4d_consistency.inc` has to be on the
+include path, which is what the second `-i` above is for.
+
 ## Cvars
 
 | cvar | default | meaning |
