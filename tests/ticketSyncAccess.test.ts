@@ -63,16 +63,19 @@ describe('forum access', () => {
     const id = (fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: '' }, { adminSteamIds: [ADMIN] }) as { ticketId: number }).ticketId;
     await sync.idle();
     const post = staffThread(db, id)!.thread_id;
-    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
+    // Two promotions in one signal: the accused of a forum post that is still
+    // standing, and somebody with no post about them. The exact set is then
+    // the proof, since it only holds if the access sync really ran.
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid IN (?, ?)').run(IDS[5], IDS[1]);
     // Discord refuses the deletion twice: once in the sweep, once for the ticket.
     t.failThreadOps = 2;
     publishTicketSignal({ kind: 'staff' });
     await sync.idle();
     expect(t.threadsById.get(post)!.deleted).toBe(false);
-    expect(access()).not.toContain('905');
+    expect(access()).toEqual(['901', '906', '907']);
     await sync.reconcile();
     expect(t.threadsById.get(post)!.deleted).toBe(true);
-    expect(access()).toContain('905');
+    expect(access()).toEqual(['901', '905', '906', '907']);
   });
 
   it('says so in the admin feed when someone who should lose the forum keeps it', async () => {
