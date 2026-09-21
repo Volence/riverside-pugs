@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
@@ -9,11 +10,16 @@ import { serverPasswordFor } from '../src/matchToken.js';
 import { setSetting } from '../src/settings.js';
 import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
+import { adminRoutes } from '../src/routes/admin.js';
+import type { Matchmaker } from '../src/matchmaker.js';
+import type { ServerReleaser } from '../src/serverRelease.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ADMIN = '76561199000000091';
 const PLAYER = '76561199000000092';
+/** Staff, but not an admin: tickets are theirs, the live board is not. */
+const MOD = '76561199000000093';
 const TOKEN = 'a'.repeat(32);
 const DROPPED = IDS[2];
 
@@ -37,8 +43,9 @@ beforeEach(async () => {
     },
   });
   cookies = {};
-  for (const id of [...IDS, ADMIN, PLAYER]) cookies[id] = authedCookie(app, db, id);
+  for (const id of [...IDS, ADMIN, PLAYER, MOD]) cookies[id] = authedCookie(app, db, id);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+  db.prepare('UPDATE players SET is_mod = 1, is_admin = 0 WHERE steamid = ?').run(MOD);
   const serverId = addServer(db, { name: 'Dallas', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
   matchId = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, server_id, token) VALUES (1, 'live', 'dead_air', ?, ?)").run(serverId, TOKEN).lastInsertRowid);
   const ins = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
@@ -131,6 +138,59 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
     expect(res.statusCode).toBe(500);
     expect(res.json().error).not.toMatch(/could not reach/);
     expect(sent).toEqual([]);
+  });
+
+  it('releases and ends through the same route, in the plugin\'s own words', async () => {
+    answer = `PUGOK leave steamid=${DROPPED} absent=1 remaining=200 held=0 hold_left=0`;
+    expect((await act({ action: 'release' })).statusCode).toBe(200);
+    expect(getPresence(db, matchId, DROPPED)).toMatchObject({ remaining_s: 200, held: 0 });
+
+    answer = `PUGOK leave steamid=${DROPPED} absent=1 remaining=0 held=0 hold_left=0`;
+    expect((await act({ action: 'end' })).statusCode).toBe(200);
+    expect(sent).toEqual([
+      `sm_pug_leave ${TOKEN} ${DROPPED} release`,
+      `sm_pug_leave ${TOKEN} ${DROPPED} end`,
+    ]);
+    expect(getPresence(db, matchId, DROPPED)).toMatchObject({ remaining_s: 0 });
+    expect((await audit()).map((a: { detail: { action: string } }) => a.detail.action)).toEqual(['end', 'release']);
+  });
+
+  it('409s while the match has no server yet', async () => {
+    db.prepare("UPDATE matches SET state = 'configuring', server_id = NULL WHERE id = ?").run(matchId);
+    const res = await act({ action: 'hold' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/no server yet/);
+    expect(sent).toEqual([]);
+  });
+
+  it('a moderator is not an admin here: refused by both routes, and nothing is dialled', async () => {
+    // is_mod opens tickets, not the board that can end a ranked match.
+    expect((await act({ action: 'hold' }, MOD)).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/api/admin/live', cookies: cookies[MOD] })).statusCode).toBe(403);
+    expect(sent).toEqual([]);
+  });
+
+  it('says so plainly where no server query is wired up at all', async () => {
+    // buildServer always supplies one, so this is the shape of an install
+    // that registers the admin routes without it: the route must answer 503
+    // rather than throw on an undefined.
+    const bare = Fastify();
+    await bare.register(cookie, { secret: loadConfig({}).cookieSecret });
+    await bare.register(adminRoutes, {
+      db, matchmaker: {} as unknown as Matchmaker, releaser: {} as unknown as ServerReleaser,
+      broadcast: () => {}, adminSteamIds: [],
+    });
+    await bare.ready();
+    try {
+      const res = await bare.inject({
+        method: 'POST', url: `/api/admin/live/${matchId}/players/${DROPPED}/leave`,
+        cookies: authedCookie(bare, db, ADMIN), payload: { action: 'hold' },
+      });
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error).toMatch(/not available here/);
+    } finally {
+      await bare.close();
+    }
   });
 
   it('an answer about somebody else is not believed', async () => {

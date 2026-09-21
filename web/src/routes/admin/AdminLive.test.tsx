@@ -197,6 +197,42 @@ describe('the live board', () => {
     expect(document.querySelector('.live-clock.is-low')).toBeNull();
   });
 
+  it('leaves the controls live while the plugin is merely unknown', async () => {
+    // Only a server that has ANSWERED an old plugin greys these out. Unknown
+    // is a match that has not been probed, and greying out is the failure that
+    // costs a match; a button that explains itself when pressed does not.
+    mockAdmin.live.mockResolvedValue(board({ leaveControl: 'unknown' }));
+    render(<AdminLive />);
+    const bob = await row('bob');
+    for (const name of ['Hold', '+5 min', 'End now']) {
+      expect((within(bob).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false);
+    }
+    expect(screen.queryByText(/older than 0\.3\.4/)).toBeNull();
+    fireEvent.click(within(bob).getByRole('button', { name: 'Hold' }));
+    await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '2', 'hold'));
+  });
+
+  it('keeps the last board up when a re-fetch fails, still counting from when THAT board arrived', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<AdminLive />);
+      await vi.advanceTimersByTimeAsync(0);
+      const line = () => (screen.getByText('bob').closest('li') as HTMLElement).textContent ?? '';
+      expect(line()).toContain('4:18 left');
+
+      mockAdmin.live.mockRejectedValue(new ApiError(500, 'boom'));
+      FakeSocket.all[0].onmessage?.({ data: JSON.stringify({ event: 'refresh' }) });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(screen.getByText(/Showing the last one that loaded/)).toBeTruthy();
+      // Ten seconds on from the board that DID load, not restarted and not
+      // frozen: the countdown an admin is watching must keep being true.
+      expect(line()).toContain('4:08 left');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('puts a failure on the card it happened on', async () => {
     mockAdmin.leaveClock.mockRejectedValue(new ApiError(502, 'could not reach Dallas: rcon connect timeout'));
     render(<AdminLive />);
