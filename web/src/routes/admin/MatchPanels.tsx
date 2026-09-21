@@ -4,6 +4,7 @@ import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction, type Run } from './useAction';
 import { formatTime } from '../../replay/ReplayControls';
+import { SlowToReadyTable } from './SlowToReady';
 import type { MatchPause, MatchReadyup } from '../../api';
 
 /**
@@ -177,7 +178,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
       <p class="muted">Voiding removes a match from every stat and rebuilds the season's ratings without it. It cannot be undone from here.</p>
       {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
         <div class="table-wrap">
-          <table class="admin-table">
+          <table class="admin-table admin-table--recent">
             <thead><tr><th>Match</th><th class="num">Score</th><th>Odds</th><th>Pauses</th><th>Ready-ups</th><th>Ended</th><th /></tr></thead>
             <tbody>
               {data.recent.map((m) => (
@@ -227,27 +228,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
           </table>
         </div>
       )}
-      {(data.slowToReady ?? []).length > 0 && (
-        <>
-          <h3>Slow to ready</h3>
-          <p class="muted">Across every counted match. "Last" is how often they were the one everybody was waiting on when the round went live.</p>
-          <div class="table-wrap">
-            <table class="admin-table">
-              <thead><tr><th>Player</th><th class="num">Last</th><th class="num">Avg unready</th><th class="num">Total unready</th></tr></thead>
-              <tbody>
-                {data.slowToReady.map((p) => (
-                  <tr key={p.steamid}>
-                    <td><a href={`/player/${p.steamid}`}>{p.name}</a></td>
-                    <td class="num">{p.timesLast} of {p.readyups}</td>
-                    <td class="num">{formatTime(p.avgSeconds * 1000)}</td>
-                    <td class="num">{formatTime(p.totalSeconds * 1000)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <SlowToReadyTable rows={data.slowToReady ?? []} />
       {(data.aborted ?? []).length > 0 && (
         <>
           <h4>Aborted</h4>

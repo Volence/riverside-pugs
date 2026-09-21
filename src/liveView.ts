@@ -354,10 +354,12 @@ export function readyupsFor(db: DB, matchId: number): MatchReadyup[] {
 
 /**
  * Who is slow to ready, across every finished ready-up of every match that
- * still counts. Sorted by how often they were the last one, then by total
- * seconds, so a repeat offender is at the top.
+ * still counts. Everybody, not a top few: the admin table re-sorts in the
+ * browser by share of ready-ups they were last for, by average and by total,
+ * and a cut made here by one of those orders would hide the top of the
+ * others. The limit is a backstop against an unbounded payload, not a ranking.
  */
-export function slowToReady(db: DB, limit = 25): SlowToReady[] {
+export function slowToReady(db: DB, limit = 1000): SlowToReady[] {
   return db
     .prepare(
       `SELECT rp.player_id AS steamid, COALESCE(p.name, rp.player_id) AS name,

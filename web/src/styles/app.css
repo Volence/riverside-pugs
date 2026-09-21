@@ -1536,6 +1536,14 @@ body.is-theater { overflow: hidden; }
 .admin-table--servers .admin-form { flex-wrap: nowrap; }
 .admin-table--servers .admin-form input { flex: 0 1 auto; width: 7rem; }
 .admin-table td, .admin-table th { white-space: nowrap; }
+/* Recent results: eight ready-up lines of "0:14 on map 1, last <two names>"
+ * held on one line each pushed the Void button out of the panel, behind a
+ * scroll bar that sat at the bottom of a long table. The two list columns may
+ * wrap; and because a phone is narrower than any wrapping can fix, the action
+ * column stays pinned to the right edge while the rest scrolls under it. */
+.admin-table--recent .admin-pauses { white-space: normal; min-width: 11rem; }
+.admin-table--recent td:last-child,
+.admin-table--recent th:last-child { position: sticky; right: 0; background: var(--surface); }
 .admin-table tr.is-clickable { cursor: pointer; }
 .admin-tag {
   margin-left: 0.5em; padding: 0 0.35em; border: 1px solid var(--rating); color: var(--rating);
