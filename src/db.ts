@@ -822,6 +822,42 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // What players.status was when the account was banned, so the end of the
+  // ban can put it back. NULL when the account is not banned, and on a row
+  // banned before this column existed, which restoreStatus in
+  // src/admin/players.ts works out from the evidence instead.
+  ensureColumn(db, 'players', 'status_before_ban', 'TEXT');
+  // Bumped to end every session a player holds at once: the signed cookie
+  // carries the value it was issued under. See src/session.ts.
+  ensureColumn(db, 'players', 'session_epoch', 'INTEGER NOT NULL DEFAULT 0');
+  // Every Discord link there has ever been, open or closed. The players row
+  // only knows the link as it stands, which is what let one Discord account
+  // serve any number of Steam accounts in sequence with nothing to show for
+  // it. No foreign key on `steamid`, like the evidence tables: a merge moves
+  // these rows rather than being blocked by them. See linkDiscord.
+  db.exec(`CREATE TABLE IF NOT EXISTS discord_link_history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    steamid      TEXT NOT NULL,
+    discord_id   TEXT NOT NULL,
+    discord_name TEXT NOT NULL DEFAULT '',
+    linked_at    TEXT NOT NULL,
+    linked_by    TEXT NOT NULL,
+    unlinked_at  TEXT,
+    unlinked_by  TEXT
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_discord_link_history_discord ON discord_link_history (discord_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_discord_link_history_steamid ON discord_link_history (steamid)');
+  // Links made before this table existed get an open row, so the first unlink
+  // after the upgrade has something to close. `backfill` marks linked_at as
+  // the time of the upgrade rather than of the link, which nobody recorded.
+  db.prepare(
+    `INSERT INTO discord_link_history (steamid, discord_id, discord_name, linked_at, linked_by)
+     SELECT p.steamid, p.discord_id, COALESCE(p.discord_name, ''), ?, 'backfill' FROM players p
+     WHERE p.discord_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM discord_link_history h
+       WHERE h.steamid = p.steamid AND h.discord_id = p.discord_id AND h.unlinked_at IS NULL
+     )`,
+  ).run(new Date().toISOString());
   // Player-authored profile fields. All three are constrained rather than
   // trusted: see src/profileFields.ts. They are columns rather than rows in
   // player_links because they are one-per-player and are rendered with the

@@ -4,6 +4,8 @@ import { resolveCampaignForMap } from './campaignRegistry.js';
 import { currentSeasonId } from './players.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { QUEUE_SIZE } from './queue.js';
+import { resolveAlias } from './aliases.js';
+import { hasActiveBan } from './banState.js';
 
 /** How long to wait after MATCH_CREATE before committing with whatever roster
  *  lines arrived. The burst is emitted in one tick by the plugin, so this only
@@ -112,6 +114,15 @@ export class SelfStartedMatches {
       .get(ev.token) as { id: number } | undefined;
     if (!live) return false;
 
+    if (this.isBanned(ev.steamid)) {
+      publishAdminEvent({
+        kind: 'problem',
+        matchId: live.id,
+        text: `Refused to roster ${ev.name} (${ev.steamid}) onto team ${ev.team.toUpperCase()} of match #${live.id}: that account is banned. They are on the game server anyway, so check its ban list.`,
+      });
+      return true;
+    }
+
     // A roster line for a team that is already full is either a sub for
     // somebody who left, or a second account belonging to somebody already
     // on it. Nothing in the line distinguishes the two, so the account
@@ -159,6 +170,15 @@ export class SelfStartedMatches {
       if (r.changes > 0) console.log(`[selfStarted] match ${live.id}: rostered ${ev.steamid} on ${ev.team} at map ${ev.joinedMap}`);
     })();
     return true;
+  }
+
+  /** Whether this SteamID, or the account it was merged into, is under a ban
+   *  right now. A match started in game never passed through the queue, which
+   *  is where a ban is otherwise enforced, so this is the only check it gets.
+   *  The listener has normally resolved the alias already; resolving again is
+   *  one indexed read and means this does not depend on who called handle(). */
+  private isBanned(steamid: string): boolean {
+    return hasActiveBan(this.deps.db, resolveAlias(this.deps.db, steamid));
   }
 
   /** How many players are rostered on one side of a match. */
@@ -227,6 +247,20 @@ export class SelfStartedMatches {
     const p = this.pending.get(token);
     if (!p || p.committed) return;
     if (!p.map || p.roster.size === 0) return;
+
+    // Banned accounts come off the roster before anything else looks at it,
+    // so the both-sides rule below judges the match that will actually be
+    // rated. Deleted rather than skipped, so a second pass through here (the
+    // end line, then the grace timer) does not report the same account twice.
+    for (const [steamid, { name, team }] of p.roster) {
+      if (!this.isBanned(steamid)) continue;
+      p.roster.delete(steamid);
+      publishAdminEvent({
+        kind: 'problem',
+        text: `Dropped ${name} (${steamid}) from team ${team.toUpperCase()} of a match started in-game on ${p.map}: that account is banned, so it is not rostered or rated. They are on the game server anyway, so check its ban list.`,
+      });
+    }
+    if (p.roster.size === 0) return;
 
     // Both sides, or it is not a match. It used to be adopted with whatever
     // had arrived, so a roster of one was a live match that went on to be

@@ -23,9 +23,12 @@ import { setReview, unanalysableCounts } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
+import { publishBanChange } from '../banEvents.js';
+import { hasActiveBan } from '../banState.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
+import { endSessions } from '../session.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -97,7 +100,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       }
     }
     banPlayer(db, t.steamid, t.adminId, reason.trim(), mins);
-    matchmaker.leave(t.steamid);
+    // Out of the queue AND out of any ready check or vote in progress.
+    matchmaker.remove(t.steamid);
     logAdmin(db, t.adminId, 'ban', t.steamid, { reason: reason.trim(), minutes: mins });
     return { ok: true };
   });
@@ -127,8 +131,24 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { isAdmin } = (req.body ?? {}) as { isAdmin?: unknown };
     if (typeof isAdmin !== 'boolean') return reply.code(400).send({ error: 'isAdmin must be true or false' });
     if (t.steamid === t.adminId && !isAdmin) return reply.code(400).send({ error: 'you cannot remove your own admin' });
+    const was = getPlayer(db, t.steamid)?.is_admin === 1;
     db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
+    // A change of rights starts from a fresh sign-in: a session that was open
+    // while somebody was an admin does not outlive their being one. Only on
+    // a real change, so re-saving the same value signs nobody out.
+    if (was !== isAdmin) endSessions(db, t.steamid);
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
+    return { ok: true };
+  });
+
+  /** Sign a player out everywhere: every cookie they hold stops working, on
+   *  every device, and they sign in again. For an account that may be in
+   *  somebody else's hands, where waiting out a 30 day session is not on. */
+  app.post('/api/admin/players/:steamid/sign-out', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    endSessions(db, t.steamid);
+    logAdmin(db, t.adminId, 'sign_out', t.steamid);
     return { ok: true };
   });
 
@@ -136,7 +156,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const t = target(req, reply);
     if (!t) return reply;
     const before = getPlayer(db, t.steamid)?.discord_name ?? null;
-    unlinkDiscord(db, t.steamid);
+    unlinkDiscord(db, t.steamid, t.adminId);
     logAdmin(db, t.adminId, 'unlink_discord', t.steamid, { was: before });
     return { ok: true };
   });
@@ -187,10 +207,16 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
     const { steamid } = req.params as { steamid: string };
-    if (resolveAlias(db, steamid) === steamid) {
+    const canonical = resolveAlias(db, steamid);
+    if (canonical === steamid) {
       return reply.code(404).send({ error: 'that account is not an alias' });
     }
     removeAlias(db, steamid);
+    // While it was an alias this id carried its main's engine ban, which is
+    // permanent on the box and which the sweep will never lift now that the
+    // two are no longer connected. The main stays banned; only this id is
+    // freed, because on the website it is now an account with no ban at all.
+    if (hasActiveBan(db, canonical)) publishBanChange({ kind: 'unban', steamid });
     logAdmin(db, adminId, 'unalias_player', steamid);
     return { ok: true };
   });

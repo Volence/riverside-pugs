@@ -38,6 +38,9 @@ const PLAIN: [table: string, column: string][] = [
   ['input_bursts', 'steamid'],
   ['input_detections', 'steamid'],
   ['signon_drops', 'steamid'],
+  // The losing account's open link is closed first, below: the survivor
+  // inherits the record of it, not the link.
+  ['discord_link_history', 'steamid'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -181,6 +184,13 @@ export function mergePlayers(
          (SELECT match_id, stat FROM match_player_stats WHERE player_id = ?)`,
     ).run(from, into);
     db.prepare('UPDATE match_player_stats SET player_id = ? WHERE player_id = ?').run(into, from);
+
+    // The losing account's Discord link dies with its player row, so its
+    // history row is closed here. Left open, it would move to the survivor
+    // below and claim a link the survivor never had.
+    db.prepare(
+      "UPDATE discord_link_history SET unlinked_at = ?, unlinked_by = 'merge' WHERE steamid = ? AND unlinked_at IS NULL",
+    ).run(new Date().toISOString(), from);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

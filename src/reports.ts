@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { inGoodStanding } from './standing.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'other'] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -40,6 +41,10 @@ export type FileResult = { ok: true; id: number } | { ok: false; status: number;
 export function fileReport(
   db: DB, matchId: number, reporter: string, body: { targetId?: unknown; category?: unknown; text?: unknown },
 ): FileResult {
+  // Here rather than in each caller: the website's guard and the Discord
+  // command both check this before they get here, and the day a third surface
+  // forgets to, this is what stops a banned player filing reports from it.
+  if (!inGoodStanding(db, reporter)) return { ok: false, status: 403, error: 'only active players can file reports' };
   const elig = reportEligibility(db, matchId, reporter);
   if (!elig.canReport) return { ok: false, status: elig.status, error: elig.reason };
   const target = elig.targets.find((t) => t.steamid === body.targetId);

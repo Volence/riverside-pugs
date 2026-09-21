@@ -3,7 +3,14 @@ import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
-import { upsertPlayer } from '../src/players.js';
+import { activatePlayer, upsertPlayer as insertPlayer } from '../src/players.js';
+import type { DB as DbT } from '../src/db.js';
+
+/** Every player in this file is an active member: the page lists nobody else. */
+function upsertPlayer(d: DbT, p: { steamid: string; name: string; avatar: string | null }, admins: string[]): void {
+  insertPlayer(d, p, admins);
+  activatePlayer(d, p.steamid);
+}
 import { stubOrchestrator } from './helpers.js';
 import { OFFLINE_CAP } from '../src/streamsView.js';
 

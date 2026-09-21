@@ -30,6 +30,22 @@ describe('POST /api/profile', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('refuses an account that was never let in, and a banned one, and saves nothing', async () => {
+    const { banPlayer } = await import('../src/admin/players.js');
+    const invited = authedCookie(app, db, P1, { active: false });
+    const a = await app.inject({ method: 'POST', url: '/api/profile', cookies: invited, payload: { bio: 'buy gold at evil' } });
+    expect(a.statusCode).toBe(403);
+    authedCookie(app, db, P2);
+    banPlayer(db, P2, P1, 'toxic', 60);
+    // Signed in again after the ban, which ended the session they had.
+    const banned = authedCookie(app, db, P2, { active: false });
+    const b = await app.inject({ method: 'POST', url: '/api/profile', cookies: banned, payload: { bio: 'still here' } });
+    expect(b.statusCode).toBe(403);
+    expect(db.prepare('SELECT bio FROM players WHERE bio IS NOT NULL').all()).toEqual([]);
+    // Reading your own profile is untouched by any of this.
+    expect((await app.inject({ method: 'GET', url: `/api/players/${P2}`, cookies: banned })).statusCode).toBe(200);
+  });
+
   it('saves the signed-in player their own fields', async () => {
     const cookies = authedCookie(app, db, P1);
     const res = await app.inject({

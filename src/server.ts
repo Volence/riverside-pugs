@@ -39,6 +39,7 @@ import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { authRoutes } from './routes/auth.js';
+import { renewSession } from './session.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
@@ -289,6 +290,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     .catch((err) => console.error('[persona] backfill failed:', err));
 
   await app.register(cookie, { secret: deps.config.cookieSecret });
+  // Sliding renewal. After the cookie plugin, whose own onRequest hook is
+  // what parses the header this reads. Not on the way out: renewing a
+  // session in the same response that clears it would send both cookies.
+  const secureCookies = deps.config.publicUrl.startsWith('https://');
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.url.split('?')[0] === '/auth/logout') return;
+    renewSession(req, reply, deps.db, secureCookies);
+  });
   await app.register(websocket);
   // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
   // owns the browser and proxies here, so this path only matters in production.
@@ -308,7 +317,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     discordApi,
     membership,
   });
-  await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
+  await app.register(discordAuthRoutes, {
+    config: deps.config, db: deps.db, api: discordApi,
+    // The matchmaker is built further down; by the time a request can arrive
+    // it exists.
+    engaged: () => matchmaker.engagedIds(),
+  });
 
   // Injectable for tests, built from config otherwise. Null when unconfigured,
   // which makes every twitch route 404 rather than half-work.
@@ -972,7 +986,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       },
       commands: {
         defs: COMMAND_DEFS,
-        handle: (i) => handleCommand({ db: deps.db, matchmaker, publicUrl: deps.config.publicUrl }, i),
+        handle: (i) => handleCommand({
+          db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
+          banMessage: (steamid) => banMessage(deps.db, steamid),
+        }, i),
       },
     })
       .then((b) => { bot = b; })

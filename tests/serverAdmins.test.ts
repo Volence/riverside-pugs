@@ -6,6 +6,7 @@ import { addServer, setEnabled } from '../src/serverPool.js';
 import { setSetting } from '../src/settings.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { logAdmin } from '../src/admin/audit.js';
+import { banPlayer, unbanPlayer } from '../src/admin/players.js';
 import { ServerAdminSync, adminFlags, renderAdminsCfg, websiteAdmins } from '../src/serverAdmins.js';
 import type { AddonsTransport, transportFor } from '../src/addonsTransport.js';
 import type { ServerRow } from '../src/serverPool.js';
@@ -160,6 +161,58 @@ describe('ServerAdminSync', () => {
       logAdmin(db, MAL, 'set_admin', BONE, { isAdmin: true });
       await s.sync(); // the chain serialises, so this settles the one above too
       expect(ran.map((r) => r.server)).toContain('Dallas');
+    } finally {
+      s.stop();
+    }
+  });
+
+  // A banned admin kept SourceMod root on every box: the list was built from
+  // is_admin alone, and nothing told the sync that a ban had happened.
+  it('leaves a banned admin out of the file, and puts them back when the ban ends', () => {
+    const BONE_ID = '"identity"\t"STEAM_1:0:6109608"';
+    expect(renderAdminsCfg(db)).toContain(BONE_ID);
+    banPlayer(db, BONE, MAL, 'abuse', null);
+    expect(websiteAdmins(db).map((a) => a.steamid)).toEqual([MAL]);
+    expect(renderAdminsCfg(db)).not.toContain(BONE_ID);
+    unbanPlayer(db, BONE, MAL);
+    expect(renderAdminsCfg(db)).toContain(BONE_ID);
+  });
+
+  it('asks the bans table, not only the cached status', () => {
+    banPlayer(db, BONE, MAL, 'abuse', null);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(BONE);
+    expect(websiteAdmins(db).map((a) => a.steamid)).toEqual([MAL]);
+  });
+
+  it('pushes by itself when an admin is banned and again when they are unbanned', async () => {
+    server('Dallas', '/addons');
+    const s = sync();
+    s.start();
+    try {
+      banPlayer(db, BONE, MAL, 'abuse', null);
+      await s.sync();
+      // The push the ban triggered, then the one awaited above.
+      expect(ran).toHaveLength(2);
+      expect(written.get('Dallas:/addons/sourcemod/configs/admins.cfg')).not.toContain('Bone Breaker');
+      unbanPlayer(db, BONE, MAL);
+      await s.sync();
+      expect(ran).toHaveLength(4);
+      expect(written.get('Dallas:/addons/sourcemod/configs/admins.cfg')).toContain('Bone Breaker');
+    } finally {
+      s.stop();
+    }
+  });
+
+  it('does not push for a ban on somebody who is not an admin', async () => {
+    const PLAYER = '76561197960265730';
+    upsertPlayer(db, { steamid: PLAYER, name: 'someone', avatar: null }, []);
+    server('Dallas', '/addons');
+    const s = sync();
+    s.start();
+    try {
+      banPlayer(db, PLAYER, MAL, 'afk', 60);
+      await s.sync();
+      expect(ran).toHaveLength(1);
     } finally {
       s.stop();
     }

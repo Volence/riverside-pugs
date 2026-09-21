@@ -84,7 +84,9 @@ export interface StateSnapshot {
   /** The ready check the viewer was just in, if it failed and they have not
    *  dismissed it. The failure no longer appears in #queue-here, so this is
    *  where they find out. */
-  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean } | null;
+  /** `removed` is set instead of `notReady` when the pop was cancelled because
+   *  a player was taken out of it (banned mid ready check). */
+  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
 }
 
 /** One row of the public ban list. Nothing private is on it: see
@@ -631,6 +633,14 @@ export interface AdminReport {
 
 export interface AdminPlayerDetail extends AdminPlayerRow {
   discordId: string | null;
+  /** Every Discord account this player has linked, newest first, each with
+   *  the OTHER Steam accounts that have held it. `linkedBy` is 'backfill' for
+   *  a link older than the history table, whose real date nobody recorded. */
+  discordHistory?: {
+    discordId: string; discordName: string; linkedAt: string; linkedBy: string;
+    unlinkedAt: string | null; unlinkedBy: string | null;
+    others: { steamid: string; name: string | null; linkedAt: string; unlinkedAt: string | null }[];
+  }[];
   activeBan: AdminBan | null;
   bans: AdminBan[];
   notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];
@@ -920,6 +930,8 @@ export const adminApi = {
   activate: (steamid: string) => post(`/api/admin/players/${steamid}/activate`),
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
+  /** Ends every session the player holds, on every device. */
+  signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
@@ -1054,9 +1066,14 @@ export const api = {
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 
   register: (code: string) => post('/api/register', { code }),
+  /** Whose Discord a link code is for. Reads, never spends. */
+  peekDiscordCode: (code: string) =>
+    get<{ discordId: string; discordName: string }>(`/api/discord/link-code?code=${encodeURIComponent(code)}`),
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),
+  /** Sign out of this browser. */
+  logout: () => post<{ ok: true }>('/auth/logout'),
   saveProfile: (body: ProfileFieldsInput) => post<{ ok: true }>('/api/profile', body),
   unlinkTwitch: () => post<{ ok: true }>('/api/twitch/unlink'),
   reportEligibility: (matchId: number, signal?: AbortSignal) =>

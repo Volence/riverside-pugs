@@ -5,6 +5,7 @@ import { SelfStartedMatches } from '../src/selfStarted.js';
 import type { LogEvent } from '../src/logParse.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
 import { addAlias, canonicalise } from '../src/aliases.js';
+import { banPlayer } from '../src/admin/players.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const MAP = 'l4d_vs_hospital01_apartment';
@@ -143,6 +144,62 @@ describe('SelfStartedMatches over-full teams', () => {
     await burst();
     adopter.handle(roster('76561199000000009', 'b', 'mayhem', TOKEN, 2));
     expect(problems).toEqual([]);
+  });
+});
+
+// A match started from inside the game never went through the queue, which is
+// where a ban is normally enforced, so a banned player could be rostered and
+// rated by simply being on the server when somebody typed !load_4v4p.
+describe('SelfStartedMatches: a banned account is not rostered', () => {
+  const problems: string[] = [];
+  let unsub: () => void;
+  beforeEach(() => {
+    problems.length = 0;
+    unsub?.();
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+  });
+
+  const rostered = () => (db.prepare('SELECT player_id FROM match_players ORDER BY player_id').all() as { player_id: string }[])
+    .map((r) => r.player_id);
+
+  it('drops a banned SteamID at commit, adopts the rest, and tells the admins', async () => {
+    const [a, b, c] = ids(3);
+    upsertPlayer(db, { steamid: c, name: 'Carl', avatar: null }, []);
+    banPlayer(db, c, 'admin', 'cheating', null);
+    adopter.handle(create(TOKEN, 3));
+    adopter.handle(roster(a, 'a', 'Alice'));
+    adopter.handle(roster(b, 'b', 'Bob'));
+    adopter.handle(roster(c, 'b', 'Carl'));
+    adopter.handle(end(3));
+    await vi.waitFor(() => expect(setIds.length).toBe(1));
+    expect(rostered()).toEqual([a, b]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(c);
+    expect(problems[0]).toMatch(/banned/);
+  });
+
+  it('an expired or lifted ban does not drop anyone', async () => {
+    const [a, b] = ids(2);
+    upsertPlayer(db, { steamid: b, name: 'Bob', avatar: null }, []);
+    banPlayer(db, b, 'admin', 'afk', 60, new Date(Date.now() - 2 * 60 * 60 * 1000));
+    await burst(2);
+    expect(rostered()).toEqual([a, b]);
+    expect(problems).toEqual([]);
+  });
+
+  it('drops a banned late joiner, and an alt of a banned main, from a live match', async () => {
+    await burst(2);
+    const [, , c, alt] = ids(4);
+    upsertPlayer(db, { steamid: c, name: 'Carl', avatar: null }, []);
+    banPlayer(db, c, 'admin', 'cheating', null);
+    addAlias(db, { steamid: alt, canonical: c, by: 'test' });
+    adopter.handle(roster(c, 'a', 'Carl', TOKEN, 1));
+    // Straight to the adopter, without the listener's rewrite in front of it.
+    adopter.handle(roster(alt, 'a', 'Carl again', TOKEN, 1));
+    expect(rostered()).toEqual(ids(2));
+    expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get(alt)).toBeUndefined();
+    expect(problems).toHaveLength(2);
+    expect(problems.every((t) => /banned/.test(t))).toBe(true);
   });
 });
 

@@ -122,4 +122,25 @@ describe('/report', () => {
   it('says so when you have no recent match together', async () => {
     expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/last 48 hours/);
   });
+  // The web route has always required an active player. The command checked
+  // nothing, so a banned player could keep filing reports from Discord.
+  it('refuses a reporter who is banned, not yet active, or merged away, and files nothing', async () => {
+    const { banPlayer, unbanPlayer } = await import('../src/admin/players.js');
+    const { addAlias } = await import('../src/aliases.js');
+    play('a');
+    const filed = () => (db.prepare('SELECT COUNT(*) AS n FROM reports').get() as { n: number }).n;
+
+    banPlayer(db, IDS[0], IDS[1], 'toxic', 60);
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/banned/i);
+    unbanPlayer(db, IDS[0], IDS[1]);
+
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(IDS[0]);
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/not active/i);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(IDS[0]);
+
+    addAlias(db, { steamid: IDS[0], canonical: IDS[1], by: 'test' });
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/merged into another/i);
+
+    expect(filed()).toBe(0);
+  });
 });

@@ -167,6 +167,71 @@ describe('Matchmaker', () => {
   });
 });
 
+// A ban used to take a player out of the queue and nothing else, so someone
+// banned during a ready check stayed in it, could ready up, and was handed a
+// place on the match.
+describe('removing a player from matchmaking', () => {
+  const NINTH = '76561198000000009';
+
+  it('takes them out of the queue', () => {
+    mm.join(IDS[0]);
+    mm.remove(IDS[0]);
+    expect(mm.publicQueue().count).toBe(0);
+  });
+
+  it('dissolves their ready check, requeues everyone else at the front, and penalises nobody', () => {
+    fillQueue();
+    mm.ready(IDS[1]);
+    mm.remove(IDS[0]);
+    expect(mm.lobbies()).toEqual([]);
+    expect(mm.stateFor(IDS[0]).lobby).toBeNull();
+    expect(mm.stateFor(IDS[0]).queue.joined).toBe(false);
+    // The seven who were in it are queued again, in the order they had.
+    expect(mm.publicQueue().players.map((p) => p.steamid)).toEqual(IDS.slice(1));
+    expect(db.prepare('SELECT COUNT(*) AS n FROM penalties').get()).toEqual({ n: 0 });
+    // No timer left behind to fail a ready check that no longer exists.
+    sched.fireAll();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM penalties').get()).toEqual({ n: 0 });
+  });
+
+  it('pops again at once when the queue behind them can fill the gap', () => {
+    const extra = ['76561198000000009', '76561198000000010'];
+    for (const id of extra) upsertPlayer(db, { steamid: id, name: id.slice(-2), avatar: null }, []);
+    fillQueue();
+    for (const id of extra) mm.join(id);
+    mm.remove(IDS[0]);
+    const [lobby] = mm.lobbies();
+    expect(lobby.snapshot.players).toEqual([...IDS.slice(1), extra[0]]);
+    expect(mm.publicQueue().players.map((p) => p.steamid)).toEqual([extra[1]]);
+  });
+
+  it('works during the campaign vote too, and no match is made', () => {
+    fillQueue();
+    for (const id of IDS) mm.ready(id);
+    expect(mm.lobbies()[0].snapshot.phase).toBe('map_vote');
+    mm.remove(IDS[3]);
+    sched.fireAll();
+    expect(setupCalls).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM matches').get()).toEqual({ n: 0 });
+    expect(mm.publicQueue().count).toBe(7);
+  });
+
+  it('tells the others why the pop vanished, and says nothing to the player removed', () => {
+    fillQueue();
+    mm.remove(IDS[0]);
+    expect(mm.stateFor(IDS[1]).lobbyNotice).toEqual({
+      notReady: [], youWereReady: true, removed: { steamid: IDS[0], name: 'n1', avatar: null },
+    });
+    expect(mm.stateFor(IDS[0]).lobbyNotice).toBeNull();
+  });
+
+  it('is a no-op for someone who is nowhere in matchmaking', () => {
+    const before = broadcasts;
+    mm.remove(NINTH);
+    expect(broadcasts).toBe(before);
+  });
+});
+
 describe('stateFor connect details', () => {
   it('gives a rostered player the connect block once the match is live', () => {
     const { db, mm } = fixtureWithLiveMatch();

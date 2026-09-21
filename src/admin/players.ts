@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { aliasesOf } from '../aliases.js';
 import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { displaySr } from '../rating.js';
-import { currentSeasonId, getPlayer } from '../players.js';
+import { currentSeasonId, discordHistoryOf, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { listReports } from '../reports.js';
 import { signonDropSummary } from '../signonDrops.js';
@@ -54,7 +54,57 @@ export function insertBan(
   const expires = minutes ? new Date(now.getTime() + minutes * 60 * 1000).toISOString() : null;
   db.prepare('INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
     .run(steamid, reason, by, now.toISOString(), expires);
-  db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
+  // Remember what the ban is interrupting, so its end can put that back. A
+  // second ban on an account that is already banned keeps the first memory:
+  // what it interrupts is a ban, and "banned" is never what to restore to.
+  //
+  // session_epoch goes up in the same statement, which ends every session the
+  // player holds (src/session.ts). They can sign straight back in, and will
+  // then be shown the ban; what they cannot do is carry on in a tab that was
+  // open when it landed.
+  db.prepare(
+    `UPDATE players SET
+       status_before_ban = CASE WHEN status = 'banned' THEN status_before_ban ELSE status END,
+       status = 'banned',
+       session_epoch = session_epoch + 1
+     WHERE steamid = ?`,
+  ).run(steamid);
+}
+
+/**
+ * Put a banned account back the way the ban found it.
+ *
+ * It used to go to `active` unconditionally. For an account that had never
+ * been let in, that made a ban the way in: a one-day abandon ban from a match
+ * started in game ended with the account past the invite code and past the
+ * Discord gate, neither of which it had ever faced.
+ *
+ * A row banned before status_before_ban existed has nothing remembered, so
+ * it is judged on the evidence: `active` only when something shows the
+ * account was let in at some point, otherwise `invited`, which costs a
+ * genuine player one trip through the gate they have already passed once.
+ * What counts: a linked Discord, the admin flag, an admin having activated
+ * the account by hand, a queue penalty, or a place on a match that was set
+ * up by the site (went_live_at), since the queue only ever took active
+ * players. A match started in game proves nothing: that path rosters whoever
+ * is on the server.
+ */
+function restoreStatus(db: DB, steamid: string): void {
+  const row = db.prepare('SELECT status, status_before_ban, discord_id, is_admin FROM players WHERE steamid = ?')
+    .get(steamid) as
+    | { status: string; status_before_ban: string | null; discord_id: string | null; is_admin: number } | undefined;
+  if (!row || row.status !== 'banned') return;
+  let to = row.status_before_ban;
+  if (to !== 'active' && to !== 'invited') {
+    const wasLetIn = row.discord_id !== null || row.is_admin === 1 || db.prepare(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM admin_actions WHERE action = 'activate' AND target = @id)
+          OR EXISTS (SELECT 1 FROM penalties WHERE player_id = @id)
+          OR EXISTS (SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
+                     WHERE mp.player_id = @id AND m.went_live_at IS NOT NULL)`,
+    ).get({ id: steamid }) !== undefined;
+    to = wasLetIn ? 'active' : 'invited';
+  }
+  db.prepare('UPDATE players SET status = ?, status_before_ban = NULL WHERE steamid = ?').run(to, steamid);
 }
 
 export function banPlayer(
@@ -65,18 +115,19 @@ export function banPlayer(
   publishBanChange({ kind: 'ban', steamid, reason });
 }
 
-/** Lift every open ban and restore the player to active. */
+/** Lift every open ban and restore the player to what they were before it. */
 export function unbanPlayer(db: DB, steamid: string, by: string, now = new Date()): void {
   db.transaction(() => {
     db.prepare('UPDATE bans SET lifted_by = ?, lifted_at = ? WHERE player_id = ? AND lifted_at IS NULL')
       .run(by, now.toISOString(), steamid);
-    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ? AND status = 'banned'").run(steamid);
+    restoreStatus(db, steamid);
   })();
   publishBanChange({ kind: 'unban', steamid });
 }
 
 /** Runs on the 60 s reaper. A banned player whose every ban has run out goes
- *  back to active; one still under another open ban stays banned. */
+ *  back to what they were before it; one still under another open ban stays
+ *  banned. */
 export function liftExpiredBans(db: DB, now = new Date()): string[] {
   const iso = now.toISOString();
   const expired = db.prepare(
@@ -87,7 +138,7 @@ export function liftExpiredBans(db: DB, now = new Date()): string[] {
     db.prepare("UPDATE bans SET lifted_by = 'system', lifted_at = ? WHERE player_id = ? AND lifted_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?")
       .run(iso, player_id, iso);
     if (!activeBan(db, player_id, now)) {
-      db.prepare("UPDATE players SET status = 'active' WHERE steamid = ? AND status = 'banned'").run(player_id);
+      restoreStatus(db, player_id);
       lifted.push(player_id);
       publishBanChange({ kind: 'unban', steamid: player_id });
     }
@@ -156,6 +207,10 @@ export function playerDetail(db: DB, steamid: string) {
     ...(row ?? {}),
     steamid: p.steamid,
     discordId: p.discord_id,
+    // Every Discord account this player has held, and who else has held each
+    // one. One Discord passing between Steam accounts is the plainest sign of
+    // an alt this site has.
+    discordHistory: discordHistoryOf(db, steamid),
     activeBan: activeBan(db, steamid),
     bans,
     notes,

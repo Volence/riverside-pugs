@@ -16,7 +16,7 @@ async function confirmDialog(name?: string | RegExp) {
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
-    players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
+    players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     reports: vi.fn(), audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
@@ -111,6 +111,45 @@ describe('Admin page', () => {
     expect(items[1].textContent).toContain('after 12 s');
     expect(items[1].textContent).toContain('got in');
     expect(within(section).getByRole('link', { name: 'What players are told' }).getAttribute('href')).toBe('/help/consistency');
+  });
+
+  it('says which other Steam account a player\'s Discord used to be on', async () => {
+    const row = { steamid: '2', name: 'newcomer', avatar: null, status: 'active', isAdmin: false, discordName: 'Alice', sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: '111', activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputFlags: [],
+      inputCaps: [],
+      discordHistory: [{
+        discordId: '111', discordName: 'Alice', linkedAt: '2026-09-20T00:00:00.000Z', linkedBy: '2', unlinkedAt: null, unlinkedBy: null,
+        others: [{ steamid: '9', name: 'banned main', linkedAt: '2026-08-01T00:00:00.000Z', unlinkedAt: '2026-09-19T00:00:00.000Z' }],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('newcomer')).toBeTruthy());
+    fireEvent.click(screen.getByText('newcomer'));
+    await waitFor(() => expect(screen.getByText(/This Discord was previously linked to/)).toBeTruthy());
+    expect((screen.getByText('banned main') as HTMLAnchorElement).getAttribute('href')).toBe('/player/9');
+  });
+
+  it('signs a player out everywhere, after asking', async () => {
+    const row = { steamid: '2', name: 'phished', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputFlags: [],
+      inputCaps: [],
+    });
+    mockAdmin.signOutPlayer.mockResolvedValue({ ok: true });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    await waitFor(() => expect(screen.getByText('phished')).toBeTruthy());
+    fireEvent.click(screen.getByText('phished'));
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign out everywhere' })));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(mockAdmin.signOutPlayer).toHaveBeenCalledWith('2'));
   });
 
   it('says none, with no section, for a player with no connect drops', async () => {

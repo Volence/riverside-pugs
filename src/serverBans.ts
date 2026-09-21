@@ -80,6 +80,10 @@ export class ServerBanSync {
    * open ban (newest reason wins), then an unban for every player lifted
    * inside the window who has no open ban left. Deterministic order so tests
    * and logs are readable.
+   *
+   * Each player means the player AND every SteamID merged into them. The
+   * engine bans a SteamID, not a person, so a ban pushed for the main alone
+   * left the alt, the account this person is known to own, free to join.
    */
   commands(): string[] {
     const nowIso = new Date(this.now()).toISOString();
@@ -98,9 +102,19 @@ export class ServerBanSync {
       'SELECT DISTINCT player_id FROM bans WHERE lifted_at IS NOT NULL AND lifted_at >= ? ORDER BY player_id',
     ).all(since) as { player_id: string }[];
     return [
-      ...open.map((r) => banCommand(r.player_id, r.reason)),
-      ...lifted.filter((r) => !openIds.has(r.player_id)).map((r) => unbanCommand(r.player_id)),
+      ...open.flatMap((r) => this.withAliases(r.player_id).map((id) => banCommand(id, r.reason))),
+      ...lifted.filter((r) => !openIds.has(r.player_id))
+        .flatMap((r) => this.withAliases(r.player_id).map((id) => unbanCommand(id))),
     ];
+  }
+
+  /** The account, then every SteamID merged into it. Read fresh each time, so
+   *  an alt merged after the ban was made is picked up by the next sweep. */
+  private withAliases(steamid: string): string[] {
+    const aliases = this.deps.db.prepare(
+      'SELECT steamid FROM player_aliases WHERE canonical_id = ? ORDER BY steamid',
+    ).all(steamid) as { steamid: string }[];
+    return [steamid, ...aliases.map((a) => a.steamid)];
   }
 
   /** The unconditional repair pass. See the class comment. */
@@ -112,8 +126,8 @@ export class ServerBanSync {
 
   /** One change, now. The sweep will say it again in five minutes anyway. */
   async onChange(e: BanChange): Promise<void> {
-    const cmd = e.kind === 'ban' ? banCommand(e.steamid, e.reason) : unbanCommand(e.steamid);
-    await this.pushToAll([cmd]);
+    const ids = this.withAliases(e.steamid);
+    await this.pushToAll(ids.map((id) => (e.kind === 'ban' ? banCommand(id, e.reason) : unbanCommand(id))));
   }
 
   /** For a caller that already holds a connection to one box (match setup). */

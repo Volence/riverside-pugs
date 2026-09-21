@@ -105,6 +105,11 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
           danger: true,
         })}>Unlink Discord</button>}
         {d.timeout && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.clearPenalties(d.steamid))}>Clear penalties</button>}
+        <button class="chip" disabled={busy} onClick={() => run(() => adminApi.signOutPlayer(d.steamid), {
+          title: `Sign ${d.name} out everywhere?`,
+          body: 'Every browser they are signed in on stops working at once and has to sign in through Steam again. Use it when an account may be in somebody else\'s hands.',
+          confirmLabel: 'Sign out',
+        })}>Sign out everywhere</button>
       </div>
 
       <MergeSection d={d} busy={busy} run={run} />
@@ -329,10 +334,41 @@ function MergeSection(
   const shared = d.sharesAddressWith ?? [];
   const networks = d.networks ?? [];
   const countries = [...new Set(networks.map((n) => n.country).filter(Boolean))];
+  const discordHistory = d.discordHistory ?? [];
 
   return (
     <section>
       <h4>Identity</h4>
+
+      {discordHistory.length > 0 && (
+        <div class="admin-shared">
+          <p class="muted">Discord accounts this player has linked:</p>
+          <ul>
+            {discordHistory.map((h) => (
+              <li key={`${h.discordId}-${h.linkedAt}`}>
+                {h.discordName || 'unknown'} <code>{h.discordId}</code>{' '}
+                <span class="muted">
+                  {h.linkedBy === 'backfill' ? 'linked before history was kept' : `linked ${fmtTime(h.linkedAt)}`}
+                  {h.unlinkedAt ? `, unlinked ${fmtTime(h.unlinkedAt)}${h.unlinkedBy === 'merge' ? ' by a merge' : ''}` : ', current'}
+                </span>
+                {h.others.length > 0 && (
+                  <ul>
+                    {h.others.map((o) => (
+                      <li key={`${o.steamid}-${o.linkedAt}`}>
+                        <strong>This Discord was {o.unlinkedAt ? 'previously' : 'also'} linked to</strong>{' '}
+                        <a href={`/player/${o.steamid}`}>{o.name ?? o.steamid}</a> <code>{o.steamid}</code>{' '}
+                        <span class="muted">
+                          {o.unlinkedAt ? `until ${fmtTime(o.unlinkedAt)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {(shared.length > 0 || countries.length > 0) && (
         <div class="admin-shared">
