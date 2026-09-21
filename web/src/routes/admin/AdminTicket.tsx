@@ -93,10 +93,18 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
       {data.summary && <FileSummary s={data.summary} />}
 
+      {/* The case file stays for good, because a moderator on a restricted
+          ticket about a colleague gets no summary and this is then the only
+          record of the accused they can see. It must not repeat the summary
+          when there IS one: both open with the same heading and the same
+          status line, so the page read as two "About <name>" blocks
+          disagreeing with each other. */}
       {c && (
         <section>
-          <h4>About {c.name}</h4>
-          <p class="muted">{c.status} · SR {c.sr ?? 'n/a'} · {c.games} games{c.activeBan ? ` · banned: ${c.activeBan.reason}` : ''}{c.timeout ? ` · queue timeout, ${c.timeout.offenses} offenses` : ''}</p>
+          <h4>{data.summary ? 'Case file' : `About ${c.name}`}</h4>
+          {!data.summary && (
+            <p class="muted">{c.status} · SR {c.sr ?? 'n/a'} · {c.games} games{c.activeBan ? ` · banned: ${c.activeBan.reason}` : ''}{c.timeout ? ` · queue timeout, ${c.timeout.offenses} offenses` : ''}</p>
+          )}
           <ul class="admin-list">
             <li>{c.bans.length} ban{c.bans.length === 1 ? '' : 's'} on record, {c.penalties.length} penalt{c.penalties.length === 1 ? 'y' : 'ies'}, {c.inputFlags.length} input flag{c.inputFlags.length === 1 ? '' : 's'}</li>
             {c.aliases.length > 0 && <li>{c.aliases.length} merged second account{c.aliases.length === 1 ? '' : 's'}</li>}
