@@ -5,7 +5,7 @@ import { campaignDisplayName } from '../campaignRegistry.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
-import { fileReport, REPORT_CATEGORIES } from '../tickets/filing.js';
+import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
 import { linkPrompt } from './controller.js';
 import { escapeName } from './presenter.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
@@ -18,7 +18,7 @@ export interface CommandDeps {
 }
 
 /** Labels for the report categories, in the order they should list. */
-const REPORT_LABELS: Record<string, string> = {
+const REPORT_LABELS: Record<ReportCategory, string> = {
   griefing: 'Griefing / throwing',
   cheating: 'Cheating',
   toxicity: 'Toxicity / harassment',
@@ -43,7 +43,7 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'link', description: 'Link your Discord to your Steam account' },
   {
     name: 'report',
-    description: 'Privately report a player from a match you played together',
+    description: 'Privately report a player, with your latest match together attached if there is one',
     options: [
       { name: 'player', description: 'Who you are reporting', type: 'user', required: true },
       {

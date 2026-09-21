@@ -80,9 +80,9 @@ All new tables are `CREATE TABLE IF NOT EXISTS` in `src/db.ts`, new columns via
   `stored_name` (null when not stored), `skip_reason` (`too_large` | `type` | `quota` |
   `disabled` | `fetch_failed` | null), `removed_at`.
 - `ticket_events`: `id`, `ticket_id`, `actor_id`, `kind`, `detail` (JSON), `created_at`.
-  Kinds: `opened`, `report_attached`, `claimed`, `unclaimed`, `restricted`, `unrestricted`,
-  `access_added`, `reporter_contacted`, `reporter_chat_ended`, `banned`, `removed`, `closed`,
-  `reopened`.
+  Kinds: `opened`, `report_attached`, `note`, `claimed`, `unclaimed`, `restricted`,
+  `unrestricted`, `access_added`, `reporter_contacted`, `reporter_chat_ended`, `banned`,
+  `removed`, `closed`, `reopened`.
 - `ticket_access`: `ticket_id`, `steamid`, `added_by`, `created_at`. Only read for restricted
   tickets.
 - `bans.ticket_id INTEGER` via `ensureColumn`.

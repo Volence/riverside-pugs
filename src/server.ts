@@ -948,7 +948,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     adminSync.stop();
     if (logListener) await logListener.close();
   });
-  await app.register(apiRoutes, { db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds });
+  await app.register(apiRoutes, {
+    db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds, broadcast: (e) => hub.broadcast(e),
+  });
   await app.register(ticketRoutes, {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
   });

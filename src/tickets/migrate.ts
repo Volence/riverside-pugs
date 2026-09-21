@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import { hasStaffFlag, seedAccess } from './store.js';
+import { addTicketEvent, hasStaffFlag, seedAccess } from './store.js';
 
 interface Legacy {
   id: number; match_id: number; reporter_id: string; target_id: string; category: string; text: string;
@@ -19,6 +19,9 @@ interface Legacy {
  *
  * No owner list is available at openDb time, so a restricted migrated ticket
  * falls back to every admin but the accused (seedAccess with an empty list).
+ *
+ * A created ticket gets the events its history implies, dated then, so a
+ * migrated case reads as a timeline rather than as nothing ever happening.
  */
 export function migrateLegacyReports(db: DB): number {
   const rows = db.prepare(
@@ -48,11 +51,16 @@ export function migrateLegacyReports(db: DB): number {
         const open = db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
           .get(r.target_id, restricted) as { id: number } | undefined;
         ticketId = open?.id ?? Number(insTicket.run(r.target_id, 'open', null, '', restricted, r.created_at, null, null).lastInsertRowid);
+        if (!open) addTicketEvent(db, ticketId, null, 'opened', {}, new Date(r.created_at));
       } else {
+        const outcome = r.status === 'resolved' ? 'action_taken' : 'invalid';
+        const note = r.resolution_note ?? '';
         ticketId = Number(insTicket.run(
-          r.target_id, 'closed', r.status === 'resolved' ? 'action_taken' : 'invalid', r.resolution_note ?? '',
+          r.target_id, 'closed', outcome, note,
           restricted, r.created_at, r.resolved_at ?? r.created_at, r.resolved_by,
         ).lastInsertRowid);
+        addTicketEvent(db, ticketId, null, 'opened', {}, new Date(r.created_at));
+        addTicketEvent(db, ticketId, r.resolved_by, 'closed', { outcome, note }, new Date(r.resolved_at ?? r.created_at));
       }
       if (restricted) seedAccess(db, ticketId, r.target_id, []);
       const matchId = matchExists.get(r.match_id) ? r.match_id : null;

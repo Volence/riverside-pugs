@@ -10,10 +10,11 @@ export interface ApiRouteOpts {
   db: DB;
   matchmaker: Matchmaker;
   adminSteamIds: string[];
+  broadcast: (event: string) => void;
 }
 
 export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promise<void> {
-  const { db, matchmaker, adminSteamIds } = opts;
+  const { db, matchmaker, adminSteamIds, broadcast } = opts;
   const requireActive = makeRequireActive(db);
 
   /** Who is streaming, in three tiers. Public: a page anyone can open is the
@@ -85,6 +86,7 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     const body = (req.body ?? {}) as Record<string, unknown>;
     const r = fileReport(db, steamid, { ...body, matchId: Number((req.params as { id: string }).id) }, { adminSteamIds });
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    broadcast('refresh');
     return { ok: true };
   });
 

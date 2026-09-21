@@ -46,6 +46,14 @@ describe('migrateLegacyReports', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = 1').get()).toEqual({ n: 2 });
     expect(db.prepare('SELECT match_id, text, created_at FROM ticket_reports WHERE id = 1').get())
       .toEqual({ match_id: matchId, text: 'old text', created_at: '2026-09-18T10:00:00.000Z' });
+    // A migrated ticket gets the timeline its history implies, dated then.
+    expect(db.prepare('SELECT ticket_id, actor_id, kind, detail, created_at FROM ticket_events ORDER BY id').all()).toEqual([
+      { ticket_id: 1, actor_id: null, kind: 'opened', detail: '{}', created_at: '2026-09-18T10:00:00.000Z' },
+      { ticket_id: 2, actor_id: null, kind: 'opened', detail: '{}', created_at: '2026-09-18T10:00:00.000Z' },
+      { ticket_id: 2, actor_id: ADMIN, kind: 'closed', detail: '{"outcome":"action_taken","note":"warned him"}', created_at: '2026-09-19T10:00:00.000Z' },
+      { ticket_id: 3, actor_id: null, kind: 'opened', detail: '{}', created_at: '2026-09-18T10:00:00.000Z' },
+      { ticket_id: 3, actor_id: ADMIN, kind: 'closed', detail: '{"outcome":"invalid","note":""}', created_at: '2026-09-19T10:00:00.000Z' },
+    ]);
   });
 
   it('restricts a migrated ticket about staff', () => {
@@ -119,6 +127,18 @@ describe('merging players', () => {
     ]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(main)).toEqual({ n: 2 });
     expect(db.prepare('SELECT reporter_id FROM ticket_reports WHERE ticket_id = ?').get(alt + 1)).toEqual({ reporter_id: T1 });
+  });
+
+  it('folds two open restricted tickets into one and leaves no dangling rows', () => {
+    const deps = { adminSteamIds: [] };
+    const main = (fileReport(db, R1, { targetId: T1, category: 'unsafe', text: 'threats' }, deps) as { ticketId: number }).ticketId;
+    const alt = (fileReport(db, R2, { targetId: ALT, category: 'unsafe', text: 'more of it' }, deps) as { ticketId: number }).ticketId;
+    expect(alt).not.toBe(main);
+    mergePlayers(db, { from: ALT, into: T1, by: ADMIN });
+    expect(db.prepare('SELECT id, target_id, restricted, status FROM tickets').all())
+      .toEqual([{ id: main, target_id: T1, restricted: 1, status: 'open' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(main)).toEqual({ n: 2 });
+    expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
   it('restricts an open ticket that the merge turns into a ticket about staff', () => {
