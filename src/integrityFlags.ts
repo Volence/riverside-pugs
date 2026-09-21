@@ -36,6 +36,21 @@ export function cheatName(n: number): string {
   return LILAC_CHEATS[n] ?? `unknown(${n})`;
 }
 
+/** The match a flag or an input burst is evidence ABOUT: the live one on this
+ *  server that the player is rostered in, or null. Not simply the newest live
+ *  match on the box, which files a spectator's flag on a game they were not
+ *  playing and lets a stale live match take evidence from the real one.
+ *  `steamid` is the canonical id, which is what match_players holds. */
+export function liveMatchOf(db: DB, serverId: number | null, steamid: string): number | null {
+  if (serverId === null) return null;
+  const row = db.prepare(
+    `SELECT m.id FROM matches m JOIN match_players mp ON mp.match_id = m.id
+     WHERE m.state = 'live' AND m.server_id = ? AND mp.player_id = ?
+     ORDER BY m.id DESC LIMIT 1`,
+  ).get(serverId, steamid) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
 /** LilAC fires repeatedly while a cheat looks active, so one player in one round
  *  can produce a long run of identical flags. The admin list wants the event,
  *  not every repetition, and an un-deduped feed would bury everything else. */

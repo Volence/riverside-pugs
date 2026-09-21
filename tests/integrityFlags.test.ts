@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
-  LILAC_CHEATS, cheatName, flagsForPlayer, recentFlags, recordIntegrityFlag,
+  LILAC_CHEATS, cheatName, flagsForPlayer, liveMatchOf, recentFlags, recordIntegrityFlag,
 } from '../src/integrityFlags.js';
+import { addServer } from '../src/serverPool.js';
 
 const A = '76561198030413993';
 let db: DB;
@@ -95,5 +96,54 @@ describe('integrityPlayer', () => {
     expect(out.clips).toEqual([]);
     expect(out.flags).toHaveLength(1);
     expect(out.flags[0].kind).toBe('aimlock');
+  });
+});
+
+// Which match a flag or a burst is evidence about. It used to be "the newest
+// live match on that server", whoever was in it, so a spectator's flag was
+// filed on a match they were not playing, and a stale live match on the same
+// box took evidence that belonged to the real one.
+describe('liveMatchOf', () => {
+  const B = '76561198000000002';
+  let server: number;
+  const match = (id: number, state: string, serverId: number, players: string[]): void => {
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id) VALUES (?, 1, ?, 'dead_air', ?)")
+      .run(id, state, serverId);
+    for (const p of players) {
+      db.prepare("INSERT OR IGNORE INTO players (steamid, name) VALUES (?, 'p')").run(p);
+      db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(id, p);
+    }
+  };
+  beforeEach(() => {
+    server = addServer(db, { name: 'one', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+  });
+
+  it('is the live match on that server the player is rostered in', () => {
+    match(1, 'live', server, [A]);
+    expect(liveMatchOf(db, server, A)).toBe(1);
+  });
+
+  it('is not a live match the player is not in', () => {
+    match(1, 'live', server, [B]);
+    expect(liveMatchOf(db, server, A)).toBeNull();
+  });
+
+  it('passes over a newer live match on the box for the one the player is in', () => {
+    match(1, 'live', server, [A]);
+    match(2, 'live', server, [B]);
+    expect(liveMatchOf(db, server, A)).toBe(1);
+    expect(liveMatchOf(db, server, B)).toBe(2);
+  });
+
+  it('is not a match that is over, or one on another server', () => {
+    const other = addServer(db, { name: 'two', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    match(1, 'completed', server, [A]);
+    match(2, 'live', other, [A]);
+    expect(liveMatchOf(db, server, A)).toBeNull();
+  });
+
+  it('is nothing when the server is unknown', () => {
+    match(1, 'live', server, [A]);
+    expect(liveMatchOf(db, null, A)).toBeNull();
   });
 });
