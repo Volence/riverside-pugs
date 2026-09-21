@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
-import type { PlayerFileData } from '../api';
+import type { IntegrityRound, PlayerFileData } from '../api';
 import { ConfirmHost } from '../components/Confirm';
 
 const { mockPeople, mockAdmin, mockMod } = vi.hoisted(() => ({
@@ -264,6 +264,15 @@ describe('the evidence timeline', () => {
   });
 });
 
+const integrityRound = (over: Partial<IntegrityRound> = {}): IntegrityRound => ({
+  matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
+  metrics: {
+    fidMax: 0.5, fidP95: 0.3, windows: 4, scoreable: 2, fidSum: 0.6, occ: null, eligiblePairs: 10,
+    gates: { considered: 40, notLive: 5, notGhost: 10, inGrace: 5, tooClose: 5, occluded: 5, passed: 10 },
+  },
+  computedAt: '2026-09-17T00:00:00Z', reviewState: 'new', reviewNote: '', ...over,
+});
+
 describe('the evidence detail', () => {
   it('shows the input bursts, the drops and the clips, and lets an admin review a round', async () => {
     mockPeople.file.mockResolvedValue(file({
@@ -343,9 +352,12 @@ describe('the evidence detail', () => {
     expect(text).toContain('low · holds: wheel-like');
     expect(text).toContain('13.0/s over 51 presses');
     expect(text).toContain('96% one-tick');
-    // The per-round budget cut capture short once; EvidenceDetail says how
-    // many times, not which match, so this pins the count-level warning.
-    expect(screen.getByText(/Capture was cut short by the game server's per-round budget 1 time/)).toBeTruthy();
+    const capText = screen.getByText(/Capture was cut short/).textContent!;
+    expect(capText).toContain('Capture was cut short by the game server\'s per-round budget 1 time');
+    // Which round it was cut short on is what a reviewer needs to correlate
+    // a truncated capture with a specific round's evidence.
+    expect(within(screen.getByText(/Capture was cut short/)).getByRole('link', { name: '#41' }).getAttribute('href')).toBe('/match/41');
+    expect(capText).toContain('bhop');
   });
 
   it('says a connect drop\'s time honestly when it is unknown, and whether they got back in', async () => {
@@ -404,10 +416,132 @@ describe('the evidence detail', () => {
     await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 3, 'dismissed', 'heard the spawn'));
   });
 
-  it('offers a moderator the same evidence with no review buttons', async () => {
-    mockPeople.file.mockResolvedValue(file({ actions: ['note', 'looked_at', 'open_ticket'] }));
+  it('shows a clip whose round is already dismissed as visibly reviewed, with its note', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, flags: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          rounds: [integrityRound({ reviewState: 'dismissed', reviewNote: 'heard the spawn' })],
+          clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+
+    await waitFor(() => expect(screen.getByText('dismissed: heard the spawn')).toBeTruthy());
+    // Scoped to the evidence section: other sections have their own muted
+    // ul.admin-list items (steam flags, cleared penalties) this could catch.
+    const section = document.getElementById('evidence')!.closest('section')!;
+    const li = section.querySelector('ul.admin-list > li.muted') as HTMLElement | null;
+    expect(li).toBeTruthy();
+    expect(within(li as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+  });
+
+  it('does not bleed review state or notes between two rounds differing only in slot', async () => {
+    // The whole key is (matchId, ordinal, half, slot). A fixture with one round
+    // cannot detect a future partial-key lookup that drops half or slot: it
+    // would still match, and the test would still pass, while an admin was
+    // shown that a moment had already been cleared when it had not.
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, flags: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          rounds: [
+            integrityRound({ slot: 3, reviewState: 'dismissed', reviewNote: 'heard the spawn' }),
+            integrityRound({ slot: 4, reviewState: 'new', reviewNote: '' }),
+            integrityRound({ ordinal: 2, half: 2, slot: 3, reviewState: 'reviewed', reviewNote: 'second half note' }),
+          ],
+          clips: [
+            { id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} },
+            { id: 2, matchId: 42, ordinal: 2, half: 1, slot: 4, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} },
+            { id: 3, matchId: 42, ordinal: 2, half: 2, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} },
+          ],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    await waitFor(() => expect(screen.getAllByPlaceholderText('Review note')).toHaveLength(3));
+
+    // Exactly two of the three groups are triaged, and each carries its OWN note.
+    // Scoped to the evidence section: the file has other ul.admin-list
+    // elements (aliases, tickets, notes) that this selector would also match.
+    const section = document.getElementById('evidence')!.closest('section')!;
+    const groups = section.querySelectorAll('ul.admin-list > li');
+    expect(groups).toHaveLength(3);
+    expect((groups[0] as HTMLElement).className).toContain('muted');
+    expect((groups[1] as HTMLElement).className).not.toContain('muted');
+    expect((groups[2] as HTMLElement).className).toContain('muted');
+    expect(within(groups[0] as HTMLElement).getByText('dismissed: heard the spawn')).toBeTruthy();
+    expect(within(groups[2] as HTMLElement).getByText('reviewed: second half note')).toBeTruthy();
+    expect(within(groups[1] as HTMLElement).queryByText(/heard the spawn|second half note/)).toBeNull();
+
+    // Typing in the second group's note box leaves the others empty, and its
+    // button posts its own slot rather than the first group's.
+    const inputs = screen.getAllByPlaceholderText('Review note') as HTMLInputElement[];
+    fireEvent.input(inputs[1], { target: { value: 'slot 4 only' } });
+    expect(inputs[0].value).toBe('');
+    expect(inputs[2].value).toBe('');
+    fireEvent.click(within(groups[1] as HTMLElement).getByRole('button', { name: 'Mark this round reviewed (1 clip)' }));
+    await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(42, 2, 1, 4, 'reviewed', 'slot 4 only'));
+    expect(mockAdmin.integrityReview).toHaveBeenCalledTimes(1);
+  });
+
+  // The review POST triggers the same reload every other action on the file
+  // uses; this pins that the new state actually reaches the screen from it,
+  // not merely that the call went out.
+  it('shows the review that was just posted without a manual reload', async () => {
+    const base = file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, flags: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          rounds: [integrityRound()],
+          clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+        },
+      },
+    });
+    mockPeople.file.mockResolvedValueOnce(base).mockResolvedValueOnce({
+      ...base,
+      sections: {
+        ...base.sections,
+        evidence: {
+          ...base.sections.evidence,
+          rounds: [integrityRound({ reviewState: 'reviewed', reviewNote: 'checked it' })],
+        },
+      },
+    });
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByText(/reviewed: checked it/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark this round reviewed (1 clip)' }));
+    await waitFor(() => expect(screen.getByText('reviewed: checked it')).toBeTruthy());
+  });
+
+  it('offers a moderator the same evidence with no review buttons, but the same review state', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      actions: ['note', 'looked_at', 'open_ticket'],
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, flags: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          rounds: [integrityRound({ reviewState: 'dismissed', reviewNote: 'heard the spawn' })],
+          clips: [{ id: 1, matchId: 42, ordinal: 2, half: 1, slot: 3, startMs: 5000, endMs: 7000, kind: 'ghost_track', score: 0.5, detail: {} }],
+        },
+      },
+    }));
     render(<PlayerFile steamid={P} me="76561199000000008" />);
     await screen.findByRole('heading', { name: /griefer/ });
     expect(screen.queryByRole('button', { name: /Mark this round reviewed/ })).toBeNull();
+    // Mods see what admins see here; only the review buttons are admin-only.
+    expect(screen.getByText('dismissed: heard the spawn')).toBeTruthy();
   });
 });

@@ -36,6 +36,9 @@ export function EvidenceDetail(
   const e = d.sections.evidence;
   const [notes, setNotes] = useState<Record<string, string>>({});
   const a = e.analyzer;
+  // Same key as groupByRound: matchId/ordinal/half/slot. A re-analysis
+  // rewrites every clip, so review state lives on the round, not a clip.
+  const roundsByKey = new Map(e.rounds.map((r) => [`${r.matchId}/${r.ordinal}/${r.half}/${r.slot}`, r]));
 
   return (
     <Panel class="file-section">
@@ -90,8 +93,13 @@ export function EvidenceDetail(
         {groupByRound(e.clips).map((g) => {
           const first = g.clips[0];
           const n = g.clips.length;
+          // Review state is keyed by the round (matchId/ordinal/half/slot), the
+          // same four fields every clip in the group carries, so a round's
+          // triage is a lookup rather than something a clip carries itself.
+          const round = roundsByKey.get(g.key);
+          const reviewed = round !== undefined && round.reviewState !== 'new';
           return (
-            <li key={g.key}>
+            <li key={g.key} class={reviewed ? 'muted' : ''}>
               <ul class="integrity-clips">
                 {g.clips.map((c) => (
                   <li key={c.id}>
@@ -102,6 +110,11 @@ export function EvidenceDetail(
                   </li>
                 ))}
               </ul>
+              {reviewed && round && (
+                <p class="muted">
+                  {round.reviewState}{round.reviewNote ? `: ${round.reviewNote}` : ''}
+                </p>
+              )}
               {canReview && (
                 <div class="admin-form">
                   <input value={notes[g.key] ?? ''} placeholder="Review note" aria-label="Review note for this round"
@@ -141,7 +154,12 @@ export function EvidenceDetail(
         <p class="admin-warn">
           Capture was cut short by the game server's per-round budget {e.inputCaps.length}
           {' '}time{e.inputCaps.length === 1 ? '' : 's'}, so bursts after that point in the round were
-          never sent. No flag below does not mean a clean round there.
+          never sent. Most recent:{' '}
+          {e.inputCaps.slice(0, 3).map((c, i) => (
+            <span key={`${c.at}-${c.kind}`}>
+              {i > 0 ? ', ' : ''}{c.kind}{c.matchId ? <> in <a href={`/match/${c.matchId}`}>#{c.matchId}</a></> : null} ({fmtTime(c.at)})
+            </span>
+          ))}. No flag below does not mean a clean round there.
         </p>
       )}
       {e.inputFlags.length === 0 ? <p class="muted">Nothing flagged by input timing.</p> : (
