@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ENTITY_KIND, STATE, PLAYER_SLOTS, type Frame, type PlayerSample } from '../src/replayFormat.js';
 import { TUNING } from '../src/integrity/constants.js';
-import { bearing } from '../src/integrity/geometry.js';
+import { bearing, wrapDeg } from '../src/integrity/geometry.js';
 import { trackFidelity, trackWindows, pickClips, scanPairs, visibleOthers, type TrackWindow } from '../src/integrity/ghostTrack.js';
 import { pairEligible } from '../src/integrity/geometry.js';
 import { occupancy } from '../src/integrity/occupancy.js';
@@ -192,6 +192,23 @@ describe('trackFidelity', () => {
     expect(trackFidelity([1, 2, 3], [0, 0, 0])).toBe(0);
   });
 
+  // The third series is the share of the bearing change the GHOST caused. The
+  // residual is measured against whichever innocent explanation fits better.
+  it('is 0 when the ghost caused none of the bearing change, however well the yaw matched it', () => {
+    expect(trackFidelity([2, 2, 2], [2, 2, 2], [0, 0, 0])).toBe(0);
+  });
+
+  it('is 0 for a held angle when the two causes cancel and the bearing never changed', () => {
+    expect(trackFidelity([0, 0, 0], [0, 0, 0], [1, 1, 1])).toBe(0);
+  });
+
+  it('is normalised by the smaller of the two, so a partly self-made bearing change earns less', () => {
+    // Residual 0.5 throughout. Against the whole bearing change (4) that is
+    // 0.875; against the ghost's share (1) it is 0.5.
+    expect(trackFidelity([3.5, 3.5], [4, 4], [1, 1])).toBeCloseTo(0.5, 10);
+    expect(trackFidelity([3.5, 3.5], [4, 4])).toBeCloseTo(0.875, 10);
+  });
+
   it('is 0 for series shorter than one delta', () => {
     expect(trackFidelity([], [])).toBe(0);
   });
@@ -232,6 +249,143 @@ describe('trackWindows', () => {
     const w = trackWindows(round(40, (_i, b) => b), 0);
     expect(w[0].ghostSlot).toBe(4);
     expect(w[0].endMs).toBeGreaterThan(w[0].startMs);
+  });
+});
+
+/** A free scene: both players go wherever `at` says, t in seconds at 10 Hz.
+ *  Positions are rounded to whole units because the file stores them as int16
+ *  and the quantisation is part of what the metric has to survive. */
+interface Pose { sx: number; sy: number; yaw: number; gx: number; gy: number }
+function scene(n: number, at: (t: number) => Pose): Frame[] {
+  const frames: Frame[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = at(i / 10);
+    const players = Array.from({ length: PLAYER_SLOTS }, (_, s) => blank(s));
+    players[0] = { ...blank(0), state: STATE.PRESENT | STATE.ALIVE, x: Math.round(p.sx), y: Math.round(p.sy), yaw: wrapDeg(p.yaw) };
+    players[4] = { ...blank(4), state: STATE.PRESENT | STATE.GHOST, x: Math.round(p.gx), y: Math.round(p.gy) };
+    frames.push({ tMs: TUNING.SPAWN_GRACE_MS + i * 100, offset: 0, players, entities: [] });
+  }
+  return frames;
+}
+
+/** Seeded gaussian noise, so a threshold that passes today passes tomorrow. */
+function gaussian(seed: number): () => number {
+  let s = seed >>> 0;
+  const u = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return (s + 1) / 4294967297; };
+  return () => Math.sqrt(-2 * Math.log(u())) * Math.cos(2 * Math.PI * u());
+}
+
+const deg = (rad: number) => rad * 180 / Math.PI;
+const best = (frames: Frame[]) => {
+  const w = trackWindows(frames, 0);
+  // Every one of these asserts over real windows. A scene that forms none
+  // would pass any upper bound vacuously.
+  expect(w.length).toBeGreaterThan(0);
+  return Math.max(...w.map((x) => x.fidelity));
+};
+
+/** What version 3 scored: all of the bearing change, the survivor's own
+ *  movement included. Rebuilt here so the new numbers sit next to the old. */
+function uncompensated(frames: Frame[]): number {
+  let top = 0;
+  for (let i = 0; i + TUNING.W <= frames.length; i++) {
+    const w = frames.slice(i, i + TUNING.W);
+    const dy: number[] = [], db: number[] = [];
+    for (let k = 1; k < w.length; k++) {
+      dy.push(wrapDeg(w[k].players[0].yaw - w[k - 1].players[0].yaw));
+      db.push(wrapDeg(bearing(w[k].players[0], w[k].players[4]) - bearing(w[k - 1].players[0], w[k - 1].players[4])));
+    }
+    top = Math.max(top, trackFidelity(dy, db));
+  }
+  return top;
+}
+
+/**
+ * The survivor's own movement is not tracking.
+ *
+ * The bearing to a ghost changes when the GHOST moves and when the SURVIVOR
+ * does. Version 3 asked the crosshair to reproduce all of it, so a survivor who
+ * held a door while running past it was credited with following whatever stood
+ * behind the door. The highest score in real history, 0.622, was against a
+ * ghost that moved 0 units.
+ */
+describe('trackWindows and the survivor\'s own movement', () => {
+  it('scores a door held while running past a STATIONARY ghost as nothing', () => {
+    const n = gaussian(1);
+    // Looking at the door frame at (700, 600) the whole way. The ghost stands
+    // just behind it.
+    const frames = scene(40, (t) => {
+      const sx = 220 * t;
+      return { sx, sy: 0, yaw: deg(Math.atan2(600, 700 - sx)) + 0.3 * n(), gx: 740, gy: 630 };
+    });
+    expect(uncompensated(frames)).toBeGreaterThan(0.7);
+    expect(best(frames)).toBeLessThan(0.1);
+  });
+
+  it('scores an A-D strafe on a corner, ghost still behind it, as nothing', () => {
+    const n = gaussian(2);
+    const frames = scene(40, (t) => {
+      const sy = 150 * Math.sin(2 * t);
+      return { sx: 0, sy, yaw: deg(Math.atan2(-sy, 500)) + 0.3 * n(), gx: 560, gy: 10 };
+    });
+    expect(uncompensated(frames)).toBeGreaterThan(0.7);
+    expect(best(frames)).toBeLessThan(0.1);
+  });
+
+  it('scores a door held while the ghost behind it paces slowly as nothing', () => {
+    const n = gaussian(3);
+    const frames = scene(40, (t) => {
+      const sx = 220 * t;
+      return { sx, sy: 0, yaw: deg(Math.atan2(600, 700 - sx)) + 0.3 * n(), gx: 740, gy: 630 + 40 * t };
+    });
+    expect(best(frames)).toBeLessThan(0.1);
+  });
+
+  // Found in real history while checking the fix above, not before it:
+  // pug_777fde4d..._1_2 at 56.2 s. The survivor sidesteps with the crosshair
+  // dead still and the ghost happens to sidestep the same way, so the bearing
+  // hardly changes. Subtracting the survivor's movement ALONE turns that into
+  // "the ghost moved 3 degrees and the crosshair followed", 0.51 for a held
+  // angle. A held angle scores zero, whoever is moving.
+  it('scores a held angle as nothing when survivor and ghost move in parallel', () => {
+    const frames = scene(40, (t) => ({ sx: 0, sy: 60 * t, yaw: 3.35, gx: 405, gy: -23 + 60 * t }));
+    expect(best(frames)).toBe(0);
+  });
+
+  it('still scores true tracking of a moving ghost, survivor standing still, exactly as before', () => {
+    const n = gaussian(4);
+    const frames = scene(40, (t) => {
+      const gy = -300 + 250 * t;
+      return { sx: 0, sy: 0, yaw: deg(Math.atan2(gy, 600)) + 0.3 * n(), gx: 600, gy };
+    });
+    // Nothing to compensate for, so the number must not move at all.
+    expect(best(frames)).toBeCloseTo(uncompensated(frames), 10);
+    expect(best(frames)).toBeGreaterThan(0.7);
+  });
+
+  it('still scores true tracking of a moving ghost while the survivor runs', () => {
+    const n = gaussian(5);
+    const frames = scene(40, (t) => {
+      const sx = 220 * t, gy = -300 + 250 * t;
+      return { sx, sy: 0, yaw: deg(Math.atan2(gy, 900 - sx)) + 0.3 * n(), gx: 900, gy };
+    });
+    expect(best(frames)).toBeGreaterThan(0.7);
+    // The ghost-caused share of the motion is smaller than the whole, so the
+    // same noise costs a little more than it used to. A little.
+    expect(best(frames)).toBeGreaterThan(uncompensated(frames) - 0.1);
+  });
+
+  it('is not thrown by yaw and bearing wrapping across 180', () => {
+    const n = gaussian(6);
+    // Ghost due west, crossing the -180/180 seam, survivor walking the other way.
+    const frames = scene(40, (t) => {
+      const sy = -100 * t, gy = -400 + 250 * t;
+      return { sx: 0, sy, yaw: deg(Math.atan2(gy - sy, -900)) + 0.3 * n(), gx: -900, gy };
+    });
+    const yaws = frames.map((f) => f.players[0].yaw);
+    expect(Math.max(...yaws)).toBeGreaterThan(170);
+    expect(Math.min(...yaws)).toBeLessThan(-170);
+    expect(best(frames)).toBeGreaterThan(0.7);
   });
 });
 

@@ -9,10 +9,11 @@ import {
  *
  * Proximity alone is not evidence, because the good spawn spots are known and
  * people pre-aim them. A held angle produces none of the motion needed to
- * follow a moving target, so it scores zero however well chosen the spot was.
- * Producing that motion, against something you cannot see, is what has no
- * innocent explanation, and the more the ghost moves the harder it is to do by
- * accident.
+ * follow a moving target, so it scores zero however well chosen the spot was,
+ * and so does a held corner, whose only motion is the survivor's own parallax.
+ * Producing the motion the GHOST'S movement called for, against something you
+ * cannot see, is what has no innocent explanation, and the more the ghost
+ * moves the harder it is to do by accident.
  *
  * This module is metric A and the frame-eligibility primitives it shares with
  * metric B. Metric B lives in `occupancy.ts` and the round-level orchestration
@@ -21,8 +22,8 @@ import {
  */
 
 /**
- * How much of the motion needed to follow the target the crosshair actually
- * produced. 1 is exact, 0 is none of it.
+ * How much better "the crosshair followed the ghost" explains the yaw than the
+ * best INNOCENT explanation does. 1 is exact, 0 is no better.
  *
  * This replaces the Pearson correlation the design spec first called for.
  * Pearson has a degenerate case that fails at precisely the wrong moment: a
@@ -31,18 +32,57 @@ import {
  * is undefined and the most blatant possible cheat scores zero. Pearson is also
  * scale invariant, so half the required motion, perfectly proportioned, would
  * score a perfect 1. A normalised residual has neither problem.
+ *
+ * WHAT IT IS NORMALISED BY is the part that was wrong until version 4. The
+ * bearing to a ghost changes for two reasons, the ghost moving and the
+ * SURVIVOR moving, and the old denominator was all of it. A survivor holding a
+ * door frame while running past it turns their view exactly as the parallax of
+ * that door demands, which is also what the parallax of a ghost standing behind
+ * the door demands, so they were credited with tracking something that never
+ * moved: 0.70 to 0.97 on synthetic frames, and the highest score in real
+ * history, 0.622, was against a ghost that moved 0 units.
+ *
+ * So there are two innocent explanations to beat, not one, and the residual of
+ * "followed the ghost" is measured against whichever of them does better:
+ *
+ *   held an ANGLE:        the yaw does not change. Its error against the
+ *                         bearing is the whole bearing change, `dBearing`.
+ *   held a WORLD POINT:   the yaw changes by the survivor's own parallax and
+ *                         nothing else. Its error against the bearing is what
+ *                         is left, the change the ghost's own steps caused,
+ *                         `dGhost`.
+ *
+ * Both are needed. Subtracting the survivor's movement alone, which is the
+ * obvious fix, breaks the first: when a survivor sidesteps with the crosshair
+ * dead still and the ghost happens to sidestep the same way, the bearing barely
+ * changes, the two causes cancel, and "the ghost moved and the crosshair
+ * followed" scores 0.51 for a held angle. That is a real window, found in
+ * pug_777fde4d..._1_2 at 56.2 s while checking the fix.
+ *
+ * With `dGhost` omitted the two series are the same, which is the case of a
+ * survivor who is not moving, and the result is the plain residual ratio.
+ *
+ * THE LIMIT, which is a property of the evidence and not of the arithmetic: a
+ * cheat user watching a ghost that is STANDING STILL behind a wall, while
+ * strafing, does exactly what an honest player holding that corner does. Both
+ * score 0 here and no function of yaw and position can separate them. The same
+ * goes for a ghost moving in step with the survivor. Only a ghost whose own
+ * movement demanded crosshair movement is evidence.
  */
-export function trackFidelity(dYaw: number[], dBearing: number[]): number {
-  const n = Math.min(dYaw.length, dBearing.length);
+export function trackFidelity(dYaw: number[], dBearing: number[], dGhost: number[] = dBearing): number {
+  const n = Math.min(dYaw.length, dBearing.length, dGhost.length);
   if (n < 1) return 0;
-  let residual = 0, total = 0;
+  let residual = 0, vsAngle = 0, vsPoint = 0;
   for (let i = 0; i < n; i++) {
     const d = dYaw[i] - dBearing[i];
     residual += d * d;
-    total += dBearing[i] * dBearing[i];
+    vsAngle += dBearing[i] * dBearing[i];
+    vsPoint += dGhost[i] * dGhost[i];
   }
-  // The target never moved, so following it required nothing and holding still
-  // proves nothing. No evidence, not perfect evidence.
+  const total = Math.min(vsAngle, vsPoint);
+  // An innocent explanation fits exactly, so following the ghost required
+  // nothing that holding still would not also have produced. No evidence, not
+  // perfect evidence.
   if (total <= 1e-9) return 0;
   // Clamped: moving opposite to the target is not worse than useless evidence,
   // it is simply no evidence of tracking.
@@ -94,21 +134,26 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
     // A run is consecutive frames where this pair is eligible AND on target.
     // Windows never straddle a break, because a break means the pair stopped
     // being comparable, not that nothing happened.
-    let run: { tMs: number; yaw: number; bear: number; err: number; dist: number }[] = [];
+    let run: { tMs: number; yaw: number; bear: number; err: number; dist: number; s: Pt; g: Pt }[] = [];
 
     const flush = () => {
       for (let i = 0; i + TUNING.W <= run.length; i++) {
         const w = run.slice(i, i + TUNING.W);
-        const dy: number[] = [], db: number[] = [];
+        const dy: number[] = [], db: number[] = [], dg: number[] = [];
         for (let k = 1; k < w.length; k++) {
           dy.push(wrapDeg(w[k].yaw - w[k - 1].yaw));
           db.push(wrapDeg(w[k].bear - w[k - 1].bear));
+          // The ghost's own share of that bearing change: where it is now
+          // against where it was, both seen from where the survivor now
+          // stands. Exactly zero for a ghost that did not move, however far
+          // the survivor did, because the positions are integers.
+          dg.push(wrapDeg(w[k].bear - bearing(w[k].s, w[k - 1].g)));
         }
         out.push({
           startMs: w[0].tMs,
           endMs: w[w.length - 1].tMs,
           ghostSlot: gs,
-          fidelity: trackFidelity(dy, db),
+          fidelity: trackFidelity(dy, db, dg),
           meanErr: w.reduce((s, x) => s + Math.abs(x.err), 0) / w.length,
           meanDist: w.reduce((s, x) => s + x.dist, 0) / w.length,
         });
@@ -125,7 +170,7 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
       }
       const err = aimError(s.yaw, s, g);
       if (Math.abs(err) > TUNING.E_TRACK) { flush(); continue; }
-      run.push({ tMs: f.tMs, yaw: s.yaw, bear: bearing(s, g), err, dist: dist2d(s, g) });
+      run.push({ tMs: f.tMs, yaw: s.yaw, bear: bearing(s, g), err, dist: dist2d(s, g), s: { x: s.x, y: s.y }, g: { x: g.x, y: g.y } });
     }
     flush();
   }

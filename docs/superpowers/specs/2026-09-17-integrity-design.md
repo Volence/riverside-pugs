@@ -184,9 +184,36 @@ The plugin phase has real traces and does not inherit it.
 **A. Tracking fidelity.** The backbone, and the one the owner's spawn-knowledge objection
 does not touch at all. Over a sliding window of `W` frames (20, which is 2 seconds at 10 Hz)
 in which the same ghost stays eligible throughout and `|err|` stays under `E_TRACK` (12
-degrees) throughout, how much of the motion needed to follow the ghost the crosshair actually
-produced: `max(0, 1 - RMS(dYaw - dBearing) / RMS(dBearing))`, where the deltas are
-frame to frame. 1 is exact tracking, 0 is none of the required motion.
+degrees) throughout, how much better "the crosshair followed the ghost" explains the yaw
+than the best innocent explanation does:
+`max(0, 1 - RMS(dYaw - dBearing) / min(RMS(dBearing), RMS(dGhost)))`, where the deltas are
+frame to frame. 1 is exact tracking, 0 is no better than innocent.
+
+`dGhost` is the share of each bearing change that the ghost's own step caused: the bearing
+to where it is now minus the bearing to where it was, both from the survivor's current
+position. **Amended 2026-09-21 (analyzer version 4).** The first implementation divided by
+`RMS(dBearing)` alone, and `dBearing` includes the survivor's own translation. A survivor
+holding a door frame while running past it turns their view by the parallax of that door,
+which is also the parallax of a ghost standing behind it, so they were credited with
+tracking something that never moved: 0.70 to 0.97 on synthetic frames, and the highest
+score in real history (0.622) was against a ghost that moved 0 units. There are two
+innocent explanations and the residual has to beat both:
+
+- **Held an angle.** The yaw does not change. Its error against the bearing is `dBearing`.
+- **Held a world point.** The yaw changes by the survivor's own parallax only. Its error
+  against the bearing is `dGhost`.
+
+Dividing by `RMS(dGhost)` alone, which is the obvious fix, breaks the first case. When the
+survivor sidesteps with the crosshair dead still and the ghost sidesteps the same way, the
+two causes cancel, the bearing barely changes, and a held angle scores 0.51 (a real window,
+`pug_777fde4d..._1_2` at 56.2 s). Hence the minimum.
+
+**What this cannot see, by construction.** A cheat user watching a ghost that is standing
+still behind a wall, while strafing, does exactly what an honest player holding that corner
+does, and both score 0. So does anyone watching a ghost that moves in step with them. No
+function of yaw and position separates those; only a ghost whose own movement demanded
+crosshair movement is evidence. The plugin phase, with real line of sight, is where the
+stationary case gets answered.
 
 Pre-aiming a spawn spot is a static crosshair. It produces none of the motion needed to
 follow a moving target, so it scores zero no matter how well chosen the spot was. Following
