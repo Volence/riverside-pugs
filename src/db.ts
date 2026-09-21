@@ -909,6 +909,15 @@ export function openDb(path: string): DB {
   // own transport (see src/dlc4.ts), not set by hand. Defaults to 0 so an
   // existing row stays out of the dlc4 map pool until it is actually checked.
   ensureColumn(db, 'servers', 'has_dlc4', 'INTEGER NOT NULL DEFAULT 0');
+  // Signed log lines; see src/logAuth.ts. The secret is generated here and
+  // pushed to the box over rcon, NULL until an admin asks for one. log_auth is
+  // off | log | enforce and defaults to off, so nothing changes for a server
+  // until someone turns it on. The last two are where the replay check had
+  // got to, kept so a backend restart does not reopen the window.
+  ensureColumn(db, 'servers', 'log_secret', 'TEXT');
+  ensureColumn(db, 'servers', 'log_auth', "TEXT NOT NULL DEFAULT 'off'");
+  ensureColumn(db, 'servers', 'log_auth_boot', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'servers', 'log_auth_seq', 'INTEGER NOT NULL DEFAULT 0');
   seed(db);
   return db;
 }

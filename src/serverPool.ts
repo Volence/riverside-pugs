@@ -24,6 +24,11 @@ export interface ServerRow {
   /** 1 to restart srcds after every match on this box. Off by default; see
    *  src/serverRestart.ts for why it is per server rather than global. */
   restart_after_match: number;
+  /** Shared secret the box signs its log lines with, or null. Never sent to a
+   *  browser. See src/logAuth.ts. */
+  log_secret: string | null;
+  /** off | log | enforce: what happens to a line that fails that check. */
+  log_auth: 'off' | 'log' | 'enforce';
 }
 
 export function addServer(
@@ -88,6 +93,12 @@ function serversAtAddress(db: DB, source: string, feedHost: string): { id: numbe
     return rows.length === 1 ? rows : [];
   }
   return [];
+}
+
+/** The ids behind serversAtAddress, for src/logAuth.ts: when a line cannot
+ *  be pinned on one server, these are the ones it could be from. */
+export function serverIdsAtAddress(db: DB, source: string, feedHost: string): number[] {
+  return serversAtAddress(db, source, feedHost).map((r) => r.id);
 }
 
 /** Whether a datagram from this address may be looked at at all. Separate
