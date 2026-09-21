@@ -25,6 +25,7 @@ import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
+import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -41,12 +42,17 @@ export interface AdminRouteOpts {
   /** Pushes the website's admin list to every box. Absent in tests that do
    *  not exercise it, where the route reports that rather than pretending. */
   adminSync?: ServerAdminSync;
+  /** The log signature verifier, for its counters in the overview. */
+  logAuth?: LogAuth;
+  /** Pushes one server its log secret over rcon; true when the box knew the
+   *  cvar. Absent in tests that do not exercise it, where the route says so. */
+  logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -211,7 +217,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
 
   app.get('/api/admin/overview', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
-    return { ...adminOverview(db), queue: matchmaker.publicQueue().players };
+    return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players };
   });
 
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
@@ -285,6 +291,68 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (typeof on !== 'boolean') return reply.code(400).send({ error: 'on must be true or false' });
     setRestartAfterMatch(db, id, on);
     logAdmin(db, adminId, 'server_restart_after_match', id, { on });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /**
+   * Give a server its log secret, which its plugins sign every log line with
+   * (src/logAuth.ts). One button for three cases:
+   *
+   *   no secret yet   generate one, store it, push it. Stored even when the
+   *                   push does not land (plugins not staged yet): setupMatch
+   *                   pushes it again with every match.
+   *   has one         push the SAME one again. The repair for a box that lost
+   *                   it: rebuilt, or its data/ directory wiped.
+   *   rotate: true    a new one, stored ONLY once the box has it. The other
+   *                   order would leave an enforcing server signing with a
+   *                   secret the backend had already thrown away.
+   *
+   * The secret never goes to the browser or into the audit log.
+   */
+  app.post('/api/admin/servers/:id/log-secret', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const server = getServer(db, id);
+    if (!server) return reply.code(404).send({ error: 'no such server' });
+    if (!logSecretPusher) return reply.code(503).send({ error: 'pushing a log secret is not available here' });
+    const rotate = (req.body as { rotate?: unknown } | null)?.rotate === true && server.log_secret !== null;
+    const secret = rotate || server.log_secret === null ? newLogSecret() : server.log_secret;
+    if (server.log_secret === null) setLogSecret(db, id, secret);
+    let pushed = false;
+    try {
+      pushed = await logSecretPusher(server, secret);
+    } catch (err) {
+      logAdmin(db, adminId, 'server_log_secret', id, { rotated: false, pushed: false, error: String(err) });
+      return reply.code(502).send({ error: `could not reach ${server.name}: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    const rotated = rotate && pushed;
+    if (rotated) setLogSecret(db, id, secret);
+    logAdmin(db, adminId, 'server_log_secret', id, { rotated, pushed });
+    broadcast('refresh');
+    return { ok: true, pushed, rotated };
+  });
+
+  /** What happens to a log line that fails its signature: off, log (count it,
+   *  accept it) or enforce (drop it). Per server, because plugins roll out a
+   *  box at a time. Refused without a secret, since there would be nothing to
+   *  check a line against and `enforce` would read as protection it is not. */
+  app.post('/api/admin/servers/:id/log-auth', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const server = getServer(db, id);
+    if (!server) return reply.code(404).send({ error: 'no such server' });
+    const { mode } = (req.body ?? {}) as { mode?: unknown };
+    if (typeof mode !== 'string' || !(LOG_AUTH_MODES as readonly string[]).includes(mode)) {
+      return reply.code(400).send({ error: `mode must be one of ${LOG_AUTH_MODES.join(', ')}` });
+    }
+    if (mode !== 'off' && server.log_secret === null) {
+      return reply.code(409).send({ error: 'give this server a log secret first' });
+    }
+    setLogAuthMode(db, id, mode as LogAuthMode);
+    logAdmin(db, adminId, 'server_log_auth', id, { mode });
     broadcast('refresh');
     return { ok: true };
   });

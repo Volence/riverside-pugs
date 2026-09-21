@@ -186,6 +186,9 @@ export class AdminFeedPoster {
       case 'server_idle': return `${who} set server ${e.target} idle`;
       case 'server_restart_after_match':
         return `${who} turned ${d.on ? 'on' : 'off'} restart-after-match for server ${e.target}`;
+      case 'server_log_secret':
+        return `${who} ${d.rotated ? 'rotated' : 'pushed'} the log secret for server ${e.target}${d.pushed ? '' : ' (it did NOT reach the box)'}`;
+      case 'server_log_auth': return `${who} set log signing on server ${e.target} to \`${String(d.mode)}\``;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``

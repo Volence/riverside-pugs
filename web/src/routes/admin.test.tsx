@@ -17,7 +17,7 @@ async function confirmDialog(name?: string | RegExp) {
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
     players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
-    reports: vi.fn(), audit: vi.fn(),
+    reports: vi.fn(), audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
@@ -263,6 +263,38 @@ describe('AdminMatches layout', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
   };
+
+  // Log signing (audit 2026-09-21 item 15): the secret is set up from here,
+  // and the counters are what an admin watches before flipping to enforce.
+  it('offers to set up log signing on a server that has no secret', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    (o.servers[0] as Record<string, unknown>).logAuth = { mode: 'off', hasSecret: false, counters: null };
+    mockAdmin.overview.mockResolvedValue(o);
+    mockAdmin.serverLogSecret.mockResolvedValue({ ok: true, pushed: true, rotated: false });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up' }));
+    await confirmDialog('Generate and push');
+    await waitFor(() => expect(mockAdmin.serverLogSecret).toHaveBeenCalledWith(1));
+  });
+
+  it('shows the signature counters and asks before enforcing', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    (o.servers[0] as Record<string, unknown>).logAuth = {
+      mode: 'log', hasSecret: true,
+      counters: { ok: 412, missing: 3, badMac: 1, replay: 0, lastOkAt: 1, lastFailAt: 1, lastFail: 'missing' },
+    };
+    mockAdmin.overview.mockResolvedValue(o);
+    mockAdmin.serverLogAuth.mockResolvedValue({ ok: true });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    expect(await screen.findByText(/ok 412 · unsigned 3 · bad 1 · replayed 0/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Log signing mode for Dallas'), { target: { value: 'enforce' } });
+    await confirmDialog('Enforce');
+    await waitFor(() => expect(mockAdmin.serverLogAuth).toHaveBeenCalledWith(1, 'enforce'));
+  });
 
   // The index into what abandoned matches left behind. Without it an aborted
   // match is only reachable from a Discord post that scrolls away.

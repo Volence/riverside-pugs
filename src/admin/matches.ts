@@ -4,9 +4,10 @@ import { pausesFor, readyupsFor, slowToReady } from '../liveView.js';
 import { archiveAborted } from '../matchArchive.js';
 import { matchForecast, recomputeSeasonRatings } from '../rating.js';
 import { getServer } from '../serverPool.js';
+import type { LogAuth } from '../logAuth.js';
 import { serverPasswordFor } from '../matchToken.js';
 
-export function adminOverview(db: DB) {
+export function adminOverview(db: DB, logAuth?: LogAuth) {
   const openRows = db.prepare(
     `SELECT m.id, m.campaign, m.state, m.server_id AS serverId, m.token, m.created_at AS createdAt,
             m.went_live_at AS wentLiveAt,
@@ -35,12 +36,24 @@ export function adminOverview(db: DB) {
       forecast: matchForecast(db, m.id),
     };
   });
-  // Never the rcon password: this goes to a browser.
-  const servers = db.prepare(
+  // Never the rcon password, and never the log secret: this goes to a browser.
+  // Whether a secret EXISTS is sent, the mode, and what the verifier has
+  // counted since this process started, which is what an admin watches while
+  // a box is in log mode to decide it is safe to enforce.
+  const servers = (db.prepare(
     `SELECT id, name, host, port, status, enabled, tv_port AS tvPort,
-            tv_password AS tvPassword, tv_enabled AS tvEnabled, restart_after_match AS restartAfterMatch
+            tv_password AS tvPassword, tv_enabled AS tvEnabled, restart_after_match AS restartAfterMatch,
+            log_auth AS logMode, log_secret IS NOT NULL AS hasLogSecret
      FROM servers ORDER BY id`,
-  ).all();
+  ).all() as ({ id: number; logMode: string; hasLogSecret: number } & Record<string, unknown>)[])
+    .map(({ logMode, hasLogSecret, ...s }) => ({
+      ...s,
+      logAuth: {
+        mode: logMode,
+        hasSecret: hasLogSecret === 1,
+        counters: logAuth?.counters(s.id) ?? null,
+      },
+    }));
   const recent = (db.prepare(
     `SELECT id, campaign, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore, winner
      FROM matches WHERE state = 'completed' ORDER BY id DESC LIMIT 30`,

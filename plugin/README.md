@@ -154,6 +154,58 @@ Both grammars are emitted from single central helpers in `pug-match.sp`
 lives in one place. Any change here must be mirrored in `src/logParse.ts` /
 `src/dumpParse.ts` and vice versa.
 
+### Signed log lines (`pug-logauth.inc`, `src/logAuth.ts`)
+
+Every line above is a UDP datagram, and the backend admits the token-less kinds
+(`L4DC`, `L4DL`, `L4DM`, `PUGNET`) on the sender's address alone, which is the
+thing a spoofer forges. The token on a `PUG` line is little better: it crosses
+the same cleartext stream. This engine has no `sv_logsecret`. So a server that
+has been given a secret signs every line it logs:
+
+```
+<the line as before> lseq=<boot>.<n> mac=<8 hex>
+```
+
+- `mac` is the first four bytes of HMAC-SHA1(secret, everything before ` mac=`).
+  The key is the secret's own characters. `pug-hmac.inc` is that in plain
+  SourcePawn; `tests/logauth_vectors.sp` holds it and `node:crypto` to one table
+  of vectors (`./test-logauth.sh`, `tests/logAuthVectors.test.ts`).
+- `n` counts signed lines for the whole server, across all four plugins; `boot`
+  is when this srcds process first loaded one of them. A line from an earlier
+  boot, or a counter already seen, is a replay. Both live in ConVars
+  (`sm_pug_log_boot`, `sm_pug_log_seq`) because those outlive a plugin reload
+  and die with the process, which is the lifetime wanted. `boot` rides on every
+  line so that a lost datagram cannot leave a restarted server refused.
+- `lseq`, not `seq`: EVENT and CHAT already carry a per-match `seq=`.
+- The secret arrives as `sm_pug_log_secret <hex>` over rcon (FCVAR_PROTECTED),
+  pushed by the backend at every match set-up, with `sm_pug_setid`, and from the
+  admin server panel. The backend turns `sv_rcon_log` off around that one
+  command, because srcds logs rcon commands onto this same stream. The plugins
+  keep it in `data/pug_logauth_<hostport>.txt`, so a restarted server signs from
+  its first line. With no secret, lines go out exactly as they always did.
+- The engine's own `entered the game` line cannot be signed. It is honoured
+  from the pinned source address only, and all it can do is clear a signon drop.
+
+The backend strips the trailer before the grammar sees the line, and decides
+per server (`servers.log_auth`): `off` believes everything as before, `log`
+counts failures and believes them anyway, `enforce` drops them. A valid
+signature also says which server a line came from, which address and port
+cannot always (two srcds on one machine).
+
+Roll-out, one server at a time, web first:
+
+1. Deploy the web app. Nothing changes: every server is `off` with no secret.
+2. Admin, Matches, Servers, "Log signing": **Set up**. A secret is generated
+   and pushed. Old plugins answer "Unknown command" and carry on unsigned.
+3. Stage the four new plugins on that server while it is empty, then **Push
+   again** (the cvar exists only once one of them has loaded).
+4. Set the mode to **log** and play a match. `unsigned` should stop climbing
+   and `bad` and `replayed` should stay at zero.
+5. Set the mode to **enforce**.
+
+Back out: set the mode to `off`. To stop a server signing altogether, run
+`sm_pug_log_secret ""` on it, which also removes the file.
+
 ## Build
 
 ### Locally, via wine

@@ -54,6 +54,7 @@ import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
 import { rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { LogListener, type LogMeta } from './logListener.js';
+import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
 import {
@@ -114,6 +115,9 @@ export interface ServerDeps {
    *  route. Injected in tests so the check never dials a real box; defaults
    *  to the real serverHasDlc4 otherwise. */
   dlc4Probe?: (server: ServerRow) => Promise<boolean>;
+  /** Pushes one server its log secret, for the admin's log-secret route.
+   *  Injected in tests so it never dials a real box. */
+  logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -454,6 +458,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }),
   });
 
+  // Built whether or not there is a listener to feed it: the admin overview
+  // reads its counters either way. See src/logAuth.ts.
+  const logAuth = new LogAuth(deps.db, deps.config.logPublicAddress.split(':')[0]);
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
@@ -466,10 +474,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      // Which server row a datagram belongs to. Address AND port, because two
-      // srcds on one machine share an address (Riverside #3 and #4).
+      // Which server row a datagram belongs to. The server whose secret
+      // signed the line, when one did: that cannot be forged or confused.
+      // Otherwise address AND port, because two srcds on one machine share an
+      // address (Riverside #3 and #4).
       const serverOf = (source: string, meta: LogMeta): number | null =>
-        resolveServerBySource(deps.db, source, feedHost, meta.port);
+        meta.serverId ?? resolveServerBySource(deps.db, source, feedHost, meta.port);
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -604,8 +614,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
           // SelfStartedMatches keeps the sender of a burst's first line as an
           // opaque string and hands it back to resolveServerId below, so the
-          // port rides along inside it.
-          selfStarted?.handle(ev, `${source}|${meta.port}`);
+          // port, and the server a signature named, ride along inside it.
+          selfStarted?.handle(ev, `${source}|${meta.port}|${meta.serverId ?? ''}`);
           return;
         }
         // Spectator feed. Cosmetic by design, so a throw here must never take
@@ -681,6 +691,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           console.error('[live] failed to record', ev.kind, err);
         }
       });
+      logListener.setAuthenticator((input) => logAuth.check(input));
       await logListener.listen(deps.config.logListenPort);
       // pending is declared before the orchestrator it depends on and assigned
       // after: the same forward-reference the selfStarted callback above uses,
@@ -772,7 +783,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         db: deps.db,
         listener: logListener,
         resolveServerId: (key) => {
-          const [address, port] = key.split('|');
+          const [address, port, signedBy] = key.split('|');
+          if (signedBy) return Number(signedBy);
           return resolveServerBySource(deps.db, address, feedHost, Number(port));
         },
         setMatchId: (token, matchId, serverId) =>
@@ -977,11 +989,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     banSync.stop();
     adminSync.stop();
     if (logListener) await logListener.close();
+    // Where each server's replay check had got to. Best effort: the caller may
+    // already have closed the database, and a few seconds of position is all
+    // that is lost.
+    try { logAuth.flush(); } catch { /* database already closed */ }
   });
   await app.register(apiRoutes, { db: deps.db, matchmaker });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
-    dlc4Probe: deps.dlc4Probe, adminSync,
+    dlc4Probe: deps.dlc4Probe, adminSync, logAuth,
+    logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await pushLogSecret(rcon, secret);
+      } finally {
+        rcon.close();
+      }
+    }),
   });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });

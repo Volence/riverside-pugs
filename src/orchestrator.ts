@@ -18,6 +18,7 @@ import { CAMPAIGNS, isMapName } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { stopAfterMap } from './stopPoint.js';
+import { pushLogSecret } from './logAuth.js';
 
 /** What one attempt to collect a match came to.
  *   completed  persisted, rated and released.
@@ -105,6 +106,19 @@ export class RealOrchestrator implements Orchestrator {
     this.beforeLive = deps.beforeLive;
   }
 
+  /** Give the box its log secret, when it has one. Never fatal: a match is
+   *  not worth losing over this, and a box that ends up unsigned shows in the
+   *  server panel's counters (and, in enforce mode, in the admin feed). */
+  private async pushSecret(rcon: RconClient, server: ServerRow): Promise<void> {
+    if (!server.log_secret) return;
+    try {
+      const known = await pushLogSecret(rcon, server.log_secret);
+      if (!known) console.warn(`[orchestrator] ${server.name} does not know sm_pug_log_secret (plugins older than log signing?)`);
+    } catch (err) {
+      console.error(`[orchestrator] pushing the log secret to ${server.name} failed (non-fatal):`, err);
+    }
+  }
+
   private async connectRcon(server: ServerRow): Promise<RconClient> {
     const opts = this.makeRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     const client = new RealRcon(opts);
@@ -144,6 +158,7 @@ export class RealOrchestrator implements Orchestrator {
     try {
       rcon = await this.connectRcon(server);
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
+      await this.pushSecret(rcon, server);
       await rcon.exec('exec pug_match');
       // The first line of the in-game ready-up panel. After pug_match, whose
       // rotoblin_pug_4v4.cfg sets the generic "Riverside PUG"; nothing on the
@@ -244,6 +259,10 @@ export class RealOrchestrator implements Orchestrator {
     let rcon: RconClient | null = null;
     try {
       rcon = await this.connectRcon(server);
+      // A match started in game never goes through setupMatch, so this is the
+      // one connection it gets. The box normally has its secret already (the
+      // plugins keep it across restarts); this covers one that lost it.
+      await this.pushSecret(rcon, server);
       await expectPugOk(rcon, `sm_pug_setid ${token} ${matchId}`);
     } finally {
       rcon?.close();

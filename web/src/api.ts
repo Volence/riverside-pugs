@@ -687,6 +687,19 @@ export interface Forecast {
   source: 'history' | 'current';
 }
 
+export type LogAuthMode = 'off' | 'log' | 'enforce';
+/** What the backend's log signature check has to say about one server. The
+ *  secret itself never leaves the backend; `hasSecret` is all the page gets.
+ *  Counters are since the backend last started, null when it has no verifier. */
+export interface ServerLogAuth {
+  mode: LogAuthMode;
+  hasSecret: boolean;
+  counters: {
+    ok: number; missing: number; badMac: number; replay: number;
+    lastOkAt: number | null; lastFailAt: number | null; lastFail: string | null;
+  } | null;
+}
+
 export interface AdminOverview {
   open: {
     id: number; campaign: string; state: string; serverId: number | null; createdAt: string;
@@ -696,7 +709,12 @@ export interface AdminOverview {
     connect: { host: string; port: number; password: string } | null;
     forecast: Forecast | null;
   }[];
-  servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number }[];
+  servers: {
+    id: number; name: string; host: string; port: number; status: string; enabled: number;
+    tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number;
+    /** Signed log lines. Optional: a payload from before it existed has none. */
+    logAuth?: ServerLogAuth;
+  }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
@@ -924,6 +942,9 @@ export const adminApi = {
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
   serverRestartAfterMatch: (id: number, on: boolean) =>
     post(`/api/admin/servers/${id}/restart-after-match`, { on }),
+  serverLogSecret: (id: number, rotate = false) =>
+    post<{ ok: true; pushed: boolean; rotated: boolean }>(`/api/admin/servers/${id}/log-secret`, { rotate }),
+  serverLogAuth: (id: number, mode: LogAuthMode) => post(`/api/admin/servers/${id}/log-auth`, { mode }),
   dlc4Check: () => post<{ results: { id: number; name: string; hasDlc4: boolean }[] }>('/api/admin/servers/dlc4-check'),
   syncServerAdmins: () => post<{ results: { serverId: number; server: string; ok: boolean; error?: string }[] }>('/api/admin/servers/admins-sync'),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
