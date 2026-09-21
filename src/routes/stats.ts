@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
-import { makeOptionalViewer } from './guards.js';
+import { makeOptionalViewer, makeRequireActive } from './guards.js';
+import {
+  ENDORSE_ERROR_TEXT, allTitles, endorseState, giveEndorsement, pendingEndorsements,
+} from '../endorsements.js';
 import { resolveDemoPath } from '../demos.js';
 import { publicUrlFor, type R2Config } from '../r2.js';
 import { getLiveMatches, mapStatsFor, eventsFor } from '../liveView.js';
@@ -54,6 +57,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   // the personal /api/state dashboard, stays behind requireActive in
   // routes/api.ts.
   const viewerOf = makeOptionalViewer(db);
+  // The endorse routes are the exception to "public read routes" above: they
+  // write, and what they read is one player's own choices.
+  const requireActive = makeRequireActive(db);
   /** Whether an already-resolved active viewer is an admin. */
   const isAdminViewer = (steamid: string): boolean =>
     (db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(steamid) as
@@ -191,6 +197,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       bucket[sr.stat] = sr.value;
       byPlayer.set(sr.player_id, bucket);
     }
+    const titles = allTitles(db);
     const players = (db.prepare(
       `SELECT mp.player_id AS steamid, p.name, mp.team, mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
               rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
@@ -200,6 +207,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        WHERE mp.match_id = ?`,
     ).all(id) as any[]).map((p) => ({
       steamid: p.steamid, name: p.name, team: p.team,
+      title: titles.get(p.steamid) ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       srDelta: p.mu_after === null ? 0
         : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
@@ -248,6 +256,41 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const forecast = viewer && isAdminViewer(viewer) ? matchForecast(db, id) : undefined;
 
     return { match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, ...(forecast ? { forecast } : {}) };
+  });
+
+  /** One player's endorse panel for one match: who they may endorse, what
+   *  they already gave, what is left. Their own choices only. */
+  app.get('/api/matches/:id/endorse', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    return endorseState(db, Number((req.params as { id: string }).id), steamid);
+  });
+
+  /** Give one endorsement. The giver is the session and never the body, so a
+   *  body naming somebody else as `from` is ignored. A test pins that. Every
+   *  rule is enforced in src/endorsements.ts, which the Discord button calls
+   *  as well. Not rate limited: nothing on this site is yet (September audit),
+   *  and this belongs in that work when it lands. */
+  app.post('/api/matches/:id/endorse', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    const matchId = Number((req.params as { id: string }).id);
+    const body = (req.body ?? {}) as { to?: unknown; kind?: unknown };
+    if (typeof body.to !== 'string' || typeof body.kind !== 'string') {
+      return reply.code(400).send({ error: 'to and kind are required', code: 'bad_kind' });
+    }
+    const r = Number.isInteger(matchId)
+      ? giveEndorsement(db, { matchId, from: steamid, to: body.to, kind: body.kind })
+      : { ok: false as const, error: 'no_match' as const };
+    if (!r.ok) return reply.code(400).send({ error: ENDORSE_ERROR_TEXT[r.error], code: r.error });
+    return { ok: true, remaining: r.remaining, state: endorseState(db, matchId, steamid) };
+  });
+
+  /** Recent matches this player can still endorse on, for the quiet bar. */
+  app.get('/api/endorse/pending', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    return { pending: pendingEndorsements(db, steamid) };
   });
 
   /**
