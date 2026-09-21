@@ -5,10 +5,11 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { completeMatch } from '../src/matchResult.js';
-import { upsertPlayer } from '../src/players.js';
+import { upsertPlayer, linkDiscord, activatePlayer } from '../src/players.js';
 import type { Dump } from '../src/dumpParse.js';
 import { statDef, STAT_DEFS } from '../src/statKeys.js';
 import { getSetting, setSetting } from '../src/settings.js';
+import { banPlayer } from '../src/admin/players.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -79,6 +80,49 @@ describe('stats routes', () => {
       .run(ME, 'times_skeeted');
     const body = (await app.inject({ method: 'GET', url: `/api/players/${ME}` })).json();
     expect(body.privateStatTotals).toBeNull();
+  });
+
+  it('shows a player\'s linked discord name only to a signed-in viewer in good standing', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    linkDiscord(db, IDS[1], '111', 'a totally different name');
+    const sameName = (db.prepare('SELECT name FROM players WHERE steamid = ?').get(IDS[2]) as { name: string }).name;
+    linkDiscord(db, IDS[2], '222', sameName); // same name as steam: null for everyone either way
+
+    // Anonymous: null for everyone, and the name never rides along at all.
+    const anon = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect(anon.players.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
+    expect(JSON.stringify(anon)).not.toContain('a totally different name');
+    expect(JSON.stringify(anon)).not.toContain('discordId');
+
+    // Signed in and active: filled in, but only where it differs.
+    const good = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect(good.players.find((p: any) => p.steamid === IDS[1]).discordName).toBe('a totally different name');
+    expect(good.players.find((p: any) => p.steamid === IDS[2]).discordName).toBeNull();
+
+    // Signed in but banned: same as anonymous.
+    banPlayer(db, ME, 'admin', 'testing', null);
+    const banned = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect(banned.players.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
+  });
+
+  it('shows a player\'s linked discord name on the live roster only to a signed-in viewer in good standing', async () => {
+    const matchId = Number(
+      db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'no_mercy')").run().lastInsertRowid,
+    );
+    db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)').run(matchId, IDS[1], 'a');
+    linkDiscord(db, IDS[1], '111', 'a totally different name');
+
+    const anon = (await app.inject({ method: 'GET', url: '/api/live' })).json();
+    expect(anon.matches[0].teamA.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
+    expect(JSON.stringify(anon)).not.toContain('a totally different name');
+    expect(JSON.stringify(anon)).not.toContain('discordId');
+
+    const good = (await app.inject({ method: 'GET', url: '/api/live', cookies })).json();
+    expect(good.matches[0].teamA.find((p: any) => p.steamid === IDS[1]).discordName).toBe('a totally different name');
+
+    banPlayer(db, ME, 'admin', 'testing', null);
+    const banned = (await app.inject({ method: 'GET', url: '/api/live', cookies })).json();
+    expect(banned.matches[0].teamA.find((p: any) => p.steamid === IDS[1]).discordName).toBeNull();
   });
 
   it('shows a formerly private stat to everyone, logged in or not', async () => {
@@ -257,6 +301,45 @@ describe('stats routes', () => {
     expect(winnerPlayer.team).toBe('b');
     expect(winnerPlayer.srDelta).toBeGreaterThan(0);
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
+  });
+
+  // 2026-09-21: match 103 was live and https://riversidepug.com/match/103 said
+  // "Match not found." even though every admin-feed post about it links
+  // exactly there. The link has to work while the match is still running.
+  it('a match still being played answers with a small ongoing payload, not a 404', async () => {
+    const configuring = Number(
+      db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'configuring', 'dead_air')").run().lastInsertRowid,
+    );
+    const res1 = await app.inject({ method: 'GET', url: `/api/matches/${configuring}` });
+    expect(res1.statusCode).toBe(200);
+    expect(res1.json()).toEqual({ ongoing: true, id: configuring, campaign: 'dead_air', state: 'waiting' });
+
+    db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('t','127.0.0.1',27015,27015,'x','live')",
+    ).run();
+    const serverId = db.prepare('SELECT id FROM servers').get() as { id: number };
+    const assigned = Number(
+      db.prepare('INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, ?, ?, ?)')
+        .run('configuring', 'dead_air', serverId.id).lastInsertRowid,
+    );
+    const res2 = await app.inject({ method: 'GET', url: `/api/matches/${assigned}` });
+    expect(res2.json()).toEqual({ ongoing: true, id: assigned, campaign: 'dead_air', state: 'configuring' });
+
+    const live = Number(
+      db.prepare("INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, 'live', 'dead_air', ?)")
+        .run(serverId.id).lastInsertRowid,
+    );
+    const res3 = await app.inject({ method: 'GET', url: `/api/matches/${live}` });
+    expect(res3.json()).toEqual({ ongoing: true, id: live, campaign: 'dead_air', state: 'live' });
+    // Never the server, the token, or a password: this is a public link.
+    expect(res3.body).not.toMatch(/rcon|token|password|127\.0\.0\.1/i);
+
+    // A finished match still gets the full payload, and an unknown id still 404s.
+    const matchId = playCompletedMatch(db, 'b');
+    const res4 = await app.inject({ method: 'GET', url: `/api/matches/${matchId}` });
+    expect(res4.json().ongoing).toBe(false);
+    expect(res4.json().match.id).toBe(matchId);
+    expect((await app.inject({ method: 'GET', url: '/api/matches/12345' })).statusCode).toBe(404);
   });
 
   // 2026-09-20: three abandons in a row, and every one of them 404'd here, so

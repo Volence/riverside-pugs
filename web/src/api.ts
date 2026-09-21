@@ -176,6 +176,9 @@ export interface MatchSummary {
 export interface MatchPlayerStats {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   team: Team;
   siDamage: number;
   siKills: number;
@@ -200,6 +203,9 @@ export interface StatDef {
 }
 
 export interface LivePlayer extends NamedPlayer {
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   /** Missing key means "not measured", never zero. skill_detect keys are
    *  absent entirely when that plugin is not loaded. */
   stats: Record<string, number>;
@@ -290,7 +296,19 @@ export interface MatchDemo {
   bytes: number;
 }
 
+/** A match still being played: 'waiting' for a server, 'configuring' one, or
+ *  'live'. Deliberately tiny; never the server address, the token or a
+ *  password, none of which belong in a link anyone can open. The same id
+ *  answers with a MatchDetail once the match ends. */
+export interface MatchOngoing {
+  ongoing: true;
+  id: number;
+  campaign: string;
+  state: 'waiting' | 'configuring' | 'live';
+}
+
 export interface MatchDetail {
+  ongoing: false;
   /** `winner` is null on an aborted match: it never reached a result. The
    *  void fields are set only when a COMPLETED match was voided afterwards,
    *  which the schema also records as state 'aborted'. */
@@ -328,6 +346,11 @@ export interface MatchDetail {
     byPlayer: Record<string, Record<string, number>>;
   }[];
 }
+
+/** What GET /api/matches/:id answers, narrowed by `ongoing` so a caller has
+ *  to handle the in-progress case before it can reach the finished one's
+ *  fields. */
+export type MatchApiResult = MatchOngoing | MatchDetail;
 
 export interface RoundAggregate {
   attempts: number;
@@ -1183,7 +1206,7 @@ export const api = {
   map: (map: string, signal?: AbortSignal) =>
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
-    get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
+    get<MatchApiResult>(`/api/matches/${encodeURIComponent(id)}`, signal),
   endorseState: (matchId: number, signal?: AbortSignal) =>
     get<EndorseState>(`/api/matches/${matchId}/endorse`, signal),
   endorse: (matchId: number, to: string, kind: EndorseKind) =>

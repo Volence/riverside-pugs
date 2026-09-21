@@ -516,11 +516,14 @@ export class DiscordSync {
 
   private player(steamid: string): PlayerView {
     const { db } = this.deps;
-    const p = db.prepare('SELECT name, discord_id FROM players WHERE steamid = ?').get(steamid) as
-      | { name: string; discord_id: string | null } | undefined;
+    const p = db.prepare('SELECT name, discord_id, discord_name FROM players WHERE steamid = ?').get(steamid) as
+      | { name: string; discord_id: string | null; discord_name: string | null } | undefined;
     const r = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?')
       .get(steamid, currentSeasonId(db)) as { mu: number; sigma: number } | undefined;
-    return { name: p?.name ?? steamid, discordId: p?.discord_id ?? null, sr: r ? displaySr(r.mu, r.sigma) : null };
+    return {
+      name: p?.name ?? steamid, discordId: p?.discord_id ?? null, discordName: p?.discord_name ?? null,
+      sr: r ? displaySr(r.mu, r.sigma) : null,
+    };
   }
 
   private resultPlayer(steamid: string, matchId: number): ResultPlayer {
