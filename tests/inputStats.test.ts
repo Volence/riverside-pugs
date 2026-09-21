@@ -85,29 +85,42 @@ describe('burstStats', () => {
 });
 
 describe('pounceSpam', () => {
-  const claw = (airPresses: number) => ({ kind: 'pounce', weapon: 'weapon_hunter_claw', airPresses });
+  // Every array below is a REAL burst captured from a live client 2026-09-21.
+  const claw = (intervals: number[]) => ({ kind: 'pounce', weapon: 'weapon_hunter_claw', intervals });
+  const HUMAN_NORMAL = [18, 13];                       // 3 presses over 2.03s
+  const HUMAN_MASHING = [21, 21, 19, 24, 20, 17, 15];  // 8 presses over 1.61s, as fast as a hand goes
+  const MACRO_SHORT = [7, 8, 8, 7, 8, 8];              // 7 presses over 0.57s
+  const MACRO_LONG = [8, 7, 8, 8, 7, 8, 8, 7, 8, 9, 5, 8, 7, 8, 8, 8];
 
-  it('ignores a real hunter pounce', () => {
-    // Measured on a live client 2026-09-21: a normal pounce reads a=3.
-    expect(pounceSpam(claw(1), 12)).toBe(false);
-    expect(pounceSpam(claw(3), 12)).toBe(false);
+  it('does not flag a hand, even mashing as fast as it can', () => {
+    expect(pounceSpam(claw(HUMAN_MASHING), 12)).toBe(false);
+    expect(pounceSpam(claw(HUMAN_NORMAL), 12)).toBe(false);
   });
 
-  it('flags a button held through the air', () => {
-    expect(pounceSpam(claw(20), 12)).toBe(true);
+  it('flags a macro on a SHORT pounce, which a count threshold missed', () => {
+    // This is the case that killed the original design: 7 presses, under any
+    // sane count threshold, but the interval gives it away regardless of how
+    // long the player was airborne.
+    expect(pounceSpam(claw(MACRO_SHORT), 12)).toBe(true);
+  });
+
+  it('flags a macro on a long pounce too', () => {
+    expect(pounceSpam(claw(MACRO_LONG), 12)).toBe(true);
+  });
+
+  it('needs enough presses for the mean to mean anything', () => {
+    expect(pounceSpam(claw([7, 8]), 12)).toBe(false);
   });
 
   it('only applies to the pounce anchor', () => {
-    expect(pounceSpam({ kind: 'fire', weapon: 'weapon_hunter_claw', airPresses: 40 }, 12)).toBe(false);
+    expect(pounceSpam({ kind: 'fire', weapon: 'weapon_hunter_claw', intervals: MACRO_LONG }, 12)).toBe(false);
   });
 
   // The pounce anchor fires for anyone airborne. A survivor shooting while
-  // falling logged a=3 on a live client, and a fire macro while jumping reached
-  // a=8 against a threshold of 12: close enough that without this filter a
-  // survivor with a macro, or a long fall, would eventually be flagged as a
-  // hunter cheat.
+  // falling logged a pounce burst on a live client, so without this filter a
+  // survivor with a fire macro would be flagged for a hunter cheat.
   it('never flags a survivor who was merely airborne', () => {
-    expect(pounceSpam({ kind: 'pounce', weapon: 'weapon_pistol', airPresses: 40 }, 12)).toBe(false);
-    expect(pounceSpam({ kind: 'pounce', weapon: '', airPresses: 40 }, 12)).toBe(false);
+    expect(pounceSpam({ kind: 'pounce', weapon: 'weapon_pistol', intervals: MACRO_LONG }, 12)).toBe(false);
+    expect(pounceSpam({ kind: 'pounce', weapon: '', intervals: MACRO_LONG }, 12)).toBe(false);
   });
 });

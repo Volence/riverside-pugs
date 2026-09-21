@@ -96,25 +96,42 @@ export function burstStats(ticks: readonly number[]): BurstStats {
 }
 
 /**
- * Signature v1. The only one shipped, because it is the only one that needs no
- * statistical tuning: a human issues one or two `+attack` presses per pounce and
- * someone holding the button through the air issues dozens. Separating 2 from 40
- * is arithmetic, not a threshold. Oryx-AC's equivalent (`highn`, 17+ scrolls per
- * jump) is its highest confidence check.
+ * Signature v1: a pounce whose attack presses come faster than a hand can mash.
  *
- * The rate and variance signatures deliberately wait for real player
- * distributions; the only human sample in evidence is one person clicking for
- * fifteen seconds.
+ * Measured against a live client 2026-09-21, hunter pounces:
+ *
+ *   you, normal pounce   3 presses over 2.03s   mean interval 15.5t  (6.5/s)
+ *   you, MASHING M1      8 presses over 1.61s   mean interval 19.7t  (5.1/s)
+ *   macro 13/s, short    7 presses over 0.57s   mean interval  7.7t (13.0/s)
+ *   macro 13/s, short    9 presses over 0.69s   mean interval  7.8t (12.9/s)
+ *   macro 13/s, long    49 presses over 3.81s   mean interval  7.7t (13.0/s)
+ *
+ * This was a COUNT threshold first (airPresses >= 12) and that was wrong. The
+ * count is bounded by how long the pounce lasts, so a macro on a short pounce
+ * registers 7 or 9 presses and slips under, while only a freak 3.8 second leap
+ * trips it. The interval is flat at 7.7t across all three macro pounces
+ * regardless of length, because it does not depend on airborne time at all.
+ *
+ * A hand mashing as fast as it can reached 5.1/s. That is the number the
+ * threshold sits above, with the macro more than twice it on the other side.
  */
 export function pounceSpam(
-  burst: { kind: string; weapon: string; airPresses: number }, threshold: number,
+  burst: { kind: string; weapon: string; intervals: readonly number[] },
+  maxMeanTicks: number,
+  minIntervals = MIN_POUNCE_INTERVALS,
 ): boolean {
-  return burst.kind === 'pounce' && POUNCE_WEAPONS.has(burst.weapon) && burst.airPresses >= threshold;
+  if (burst.kind !== 'pounce' || !POUNCE_WEAPONS.has(burst.weapon)) return false;
+  if (burst.intervals.length < minIntervals) return false;
+  return burstStats(burst.intervals).meanTicks <= maxMeanTicks;
 }
+
+/** Fewer than this and the mean is one or two samples of noise. A real pounce
+ *  that only trips on a handful of presses is not worth an admin's time. */
+export const MIN_POUNCE_INTERVALS = 4;
 
 /** The pounce anchor fires for ANYONE airborne, so a survivor shooting while
  *  falling produces a `pounce` burst too. Measured 2026-09-21: a survivor firing
- *  mid-jump logged a=3, and a fire macro while jumping reached a=8, against a
- *  threshold of 12. The weapon is what separates a hunter from a survivor who
- *  jumped, which is why it is on the wire. */
+ *  mid-jump logged a=3, and a fire macro while jumping reached a=8. The weapon
+ *  is what separates a hunter from a survivor who jumped, which is why it is on
+ *  the wire. */
 export const POUNCE_WEAPONS = new Set(['weapon_hunter_claw']);

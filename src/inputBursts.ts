@@ -12,9 +12,11 @@ import { decodeIntervals, encodeIntervals, pounceSpam } from './inputStats.js';
  * tuning; the rate and variance ones wait for real player distributions.
  */
 
-/** A human issues one or two `+attack` presses per pounce. Someone holding the
- *  button through the air issues dozens. Default rather than constant so it can
- *  be raised from settings without a deploy. */
+/** Mean ticks between attack presses during a pounce, at or below which the
+ *  burst is flagged. 12 ticks is 8.3/s. Measured: a hand mashing reached 5.1/s
+ *  (19.7 ticks) and a 13/s macro sat at 7.7 ticks, so this has better than a
+ *  2x margin on both sides. Default rather than constant so it can be moved
+ *  from settings without a deploy. */
 export const DEFAULT_POUNCE_SPAM_THRESHOLD = 12;
 
 /** Threshold from settings, so it can be raised without a deploy if a real
@@ -22,7 +24,7 @@ export const DEFAULT_POUNCE_SPAM_THRESHOLD = 12;
  *  for an absent or nonsense value rather than disabling the signature. */
 export function pounceSpamThreshold(db: DB): number {
   const raw = Number(getSetting(db, 'input_pounce_spam_threshold'));
-  return Number.isFinite(raw) && raw >= 3 ? Math.floor(raw) : DEFAULT_POUNCE_SPAM_THRESHOLD;
+  return Number.isFinite(raw) && raw >= 3 && raw <= 30 ? Math.floor(raw) : DEFAULT_POUNCE_SPAM_THRESHOLD;
 }
 
 export interface InputBurstInput {

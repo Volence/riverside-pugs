@@ -12,7 +12,7 @@ beforeEach(() => { db = openDb(':memory:'); });
 
 const burst = (over: Partial<Parameters<typeof recordInputBurst>[1]> = {}) => ({
   matchId: 7, serverId: 1, steamid: A, kind: 'pounce' as const, weapon: 'weapon_hunter_claw',
-  airPresses: 2, groundTicks: 4, serverTick: 1000, clientTick: 999, intervals: [8, 9, 8],
+  airPresses: 2, groundTicks: 4, serverTick: 1000, clientTick: 999, intervals: [18, 21, 19, 20],
   ...over,
 });
 
@@ -21,26 +21,28 @@ describe('recordInputBurst', () => {
     const r = recordInputBurst(db, burst());
     expect(r.detections).toEqual([]);
     const row = db.prepare('SELECT * FROM input_bursts WHERE id = ?').get(r.id) as { n: number; intervals: string };
-    expect(row.n).toBe(3);
-    expect(row.intervals).toHaveLength(3);
+    expect(row.n).toBe(4);
+    expect(row.intervals).toHaveLength(4);
   });
 
-  it('fires pounce_spam on a button held through the air', () => {
-    const r = recordInputBurst(db, burst({ airPresses: 25 }));
+  it('fires pounce_spam on presses faster than a hand can mash', () => {
+    const r = recordInputBurst(db, burst({ intervals: [7, 8, 8, 7, 8, 8] }));
     expect(r.detections).toEqual(['pounce_spam']);
     expect(detectionsForPlayer(db, A)).toHaveLength(1);
   });
 
   it('does not fire on a fire burst however many presses', () => {
-    expect(recordInputBurst(db, burst({ kind: 'fire', airPresses: 99 })).detections).toEqual([]);
+    expect(recordInputBurst(db, burst({ kind: 'fire', intervals: [7, 8, 8, 7, 8, 8] })).detections).toEqual([]);
   });
 
   it('does not fire on a survivor who was merely airborne', () => {
-    expect(recordInputBurst(db, burst({ weapon: 'weapon_pistol', airPresses: 40 })).detections).toEqual([]);
+    expect(recordInputBurst(db, burst({ weapon: 'weapon_pistol', intervals: [7, 8, 8, 7, 8, 8] })).detections).toEqual([]);
   });
 
-  it('round trips the intervals through storage', () => {
-    const r = recordInputBurst(db, burst({ intervals: [1, 30, 15, 2] }));
+  it('round trips the extremes of the range through storage', () => {
+    // kind 'fire' so the pounce signature cannot fire on these values and
+    // confuse the round-trip assertion.
+    const r = recordInputBurst(db, burst({ kind: 'fire', intervals: [1, 30, 15, 2] }));
     const again = rerunSignatures(db);
     expect(again).toBe(0);                 // same signature, already recorded
     expect(r.id).toBeGreaterThan(0);
@@ -51,15 +53,15 @@ describe('isFirstDetectionInMatch', () => {
   // A macro fires on every single pounce. Posting per burst would bury the
   // admin feed under one player's round, so only the first in a match posts.
   it('is true once per player per match and false after', () => {
-    recordInputBurst(db, burst({ airPresses: 25 }));
+    recordInputBurst(db, burst({ intervals: [7, 8, 8, 7, 8, 8] }));
     expect(isFirstDetectionInMatch(db, A, 7)).toBe(true);
-    recordInputBurst(db, burst({ airPresses: 30 }));
+    recordInputBurst(db, burst({ intervals: [7, 8, 8, 7, 8, 7] }));
     expect(isFirstDetectionInMatch(db, A, 7)).toBe(false);
   });
 
   it('is true again in a different match', () => {
-    recordInputBurst(db, burst({ airPresses: 25 }));
-    recordInputBurst(db, burst({ matchId: 8, airPresses: 25 }));
+    recordInputBurst(db, burst({ intervals: [7, 8, 8, 7, 8, 8] }));
+    recordInputBurst(db, burst({ matchId: 8, intervals: [7, 8, 8, 7, 8, 8] }));
     expect(isFirstDetectionInMatch(db, A, 8)).toBe(true);
   });
 });
@@ -82,14 +84,14 @@ describe('rerunSignatures', () => {
   // The whole reason raw ordered intervals are stored: a signature written
   // later applies to everything recorded before it existed.
   it('finds detections a stricter earlier threshold missed', () => {
-    recordInputBurst(db, burst({ airPresses: 14 }), 40);   // threshold too high, nothing fires
+    recordInputBurst(db, burst({ intervals: [7, 8, 8, 7, 8, 8] }), 5);   // threshold too strict, nothing fires
     expect(detectionsForPlayer(db, A)).toHaveLength(0);
     expect(rerunSignatures(db, DEFAULT_POUNCE_SPAM_THRESHOLD)).toBe(1);
     expect(detectionsForPlayer(db, A)).toHaveLength(1);
   });
 
   it('is idempotent, so re-running twice does not double count', () => {
-    recordInputBurst(db, burst({ airPresses: 25 }));
+    recordInputBurst(db, burst({ intervals: [7, 8, 8, 7, 8, 8] }));
     rerunSignatures(db);
     rerunSignatures(db);
     expect(detectionsForPlayer(db, A)).toHaveLength(1);

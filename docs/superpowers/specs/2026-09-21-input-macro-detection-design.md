@@ -161,8 +161,31 @@ the order-dependent `sameAsNext` / `closeToNext` counts Oryx uses. Storing the r
 ordered intervals is what keeps those computable; a summary or a histogram would
 discard exactly the information that catches a jittered macro.
 
-**Signature v1, `pounce_spam`:** `kind = pounce` and `air_presses >= 12`. A human
-issues one or two. Severity high. Threshold is a setting, not a constant.
+**Signature v1, `pounce_spam`:** a pounce with `weapon_hunter_claw` whose MEAN
+INTERVAL between attack presses is at or below 12 ticks (8.3/s), over at least 4
+intervals. Severity high. Threshold is a setting.
+
+This was a COUNT threshold (`air_presses >= 12`) and live testing killed it.
+Measured 2026-09-21 against a real client:
+
+| | presses | airborne | mean interval | rate |
+|---|---|---|---|---|
+| normal pounce | 3 | 2.03s | 15.5t | 6.5/s |
+| **hand MASHING M1** | 8 | 1.61s | 19.7t | 5.1/s |
+| macro 13/s, short | **7** | 0.57s | 7.7t | 13.0/s |
+| macro 13/s, short | **9** | 0.69s | 7.8t | 12.9/s |
+| macro 13/s, long | 49 | 3.81s | 7.7t | 13.0/s |
+
+The count is bounded by how long the pounce lasts, so a macro on a SHORT pounce
+registers 7 or 9 presses and slips under any threshold that a mashing hand (8)
+does not also trip. Only a freak 3.8 second leap exceeded it. The mean interval
+is flat at 7.7t across all three macro pounces regardless of length, because it
+does not depend on airborne time at all. A hand mashing as hard as it can reached
+5.1/s; the macro is more than twice that.
+
+The earlier claim that this signature "needs no tuning because it separates 2 from
+40" was wrong. It is a tuned threshold sitting between two human-reachable
+numbers, and it earned that threshold from measurement rather than from argument.
 
 `scripts/rerun-input-signatures.ts` recomputes detections over stored bursts, which
 is the whole point of approach C: a signature written in three weeks applies to
