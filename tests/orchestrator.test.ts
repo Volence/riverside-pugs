@@ -1,5 +1,6 @@
 import { subscribeAdminEvents } from '../src/adminFeed.js';
 import { setLogSecret } from '../src/logAuth.js';
+import { setSetting } from '../src/settings.js';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
@@ -133,6 +134,31 @@ describe('RealOrchestrator', () => {
 
     const m = db.prepare('SELECT state, leave_control FROM matches WHERE id = ?').get(mid) as { state: string; leave_control: number | null };
     expect(m).toEqual({ state: 'live', leave_control: 0 });
+  });
+
+  it('pushes the DEFAULT leaver rules when their settings rows are blank, never 0', async () => {
+    // These rows are hand-edited in sqlite, and Number('') is 0, not NaN, so
+    // a blank one sails past an integer check. The same bug once aborted every
+    // live match through noshow_minutes (src/noShow.ts). Here it is quieter
+    // and worse: `sm_pug_leave_hold_max 0` is clamped by the cvar to its own
+    // lower bound of 10, so every Hold on that match releases itself after ten
+    // seconds while the board's tooltip promises thirty minutes, and
+    // `sm_pug_leave_budget 0` turns leave tracking off for the match.
+    setSetting(db, 'clock_hold_max_minutes', '');
+    setSetting(db, 'leave_budget_seconds', '   ');
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    await orch.setupMatch(seedMatch(db));
+
+    expect(srv.cmds).toContain('sm_pug_leave_budget 300');
+    expect(srv.cmds).toContain('sm_pug_leave_hold_max 1800');
   });
 
   it('unrelated "Unknown command" console noise in the same reply is not read as an old plugin', async () => {

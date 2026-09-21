@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import type { LogEvent } from './logParse.js';
-import { getSetting } from './settings.js';
+import { settingNumber } from './settings.js';
 
 /**
  * Who is on the game server, per rostered player of an ongoing match.
@@ -53,17 +53,10 @@ export interface PresenceChange {
   holdReleased: boolean;
 }
 
-/** Same emptiness rule as noShow.ts: Number('') is 0, and a blank row must
- *  read as the default, not as zero. */
-function num(db: DB, key: string, fallback: number): number {
-  const value = getSetting(db, key);
-  if (value === undefined || value.trim() === '') return fallback;
-  const raw = Number(value);
-  return Number.isFinite(raw) ? raw : fallback;
-}
-
-export const holdMaxSeconds = (db: DB): number => Math.max(60, num(db, 'clock_hold_max_minutes', 30) * 60);
-export const lowAlertSeconds = (db: DB): number => Math.max(0, num(db, 'abandon_low_alert_seconds', 90));
+export const holdMaxSeconds = (db: DB): number =>
+  Math.max(60, settingNumber(db, 'clock_hold_max_minutes', 30) * 60);
+export const lowAlertSeconds = (db: DB): number =>
+  Math.max(0, settingNumber(db, 'abandon_low_alert_seconds', 90));
 
 export function ongoingMatchIdOf(db: DB, token: string): number | null {
   const row = db.prepare("SELECT id FROM matches WHERE token = ? AND state IN ('configuring', 'live')")

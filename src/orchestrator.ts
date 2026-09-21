@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { statusShowsAbandoner } from './abandon.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { getSetting } from './settings.js';
+import { getSetting, settingNumber } from './settings.js';
 import type { DB } from './db.js';
 import type { RconClient, RconOpts } from './rcon.js';
 import { RconClient as RealRcon } from './rcon.js';
@@ -20,6 +20,7 @@ import { isInstalledEverywhere } from './campaignInstall.js';
 import { stopAfterMap } from './stopPoint.js';
 import { isUnknownCvar } from './leaveControl.js';
 import { pushLogSecret } from './logAuth.js';
+import { holdMaxSeconds } from './presence.js';
 
 /** What one attempt to collect a match came to.
  *   completed  persisted, rated and released.
@@ -166,14 +167,17 @@ export class RealOrchestrator implements Orchestrator {
       // per-map config path resets it, so the number holds for the whole match.
       await rcon.exec(`l4d_ready_league_notice "Riverside PUG #${matchId}"`);
       // The leaver rules for this match, from the admin settings.
-      await rcon.exec(`sm_pug_leave_budget ${settingInt(this.db, 'leave_budget_seconds', 300)}`);
+      await rcon.exec(`sm_pug_leave_budget ${settingNumber(this.db, 'leave_budget_seconds', 300, { integer: true, min: 0 })}`);
       await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
       // The ceiling on an admin hold of one player's reconnect clock. The
       // plugin enforces it itself, so a release that never arrives cannot pin
       // a box paused. The reply doubles as a free capability probe: a
       // pug-match older than 0.3.4 has no such cvar and says so, and the live
       // board then greys its clock controls out with the reason. Never fatal.
-      const holdMax = await rcon.exec(`sm_pug_leave_hold_max ${settingInt(this.db, 'clock_hold_max_minutes', 30) * 60}`);
+      // holdMaxSeconds, the same reader the board's tooltip and the sweep
+      // use, so the ceiling the plugin enforces and the ceiling the site
+      // promises cannot come from two different readings of one row.
+      const holdMax = await rcon.exec(`sm_pug_leave_hold_max ${holdMaxSeconds(this.db)}`);
       this.db.prepare('UPDATE matches SET leave_control = ? WHERE id = ?')
         .run(isUnknownCvar(holdMax, 'sm_pug_leave_hold_max') ? 0 : 1, matchId);
       await rcon.exec(`sv_password "${serverPasswordFor(token)}"`);
@@ -427,7 +431,3 @@ async function expectPugOk(rcon: RconClient, cmd: string): Promise<string> {
   return res;
 }
 
-function settingInt(db: DB, key: string, fallback: number): number {
-  const n = Number(getSetting(db, key));
-  return Number.isInteger(n) && n >= 0 ? n : fallback;
-}
