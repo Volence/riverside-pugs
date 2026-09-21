@@ -21,8 +21,9 @@ describe('openDb', () => {
       'match_live_players', 'match_maps',
       'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
       'matches', 'matchmaker_state',
-      'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings', 'players',
-      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'twitch_status',
+      'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
+      'player_steam_signals', 'players',
+      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'steam_signal_alerts', 'twitch_status',
     ]);
   });
 

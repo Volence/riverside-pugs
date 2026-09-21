@@ -360,4 +360,25 @@ describe('mergePlayers', () => {
     expect((db.prepare('SELECT handle FROM player_links WHERE player_id = ?').get(MAIN) as any).handle).toBe('main_handle');
     expect((db.prepare('SELECT is_live FROM twitch_status WHERE player_id = ?').get(MAIN) as any).is_live).toBe(1);
   });
+
+  it('drops the losing account\'s Steam signals, which describe a different Steam account', () => {
+    const signals = db.prepare('INSERT INTO player_steam_signals (steamid, vac_bans, steam_level, checked_at) VALUES (?, ?, ?, ?)');
+    signals.run(MAIN, 0, 30, '2026-09-20T00:00:00.000Z');
+    signals.run(ALT, 2, 1, '2026-09-20T00:00:00.000Z');
+    db.prepare("INSERT INTO steam_signal_alerts (player_id, kind, marker, at) VALUES (?, 'recent_ban', '2', '2026-09-20T00:00:00.000Z')").run(ALT);
+
+    const plan = mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(plan.rowsByTable.player_steam_signals).toBe(1);
+    expect(db.prepare('SELECT vac_bans, steam_level FROM player_steam_signals WHERE steamid = ?').get(MAIN))
+      .toEqual({ vac_bans: 0, steam_level: 30 });
+    expect(db.prepare('SELECT 1 FROM player_steam_signals WHERE steamid = ?').get(ALT)).toBeUndefined();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM steam_signal_alerts').get()).toEqual({ n: 0 });
+  });
+
+  it('never hands the losing account\'s Steam signals to a survivor that has none', () => {
+    db.prepare("INSERT INTO player_steam_signals (steamid, vac_bans, checked_at) VALUES (?, 2, '2026-09-20T00:00:00.000Z')").run(ALT);
+    mergePlayers(db, { from: ALT, into: MAIN });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM player_steam_signals').get()).toEqual({ n: 0 });
+  });
 });
