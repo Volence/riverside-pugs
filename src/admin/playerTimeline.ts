@@ -2,6 +2,9 @@ import type { DB } from '../db.js';
 import { aliasesOf, resolveAlias } from '../aliases.js';
 import { inputAdapter } from './timeline/input.js';
 import { lilacAdapter } from './timeline/lilac.js';
+import { analyzerAdapter } from './timeline/analyzer.js';
+import { dropsAdapter } from './timeline/drops.js';
+import { steamAdapter } from './timeline/steam.js';
 import type { TimelineAdapter, TimelineItem } from './timeline/types.js';
 
 /** Every source, in no particular order: the result is sorted by time. A new
@@ -9,6 +12,9 @@ import type { TimelineAdapter, TimelineItem } from './timeline/types.js';
 export const ADAPTERS: TimelineAdapter[] = [
   inputAdapter,
   lilacAdapter,
+  analyzerAdapter,
+  dropsAdapter,
+  steamAdapter,
 ];
 
 /** Items on one file. Well above what a page shows, and a bound all the same. */

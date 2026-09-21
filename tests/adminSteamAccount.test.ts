@@ -264,7 +264,7 @@ describe('steam account over HTTP', () => {
     // added here on purpose, which is the moment to ask who can see it.
     const allowed = new Set([
       'src/steamSignals.ts', 'src/admin/steamAccount.ts', 'src/admin/players.ts', 'src/mergePlayers.ts',
-      'src/db.ts', 'src/server.ts',
+      'src/db.ts', 'src/server.ts', 'src/admin/timeline/steam.ts',
     ]);
     const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
