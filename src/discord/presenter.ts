@@ -33,17 +33,17 @@ export interface PlayerView {
 /** Mention when linked (Discord shows their server nickname), with the Steam
  *  name added beside it when their Discord name reads differently, so a
  *  reader who only knows one of the two names can still tell who this is.
- *  Plain Steam name, escaped, when unlinked. SR in brackets when they have
- *  one. */
+ *  Plain Steam name, escaped, when unlinked. Shared by playerLabel and
+ *  srChange, which differ only in what they append after this. */
+function mentionLabel(p: PlayerView): string {
+  if (!p.discordId) return escapeName(p.name);
+  if (p.discordName && !sameName(p.name, p.discordName)) return `<@${p.discordId}> (${escapeName(p.name)})`;
+  return `<@${p.discordId}>`;
+}
+
+/** mentionLabel with SR in brackets when the player has one. */
 export function playerLabel(p: PlayerView): string {
-  let who: string;
-  if (!p.discordId) {
-    who = escapeName(p.name);
-  } else if (p.discordName && !sameName(p.name, p.discordName)) {
-    who = `<@${p.discordId}> (${escapeName(p.name)})`;
-  } else {
-    who = `<@${p.discordId}>`;
-  }
+  const who = mentionLabel(p);
   return p.sr === null ? who : `${who} (${p.sr})`;
 }
 
@@ -296,7 +296,7 @@ export interface ResultView {
 }
 
 function srChange(p: ResultPlayer): string {
-  const who = p.discordId ? `<@${p.discordId}>` : escapeName(p.name);
+  const who = mentionLabel(p);
   if (p.srBefore === null || p.srAfter === null) return `${who} (not rated)`;
   const d = p.srAfter - p.srBefore;
   return `${who} ${p.srAfter} (${d >= 0 ? '+' : ''}${d})`;

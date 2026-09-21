@@ -176,6 +176,22 @@ describe('renderResult', () => {
     });
     expect(text(p)).toContain('Draw');
   });
+
+  it('names both the steam and discord identity when they differ, mention alone when they do not, and the escaped steam name when unlinked', () => {
+    const p = renderResult({
+      matchId: 1, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 5, scoreB: 5, winner: 'draw',
+      teamA: [
+        { name: 'mira', discordId: '111', discordName: 'br1', srBefore: 1200, srAfter: 1180 },
+        { name: 'js', discordId: '222', discordName: 'JS', srBefore: 900, srAfter: 925 },
+      ],
+      teamB: [{ name: 'b*o_b', discordId: null, srBefore: 800, srAfter: 800 }],
+    });
+    const t = text(p);
+    expect(t).toContain('<@111> (mira) 1180 (-20)');
+    expect(t).toContain('<@222> 925 (+25)');
+    expect(t).not.toContain('<@222> (js)');
+    expect(t).toContain('b\\\\*o\\\\_b 800 (+0)');
+  });
 });
 
 describe('copy rules', () => {
