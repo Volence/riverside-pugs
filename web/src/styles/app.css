@@ -1542,8 +1542,10 @@ body.is-theater { overflow: hidden; }
  * wrap; and because a phone is narrower than any wrapping can fix, the action
  * column stays pinned to the right edge while the rest scrolls under it. */
 .admin-table--recent .admin-pauses { white-space: normal; min-width: 11rem; }
-.admin-table--recent td:last-child,
-.admin-table--recent th:last-child { position: sticky; right: 0; background: var(--surface); }
+/* The pin itself, as a modifier: Needs a look has the same shape and the same
+ * problem, its Looked at button being the column a phone scrolls away. */
+.admin-table--pin-last td:last-child,
+.admin-table--pin-last th:last-child { position: sticky; right: 0; background: var(--surface); }
 .admin-table tr.is-clickable { cursor: pointer; }
 .admin-tag {
   margin-left: 0.5em; padding: 0 0.35em; border: 1px solid var(--rating); color: var(--rating);

@@ -39,4 +39,16 @@ describe('app.css', () => {
     expect(unclosed, 'blocks opened and never closed, by line').toEqual([]);
     expect(extra, 'closing braces with nothing open, by line').toEqual([]);
   });
+
+  // An action column inside the sideways scroll of a phone-width table is an
+  // action nobody can reach. Two tables need it, so the rule is a modifier
+  // rather than something scoped to whichever table asked for it first.
+  it('pins the last column of a table that asks for it, whichever table that is', () => {
+    const rule = css.match(/\.admin-table--pin-last[^{]*\{[^}]*\}/);
+    expect(rule, '.admin-table--pin-last is not defined').toBeTruthy();
+    expect(rule![0]).toContain('position: sticky');
+    expect(rule![0]).toContain('right: 0');
+    // Scoped to the modifier, never to one table's own class.
+    expect(css).not.toMatch(/\.admin-table--recent[^,{]*last-child/);
+  });
 });

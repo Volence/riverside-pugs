@@ -178,7 +178,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
       <p class="muted">Voiding removes a match from every stat and rebuilds the season's ratings without it. It cannot be undone from here.</p>
       {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
         <div class="table-wrap">
-          <table class="admin-table admin-table--recent">
+          <table class="admin-table admin-table--recent admin-table--pin-last">
             <thead><tr><th>Match</th><th class="num">Score</th><th>Odds</th><th>Pauses</th><th>Ready-ups</th><th>Ended</th><th /></tr></thead>
             <tbody>
               {data.recent.map((m) => (

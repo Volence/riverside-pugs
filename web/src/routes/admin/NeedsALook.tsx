@@ -49,7 +49,7 @@ export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
         {data && players.length === 0 && <Empty>Nothing is waiting to be looked at.</Empty>}
         {players.length > 0 && (
           <div class="table-wrap">
-            <table class="admin-table">
+            <table class="admin-table admin-table--pin-last">
               <thead>
                 <tr>
                   <th>Player</th>

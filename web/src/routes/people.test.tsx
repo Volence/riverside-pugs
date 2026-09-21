@@ -99,6 +99,9 @@ describe('Needs a look', () => {
     expect(within(row).getByText(/3 of 40/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '1 open ticket' }).getAttribute('href'))
       .toBe('/admin/people/tickets');
+    // Same pin as Recent results: the Looked at button is the last column,
+    // and a phone would otherwise leave it inside the sideways scroll.
+    expect(row.closest('table')!.classList.contains('admin-table--pin-last')).toBe(true);
   });
 
   it('marks a file looked at from the list', async () => {

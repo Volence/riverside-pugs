@@ -314,11 +314,18 @@ describe('the live board', () => {
       ...emptyOverview,
       servers: [{ id: 1, name: 'Dallas', host: '1.2.3.4', port: 27015, status: 'live', enabled: 1, tvEnabled: 0, tvPort: null, tvPassword: null }],
       queue: [{ steamid: '9', name: 'queued', avatar: null }],
+      recent: [{
+        id: 42, campaign: 'no_mercy', teamAScore: 800, teamBScore: 600, winner: 'A',
+        endedAt: '2026-09-21T18:00:00.000Z', forecast: null, pauses: [], readyups: [],
+      }],
     });
     render(<AdminLive />);
     expect(await screen.findByRole('heading', { name: 'Servers' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Queue' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Recent results' })).toBeTruthy();
     expect(screen.getByText('queued')).toBeTruthy();
+    // The Void button lives in the last column, and at phone width the rest
+    // of the table scrolls sideways under it.
+    expect(document.querySelector('.admin-table--recent.admin-table--pin-last')).toBeTruthy();
   });
 });
