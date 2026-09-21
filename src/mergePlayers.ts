@@ -43,12 +43,36 @@ const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
   ['match_live_map_stats', 'player_id'],
   ['match_readyup_players', 'player_id'],
+  // Both predate this branch. player_id is the whole key on twitch_status and
+  // part of it on player_links, so the same keep-the-occupied-slot rule
+  // applies: whichever account already has a link for a platform, or a
+  // cached Twitch row, keeps it.
+  ['player_links', 'player_id'],
+  ['twitch_status', 'player_id'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
  *  a fault. Routes turn this into a 400 and let everything else be a 500, so
  *  a programming error is never disguised as bad input. */
 export class MergeError extends Error {}
+
+/** Every (table, column) pair the merge rewrites when folding `from` into
+ *  `into`: PLAIN and KEYED, plus the tables handled by hand because their key
+ *  or their arithmetic does not fit either list. A test enumerates every
+ *  foreign key that actually points at players and checks it against this,
+ *  so a table added later without being taught to the merge fails loudly
+ *  instead of throwing at merge time on whoever happens to hold a row in it. */
+export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
+  ...PLAIN,
+  ...KEYED,
+  ['match_players', 'player_id'],
+  ['match_player_stats', 'player_id'],
+  ['player_ratings', 'player_id'],
+  ['rating_history', 'player_id'],
+  ['player_aliases', 'canonical_id'],
+  ['endorsements', 'from_id'],
+  ['endorsements', 'to_id'],
+];
 
 export interface MergePlan {
   from: string;

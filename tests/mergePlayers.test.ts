@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, ensureRating, currentSeasonId } from '../src/players.js';
-import { mergePlayers } from '../src/mergePlayers.js';
+import { mergePlayers, MERGE_HANDLED_PLAYER_COLUMNS } from '../src/mergePlayers.js';
 
 const MAIN = '76561198005192652';
 const ALT = '76561199861598482';
@@ -199,5 +199,44 @@ describe('mergePlayers', () => {
       expect((db.prepare('SELECT from_id, to_id FROM endorsements WHERE match_id = 1 AND from_id = ?').get(ALT) as any))
         .toEqual({ from_id: ALT, to_id: OTHER });
     });
+  });
+
+  // Predates this branch: player_links and twitch_status were added to the
+  // schema with a foreign key on players and never taught to the merge, so
+  // an alt's socials and Twitch cache silently stayed behind under a steamid
+  // that no longer resolved to anyone.
+  it('handles every foreign key that points at players', () => {
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[])
+      .map((r) => r.name);
+    const refs: [string, string][] = [];
+    for (const table of tables) {
+      const fks = db.prepare(`PRAGMA foreign_key_list(${table})`).all() as { table: string; from: string }[];
+      for (const fk of fks) if (fk.table === 'players') refs.push([table, fk.from]);
+    }
+    for (const ref of refs) expect(MERGE_HANDLED_PLAYER_COLUMNS).toContainEqual(ref);
+  });
+
+  it('moves player_links and twitch_status onto the surviving account', () => {
+    db.prepare("INSERT INTO player_links (player_id, platform, handle) VALUES (?, 'twitter', 'alt_handle')").run(ALT);
+    db.prepare("INSERT INTO twitch_status (player_id, is_live, checked_at) VALUES (?, 0, datetime('now'))").run(ALT);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect((db.prepare('SELECT handle FROM player_links WHERE player_id = ?').get(MAIN) as any).handle).toBe('alt_handle');
+    expect(db.prepare('SELECT 1 FROM twitch_status WHERE player_id = ?').get(MAIN)).toBeTruthy();
+    expect(db.prepare('SELECT 1 FROM player_links WHERE player_id = ?').get(ALT)).toBeUndefined();
+    expect(db.prepare('SELECT 1 FROM twitch_status WHERE player_id = ?').get(ALT)).toBeUndefined();
+  });
+
+  it('keeps the surviving account row for player_links and twitch_status when both already have one', () => {
+    db.prepare("INSERT INTO player_links (player_id, platform, handle) VALUES (?, 'twitter', 'main_handle')").run(MAIN);
+    db.prepare("INSERT INTO player_links (player_id, platform, handle) VALUES (?, 'twitter', 'alt_handle')").run(ALT);
+    db.prepare("INSERT INTO twitch_status (player_id, is_live, checked_at) VALUES (?, 1, datetime('now'))").run(MAIN);
+    db.prepare("INSERT INTO twitch_status (player_id, is_live, checked_at) VALUES (?, 0, datetime('now'))").run(ALT);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect((db.prepare('SELECT handle FROM player_links WHERE player_id = ?').get(MAIN) as any).handle).toBe('main_handle');
+    expect((db.prepare('SELECT is_live FROM twitch_status WHERE player_id = ?').get(MAIN) as any).is_live).toBe(1);
   });
 });
