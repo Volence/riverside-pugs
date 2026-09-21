@@ -95,8 +95,9 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
   app.post('/api/mod/tickets/:id/reopen', act('ticket_reopen', (id, me) => reopenTicket(db, id, me)));
   app.post('/api/mod/tickets/:id/ban', act('ticket_ban', (id, me, b) => {
     const r = banFromTicket(db, id, me, b.reason, b.minutes);
-    // Out of the queue at once, as the Players tab ban does.
-    if (r.ok) matchmaker.leave(getTicketRow(db, id)!.target_id);
+    // Out of the queue AND out of any ready check or vote in progress, as the
+    // Players tab ban does. leave() only knows about the queue.
+    if (r.ok) matchmaker.remove(getTicketRow(db, id)!.target_id);
     return r;
   }, (b) => ({ reason: b.reason, minutes: b.minutes ?? null })));
 }

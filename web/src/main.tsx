@@ -66,7 +66,7 @@ function App() {
 
   return (
     <>
-      <Nav session={session} state={state} />
+      <Nav session={session} state={state} onSignedOut={refresh} />
       {/* Below the nav and above the router: it belongs to the shell, not to
           any page, and it is what keeps a running ready check visible while
           you are reading the leaderboard. It also owns data-urgent and the

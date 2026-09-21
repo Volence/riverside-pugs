@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import { statusShowsAbandoner } from './abandon.js';
+import { publishAdminEvent } from './adminFeed.js';
 import { getSetting } from './settings.js';
 import type { DB } from './db.js';
 import type { RconClient, RconOpts } from './rcon.js';
@@ -16,11 +18,23 @@ import { CAMPAIGNS, isMapName } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { stopAfterMap } from './stopPoint.js';
+import { pushLogSecret } from './logAuth.js';
+
+/** What one attempt to collect a match came to.
+ *   completed  persisted, rated and released.
+ *   retry      nothing usable came back (rcon down, mangled or foreign dump);
+ *              the match is still live and worth asking again.
+ *   not_ended  the plugin answered, authenticated, and says the match is NOT
+ *              over. Asking again will not change that, and the give-up path
+ *              behind the retries aborts the match and releases its box, so
+ *              the caller must stop here rather than count this as a failure.
+ *   skipped    nothing to do: no such match, or it is not live. */
+export type FinishOutcome = 'completed' | 'retry' | 'not_ended' | 'skipped';
 
 /** Sub-project 2b's SourcePawn plugin is the server-side counterpart. */
 export interface Orchestrator {
   setupMatch(matchId: number): Promise<void>;
-  finishMatch(matchId: number): Promise<void>;
+  finishMatch(matchId: number): Promise<FinishOutcome | void>;
 }
 
 /** Stub used in dev mode. Makes no real server contact. */
@@ -92,6 +106,19 @@ export class RealOrchestrator implements Orchestrator {
     this.beforeLive = deps.beforeLive;
   }
 
+  /** Give the box its log secret, when it has one. Never fatal: a match is
+   *  not worth losing over this, and a box that ends up unsigned shows in the
+   *  server panel's counters (and, in enforce mode, in the admin feed). */
+  private async pushSecret(rcon: RconClient, server: ServerRow): Promise<void> {
+    if (!server.log_secret) return;
+    try {
+      const known = await pushLogSecret(rcon, server.log_secret);
+      if (!known) console.warn(`[orchestrator] ${server.name} does not know sm_pug_log_secret (plugins older than log signing?)`);
+    } catch (err) {
+      console.error(`[orchestrator] pushing the log secret to ${server.name} failed (non-fatal):`, err);
+    }
+  }
+
   private async connectRcon(server: ServerRow): Promise<RconClient> {
     const opts = this.makeRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
     const client = new RealRcon(opts);
@@ -131,6 +158,7 @@ export class RealOrchestrator implements Orchestrator {
     try {
       rcon = await this.connectRcon(server);
       await rcon.exec(`logaddress_add ${this.logPublicAddress}`);
+      await this.pushSecret(rcon, server);
       await rcon.exec('exec pug_match');
       // The first line of the in-game ready-up panel. After pug_match, whose
       // rotoblin_pug_4v4.cfg sets the generic "Riverside PUG"; nothing on the
@@ -231,6 +259,10 @@ export class RealOrchestrator implements Orchestrator {
     let rcon: RconClient | null = null;
     try {
       rcon = await this.connectRcon(server);
+      // A match started in game never goes through setupMatch, so this is the
+      // one connection it gets. The box normally has its secret already (the
+      // plugins keep it across restarts); this covers one that lost it.
+      await this.pushSecret(rcon, server);
       await expectPugOk(rcon, `sm_pug_setid ${token} ${matchId}`);
     } finally {
       rcon?.close();
@@ -276,33 +308,55 @@ export class RealOrchestrator implements Orchestrator {
     }
   }
 
-  async finishMatch(matchId: number): Promise<void> {
+  async finishMatch(matchId: number): Promise<FinishOutcome> {
     const match = this.db
       .prepare('SELECT id, state, campaign, server_id, token FROM matches WHERE id = ?')
       .get(matchId) as MatchRow | undefined;
-    if (!match || match.state !== 'live' || match.server_id === null || match.token === null) return;
+    if (!match || match.state !== 'live' || match.server_id === null || match.token === null) return 'skipped';
     const server = getServer(this.db, match.server_id);
-    if (!server) return;
+    if (!server) return 'skipped';
 
     let rcon: RconClient | null = null;
     let persisted = false;
     let dump: Dump | null = null;
     try {
       rcon = await this.connectRcon(server);
-      const body = await rcon.exec(`sm_pug_dump ${match.token}`);
-      dump = parseDump(body);
+      // A fresh nonce per pull, as a second argument. pug-match 0.3.3 echoes it
+      // (and its match state) on the DUMP and END lines, which is what ties
+      // the block we parse to THIS request. Older plugins read argument 1
+      // only (TokenArgOk) and ignore the rest, so this costs them nothing, and
+      // parseDump reads their nonce-less answer exactly as before.
+      const nonce = randomBytes(8).toString('hex');
+      const body = await rcon.exec(`sm_pug_dump ${match.token} ${nonce}`);
+      dump = parseDump(body, { nonce });
       if (!dump) {
         console.error(`[orchestrator] unparseable dump for match ${matchId}; leaving live for retry`);
-        return;
+        return 'retry';
       }
       if (dump.matchId !== matchId) {
         console.error(`[orchestrator] dump match id ${dump.matchId} != expected ${matchId}; leaving live for retry`);
-        return;
+        return 'retry';
+      }
+      // WriteDump answers in ANY match state, and we only get here because a
+      // MATCH_END line arrived over UDP. That line needs the token, but the
+      // token crosses the same cleartext stream, so a forged one used to
+      // complete and rate a match at whatever the score was at that moment.
+      // A plugin that echoes our nonce also says what state it is in, and only
+      // `ended` is a result. Nothing is persisted, nothing is aborted, and the
+      // box is not released: the match carries on, and the real MATCH_END
+      // collects it. An older plugin says nothing and is believed as before.
+      if (dump.nonce && dump.state !== 'ended') {
+        console.error(`[orchestrator] match ${matchId}: MATCH_END arrived but the plugin says state=${dump.state}; NOT completing`);
+        publishAdminEvent({
+          kind: 'problem', matchId,
+          text: `Match #${matchId}: a MATCH_END line arrived, but ${server.name} itself says the match is ${dump.state}, not ended. Nothing was completed or rated and the match carries on. A real end cannot look like this, so treat that line as forged and the match token as known to someone.`,
+        });
+        return 'not_ended';
       }
       persisted = completeMatch(this.db, matchId, dump);
       if (!persisted) {
         console.error(`[orchestrator] match ${matchId} was not completable (state changed?); skipping`);
-        return;
+        return 'skipped';
       }
       try {
         await rcon.exec(`sm_pug_abort ${match.token}`);
@@ -348,7 +402,9 @@ export class RealOrchestrator implements Orchestrator {
         const winnerText = dump.winner === 'draw' ? 'Draw' : dump.winner === 'a' ? 'Team A wins' : 'Team B wins';
         this.notify(`🏁 Match #${matchId} final: Team A ${dump.totalA}, Team B ${dump.totalB}. ${winnerText}!`);
       }
+      return 'completed';
     }
+    return 'retry';
   }
 }
 

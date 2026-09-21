@@ -105,15 +105,35 @@ describe('mergePlayers', () => {
     rosters(1, MAIN, 'a');
     rosters(1, ALT, 'a');
     rosters(1, OTHER, 'b');
+    // Two more, so that the match is still a 2v2 once MAIN and ALT are one
+    // person: anything smaller is not rated at all (MIN_RATED_PER_TEAM).
+    for (const [id, team] of [['76561197960000001', 'a'], ['76561197960000002', 'b']] as const) {
+      upsertPlayer(db, { steamid: id, name: 'filler', avatar: null }, []);
+      rosters(1, id, team);
+    }
 
     mergePlayers(db, { from: ALT, into: MAIN });
 
     const ratings = db.prepare('SELECT player_id FROM player_ratings WHERE season_id = ? ORDER BY player_id')
       .all(currentSeasonId(db)) as any[];
-    expect(ratings.map((r) => r.player_id)).toEqual([MAIN, OTHER].sort());
+    expect(ratings.map((r) => r.player_id)).toEqual(['76561197960000001', '76561197960000002', MAIN, OTHER].sort());
     // Rebuilt from the merged rosters, so the win is counted once.
     const hist = db.prepare('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?').get(MAIN) as any;
     expect(hist.n).toBe(1);
+  });
+
+  // The ghost row is the one the dump never named, so it is the one marked
+  // unrated. Which account carried it is an accident, and the person played.
+  it('keeps the merged player rated when either of the two rows was', () => {
+    match(1);
+    rosters(1, MAIN, 'b');
+    rosters(1, ALT, 'b');
+    db.prepare("UPDATE match_players SET rated = 0, unrated_reason = 'not_in_dump' WHERE player_id = ?").run(MAIN);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT rated, unrated_reason FROM match_players WHERE match_id = 1 AND player_id = ?').get(MAIN))
+      .toEqual({ rated: 1, unrated_reason: null });
   });
 
   it('carries scratch and audit rows across, and drops a duplicate rather than failing', () => {
@@ -359,5 +379,26 @@ describe('mergePlayers', () => {
 
     expect((db.prepare('SELECT handle FROM player_links WHERE player_id = ?').get(MAIN) as any).handle).toBe('main_handle');
     expect((db.prepare('SELECT is_live FROM twitch_status WHERE player_id = ?').get(MAIN) as any).is_live).toBe(1);
+  });
+
+  it('drops the losing account\'s Steam signals, which describe a different Steam account', () => {
+    const signals = db.prepare('INSERT INTO player_steam_signals (steamid, vac_bans, steam_level, checked_at) VALUES (?, ?, ?, ?)');
+    signals.run(MAIN, 0, 30, '2026-09-20T00:00:00.000Z');
+    signals.run(ALT, 2, 1, '2026-09-20T00:00:00.000Z');
+    db.prepare("INSERT INTO steam_signal_alerts (player_id, kind, marker, at) VALUES (?, 'recent_ban', '2', '2026-09-20T00:00:00.000Z')").run(ALT);
+
+    const plan = mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(plan.rowsByTable.player_steam_signals).toBe(1);
+    expect(db.prepare('SELECT vac_bans, steam_level FROM player_steam_signals WHERE steamid = ?').get(MAIN))
+      .toEqual({ vac_bans: 0, steam_level: 30 });
+    expect(db.prepare('SELECT 1 FROM player_steam_signals WHERE steamid = ?').get(ALT)).toBeUndefined();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM steam_signal_alerts').get()).toEqual({ n: 0 });
+  });
+
+  it('never hands the losing account\'s Steam signals to a survivor that has none', () => {
+    db.prepare("INSERT INTO player_steam_signals (steamid, vac_bans, checked_at) VALUES (?, 2, '2026-09-20T00:00:00.000Z')").run(ALT);
+    mergePlayers(db, { from: ALT, into: MAIN });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM player_steam_signals').get()).toEqual({ n: 0 });
   });
 });

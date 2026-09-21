@@ -132,4 +132,30 @@ describe('/report', () => {
     expect(JSON.stringify(def)).toContain('unsafe');
     expect(text(await run('report', { player: '905', reason: 'unsafe' }))).toMatch(/say what happened/i);
   });
+  // The web route has always required an active player. The command checked
+  // nothing, so a banned player could keep filing reports from Discord.
+  it('refuses a reporter who is banned, not yet active, or merged away, and files nothing', async () => {
+    const { banPlayer, unbanPlayer } = await import('../src/admin/players.js');
+    const { addAlias, removeAlias } = await import('../src/aliases.js');
+    play('a');
+    const filed = () => (db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get() as { n: number }).n;
+
+    banPlayer(db, IDS[0], IDS[1], 'toxic', 60);
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/banned/i);
+    unbanPlayer(db, IDS[0], IDS[1]);
+
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(IDS[0]);
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/not active/i);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(IDS[0]);
+
+    addAlias(db, { steamid: IDS[0], canonical: IDS[1], by: 'test' });
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/merged into another/i);
+
+    expect(filed()).toBe(0);
+    // And it was the standing that refused each time: the same command from
+    // the same player goes through once nothing is wrong with them.
+    removeAlias(db, IDS[0]);
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/reported player5/i);
+    expect(filed()).toBe(1);
+  });
 });

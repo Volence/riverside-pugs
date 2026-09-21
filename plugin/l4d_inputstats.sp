@@ -18,8 +18,9 @@
 #pragma newdecls required
 #include <sourcemod>
 #include <sdktools>
+#include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.2.0"
+#define PLUGIN_VERSION "0.2.1"
 
 /** A burst closes after this much silence. 30 ticks at 100 tick = 300ms.
  *  Measured, not guessed: a human sample containing one 31-second idle gap had
@@ -161,6 +162,8 @@ public void OnPluginStart()
 {
 	CreateConVar("l4d_inputstats_version", PLUGIN_VERSION, "Input stats version",
 		FCVAR_NOTIFY | FCVAR_DONTRECORD);
+	// Signs the L4DM lines once the backend has pushed a secret; see the include.
+	PugLogAuth_Init();
 	g_cvEnabled = CreateConVar("l4d_inputstats_enabled", "1",
 		"Capture and ship input burst timing.", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	// TEST ONLY. Bots press buttons, which makes them the only way to exercise
@@ -590,7 +593,7 @@ void EmitBurst(int client, int kind, const char[] weapon, int n, int groundTicks
 		// what lets the web tell a truncated capture from an uneventful round.
 		if (!g_bCapSent[client][kind]) {
 			g_bCapSent[client][kind] = true;
-			LogToGame("L4DM id=%s k=cap c=%s st=%d v=%d", id, g_sKind[kind], GetGameTickCount(), WIRE_VERSION);
+			PugLog("L4DM id=%s k=cap c=%s st=%d v=%d", id, g_sKind[kind], GetGameTickCount(), WIRE_VERSION);
 		}
 		return;
 	}
@@ -609,14 +612,15 @@ void EmitBurst(int client, int kind, const char[] weapon, int n, int groundTicks
  *
  * Longest possible line: about 120 bytes of fixed keys with every counter at
  * its widest and a 31 character weapon, plus 256 for d and 257 for h, is under
- * 650, and under 680 with the engine's stamp in front. That is inside
- * LogToGame's 1024 byte buffer and one UDP log datagram, with room. If
+ * 650, and under 680 with the engine's stamp in front, or 720 signed (PugLog
+ * adds at most 40). That is inside PugLog's 976 usable bytes, LogToGame's 1024
+ * byte buffer and one UDP log datagram, with room. If
  * MAX_INTERVALS is ever raised, this is the sum to redo.
  */
 void EmitLine(const char[] id, const char[] kind, const char[] weapon, int n, int groundTicks,
 	int airPresses, int serverTick, int clientTick, int serverSpan, const char[] d, const char[] h)
 {
-	LogToGame("L4DM id=%s k=%s w=%s n=%d g=%d a=%d st=%d ct=%d sp=%d v=%d d=%s h=%s",
+	PugLog("L4DM id=%s k=%s w=%s n=%d g=%d a=%d st=%d ct=%d sp=%d v=%d d=%s h=%s",
 		id, kind, weapon, n, groundTicks, airPresses, serverTick, clientTick, serverSpan,
 		WIRE_VERSION, d, h);
 }

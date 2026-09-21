@@ -38,6 +38,23 @@ export interface Dump {
   winner: 'a' | 'b' | 'draw';
   totalA: number;
   totalB: number;
+  /** The backend's nonce as the plugin echoed it, on BOTH the DUMP and the END
+   *  line, or null from a plugin older than 0.3.3, which echoes nothing.
+   *  Optional so hand-built dumps (dev simulation, tests) need not set it. */
+  nonce?: string | null;
+  /** The plugin's match state when it answered: `ended` is the only one a
+   *  result may be taken from. Null whenever `nonce` is. */
+  state?: DumpState | null;
+}
+
+/** StateName() in pug-match.sp, less `none`: with no match configured
+ *  sm_pug_dump answers PUGERR and there is no dump at all. */
+export const DUMP_STATES = ['pending', 'live', 'ended'] as const;
+export type DumpState = typeof DUMP_STATES[number];
+
+export interface ParseDumpOpts {
+  /** The nonce sent as sm_pug_dump's second argument. */
+  nonce?: string;
 }
 
 function kv(parts: string[]): Record<string, string> {
@@ -58,20 +75,56 @@ function intOf(s: string | undefined): number | null {
  * Parse the authoritative `sm_pug_dump` response. Strict: any malformed required
  * field yields null so the caller can retry the RCON pull rather than persist
  * garbage. Ignores unrelated console noise before the DUMP header.
+ *
+ * WHICH block is read depends on whether the plugin echoes the nonce.
+ *
+ * An RCON response carries whatever else reached the console while the
+ * command ran (see the `ready` probe in src/server.ts, whose first answer
+ * after a boot was another plugin's output and nothing else), so "the first
+ * line that starts with DUMP" is not necessarily the plugin answering THIS
+ * request. pug-match 0.3.3 repeats the caller's nonce on the DUMP and the END
+ * line. Given a nonce, the block read is the LAST one that carries it, and its
+ * END line has to carry it too; an answer in which some block has a nonce and
+ * none has ours is refused.
+ *
+ * An answer with no nonce anywhere is an older plugin, and is read exactly as
+ * it always was: first DUMP, first END after it. Web deploys before plugins
+ * and plugins roll out a box at a time, so that path has to keep working.
  */
-export function parseDump(body: string): Dump | null {
+export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   const lines = body
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const start = lines.findIndex((l) => l.startsWith('DUMP '));
-  if (start < 0) return null;
+  const headers: { i: number; nonce: string | null }[] = [];
+  lines.forEach((l, i) => {
+    if (l.startsWith('DUMP ')) headers.push({ i, nonce: kv(l.split(/\s+/).slice(1)).nonce ?? null });
+  });
+  if (headers.length === 0) return null;
+
+  let start = headers[0].i;
+  let nonce: string | null = null;
+  if (opts.nonce !== undefined) {
+    const ours = headers.filter((h) => h.nonce === opts.nonce);
+    if (ours.length > 0) {
+      start = ours[ours.length - 1].i;
+      nonce = opts.nonce;
+    } else if (headers.some((h) => h.nonce !== null)) {
+      return null;
+    }
+  }
 
   const header = kv(lines[start].split(/\s+/).slice(1));
   const matchId = intOf(header.match);
   if (matchId === null) return null;
   const skillDetect = header.skilldetect === '1';
+  // Only believed alongside our nonce: without one the line could be anybody's.
+  let state: DumpState | null = null;
+  if (nonce !== null) {
+    if (!(DUMP_STATES as readonly string[]).includes(header.state ?? '')) return null;
+    state = header.state as DumpState;
+  }
 
   const maps: DumpMap[] = [];
   const players: DumpPlayer[] = [];
@@ -111,11 +164,14 @@ export function parseDump(body: string): Dump | null {
       const a = intOf(rest.a), b = intOf(rest.b);
       if (a === null || b === null) return null;
       if (rest.winner !== 'a' && rest.winner !== 'b' && rest.winner !== 'draw') return null;
+      // The END line closes the block only if it is the same answer: a block
+      // that opens with our nonce and ends without it was spliced.
+      if (nonce !== null && (rest.nonce !== nonce || rest.state !== state)) return null;
       end = { winner: rest.winner, totalA: a, totalB: b };
       break;
     }
   }
 
   if (!end) return null;
-  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB };
+  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state };
 }

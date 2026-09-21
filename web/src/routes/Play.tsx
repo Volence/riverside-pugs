@@ -310,9 +310,12 @@ export function LobbyNotice(
     <Panel>
       <div class="lobby-notice">
         <div>
-          <h3>Ready check failed</h3>
+          <h3>{notice.removed ? 'Pop cancelled' : 'Ready check failed'}</h3>
           <p>
-            {notice.youWereReady ? (
+            {notice.removed ? (
+              <>The pop was cancelled because {notice.removed.name} was removed from it by an admin.
+                You went back to the front of the queue.</>
+            ) : notice.youWereReady ? (
               <>You readied up. The pop was cancelled because {missing || 'someone'} did not,
                 and you went back to the front of the queue.</>
             ) : (

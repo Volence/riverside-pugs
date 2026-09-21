@@ -181,6 +181,39 @@ function lineBody(text: string): string {
   return (stamp ? text.slice(stamp.index + stamp[0].length) : text).split('\n', 1)[0].trimEnd();
 }
 
+/** What pug-logauth.inc appends to a line once the backend has pushed the
+ *  server a secret: a boot stamp and a per-server counter, then the first four
+ *  bytes of HMAC-SHA1 over everything on the line before " mac=". `lseq`, not
+ *  `seq`, because EVENT and CHAT already have a per-match `seq=`. */
+const AUTH_TRAILER_RE = / lseq=(\d{1,10})\.(\d{1,10}) mac=([0-9a-f]{8})$/;
+
+export interface LogAuthTrailer {
+  /** The exact bytes the MAC covers: the line from just after the engine's
+   *  stamp up to, not including, " mac=". */
+  signed: Buffer;
+  boot: number;
+  seq: number;
+  mac: string;
+}
+
+/**
+ * The signature trailer of a datagram, or null when the line has none.
+ *
+ * Read from the BYTES, through latin1, which maps every byte to one character
+ * and back. The grammar below decodes as UTF-8, and a name or a chat message
+ * that is not valid UTF-8 comes out of that with replacement characters, which
+ * re-encode to different bytes than the plugin signed.
+ *
+ * Checking the MAC is src/logAuth.ts's business; this only finds it.
+ */
+export function readLogAuthTrailer(buf: Buffer): LogAuthTrailer | null {
+  const line = lineBody(buf.toString('latin1'));
+  const m = AUTH_TRAILER_RE.exec(line);
+  if (!m) return null;
+  const signed = Buffer.from(line.slice(0, line.length - ' mac='.length - m[3].length), 'latin1');
+  return { signed, boot: Number(m[1]), seq: Number(m[2]), mac: m[3] };
+}
+
 /** Anchored at BOTH ends, and the name is greedy, so the fields read are the
  *  last `<uid><steamid><team>` on the line: the engine's own. A name that
  *  contains a whole fake suffix only ends up inside the name group. A `say`
@@ -324,7 +357,10 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
  * player on the box was a complete, correctly addressed match line.
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {
-  const line = lineBody(buf.toString('utf8'));
+  // The signature trailer is taken off before anything reads the line, in
+  // every mode: name= and msg= run to the end of the line and would swallow
+  // it, and kv() is last-wins, so nothing after them may reach the grammar.
+  const line = lineBody(buf.toString('utf8')).replace(AUTH_TRAILER_RE, '');
   const pinned = parseSourcePinned(line);
   if (pinned !== undefined) return pinned;
   if (!line.startsWith('PUG ')) return null;

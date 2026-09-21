@@ -137,4 +137,36 @@ describe('admin feed', () => {
     await feed.idle();
     expect(text(0)).toMatch(/changed the invite_code setting/i);
   });
+
+  it('a recent ban elsewhere is worded as context and links the match', async () => {
+    publishAdminEvent({
+      kind: 'steam_signal', steamid: IDS[2], matchId,
+      signal: { what: 'recent_ban', vacBans: 1, gameBans: 2, daysSinceLastBan: 40 },
+    });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**player2**');
+    expect(line).toContain('1 VAC ban and 2 game bans');
+    expect(line).toContain('40 days ago');
+    expect(line).toContain(`[#${matchId}](https://pug.test/match/${matchId})`);
+    expect(line).toContain('Steam does not say which game');
+  });
+
+  it('a game borrowed from a banned account names the lender', async () => {
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(IDS[6]);
+    publishAdminEvent({ kind: 'steam_signal', steamid: IDS[2], matchId, signal: { what: 'banned_lender', lenderId: IDS[6] } });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**player2**');
+    expect(line).toContain('**player6**');
+    expect(line).toContain('Family Sharing');
+    expect(line).toContain('banned here');
+  });
+
+  it('steam signals ride the problems toggle', async () => {
+    setSetting(db, 'admin_feed_problems', '0');
+    publishAdminEvent({ kind: 'steam_signal', steamid: IDS[2], matchId, signal: { what: 'banned_lender', lenderId: IDS[6] } });
+    await feed.idle();
+    expect(t.live()).toHaveLength(0);
+  });
 });

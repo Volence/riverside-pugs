@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
+import { inGoodStanding } from '../standing.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess } from './store.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other'] as const;
@@ -43,7 +44,12 @@ function findOrOpen(
  */
 export function fileReport(db: DB, reporter: string, body: FileBody, deps: FilingDeps): FileResult {
   const now = deps.now ?? new Date();
-  if (getPlayer(db, reporter)?.status !== 'active') return fail(403, 'not an active player');
+  // Here rather than in each caller, and through the one predicate every
+  // surface shares: active, no ban in force, and not a SteamID that has been
+  // merged into another account. The website's guard and the Discord command
+  // both check this before they get here, and the day a third surface forgets
+  // to, this is what stops a banned player filing reports from it.
+  if (!inGoodStanding(db, reporter, now)) return fail(403, 'not an active player');
   if (typeof body.targetId !== 'string' || !body.targetId) return fail(400, 'pick a player');
   if (body.targetId === reporter) return fail(400, 'you cannot report yourself');
   const target = getPlayer(db, body.targetId);

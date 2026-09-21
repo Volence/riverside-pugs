@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { api, type Me } from '../api';
+import { api, ApiError, type Me } from '../api';
 
 /** Where a backend-only route must be reached by a full navigation. preact-iso
  *  intercepts same-origin clicks unless target is set (see SignIn in Play). */
@@ -8,13 +8,19 @@ const BACKEND = { target: '_top', rel: 'noopener' } as const;
 /** Connect or disconnect Discord, for the signed-in player's own profile. */
 export function DiscordLinkCard({ me, onChange }: { me: Me; onChange?: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   if (!me.discordEnabled) return null;
 
   const unlink = async () => {
     setBusy(true);
+    setError(null);
     try {
       await api.unlinkDiscord();
       onChange?.();
+    } catch (err) {
+      // Refused while banned, timed out, queued or in a match; the backend
+      // says which.
+      setError(err instanceof ApiError ? err.message : 'Could not disconnect Discord.');
     } finally {
       setBusy(false);
     }
@@ -27,6 +33,7 @@ export function DiscordLinkCard({ me, onChange }: { me: Me; onChange?: () => voi
         <>
           <span class="discordlink__name">{me.discord.name}</span>
           <button class="btn btn--ghost" onClick={unlink} disabled={busy}>Disconnect</button>
+          {error && <span class="error">{error}</span>}
         </>
       ) : (
         <>

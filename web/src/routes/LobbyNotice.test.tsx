@@ -31,6 +31,16 @@ describe('LobbyNotice', () => {
     expect(body).not.toMatch(/abe/);
   });
 
+  it('says the pop was cancelled because a player was removed, and blames nobody for not readying', () => {
+    render(<LobbyNotice notice={{ notReady: [], youWereReady: true, removed: p('mallory') }} refresh={() => {}} />);
+    const body = document.body.textContent ?? '';
+    expect(body).toMatch(/pop cancelled/i);
+    expect(body).toMatch(/mallory was removed/i);
+    expect(body).toMatch(/front of the queue/i);
+    expect(body).not.toMatch(/ready check failed/i);
+    expect(body).not.toMatch(/did not/i);
+  });
+
   // Called rather than counted: @testing-library/preact replays a click onto
   // earlier renders in the same file, so an exact count measures the harness
   // and not this component. What stops a real double submit is the button

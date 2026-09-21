@@ -6,7 +6,7 @@ import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
 import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
-import { linkPrompt } from './controller.js';
+import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
@@ -14,6 +14,8 @@ export interface CommandDeps {
   db: DB;
   matchmaker: Matchmaker;
   publicUrl: string;
+  /** The ban explanation (reason, expiry), as the button controller has it. */
+  banMessage?: (steamid: string) => string;
   adminSteamIds?: string[];
 }
 
@@ -200,8 +202,12 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
 
 /** Always private: nobody else in the channel learns who reported whom. */
 function report(deps: CommandDeps, i: Cmd): InteractionReply {
-  const reporter = playerByDiscordId(deps.db, i.userId);
-  if (!reporter) return linkPrompt({ ...deps }, i.userId, i.userName);
+  // The same door the buttons use: linked, active, not banned, not merged
+  // away. The web route has always required an active player; this checked
+  // only that the Discord account was linked to somebody.
+  const who = resolve(deps, i);
+  if ('reply' in who) return who.reply;
+  const reporter = who.player;
   const target = playerByDiscordId(deps.db, i.options.player ?? '');
   if (!target) {
     return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report on their profile on the website instead.' });

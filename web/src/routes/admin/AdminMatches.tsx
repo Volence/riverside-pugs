@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type AdminOverview, type Forecast } from '../../api';
+import { adminApi, type AdminOverview, type Forecast, type LogAuthMode, type ServerLogAuth } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
@@ -88,7 +88,7 @@ export function AdminMatches() {
           {data.servers.length === 0 ? <Empty>No servers.</Empty> : (
             <div class="table-wrap">
             <table class="admin-table admin-table--servers">
-              <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>Restart after match</th><th>SourceTV</th><th /></tr></thead>
+              <thead><tr><th>Server</th><th>Status</th><th>In pool</th><th>Restart after match</th><th>SourceTV</th><th>Log signing</th><th /></tr></thead>
               <tbody>
                 {data.servers.map((s) => (
                   <tr key={s.id} class={s.enabled === 1 ? undefined : 'is-dim'}>
@@ -118,6 +118,7 @@ export function AdminMatches() {
                     </td>
                     <td><RestartCell server={s} busy={busy} run={run} /></td>
                     <td><SourceTvCell server={s} busy={busy} run={run} /></td>
+                    <td><LogAuthCell server={s} busy={busy} run={run} /></td>
                     <td>{s.status !== 'idle' && (
                       <button class="chip" disabled={busy}
                         onClick={() => run(() => adminApi.serverIdle(s.id), {
@@ -295,6 +296,68 @@ function RestartCell({ server: s, busy, run }: {
             },
         )}>{on ? 'Turn off' : 'Turn on'}</button>
     </>
+  );
+}
+
+/**
+ * Signed log lines, per server.
+ *
+ * Everything a game server reports arrives as UDP log lines, and a UDP sender
+ * address can be forged. A server that has been given a secret signs its
+ * lines, and the mode says what happens to one that fails the check: `off`
+ * believes everything as before, `log` counts failures and still believes
+ * them, `enforce` drops them.
+ *
+ * The order that works, one box at a time: give it a secret, stage the new
+ * plugins, set `log`, play a match and watch `unsigned` stop climbing, then
+ * `enforce`. The counters are since the website last restarted.
+ */
+function LogAuthCell({ server: s, busy, run }: {
+  server: { id: number; name: string; logAuth?: ServerLogAuth };
+  busy: boolean;
+  run: Run;
+}) {
+  const la = s.logAuth;
+  if (!la) return null;
+  const c = la.counters;
+  const tone = la.mode === 'enforce' ? 'idle' : la.mode === 'log' ? 'reserved' : 'offline';
+  return (
+    <div class="admin-logauth">
+      <span class={`admin-status admin-status--${tone}`}>{la.mode}</span>{' '}
+      {!la.hasSecret ? (
+        <button class="chip" disabled={busy}
+          onClick={() => run(() => adminApi.serverLogSecret(s.id), {
+            title: `Give ${s.name} a log secret?`,
+            body: 'A secret is generated and pushed to the server over rcon. Nothing is checked until you change the mode, '
+              + 'and servers still on the old plugins ignore it.',
+            confirmLabel: 'Generate and push',
+          })}>Set up</button>
+      ) : (
+        <>
+          <select aria-label={`Log signing mode for ${s.name}`} disabled={busy} value={la.mode}
+            onChange={(e) => {
+              const mode = (e.currentTarget as HTMLSelectElement).value as LogAuthMode;
+              void run(() => adminApi.serverLogAuth(s.id, mode), mode === 'enforce' ? {
+                title: `Drop unsigned log lines from ${s.name}?`,
+                body: 'Every line that is unsigned, badly signed or replayed will be ignored, including evidence. '
+                  + 'Only do this once the unsigned count has stopped climbing in log mode with the new plugins staged.',
+                confirmLabel: 'Enforce',
+              } : undefined);
+            }}>
+            <option value="off">off</option>
+            <option value="log">log</option>
+            <option value="enforce">enforce</option>
+          </select>{' '}
+          <button class="chip" disabled={busy} title="Send the same secret to the server again, for one that lost it"
+            onClick={() => run(() => adminApi.serverLogSecret(s.id))}>Push again</button>
+        </>
+      )}
+      {la.hasSecret && c && (
+        <div class="muted mono" title="Since the website last restarted">
+          ok {c.ok} · unsigned {c.missing} · bad {c.badMac} · replayed {c.replay}
+        </div>
+      )}
+    </div>
   );
 }
 

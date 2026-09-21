@@ -38,7 +38,9 @@ import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
+import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
+import { renewSession } from './session.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
@@ -46,14 +48,15 @@ import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestr
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
-import { resolveServerBySource, type ServerRow } from './serverPool.js';
+import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
 import { rconRestarter, type ServerRestarter } from './serverRestart.js';
-import { LogListener } from './logListener.js';
+import { LogListener, type LogMeta } from './logListener.js';
+import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
 import {
@@ -89,6 +92,10 @@ export interface ServerDeps {
    *  means "no Twitch even though it is configured", which is how a test keeps
    *  the poller from starting. */
   twitchApi?: TwitchApi | null;
+  /** Every Steam Web API call the signals and the persona backfill make.
+   *  Injected in tests, which also keeps the background refresher from
+   *  starting; production leaves it out and gets the real fetch. */
+  steamFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
   /** Runs a batch of console commands on one server, for the ban sync.
@@ -115,6 +122,9 @@ export interface ServerDeps {
    *  route. Injected in tests so the check never dials a real box; defaults
    *  to the real serverHasDlc4 otherwise. */
   dlc4Probe?: (server: ServerRow) => Promise<boolean>;
+  /** Pushes one server its log secret, for the admin's log-secret route.
+   *  Injected in tests so it never dials a real box. */
+  logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -150,14 +160,19 @@ export async function finishWithRetry(
     (db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as
       { state: string } | undefined)?.state === 'live';
 
-  await orchestrator.finishMatch(matchId);
+  // `not_ended` is not a failed collection, and must not be treated as one:
+  // the plugin answered, and what it said is that the match is still being
+  // played. Everything below this loop aborts the match and releases its box,
+  // which sends sm_pug_abort, so falling through would let the forged
+  // MATCH_END that got us here kill the match it could no longer rate.
+  if (await orchestrator.finishMatch(matchId) === 'not_ended') return;
   for (const wait of delays) {
     if (!stillLive()) return;
     await sleep(wait);
     // Re-check after the wait: another path may have completed it meanwhile.
     if (!stillLive()) return;
     console.warn(`[orchestrator] retrying collection of match ${matchId}`);
-    await orchestrator.finishMatch(matchId);
+    if (await orchestrator.finishMatch(matchId) === 'not_ended') return;
   }
   if (!stillLive()) return;
 
@@ -276,11 +291,33 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   // Best effort and never awaited: a Steam outage must not delay boot.
-  void backfillPersonas(deps.db, deps.config.steamApiKey)
+  void backfillPersonas(deps.db, deps.config.steamApiKey, deps.steamFetch)
     .then((n) => { if (n > 0) console.log(`[persona] backfilled ${n} player(s)`); })
     .catch((err) => console.error('[persona] backfill failed:', err));
 
+  // What Steam says about each account, for the admin player page. Without an
+  // api key every call below is a no-op, so nothing here is conditional on it.
+  const signalDeps: SignalDeps = { db: deps.db, apiKey: deps.config.steamApiKey, fetchFn: deps.steamFetch };
+  // Fire and forget, always: a caller is a login or a log event, and neither
+  // may wait on Steam or fail because of it. refreshSteamSignals does not
+  // throw; the catch is for whatever it has not thought of.
+  const refreshSignals = (steamids: string[], opts: Parameters<typeof refreshSteamSignals>[2] = {}): void => {
+    void refreshSteamSignals(signalDeps, steamids, opts)
+      .catch((err) => console.error('[steamSignals] refresh failed:', err));
+  };
+  // Same rule as the Twitch poller below: tests inject the fetch and drive the
+  // refresh directly, so a timer started for them would only outlive the test.
+  const stopSignalRefresh = deps.steamFetch === undefined ? startSteamSignalRefresh(signalDeps) : null;
+
   await app.register(cookie, { secret: deps.config.cookieSecret });
+  // Sliding renewal. After the cookie plugin, whose own onRequest hook is
+  // what parses the header this reads. Not on the way out: renewing a
+  // session in the same response that clears it would send both cookies.
+  const secureCookies = deps.config.publicUrl.startsWith('https://');
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.url.split('?')[0] === '/auth/logout') return;
+    renewSession(req, reply, deps.db, secureCookies);
+  });
   await app.register(websocket);
   // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
   // owns the browser and proxies here, so this path only matters in production.
@@ -297,10 +334,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db,
     verifyLogin: deps.verifyLogin ?? realVerifyLogin,
     fetchPersona: deps.fetchPersona ?? realFetchPersona,
+    refreshSignals: (steamid) => refreshSignals([steamid]),
     discordApi,
     membership,
   });
-  await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
+  await app.register(discordAuthRoutes, {
+    config: deps.config, db: deps.db, api: discordApi,
+    // The matchmaker is built further down; by the time a request can arrive
+    // it exists.
+    engaged: () => matchmaker.engagedIds(),
+  });
 
   // Injectable for tests, built from config otherwise. Null when unconfigured,
   // which makes every twitch route 404 rather than half-work.
@@ -450,6 +493,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }),
   });
 
+  // Built whether or not there is a listener to feed it: the admin overview
+  // reads its counters either way. See src/logAuth.ts.
+  const logAuth = new LogAuth(deps.db, deps.config.logPublicAddress.split(':')[0]);
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
@@ -462,7 +509,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      logListener = new LogListener((raw, source) => {
+      // Which server row a datagram belongs to. The server whose secret
+      // signed the line, when one did: that cannot be forged or confused.
+      // Otherwise address AND port, because two srcds on one machine share an
+      // address (Riverside #3 and #4).
+      const serverOf = (source: string, meta: LogMeta): number | null =>
+        meta.serverId ?? resolveServerBySource(deps.db, source, feedHost, meta.port);
+      logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
         // merged into their main arrives here as the main, so the roster,
@@ -481,7 +534,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             const kind = cheatName(ev.cheat);
             // Stored whether or not the player is in a live match: unlike an
@@ -506,7 +559,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Same rules as a burst: evidence only, live matches only, and never
           // allowed to take the listener down.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             // The player's own match, like a burst: two live matches can share
             // a server id while the Riverside boxes share an address.
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
@@ -523,7 +576,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             // Rostered players in a live match only: a burst that belongs to
             // no match is not evidence about a ranked game, and storing warmup
@@ -594,13 +647,44 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
-          selfStarted?.handle(ev, source);
+          // SelfStartedMatches keeps the sender of a burst's first line as an
+          // opaque string and hands it back to resolveServerId below, so the
+          // port, and the server a signature named, ride along inside it.
+          selfStarted?.handle(ev, `${source}|${meta.port}|${meta.serverId ?? ''}`);
+          // A roster line for a match that is already live is a sub being put
+          // on a team, in game by definition, and the plugin sends no connect
+          // event for them. During the opening burst the match is not live
+          // yet, so this stays quiet and MATCH_START does the whole roster.
+          // Guarded like everything else here that is not the result path.
+          if (ev.kind === 'match_roster') {
+            try {
+              const rostered = deps.db.prepare(
+                `SELECT m.id FROM matches m JOIN match_players mp ON mp.match_id = m.id
+                  WHERE m.token = ? AND m.state = 'live' AND mp.player_id = ?`,
+              ).get(ev.token, ev.steamid) as { id: number } | undefined;
+              if (rostered) refreshSignals([ev.steamid], { sharing: true, matchId: rostered.id, freshMs: 60 * 60 * 1000 });
+            } catch (err) {
+              console.error('[steamSignals] could not check a late joiner:', err);
+            }
+          }
           return;
         }
         // Spectator feed. Cosmetic by design, so a throw here must never take
         // down the listener that also carries match_end.
         try {
-          if (ev.kind === 'match_start') recordMatchStart(deps.db, ev.token, ev.map);
+          if (ev.kind === 'match_start') {
+            recordMatchStart(deps.db, ev.token, ev.map);
+            // Everyone has readied up, so everyone rostered is in game: the one
+            // moment the Family Sharing question means anything, and the point
+            // at which a ban elsewhere is worth an admin's attention.
+            const started = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (started) {
+              const roster = deps.db.prepare('SELECT player_id FROM match_players WHERE match_id = ?')
+                .all(started.id) as { player_id: string }[];
+              refreshSignals(roster.map((r) => r.player_id), { sharing: true, matchId: started.id });
+            }
+          }
           else if (ev.kind === 'heartbeat') {
             recordHeartbeat(deps.db, ev.token);
             // The heartbeat repeats the phase so a lost PHASE datagram is
@@ -628,6 +712,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // The engine's own "entered the game" line normally gets here
             // first; this is the second chance when that datagram was lost.
             signonDrops?.onEntered(ev.steamid);
+            // Covers whoever the match-start pass cannot: a late joiner, and a
+            // reconnect on a different copy of the game. Someone checked
+            // within the hour is only asked whose copy they are playing on.
+            const joined = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (joined) refreshSignals([ev.steamid], { sharing: true, matchId: joined.id, freshMs: 60 * 60 * 1000 });
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
@@ -670,6 +760,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           console.error('[live] failed to record', ev.kind, err);
         }
       });
+      logListener.setAuthenticator((input) => logAuth.check(input));
       await logListener.listen(deps.config.logListenPort);
       // pending is declared before the orchestrator it depends on and assigned
       // after: the same forward-reference the selfStarted callback above uses,
@@ -756,11 +847,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       for (const s of servers) logListener.allowMatchCreateFrom(s.host);
       const feedHost = deps.config.logPublicAddress.split(':')[0];
       if (feedHost) logListener.allowMatchCreateFrom(feedHost);
-      logListener.allowMatchCreateWhen((address) => resolveServerBySource(deps.db, address, feedHost) !== null);
+      logListener.allowMatchCreateWhen((address) => isKnownServerAddress(deps.db, address, feedHost));
       selfStarted = new SelfStartedMatches({
         db: deps.db,
         listener: logListener,
-        resolveServerId: (source) => resolveServerBySource(deps.db, source, feedHost),
+        resolveServerId: (key) => {
+          const [address, port, signedBy] = key.split('|');
+          if (signedBy) return Number(signedBy);
+          return resolveServerBySource(deps.db, address, feedHost, Number(port));
+        },
         setMatchId: (token, matchId, serverId) =>
           (orchestrator as RealOrchestrator).assignMatchId(serverId, token, matchId),
         adminSteamIds: deps.config.adminSteamIds,
@@ -946,7 +1041,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       },
       commands: {
         defs: COMMAND_DEFS,
-        handle: (i) => handleCommand({ db: deps.db, matchmaker, publicUrl: deps.config.publicUrl, adminSteamIds: deps.config.adminSteamIds }, i),
+        handle: (i) => handleCommand({
+          db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
+          banMessage: (steamid) => banMessage(deps.db, steamid),
+          adminSteamIds: deps.config.adminSteamIds,
+        }, i),
       },
     })
       .then((b) => { bot = b; })
@@ -959,10 +1058,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(pruneTimer);
     stopTwitchPoll?.();
+    stopSignalRefresh?.();
     clearTimeout(pruneOnBoot);
     banSync.stop();
     adminSync.stop();
     if (logListener) await logListener.close();
+    // Where each server's replay check had got to. Best effort: the caller may
+    // already have closed the database, and a few seconds of position is all
+    // that is lost.
+    try { logAuth.flush(); } catch { /* database already closed */ }
   });
   await app.register(apiRoutes, {
     db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds, broadcast: (e) => hub.broadcast(e),
@@ -972,7 +1076,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
-    dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds,
+    dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
+    logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await pushLogSecret(rcon, secret);
+      } finally {
+        rcon.close();
+      }
+    }),
+    // Sharing is asked too: the admin may be looking at someone who is in
+    // game right now. No match id, so a manual look never posts to the feed.
+    refreshSignals: deps.config.steamApiKey
+      ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
+      : undefined,
   });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });

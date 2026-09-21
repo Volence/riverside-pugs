@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { FEED_SETTING, subscribeAdminEvents, type AdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
 import { getPlayer } from '../players.js';
+import { resolveAlias } from '../aliases.js';
 import { activeTimeout } from '../penalties.js';
 import { escapeName } from './presenter.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
@@ -112,6 +113,29 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'steam_signal': {
+        // Context, worded as context. A ban in some other game is not a ban
+        // in this one, and a borrowed library is how siblings share a PC.
+        const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
+        const who = `**${this.name(e.steamid)}**`;
+        if (e.signal.what === 'recent_ban') {
+          const s = e.signal;
+          const parts = [
+            s.vacBans ? `${s.vacBans} VAC ban${s.vacBans === 1 ? '' : 's'}` : '',
+            s.gameBans ? `${s.gameBans} game ban${s.gameBans === 1 ? '' : 's'}` : '',
+          ].filter(Boolean).join(' and ');
+          const when = s.daysSinceLastBan === 0 ? 'today' : `${s.daysSinceLastBan} day${s.daysSinceLastBan === 1 ? '' : 's'} ago`;
+          return {
+            text: `🪪 ${who}${match} has ${parts} on their Steam account, the latest ${when}. Steam does not say which game, so this is context for their [admin page](${this.deps.publicUrl}/admin), not a finding about this one.`,
+            color: COLOR.problem,
+          };
+        }
+        const lender = resolveAlias(this.deps.db, e.signal.lenderId);
+        return {
+          text: `🪪 ${who}${match} is playing on a copy of the game borrowed through Steam Family Sharing from **${this.name(lender)}** (\`${e.signal.lenderId}\`), who is banned here. Could be a shared household; worth a look.`,
+          color: COLOR.problem,
+        };
+      }
       case 'signon_drop': {
         // The in-game name, not this.name(): most of these steamids have never
         // signed in, and an admin searching the server log needs the name the
@@ -147,6 +171,9 @@ export class AdminFeedPoster {
       case 'server_idle': return `${who} set server ${e.target} idle`;
       case 'server_restart_after_match':
         return `${who} turned ${d.on ? 'on' : 'off'} restart-after-match for server ${e.target}`;
+      case 'server_log_secret':
+        return `${who} ${d.rotated ? 'rotated' : 'pushed'} the log secret for server ${e.target}${d.pushed ? '' : ' (it did NOT reach the box)'}`;
+      case 'server_log_auth': return `${who} set log signing on server ${e.target} to \`${String(d.mode)}\``;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``

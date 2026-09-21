@@ -12,7 +12,7 @@ describe('openDb', () => {
     expect(names).toEqual([
       'admin_actions', 'bans', 'campaign_play_rules',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
-      'discord_link_codes', 'discord_messages', 'discord_voice', 'discord_voice_origin',
+      'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_voice', 'discord_voice_origin',
       'endorsements',
       'input_bursts', 'input_caps', 'input_detections',
       'integrity_clips', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
@@ -21,8 +21,9 @@ describe('openDb', () => {
       'match_live_players', 'match_maps',
       'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
       'matches', 'matchmaker_state',
-      'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings', 'players',
-      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops',
+      'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
+      'player_steam_signals', 'players',
+      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'steam_signal_alerts',
       'ticket_access', 'ticket_events', 'ticket_reports', 'tickets', 'twitch_status',
     ]);
   });

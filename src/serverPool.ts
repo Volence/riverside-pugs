@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { publishAdminEvent } from './adminFeed.js';
 
 export interface ServerRow {
   id: number;
@@ -23,6 +24,11 @@ export interface ServerRow {
   /** 1 to restart srcds after every match on this box. Off by default; see
    *  src/serverRestart.ts for why it is per server rather than global. */
   restart_after_match: number;
+  /** Shared secret the box signs its log lines with, or null. Never sent to a
+   *  browser. See src/logAuth.ts. */
+  log_secret: string | null;
+  /** off | log | enforce: what happens to a line that fails that check. */
+  log_auth: 'off' | 'log' | 'enforce';
 }
 
 export function addServer(
@@ -68,21 +74,88 @@ export const release = (db: DB, id: number) => setStatus(db, id, 'idle');
 export const markLive = (db: DB, id: number) => setStatus(db, id, 'live');
 export const markOffline = (db: DB, id: number) => setStatus(db, id, 'offline');
 
-/**
- * Which game server a log datagram came from, by sender address.
+/** Every server row a datagram from `source` could belong to, by address
+ *  alone.
  *
- * A remote box sends from its own public IP, which is its servers.host. The
- * box the backend shares sends to logPublicAddress; a loopback target is
- * sourced from 127.0.0.1, so that and the feed host both mean the server whose
- * host IS the feed host. With a single server row, anything admitted belongs to
- * it (the original one-box behaviour).
- */
-export function resolveServerBySource(db: DB, source: string, feedHost: string): number | null {
-  const rows = db.prepare('SELECT id, host FROM servers ORDER BY id').all() as { id: number; host: string }[];
-  const exact = rows.find((r) => r.host === source);
-  if (exact) return exact.id;
+ *  A remote box sends from its own public IP, which is its servers.host. The
+ *  box the backend shares sends to logPublicAddress; a loopback target is
+ *  sourced from 127.0.0.1, so that and the feed host both mean the servers whose
+ *  host IS the feed host. With a single server row, anything admitted belongs to
+ *  it (the original one-box behaviour). */
+function serversAtAddress(db: DB, source: string, feedHost: string): { id: number; name: string; port: number }[] {
+  const rows = db.prepare('SELECT id, name, host, port FROM servers ORDER BY id')
+    .all() as { id: number; name: string; host: string; port: number }[];
+  const exact = rows.filter((r) => r.host === source);
+  if (exact.length > 0) return exact;
   if (source === '127.0.0.1' || (feedHost && source === feedHost)) {
-    return rows.find((r) => r.host === feedHost)?.id ?? (rows.length === 1 ? rows[0].id : null);
+    const atFeed = rows.filter((r) => r.host === feedHost);
+    if (atFeed.length > 0) return atFeed;
+    return rows.length === 1 ? rows : [];
+  }
+  return [];
+}
+
+/** The ids behind serversAtAddress, for src/logAuth.ts: when a line cannot
+ *  be pinned on one server, these are the ones it could be from. */
+export function serverIdsAtAddress(db: DB, source: string, feedHost: string): number[] {
+  return serversAtAddress(db, source, feedHost).map((r) => r.id);
+}
+
+/** Whether a datagram from this address may be looked at at all. Separate
+ *  from resolveServerBySource on purpose: that one answers null for an address
+ *  two servers share when the port settles nothing, and the listener's
+ *  admission gate must not start refusing a real game server over it. */
+export function isKnownServerAddress(db: DB, source: string, feedHost: string): boolean {
+  return serversAtAddress(db, source, feedHost).length > 0;
+}
+
+/** When each shared address was last reported as unattributable, epoch ms. */
+const ambiguityReported = new Map<string, number>();
+const AMBIGUITY_REPORT_EVERY_MS = 30 * 60_000;
+
+/** For tests only. */
+export function _resetAmbiguityReports(): void { ambiguityReported.clear(); }
+
+/**
+ * Which game server a log datagram came from, by sender address and port.
+ *
+ * The address is enough while every server has a host of its own. Two srcds
+ * on one machine (Riverside #3 and #4) share one, and picking the first row
+ * credited everything #4 sent to #3: evidence on the wrong match, and a match
+ * started in game on #4 handed back to #3, which answered PUGERR bad token
+ * (match 73, 2026-09-20).
+ *
+ * srcds sends log datagrams from its game socket (the engine writes them with
+ * NET_OutOfBandPrintf on NS_SERVER), so the sender's port is the game port,
+ * servers.port. That is engine knowledge and not something this repository
+ * has a capture of, so it is used the careful way round: an exact host and
+ * port match wins; failing that, the host alone decides when only one server
+ * is on it, which is every box but Riverside and is what happened before; and
+ * when two servers share the host and the port settles nothing, the answer is
+ * NEITHER, reported to the admin feed with the port that was seen, rather
+ * than quietly the first. A NAT that rewrites source ports would look like
+ * that, and the report is how anyone would find out.
+ *
+ * A line that carries a valid MAC names its server outright and never gets
+ * here; see src/logAuth.ts.
+ */
+export function resolveServerBySource(db: DB, source: string, feedHost: string, port?: number): number | null {
+  const at = serversAtAddress(db, source, feedHost);
+  if (at.length === 0) return null;
+  if (port !== undefined) {
+    const exact = at.find((r) => r.port === port);
+    if (exact) return exact.id;
+  }
+  if (at.length === 1) return at[0].id;
+
+  const now = Date.now();
+  if (now - (ambiguityReported.get(source) ?? 0) >= AMBIGUITY_REPORT_EVERY_MS) {
+    ambiguityReported.set(source, now);
+    const names = at.map((r) => `${r.name} (port ${r.port})`).join(' and ');
+    publishAdminEvent({
+      kind: 'problem',
+      text: `Log lines from ${source}${port === undefined ? '' : `:${port}`} could belong to ${names}, and the port they came from matches neither, so they were credited to NEITHER. Evidence and in-game match starts from that address are being lost until a server's game port matches, or the servers are given a log secret (a signed line names its own server).`,
+    });
   }
   return null;
 }

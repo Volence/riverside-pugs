@@ -16,8 +16,8 @@ async function confirmDialog(name?: string | RegExp) {
 
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
-    players: vi.fn(), player: vi.fn(), ban: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
-    audit: vi.fn(),
+    players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), steamRefresh: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
+    audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
@@ -113,6 +113,45 @@ describe('Admin page', () => {
     expect(within(section).getByRole('link', { name: 'What players are told' }).getAttribute('href')).toBe('/help/consistency');
   });
 
+  it('says which other Steam account a player\'s Discord used to be on', async () => {
+    const row = { steamid: '2', name: 'newcomer', avatar: null, status: 'active', isAdmin: false, discordName: 'Alice', sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: '111', activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputFlags: [],
+      inputCaps: [],
+      discordHistory: [{
+        discordId: '111', discordName: 'Alice', linkedAt: '2026-09-20T00:00:00.000Z', linkedBy: '2', unlinkedAt: null, unlinkedBy: null,
+        others: [{ steamid: '9', name: 'banned main', linkedAt: '2026-08-01T00:00:00.000Z', unlinkedAt: '2026-09-19T00:00:00.000Z' }],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('newcomer')).toBeTruthy());
+    fireEvent.click(screen.getByText('newcomer'));
+    await waitFor(() => expect(screen.getByText(/This Discord was previously linked to/)).toBeTruthy());
+    expect((screen.getByText('banned main') as HTMLAnchorElement).getAttribute('href')).toBe('/player/9');
+  });
+
+  it('signs a player out everywhere, after asking', async () => {
+    const row = { steamid: '2', name: 'phished', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputFlags: [],
+      inputCaps: [],
+    });
+    mockAdmin.signOutPlayer.mockResolvedValue({ ok: true });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    await waitFor(() => expect(screen.getByText('phished')).toBeTruthy());
+    fireEvent.click(screen.getByText('phished'));
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign out everywhere' })));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(mockAdmin.signOutPlayer).toHaveBeenCalledWith('2'));
+  });
+
   it('says none, with no section, for a player with no connect drops', async () => {
     const row = { steamid: '2', name: 'clean', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
@@ -127,6 +166,101 @@ describe('Admin page', () => {
     fireEvent.click(screen.getByText('clean'));
     await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
     expect(document.getElementById('connect-drops')).toBeNull();
+  });
+
+  const steamRow = { steamid: '2', name: 'borrower', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 2400, games: 9, createdAt: '2026-09-01', offenses: 0 };
+  const steamDetail = {
+    ...steamRow, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
+    signonDrops: { count: 0, lastAt: null, rows: [] }, inputFlags: [], inputCaps: [],
+  };
+
+  const steamSection = () => waitFor(() => {
+    const el = document.getElementById('steam-account');
+    expect(el).toBeTruthy();
+    return el!;
+  });
+
+  it('shows the Steam account as context: age, bans, hours, level and the lender', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [steamRow] });
+    mockAdmin.player.mockImplementation(async (steamid: string) => (steamid === '99'
+      ? { ...steamDetail, steamid: '99', name: 'lenny', status: 'banned' }
+      : {
+        ...steamDetail,
+        steamAccount: {
+          checkedAt: '2026-09-21T10:00:00.000Z', createdAt: '2026-08-22T00:00:00.000Z', ageDays: 30,
+          reference: { kind: 'first_match', at: '2026-09-02T00:00:00.000Z' }, daysBeforeReference: 11,
+          visibility: 'public', profileConfigured: true,
+          bans: { vac: 1, game: 0, daysSinceLast: 105, community: false, economy: 'none', checkedAt: '2026-09-21T10:00:00.000Z' },
+          l4d1: { state: 'visible', hours: 12 }, level: 3,
+          lender: { steamid: '99', seenAt: '2026-09-20T20:00:00.000Z', player: { steamid: '99', name: 'lenny', banned: true } },
+          flags: [
+            { kind: 'new_account', text: 'New account: created 11 days before their first match here. New players are also new accounts.' },
+            { kind: 'borrowed_game', text: 'Borrowed game: last seen playing on a copy shared by lenny through Steam Family Sharing. lenny is banned here.' },
+          ],
+        },
+      }));
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
+    fireEvent.click(screen.getByText('borrower'));
+
+    const section = await steamSection();
+    const text = section.textContent ?? '';
+    expect(text).toContain('not a verdict');
+    expect(text).toContain('New account: created 11 days before their first match here.');
+    expect(text).toContain('30 days old');
+    expect(text).toContain('created 11 days before their first match here');
+    expect(text).toContain('1 VAC ban');
+    expect(text).toContain('105 days ago');
+    expect(text).toContain('12 h');
+    expect(text).toContain('Public');
+    expect(text).toContain('Level 3');
+    expect(text).toContain('BANNED here');
+    expect(within(section).getByRole('link', { name: 'Steam profile' }).getAttribute('href'))
+      .toBe('https://steamcommunity.com/profiles/2');
+
+    // The lender is a player here, so their name opens THEIR admin detail.
+    fireEvent.click(within(section).getByRole('button', { name: 'lenny' }));
+    await waitFor(() => expect(mockAdmin.player).toHaveBeenCalledWith('99', expect.anything()));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'lenny' })).toBeTruthy());
+  });
+
+  it('says hidden rather than zero for a private profile, and unknown lenders by id', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [steamRow] });
+    mockAdmin.player.mockResolvedValue({
+      ...steamDetail,
+      steamAccount: {
+        checkedAt: '2026-09-21T10:00:00.000Z', createdAt: null, ageDays: null, reference: null, daysBeforeReference: null,
+        visibility: 'private', profileConfigured: true, bans: { vac: 0, game: 0, daysSinceLast: null, community: false, economy: 'none', checkedAt: '2026-09-21T10:00:00.000Z' },
+        l4d1: { state: 'hidden', lastSeenHours: 4 }, level: null,
+        lender: { steamid: '76561198000000099', seenAt: '2026-09-20T20:00:00.000Z', player: null },
+        flags: [{ kind: 'private_profile', text: 'Private profile: Steam will not show this account\'s age, hours or level. Plenty of people keep it that way.' }],
+      },
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
+    fireEvent.click(screen.getByText('borrower'));
+    const section = await steamSection();
+    const text = section.textContent ?? '';
+    expect(text).toContain('hidden (4 h when last visible)');
+    expect(text).toContain('Private');
+    expect(text).toContain('No VAC or game bans');
+    expect(text).not.toMatch(/\b0 h\b/);
+    expect(within(section).getByRole('link', { name: '76561198000000099' }).getAttribute('href'))
+      .toBe('https://steamcommunity.com/profiles/76561198000000099');
+  });
+
+  it('says Steam has not been asked yet, and asks on request', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [steamRow] });
+    mockAdmin.player.mockResolvedValue({ ...steamDetail, steamAccount: null });
+    mockAdmin.steamRefresh.mockResolvedValue({ ok: true, refreshed: 1 });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
+    fireEvent.click(screen.getByText('borrower'));
+    const section = await steamSection();
+    expect(section.textContent).toContain('Steam has not been asked about this account yet');
+    fireEvent.click(within(section).getByRole('button', { name: 'Check now' }));
+    await waitFor(() => expect(mockAdmin.steamRefresh).toHaveBeenCalledWith('2'));
+    await waitFor(() => expect(mockAdmin.player.mock.calls.length).toBeGreaterThan(1));
   });
 
   it('shows what an input flag rests on, what its holds look like, and any truncated capture', async () => {
@@ -263,6 +397,38 @@ describe('AdminMatches layout', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
   };
+
+  // Log signing (audit 2026-09-21 item 15): the secret is set up from here,
+  // and the counters are what an admin watches before flipping to enforce.
+  it('offers to set up log signing on a server that has no secret', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    (o.servers[0] as Record<string, unknown>).logAuth = { mode: 'off', hasSecret: false, counters: null };
+    mockAdmin.overview.mockResolvedValue(o);
+    mockAdmin.serverLogSecret.mockResolvedValue({ ok: true, pushed: true, rotated: false });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up' }));
+    await confirmDialog('Generate and push');
+    await waitFor(() => expect(mockAdmin.serverLogSecret).toHaveBeenCalledWith(1));
+  });
+
+  it('shows the signature counters and asks before enforcing', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    const o = overview();
+    (o.servers[0] as Record<string, unknown>).logAuth = {
+      mode: 'log', hasSecret: true,
+      counters: { ok: 412, missing: 3, badMac: 1, replay: 0, lastOkAt: 1, lastFailAt: 1, lastFail: 'missing' },
+    };
+    mockAdmin.overview.mockResolvedValue(o);
+    mockAdmin.serverLogAuth.mockResolvedValue({ ok: true });
+    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
+    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    expect(await screen.findByText(/ok 412 · unsigned 3 · bad 1 · replayed 0/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Log signing mode for Dallas'), { target: { value: 'enforce' } });
+    await confirmDialog('Enforce');
+    await waitFor(() => expect(mockAdmin.serverLogAuth).toHaveBeenCalledWith(1, 'enforce'));
+  });
 
   // The index into what abandoned matches left behind. Without it an aborted
   // match is only reachable from a Discord post that scrolls away.

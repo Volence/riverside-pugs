@@ -8,6 +8,7 @@ import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from '
 import { getSetting } from '../settings.js';
 import { ENDORSE_ERROR_TEXT, ENDORSE_LABEL, endorseState, giveEndorsement } from '../endorsements.js';
 import { escapeName, renderEndorseKinds, renderEndorsePicker } from './presenter.js';
+import { MERGED_MESSAGE, standingOf } from '../standing.js';
 
 export interface ControllerDeps {
   db: DB;
@@ -36,16 +37,22 @@ export function linkPrompt(deps: ControllerDeps, userId: string, userName: strin
   );
 }
 
-/** Resolve the presser to an active player, or the reply that explains why not. */
-function resolve(
+/** Resolve the presser to an active player, or the reply that explains why
+ *  not. Shared with the slash commands that act as a player (/report), so a
+ *  command can never do what the matching button or HTTP route would refuse. */
+export function resolve(
   deps: ControllerDeps, i: { userId: string; userName: string },
 ): { player: PlayerRow } | { reply: InteractionReply } {
   const player = playerByDiscordId(deps.db, i.userId);
   if (!player) return { reply: linkPrompt(deps, i.userId, i.userName) };
-  if (player.status === 'banned') {
+  // The same predicate the website's guards use, so a button can never do
+  // what the matching HTTP route would refuse.
+  const standing = standingOf(deps.db, player);
+  if (standing === 'merged') return { reply: say(MERGED_MESSAGE) };
+  if (standing === 'banned') {
     return { reply: say(deps.banMessage?.(player.steamid) ?? 'You are banned from the PUG.') };
   }
-  if (player.status !== 'active') {
+  if (standing !== 'ok') {
     return {
       reply: say(
         'Your account is not active yet. Make sure your linked Discord account is in the Riverside server, then sign in on the website again, or use an invite code there.',

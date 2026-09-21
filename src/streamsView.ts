@@ -66,13 +66,23 @@ export function streamsView(
 
   // LEFT JOIN, so somebody who linked a minute ago and has never been polled
   // still appears, as offline, rather than vanishing until the next tick.
+  //
+  // Members in good standing only, which is inGoodStanding (src/standing.ts)
+  // written as SQL: active, no ban in force, not merged into another account.
+  // The title and thumbnail on a card are whatever the streamer typed into
+  // Twitch, and this page is public, so who gets a card is a moderation
+  // question and the answer is the same one the queue gives.
   const rows = db.prepare(
     `SELECT p.steamid, p.name, p.avatar, p.twitch_name,
             t.is_live, t.title, t.game_name, t.viewers, t.thumbnail, t.started_at, t.last_live_at
      FROM players p
      LEFT JOIN twitch_status t ON t.player_id = p.steamid
-     WHERE p.twitch_id IS NOT NULL AND p.twitch_name IS NOT NULL`,
-  ).all() as Row[];
+     WHERE p.twitch_id IS NOT NULL AND p.twitch_name IS NOT NULL
+       AND p.status = 'active'
+       AND NOT EXISTS (SELECT 1 FROM bans b WHERE b.player_id = p.steamid
+                       AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?))
+       AND NOT EXISTS (SELECT 1 FROM player_aliases a WHERE a.steamid = p.steamid)`,
+  ).all(now.toISOString()) as Row[];
 
   // Who is on a live match roster, and which match. A player on two live
   // matches is not a state the matchmaker can produce, so first wins.

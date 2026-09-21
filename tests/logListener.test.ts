@@ -236,3 +236,66 @@ describe('LogListener: token-less lines are admitted by source address alone', (
     expect(got.map((e) => e.kind)).toEqual(['heartbeat']);
   });
 });
+
+// Two srcds on one machine share an address, and srcds sends its log datagrams
+// from its game socket, so the sender's port is what tells them apart.
+describe('LogListener: the sender port rides along', () => {
+  it("hands the callback the datagram's source port", async () => {
+    const got: number[] = [];
+    listener = new LogListener((_ev, _source, meta) => got.push(meta.port));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.register(TOKEN);
+    const c = dgram.createSocket('udp4');
+    await new Promise<void>((r) => c.bind(0, '127.0.0.1', () => r()));
+    const from = c.address().port;
+    const pkt = Buffer.from(`L 07/30/2026 - 14:23:01: PUG ${TOKEN} HEARTBEAT\n`, 'utf8');
+    await new Promise<void>((resolve, reject) => c.send(pkt, port, '127.0.0.1', (err) => (err ? reject(err) : resolve())));
+    await new Promise((r) => setTimeout(r, 60));
+    c.close();
+    expect(got).toEqual([from]);
+  });
+});
+
+describe('LogListener: the authenticator', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 60));
+  const LILAC = 'L4DL id=76561198030413993 cheat=3 banned=1';
+
+  it('drops what it refuses before any gate sees it, token or no token', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    listener.register(TOKEN);
+    listener.setAuthenticator(() => ({ accept: false, serverId: null }));
+    await send(port, LILAC);
+    await send(port, `PUG ${TOKEN} MATCH_END a=1 b=2 winner=b`);
+    await settle();
+    expect(got).toEqual([]);
+  });
+
+  it('hands it the parsed event, the trailer and where the datagram came from, and passes its server on', async () => {
+    const seen: any[] = [];
+    const metas: any[] = [];
+    listener = new LogListener((_ev, _source, meta) => metas.push(meta));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    listener.setAuthenticator((input) => { seen.push(input); return { accept: true, serverId: 4 }; });
+    await send(port, `${LILAC} lseq=1790000000.7 mac=0a1b2c3d`);
+    await settle();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].ev).toMatchObject({ kind: 'lilac_flag' });
+    expect(seen[0].trailer).toMatchObject({ boot: 1790000000, seq: 7, mac: '0a1b2c3d' });
+    expect(seen[0].address).toBe('127.0.0.1');
+    expect(metas[0].serverId).toBe(4);
+  });
+
+  it('is an extra gate, not a replacement: a signed line from an address nobody knows is still refused', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.setAuthenticator(() => ({ accept: true, serverId: 1 }));
+    await send(port, LILAC);
+    await settle();
+    expect(got).toEqual([]);
+  });
+});

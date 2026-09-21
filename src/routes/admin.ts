@@ -22,9 +22,13 @@ import { setReview, unanalysableCounts } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
+import { publishBanChange } from '../banEvents.js';
+import { hasActiveBan } from '../banState.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
 import { restrictOpenTicketAbout } from '../tickets/store.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
+import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
+import { endSessions } from '../session.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -41,6 +45,14 @@ export interface AdminRouteOpts {
   /** Pushes the website's admin list to every box. Absent in tests that do
    *  not exercise it, where the route reports that rather than pretending. */
   adminSync?: ServerAdminSync;
+  /** The log signature verifier, for its counters in the overview. */
+  logAuth?: LogAuth;
+  /** Pushes one server its log secret over rcon; true when the box knew the
+   *  cvar. Absent in tests that do not exercise it, where the route says so. */
+  logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Asks Steam about one player now and resolves with the rows written.
+   *  Absent on an install with no Steam api key, where the route says so. */
+  refreshSignals?: (steamid: string) => Promise<number>;
   /** config.adminSteamIds: who is let into a ticket that becomes restricted
    *  because the player it is about was just promoted. */
   adminSteamIds: string[];
@@ -49,7 +61,7 @@ export interface AdminRouteOpts {
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, adminSteamIds } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, adminSteamIds } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -95,7 +107,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       }
     }
     banPlayer(db, t.steamid, t.adminId, reason.trim(), mins);
-    matchmaker.leave(t.steamid);
+    // Out of the queue AND out of any ready check or vote in progress.
+    matchmaker.remove(t.steamid);
     logAdmin(db, t.adminId, 'ban', t.steamid, { reason: reason.trim(), minutes: mins });
     return { ok: true };
   });
@@ -125,11 +138,27 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { isAdmin } = (req.body ?? {}) as { isAdmin?: unknown };
     if (typeof isAdmin !== 'boolean') return reply.code(400).send({ error: 'isAdmin must be true or false' });
     if (t.steamid === t.adminId && !isAdmin) return reply.code(400).send({ error: 'you cannot remove your own admin' });
+    const was = getPlayer(db, t.steamid)?.is_admin === 1;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
       if (isAdmin) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      // A change of rights starts from a fresh sign-in: a session that was open
+      // while somebody was an admin does not outlive their being one. Only on
+      // a real change, so re-saving the same value signs nobody out.
+      if (was !== isAdmin) endSessions(db, t.steamid);
     })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
+    return { ok: true };
+  });
+
+  /** Sign a player out everywhere: every cookie they hold stops working, on
+   *  every device, and they sign in again. For an account that may be in
+   *  somebody else's hands, where waiting out a 30 day session is not on. */
+  app.post('/api/admin/players/:steamid/sign-out', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    endSessions(db, t.steamid);
+    logAdmin(db, t.adminId, 'sign_out', t.steamid);
     return { ok: true };
   });
 
@@ -138,9 +167,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!t) return reply;
     const { isMod } = (req.body ?? {}) as { isMod?: unknown };
     if (typeof isMod !== 'boolean') return reply.code(400).send({ error: 'isMod must be true or false' });
+    const was = getPlayer(db, t.steamid)?.is_mod === 1;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
       if (isMod) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      // The same rule as the admin flag above: a demoted moderator loses the
+      // tickets now, not when a 30 day session runs out, and a promoted one
+      // starts from a fresh sign-in. Only on a real change.
+      if (was !== isMod) endSessions(db, t.steamid);
     })();
     logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
     return { ok: true };
@@ -150,7 +184,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const t = target(req, reply);
     if (!t) return reply;
     const before = getPlayer(db, t.steamid)?.discord_name ?? null;
-    unlinkDiscord(db, t.steamid);
+    unlinkDiscord(db, t.steamid, t.adminId);
     logAdmin(db, t.adminId, 'unlink_discord', t.steamid, { was: before });
     return { ok: true };
   });
@@ -201,10 +235,16 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
     const { steamid } = req.params as { steamid: string };
-    if (resolveAlias(db, steamid) === steamid) {
+    const canonical = resolveAlias(db, steamid);
+    if (canonical === steamid) {
       return reply.code(404).send({ error: 'that account is not an alias' });
     }
     removeAlias(db, steamid);
+    // While it was an alias this id carried its main's engine ban, which is
+    // permanent on the box and which the sweep will never lift now that the
+    // two are no longer connected. The main stays banned; only this id is
+    // freed, because on the website it is now an account with no ban at all.
+    if (hasActiveBan(db, canonical)) publishBanChange({ kind: 'unban', steamid });
     logAdmin(db, adminId, 'unalias_player', steamid);
     return { ok: true };
   });
@@ -215,6 +255,15 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const n = clearPenalties(db, t.steamid, t.adminId);
     logAdmin(db, t.adminId, 'clear_penalties', t.steamid, { cleared: n });
     return { ok: true, cleared: n };
+  });
+
+  /** Ask Steam about this account now, rather than wait for the weekly pass.
+   *  Not audited: it changes nothing an admin did, only how fresh the panel is. */
+  app.post('/api/admin/players/:steamid/steam-refresh', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    if (!opts.refreshSignals) return reply.code(503).send({ error: 'no Steam api key is configured' });
+    return { ok: true, refreshed: await opts.refreshSignals(t.steamid) };
   });
 
   app.post('/api/admin/players/:steamid/notes', async (req, reply) => {
@@ -231,7 +280,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
 
   app.get('/api/admin/overview', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
-    return { ...adminOverview(db), queue: matchmaker.publicQueue().players };
+    return { ...adminOverview(db, logAuth), queue: matchmaker.publicQueue().players };
   });
 
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
@@ -305,6 +354,68 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (typeof on !== 'boolean') return reply.code(400).send({ error: 'on must be true or false' });
     setRestartAfterMatch(db, id, on);
     logAdmin(db, adminId, 'server_restart_after_match', id, { on });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /**
+   * Give a server its log secret, which its plugins sign every log line with
+   * (src/logAuth.ts). One button for three cases:
+   *
+   *   no secret yet   generate one, store it, push it. Stored even when the
+   *                   push does not land (plugins not staged yet): setupMatch
+   *                   pushes it again with every match.
+   *   has one         push the SAME one again. The repair for a box that lost
+   *                   it: rebuilt, or its data/ directory wiped.
+   *   rotate: true    a new one, stored ONLY once the box has it. The other
+   *                   order would leave an enforcing server signing with a
+   *                   secret the backend had already thrown away.
+   *
+   * The secret never goes to the browser or into the audit log.
+   */
+  app.post('/api/admin/servers/:id/log-secret', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const server = getServer(db, id);
+    if (!server) return reply.code(404).send({ error: 'no such server' });
+    if (!logSecretPusher) return reply.code(503).send({ error: 'pushing a log secret is not available here' });
+    const rotate = (req.body as { rotate?: unknown } | null)?.rotate === true && server.log_secret !== null;
+    const secret = rotate || server.log_secret === null ? newLogSecret() : server.log_secret;
+    if (server.log_secret === null) setLogSecret(db, id, secret);
+    let pushed = false;
+    try {
+      pushed = await logSecretPusher(server, secret);
+    } catch (err) {
+      logAdmin(db, adminId, 'server_log_secret', id, { rotated: false, pushed: false, error: String(err) });
+      return reply.code(502).send({ error: `could not reach ${server.name}: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    const rotated = rotate && pushed;
+    if (rotated) setLogSecret(db, id, secret);
+    logAdmin(db, adminId, 'server_log_secret', id, { rotated, pushed });
+    broadcast('refresh');
+    return { ok: true, pushed, rotated };
+  });
+
+  /** What happens to a log line that fails its signature: off, log (count it,
+   *  accept it) or enforce (drop it). Per server, because plugins roll out a
+   *  box at a time. Refused without a secret, since there would be nothing to
+   *  check a line against and `enforce` would read as protection it is not. */
+  app.post('/api/admin/servers/:id/log-auth', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const server = getServer(db, id);
+    if (!server) return reply.code(404).send({ error: 'no such server' });
+    const { mode } = (req.body ?? {}) as { mode?: unknown };
+    if (typeof mode !== 'string' || !(LOG_AUTH_MODES as readonly string[]).includes(mode)) {
+      return reply.code(400).send({ error: `mode must be one of ${LOG_AUTH_MODES.join(', ')}` });
+    }
+    if (mode !== 'off' && server.log_secret === null) {
+      return reply.code(409).send({ error: 'give this server a log secret first' });
+    }
+    setLogAuthMode(db, id, mode as LogAuthMode);
+    logAdmin(db, adminId, 'server_log_auth', id, { mode });
     broadcast('refresh');
     return { ok: true };
   });

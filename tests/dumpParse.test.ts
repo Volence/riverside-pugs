@@ -85,3 +85,60 @@ describe('parseDump SKILL lines', () => {
     expect(parseDump(SKILL_SAMPLE.replace('skeets=2', 'skeets=x'))).toBeNull();
   });
 });
+
+// Audit 2026-09-21 item 23. pug-match 0.3.3 echoes the backend's nonce and its
+// own match state on both the DUMP and the END line.
+describe('parseDump with a nonce', () => {
+  const N = '0123456789abcdef';
+  const block = (nonce: string | null, state: string | null, winner = 'a', match = 42): string => {
+    const tail = `${nonce ? ` nonce=${nonce}` : ''}${state ? ` state=${state}` : ''}`;
+    return [
+      `DUMP match=${match} skilldetect=0${tail}`,
+      'MAP map=l4d_hospital01_apartment a=245 b=310',
+      'STAT steamid=76561198000000001 team=a joined_map=0 sidmg=1 sikill=1 ck=1 ff=1 rev=1',
+      `END winner=${winner} a=645 b=610${tail}`,
+    ].join('\n');
+  };
+
+  it('reads the nonce and the state off an answer that echoes ours', () => {
+    const d = parseDump(block(N, 'ended'), { nonce: N })!;
+    expect(d.nonce).toBe(N);
+    expect(d.state).toBe('ended');
+    expect(d.matchId).toBe(42);
+  });
+
+  it('takes the LAST block that carries our nonce, not the first block in the response', () => {
+    const body = [block('ffffffffffffffff', 'ended', 'b'), 'unrelated console chatter', block(N, 'ended', 'a'), block(N, 'ended', 'draw')].join('\n');
+    expect(parseDump(body, { nonce: N })!.winner).toBe('draw');
+  });
+
+  it('is not fooled by an earlier block that has no nonce at all', () => {
+    const body = [block(null, null, 'b'), block(N, 'live', 'a')].join('\n');
+    const d = parseDump(body, { nonce: N })!;
+    expect(d.winner).toBe('a');
+    expect(d.state).toBe('live');
+  });
+
+  it('refuses an answer whose blocks carry a nonce, none of them ours', () => {
+    expect(parseDump(block('ffffffffffffffff', 'ended'), { nonce: N })).toBeNull();
+  });
+
+  it('refuses a block whose END line does not repeat the nonce', () => {
+    const body = block(N, 'ended').replace(/(END .*) nonce=\w+/, '$1 nonce=ffffffffffffffff');
+    expect(parseDump(body, { nonce: N })).toBeNull();
+    expect(parseDump(block(N, 'ended').replace(/(END [^\n]*?) nonce=\w+/, '$1'), { nonce: N })).toBeNull();
+  });
+
+  it('refuses a state it does not know, rather than guessing whether the match is over', () => {
+    expect(parseDump(block(N, 'banana'), { nonce: N })).toBeNull();
+  });
+
+  it('reads an old plugin, which echoes nothing, exactly as before: first DUMP, first END', () => {
+    const body = [block(null, null, 'b'), block(null, null, 'a')].join('\n');
+    const d = parseDump(body, { nonce: N })!;
+    expect(d.winner).toBe('b');
+    expect(d.nonce).toBeNull();
+    expect(d.state).toBeNull();
+    expect(parseDump(body)!.winner).toBe('b');
+  });
+});

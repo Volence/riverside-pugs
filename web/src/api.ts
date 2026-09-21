@@ -86,7 +86,9 @@ export interface StateSnapshot {
   /** The ready check the viewer was just in, if it failed and they have not
    *  dismissed it. The failure no longer appears in #queue-here, so this is
    *  where they find out. */
-  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean } | null;
+  /** `removed` is set instead of `notReady` when the pop was cancelled because
+   *  a player was taken out of it (banned mid ready check). */
+  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
 }
 
 /** One row of the public ban list. Nothing private is on it: see
@@ -627,6 +629,14 @@ export interface AdminBan {
 
 export interface AdminPlayerDetail extends AdminPlayerRow {
   discordId: string | null;
+  /** Every Discord account this player has linked, newest first, each with
+   *  the OTHER Steam accounts that have held it. `linkedBy` is 'backfill' for
+   *  a link older than the history table, whose real date nobody recorded. */
+  discordHistory?: {
+    discordId: string; discordName: string; linkedAt: string; linkedBy: string;
+    unlinkedAt: string | null; unlinkedBy: string | null;
+    others: { steamid: string; name: string | null; linkedAt: string; unlinkedAt: string | null }[];
+  }[];
   activeBan: AdminBan | null;
   bans: AdminBan[];
   notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];
@@ -664,6 +674,35 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   networks: { ipHash: string; country: string | null; firstSeen: string; lastSeen: string; seenCount: number }[];
   /** Other accounts seen on one of those connections. Evidence, not proof. */
   sharesAddressWith: { steamid: string; name: string; country: string | null; seenCount: number; lastSeen: string }[];
+  /** What Steam says about the account. Null until Steam has been asked, and
+   *  for good on an install with no api key. Context, never a verdict. */
+  steamAccount?: SteamAccount | null;
+}
+
+export interface SteamAccount {
+  checkedAt: string;
+  /** Null for a private profile: Steam does not give the date. */
+  createdAt: string | null;
+  ageDays: number | null;
+  /** What the age is measured against: the first match here, or the day they
+   *  joined when they have not played yet. */
+  reference: { kind: 'first_match' | 'joined'; at: string } | null;
+  daysBeforeReference: number | null;
+  visibility: 'public' | 'private' | 'unknown';
+  profileConfigured: boolean | null;
+  bans: { vac: number; game: number; daysSinceLast: number | null; community: boolean; economy: string; checkedAt: string } | null;
+  /** `hidden` is never zero hours: game details are private. */
+  l4d1:
+    | { state: 'visible'; hours: number }
+    | { state: 'not_owned' }
+    | { state: 'hidden'; lastSeenHours: number | null }
+    | null;
+  level: number | null;
+  /** Last account seen lending this one the game through Family Sharing, and
+   *  the player here it belongs to, if any. */
+  lender: { steamid: string; seenAt: string; player: { steamid: string; name: string; banned: boolean } | null } | null;
+  /** Plain-worded and already hedged by the server. */
+  flags: { kind: string; text: string }[];
 }
 
 /** Team SR, the gap and the paper odds. `source` says which ratings it came
@@ -683,6 +722,19 @@ export interface Forecast {
   source: 'history' | 'current';
 }
 
+export type LogAuthMode = 'off' | 'log' | 'enforce';
+/** What the backend's log signature check has to say about one server. The
+ *  secret itself never leaves the backend; `hasSecret` is all the page gets.
+ *  Counters are since the backend last started, null when it has no verifier. */
+export interface ServerLogAuth {
+  mode: LogAuthMode;
+  hasSecret: boolean;
+  counters: {
+    ok: number; missing: number; badMac: number; replay: number;
+    lastOkAt: number | null; lastFailAt: number | null; lastFail: string | null;
+  } | null;
+}
+
 export interface AdminOverview {
   open: {
     id: number; campaign: string; state: string; serverId: number | null; createdAt: string;
@@ -692,7 +744,12 @@ export interface AdminOverview {
     connect: { host: string; port: number; password: string } | null;
     forecast: Forecast | null;
   }[];
-  servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number }[];
+  servers: {
+    id: number; name: string; host: string; port: number; status: string; enabled: number;
+    tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number;
+    /** Signed log lines. Optional: a payload from before it existed has none. */
+    logAuth?: ServerLogAuth;
+  }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
@@ -956,10 +1013,14 @@ export const adminApi = {
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   setMod: (steamid: string, isMod: boolean) => post(`/api/admin/players/${steamid}/mod`, { isMod }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
+  /** Ends every session the player holds, on every device. */
+  signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
   unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),
+  steamRefresh: (steamid: string) =>
+    post<{ ok: true; refreshed: number }>(`/api/admin/players/${steamid}/steam-refresh`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
@@ -974,6 +1035,9 @@ export const adminApi = {
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
   serverRestartAfterMatch: (id: number, on: boolean) =>
     post(`/api/admin/servers/${id}/restart-after-match`, { on }),
+  serverLogSecret: (id: number, rotate = false) =>
+    post<{ ok: true; pushed: boolean; rotated: boolean }>(`/api/admin/servers/${id}/log-secret`, { rotate }),
+  serverLogAuth: (id: number, mode: LogAuthMode) => post(`/api/admin/servers/${id}/log-auth`, { mode }),
   dlc4Check: () => post<{ results: { id: number; name: string; hasDlc4: boolean }[] }>('/api/admin/servers/dlc4-check'),
   syncServerAdmins: () => post<{ results: { serverId: number; server: string; ok: boolean; error?: string }[] }>('/api/admin/servers/admins-sync'),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
@@ -1083,9 +1147,14 @@ export const api = {
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 
   register: (code: string) => post('/api/register', { code }),
+  /** Whose Discord a link code is for. Reads, never spends. */
+  peekDiscordCode: (code: string) =>
+    get<{ discordId: string; discordName: string }>(`/api/discord/link-code?code=${encodeURIComponent(code)}`),
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),
+  /** Sign out of this browser. */
+  logout: () => post<{ ok: true }>('/auth/logout'),
   saveProfile: (body: ProfileFieldsInput) => post<{ ok: true }>('/api/profile', body),
   unlinkTwitch: () => post<{ ok: true }>('/api/twitch/unlink'),
   reportEligibility: (matchId: number, signal?: AbortSignal) =>

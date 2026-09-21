@@ -52,6 +52,10 @@ describe('the moderator flag', () => {
     expect((await set(B, true)).statusCode).toBe(403);
     expect((await set(ADMIN, 'yes')).statusCode).toBe(400);
     expect((await set(ADMIN, true)).statusCode).toBe(200);
+    // A change of rights ends the sessions of whoever it was changed for (see
+    // session.test.ts), so A reads the new flag from a fresh sign-in.
+    expect((await app.inject({ method: 'GET', url: '/api/me', cookies: cookie[A] })).statusCode).toBe(401);
+    cookie[A] = authedCookie(app, db, A);
     expect((await app.inject({ method: 'GET', url: '/api/me', cookies: cookie[A] })).json().isMod).toBe(true);
     expect((await app.inject({ method: 'GET', url: '/api/me', cookies: cookie[B] })).json().isMod).toBe(false);
     const audit = (await app.inject({ method: 'GET', url: '/api/admin/audit', cookies: cookie[ADMIN] })).json();

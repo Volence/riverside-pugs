@@ -113,12 +113,17 @@ export function Profile(
         {session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid && (
           <Panel>
             <DiscordLinkCard me={session.me} onChange={refresh} />
-            <ProfileEdit
-              data={data}
-              twitchEnabled={session.me.twitchEnabled ?? false}
-              twitchLinked={Boolean(session.me.twitch)}
-              onSaved={() => refresh?.()}
-            />
+            {/* Active players only: the backend refuses a profile write or a
+                Twitch link from an account that is pending or banned. The
+                Discord card above stays, since linking is how they get in. */}
+            {session.kind === 'active' && (
+              <ProfileEdit
+                data={data}
+                twitchEnabled={session.me.twitchEnabled ?? false}
+                twitchLinked={Boolean(session.me.twitch)}
+                onSaved={() => refresh?.()}
+              />
+            )}
           </Panel>
         )}
         {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}

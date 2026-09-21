@@ -46,7 +46,7 @@ or when more than `MAX_ROSTER` (8) players are on teams.
 |---|---|---|
 | `sm_pug_match` | `<matchid> <token> <campaign>` | Starts match intake. Resets all match state, arms the roster. |
 | `sm_pug_roster` | `<steamid64>:<a\|b>` | Call once per player (×8). Team letters are lowercase `a`/`b`; convention: team `a` starts as survivors on map 1. |
-| `sm_pug_dump` | `<token>` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. |
+| `sm_pug_dump` | `<token> [nonce]` | Authoritative match record over the RCON response body. Idempotent, so it is safe to call more than once. `nonce` (1 to 32 hex digits, 0.3.3 and later) is echoed on the DUMP and END lines. |
 | `sm_pug_abort` | `<token> [teardown [<map>]]` | End the match. Plain form: reset plugin state, nothing else (the routine post-report call). With `teardown`: announce in chat, ask Rotoblin for an unpause and wait up to 10 s for it, kick every human (bots and SourceTV stay), then `ForceChangeLevel(<map>)` once the kicks have landed. Logs `PUG <token> PROBLEM code=unpause_timeout` if the game never unpaused. The backend sends the teardown form from the release path for abandon, no-show and admin abort; never for a clean finish. |
 | `sm_pug_status` | none | Full current plugin state over the RCON response body. Takes no token deliberately, since the moment you most want it is when setup went wrong and you do not trust your own idea of the token. Read-only, safe at any time. |
 | `sm_pug_setid` | `<token> <matchid>` | Backend assigns the match id for a **self-started** match. Keyed by token, because the id is exactly what the plugin does not know and so cannot be asked for. |
@@ -135,16 +135,76 @@ a score.
 ### Authoritative: RCON `sm_pug_dump` response body (`src/dumpParse.ts`)
 
 ```
-DUMP match=<id>
+DUMP match=<id> skilldetect=0|1 [nonce=<hex>] state=pending|live|ended
 MAP map=<m> a=<n> b=<n>              (one per completed map, in order)
-STAT steamid=<id64> team=a|b sidmg=<n> sikill=<n> ck=<n> ff=<n> rev=<n>   (x8)
-END winner=a|b|draw a=<total> b=<total>
+STAT steamid=<id64> team=a|b joined_map=<n> sidmg=<n> sikill=<n> ck=<n> ff=<n> rev=<n>   (one per roster slot)
+SKILL steamid=<id64> <key>=<n> ...   (one per roster slot)
+END winner=a|b|draw a=<total> b=<total> [nonce=<hex>] state=pending|live|ended
 ```
+
+`nonce=` and `state=` are 0.3.3 and later. The backend sends a fresh nonce with
+every pull and, when the answer echoes it, reads the LAST block that carries it
+(an rcon response also holds whatever else reached the console) and completes
+the match only on `state=ended`: the dump answers in any state, and the
+`MATCH_END` line that triggers the pull is UDP. An answer with no nonce is an
+older plugin and is read as it always was, first DUMP to first END.
 
 Both grammars are emitted from single central helpers in `pug-match.sp`
 (`EmitPug` for the live view, `DumpLine` for the dump) so the wire format
 lives in one place. Any change here must be mirrored in `src/logParse.ts` /
 `src/dumpParse.ts` and vice versa.
+
+### Signed log lines (`pug-logauth.inc`, `src/logAuth.ts`)
+
+Every line above is a UDP datagram, and the backend admits the token-less kinds
+(`L4DC`, `L4DL`, `L4DM`, `PUGNET`) on the sender's address alone, which is the
+thing a spoofer forges. The token on a `PUG` line is little better: it crosses
+the same cleartext stream. This engine has no `sv_logsecret`. So a server that
+has been given a secret signs every line it logs:
+
+```
+<the line as before> lseq=<boot>.<n> mac=<8 hex>
+```
+
+- `mac` is the first four bytes of HMAC-SHA1(secret, everything before ` mac=`).
+  The key is the secret's own characters. `pug-hmac.inc` is that in plain
+  SourcePawn; `tests/logauth_vectors.sp` holds it and `node:crypto` to one table
+  of vectors (`./test-logauth.sh`, `tests/logAuthVectors.test.ts`).
+- `n` counts signed lines for the whole server, across all four plugins; `boot`
+  is when this srcds process first loaded one of them. A line from an earlier
+  boot, or a counter already seen, is a replay. Both live in ConVars
+  (`sm_pug_log_boot`, `sm_pug_log_seq`) because those outlive a plugin reload
+  and die with the process, which is the lifetime wanted. `boot` rides on every
+  line so that a lost datagram cannot leave a restarted server refused.
+- `lseq`, not `seq`: EVENT and CHAT already carry a per-match `seq=`.
+- The secret arrives as `sm_pug_log_secret <hex>` over rcon (FCVAR_PROTECTED),
+  pushed by the backend at every match set-up, with `sm_pug_setid`, and from the
+  admin server panel. The backend turns `sv_rcon_log` off around that one
+  command, because srcds logs rcon commands onto this same stream. The plugins
+  keep it in `data/pug_logauth_<hostport>.txt`, so a restarted server signs from
+  its first line. With no secret, lines go out exactly as they always did.
+- The engine's own `entered the game` line cannot be signed. It is honoured
+  from the pinned source address only, and all it can do is clear a signon drop.
+
+The backend strips the trailer before the grammar sees the line, and decides
+per server (`servers.log_auth`): `off` believes everything as before, `log`
+counts failures and believes them anyway, `enforce` drops them. A valid
+signature also says which server a line came from, which address and port
+cannot always (two srcds on one machine).
+
+Roll-out, one server at a time, web first:
+
+1. Deploy the web app. Nothing changes: every server is `off` with no secret.
+2. Admin, Matches, Servers, "Log signing": **Set up**. A secret is generated
+   and pushed. Old plugins answer "Unknown command" and carry on unsigned.
+3. Stage the four new plugins on that server while it is empty, then **Push
+   again** (the cvar exists only once one of them has loaded).
+4. Set the mode to **log** and play a match. `unsigned` should stop climbing
+   and `bad` and `replayed` should stay at zero.
+5. Set the mode to **enforce**.
+
+Back out: set the mode to `off`. To stop a server signing altogether, run
+`sm_pug_log_secret ""` on it, which also removes the file.
 
 ## Build
 
