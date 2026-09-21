@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   renderPanel, renderLobby, renderLobbyFailed, renderMatch, renderResult, renderCancelled, playerLabel,
-  renderEndorsePicker, renderEndorseKinds,
+  renderEndorsePicker, renderEndorseKinds, escapeName,
 } from '../src/discord/presenter.js';
 import type { MessagePayload } from '../src/discord/transport.js';
 import type { EndorseKind } from '../src/endorsements.js';
@@ -16,6 +16,19 @@ describe('playerLabel', () => {
   it('mentions linked players, escapes markdown in plain names, appends SR', () => {
     expect(playerLabel(alice)).toBe('<@111> (1200)');
     expect(playerLabel(bob)).toBe('b\\*o\\_b');
+  });
+});
+
+describe('escapeName', () => {
+  it('neutralises brackets so a name can never open a markdown link', () => {
+    const out = escapeName('[x](http://evil.example)');
+    for (const m of out.matchAll(/[[\]]/g)) {
+      expect(out[m.index! - 1]).toBe('\\');
+    }
+  });
+
+  it('still escapes markdown emphasis as before', () => {
+    expect(escapeName('b*o_b')).toBe('b\\*o\\_b');
   });
 });
 

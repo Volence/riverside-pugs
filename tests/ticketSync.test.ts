@@ -183,6 +183,23 @@ describe('the staff forum post', () => {
     expect(accused).toContain('](http://evil.example)');
   });
 
+  it('a name that is itself a whole markdown link renders as inert text, not a link', async () => {
+    db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('[x](http://evil.example)', IDS[5]);
+    sync.start();
+    const id = file(IDS[0], { targetId: IDS[5], category: 'griefing', text: '' });
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    const fields = cardOf(threadId).embeds[0].fields!;
+    const accused = fields.find((f) => f.name === 'Accused')!.value;
+    // Drop every backslash-escaped character: what is left is what Discord
+    // could actually render as markdown. The only real link left standing
+    // must be the one this card wrote itself.
+    const unescaped = accused.replace(/\\./g, '');
+    const links = [...unescaped.matchAll(/\[([^[\]]*)\]\(([^()]*)\)/g)];
+    expect(links).toHaveLength(1);
+    expect(links[0][0]).toBe(`[profile](https://pug.test/player/${IDS[5]})`);
+  });
+
   it('a post deleted by hand is made again', async () => {
     sync.start();
     const id = file(IDS[0], { targetId: IDS[5], category: 'afk', text: '' });

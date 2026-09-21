@@ -21,9 +21,14 @@ export interface PlayerView {
   sr: number | null;
 }
 
-const MARKDOWN = /([\\*_~`|>])/g;
+// Square brackets are in here too: without them, a name that is itself a
+// markdown link, [x](http://evil.example), renders as a live, attacker-chosen
+// link wherever a "plain" name is shown in an embed. A backslash-escaped
+// bracket still renders as a bracket, so nothing visible changes.
+const MARKDOWN = /([\\*_~`|>[\]])/g;
 
-/** A plain name with Discord markdown neutralised, so "b*o_b" is not italic. */
+/** A plain name with Discord markdown neutralised, so "b*o_b" is not italic
+ *  and "[x](evil)" is not a link. */
 export function escapeName(name: string): string {
   return name.replace(MARKDOWN, '\\$1');
 }
