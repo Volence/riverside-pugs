@@ -106,6 +106,15 @@ export function burstStats(ticks: readonly number[]): BurstStats {
  * distributions; the only human sample in evidence is one person clicking for
  * fifteen seconds.
  */
-export function pounceSpam(burst: { kind: string; airPresses: number }, threshold: number): boolean {
-  return burst.kind === 'pounce' && burst.airPresses >= threshold;
+export function pounceSpam(
+  burst: { kind: string; weapon: string; airPresses: number }, threshold: number,
+): boolean {
+  return burst.kind === 'pounce' && POUNCE_WEAPONS.has(burst.weapon) && burst.airPresses >= threshold;
 }
+
+/** The pounce anchor fires for ANYONE airborne, so a survivor shooting while
+ *  falling produces a `pounce` burst too. Measured 2026-09-21: a survivor firing
+ *  mid-jump logged a=3, and a fire macro while jumping reached a=8, against a
+ *  threshold of 12. The weapon is what separates a hunter from a survivor who
+ *  jumped, which is why it is on the wire. */
+export const POUNCE_WEAPONS = new Set(['weapon_hunter_claw']);

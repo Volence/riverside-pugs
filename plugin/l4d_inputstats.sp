@@ -9,9 +9,9 @@
  * being redeployed to a game server. That matters here because the cheats are
  * frozen (nobody writes new ones for a 2008 game) while our tooling is not.
  *
- * THIS PLUGIN MUST BE INCAPABLE OF CHANGING THE GAME. OnPlayerRunCmd always
- * returns Plugin_Continue and never writes `buttons`. If that ever stops being
- * true, this belongs nowhere near a ranked match.
+ * THIS PLUGIN IS INCAPABLE OF CHANGING THE GAME: it hooks OnPlayerRunCmdPre,
+ * whose parameters are read-only by signature. That is also why it sees the
+ * player's real input rather than whatever a rate-clamping plugin left behind.
  */
 #pragma semicolon 1
 #pragma newdecls required
@@ -137,14 +137,28 @@ void ResetClient(int c)
 	g_iBurstsThisRound[c] = 0;
 }
 
-public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3],
-	int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+/**
+ * OnPlayerRunCmdPre, NOT OnPlayerRunCmd, for two reasons.
+ *
+ * It runs before any plugin's OnPlayerRunCmd, so it sees the player's real
+ * input. Measured with OnPlayerRunCmd on 2026-09-21, a macro driven at 13/s was
+ * recorded at 6.1/s, statistically indistinguishable from a hand: another
+ * plugin (l4d2_pistol_delay) clamps the attack button before that hook runs, so
+ * we were measuring post-clamp input and would have called a cheat a human.
+ *
+ * Its signature is also read-only: `int buttons`, not `int &buttons`. That makes
+ * "this plugin cannot change the game" a property of the hook rather than a
+ * promise in a comment.
+ */
+public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float vel[3],
+	const float angles[3], int weapon, int subtype, int cmdnum, int tickcount, int seed,
+	const int mouse[2])
 {
 	// Hot path: ~800 calls a second with eight players at 100 tick. Integer work
 	// only; nothing here formats a string. Formatting happens at burst close.
-	if (!g_cvEnabled.BoolValue || !IsPlayerAlive(client)
+	if (!g_cvEnabled.BoolValue || !IsClientInGame(client) || !IsPlayerAlive(client)
 	    || (IsFakeClient(client) && !g_cvBots.BoolValue)) {
-		return Plugin_Continue;
+		return;
 	}
 
 	int tick = GetGameTickCount();
@@ -195,7 +209,6 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 
 	g_iPrevButtons[client] = buttons;
-	return Plugin_Continue;
 }
 
 /** Append one interval to a burst, closing and emitting the previous one when

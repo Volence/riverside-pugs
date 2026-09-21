@@ -11,7 +11,7 @@ let db: DB;
 beforeEach(() => { db = openDb(':memory:'); });
 
 const burst = (over: Partial<Parameters<typeof recordInputBurst>[1]> = {}) => ({
-  matchId: 7, serverId: 1, steamid: A, kind: 'pounce' as const, weapon: 'hunter_claw',
+  matchId: 7, serverId: 1, steamid: A, kind: 'pounce' as const, weapon: 'weapon_hunter_claw',
   airPresses: 2, groundTicks: 4, serverTick: 1000, clientTick: 999, intervals: [8, 9, 8],
   ...over,
 });
@@ -33,6 +33,10 @@ describe('recordInputBurst', () => {
 
   it('does not fire on a fire burst however many presses', () => {
     expect(recordInputBurst(db, burst({ kind: 'fire', airPresses: 99 })).detections).toEqual([]);
+  });
+
+  it('does not fire on a survivor who was merely airborne', () => {
+    expect(recordInputBurst(db, burst({ weapon: 'weapon_pistol', airPresses: 40 })).detections).toEqual([]);
   });
 
   it('round trips the intervals through storage', () => {

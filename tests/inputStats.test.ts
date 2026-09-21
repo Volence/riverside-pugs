@@ -85,16 +85,29 @@ describe('burstStats', () => {
 });
 
 describe('pounceSpam', () => {
-  it('ignores a human pounce', () => {
-    expect(pounceSpam({ kind: 'pounce', airPresses: 1 }, 12)).toBe(false);
-    expect(pounceSpam({ kind: 'pounce', airPresses: 2 }, 12)).toBe(false);
+  const claw = (airPresses: number) => ({ kind: 'pounce', weapon: 'weapon_hunter_claw', airPresses });
+
+  it('ignores a real hunter pounce', () => {
+    // Measured on a live client 2026-09-21: a normal pounce reads a=3.
+    expect(pounceSpam(claw(1), 12)).toBe(false);
+    expect(pounceSpam(claw(3), 12)).toBe(false);
   });
 
   it('flags a button held through the air', () => {
-    expect(pounceSpam({ kind: 'pounce', airPresses: 20 }, 12)).toBe(true);
+    expect(pounceSpam(claw(20), 12)).toBe(true);
   });
 
   it('only applies to the pounce anchor', () => {
-    expect(pounceSpam({ kind: 'fire', airPresses: 40 }, 12)).toBe(false);
+    expect(pounceSpam({ kind: 'fire', weapon: 'weapon_hunter_claw', airPresses: 40 }, 12)).toBe(false);
+  });
+
+  // The pounce anchor fires for anyone airborne. A survivor shooting while
+  // falling logged a=3 on a live client, and a fire macro while jumping reached
+  // a=8 against a threshold of 12: close enough that without this filter a
+  // survivor with a macro, or a long fall, would eventually be flagged as a
+  // hunter cheat.
+  it('never flags a survivor who was merely airborne', () => {
+    expect(pounceSpam({ kind: 'pounce', weapon: 'weapon_pistol', airPresses: 40 }, 12)).toBe(false);
+    expect(pounceSpam({ kind: 'pounce', weapon: '', airPresses: 40 }, 12)).toBe(false);
   });
 });
