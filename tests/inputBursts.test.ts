@@ -84,6 +84,41 @@ describe('recordInputBurst', () => {
   });
 });
 
+describe('pistol_rate', () => {
+  const held = Array.from({ length: 50 }, (_, i) => (i % 3 === 0 ? 7 : 8));    // ~13/s for 3.8 s
+  const fire = (over: Partial<Parameters<typeof recordInputBurst>[1]> = {}) =>
+    burst({ kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0, intervals: held, ...over });
+
+  it('fires on the second sustained pistol burst in a match, at low severity', () => {
+    expect(recordInputBurst(db, fire()).detections).toEqual([]);
+    expect(recordInputBurst(db, fire()).detections).toEqual(['pistol_rate']);
+    const rows = detectionsForPlayer(db, A);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ signature: 'pistol_rate', kind: 'fire', severity: 'low', hits: 2 });
+  });
+
+  it('keeps its own row beside pounce_spam for the same player and match', () => {
+    macroMatch();
+    recordInputBurst(db, fire());
+    recordInputBurst(db, fire());
+    expect(detectionsForPlayer(db, A).map((d) => d.signature).sort()).toEqual(['pistol_rate', 'pounce_spam']);
+  });
+
+  it('is found by a re-run over bursts stored before the signature existed', () => {
+    const never = { ...DEFAULT_THRESHOLDS, pistolMinRate: 30 };
+    recordInputBurst(db, fire(), never);
+    recordInputBurst(db, fire(), never);
+    expect(detectionsForPlayer(db, A)).toHaveLength(0);
+    expect(rerunSignatures(db).detections).toBe(1);
+    expect(detectionsForPlayer(db, A)[0].signature).toBe('pistol_rate');
+  });
+
+  it('reads its rate from its own setting', () => {
+    setSetting(db, 'input_pistol_min_rate', '15');
+    expect(inputThresholds(db).pistolMinRate).toBe(15);
+  });
+});
+
 describe('inputThresholds', () => {
   it('falls back to the defaults for an absent or nonsense setting', () => {
     expect(inputThresholds(db)).toEqual(DEFAULT_THRESHOLDS);

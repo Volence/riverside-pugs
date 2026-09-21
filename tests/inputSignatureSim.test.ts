@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_THRESHOLDS, MIN_POUNCE_INTERVALS, burstStats, matchDetections, type SignatureBurst,
+  DEFAULT_THRESHOLDS, MAX_INTERVALS, MIN_POUNCE_INTERVALS, burstStats, matchDetections, pistolRate,
+  type SignatureBurst,
 } from '../src/inputStats.js';
 import { burst, human, macro, rng, uniform, type Presser } from './inputSim.js';
 
@@ -27,6 +28,22 @@ function flaggedMatches(p: Presser, phasesPerMatch: number, matches: number, see
   for (let m = 0; m < matches; m++) {
     const bursts = Array.from({ length: phasesPerMatch }, () => claw(phase(p, r)));
     if (matchDetections(bursts, DEFAULT_THRESHOLDS).some((d) => d.signature === 'pounce_spam')) flagged++;
+  }
+  return flagged / matches;
+}
+
+const pistol = (intervals: number[]): SignatureBurst => ({ kind: 'fire', weapon: 'weapon_pistol', intervals });
+
+/** Pistol bursts of `loMs`..`hiMs`, cut at the plugin's per-burst cap. */
+function flaggedPistolMatches(
+  p: Presser, burstsPerMatch: number, loMs: number, hiMs: number, matches: number, seed: number,
+): number {
+  const r = rng(seed);
+  let flagged = 0;
+  for (let m = 0; m < matches; m++) {
+    const bursts = Array.from({ length: burstsPerMatch },
+      () => pistol(burst(p, uniform(r, loMs, hiMs), r).slice(0, MAX_INTERVALS)));
+    if (matchDetections(bursts, DEFAULT_THRESHOLDS).some((d) => d.signature === 'pistol_rate')) flagged++;
   }
   return flagged / matches;
 }
@@ -81,5 +98,43 @@ describe('pounce_spam calibration', () => {
     expect(j.cv).toBeGreaterThan(0.25);      // measured 0.320
     expect(j.cv).toBeLessThan(0.4);
     expect(MIN_POUNCE_INTERVALS).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe('pistol_rate calibration', () => {
+  // The worst legitimate case again: 150 pistol bursts in a match, one to
+  // eight seconds each, every one of them clicked at the player's PEAK rate
+  // with no fatigue at all.
+  it('flags a legit 8/s, cv 0.39 clicker in well under 1% of matches', () => {
+    expect(flaggedPistolMatches(human(8), 150, 1000, 8000, 1000, 11)).toBeLessThan(0.005);
+  });
+
+  it('keeps a margin above the measured peak: a 9/s hand stays under 1%', () => {
+    expect(flaggedPistolMatches(human(9), 150, 1000, 8000, 1000, 12)).toBeLessThan(0.01);
+  });
+
+  // The measurement the signature is built on: 13/s held for twelve seconds.
+  it('flags a perfect 13/s macro in nearly every match, on only ten bursts', () => {
+    expect(flaggedPistolMatches(macro(13), 10, 2000, 8000, 1000, 13)).toBeGreaterThan(0.99);
+  });
+
+  // Jitter buys a macro a human cv. It does not buy it a human rate, and the
+  // mean over three seconds barely moves: that is why this signature exists.
+  it('flags a 13/s macro with 25 ms of jitter in nearly every match too', () => {
+    expect(flaggedPistolMatches(macro(13, 25), 10, 2000, 8000, 1000, 14)).toBeGreaterThan(0.99);
+  });
+
+  // Why not 11/s, which the numbers first suggested: the signature takes the
+  // FASTEST three second window of every burst, which is many draws per
+  // match, and at 11/s a sustained 9/s hand trips it far too often.
+  it('would flag a 9/s hand in a large share of matches at 11/s', () => {
+    const r = rng(15);
+    let flagged = 0;
+    for (let m = 0; m < 300; m++) {
+      let hits = 0;
+      for (let i = 0; i < 150; i++) if (pistolRate(pistol(burst(human(9), uniform(r, 1000, 8000), r)), 11)) hits++;
+      if (hits >= 2) flagged++;
+    }
+    expect(flagged / 300).toBeGreaterThan(0.1);
   });
 });

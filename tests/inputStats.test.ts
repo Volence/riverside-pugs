@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BURST_MAX_TICKS, DEFAULT_THRESHOLDS, MAX_INTERVALS, POUNCE_REPEATS, burstStats, decodeIntervals,
-  encodeIntervals, matchDetections, pounceSpam,
+  BURST_MAX_TICKS, DEFAULT_THRESHOLDS, MAX_INTERVALS, PISTOL_REPEATS, POUNCE_REPEATS, burstStats, decodeIntervals,
+  encodeIntervals, matchDetections, pistolRate, pounceSpam,
 } from '../src/inputStats.js';
 
 describe('encodeIntervals / decodeIntervals', () => {
@@ -149,5 +149,52 @@ describe('matchDetections', () => {
     expect(matchDetections(Array(POUNCE_REPEATS - 1).fill(fast), DEFAULT_THRESHOLDS)).toEqual([]);
     const hit = matchDetections([slow, ...Array(POUNCE_REPEATS).fill(fast), slow], DEFAULT_THRESHOLDS);
     expect(hit).toEqual([{ signature: 'pounce_spam', qualifying: [1, 2, 3, 4] }]);
+  });
+});
+
+describe('pistolRate', () => {
+  const pistol = (intervals: number[]) => ({ kind: 'fire', weapon: 'weapon_pistol', intervals });
+  const RATE = DEFAULT_THRESHOLDS.pistolMinRate;
+  // 13/s aliases to 7s and 8s at 100 tick; this is the measured macro's shape.
+  const macro = (n: number) => Array.from({ length: n }, (_, i) => (i % 3 === 0 ? 7 : 8));
+  const hand = (n: number) => Array.from({ length: n }, (_, i) => [12, 9, 17, 11, 14, 8, 13][i % 7]);
+
+  it('marks three seconds at the macro rate', () => {
+    expect(pistolRate(pistol(macro(45)), RATE)).toBe(true);
+  });
+
+  it('does not mark the same rate held for under three seconds', () => {
+    // 30 intervals at ~7.7 ticks is 2.3 s. A hand can sprint; it cannot sustain.
+    expect(pistolRate(pistol(macro(30)), RATE)).toBe(false);
+  });
+
+  it('does not mark a hand at its measured peak, however long the burst', () => {
+    expect(pistolRate(pistol(hand(200)), RATE)).toBe(false);
+  });
+
+  // The mean over the WHOLE burst would let a macro hide by clicking slowly
+  // for a few seconds after letting go of it, inside the same burst.
+  it('finds a sustained window inside a longer, slower burst', () => {
+    expect(pistolRate(pistol([...hand(20), ...macro(45), ...hand(40)]), RATE)).toBe(true);
+  });
+
+  // Jitter is symmetric, so it cannot move a three second mean: this is the
+  // jittered run from the measurements, tiled to length.
+  it('marks a jittered macro, which variance cannot separate from a hand', () => {
+    const jittered = [6, 9, 7, 11, 5, 8, 10, 6, 9, 7, 12, 4, 8, 10, 6, 9, 7, 11, 5, 8];
+    expect(pistolRate(pistol([...jittered, ...jittered, ...jittered]), RATE)).toBe(true);
+  });
+
+  it('only reads fire bursts on a pistol', () => {
+    expect(pistolRate({ kind: 'fire', weapon: 'weapon_hunting_rifle', intervals: macro(60) }, RATE)).toBe(false);
+    expect(pistolRate({ kind: 'pounce', weapon: 'weapon_pistol', intervals: macro(60) }, RATE)).toBe(false);
+  });
+
+  it('needs two such bursts in a match before it is a detection', () => {
+    const one = matchDetections([pistol(macro(60))], DEFAULT_THRESHOLDS);
+    const two = matchDetections([pistol(macro(60)), pistol(hand(50)), pistol(macro(50))], DEFAULT_THRESHOLDS);
+    expect(PISTOL_REPEATS).toBe(2);
+    expect(one).toEqual([]);
+    expect(two).toEqual([{ signature: 'pistol_rate', qualifying: [0, 2] }]);
   });
 });

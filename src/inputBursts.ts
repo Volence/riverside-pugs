@@ -39,6 +39,7 @@ function rateSetting(db: DB, key: string, fallback: number): number {
 export function inputThresholds(db: DB): Thresholds {
   return {
     pounceMinRate: rateSetting(db, 'input_pounce_min_rate', DEFAULT_THRESHOLDS.pounceMinRate),
+    pistolMinRate: rateSetting(db, 'input_pistol_min_rate', DEFAULT_THRESHOLDS.pistolMinRate),
   };
 }
 

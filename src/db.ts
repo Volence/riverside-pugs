@@ -616,6 +616,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // seeded input_pounce_spam_threshold = 12 TICKS into production, and seeding
   // never overwrites, so that row is now ignored rather than reinterpreted.
   input_pounce_min_rate: '12',
+  // The same, for primary fire on a pistol sustained over three seconds.
+  input_pistol_min_rate: '12',
   require_discord_to_queue: '1',
   // Pressing Ready needs that account to be in a voice channel on the guild.
   require_voice_to_ready: '1',

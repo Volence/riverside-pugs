@@ -106,6 +106,7 @@ export interface SignatureBurst {
  *  are in and the unit an admin can reason about. */
 export interface Thresholds {
   pounceMinRate: number;
+  pistolMinRate: number;
 }
 
 /**
@@ -122,8 +123,15 @@ export interface Thresholds {
  * clicker is flagged in 0 of 2000 matches, a 9/s hand in under 1%, and the 13/s
  * macro in every match, jittered or not. 11/s was tried and rejected: over six
  * intervals the mean is too noisy, and the 9/s hand climbed past 30%.
+ *
+ * The pistol signature lands on the same number by a different road. It reads
+ * three seconds rather than six intervals, so its mean is far steadier and
+ * 11/s looked safe, but it takes the FASTEST three second window of every
+ * pistol burst in a match, which is a great many draws. Simulated over 150
+ * bursts a match: at 11/s a sustained 9/s hand is flagged in 23% of matches,
+ * at 12/s in none, and the 13/s macro in every match either way.
  */
-export const DEFAULT_THRESHOLDS: Thresholds = { pounceMinRate: 12 };
+export const DEFAULT_THRESHOLDS: Thresholds = { pounceMinRate: 12, pistolMinRate: 12 };
 
 /** A threshold below this is inside human reach and would turn a signature
  *  back into a false positive machine, so settings cannot go under it. */
@@ -187,6 +195,55 @@ export const POUNCE_REPEATS = 4;
  *  the wire. */
 export const POUNCE_WEAPONS = new Set(['weapon_hunter_claw']);
 
+/**
+ * `pistol_rate`: primary-fire presses on a pistol, sustained at a rate a hand
+ * cannot hold. This is the signature the measurements actually support: a hand
+ * peaked at 8.0/s, both macros held 13/s for twelve unbroken seconds, and the
+ * jittered one was FASTER, because jitter is symmetric. Hands fatigue; scripts
+ * do not. It reads the MEAN rate over three seconds, never the variance, which
+ * is why 25 ms of jitter (cv 0.32, a human number) does nothing to it.
+ *
+ * Presses are what is measured, not shots. Dual pistols fire more bullets per
+ * second than one, but each bullet is still one press of the button, so a
+ * second pistol changes nothing here and the weapon check does not care how
+ * many are held (L4D1 reports `weapon_pistol` either way). The same goes for
+ * whatever a fire-rate clamp lets through: OnPlayerRunCmdPre sees the presses.
+ *
+ * It looks for the fastest window of at least PISTOL_SUSTAIN_TICKS inside the
+ * burst rather than averaging the whole burst, so a macro cannot hide by
+ * clicking slowly for a few seconds before the burst closes. A burst shorter
+ * than three seconds never qualifies, however fast: a hand can sprint.
+ *
+ * True here means this ONE burst qualifies; a detection takes PISTOL_REPEATS.
+ */
+export function pistolRate(
+  burst: SignatureBurst,
+  minRate: number,
+  sustainTicks = PISTOL_SUSTAIN_TICKS,
+): boolean {
+  if (burst.kind !== 'fire' || !PISTOL_WEAPONS.has(burst.weapon)) return false;
+  const iv = burst.intervals;
+  // Two pointers: for each end j, the SHORTEST window ending there that still
+  // spans sustainTicks. Any longer window ending at j only adds older, and so
+  // by then already judged, intervals.
+  let sum = 0, i = 0;
+  for (let j = 0; j < iv.length; j++) {
+    sum += iv[j];
+    while (sum - iv[i] >= sustainTicks) { sum -= iv[i]; i++; }
+    if (sum >= sustainTicks && atOrAboveRate(sum, j - i + 1, minRate)) return true;
+  }
+  return false;
+}
+
+/** Three seconds. At the 12/s threshold that is at least 36 presses. */
+export const PISTOL_SUSTAIN_TICKS = 3 * TICKRATE;
+
+/** Three seconds at 12/s is already far outside a hand, so two bursts are
+ *  enough to call it a pattern rather than a capture glitch. */
+export const PISTOL_REPEATS = 2;
+
+export const PISTOL_WEAPONS = new Set(['weapon_pistol']);
+
 export interface Signature {
   name: string;
   /** Qualifying bursts, in one match, before a detection exists. */
@@ -198,6 +255,7 @@ export interface Signature {
  *  both run exactly this list, so a signature added here reaches history too. */
 export const SIGNATURES: readonly Signature[] = [
   { name: 'pounce_spam', repeats: POUNCE_REPEATS, qualifies: (b, t) => pounceSpam(b, t.pounceMinRate) },
+  { name: 'pistol_rate', repeats: PISTOL_REPEATS, qualifies: (b, t) => pistolRate(b, t.pistolMinRate) },
 ];
 
 export interface MatchDetection {

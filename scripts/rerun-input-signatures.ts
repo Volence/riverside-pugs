@@ -7,7 +7,7 @@
  * detectors are not.
  *
  *   npx tsx scripts/rerun-input-signatures.ts [--db PATH] [--dry-run]
- *       [--pounce-rate N]
+ *       [--pounce-rate N] [--pistol-rate N]
  *
  * Runs every signature in SIGNATURES (src/inputStats.ts). Rates are presses per
  * second and default to the site's settings.
@@ -33,7 +33,9 @@ const dryRun = args.includes('--dry-run');
 const db = openDb(dbPath);
 
 const thresholds: Thresholds = inputThresholds(db);
-const overrides: [string, keyof Thresholds][] = [['--pounce-rate', 'pounceMinRate']];
+const overrides: [string, keyof Thresholds][] = [
+  ['--pounce-rate', 'pounceMinRate'], ['--pistol-rate', 'pistolMinRate'],
+];
 for (const [name, key] of overrides) {
   const raw = flag(name);
   if (raw === undefined) continue;
