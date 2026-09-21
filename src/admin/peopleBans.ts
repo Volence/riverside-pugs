@@ -21,8 +21,9 @@ export interface PeopleBanRow {
    *  would tell the reader a restricted ticket exists. */
   ticketId: number | null;
   withheld: boolean;
-  /** Whether this viewer may open the banned player's file. A moderator sees
-   *  a ban on a colleague and is simply not offered the link. */
+  /** Whether this viewer may open the banned player's file. True on every row
+   *  a moderator is given, since the rest are dropped; an admin opens all of
+   *  them. Kept so the UI asks rather than assumes. */
   canOpen: boolean;
 }
 
@@ -38,6 +39,13 @@ interface Row {
  * Lifted and expired bans stay listed, as on the public page it replaces: a
  * record that quietly deletes its mistakes is not a record, and "lifted by,
  * and when" is the part that shows the process works.
+ *
+ * A non-admin is given only rows whose file they could open. Listing the rest
+ * without a link told a moderator exactly which banned accounts belong to
+ * staff or to themselves, by the one thing missing from them, and canOpenFile
+ * resolves aliases, so a merged second account is not a way round it either.
+ * Any total the page shows is counted off the rows it received, so the figure
+ * cannot put back what the filter took out.
  */
 export function peopleBans(
   db: DB, viewer: FileViewer,
@@ -58,7 +66,7 @@ export function peopleBans(
   ).all(q, q, like) as Row[];
 
   const filter = opts.filter ?? 'all';
-  return rows.map((r) => {
+  return rows.filter((r) => viewer.isAdmin || canOpenFile(db, viewer, r.player_id)).map((r) => {
     const active = r.lifted_at === null
       && (r.expires_at === null || Date.parse(toIso(r.expires_at)) > now.getTime());
     const withheld = banIsWithheld(db, r.ticket_id, viewer.steamid);

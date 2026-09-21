@@ -10,6 +10,7 @@ import { peopleBans } from '../admin/peopleBans.js';
 import { playerFile } from '../admin/playerFile.js';
 import { markLookedAt } from '../admin/reviews.js';
 import { getPlayer } from '../players.js';
+import { resolveAlias } from '../aliases.js';
 
 export interface PeopleRouteOpts {
   db: DB;
@@ -33,12 +34,17 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
   const { db } = opts;
   const requireMod = makeRequireMod(db);
 
-  /** Staff, then a target whose file this viewer may act on with `action`. */
+  /** Staff, then a target whose file this viewer may act on with `action`.
+   *
+   *  The id is resolved first, so a merged second account names the file it
+   *  was merged into, exactly as every GET here does: a note written against
+   *  an alt would otherwise land on a record nobody opens. canDo resolves
+   *  aliases too, so an alt of a colleague or of the viewer is still a 404. */
   const onFile = (req: FastifyRequest, reply: FastifyReply, action: FileAction) => {
     const me = requireMod(req, reply);
     if (!me) return null;
     const viewer = fileViewer(db, me);
-    const { steamid } = req.params as { steamid: string };
+    const steamid = resolveAlias(db, (req.params as { steamid: string }).steamid);
     if (!getPlayer(db, steamid) || !canDo(db, viewer, steamid, action)) {
       reply.code(404).send({ error: 'no such player' });
       return null;

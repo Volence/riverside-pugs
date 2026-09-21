@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
+import { addAlias } from '../src/aliases.js';
 import { banPlayer, addNote } from '../src/admin/players.js';
 import { recordPenalty } from '../src/penalties.js';
 import { fileViewer } from '../src/admin/fileAccess.js';
@@ -150,10 +151,29 @@ describe('the ban list inside the panel', () => {
     expect(peopleBans(db, admin).find((b) => b.steamid === P)!.length).toBe('1 day');
     expect(peopleBans(db, admin).find((b) => b.steamid === MOD)!.length).toBe('permanent');
 
-    // A moderator sees the staff row and is told they cannot open that file.
-    const asMod = peopleBans(db, fileViewer(db, MOD));
-    expect(asMod.find((b) => b.steamid === MOD)!.canOpen).toBe(false);
-    expect(asMod.find((b) => b.steamid === P)!.canOpen).toBe(true);
+    // Every row an admin gets opens a file, so the flag is there for the
+    // moderator's list, where it is now always true; see below.
+    expect(peopleBans(db, admin).every((b) => b.canOpen)).toBe(true);
+  });
+
+  // A row a moderator cannot open is a row whose missing link says "this
+  // account is staff". Dropping it says nothing either way, and a moderator
+  // has no business with a colleague's ban anyway.
+  it('leaves a moderator only the rows they could open, and an admin all of them', () => {
+    const ALT_OF_MOD = '76561199000000007';
+    const ALT_OF_ADMIN = '76561199000000008';
+    for (const id of [ALT_OF_MOD, ALT_OF_ADMIN]) {
+      upsertPlayer(db, { steamid: id, name: `p${id.slice(-3)}`, avatar: null }, []);
+    }
+    addAlias(db, { steamid: ALT_OF_MOD, canonical: MOD, by: 'test' });
+    addAlias(db, { steamid: ALT_OF_ADMIN, canonical: ADMIN, by: 'test' });
+    for (const id of [P, MOD, ADMIN, ALT_OF_MOD, ALT_OF_ADMIN]) {
+      banPlayer(db, id, ADMIN, 'throwing', null);
+    }
+
+    expect(peopleBans(db, fileViewer(db, MOD)).map((b) => b.steamid)).toEqual([P]);
+    expect(peopleBans(db, fileViewer(db, ADMIN)).map((b) => b.steamid).sort())
+      .toEqual([P, MOD, ADMIN, ALT_OF_MOD, ALT_OF_ADMIN].sort());
   });
 
   it('counts an expired ban as expired without hiding it', () => {

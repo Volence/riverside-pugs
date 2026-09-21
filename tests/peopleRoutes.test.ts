@@ -4,9 +4,14 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
+import { addAlias } from '../src/aliases.js';
+import { upsertPlayer } from '../src/players.js';
 
 const IDS = Array.from({ length: 6 }, (_, i) => `7656119900000000${i}`);
 const [PLAYER, OTHER, MOD, MOD2, ADMIN, OWNER] = IDS;
+/** Merged second accounts: of an ordinary player, of an admin, of the
+ *  moderator doing the asking. */
+const ALTS = ['76561199000000010', '76561199000000011', '76561199000000012'];
 let db: DB;
 let app: FastifyInstance;
 const cookie: Record<string, Record<string, string>> = {};
@@ -15,6 +20,7 @@ beforeEach(async () => {
   db = openDb(':memory:');
   app = await buildServer({ config: loadConfig({ ADMIN_STEAMIDS: OWNER }), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
   for (const id of IDS) cookie[id] = authedCookie(app, db, id);
+  for (const id of ALTS) upsertPlayer(db, { steamid: id, name: `alt${id.slice(-2)}`, avatar: null }, []);
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid IN (?, ?)').run(MOD, MOD2);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid IN (?, ?)').run(ADMIN, OWNER);
 });
@@ -81,6 +87,30 @@ describe('the People routes', () => {
     const audit = (await get(OWNER, '/api/admin/audit')).json();
     expect(audit.actions.map((a: { action: string }) => a.action)).toEqual(['looked_at', 'note']);
     expect(audit.actions[0]).toMatchObject({ adminId: MOD, target: PLAYER });
+  });
+
+  // Every GET resolves aliases, so a merged alt's id opens the main file.
+  // The POSTs used to act on the raw id, which wrote a note onto an account
+  // nobody reads and left the same id refusing nothing at all.
+  it('acts on the main account when a merged alt is named, under the same rule as the GET', async () => {
+    const [altOfPlayer, altOfAdmin, altOfMod] = ALTS;
+    addAlias(db, { steamid: altOfPlayer, canonical: PLAYER, by: 'test' });
+    addAlias(db, { steamid: altOfAdmin, canonical: ADMIN, by: 'test' });
+    addAlias(db, { steamid: altOfMod, canonical: MOD, by: 'test' });
+
+    expect((await post(MOD, `/api/admin/people/${altOfPlayer}/notes`, { text: 'same person' })).statusCode).toBe(200);
+    expect((await post(MOD, `/api/admin/people/${altOfPlayer}/looked-at`, {})).statusCode).toBe(200);
+    const file = (await get(MOD, `/api/admin/people/${PLAYER}`)).json();
+    expect(file.sections.notes[0].text).toBe('same person');
+    expect(file.lastReview).not.toBeNull();
+    const audit = (await get(OWNER, '/api/admin/audit')).json();
+    expect(audit.actions.every((a: { target: string }) => a.target === PLAYER)).toBe(true);
+
+    for (const alt of [altOfAdmin, altOfMod]) {
+      expect((await post(MOD, `/api/admin/people/${alt}/notes`, { text: 'x' })).statusCode, alt).toBe(404);
+      expect((await post(MOD, `/api/admin/people/${alt}/looked-at`, {})).statusCode, alt).toBe(404);
+      expect((await get(MOD, `/api/admin/people/${alt}`)).statusCode, alt).toBe(404);
+    }
   });
 
   it('refuses a note or a review on a file the viewer may not open, as a 404', async () => {
