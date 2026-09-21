@@ -163,6 +163,16 @@ function halfOf(s: string | undefined): number | null {
 /** The engine's `L MM/DD/YYYY - HH:MM:SS: ` stamp, which opens every log line. */
 const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
 
+/** What the server logged: the first line of the datagram, from just after
+ *  the engine's stamp. The FIRST stamp is the engine's own, since the only
+ *  thing ahead of it is the five byte datagram header, so a stamp typed into
+ *  chat or a name is just more body. A datagram with no stamp at all is taken
+ *  whole. */
+function lineBody(text: string): string {
+  const stamp = LOG_STAMP_RE.exec(text);
+  return (stamp ? text.slice(stamp.index + stamp[0].length) : text).split('\n', 1)[0].trimEnd();
+}
+
 /** Anchored at BOTH ends, and the name is greedy, so the fields read are the
  *  last `<uid><steamid><team>` on the line: the engine's own. A name that
  *  contains a whole fake suffix only ends up inside the name group. A `say`
@@ -182,16 +192,14 @@ const ENTERED_RE = /^".*<\d+><(STEAM_\d:[01]:\d{1,10})><[^<>"]*>" entered the ga
  * the caller carries on to the PUG grammar; null when it is one of ours but
  * malformed.
  *
- * Unlike the PUG path, the marker is NOT searched for anywhere in the datagram.
- * Those lines are protected by a secret token; these are protected only by the
- * sender's address, and the game server's address also sends every chat line
+ * The marker is NOT searched for anywhere in the datagram. These lines are
+ * protected only by the sender's address, and the game server's address also
+ * sends every chat line
  * (`"name<2><STEAM_1:0:5><Survivor>" say "L4DC SIGNON_DROP steamid=..."`). So
- * the marker must be the first thing after the engine's stamp, which no player
- * controlled text can be: every engine line about a player opens with a quote.
+ * the marker must be the first thing in lineBody(), which no player controlled
+ * text can be: every engine line about a player opens with a quote.
  */
-function parseSourcePinned(text: string): LogEvent | null | undefined {
-  const stamp = LOG_STAMP_RE.exec(text);
-  const body = (stamp ? text.slice(stamp.index + stamp[0].length) : text).split('\n', 1)[0].trimEnd();
+function parseSourcePinned(body: string): LogEvent | null | undefined {
 
   if (body.startsWith('L4DC ')) {
     // Name is last and takes the rest of the line. Every other field is read
@@ -275,16 +283,19 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
 /**
  * Decode a raw srcds log UDP datagram into a typed PUG event, or null if it is
  * not one of ours or is malformed. Never throws. Tolerant of the engine framing
- * being present or absent. It locates the `PUG ` marker rather than assuming an
- * offset.
+ * being present or absent.
+ *
+ * The `PUG ` marker must open the line, exactly as the token-less markers
+ * must. It used to be searched for anywhere in the datagram, on the reasoning
+ * that the token protects these lines. It does not: a match started in game
+ * brings its own token, so `say "PUG <any 32 hex> MATCH_CREATE ..."` from a
+ * player on the box was a complete, correctly addressed match line.
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {
-  const text = buf.toString('utf8');
-  const pinned = parseSourcePinned(text);
+  const line = lineBody(buf.toString('utf8'));
+  const pinned = parseSourcePinned(line);
   if (pinned !== undefined) return pinned;
-  const idx = text.indexOf('PUG ');
-  if (idx < 0) return null;
-  const line = text.slice(idx).split('\n', 1)[0].trim();
+  if (!line.startsWith('PUG ')) return null;
   const parts = line.split(/\s+/);
   if (parts.length < 3) return null;
   const token = parts[1];
