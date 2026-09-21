@@ -57,7 +57,10 @@ export const dropsAdapter: TimelineAdapter = {
         + `${r.secs_connected < 0 ? '' : ` after ${r.secs_connected} s`}`
         + `, ${r.forced_count} files enforced.`
         + (repeats.has(r.id)
+          // Both branches carry the counter-reading, and the repeat needs it
+          // most: it is the one a reader is likeliest to take for a finding.
           ? ' Second drop inside ten minutes with no clean entry between: likely a rejected game file.'
+            + ' A cancelled loading screen looks the same, so this is a hint, not proof.'
           : ' A cancelled loading screen looks the same, so one of these says nothing.')
         + (r.entered_after_at === null ? ' They have not got in since.' : ''),
       matchId: null,

@@ -68,6 +68,9 @@ describe('the connect-drop source', () => {
     const items = dropsAdapter.items({ db, steamid: P, ids: [P], viewer: STAFF });
     expect(items.map((i) => i.kind)).toEqual(['drop', 'repeat', 'drop']);
     expect(items[1].summary).toMatch(/ten minutes/);
+    // The repeat carries the other reading too. It is the stronger hint, so
+    // it is the one a reader is most likely to take for a finding.
+    expect(items[1].summary).toMatch(/cancelled loading screen/);
     expect(items[2].summary).toMatch(/cancelled loading screen/);
   });
 
