@@ -39,6 +39,8 @@
 /** Must match ENC_BASE in src/inputStats.ts. */
 #define ENC_BASE 48
 
+#define TEAM_INFECTED 3
+
 ConVar g_cvEnabled;
 ConVar g_cvBots;
 
@@ -130,11 +132,18 @@ public void Event_RoundStart(Event e, const char[] n, bool b)
 void ResetClient(int c)
 {
 	g_iPrevButtons[c] = 0;
+	ResetCapture(c);
+	g_iBurstsThisRound[c] = 0;
+}
+
+/** Forget every burst in flight without emitting it, and nothing else: the
+ *  round's burst budget and the previous button state both outlive this. */
+void ResetCapture(int c)
+{
 	g_bPrevGround[c] = true;
 	g_iAtkCount[c] = 0; g_iAtkLastTick[c] = 0;
 	g_iAirCount[c] = 0; g_iAirLastTick[c] = 0; g_iAirStartTick[c] = 0;
 	g_iGroundStartTick[c] = 0;
-	g_iBurstsThisRound[c] = 0;
 }
 
 /**
@@ -161,16 +170,35 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 		return;
 	}
 
+	// A ghost (an infected player who has not spawned yet) passes IsPlayerAlive,
+	// holds weapon_hunter_claw, and EVERYONE mashes M1 as a ghost because that
+	// is how you spawn. Captured, that mashing dominated the pounce bursts. A
+	// ghost cannot attack, pounce or hop, so nothing it presses is evidence:
+	// drop whatever was in flight, keep the button state current so the press
+	// that spawns the player is not read as an edge on their first live tick,
+	// and capture nothing.
+	if (GetClientTeam(client) == TEAM_INFECTED && GetEntProp(client, Prop_Send, "m_isGhost") != 0) {
+		ResetCapture(client);
+		g_iPrevButtons[client] = buttons;
+		return;
+	}
+
 	int tick = GetGameTickCount();
 	int prev = g_iPrevButtons[client];
-	bool ground = (GetEntityFlags(client) & FL_ONGROUND) != 0;
+	// FL_ONGROUND is clear on a ladder, so a climb used to read as one long
+	// airborne phase and every press on it as a pounce press, and stepping off
+	// at the top as a landing for the bhop anchor. A ladder is not the air.
+	bool onLadder = GetEntityMoveType(client) == MOVETYPE_LADDER;
+	bool ground = onLadder || (GetEntityFlags(client) & FL_ONGROUND) != 0;
 
 	// --- ground and air transitions ----------------------------------------
 	if (ground && !g_bPrevGround[client]) {
 		// Landed. The airborne phase just ended, so that pounce attempt is
 		// complete and its press count is final.
 		FlushAir(client, tick);
-		g_iGroundStartTick[client] = tick;
+		// Grabbing a ladder ends the airborne phase but is not a landing: a
+		// jump off a ladder is not a bunnyhop.
+		g_iGroundStartTick[client] = onLadder ? 0 : tick;
 	} else if (!ground && g_bPrevGround[client]) {
 		// Left the ground. Anything pressed from here until landing belongs to
 		// this airborne phase.
@@ -197,7 +225,7 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	}
 
 	// --- +jump press edges, the bhop anchor ---------------------------------
-	if ((buttons & IN_JUMP) && !(prev & IN_JUMP) && g_iGroundStartTick[client] > 0 && ground) {
+	if ((buttons & IN_JUMP) && !(prev & IN_JUMP) && g_iGroundStartTick[client] > 0 && ground && !onLadder) {
 		int onGround = tick - g_iGroundStartTick[client];
 		if (onGround >= 0 && onGround <= BURST_GAP_TICKS) {
 			char one[2];
