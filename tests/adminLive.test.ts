@@ -119,6 +119,20 @@ describe('POST /api/admin/live/:matchId/players/:steamid/leave', () => {
     expect(getPresence(db, matchId, DROPPED)).toMatchObject({ remaining_s: 210, held: 0 });
   });
 
+  it('a command that cannot even be built is not reported as a box being down', async () => {
+    // leaveCommand asserts its arguments, and a throw from it means one of our
+    // own tables holds something that must never become a console line. Built
+    // inside the try it came back as "could not reach Dallas" with a 502,
+    // which sends an admin to look at a box that was never dialled. Outside it
+    // the app's own error handler answers 500 and puts the real message in the
+    // server log, which is where a bug in our tables belongs.
+    db.prepare("UPDATE matches SET token = 'not-a-token' WHERE id = ?").run(matchId);
+    const res = await act({ action: 'hold' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).not.toMatch(/could not reach/);
+    expect(sent).toEqual([]);
+  });
+
   it('an answer about somebody else is not believed', async () => {
     answer = `PUGOK leave steamid=${IDS[5]} absent=1 remaining=1 held=1 hold_left=9`;
     expect((await act({ action: 'hold' })).statusCode).toBe(409);
