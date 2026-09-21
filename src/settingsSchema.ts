@@ -27,7 +27,7 @@ export interface SettingDef {
 
 export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'ready_seconds', group: 'Queue', label: 'Ready check seconds', help: 'How long everyone has to press Ready when the queue pops.', type: { kind: 'int', min: 15, max: 600 } },
-  { key: 'input_pounce_spam_threshold', group: 'Stats', label: 'Pounce spam flag threshold', help: 'Airborne attack presses before a pounce burst is flagged for admin review. A human issues one or two; holding the button issues dozens. Evidence only: nothing happens in game.', type: { kind: 'int', min: 3, max: 200 } },
+  { key: 'input_pounce_min_rate', group: 'Stats', label: 'Pounce spam rate (presses/s)', help: 'Attack presses per second, in the air as a hunter, at or above which one pounce counts toward the pounce_spam input flag. It takes four such pounces in one match to flag anyone. A hand peaks near 8 a second and the measured macro holds 13, so keep this well above 9. Evidence for review only: nothing happens in game.', type: { kind: 'int', min: 10, max: 30 } },
   { key: 'vote_seconds', group: 'Queue', label: 'Campaign vote seconds', help: 'How long the campaign vote runs.', type: { kind: 'int', min: 10, max: 300 } },
   { key: 'map_pool', group: 'Queue', label: 'Campaign pool', help: 'Campaigns offered in the vote.', type: { kind: 'campaigns' } },
   { key: 'invite_code', group: 'Queue', label: 'Invite code', help: 'Fallback way in for someone not in the Discord server.', type: { kind: 'string', maxLength: 64, allowEmpty: false }, secret: true },

@@ -45,7 +45,7 @@ import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, recordIntegrityFlag } from './integrityFlags.js';
-import { isFirstDetectionInMatch, recordInputBurst, pounceSpamThreshold } from './inputBursts.js';
+import { inputThresholds, recordInputBurst } from './inputBursts.js';
 import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
@@ -520,12 +520,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
               airPresses: ev.airPresses, groundTicks: ev.groundTicks,
               serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
-            }, pounceSpamThreshold(deps.db));
+            }, inputThresholds(deps.db));
+            // `detections` names a signature only on the burst that completed
+            // its repeat count, so this posts once per player, match and
+            // signature however many bursts qualify afterwards.
             for (const signature of stored.detections) {
-              if (!isFirstDetectionInMatch(deps.db, ev.steamid, matchId)) continue;
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
-                detail: `${ev.burstKind}, ${ev.airPresses} presses in the air`,
+                detail: `repeated across separate ${ev.burstKind} bursts this match`,
               });
             }
           } catch (err) {

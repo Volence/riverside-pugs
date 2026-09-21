@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseLogDatagram } from '../src/logParse.js';
-import { burstStats, pounceSpam } from '../src/inputStats.js';
+import { DEFAULT_THRESHOLDS, burstStats, pounceSpam } from '../src/inputStats.js';
 
 /**
  * Lines captured off the real wire from l4d_inputstats.smx on the local test
@@ -18,9 +18,9 @@ const REAL = [
   // EVERY real bhop line would have been refused by the parser. Nothing caught
   // it but reading the wire.
   'L 09/21/2026 - 03:42:30: L4DM id=76561197960287930 k=bhop w=test_weapon n=1 g=4 a=2 st=101 ct=0 d=6',
-  // Live client, 2026-09-21. A REAL hunter pounce: three airborne presses, well
-  // under the threshold of 12. This is the human baseline the signature must
-  // never flag, and it is where `weapon_hunter_claw` was confirmed.
+  // Live client, 2026-09-21. A REAL hunter pounce: three airborne presses at
+  // 6.5/s. This is the human baseline the signature must never mark, and it is
+  // where `weapon_hunter_claw` was confirmed.
   'L 09/21/2026 - 10:40:36: L4DM id=STEAM_1:1:35074132 k=pounce w=weapon_hunter_claw n=2 g=203 a=3 st=41646 ct=0 d=A<',
   // Live client, same session. A SURVIVOR shooting mid-jump also produces a
   // pounce burst, which is why the signature filters on the weapon.
@@ -31,8 +31,8 @@ describe('lines the plugin actually emitted', () => {
   it('does not flag a real hunter pounce or an airborne survivor', () => {
     const hunter = parseLogDatagram(Buffer.from(REAL[4], 'utf8')) as never;
     const survivor = parseLogDatagram(Buffer.from(REAL[5], 'utf8')) as never;
-    expect(pounceSpam(hunter, 12)).toBe(false);
-    expect(pounceSpam(survivor, 12)).toBe(false);
+    expect(pounceSpam(hunter, DEFAULT_THRESHOLDS.pounceMinRate)).toBe(false);
+    expect(pounceSpam(survivor, DEFAULT_THRESHOLDS.pounceMinRate)).toBe(false);
   });
 
   it('the parser accepts every one of them', () => {

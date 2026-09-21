@@ -581,6 +581,11 @@ CREATE TABLE IF NOT EXISTS input_detections (
   signature TEXT NOT NULL,
   severity TEXT NOT NULL,
   at TEXT NOT NULL,
+  -- Bursts that qualified in this match so far, and their ids as a JSON array.
+  -- A detection is one row per player, match and signature, written only once
+  -- the signature has repeated; burst_id is the burst that completed it.
+  hits INTEGER NOT NULL DEFAULT 1,
+  evidence TEXT NOT NULL DEFAULT '[]',
   UNIQUE(burst_id, signature)
 );
 CREATE INDEX IF NOT EXISTS input_detections_steamid ON input_detections(steamid, at);
@@ -605,10 +610,12 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // Discord turns into being dropped out of voice when the channel goes.
   discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
-  // Airborne +attack presses before a pounce burst is flagged. A human issues
-  // one or two; a held button issues dozens. Raise it if a real match ever
-  // shows a legitimate player above it; never lower it below 3.
-  input_pounce_spam_threshold: '12',
+  // Presses per second, in the air on the hunter claw, at or above which an
+  // airborne phase counts toward pounce_spam. See DEFAULT_THRESHOLDS in
+  // src/inputStats.ts for why 12. A NEW key on purpose: the first signature
+  // seeded input_pounce_spam_threshold = 12 TICKS into production, and seeding
+  // never overwrites, so that row is now ignored rather than reinterpreted.
+  input_pounce_min_rate: '12',
   require_discord_to_queue: '1',
   // Pressing Ready needs that account to be in a voice channel on the guild.
   require_voice_to_ready: '1',
@@ -711,6 +718,11 @@ export function openDb(path: string): DB {
   // First time this rostered player was seen connected to the match server.
   // Null means they never turned up, which is what the no-show reaper counts.
   ensureColumn(db, 'match_players', 'connected_at', 'TEXT');
+  // Input detections became one row per player, match and signature, carrying
+  // how many bursts qualified and which. Rows from before this default to one
+  // hit and no evidence list; scripts/rerun-input-signatures.ts rebuilds them.
+  ensureColumn(db, 'input_detections', 'hits', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'input_detections', 'evidence', "TEXT NOT NULL DEFAULT '[]'");
   // How many survivors were still standing when the round ended. NULL, not 0,
   // as the default: every round recorded before the plugin emitted this was
   // simply not measured, and 0 is a real value here (a wipe). Defaulting to 0

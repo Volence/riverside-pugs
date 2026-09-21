@@ -605,7 +605,7 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   /** Input signatures that fired on this player's button timing. Evidence to
    *  read next to the replay, never a verdict: the only signature shipped is
    *  the one that needs no statistical tuning. */
-  inputFlags: { id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string }[];
+  inputFlags: { id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string; hits: number }[];
   /** Second Steam accounts folded into this one by a merge. Their SteamIDs
    *  still resolve here on every line the game server sends. */
   aliases: { steamid: string; canonical: string; created_at: string; created_by: string }[];

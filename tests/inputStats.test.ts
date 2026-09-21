@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BURST_MAX_TICKS, MAX_INTERVALS, burstStats, decodeIntervals, encodeIntervals, pounceSpam,
+  BURST_MAX_TICKS, DEFAULT_THRESHOLDS, MAX_INTERVALS, POUNCE_REPEATS, burstStats, decodeIntervals,
+  encodeIntervals, matchDetections, pounceSpam,
 } from '../src/inputStats.js';
 
 describe('encodeIntervals / decodeIntervals', () => {
@@ -91,36 +92,62 @@ describe('pounceSpam', () => {
   const HUMAN_MASHING = [21, 21, 19, 24, 20, 17, 15];  // 8 presses over 1.61s, as fast as a hand goes
   const MACRO_SHORT = [7, 8, 8, 7, 8, 8];              // 7 presses over 0.57s
   const MACRO_LONG = [8, 7, 8, 8, 7, 8, 8, 7, 8, 9, 5, 8, 7, 8, 8, 8];
+  const RATE = DEFAULT_THRESHOLDS.pounceMinRate;
 
-  it('does not flag a hand, even mashing as fast as it can', () => {
-    expect(pounceSpam(claw(HUMAN_MASHING), 12)).toBe(false);
-    expect(pounceSpam(claw(HUMAN_NORMAL), 12)).toBe(false);
+  it('does not mark a hand, even mashing as fast as it can', () => {
+    expect(pounceSpam(claw(HUMAN_MASHING), RATE)).toBe(false);
+    expect(pounceSpam(claw(HUMAN_NORMAL), RATE)).toBe(false);
   });
 
-  it('flags a macro on a SHORT pounce, which a count threshold missed', () => {
+  // The threshold that shipped first was 12 ticks, 8.3/s, which is the measured
+  // human PEAK on the pistol. A legit fast clicker sits right on it.
+  it('does not mark a hand at the measured human peak of 8 presses a second', () => {
+    expect(pounceSpam(claw([12, 13, 12, 13, 12, 13, 12, 13]), RATE)).toBe(false);
+    expect(pounceSpam(claw([11, 11, 11, 11, 11, 11, 11, 11]), RATE)).toBe(false);   // 9.1/s
+  });
+
+  it('marks a macro on a SHORT pounce, which a count threshold missed', () => {
     // This is the case that killed the original design: 7 presses, under any
     // sane count threshold, but the interval gives it away regardless of how
     // long the player was airborne.
-    expect(pounceSpam(claw(MACRO_SHORT), 12)).toBe(true);
+    expect(pounceSpam(claw(MACRO_SHORT), RATE)).toBe(true);
   });
 
-  it('flags a macro on a long pounce too', () => {
-    expect(pounceSpam(claw(MACRO_LONG), 12)).toBe(true);
+  it('marks a macro on a long pounce too', () => {
+    expect(pounceSpam(claw(MACRO_LONG), RATE)).toBe(true);
+  });
+
+  it('sits exactly on the rate: 12/s is a mean of 8.33 ticks', () => {
+    expect(pounceSpam(claw([8, 8, 9, 8, 8, 9]), 12)).toBe(true);     // 50 ticks / 6 = 8.33
+    expect(pounceSpam(claw([8, 9, 9, 8, 8, 9]), 12)).toBe(false);    // 51 ticks / 6 = 8.5
   });
 
   it('needs enough presses for the mean to mean anything', () => {
-    expect(pounceSpam(claw([7, 8]), 12)).toBe(false);
+    expect(pounceSpam(claw([7, 8, 8, 7, 8]), RATE)).toBe(false);
   });
 
   it('only applies to the pounce anchor', () => {
-    expect(pounceSpam({ kind: 'fire', weapon: 'weapon_hunter_claw', intervals: MACRO_LONG }, 12)).toBe(false);
+    expect(pounceSpam({ kind: 'fire', weapon: 'weapon_hunter_claw', intervals: MACRO_LONG }, RATE)).toBe(false);
   });
 
   // The pounce anchor fires for anyone airborne. A survivor shooting while
   // falling logged a pounce burst on a live client, so without this filter a
   // survivor with a fire macro would be flagged for a hunter cheat.
-  it('never flags a survivor who was merely airborne', () => {
-    expect(pounceSpam({ kind: 'pounce', weapon: 'weapon_pistol', intervals: MACRO_LONG }, 12)).toBe(false);
-    expect(pounceSpam({ kind: 'pounce', weapon: '', intervals: MACRO_LONG }, 12)).toBe(false);
+  it('never marks a survivor who was merely airborne', () => {
+    expect(pounceSpam({ kind: 'pounce', weapon: 'weapon_pistol', intervals: MACRO_LONG }, RATE)).toBe(false);
+    expect(pounceSpam({ kind: 'pounce', weapon: '', intervals: MACRO_LONG }, RATE)).toBe(false);
+  });
+});
+
+describe('matchDetections', () => {
+  const fast = { kind: 'pounce', weapon: 'weapon_hunter_claw', intervals: [7, 8, 8, 7, 8, 8] };
+  const slow = { kind: 'pounce', weapon: 'weapon_hunter_claw', intervals: [18, 21, 19, 20, 22, 18] };
+
+  // One fast phase is an anecdote: a hand can get lucky on six intervals. The
+  // same thing on several separate pounces in one match is a pattern.
+  it('needs the signature to repeat across distinct airborne phases', () => {
+    expect(matchDetections(Array(POUNCE_REPEATS - 1).fill(fast), DEFAULT_THRESHOLDS)).toEqual([]);
+    const hit = matchDetections([slow, ...Array(POUNCE_REPEATS).fill(fast), slow], DEFAULT_THRESHOLDS);
+    expect(hit).toEqual([{ signature: 'pounce_spam', qualifying: [1, 2, 3, 4] }]);
   });
 });

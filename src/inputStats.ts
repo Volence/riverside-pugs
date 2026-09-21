@@ -95,8 +95,51 @@ export function burstStats(ticks: readonly number[]): BurstStats {
   };
 }
 
+/** What a signature reads. Storage and the wire both carry more. */
+export interface SignatureBurst {
+  kind: string;
+  weapon: string;
+  intervals: readonly number[];
+}
+
+/** Rates are presses per second, because that is the unit the measurements
+ *  are in and the unit an admin can reason about. */
+export interface Thresholds {
+  pounceMinRate: number;
+}
+
 /**
- * Signature v1: a pounce whose attack presses come faster than a hand can mash.
+ * Where the rate thresholds sit, and why.
+ *
+ * Measured on a real client: a hand clicking as fast as it can peaks near 8
+ * presses/s (mean interval 125 ms, cv 0.39) and mashes M1 in the air at 5.1/s.
+ * A macro held 13/s for twelve seconds, and 25 ms of jitter did not slow it.
+ *
+ * 12/s is 50% above the measured human peak and still under the macro. The
+ * first threshold was 12 TICKS, which is 8.3/s, which is the human peak: in
+ * simulation (tests/inputSignatureSim.test.ts) it flagged a legit 8/s clicker
+ * on 45% of airborne phases. At 12/s, six intervals and four repeats the same
+ * clicker is flagged in 0 of 2000 matches, a 9/s hand in under 1%, and the 13/s
+ * macro in every match, jittered or not. 11/s was tried and rejected: over six
+ * intervals the mean is too noisy, and the 9/s hand climbed past 30%.
+ */
+export const DEFAULT_THRESHOLDS: Thresholds = { pounceMinRate: 12 };
+
+/** A threshold below this is inside human reach and would turn a signature
+ *  back into a false positive machine, so settings cannot go under it. */
+export const MIN_RATE_FLOOR = 10;
+export const MAX_RATE_CEILING = 30;
+
+/** Whether intervals summing to `sumTicks` over `n` gaps are at or above
+ *  `rate` presses/s. Integer arithmetic, so the boundary is exact: 12/s is a
+ *  mean of 8.33 ticks and no float decides which side 50/6 falls on. */
+export function atOrAboveRate(sumTicks: number, n: number, rate: number): boolean {
+  return n > 0 && sumTicks * rate <= TICKRATE * n;
+}
+
+/**
+ * `pounce_spam`: attack presses during one airborne phase, on the hunter claw,
+ * arriving faster than a hand can mash.
  *
  * Measured against a live client 2026-09-21, hunter pounces:
  *
@@ -112,22 +155,30 @@ export function burstStats(ticks: readonly number[]): BurstStats {
  * trips it. The interval is flat at 7.7t across all three macro pounces
  * regardless of length, because it does not depend on airborne time at all.
  *
- * A hand mashing as fast as it can reached 5.1/s. That is the number the
- * threshold sits above, with the macro more than twice it on the other side.
+ * True here means this ONE phase qualifies. It is not a detection: that takes
+ * POUNCE_REPEATS qualifying phases in one match, see matchDetections.
  */
 export function pounceSpam(
-  burst: { kind: string; weapon: string; intervals: readonly number[] },
-  maxMeanTicks: number,
+  burst: SignatureBurst,
+  minRate: number,
   minIntervals = MIN_POUNCE_INTERVALS,
 ): boolean {
   if (burst.kind !== 'pounce' || !POUNCE_WEAPONS.has(burst.weapon)) return false;
   if (burst.intervals.length < minIntervals) return false;
-  return burstStats(burst.intervals).meanTicks <= maxMeanTicks;
+  let sum = 0;
+  for (const t of burst.intervals) sum += t;
+  return atOrAboveRate(sum, burst.intervals.length, minRate);
 }
 
-/** Fewer than this and the mean is one or two samples of noise. A real pounce
- *  that only trips on a handful of presses is not worth an admin's time. */
-export const MIN_POUNCE_INTERVALS = 4;
+/** Fewer than this and the mean is a handful of samples of noise. Six is the
+ *  shortest macro pounce that was measured (7 presses over 0.57 s), so the
+ *  short pounce that killed the count threshold still qualifies. */
+export const MIN_POUNCE_INTERVALS = 6;
+
+/** Qualifying airborne phases, in one match, before there is a detection.
+ *  A macro is on for every pounce, so it clears this within a spawn or two. A
+ *  hand that got lucky on six intervals once does not. */
+export const POUNCE_REPEATS = 4;
 
 /** The pounce anchor fires for ANYONE airborne, so a survivor shooting while
  *  falling produces a `pounce` burst too. Measured 2026-09-21: a survivor firing
@@ -135,3 +186,37 @@ export const MIN_POUNCE_INTERVALS = 4;
  *  is what separates a hunter from a survivor who jumped, which is why it is on
  *  the wire. */
 export const POUNCE_WEAPONS = new Set(['weapon_hunter_claw']);
+
+export interface Signature {
+  name: string;
+  /** Qualifying bursts, in one match, before a detection exists. */
+  repeats: number;
+  qualifies(burst: SignatureBurst, t: Thresholds): boolean;
+}
+
+/** Every shipped signature. scripts/rerun-input-signatures.ts and the live path
+ *  both run exactly this list, so a signature added here reaches history too. */
+export const SIGNATURES: readonly Signature[] = [
+  { name: 'pounce_spam', repeats: POUNCE_REPEATS, qualifies: (b, t) => pounceSpam(b, t.pounceMinRate) },
+];
+
+export interface MatchDetection {
+  signature: string;
+  /** Indexes into the bursts passed in, in order, of every one that qualified. */
+  qualifying: number[];
+}
+
+/**
+ * Signatures that reached their repeat count over ONE player's bursts in ONE
+ * match. Pure, so the live path, the re-run tool and the calibration
+ * simulation cannot disagree about what a detection is.
+ */
+export function matchDetections(bursts: readonly SignatureBurst[], t: Thresholds): MatchDetection[] {
+  const out: MatchDetection[] = [];
+  for (const sig of SIGNATURES) {
+    const qualifying: number[] = [];
+    bursts.forEach((b, i) => { if (sig.qualifies(b, t)) qualifying.push(i); });
+    if (qualifying.length >= sig.repeats) out.push({ signature: sig.name, qualifying });
+  }
+  return out;
+}
