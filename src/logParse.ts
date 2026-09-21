@@ -349,8 +349,6 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       return { kind: 'match_create', token, map: rest.map, players };
     }
     case 'MATCH_ROSTER': {
-      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
-      if (rest.team !== 'a' && rest.team !== 'b') return null;
       // The name is taken from the raw line rather than from kv(), because
       // in-game names contain spaces and may contain '=' too. The plugin emits
       // name= last on the line for exactly this reason, so everything after the
@@ -359,6 +357,14 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (at < 0) return null;
       const name = line.slice(at + ' name='.length).trim();
       if (!name) return null;
+      // SHADOWS the outer `rest` on purpose, exactly as CHAT does below and
+      // for the same reason: the outer one tokenized the name too, and kv() is
+      // last-wins, so a player called "x steamid=<someone> team=b" was
+      // rostered as someone else on the other team. This one stops at name=,
+      // and the contaminated one cannot be reached by name from here on.
+      const rest = kv(line.slice(0, at).split(/\s+/).slice(3));
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      if (rest.team !== 'a' && rest.team !== 'b') return null;
       const joinedMap = Math.max(0, intOf(rest.joined_map) ?? 0);
       return { kind: 'match_roster', token, steamid: rest.steamid, team: rest.team, name, joinedMap };
     }

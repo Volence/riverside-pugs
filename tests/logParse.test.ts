@@ -197,6 +197,49 @@ describe('parseLogDatagram: self-started match lines', () => {
     expect(ev).toMatchObject({ kind: 'match_roster', name: 'x=y z', team: 'a' });
   });
 
+  // name= is the player's own text. Everything structured is read from the
+  // part of the line before it, so nothing in a name can stand in for a field.
+  describe('a name cannot forge a roster field', () => {
+    const REAL = '76561198030413993';
+    const VICTIM = '76561198000000009';
+    const roster = (name: string, head = `steamid=${REAL} team=a joined_map=0`) =>
+      parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER ${head} name=${name}`));
+
+    it('not the steamid', () => {
+      const name = `x steamid=${VICTIM}`;
+      expect(roster(name)).toEqual({
+        kind: 'match_roster', token: TOKEN, steamid: REAL, team: 'a', name, joinedMap: 0,
+      });
+    });
+
+    it('not the team', () => {
+      expect(roster('x team=b')).toMatchObject({ steamid: REAL, team: 'a', name: 'x team=b' });
+    });
+
+    it('not joined_map', () => {
+      expect(roster('x joined_map=9')).toMatchObject({ steamid: REAL, joinedMap: 0, name: 'x joined_map=9' });
+    });
+
+    it('not all three at once', () => {
+      const name = `x steamid=${VICTIM} team=b joined_map=9`;
+      expect(roster(name)).toEqual({
+        kind: 'match_roster', token: TOKEN, steamid: REAL, team: 'a', name, joinedMap: 0,
+      });
+    });
+
+    it('not a field the real line left out', () => {
+      // An older plugin sends no joined_map; the name must not supply one.
+      expect(roster('x joined_map=9', `steamid=${REAL} team=a`)).toMatchObject({ joinedMap: 0 });
+      // And a line with no real steamid is malformed, whatever the name says.
+      expect(roster(`x steamid=${VICTIM}`, 'team=a')).toBeNull();
+    });
+
+    it('not with a second name= either', () => {
+      const name = `x name=y steamid=${VICTIM}`;
+      expect(roster(name)).toMatchObject({ steamid: REAL, name });
+    });
+  });
+
   it('rejects MATCH_ROSTER with a bad team letter', () => {
     expect(
       parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=c name=x`)),

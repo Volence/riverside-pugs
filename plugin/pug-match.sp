@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.1"
+#define PLUGIN_VERSION "0.3.2"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -2239,7 +2239,11 @@ void GenerateToken(char[] out, int maxlen)
 
 /** In-game name, with anything that would corrupt a log line removed. Names are
  *  emitted last on their line so spaces are safe, but control characters are
- *  not, and an over-long name would push the line past the LogToGame buffer. */
+ *  not, and an over-long name would push the line past the LogToGame buffer.
+ *
+ *  '=' and '"' become '_'. The backend stops reading fields at name=, so a
+ *  name like "x steamid=7656... team=b" no longer forges anything there, but
+ *  it should not be able to LOOK like fields to the next reader either. */
 void SanitizeName(int client, char[] out, int maxlen)
 {
 	char raw[128];
@@ -2251,7 +2255,8 @@ void SanitizeName(int client, char[] out, int maxlen)
 	int w = 0;
 	for (int i = 0; raw[i] != '\0' && w < maxlen - 1; i++)
 	{
-		if (raw[i] >= 32 && raw[i] != 127) out[w++] = raw[i];
+		if (raw[i] == '=' || raw[i] == '"') out[w++] = '_';
+		else if (raw[i] >= 32 && raw[i] != 127) out[w++] = raw[i];
 	}
 	out[w] = '\0';
 	if (w == 0) strcopy(out, maxlen, "unknown");
