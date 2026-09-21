@@ -115,7 +115,7 @@ interface HudDesign {
   preset: 'stock' | 'modern';
   advanced: boolean;
   aspect: '16:9' | '16:10' | '4:3';   // preview only, never written to a file
-  font: string;                       // id of a bundled font, or 'stock'
+  font: 'preset' | 'roboto';          // one bundled family in this version: Roboto Condensed
   elements: Record<string, ElementOverride>;   // sparse: only what the user changed
   styles: Record<string, StyleOverride>;       // panel background, bar fills, portraits
   images: Record<string, UploadedImage>;       // keyed by slot id
@@ -126,6 +126,8 @@ interface ElementOverride {
   x?: number; y?: number;             // HUD units from the top-left at the design aspect
   w?: number; h?: number;             // free-resize elements only
   scale?: number;                     // composite elements only, 0.5 to 2
+  dir?: 'row' | 'column';             // survivor team display only
+  spacing?: number;                   // team displays: units between teammate panels
   color?: string; bg?: string;        // 'r g b a'
   fontSize?: number;
 }
@@ -164,7 +166,11 @@ First version, mocked and editable: own health panel, team column, weapon select
 kill feed, target ID, progress bar, crosshair marker (position preview only, the image comes
 from the player's saved crosshair), infected team row, own special infected health card,
 ability ring, ghost panel, tank panel with frustration meter. Every other `hudlayout.res`
-element ships at its preset value. Adding one later is one registry entry and one mock.
+element ships at its preset value. Two of the listed elements, the kill feed and target ID,
+are full-screen containers whose content is placed by game code, so in this version they can
+be hidden and restyled but not moved. The survivor team display can be a row or a column
+(the positions of `TeamPlayer1` to `4` in `teamdisplayhud.res`); the infected row is a row only
+and exposes its spacing (`HorizPanelSpacing`). Adding one later is one registry entry and one mock.
 
 ### Anchors
 
@@ -186,7 +192,8 @@ through the same function the generator uses, so the preview cannot disagree wit
 
 `textures.ts` ports `gen_textures.py` to canvas: flat and rounded scalable panels in any
 colour and opacity, infected health bar frames, and in Advanced mode the survivor bar fills
-and tinted incap and dead portraits. Each generated or uploaded image is encoded with the
+and flat-tinted incap and dead panels (no portrait art: the stock art is Valve's and lives in
+`pak01`, which the browser cannot read). Each generated or uploaded image is encoded with the
 existing `encodeVTF` and paired with an `UnlitGeneric` VMT.
 
 In normal mode every texture gets a new name under `materials/vgui/hud/hudeditor/` and the
