@@ -19,6 +19,10 @@ const ACCUSED = '76561198100000002';
 const OWNER = '76561198100000003';
 // An admin who is not on that list: the whole point of the bug.
 const ADMIN = '76561198100000004';
+/** The issuer's name, distinctive so a payload cannot contain it by chance.
+ *  Withholding the issuer means withholding the name the page would print,
+ *  not only the id behind it. */
+const OWNER_NAME = 'theissuer';
 
 let db: DB;
 let app: FastifyInstance;
@@ -33,6 +37,7 @@ beforeEach(async () => {
   cookie = { [R1]: authedCookie(app, db, R1), [ACCUSED]: authedCookie(app, db, ACCUSED),
     [OWNER]: authedCookie(app, db, OWNER), [ADMIN]: authedCookie(app, db, ADMIN) };
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid IN (?, ?)').run(OWNER, ADMIN);
+  db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run(OWNER_NAME, OWNER);
 });
 afterEach(async () => { await app.close(); });
 
@@ -58,6 +63,7 @@ describe('legacy ban readers redact a ban tied to a ticket the viewer may not se
     const outsiderText = JSON.stringify(outsider);
     expect(outsiderText).not.toContain('sensitive detail about the threat');
     expect(outsiderText).not.toContain(OWNER);
+    expect(outsiderText).not.toContain(OWNER_NAME);
 
     const ownerView = (await get(OWNER, '/api/bans')).json();
     const ownerRow = ownerView.bans.find((b: { steamid: string }) => b.steamid === ACCUSED);
@@ -73,6 +79,7 @@ describe('legacy ban readers redact a ban tied to a ticket the viewer may not se
     const outsiderText = JSON.stringify(outsider);
     expect(outsiderText).not.toContain('another sensitive detail');
     expect(outsiderText).not.toContain(OWNER);
+    expect(outsiderText).not.toContain(OWNER_NAME);
 
     const ownerView = (await get(OWNER, `/api/admin/players/${ACCUSED}`)).json();
     expect(ownerView.bans[0]).toMatchObject({ reason: 'another sensitive detail', createdBy: OWNER });
@@ -84,7 +91,9 @@ describe('legacy ban readers redact a ban tied to a ticket the viewer may not se
 
     for (const viewer of [ADMIN, OWNER]) {
       const bansRow = (await get(viewer, '/api/bans')).json().bans.find((b: { steamid: string }) => b.steamid === ACCUSED);
-      expect(bansRow).toMatchObject({ reason: 'plain old ban' });
+      // The issuer is withheld only when the ticket says so; an ordinary ban
+      // still says who issued it, which is half of what the list is for.
+      expect(bansRow).toMatchObject({ reason: 'plain old ban', bannedByName: OWNER_NAME });
       const detail = (await get(viewer, `/api/admin/players/${ACCUSED}`)).json();
       expect(detail.activeBan).toMatchObject({ reason: 'plain old ban', createdBy: OWNER });
     }

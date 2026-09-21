@@ -6,6 +6,7 @@ import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { addAlias } from '../src/aliases.js';
 import { upsertPlayer } from '../src/players.js';
+import { banPlayer } from '../src/admin/players.js';
 
 const IDS = Array.from({ length: 6 }, (_, i) => `7656119900000000${i}`);
 const [PLAYER, OTHER, MOD, MOD2, ADMIN, OWNER] = IDS;
@@ -37,10 +38,43 @@ const flag = (steamid: string, at: string) =>
   ).run(steamid, at);
 
 describe('the People routes', () => {
-  it('are staff only, and a plain player gets nothing', async () => {
-    expect((await app.inject({ method: 'GET', url: '/api/admin/people' })).statusCode).toBe(401);
-    expect((await get(PLAYER, '/api/admin/people')).statusCode).toBe(403);
-    expect((await get(PLAYER, `/api/admin/people/${OTHER}`)).statusCode).toBe(403);
+  // Every route, not the two that happened to be written down: a desk is only
+  // as closed as its least guarded door, and these are added to one at a time.
+  const ROUTES = (): [string, string, object][] => [
+    ['GET', '/api/admin/people', {}],
+    ['GET', '/api/admin/people/review', {}],
+    ['GET', '/api/admin/people/bans', {}],
+    ['GET', `/api/admin/people/${OTHER}`, {}],
+    ['POST', `/api/admin/people/${OTHER}/notes`, { text: 'x' }],
+    ['POST', `/api/admin/people/${OTHER}/looked-at`, {}],
+  ];
+
+  it('are staff only, on every one of them, signed in or not', async () => {
+    for (const [method, url, payload] of ROUTES()) {
+      const anon = await app.inject({ method: method as 'GET', url, payload });
+      expect(anon.statusCode, `anonymous ${url}`).toBe(401);
+      const asPlayer = method === 'GET' ? await get(PLAYER, url) : await post(PLAYER, url, payload);
+      expect(asPlayer.statusCode, `a plain player on ${url}`).toBe(403);
+    }
+  });
+
+  // Staff flags are not standing. A moderator who is banned, or who never
+  // got through the gate, is refused whatever the flag still says.
+  it('refuse a moderator who is banned or not active, on every one of them', async () => {
+    banPlayer(db, MOD, ADMIN, 'throwing', null);
+    // A ban bumps the session epoch, so their own cookie is already dead.
+    expect((await get(MOD, '/api/admin/people')).statusCode).toBe(401);
+    // Signed in again afterwards, so what refuses them below is standing
+    // rather than a stale cookie: the flag is still is_mod = 1.
+    cookie[MOD] = authedCookie(app, db, MOD);
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(MOD2);
+
+    for (const [method, url, payload] of ROUTES()) {
+      for (const who of [MOD, MOD2]) {
+        const res = method === 'GET' ? await get(who, url) : await post(who, url, payload);
+        expect(res.statusCode, `${who} on ${url}`).toBe(403);
+      }
+    }
   });
 
   it('lists only the files the viewer could open', async () => {
@@ -159,6 +193,9 @@ describe('the admin-only routes the file calls', () => {
       [`/api/admin/players/${PLAYER}/clear-penalties`, {}],
       [`/api/admin/players/${PLAYER}/steam-refresh`, {}],
       [`/api/admin/players/${PLAYER}/notes`, { text: 'x' }],
+      // The file offers this one behind the admin-only `review_round` action,
+      // and it is the only mutation the file makes outside /api/admin/players.
+      ['/api/admin/integrity/1/1/1/0/review', { state: 'reviewed', note: '' }],
     ];
     for (const [url, payload] of refusedPosts) {
       expect((await post(MOD, url, payload)).statusCode, url).toBe(403);

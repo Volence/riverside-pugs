@@ -17,6 +17,9 @@ const P = '76561199000000001';
 const MOD = '76561199000000003';
 const ADMIN = '76561199000000005';
 const OTHER = '76561199000000006';
+/** Distinctive on purpose: a withheld ban must not print it, and a name like
+ *  "p005" could match something else in a serialised payload by accident. */
+const ISSUER_NAME = 'theissuer';
 let db: DB;
 
 beforeEach(() => {
@@ -26,7 +29,7 @@ beforeEach(() => {
     activatePlayer(db, id);
   }
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
-  db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+  db.prepare('UPDATE players SET is_admin = 1, name = ? WHERE steamid = ?').run(ISSUER_NAME, ADMIN);
 });
 
 const flag = (steamid: string, at: string) =>
@@ -98,6 +101,27 @@ describe('the Player File', () => {
     expect(file.glance.analyzer).toEqual(file.sections.evidence.analyzer);
   });
 
+  // A restricted ticket's access list is the whole point of it: naming the
+  // ticket, or quoting a word of it, anywhere on the file would undo it.
+  it('leaves a restricted ticket a moderator is not on off the file entirely', () => {
+    const t = openStaffTicket(
+      db, ADMIN, { targetId: P, restricted: true, note: 'the confidential complaint' },
+      { adminSteamIds: [ADMIN] },
+    ) as { ticketId: number };
+    setRestricted(db, t.ticketId, ADMIN, true, [ADMIN]);
+
+    const asMod = playerFile(db, P, fileViewer(db, MOD))!;
+    expect(asMod.sections.tickets).toEqual([]);
+    expect(asMod.glance.openTickets).toBe(0);
+    const text = JSON.stringify(asMod);
+    expect(text).not.toContain(`#${t.ticketId}`);
+    expect(text).not.toContain('the confidential complaint');
+
+    const asAdmin = playerFile(db, P, fileViewer(db, ADMIN))!;
+    expect(asAdmin.sections.tickets.map((x) => x.id)).toEqual([t.ticketId]);
+    expect(asAdmin.glance.openTickets).toBe(1);
+  });
+
   it('withholds a restricted ticket\'s ban reason in the standing section and on the ban list', () => {
     const t = openStaffTicket(db, ADMIN, { targetId: P, restricted: true }, { adminSteamIds: [ADMIN] }) as { ticketId: number };
     setRestricted(db, t.ticketId, ADMIN, true, [ADMIN]);
@@ -106,11 +130,17 @@ describe('the Player File', () => {
     const asMod = playerFile(db, P, fileViewer(db, MOD))!;
     expect(asMod.sections.standing.bans[0].reason).toBe(WITHHELD_REASON);
     expect(asMod.sections.standing.activeBan!.createdBy).toBe('');
+    // The id was already checked; the NAME is the other half of "by whom",
+    // and it is what the page would actually have printed.
+    expect(asMod.sections.standing.activeBan!.createdByName).toBeNull();
+    expect(JSON.stringify(asMod)).not.toContain(ISSUER_NAME);
 
     const [row] = peopleBans(db, fileViewer(db, MOD));
     expect(row.reason).toBe(WITHHELD_REASON);
     expect(row.withheld).toBe(true);
     expect(row.ticketId).toBeNull();
+    expect(row.createdByName).toBeNull();
+    expect(JSON.stringify(row)).not.toContain(ISSUER_NAME);
     expect(peopleBans(db, fileViewer(db, ADMIN))[0].reason).toBe('cheating, see the case');
   });
 });
