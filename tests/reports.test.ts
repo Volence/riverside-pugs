@@ -52,6 +52,18 @@ describe('player reports', () => {
     expect(elig.canReport).toBe(false);
   });
 
+  it('the rule lives in fileReport itself, so no surface can file for a banned or inactive reporter', async () => {
+    const { fileReport } = await import('../src/reports.js');
+    const { banPlayer } = await import('../src/admin/players.js');
+    const body = { targetId: IDS[5], category: 'afk', text: '' };
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(IDS[0]);
+    expect(fileReport(db, matchId, IDS[0], body)).toMatchObject({ ok: false, status: 403 });
+    banPlayer(db, IDS[1], ADMIN, 'toxic', 60);
+    expect(fileReport(db, matchId, IDS[1], body)).toMatchObject({ ok: false, status: 403 });
+    expect((await report(IDS[1], body)).statusCode).toBe(403);
+    expect(fileReport(db, matchId, IDS[2], body)).toMatchObject({ ok: true });
+  });
+
   it('needs a session', async () => {
     expect((await app.inject({ method: 'POST', url: `/api/matches/${matchId}/reports`, payload: {} })).statusCode).toBe(401);
   });

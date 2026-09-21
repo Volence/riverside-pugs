@@ -950,7 +950,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       },
       commands: {
         defs: COMMAND_DEFS,
-        handle: (i) => handleCommand({ db: deps.db, matchmaker, publicUrl: deps.config.publicUrl }, i),
+        handle: (i) => handleCommand({
+          db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
+          banMessage: (steamid) => banMessage(deps.db, steamid),
+        }, i),
       },
     })
       .then((b) => { bot = b; })

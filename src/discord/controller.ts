@@ -37,8 +37,10 @@ export function linkPrompt(deps: ControllerDeps, userId: string, userName: strin
   );
 }
 
-/** Resolve the presser to an active player, or the reply that explains why not. */
-function resolve(
+/** Resolve the presser to an active player, or the reply that explains why
+ *  not. Shared with the slash commands that act as a player (/report), so a
+ *  command can never do what the matching button or HTTP route would refuse. */
+export function resolve(
   deps: ControllerDeps, i: { userId: string; userName: string },
 ): { player: PlayerRow } | { reply: InteractionReply } {
   const player = playerByDiscordId(deps.db, i.userId);
