@@ -5724,3 +5724,112 @@ Named here so nobody reads them as oversights.
 - **Setup**: the regrouped sections, the Servers section, the Staff list and audit rows that link to a file. Build order item 4. `AnalysisPanel` is on Needs a look, marked as a temporary home, and moves to Setup, Servers.
 - **Sorting the Needs a look columns on the server.** The list sorts in the browser over at most a screenful of rows; if it ever grows past that, the sort belongs in `needsALook`.
 - **A file for a SteamID that has never signed in.** Evidence tables hold ids with no player row; `needsALook` leaves those off rather than listing a row that cannot open. Giving them a file means deciding what a file without an account looks like, which nothing needs yet.
+
+---
+
+## Verification
+
+Task 16, 2026-09-21, on `worktree-admin-desks`. The server and the built web app
+were run together for the first time and walked in a real browser as an admin
+and as a moderator, at 1400 px and 390 px.
+
+### How it was run
+
+A brand new sqlite file in a scratch directory, never a copy of production, with
+`DB_PATH`, `REPLAY_DIR`, `DEV_MODE=1`, `PORT=8099` and `ADMIN_STEAMIDS` set from
+`src/config.ts`. `SELECT COUNT(*) FROM servers` was 0 before anything was
+clicked and stayed 0: `openDb`'s `seed()` writes a season and the default
+settings and no server row, so nothing on the box could dial rcon at a game
+server, and `DEV_MODE=1` picks `DevOrchestrator` and starts no log listener at
+all.
+
+Seeded by hand: two completed matches with an eight-player roster, five
+ready-ups with their per-player seconds, twelve measured analyzer rounds with a
+map prior so the board ranks people, three analyzer clips, a persisted
+`integrity_reviews` row, two LilAC flags, three input bursts with two
+detections and one cap, a connect drop, a permanent ban, a lifted ban, notes,
+penalties, network rows, and a pair of throwaway accounts with rows in five
+tables for the merge preview. Three reports were filed through the real
+`POST /api/reports` as ordinary players, which opened tickets 1 and 2. Sessions
+came from `POST /api/dev/login`; `is_admin` and `is_mod` were set with sqlite3.
+
+Screenshots were driven by headless Chrome over CDP from a copy of
+`scripts/shoot-pages.mjs` in the scratch directory, extended with a dev login,
+the landed URL after any client-side redirect, the rendered text and the page's
+network requests. `scripts/shoot-pages.mjs` itself was not edited.
+
+### What was seen
+
+As an admin: `/admin` lands on `/admin/live`; `/admin?live=123` lands on
+`/admin/live?live=123`; `/admin?ticket=1` lands on `/admin/people/tickets/1`;
+`/bans` lands on `/admin/people/bans`. The Live desk renders its empty state
+("No match is running", "No match is configuring or live") over the Open
+matches, Servers, Queue, Recent results and Slow to ready panels; Recent
+results shows both seeded matches with Void on screen at 1400 px without
+horizontal scrolling and pinned beside Match and Score at 390 px; clicking
+"Avg unready" re-sorts Slow to ready and moves the sort marker. The People desk
+reaches search, a name opens the file, and a ban row opens the file. The file
+shows the header and its action chips, the glance row, the timeline with its
+filter chips, Identity, Standing, the evidence detail and Notes; the reviewed
+analyzer round shows `dismissed` with its note; the merge form shows the
+per-table row counts (`input_bursts 1`, `integrity_flags 1`, `match_players 1`,
+`penalties 1`, `player_notes 1`) before "Merge and recompute"; the input flag
+section shows its legend and its "not a verdict" wording; the LilAC section
+shows its false-positive caveat. "Looked at this" took the player off Needs a
+look and put a review row on the timeline and in the glance line. The ban list
+shows "In force 1 / On record 2" on All, and Search with Clear once a search
+has run. The ticket page shows the "About <name>" summary with "Open full
+file", and the case file with "Earlier tickets" under it.
+`/admin/people/%E0%A4%A` reached by client-side navigation, `/admin/servers`
+and `/admin/people/tickets/abc` each show "No such page in the panel." and
+never a blank screen.
+
+As a moderator: `/admin` lands on `/admin/people`; there are no Live or Setup
+desk tabs and the header reads "Moderation"; the search list holds no staff;
+`/admin/live` and `/admin/setup/settings` both bounce to `/admin/people`; the
+admin's file and the moderator's own file are "No such player, or not a file
+you can open" and the API answers 404 for both, never 403. The file of an
+ordinary player shows every section, network rows and the shared-connection
+caveat included, with no ban form, no merge form, no sign-out, no staff-flag
+buttons and no round review buttons; a note and "Looked at this" both worked.
+Needs a look has no analysis panel and made no request to
+`/api/admin/integrity/backfill` at either width, watched on the wire and in the
+server log.
+
+At 390 px no page body scrolls sideways on either walk. The only elements past
+the viewport are `.admin-table`s inside their own `.table-wrap`, measured
+rather than eyeballed. Every screenshot was looked at.
+
+### Two defects found and fixed
+
+- `web/src/styles/app.css` had an unclosed `@media (max-width: 480px)` block at
+  line 1638, left by the commit that removed the orphaned admin CSS. `npm run
+  build` failed outright, and in a browser every rule after that line was
+  swallowed into the media query, so the whole live board, every admin table
+  and every admin form were unstyled at desktop width. 3486 unit tests stayed
+  green because nothing in the suite parses CSS. Fixed, with a test that reads
+  the stylesheet and asserts every block it opens is closed.
+- The ticket page headed the accused twice: `FileSummary` was added above a
+  case-file section that already opened with the same "About <name>" heading
+  and the same status line, so the page read as two blocks disagreeing with
+  each other. The case file now heads itself "Case file" when there is a
+  summary, and keeps its full heading when there is not, which is what a
+  moderator on a restricted ticket about a colleague gets.
+
+### What was NOT verified
+
+- **Nothing on a real game server.** No server row existed, no rcon was dialled,
+  no srcds was contacted, and `DEV_MODE=1` means no orchestrator that could.
+- **Nothing through Discord.** No bot token was configured, so the admin feed,
+  the ticket forum mirror and every card are untouched by this.
+- **No production data.** A brand new sqlite file with hand-seeded rows only.
+- The live board's own behaviour with a match actually running: presence, the
+  clock controls, the low-allowance alert and Abort were seen only in their
+  empty state, because nothing here can start a match on a server.
+- A cold browser load of a URL holding a malformed percent escape, such as
+  `/admin/people/%E0%A4%A` typed into the address bar, never reaches the panel:
+  fastify's own URL parser answers 400 `FST_ERR_BAD_URL` before the SPA is
+  served. That is site-wide and predates this plan (`/`, `/player/...` and
+  `/match/...` all do it), and it is a JSON error page rather than a blank
+  screen. `parseAdminPath`'s `decode` guard covers the navigation the router
+  can actually see, which was checked.
