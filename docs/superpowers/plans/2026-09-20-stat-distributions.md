@@ -199,29 +199,49 @@ league-wide sums. Replaced by an SR median and top decile over ranked players.
 The test a header figure has to pass, and the one those two failed: a figure
 must not grow simply because another match was played.
 
-**Not doing yet: a league baseline on the match page** ("p92 for this map").
-The sample does not exist. `MIN_SURVIVAL_SAMPLE`'s own comment records that the
-best-covered maps have 8 measured rounds and most have 6, so a per-map
-percentile would be computed over roughly six playings. A percentile implies a
-distribution fine enough to place a value inside it, and six samples cannot
-support that. The match page also already answers "was I the weak link" through
-`markColumn`, which is careful about exactly this: a spread threshold, tied ends
-left unmarked, nothing marked below two values. Printing a confident-looking
-percentile beside those deliberately cautious marks would be a step backwards in
-honesty, and it costs a payload increase to do it. Revisit when the best-covered
-maps reach roughly twenty playings.
+### The league is three times bigger than this plan first assumed
 
-**Not doing: recent form** (last 10 matches against the season median). The
-comparison is malformed at this league's size, not merely noisy. A season is
-about eighteen matches and a regular plays about fifteen, so the last ten sit
-INSIDE the season sample they would be measured against: ten of the fifteen
-matches are on both sides of the comparison. That damps any genuine swing and
-manufactures the appearance of stability. The well-formed version is last ten
-against prior N, which leaves N of about five, and five matches cannot establish
-what a player's form was. Cheap to build and it would quietly lie, so it is not
-built. Worth revisiting only once a player's history is long enough for the two
-windows to be disjoint and still meaningful, which is roughly forty matches
-each.
+Corrected 2026-09-20 against live data from `riversidepug.com`, after the two
+entries below were first written off for lack of data. **Measure before
+declining something for want of a sample.**
+
+The error: `MIN_SURVIVAL_SAMPLE`'s comment says the best-covered maps have 8
+measured rounds and most have 6. That was taken as current and it is stale, as
+that comment itself predicted it would become. It also counts a different thing
+from the one that matters here: rounds carrying a `survivors_alive` reading,
+which only started being written recently, not how often a map has been played.
+
+Season 0, live, at the time of writing:
+
+- 57 matches rated, 68 players, 33 of them ranked.
+- Regulars have 15 to 41 matches each; the top player has 41.
+- 16 maps in rotation, played 9 to 18 times each, 18 to 36 round attempts each.
+- Survival readings are now 14 to 24 per map, not 6 to 8.
+- Per player per map, across six regulars: 85 percent of rows have 4 or more
+  playings, and a regular has 7 to 15 goes at any single map. Only 4 rows of 96
+  sat at n=2.
+
+So the by-map medians are well supported, and the sample argument against a
+per-map league baseline does not hold either.
+
+**Reopened: a league baseline on the match page** ("p92 for this map"). It was
+declined here for want of a sample and the sample exists: 9 to 18 playings per
+map, 8 players each, so 72 to 144 player-observations per map. That is a real
+distribution. The remaining costs are honest ones and unchanged: per-map
+distributions have to reach the wire, and the figure has to sit beside
+`markColumn`'s deliberately cautious marks without swamping them. Worth its own
+plan, on its merits rather than on this excuse.
+
+**Still not doing: recent form** (last 10 matches against the season median).
+The original objection was overlap, and the corrected numbers soften it without
+removing it: a regular has 15 to 41 matches, so for the top few players the last
+ten are a genuine minority of their history, but for most of the 33 ranked
+players they are still most of it. The comparison is only well formed when the
+two windows are disjoint, which means last-10 against prior-N with N large
+enough to mean something. That holds today for perhaps the top five players and
+for nobody else, and a figure that is sound for five players and misleading for
+twenty-eight is not one to ship. Revisit when the median ranked player is past
+roughly 30 matches.
 
 ## Explicitly not doing
 

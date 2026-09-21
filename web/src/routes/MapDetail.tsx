@@ -171,7 +171,7 @@ export function MapDetail({ map }: { map: string }) {
                           key={k}
                           // Spread on hover rather than in the cell: this table
                           // is already twenty-odd numeric columns wide.
-                          title={q ? spreadNote(q) : undefined}
+                          title={q ? spreadNote(q, 'playing') : undefined}
                         >
                           {v ?? <span class="muted">n/a</span>}
                         </td>

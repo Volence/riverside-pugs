@@ -391,9 +391,21 @@ export function deriveLiveStats(stats: Record<string, number>): Record<string, n
  * figure rather than left to a tooltip. This threshold only decides when to
  * stop showing a raw count instead.
  *
- * Deliberately not higher. The best-covered maps currently have 8 measured
- * rounds and most have 6, so 8 would blank almost every map on the site. Worth
- * revisiting upward as the history fills in.
+ * Was "deliberately not higher: the best-covered maps currently have 8 measured
+ * rounds and most have 6, so 8 would blank almost every map on the site". That
+ * was true when written and is not any more, which is the thing to know about
+ * it: checked against live data on 2026-09-20, the maps in rotation now carry
+ * 14 to 24 measured rounds each. The history filled in, exactly as the note
+ * predicted it would.
+ *
+ * The threshold is left at 6 because raising it is a judgement about how much
+ * evidence a survival percentage should need, not a fact to be read off the
+ * data, and nothing in the stat-distributions work depended on it. It is now a
+ * long way below what the maps can support and is worth revisiting on purpose.
+ *
+ * Do not quote the numbers above as current without checking them. Treating
+ * this comment as fact is what led the stat-distributions plan to decline two
+ * follow-ups for want of a sample that was already there.
  */
 export const MIN_SURVIVAL_SAMPLE = 6;
 
@@ -419,6 +431,27 @@ export function ordinal(n: number): string {
 }
 
 /**
+ * Samples before a spread is worth printing at all.
+ *
+ * The same idea as MIN_SURVIVAL_SAMPLE above, applied to quartiles, and set by
+ * the arithmetic rather than by taste. At n=2 both p25 and p75 are
+ * interpolated inside the single gap between the only two observations, so the
+ * "range" is a fraction of that gap and carries nothing the two numbers did
+ * not. At n=3 each quartile is pinned by the median and one extreme, so one
+ * unusual night moves an end directly. n=4 is the first size where the two
+ * ends are bracketed by disjoint pairs of real observations.
+ *
+ * A floor, not a comfort level. Four samples still make a coarse spread; it is
+ * simply the point below which the spread is arithmetic rather than evidence.
+ */
+export const MIN_SPREAD_SAMPLE = 4;
+
+/** What one sample IS, for the places these figures appear. A profile tile
+ *  counts matches; a by-map row counts playings of that one map, which is a
+ *  different and much smaller thing and must not be called a match. */
+const SAMPLE_UNIT = { match: 'matches', playing: 'playings' } as const;
+
+/**
  * The spread behind a median, as a line under a figure.
  *
  * Two nights of 300 and one of 4000 have the same median as three nights of
@@ -426,16 +459,21 @@ export function ordinal(n: number): string {
  * looking at, and `n` says how much to trust either: a median over three
  * matches and one over forty read identically and are not the same claim.
  *
- * Reads "290 to 510 · 23 matches". The middle half of the time is left
- * implied rather than spelled out, because the figure it sits under is
- * already labelled and the tile has one line to spend.
+ * Reads "290 to 510 · 23 matches", or just "3 matches" when the sample cannot
+ * support a spread. The count is never dropped, because the median above it is
+ * still worth showing at any n and still needs its denominator. What gets
+ * dropped is the claim the sample cannot back.
  */
-export function spreadNote(q: { n: number; p25: number; p75: number }): string {
-  const matches = `${q.n} ${q.n === 1 ? 'match' : 'matches'}`;
-  // A player who does the same thing every time has no spread to report, and
-  // "300 to 300" reads as a broken template rather than as consistency.
-  if (q.p25 === q.p75) return matches;
-  return `${q.p25.toLocaleString()} to ${q.p75.toLocaleString()} · ${matches}`;
+export function spreadNote(
+  q: { n: number; p25: number; p75: number },
+  unit: keyof typeof SAMPLE_UNIT = 'match',
+): string {
+  const count = `${q.n} ${q.n === 1 ? unit : SAMPLE_UNIT[unit]}`;
+  // Too thin to quote a range, or a player who does the same thing every time
+  // and has no range to quote. "300 to 300" reads as a broken template rather
+  // than as consistency.
+  if (q.n < MIN_SPREAD_SAMPLE || q.p25 === q.p75) return count;
+  return `${q.p25.toLocaleString()} to ${q.p75.toLocaleString()} · ${count}`;
 }
 
 /** How to render a survival rate, given how many rounds it is over.

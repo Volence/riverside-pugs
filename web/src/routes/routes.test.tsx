@@ -1970,6 +1970,6 @@ describe('leaderboard measure', () => {
     render(<Leaderboard me={null} />);
     await tableReady();
     const cell = document.querySelectorAll('tbody tr')[0].querySelectorAll('td')[7];
-    expect(cell.getAttribute('title')).toBe('60 over 20 matches');
+    expect(cell.getAttribute('title')).toBe('60 total this season');
   });
 });

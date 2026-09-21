@@ -5,6 +5,7 @@ import {
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
   FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName, spreadNote, ordinal,
+  MIN_SPREAD_SAMPLE,
 } from './format';
 
 describe('campaignName', () => {
@@ -715,6 +716,26 @@ describe('spreadNote', () => {
 
   it('counts one match as a match', () => {
     expect(spreadNote({ n: 1, p25: 4, p75: 4 })).toBe('1 match');
+  });
+
+  // At n=2 both quartiles are interpolated inside the single gap between the
+  // only two observations, so the range restates those two numbers and calls
+  // it a spread.
+  it('withholds a range the sample cannot support, keeping the count', () => {
+    expect(spreadNote({ n: 2, p25: 82.5, p75: 227.5 })).toBe('2 matches');
+    expect(spreadNote({ n: 3, p25: 30, p75: 175 })).toBe('3 matches');
+  });
+
+  it('prints the range from the first size that brackets it with real values', () => {
+    expect(MIN_SPREAD_SAMPLE).toBe(4);
+    expect(spreadNote({ n: 4, p25: 40, p75: 120 })).toBe('40 to 120 · 4 matches');
+  });
+
+  // A by-map row counts playings of one map. A regular has 40-odd matches and
+  // 7 to 15 goes at any single map, so the wrong noun overstates it fourfold.
+  it('counts playings of a map as playings, not matches', () => {
+    expect(spreadNote({ n: 15, p25: 4, p75: 9 }, 'playing')).toBe('4 to 9 · 15 playings');
+    expect(spreadNote({ n: 1, p25: 4, p75: 4 }, 'playing')).toBe('1 playing');
   });
 });
 

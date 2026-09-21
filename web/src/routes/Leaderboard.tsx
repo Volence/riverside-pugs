@@ -255,9 +255,17 @@ export function Leaderboard({ me }: { me: string | null }) {
                                 // click apart, but a reader comparing a median
                                 // against a total should not have to lose their
                                 // place in the table to do it.
+                                //
+                                // No match count here. This said "over N
+                                // matches" using the player's GAME count, which
+                                // is not the median's sample: a stat is absent
+                                // from every match played without skill_detect,
+                                // so the two diverge and the tooltip was
+                                // asserting a denominator it does not have. The
+                                // profile carries the real per-stat n.
                                 title={measure === 'median'
-                                  ? `${r.stats?.[k] ?? 0} over ${r.games} matches`
-                                  : `${r.medianStats?.[k] ?? 0} per match`}
+                                  ? `${(r.stats?.[k] ?? 0).toLocaleString()} total this season`
+                                  : `${(r.medianStats?.[k] ?? 0).toLocaleString()} per match`}
                               >
                                 {v === null ? <span class="muted">n/a</span> : v}
                               </td>

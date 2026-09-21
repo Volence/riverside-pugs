@@ -206,7 +206,11 @@ export function Profile(
                             // table is already twenty-odd numeric columns wide
                             // and a range in every cell would make it
                             // unreadable, which was the original complaint.
-                            title={q && mapMode === 'avg' ? spreadNote(q) : undefined}
+                            // Playings of THIS map, not matches. A regular has
+                            // 40-odd matches and 7 to 15 goes at any one map,
+                            // so calling the smaller number "matches" would
+                            // overstate it by roughly four times.
+                            title={q && mapMode === 'avg' ? spreadNote(q, 'playing') : undefined}
                           >
                             {v ?? <span class="muted">n/a</span>}
                           </td>
