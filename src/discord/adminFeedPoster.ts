@@ -176,6 +176,7 @@ export class AdminFeedPoster {
       case 'unban': return `${who} unbanned ${target}`;
       case 'activate': return `${who} activated ${target}`;
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;
+      case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
       case 'note': return `${who} added a note on ${target}`;
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;

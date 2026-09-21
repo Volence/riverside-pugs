@@ -20,7 +20,8 @@ describe('openDb', () => {
       'match_pauses', 'match_player_stats', 'match_players', 'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
       'matches', 'matchmaker_state',
       'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings', 'players',
-      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'twitch_status',
+      'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops',
+      'ticket_access', 'ticket_events', 'ticket_reports', 'tickets', 'twitch_status',
     ]);
   });
 

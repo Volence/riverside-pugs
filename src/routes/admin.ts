@@ -125,6 +125,16 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true };
   });
 
+  app.post('/api/admin/players/:steamid/mod', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const { isMod } = (req.body ?? {}) as { isMod?: unknown };
+    if (typeof isMod !== 'boolean') return reply.code(400).send({ error: 'isMod must be true or false' });
+    db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
+    logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
+    return { ok: true };
+  });
+
   app.post('/api/admin/players/:steamid/unlink-discord', async (req, reply) => {
     const t = target(req, reply);
     if (!t) return reply;

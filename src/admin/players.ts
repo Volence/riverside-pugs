@@ -109,6 +109,7 @@ export interface AdminPlayerRow {
   avatar: string | null;
   status: string;
   isAdmin: boolean;
+  isMod: boolean;
   discordName: string | null;
   sr: number | null;
   games: number;
@@ -121,18 +122,18 @@ export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] 
   const like = `%${q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
   const season = currentSeasonId(db);
   const rows = db.prepare(
-    `SELECT p.steamid, p.name, p.avatar, p.status, p.is_admin, p.discord_name, p.created_at, pr.mu, pr.sigma,
+    `SELECT p.steamid, p.name, p.avatar, p.status, p.is_admin, p.is_mod, p.discord_name, p.created_at, pr.mu, pr.sigma,
             (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
               WHERE mp.player_id = p.steamid AND m.state = 'completed') AS games
      FROM players p LEFT JOIN player_ratings pr ON pr.player_id = p.steamid AND pr.season_id = ?
      WHERE ? = '' OR p.name LIKE ? ESCAPE '\\' OR p.steamid LIKE ? ESCAPE '\\' OR p.discord_name LIKE ? ESCAPE '\\'
      ORDER BY p.name COLLATE NOCASE LIMIT ?`,
   ).all(season, q, like, like, like, limit) as {
-    steamid: string; name: string; avatar: string | null; status: string; is_admin: number; discord_name: string | null;
+    steamid: string; name: string; avatar: string | null; status: string; is_admin: number; is_mod: number; discord_name: string | null;
     created_at: string; mu: number | null; sigma: number | null; games: number;
   }[];
   return rows.map((r) => ({
-    steamid: r.steamid, name: r.name, avatar: r.avatar, status: r.status, isAdmin: r.is_admin === 1,
+    steamid: r.steamid, name: r.name, avatar: r.avatar, status: r.status, isAdmin: r.is_admin === 1, isMod: r.is_mod === 1,
     discordName: r.discord_name, sr: r.mu === null ? null : displaySr(r.mu, r.sigma!), games: r.games, createdAt: r.created_at,
     offenses: recentOffenses(db, r.steamid),
   }));

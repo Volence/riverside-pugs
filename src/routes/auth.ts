@@ -82,6 +82,7 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       avatar: player.avatar,
       status: player.status,
       isAdmin: player.is_admin === 1,
+      isMod: player.is_mod === 1,
       discordEnabled: config.discord !== null,
       discord: player.discord_id ? { id: player.discord_id, name: player.discord_name ?? '' } : null,
       // Only your own session ever sees your twitch id. Everywhere public it
