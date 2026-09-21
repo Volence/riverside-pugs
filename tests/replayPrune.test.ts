@@ -103,6 +103,53 @@ describe('planPrune', () => {
     expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9)).toEqual([]);
   });
 
+  // A clip is a pointer into a replay: start and end times and nothing else.
+  // Prune the file and the clip still lists on the admin page and opens onto
+  // nothing, and a review can no longer be checked against what it judged.
+  describe('integrity evidence', () => {
+    const matchOf = (filename: string) =>
+      (db.prepare('SELECT match_id AS id FROM match_replays WHERE filename = ?').get(filename) as { id: number }).id;
+    const addClip = (matchId: number, ordinal: number) => db.prepare(
+      `INSERT INTO integrity_clips (match_id, ordinal, half, slot, steamid, start_ms, end_ms, kind, score, detail, analyzer_version)
+       VALUES (?, ?, 1, 0, '765', 1000, 3000, 'ghost_track', 0.8, '{}', 1)`,
+    ).run(matchId, ordinal);
+
+    it('never selects a replay one of whose rounds has a clip, however old', () => {
+      const flagged = seedReplay(400, 1);
+      const plain = seedReplay(400, 2);
+      addClip(matchOf(flagged), 1);
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9).map((c) => c.filename)).toEqual([plain]);
+    });
+
+    it('never selects a replay an admin has reviewed, even when it was dismissed', () => {
+      const reviewed = seedReplay(400, 1);
+      db.prepare(
+        `INSERT INTO integrity_reviews (match_id, ordinal, half, slot, state, note) VALUES (?, 1, 1, 0, 'dismissed', 'heard it')`,
+      ).run(matchOf(reviewed));
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9)).toEqual([]);
+    });
+
+    it('protects the round, not the match: the other rounds of that match still go', () => {
+      const flagged = seedReplay(400, 1);
+      const id = matchOf(flagged);
+      const other = `pug_${TOKEN}_2_1.rpl`;
+      writeFileSync(join(dir, other), Buffer.alloc(16));
+      db.prepare('INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz) VALUES (?, 2, 1, ?, 1024, 10, 10)')
+        .run(id, other);
+      addClip(id, 1);
+      expect(planPrune(db, dir, new Date(), 90, 500e9, 10e9).map((c) => c.filename)).toEqual([other]);
+    });
+
+    it('holds against the free space floor as well', () => {
+      const flagged = seedReplay(30, 1, 5e9);
+      seedReplay(20, 2, 5e9);
+      seedReplay(10, 3, 5e9);
+      addClip(matchOf(flagged), 1);
+      const plan = planPrune(db, dir, new Date(), 90, 1e9, 10e9);
+      expect(plan.map((c) => c.ordinal)).toEqual([2, 3]);
+    });
+  });
+
   it('takes the oldest first when free space is below the floor, even inside the window', () => {
     // The floor overrides the retention window, because a full disk stops the
     // game server, which matters more than keeping a three week old replay.

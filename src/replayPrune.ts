@@ -37,6 +37,15 @@ export interface PruneResult {
  *
  * A replay is only ever eligible when its match is completed. A live or
  * configuring match's files are being written right now.
+ *
+ * A replay is NEVER eligible while a round of it has an integrity clip or an
+ * integrity review, under either reason. A clip is nothing but a start and an
+ * end time inside that file, so pruning the file leaves a flagged moment on
+ * the admin page that opens onto nothing, and a review that can no longer be
+ * checked against what it judged, dismissals included. The protection is per
+ * round, and a round is about a megabyte, so holding these against the free
+ * space floor too costs nothing a disk would notice. A re-analysis that no
+ * longer flags the round deletes its clips and releases it.
  */
 export function planPrune(
   db: DB, dir: string, now: Date, retentionDays: number,
@@ -53,6 +62,10 @@ export function planPrune(
        JOIN matches m ON m.id = r.match_id
       WHERE r.pruned_at IS NULL
         AND m.state IN ('completed', 'aborted')
+        AND NOT EXISTS (SELECT 1 FROM integrity_clips c
+                         WHERE c.match_id = r.match_id AND c.ordinal = r.ordinal AND c.half = r.half)
+        AND NOT EXISTS (SELECT 1 FROM integrity_reviews v
+                         WHERE v.match_id = r.match_id AND v.ordinal = r.ordinal AND v.half = r.half)
       ORDER BY ageBasis ASC, r.ordinal ASC, r.half ASC`,
   ).all() as (PruneCandidate & { ageBasis: string })[];
 
