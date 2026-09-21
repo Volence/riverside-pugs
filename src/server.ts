@@ -28,13 +28,14 @@ import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
 import { startTwitchPoll } from './twitchPoll.js';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { STATUS_CODES } from 'node:http';
+import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
@@ -253,8 +254,75 @@ export async function finishWithRetry(
   if (row?.server_id != null) releaser.release(row.server_id);
 }
 
+/** Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite
+ *  server owns the browser and proxies here, so this path only matters in
+ *  production. */
+const STATIC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
+
+/** The app shell as bytes, or null when there is no built frontend to serve.
+ *
+ *  Only for the malformed-URL handler, which runs before @fastify/static has
+ *  decorated a reply and so has no sendFile to call: the fallback at the
+ *  bottom of buildServer still goes through the plugin. Same file, same
+ *  directory, so the two cannot serve different shells. */
+function readShell(): Buffer | null {
+  try {
+    return readFileSync(join(STATIC_ROOT, 'index.html'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether this is a browser navigating to a page, rather than something
+ * asking this server for one of the things it owns.
+ *
+ * One list, asked by both the SPA fallback and the malformed-URL handler
+ * above it: two copies of "what counts as a page" would drift, and the one
+ * that drifted would start answering a typo'd endpoint with a 200 full of
+ * HTML that fails somewhere much less obvious. `/download` is a file, `/ws`
+ * a socket, and neither wants the app shell. Non-GET methods are never a
+ * page navigation.
+ */
+function isPageRequest(method: string, url: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return !['/api/', '/auth/', '/ws', '/download/'].some((prefix) => url.startsWith(prefix));
+}
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+    // A URL fastify cannot even parse, which is almost always a percent
+    // escape truncated by a paste or a chat client, is refused here, before
+    // routing, so the SPA fallback at the bottom of this file never sees it.
+    // On a page path that handed the reader a bare 400 JSON body for what is
+    // otherwise an ordinary page URL, so the same answer the fallback gives
+    // is given here. Everything else is answered exactly as fastify would:
+    // this replaces the framework's own handler rather than wrapping it, so
+    // the default response is rebuilt rather than inherited.
+    frameworkErrors: (err, req, reply) => {
+      const e = err as Error & { code?: string; statusCode?: number };
+      // The reply handed to this hook is typed against a route that does not
+      // exist yet, so its send() accepts nothing; it is an ordinary reply.
+      const res = reply as unknown as FastifyReply;
+      if (e.code === 'FST_ERR_BAD_URL' && isPageRequest(req.method, req.raw.url ?? '')) {
+        const shell = readShell();
+        if (shell !== null) {
+          // Spelled out because this path sends bytes rather than going
+          // through @fastify/static, which appends the charset itself.
+          void res.type('text/html; charset=utf-8').send(shell);
+          return;
+        }
+      }
+      const statusCode = e.statusCode ?? 500;
+      void res.code(statusCode).send({
+        error: STATUS_CODES[statusCode] ?? 'Error',
+        code: e.code,
+        message: e.message,
+        statusCode,
+      });
+    },
+  });
 
   // Module state rather than a constructor argument: campaignRegistry(db) is
   // called from a dozen places that have no business knowing about the game
@@ -325,10 +393,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     renewSession(req, reply, deps.db, secureCookies);
   });
   await app.register(websocket);
-  // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
-  // owns the browser and proxies here, so this path only matters in production.
-  const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
-  await app.register(fastifyStatic, { root: staticRoot });
+  await app.register(fastifyStatic, { root: STATIC_ROOT });
 
   const membership = new GuildMembership();
   const presence = new VoicePresence();
@@ -1176,12 +1241,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // a 200 full of HTML and fail somewhere much less obvious. Non-GET methods
   // are likewise never a page navigation.
   app.setNotFoundHandler((req, reply) => {
-    const isPageRequest =
-      (req.method === 'GET' || req.method === 'HEAD') &&
-      !req.url.startsWith('/api/') &&
-      !req.url.startsWith('/auth/') &&
-      !req.url.startsWith('/ws');
-    if (isPageRequest) return reply.type('text/html').sendFile('index.html');
+    if (isPageRequest(req.method, req.url)) return reply.type('text/html').sendFile('index.html');
     return reply.code(404).send({ error: 'not found' });
   });
 
