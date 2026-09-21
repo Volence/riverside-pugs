@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DB } from '../db.js';
 import { parseReplay, slotInfected, type Frame, type ReplayHeader } from '../replayFormat.js';
@@ -6,7 +6,8 @@ import { subtractRound, type PriorTable } from './aimPrior.js';
 import { TUNING } from './constants.js';
 import { analyzeRound, buildRoundPrior, unpausedFrames } from './round.js';
 import {
-  ANALYZER_VERSION, loadPrior, loadRoundPrior, pooledRounds, poolRounds, saveRound, type PoolEntry, type RoundKey,
+  loadPrior, loadRoundPrior, markUnanalysable, pendingRounds, pooledRounds, poolRounds, saveRound,
+  type PoolEntry, type RoundKey,
 } from './store.js';
 
 const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
@@ -100,6 +101,15 @@ function findReplays(db: DB, dir: string): Found[] {
   return out;
 }
 
+/** Read and decode one file, or null. Never throws: see `scoreAll`. */
+function readRound(f: Found): DecodedRound | null {
+  try {
+    return decodeRound(readFileSync(f.path));
+  } catch {
+    return null;
+  }
+}
+
 const keyOf = (k: RoundKey): string => `${k.matchId}/${k.ordinal}/${k.half}`;
 
 /**
@@ -117,7 +127,7 @@ const keyOf = (k: RoundKey): string => `${k.matchId}/${k.ordinal}/${k.half}`;
 function poolReplays(db: DB, files: Found[]): Map<string, { before: number; after: number }> {
   const entries: PoolEntry[] = [];
   for (const f of files) {
-    const replay = decodeRound(readFileSync(f.path));
+    const replay = readRound(f);
     if (!replay) continue;
     entries.push({ key: f.key, map: replay.header.map, prior: buildRoundPrior(replay.frames, replay.slots) });
   }
@@ -131,11 +141,21 @@ export function rebuildPriors(db: DB, dir: string): Map<string, number> {
   return counts;
 }
 
+/** Measure these, and mark the ones that cannot be so they stop being pending.
+ *  See `pendingRounds`. */
 function scoreAll(db: DB, files: Found[]): { rounds: number; skipped: number } {
   let rounds = 0, skipped = 0;
   for (const f of files) {
-    if (analyzeOneRound(db, f.key, readFileSync(f.path))) rounds++;
-    else skipped++;
+    let ok = false;
+    try {
+      ok = analyzeOneRound(db, f.key, readFileSync(f.path));
+    } catch (err) {
+      // One round must not end the pass. If it did, the process would exit
+      // with that round still pending and be started again a minute later.
+      console.error(`[integrity] ${f.path} could not be analysed:`, err);
+    }
+    if (ok) rounds++;
+    else { markUnanalysable(db, f.key, 'unreadable'); skipped++; }
   }
   return { rounds, skipped };
 }
@@ -165,17 +185,21 @@ function scoreAll(db: DB, files: Found[]): { rounds: number; skipped: number } {
  * version is stored per row precisely so a change to the analyzer can be
  * noticed, and mixing two analyzers' numbers on one board is worse than
  * either of them alone.
+ *
+ * What is pending comes from `pendingRounds`, the same query that decides
+ * whether this pass is started at all. A pending round whose file is gone or
+ * will not decode is marked unanalysable, which takes it out of that query, so
+ * one bad replay cannot have the server start this process every minute.
  */
 export function analyzePending(db: DB, dir: string): { rounds: number; skipped: number } {
-  const done = new Set(
-    (db.prepare(
-      'SELECT DISTINCT match_id, ordinal, half FROM integrity_rounds WHERE analyzer_version = ?',
-    ).all(ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
-      .map((r) => keyOf({ matchId: r.match_id, ordinal: r.ordinal, half: r.half })),
-  );
-  const found = findReplays(db, dir);
-  const pending = found.filter((f) => !done.has(keyOf(f.key)));
-  if (pending.length === 0) return { rounds: 0, skipped: 0 };
+  const pending: Found[] = [];
+  let missing = 0;
+  for (const r of pendingRounds(db)) {
+    const path = NAME_RE.test(r.filename) ? join(dir, r.filename) : null;
+    if (path && existsSync(path)) pending.push({ key: r.key, path });
+    else { markUnanalysable(db, r.key, 'missing'); missing++; }
+  }
+  if (pending.length === 0) return { rounds: 0, skipped: missing };
 
   const waiting = new Set<string>();
   for (const [map, n] of poolReplays(db, pending)) {
@@ -183,8 +207,11 @@ export function analyzePending(db: DB, dir: string): { rounds: number; skipped: 
       for (const k of pooledRounds(db, map)) waiting.add(keyOf(k));
     }
   }
-  const again = found.filter((f) => done.has(keyOf(f.key)) && waiting.has(keyOf(f.key)));
-  return scoreAll(db, [...pending, ...again]);
+  const isPending = new Set(pending.map((f) => keyOf(f.key)));
+  const again = waiting.size === 0 ? []
+    : findReplays(db, dir).filter((f) => waiting.has(keyOf(f.key)) && !isPending.has(keyOf(f.key)));
+  const got = scoreAll(db, [...pending, ...again]);
+  return { rounds: got.rounds, skipped: got.skipped + missing };
 }
 
 /**

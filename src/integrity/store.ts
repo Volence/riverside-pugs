@@ -32,6 +32,9 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       .run(key.matchId, key.ordinal, key.half);
     db.prepare('DELETE FROM integrity_clips WHERE match_id = ? AND ordinal = ? AND half = ?')
       .run(key.matchId, key.ordinal, key.half);
+    // Measured, so whatever stopped it being measured before is over.
+    db.prepare('DELETE FROM integrity_unanalysable WHERE match_id = ? AND ordinal = ? AND half = ?')
+      .run(key.matchId, key.ordinal, key.half);
     const insRound = db.prepare(
       `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -133,6 +136,58 @@ export function pooledRounds(db: DB, map: string): RoundKey[] {
   return (db.prepare('SELECT match_id, ordinal, half FROM integrity_prior_rounds WHERE map = ? AND analyzer_version = ?')
     .all(map, ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
     .map((r) => ({ matchId: r.match_id, ordinal: r.ordinal, half: r.half }));
+}
+
+/**
+ * Indexed rounds the automatic pass still has to deal with: no measurement at
+ * the current version, no failure recorded at the current version, and a
+ * replay that has not been pruned.
+ *
+ * The ONE definition of pending. `pendingRoundCount` decides whether to start
+ * the pass and `analyzePending` decides what the pass does, and when those two
+ * disagreed about a single round, a corrupt replay say, the server started a
+ * process for it every sixty seconds for ever and the process found nothing to
+ * do. A round measured by an older analyzer is pending, so bumping
+ * ANALYZER_VERSION re-measures history on its own; a pruned round is not,
+ * because there is nothing left to measure it from and that is nobody's
+ * failure.
+ */
+export function pendingRounds(db: DB): { key: RoundKey; filename: string }[] {
+  return (db.prepare(
+    `SELECT r.match_id, r.ordinal, r.half, r.filename FROM match_replays r
+     WHERE r.pruned_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM integrity_rounds i
+         WHERE i.match_id = r.match_id AND i.ordinal = r.ordinal AND i.half = r.half
+           AND i.analyzer_version = ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM integrity_unanalysable u
+         WHERE u.match_id = r.match_id AND u.ordinal = r.ordinal AND u.half = r.half
+           AND u.analyzer_version = ?)
+     ORDER BY r.match_id, r.ordinal, r.half`,
+  ).all(ANALYZER_VERSION, ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number; filename: string }[])
+    .map((r) => ({ key: { matchId: r.match_id, ordinal: r.ordinal, half: r.half }, filename: r.filename }));
+}
+
+/** `missing`: the indexed file is not on disk. `unreadable`: it is, and it is
+ *  not a replay this analyzer can read, or it has no survivors in it. */
+export type UnanalysableReason = 'missing' | 'unreadable';
+
+export function markUnanalysable(db: DB, key: RoundKey, reason: UnanalysableReason): void {
+  db.prepare(
+    `INSERT INTO integrity_unanalysable (match_id, ordinal, half, analyzer_version, reason, at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(match_id, ordinal, half) DO UPDATE SET analyzer_version = excluded.analyzer_version,
+       reason = excluded.reason, at = excluded.at`,
+  ).run(key.matchId, key.ordinal, key.half, ANALYZER_VERSION, reason, new Date().toISOString());
+}
+
+/** How many rounds the current analyzer has given up on, by reason. */
+export function unanalysableCounts(db: DB): Record<UnanalysableReason, number> {
+  const out: Record<UnanalysableReason, number> = { missing: 0, unreadable: 0 };
+  for (const r of db.prepare(
+    'SELECT reason, COUNT(*) AS n FROM integrity_unanalysable WHERE analyzer_version = ? GROUP BY reason',
+  ).all(ANALYZER_VERSION) as { reason: UnanalysableReason; n: number }[]) out[r.reason] = r.n;
+  return out;
 }
 
 export function setReview(db: DB, key: RoundKey, slot: number, state: string, note: string, adminId: string): void {

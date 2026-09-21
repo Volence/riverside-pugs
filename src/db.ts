@@ -387,6 +387,20 @@ CREATE TABLE IF NOT EXISTS integrity_prior_rounds (
   analyzer_version INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, ordinal, half)
 );
+-- Rounds the analyzer tried and could not measure: the replay is not on disk,
+-- or is not something this analyzer version can read. Without this a round
+-- like that is pending for ever and the server starts an analysis process for
+-- it every minute. Keyed to the version that failed, so a newer analyzer tries
+-- again, and cleared by saveRound the moment the round is measured.
+CREATE TABLE IF NOT EXISTS integrity_unanalysable (
+  match_id         INTEGER NOT NULL REFERENCES matches(id),
+  ordinal          INTEGER NOT NULL,
+  half             INTEGER NOT NULL,
+  analyzer_version INTEGER NOT NULL,
+  reason           TEXT    NOT NULL,
+  at               TEXT    NOT NULL,
+  PRIMARY KEY (match_id, ordinal, half)
+);
 -- One-time codes a Discord user follows to link their Steam account from
 -- Discord (the bot hands them out). Single use, 15 minutes; created_at is an
 -- ISO string written by the app so expiry can be tested with an injected clock.

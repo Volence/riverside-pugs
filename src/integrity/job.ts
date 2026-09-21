@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import { ANALYZER_VERSION } from './store.js';
+import { pendingRounds } from './store.js';
 
 /**
  * Running the integrity analysis as a background job.
@@ -60,25 +60,17 @@ export function matchInFlight(db: DB): boolean {
 }
 
 /**
- * Indexed rounds that no current-version analysis has measured.
+ * How many rounds the automatic pass has to deal with.
  *
  * Drives the automatic pass: the board used to go stale after every match
  * because nothing in the running server ever analysed anything, and asking
  * this once a minute is cheaper than a readdir, let alone a decode.
  *
- * Counts a round measured by an older analyzer as pending, matching
- * `analyzePending`, so bumping ANALYZER_VERSION re-measures history on its own.
+ * The definition lives in `pendingRounds`, which is also what the pass itself
+ * works from, so the two cannot disagree about a round.
  */
 export function pendingRoundCount(db: DB): number {
-  const row = db.prepare(
-    `SELECT COUNT(*) AS n FROM match_replays r
-     WHERE NOT EXISTS (
-       SELECT 1 FROM integrity_rounds i
-       WHERE i.match_id = r.match_id AND i.ordinal = r.ordinal AND i.half = r.half
-         AND i.analyzer_version = ?
-     )`,
-  ).get(ANALYZER_VERSION) as { n: number };
-  return row.n;
+  return pendingRounds(db).length;
 }
 
 export class IntegrityJobs {

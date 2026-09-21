@@ -430,6 +430,22 @@ describe('AdminIntegrity', () => {
     expect(screen.getByText(/measured automatically once a match finishes/)).toBeTruthy();
   });
 
+  // A replay that is gone or will not decode is given up on, and the panel has
+  // to say so: otherwise "everything has been measured" is quietly untrue.
+  it('says how many rounds could not be analysed, and why', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ unanalysable: { missing: 2, unreadable: 1 } }));
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/3 rounds could not be analysed/)).toBeTruthy());
+    expect(screen.getByText(/2 with no replay on disk, 1 that would not decode/)).toBeTruthy();
+  });
+
+  it('says nothing about that when there are none', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo());
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/measured automatically/)).toBeTruthy());
+    expect(screen.queryByText(/could not be analysed/)).toBeNull();
+  });
+
   // The guard that matters: this decodes every replay on disk on the same two
   // cores holding 100 tick.
   it('blocks the run while a match is in flight, and offers a deliberate force', async () => {

@@ -79,6 +79,8 @@ function BackfillControl() {
   }
 
   const { job, pending, matchInFlight } = data;
+  const lost = data.unanalysable ?? { missing: 0, unreadable: 0 };
+  const lostTotal = lost.missing + lost.unreadable;
   return (
     <Panel>
       <h3>Analysis</h3>
@@ -91,6 +93,13 @@ function BackfillControl() {
         scored for occupancy by itself once it has enough rounds. Re-analysing everything is
         for after a threshold change.
       </p>
+      {lostTotal > 0 && (
+        <p class="muted">
+          {lostTotal} round{lostTotal === 1 ? '' : 's'} could not be analysed and {lostTotal === 1 ? 'is' : 'are'} not
+          counted as waiting: {lost.missing} with no replay on disk, {lost.unreadable} that would not
+          decode. Re-analysing everything tries any whose file is there again.
+        </p>
+      )}
       <div class="admin-row">
         <button
           class="btn"

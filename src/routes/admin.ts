@@ -19,7 +19,7 @@ import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
-import { setReview } from '../integrity/store.js';
+import { setReview, unanalysableCounts } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
@@ -441,7 +441,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
    *
    * GET is safe to poll; the panel does while a run is going. `pending` is the
    * count of indexed rounds nothing has measured, which is what tells an admin
-   * whether pressing the button would do anything.
+   * whether pressing the button would do anything. `unanalysable` is the rounds
+   * the current analyzer tried and gave up on, which are NOT pending and would
+   * otherwise be invisible.
    */
   app.get('/api/admin/integrity/backfill', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
@@ -450,6 +452,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       available: true as const,
       job: integrityJobs.snapshot(),
       pending: pendingRoundCount(db),
+      unanalysable: unanalysableCounts(db),
       matchInFlight: matchInFlight(db),
     };
   });

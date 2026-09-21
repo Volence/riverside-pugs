@@ -830,6 +830,9 @@ export type IntegrityJobInfo =
     };
     /** Indexed rounds no current-version analysis has measured. */
     pending: number;
+    /** Rounds the current analyzer tried and could not measure. Not pending:
+     *  it will not try them again until the analyzer changes. */
+    unanalysable?: { missing: number; unreadable: number };
     matchInFlight: boolean;
   };
 

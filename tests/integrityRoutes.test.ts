@@ -89,6 +89,20 @@ describe('GET /api/admin/integrity', () => {
     expect(body).not.toHaveProperty('rounds');
   });
 
+  it('reports the rounds the analyzer gave up on alongside the pending count', async () => {
+    const withDir = await buildServer({
+      config: loadConfig({ REPLAY_DIR: '/nonexistent-replays' }), db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {},
+    });
+    db.prepare(
+      `INSERT INTO integrity_unanalysable (match_id, ordinal, half, analyzer_version, reason, at)
+       VALUES (1, 7, 1, ?, 'missing', datetime('now'))`,
+    ).run(ANALYZER_VERSION);
+    const r = await withDir.inject({ method: 'GET', url: '/api/admin/integrity/backfill', cookies: adminCookie });
+    expect(r.json()).toMatchObject({ available: true, pending: 0, unanalysable: { missing: 1, unreadable: 0 } });
+    await withDir.close();
+  });
+
   it('refuses the job route to a non-admin', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/admin/integrity/backfill', cookies: userCookie });
     expect(r.statusCode).toBe(403);

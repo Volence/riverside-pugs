@@ -1,6 +1,6 @@
 // tests/integrityRun.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
@@ -13,6 +13,7 @@ import { ANALYZER_VERSION } from '../src/integrity/store.js';
 import { bearing } from '../src/integrity/geometry.js';
 import { buildRoundPrior, unpausedFrames } from '../src/integrity/round.js';
 import { analyzeOneRound, analyzePending, backfillAll, rebuildPriors } from '../src/integrity/run.js';
+import { pendingRoundCount } from '../src/integrity/job.js';
 
 const TOKEN = 'a'.repeat(32);
 let db: DB;
@@ -209,6 +210,65 @@ describe('analyzePending', () => {
     analyzePending(db, dir);
     expect(db.prepare('SELECT frames, rounds, analyzer_version AS v FROM integrity_prior').get())
       .toEqual({ frames: 180, rounds: 3, v: ANALYZER_VERSION });
+  });
+});
+
+// A round that cannot be analysed used to be pending for ever. pendingRoundCount
+// kept counting it, and the server started a fresh analysis process for it
+// every sixty seconds, which decoded nothing and exited, until the row was
+// removed by hand.
+describe('a round that cannot be analysed', () => {
+  const failures = () => db.prepare('SELECT ordinal, half, reason, analyzer_version AS v FROM integrity_unanalysable ORDER BY ordinal').all();
+
+  it('is marked with the reason when the file will not decode, and leaves the pending set', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), new Uint8Array(16));
+    expect(pendingRoundCount(db)).toBe(1);
+    expect(analyzePending(db, dir)).toEqual({ rounds: 0, skipped: 1 });
+    expect(failures()).toEqual([{ ordinal: 1, half: 1, reason: 'unreadable', v: ANALYZER_VERSION }]);
+    expect(pendingRoundCount(db)).toBe(0);
+  });
+
+  it('is marked when the file is not on disk at all', () => {
+    expect(analyzePending(db, dir)).toEqual({ rounds: 0, skipped: 1 });
+    expect(failures()).toEqual([{ ordinal: 1, half: 1, reason: 'missing', v: ANALYZER_VERSION }]);
+    expect(pendingRoundCount(db)).toBe(0);
+  });
+
+  // Not a decode failure but a THROW, which used to end the whole process
+  // with the round still pending, to be started again a minute later.
+  it('is marked when reading it throws, instead of taking the pass down', () => {
+    mkdirSync(join(dir, `pug_${TOKEN}_1_1.rpl`));
+    addRound(2, 1);
+    expect(analyzePending(db, dir)).toEqual({ rounds: 1, skipped: 1 });
+    expect(failures()).toEqual([{ ordinal: 1, half: 1, reason: 'unreadable', v: ANALYZER_VERSION }]);
+  });
+
+  it('does not stop the rounds around it being measured', () => {
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), new Uint8Array(16));
+    addRound(2, 1);
+    expect(analyzePending(db, dir)).toEqual({ rounds: 1, skipped: 1 });
+    expect(db.prepare('SELECT rounds FROM integrity_prior').get()).toEqual({ rounds: 1 });
+  });
+
+  it('is not pending once its replay has been pruned, which is nobody\'s failure', () => {
+    db.prepare("UPDATE match_replays SET pruned_at = datetime('now')").run();
+    expect(pendingRoundCount(db)).toBe(0);
+    expect(analyzePending(db, dir)).toEqual({ rounds: 0, skipped: 0 });
+    expect(failures()).toEqual([]);
+  });
+
+  it('is tried again by a newer analyzer, which may be able to read it', () => {
+    analyzePending(db, dir);
+    db.prepare('UPDATE integrity_unanalysable SET analyzer_version = ?').run(ANALYZER_VERSION - 1);
+    expect(pendingRoundCount(db)).toBe(1);
+  });
+
+  it('loses the mark as soon as it is measured', () => {
+    analyzePending(db, dir);
+    writeFileSync(join(dir, `pug_${TOKEN}_1_1.rpl`), replayBytes(60));
+    backfillAll(db, dir);
+    expect(failures()).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) c FROM integrity_rounds').get()).toEqual({ c: 1 });
   });
 });
 
