@@ -93,6 +93,18 @@ export class AdminFeedPoster {
           text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
+      case 'clock': {
+        // /admin?live=N today. The admin routing plan moves the board to
+        // /admin/live, and whichever of the two lands second changes this.
+        const board = `[live board](${this.deps.publicUrl}/admin?live=${e.matchId})`;
+        const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        return {
+          text: e.what === 'low_allowance'
+            ? `**${this.name(e.steamid)}** has ${e.remainingS} s left to reconnect in ${match}. Hold the clock or add time on the ${board}.`
+            : `The hold on **${this.name(e.steamid)}**'s reconnect clock in ${match} released itself at the ceiling: ${e.remainingS} s left and counting. ${board}`,
+          color: COLOR.problem,
+        };
+      }
       case 'lilac_flag': {
         const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
         // "suspected" is LilAC's own word for the soft case and it is the right

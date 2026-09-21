@@ -171,3 +171,60 @@ export function recordPresenceLine(db: DB, ev: PresenceLine, now = new Date()): 
     absent: true, remaining: ev.remaining, held: ev.held === true, holdLeft: ev.holdLeft ?? null,
   }, now);
 }
+
+export interface SweepEvent {
+  what: 'low_allowance' | 'hold_expired';
+  matchId: number;
+  steamid: string;
+  remainingS: number;
+}
+
+/** The plugin releases at its ceiling and says so; this only acts when that
+ *  line has not arrived a couple of seconds after it was due. */
+const HOLD_GRACE_MS = 2000;
+
+/**
+ * What the plugin cannot tell us, because it only speaks at a LEAVE or a
+ * RETURN: that a dropped player's allowance has run low, and that a hold has
+ * reached its ceiling when the line saying so was lost.
+ *
+ * Stateless on purpose. Everything it decides from is in match_presence, so a
+ * backend restart neither posts a warning twice (low_alert_at is already set)
+ * nor loses one (the next pass computes the same figure from the same row).
+ * Each stamp is a guarded UPDATE, and an event is returned only when that
+ * update changed the row.
+ */
+export function sweepPresence(db: DB, now = new Date()): SweepEvent[] {
+  const rows = db.prepare(
+    `SELECT pr.* FROM match_presence pr JOIN matches m ON m.id = pr.match_id
+     WHERE m.state IN ('configuring', 'live') AND pr.state = 'dropped'
+     ORDER BY pr.match_id, pr.steamid`,
+  ).all() as PresenceRow[];
+  const threshold = lowAlertSeconds(db);
+  const iso = now.toISOString();
+  const out: SweepEvent[] = [];
+
+  for (const row of rows) {
+    let r = row;
+    if (r.held === 1 && r.hold_until !== null && Date.parse(r.hold_until) + HOLD_GRACE_MS <= now.getTime()) {
+      // The clock resumed AT the ceiling, not now, so that is the new anchor.
+      const n = db.prepare(
+        `UPDATE match_presence SET held = 0, remaining_at = hold_until, hold_until = NULL, updated_at = ?
+         WHERE match_id = ? AND steamid = ? AND held = 1`,
+      ).run(iso, r.match_id, r.steamid).changes;
+      if (n === 1) {
+        r = { ...r, held: 0, remaining_at: r.hold_until, hold_until: null };
+        out.push({ what: 'hold_expired', matchId: r.match_id, steamid: r.steamid, remainingS: remainingNow(r, now) ?? 0 });
+      }
+    }
+    if (threshold <= 0 || r.held === 1 || r.low_alert_at !== null) continue;
+    const left = remainingNow(r, now);
+    // At zero the plugin has already called the abandon, and that has its own line.
+    if (left === null || left <= 0 || left > threshold) continue;
+    const n = db.prepare(
+      'UPDATE match_presence SET low_alert_at = ?, updated_at = ? WHERE match_id = ? AND steamid = ? AND low_alert_at IS NULL',
+    ).run(iso, iso, r.match_id, r.steamid).changes;
+    if (n === 1) out.push({ what: 'low_allowance', matchId: r.match_id, steamid: r.steamid, remainingS: left });
+  }
+  return out;
+}

@@ -67,7 +67,7 @@ import {
   recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
-import { recordPresenceLine } from './presence.js';
+import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
@@ -650,6 +650,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           try {
             const change = recordPresenceLine(deps.db, ev);
             if (change?.changed) hub.broadcast('refresh');
+            // The plugin released a hold at its ceiling. Announced only on the
+            // held to not held transition, so whichever of this line and the
+            // sweep below gets there first is the one that speaks.
+            if (change?.holdReleased && ev.kind === 'leave' && ev.auto) {
+              publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: ev.steamid, matchId: change.matchId, remainingS: ev.remaining });
+            }
           } catch (err) {
             console.error('[presence] failed to record', ev.kind, err);
           }
@@ -963,6 +969,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 60_000);
   reaper.unref();
 
+  // The live board's clocks. Five seconds because the warning it posts is
+  // about a countdown measured in tens of seconds; the pass is one indexed
+  // read when nobody is dropped, which is nearly always.
+  const presenceSweep = setInterval(() => {
+    try {
+      const events = sweepPresence(deps.db);
+      for (const e of events) publishAdminEvent({ kind: 'clock', ...e });
+      if (events.length > 0) hub.broadcast('refresh');
+    } catch (err) {
+      console.error('[presence] sweep failed:', err);
+    }
+  }, 5_000);
+  presenceSweep.unref();
+
   // Daily replay prune. Interval rather than cron because there is no
   // scheduler here and the exact hour does not matter: the window is 90 days.
   // unref so the timer never holds the process open in tests.
@@ -1078,6 +1098,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);
+    clearInterval(presenceSweep);
     clearInterval(pruneTimer);
     stopTwitchPoll?.();
     stopSignalRefresh?.();

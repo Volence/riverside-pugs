@@ -180,4 +180,15 @@ describe('admin feed', () => {
     await feed.idle();
     expect(t.live()).toHaveLength(0);
   });
+
+  it('warns once that a dropped player is nearly out of time, with a link to the board', async () => {
+    publishAdminEvent({ kind: 'clock', what: 'low_allowance', steamid: IDS[2], matchId, remainingS: 85 });
+    publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: IDS[2], matchId, remainingS: 197 });
+    await feed.idle();
+    expect(text(0)).toMatch(/player2.* has 85 s left/);
+    expect(text(0)).toContain(`https://pug.test/admin?live=${matchId}`);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/hold on .*player2.* released itself/);
+    expect(text(1)).toContain('197 s');
+  });
 });
