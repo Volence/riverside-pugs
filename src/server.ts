@@ -44,6 +44,7 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
+import { isFirstDetectionInMatch, recordInputBurst, pounceSpamThreshold } from './inputBursts.js';
 import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
@@ -472,6 +473,36 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         // cannot take down the listener that also carries match_end.
         if (ev.kind === 'signon_drop') {
           signonDrops?.onDrop(ev).catch((err) => console.error('[consistency] failed to record a connect drop:', err));
+          return;
+        }
+        if (ev.kind === 'input_burst') {
+          // Evidence only, and never on the critical path: a failure here must
+          // not take down the listener that also carries match_end.
+          try {
+            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const live = serverId === null ? undefined : deps.db
+              .prepare("SELECT id FROM matches WHERE state = 'live' AND server_id = ? ORDER BY id DESC LIMIT 1")
+              .get(serverId) as { id: number } | undefined;
+            // Live matches only: a burst that belongs to no match is not
+            // evidence about a ranked game, and storing warmup would grow the
+            // table for nothing. Dropped rather than stored with a null match.
+            if (!live) return;
+            const matchId = live.id;
+            const stored = recordInputBurst(deps.db, {
+              matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
+              airPresses: ev.airPresses, groundTicks: ev.groundTicks,
+              serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
+            }, pounceSpamThreshold(deps.db));
+            for (const signature of stored.detections) {
+              if (!isFirstDetectionInMatch(deps.db, ev.steamid, matchId)) continue;
+              publishAdminEvent({
+                kind: 'input_flag', steamid: ev.steamid, matchId, signature,
+                detail: `${ev.burstKind}, ${ev.airPresses} presses in the air`,
+              });
+            }
+          } catch (err) {
+            console.error('[inputstats] failed to record an input burst:', err);
+          }
           return;
         }
         if (ev.kind === 'player_net') {

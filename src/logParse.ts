@@ -1,4 +1,5 @@
 import { steamId64Of } from './steamId.js';
+import { decodeIntervals } from './inputStats.js';
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
@@ -108,6 +109,10 @@ export type LogEvent =
   // cancelled loading screen looks like. `secs` is -1 when the plugin could
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
+  | {
+      kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
+      groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
+    }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
   // Where a client connected from, emitted for EVERY human that joins the box
@@ -161,6 +166,10 @@ const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
  *  last `<uid><steamid><team>` on the line: the engine's own. A name that
  *  contains a whole fake suffix only ends up inside the name group. A `say`
  *  line cannot match either, because it ends with a closing quote. */
+/** A ground/air press counter above this did not come from a real round; the
+ *  plugin caps bursts long before here. Keeps an absurd value out of the data. */
+const MAX_TICK_COUNTER = 100000;
+
 const ENTERED_RE = /^".*<\d+><(STEAM_\d:[01]:\d{1,10})><[^<>"]*>" entered the game$/;
 
 /**
@@ -195,6 +204,32 @@ function parseSourcePinned(text: string): LogEvent | null | undefined {
     const name = body.slice(at + ' name='.length).trim().slice(0, 64);
     if (!steamid || secs === null || secs < -1 || forced === null || forced < 1 || !name) return null;
     return { kind: 'signon_drop', steamid, secs, forced, name };
+  }
+
+  // Input bursts from l4d_inputstats.smx. Same anchoring as SIGNON_DROP and for
+  // the same reason, but with nothing free-text on the line at all: the only
+  // identity field is a steamid, so there is no name for a crafted one to
+  // impersonate. Anything the plugin could not have produced is refused rather
+  // than repaired, so a forged or corrupt line stays out of the statistics.
+  if (body.startsWith('L4DM ')) {
+    const f = kv(body.split(/\s+/).slice(1));
+    const steamid = steamId64Of(f.id ?? '');
+    const burstKind = f.k;
+    const weapon = (f.w ?? '').slice(0, 32);
+    const n = intOf(f.n);
+    const groundTicks = intOf(f.g);
+    const airPresses = intOf(f.a);
+    const serverTick = intOf(f.st);
+    const clientTick = intOf(f.ct);
+    const intervals = decodeIntervals(f.d ?? '');
+    if (!steamid || !intervals) return null;
+    if (burstKind !== 'fire' && burstKind !== 'pounce' && burstKind !== 'bhop') return null;
+    if (n === null || n !== intervals.length) return null;
+    if (groundTicks === null || groundTicks < 0 || groundTicks > MAX_TICK_COUNTER) return null;
+    if (airPresses === null || airPresses < 0 || airPresses > MAX_TICK_COUNTER) return null;
+    if (serverTick === null || serverTick < 0 || clientTick === null || clientTick < 0) return null;
+    if (!/^[a-z0-9_]*$/.test(weapon)) return null;
+    return { kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the

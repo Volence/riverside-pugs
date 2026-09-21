@@ -526,6 +526,47 @@ CREATE TABLE IF NOT EXISTS signon_drops (
   entered_after_at TEXT
 );
 CREATE INDEX IF NOT EXISTS signon_drops_steamid ON signon_drops(steamid, at);
+
+-- Input bursts from l4d_inputstats.smx: a run of button presses with no gap
+-- longer than 300ms. The raw ORDERED intervals are kept rather than a summary
+-- because the checks that catch a macro with jitter added compare each interval
+-- to the next one, and that ordering cannot be recovered from a summary or a
+-- histogram afterwards. Storing them is also what lets a signature written
+-- later be re-run over everything recorded before it existed.
+-- A burst is evidence, never an accusation, and is admin-only.
+CREATE TABLE IF NOT EXISTS input_bursts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER,
+  server_id INTEGER,
+  steamid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  weapon TEXT NOT NULL DEFAULT '',
+  n INTEGER NOT NULL,
+  ground_ticks INTEGER NOT NULL,
+  air_presses INTEGER NOT NULL,
+  server_tick INTEGER NOT NULL,
+  client_tick INTEGER NOT NULL,
+  intervals TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
+CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
+
+-- One row per signature that fired on a burst. Separate from the burst so that
+-- re-running an improved signature adds rows without rewriting the evidence.
+CREATE TABLE IF NOT EXISTS input_detections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  burst_id INTEGER NOT NULL,
+  match_id INTEGER,
+  steamid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  at TEXT NOT NULL,
+  UNIQUE(burst_id, signature)
+);
+CREATE INDEX IF NOT EXISTS input_detections_steamid ON input_detections(steamid, at);
+CREATE INDEX IF NOT EXISTS input_detections_match ON input_detections(match_id);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
@@ -546,6 +587,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // Discord turns into being dropped out of voice when the channel goes.
   discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
+  // Airborne +attack presses before a pounce burst is flagged. A human issues
+  // one or two; a held button issues dozens. Raise it if a real match ever
+  // shows a legitimate player above it; never lower it below 3.
+  input_pounce_spam_threshold: '12',
   require_discord_to_queue: '1',
   // Pressing Ready needs that account to be in a voice channel on the guild.
   require_voice_to_ready: '1',
