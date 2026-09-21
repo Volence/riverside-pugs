@@ -140,4 +140,64 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get(ALT)).toBeTruthy();
     expect((db.prepare('SELECT player_id FROM match_players WHERE match_id = 1').get() as any).player_id).toBe(ALT);
   });
+
+  // Endorsements have two player columns inside one primary key, so they
+  // were not covered by PLAIN or KEYED and the merge threw a foreign key
+  // violation the moment either column pointed at a deleted player.
+  describe('endorsements', () => {
+    function endorse(matchId: number, from: string, to: string, kind = 'vibes'): void {
+      db.prepare(
+        "INSERT INTO endorsements (match_id, from_id, to_id, kind, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+      ).run(matchId, from, to, kind);
+    }
+
+    it('merges when `from` gave an endorsement', () => {
+      match(1);
+      endorse(1, ALT, OTHER);
+
+      expect(() => mergePlayers(db, { from: ALT, into: MAIN })).not.toThrow();
+      const row = db.prepare('SELECT from_id, to_id FROM endorsements WHERE match_id = 1').get() as any;
+      expect(row).toEqual({ from_id: MAIN, to_id: OTHER });
+    });
+
+    it('merges when `from` received an endorsement', () => {
+      match(1);
+      endorse(1, OTHER, ALT, 'caller');
+
+      expect(() => mergePlayers(db, { from: ALT, into: MAIN })).not.toThrow();
+      const row = db.prepare('SELECT from_id, to_id FROM endorsements WHERE match_id = 1').get() as any;
+      expect(row).toEqual({ from_id: OTHER, to_id: MAIN });
+    });
+
+    it('collapses to one row when the same giver endorsed both accounts on one match', () => {
+      match(1);
+      endorse(1, OTHER, MAIN, 'clutch');
+      endorse(1, OTHER, ALT, 'vibes');
+
+      expect(() => mergePlayers(db, { from: ALT, into: MAIN })).not.toThrow();
+      const rows = db.prepare('SELECT from_id, to_id FROM endorsements WHERE match_id = 1').all() as any[];
+      expect(rows).toEqual([{ from_id: OTHER, to_id: MAIN }]);
+    });
+
+    it('drops an endorsement between the two merged accounts instead of leaving a self endorsement', () => {
+      match(1);
+      endorse(1, MAIN, ALT, 'caller');
+
+      mergePlayers(db, { from: ALT, into: MAIN });
+
+      expect(db.prepare('SELECT 1 FROM endorsements WHERE match_id = 1').get()).toBeUndefined();
+    });
+
+    it('reports the endorsements count on a dry run and changes nothing', () => {
+      match(1);
+      endorse(1, ALT, OTHER);
+      endorse(1, OTHER, ALT, 'caller');
+
+      const plan = mergePlayers(db, { from: ALT, into: MAIN, dryRun: true });
+
+      expect(plan.rowsByTable.endorsements).toBe(2);
+      expect((db.prepare('SELECT from_id, to_id FROM endorsements WHERE match_id = 1 AND from_id = ?').get(ALT) as any))
+        .toEqual({ from_id: ALT, to_id: OTHER });
+    });
+  });
 });

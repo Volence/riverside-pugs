@@ -87,6 +87,7 @@ export function mergePlayers(
   note('match_player_stats', count('SELECT COUNT(*) AS n FROM match_player_stats WHERE player_id = ?', from));
   note('player_ratings', count('SELECT COUNT(*) AS n FROM player_ratings WHERE player_id = ?', from));
   note('rating_history', count('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?', from));
+  note('endorsements', count('SELECT COUNT(*) AS n FROM endorsements WHERE from_id = ? OR to_id = ?', from, from));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -159,6 +160,18 @@ export function mergePlayers(
     //    recompute below rebuilds them from the merged rosters.
     db.prepare('DELETE FROM rating_history WHERE player_id IN (?, ?)').run(from, into);
     db.prepare('DELETE FROM player_ratings WHERE player_id = ?').run(from);
+
+    // 4. Endorsements have TWO player columns inside one primary key
+    //    (match_id, from_id, to_id), so they fit neither PLAIN nor KEYED: a
+    //    row can collide on either column independently of the other. Each
+    //    column is moved and its leftovers dropped in turn, the same way
+    //    KEYED does it, then a row that now points at the same player on
+    //    both sides is dropped rather than survive as a self endorsement.
+    db.prepare('UPDATE OR IGNORE endorsements SET from_id = ? WHERE from_id = ?').run(into, from);
+    db.prepare('DELETE FROM endorsements WHERE from_id = ?').run(from);
+    db.prepare('UPDATE OR IGNORE endorsements SET to_id = ? WHERE to_id = ?').run(into, from);
+    db.prepare('DELETE FROM endorsements WHERE to_id = ?').run(from);
+    db.prepare('DELETE FROM endorsements WHERE from_id = to_id').run();
 
     // The alias outlives the player row and is the whole reason this merge
     // is not a one-off tidy-up: without it the same person logs in on the
