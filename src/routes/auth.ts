@@ -11,8 +11,21 @@ import { applyGate } from '../discord/gate.js';
 import type { GuildMembership } from '../discord/membership.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { activeBan } from '../admin/players.js';
+import { resolveAlias } from '../aliases.js';
+import { MERGED_MESSAGE } from '../standing.js';
 
 const NEXT_COOKIE = 'pug_next';
+
+/** A whole page, because this is the end of a full-page redirect from Steam
+ *  and there is no app on screen to show a message in. Static text only. */
+const MERGED_PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Riverside PUG</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1rem;">
+<h1>This account cannot sign in</h1>
+<p>${MERGED_MESSAGE}</p>
+<p><a href="/">Back to the site</a></p>
+</body></html>`;
 
 /** Only same-site paths, so the return-to can never become an open redirect.
  *  Said as what IS allowed rather than as a list of tricks: "/" alone, or a
@@ -53,6 +66,14 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
   app.get('/auth/steam/return', async (req, reply) => {
     const steamid = await opts.verifyLogin(req.query as Record<string, string>, steamReturnUrl(config.publicUrl));
     if (!steamid) return reply.code(403).send('Steam login failed');
+    // A SteamID that was merged into another account is not an identity any
+    // more. Letting it in made a fresh `invited` row, and the alt was a
+    // separate player again. Refused outright rather than signed in as the
+    // main: the alias says the two are one person, but proving you hold the
+    // alt must never be enough to become the main.
+    if (resolveAlias(db, steamid) !== steamid) {
+      return reply.code(403).type('text/html; charset=utf-8').send(MERGED_PAGE);
+    }
     const persona = await opts.fetchPersona(steamid, config.steamApiKey);
     upsertPlayer(db, { steamid, name: persona.name, avatar: persona.avatar }, config.adminSteamIds);
     setSession(reply, steamid, config.publicUrl.startsWith('https://'));

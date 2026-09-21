@@ -2,6 +2,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import { getSession } from '../session.js';
 import { getPlayer } from '../players.js';
+import { inGoodStanding } from '../standing.js';
 
 /**
  * Identify the viewer without requiring one. Returns the steamid of an active
@@ -18,13 +19,14 @@ export function makeOptionalViewer(db: DB) {
   return function optionalViewer(req: FastifyRequest): string | null {
     const steamid = getSession(req);
     if (!steamid) return null;
-    const player = getPlayer(db, steamid);
-    return player && player.status === 'active' ? steamid : null;
+    return inGoodStanding(db, steamid) ? steamid : null;
   };
 }
 
 /** Returns a per-route guard: steamid of an active player, or sends the
- *  401/403 reply and returns null. */
+ *  401/403 reply and returns null. "Active" is inGoodStanding, the one
+ *  predicate the Discord surfaces share: status active, no ban in force, and
+ *  not a SteamID that has been merged into another account. */
 export function makeRequireActive(db: DB) {
   return function requireActive(req: FastifyRequest, reply: FastifyReply): string | null {
     const steamid = getSession(req);
@@ -32,8 +34,7 @@ export function makeRequireActive(db: DB) {
       reply.code(401).send({ error: 'not logged in' });
       return null;
     }
-    const player = getPlayer(db, steamid);
-    if (!player || player.status !== 'active') {
+    if (!inGoodStanding(db, steamid)) {
       reply.code(403).send({ error: 'not an active player' });
       return null;
     }
@@ -51,7 +52,7 @@ export function makeRequireAdmin(db: DB) {
       return null;
     }
     const player = getPlayer(db, steamid);
-    if (!player || player.status !== 'active' || player.is_admin !== 1) {
+    if (!player || player.is_admin !== 1 || !inGoodStanding(db, steamid)) {
       reply.code(403).send({ error: 'admins only' });
       return null;
     }
