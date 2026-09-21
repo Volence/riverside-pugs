@@ -6,7 +6,10 @@ import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
 import { signonDropSummary } from '../signonDrops.js';
 import { ticketsAbout } from '../tickets/views.js';
-import { activeBan, searchPlayers, type BanRow } from './players.js';
+import {
+  activeBan, bansOf, notesOf, recentMatchesOf, searchPlayers,
+  type BanRow, type PlayerNoteRow, type RecentMatchRow,
+} from './players.js';
 import { steamAccountView } from './steamAccount.js';
 import { integrityPlayer } from './integrity.js';
 import { analyzerRankOf } from './analyzerRanks.js';
@@ -41,9 +44,9 @@ export interface PlayerFile {
       penalties: ReturnType<typeof penaltyHistory>;
       timeout: { until: string; offenses: number } | null;
     };
-    matches: unknown[];
+    matches: RecentMatchRow[];
     tickets: ReturnType<typeof ticketsAbout>;
-    notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];
+    notes: PlayerNoteRow[];
     evidence: ReturnType<typeof evidence>;
   };
   actions: FileAction[];
@@ -96,31 +99,19 @@ export function playerFile(
 
   const row = searchPlayers(db, canonical, 1).find((p) => p.steamid === canonical);
   const timeline = playerTimeline(db, canonical, viewer.steamid);
+  // canOpenFile above already refused any viewer who is neither admin nor
+  // mod, which is the only reason playerFileSummary ever refuses one: a
+  // staff viewer who reached this line always gets a summary back.
+  const glance = playerFileSummary(db, canonical, viewer, { now, timeline });
+  if (!glance) throw new Error(`playerFileSummary refused a staff viewer that canOpenFile already allowed for ${canonical}`);
   const redact = banRedactor(db, canonical, viewer.steamid);
   const ban = activeBan(db, canonical, now);
-  const bans = (db.prepare(
-    `SELECT b.*, pc.name AS created_by_name, pl.name AS lifted_by_name FROM bans b
-     LEFT JOIN players pc ON pc.steamid = b.created_by
-     LEFT JOIN players pl ON pl.steamid = b.lifted_by
-     WHERE b.player_id = ? ORDER BY b.id DESC`,
-  ).all(canonical) as {
-    id: number; reason: string; created_by: string; created_at: string; expires_at: string | null;
-    lifted_by: string | null; lifted_at: string | null; created_by_name: string | null; lifted_by_name: string | null;
-  }[]).map((b) => redact({
-    id: b.id, reason: b.reason, createdBy: b.created_by, createdAt: b.created_at,
-    expiresAt: b.expires_at, liftedBy: b.lifted_by, liftedAt: b.lifted_at,
-    createdByName: b.created_by_name, liftedByName: b.lifted_by_name,
-  }));
-  const notes = (db.prepare(
-    `SELECT n.id, n.author_id, a.name AS author_name, n.text, n.created_at FROM player_notes n
-     LEFT JOIN players a ON a.steamid = n.author_id WHERE n.player_id = ? ORDER BY n.id DESC`,
-  ).all(canonical) as { id: number; author_id: string; author_name: string | null; text: string; created_at: string }[])
-    .map((n) => ({ id: n.id, authorId: n.author_id, authorName: n.author_name, text: n.text, createdAt: n.created_at }));
-  const matches = db.prepare(
-    `SELECT m.id, m.campaign, m.state, m.ended_at AS endedAt, m.winner, mp.team, mp.connected_at AS connectedAt
-     FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE mp.player_id = ? ORDER BY m.id DESC LIMIT 20`,
-  ).all(canonical);
+  // Same readers playerDetail uses, so a fixed note or ban shape never drifts
+  // between the two. Redaction happens here, not inside bansOf: only the
+  // caller knows which viewer it is building the row for.
+  const bans = bansOf(db, canonical).map(redact);
+  const notes = notesOf(db, canonical);
+  const matches = recentMatchesOf(db, canonical);
   const timeout = activeTimeout(db, canonical, now);
 
   return {
@@ -137,7 +128,7 @@ export function playerFile(
       games: row?.games ?? 0,
       createdAt: player.created_at,
     },
-    glance: playerFileSummary(db, canonical, viewer, { now, timeline })!,
+    glance,
     timeline,
     sections: {
       identity: identity(db, canonical),

@@ -94,6 +94,29 @@ describe('the Player File', () => {
   });
 });
 
+describe('the summary\'s own access gate', () => {
+  it('is null for any non-staff viewer, however it got there', () => {
+    expect(playerFileSummary(db, P, fileViewer(db, OTHER))).toBeNull();
+    banPlayer(db, OTHER, ADMIN, 'throwing', null);
+    expect(playerFileSummary(db, P, fileViewer(db, OTHER))).toBeNull();
+  });
+
+  it('answers for a moderator even when the target is staff, but with no fileUrl', () => {
+    // canOpenFile refuses a moderator a colleague's file; the summary is not
+    // gated on canOpenFile, only on the viewer being staff at all, since the
+    // ticket case file shows this to a moderator an admin deliberately added
+    // to a restricted ticket about a staff member.
+    const summary = playerFileSummary(db, ADMIN, fileViewer(db, MOD))!;
+    expect(summary).not.toBeNull();
+    expect(summary.fileUrl).toBeNull();
+  });
+
+  it('gives a moderator a real fileUrl for an ordinary player', () => {
+    const summary = playerFileSummary(db, P, fileViewer(db, MOD))!;
+    expect(summary.fileUrl).toBe(`/admin/people/${P}`);
+  });
+});
+
 describe('the ban list inside the panel', () => {
   it('filters, searches, says how long each ran, and says which rows open a file', () => {
     banPlayer(db, P, ADMIN, 'throwing', 1440);

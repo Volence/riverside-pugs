@@ -26,6 +26,22 @@ export interface EvidenceCount { source: EvidenceSource; count: number }
  * One builder on purpose: a new evidence source then appears in both places
  * the day its adapter lands, rather than in whichever of them somebody
  * remembered.
+ *
+ * Gated on staff, not on canOpenFile. It returns null outright for any
+ * viewer who is neither an admin nor a moderator, because it carries the
+ * same evidence (steamFlags, sharesAddressWith, alias/ban/penalty counts,
+ * the analyzer rank, the last review) as the full file, just compacted.
+ * canOpenFile is a stricter, further rule on top of "is staff at all": it
+ * also refuses a moderator their own file and a colleague's, which is
+ * right for the FULL file but wrong here, because this summary is also
+ * what the ticket case file shows the accused's side to a moderator an
+ * admin deliberately put on a restricted ticket about a staff member,
+ * exactly as the ticket page already did before this file existed. The
+ * caller owns that narrower check: the ticket route only reaches this
+ * function after the ticket's own visibility rule (canSeeTicket) has
+ * already let the viewer see the ticket the summary is being shown on.
+ * `fileUrl` is the one field that still asks canOpenFile, since it is
+ * the one field that offers to open the full file.
  */
 export interface PlayerFileSummary {
   steamid: string;
@@ -58,6 +74,7 @@ export function playerFileSummary(
   db: DB, steamid: string, viewer: FileViewer,
   opts: { now?: Date; timeline?: TimelineItem[] } = {},
 ): PlayerFileSummary | null {
+  if (!viewer.isAdmin && !viewer.isMod) return null;
   const canonical = resolveAlias(db, steamid);
   const player = getPlayer(db, canonical);
   if (!player) return null;
