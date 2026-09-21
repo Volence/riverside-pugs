@@ -20,7 +20,8 @@ function readDismissed(): number[] {
  * Not a notification: it only exists on a page you already opened, it goes
  * away for good when dismissed, and it never appears for anybody who has
  * nothing to give. Asked again on each navigation because that is when a
- * match you just finished becomes endorsable; the query is one indexed read.
+ * match you just finished becomes endorsable; the query is a small scan, not
+ * an indexed read (no index on match_players(player_id) or matches.ended_at).
  */
 export function EndorseBar({ me, path }: { me: string | null; path: string }) {
   const [pending, setPending] = useState<PendingEndorsement[]>([]);

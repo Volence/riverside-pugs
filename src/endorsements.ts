@@ -107,7 +107,10 @@ function gate(db: DB, matchId: number, steamid: string):
  * the client supplied.
  *
  * The checks and the insert share one immediate transaction, so a double
- * submitted click cannot spend three from a budget of two.
+ * submitted click cannot spend three from a budget of two. `.immediate()` is
+ * deliberate: it takes the write lock before the checks read, rather than
+ * after, which is why this is the only immediate-mode transaction in the
+ * codebase.
  */
 export function giveEndorsement(
   db: DB, o: { matchId: number; from: string; to: string; kind: string },
