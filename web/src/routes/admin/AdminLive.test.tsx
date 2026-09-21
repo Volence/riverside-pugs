@@ -51,6 +51,12 @@ const board = (over: Partial<LiveBoard['matches'][number]> = {}): LiveBoard => (
 
 const emptyOverview = { open: [], servers: [], recent: [], aborted: [], voided: [], queue: [], slowToReady: [] };
 
+const openMatch = () => ({
+  id: 81, campaign: 'no_mercy', state: 'live', serverId: 1, connected: 7, rostered: 8,
+  createdAt: '2026-09-21T19:40:00.000Z', wentLiveAt: '2026-09-21T19:48:00.000Z',
+  connect: { host: '45.32.199.85', port: 27015, password: 'pug_ab12cd34' }, forecast: null,
+});
+
 beforeEach(() => {
   for (const fn of Object.values(mockAdmin)) fn.mockReset();
   mockAdmin.live.mockResolvedValue(board());
@@ -266,17 +272,33 @@ describe('the live board', () => {
     expect(card.className).toContain('is-target');
   });
 
+  // The bug this pins: the panels used to sit behind the board's own loading
+  // gate, so a failing /api/admin/live took Abort, the servers, the queue and
+  // the recent results down with it although their own request was fine.
+  it('keeps the panels and Abort working when the board fails', async () => {
+    mockAdmin.live.mockRejectedValue(new ApiError(500, 'boom'));
+    mockAdmin.overview.mockResolvedValue({ ...emptyOverview, open: [openMatch()] });
+    render(<><AdminLive /><ConfirmHost /></>);
+    expect(await screen.findByRole('heading', { name: 'Open matches' })).toBeTruthy();
+    expect(screen.getByText(/Could not load the board/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
+  });
+
+  it('keeps the board up when the panels below fail', async () => {
+    mockAdmin.overview.mockRejectedValue(new ApiError(500, 'boom'));
+    render(<AdminLive />);
+    await screen.findByText(/#81/);
+    expect(screen.getByText(/Could not load the servers, queue and recent results/)).toBeTruthy();
+    expect((await row('bob')).textContent).toContain('Dropped');
+  });
+
   // Abort lives on the board until the cancel dialog with its penalty choice
   // replaces it, and it is the one control that ends a stuck match.
   it('lists the open matches under the board, and aborts one after asking', async () => {
-    mockAdmin.overview.mockResolvedValue({
-      ...emptyOverview,
-      open: [{
-        id: 81, campaign: 'no_mercy', state: 'live', serverId: 1, connected: 7, rostered: 8,
-        createdAt: '2026-09-21T19:40:00.000Z', wentLiveAt: '2026-09-21T19:48:00.000Z',
-        connect: { host: '45.32.199.85', port: 27015, password: 'pug_ab12cd34' }, forecast: null,
-      }],
-    });
+    mockAdmin.overview.mockResolvedValue({ ...emptyOverview, open: [openMatch()] });
     render(<><AdminLive /><ConfirmHost /></>);
     const panel = (await screen.findByRole('heading', { name: 'Open matches' })).closest('.panel') as HTMLElement;
     expect(panel.textContent).toContain('7/8');

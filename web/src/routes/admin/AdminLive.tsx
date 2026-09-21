@@ -52,21 +52,31 @@ export function AdminLive() {
   const panels = useAction(() => overview.reload());
   const target = useRef(liveFromUrl()).current;
 
-  if (!board) return <Panel><p class="muted">Loading...</p></Panel>;
-
+  // Two requests, two independent halves of the page. They used to share one
+  // gate, so a failing board took Abort and every panel below it down with it
+  // even though their own request had answered.
   return (
     <div class="stack">
-      {live.error && <p class="error">Could not refresh the board. Showing the last one that loaded.</p>}
-      {board.data.matches.length === 0 ? (
-        <Panel><Empty>No match is running.</Empty></Panel>
-      ) : board.data.matches.map((m) => (
-        <MatchCard key={m.id} match={m} elapsedS={elapsedS} holdMaxMinutes={board.data.holdMaxMinutes}
-          lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} />
-      ))}
+      {board ? (
+        <>
+          {live.error && <p class="error">Could not refresh the board. Showing the last one that loaded.</p>}
+          {board.data.matches.length === 0 ? (
+            <Panel><Empty>No match is running.</Empty></Panel>
+          ) : board.data.matches.map((m) => (
+            <MatchCard key={m.id} match={m} elapsedS={elapsedS} holdMaxMinutes={board.data.holdMaxMinutes}
+              lowAlertSeconds={board.data.lowAlertSeconds} reload={live.reload} isTarget={m.id === target} />
+          ))}
+        </>
+      ) : live.error ? (
+        <Panel><p class="error">Could not load the board. Everything below it still works.</p></Panel>
+      ) : (
+        <Panel><p class="muted">Loading...</p></Panel>
+      )}
 
+      {panels.error && <p class="error">{panels.error}</p>}
+      {overview.error && <p class="error">Could not load the servers, queue and recent results.</p>}
       {overview.data && (
         <>
-          {panels.error && <p class="error">{panels.error}</p>}
           {/* The same overview the panels below are built from, so the table
               and the cards above it can never disagree about a match. */}
           <OpenMatchesPanel open={overview.data.open} busy={panels.busy} run={panels.run} />
