@@ -165,12 +165,20 @@ export interface ThreadOps {
   /** Deleting a thread that is already gone is not an error. */
   deleteThread(threadId: string): Promise<void>;
   /**
-   * Make the channel's per-member permission overwrites exactly this set:
-   * view, read history, talk inside threads, attach files, embed links and
-   * add reactions. Overwrites on one channel and never a role, so a bug here
-   * cannot hand anyone anything anywhere else. The bot's own overwrite and
-   * every role overwrite are left alone. `failed` is who could not be added,
-   * which is ordinary: they have left the server.
+   * Make the FORUM channel's per-member permission overwrites exactly this
+   * set: view, read history, talk inside threads, attach files, embed links
+   * and add reactions. A channel that is not a forum is refused: the only
+   * caller is the tickets forum's access list, the tickets channel setting
+   * sits beside it in Settings, and a mis-pasted id here would strip a whole
+   * channel's member overwrites and hand it to every moderator.
+   *
+   * Overwrites on one channel and never a role, so a bug here cannot hand
+   * anyone anything anywhere else. The bot's own overwrite and every role
+   * overwrite are left alone. Access is taken away before it is given, since
+   * revocation is the direction that matters. `failed` is who could not be
+   * added, which is ordinary (they have left the server), together with
+   * anyone whose overwrite could not be deleted, which is not: an id in
+   * `failed` that is not in `userIds` still has access it should have lost.
    */
   syncMemberAccess(channelId: string, userIds: string[]): Promise<{ added: string[]; removed: string[]; failed: string[] }>;
 }

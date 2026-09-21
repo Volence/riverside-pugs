@@ -386,7 +386,11 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
     async syncMemberAccess(channelId, userIds) {
       const ch = await channelById(channelId);
-      if (!ch || !('permissionOverwrites' in ch)) throw new Error(`channel ${channelId} cannot hold permission overwrites`);
+      // A forum and nothing else, exactly as createForumPost insists: the
+      // tickets channel setting sits beside the forum one, and a mis-pasted
+      // id would otherwise delete every member overwrite on whatever channel
+      // it named and give the forum's audience the run of it.
+      if (!ch || ch.type !== ChannelType.GuildForum) throw new Error(`channel ${channelId} is not a forum`);
       const me = client.user!.id;
       // Member overwrites only, and never the bot's own: the owner's role
       // overwrites (everyone denied, the bot's role allowed) are not ours.
@@ -394,7 +398,21 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         .filter((o) => o.type === OverwriteType.Member && o.id !== me).map((o) => o.id);
       const want = new Set(userIds);
       const added: string[] = [];
+      const removed: string[] = [];
       const failed: string[] = [];
+      // Revocations first, and each one guarded: taking access away is the
+      // direction that matters, and one overwrite Discord refuses to delete
+      // must not skip every revocation after it.
+      for (const id of have) {
+        if (want.has(id)) continue;
+        try {
+          await ch.permissionOverwrites.delete(id);                           // PermissionOverwriteManager.delete :5330
+          removed.push(id);
+        } catch (err) {
+          console.error(`[discord] could not take ${id}'s access to ${channelId} away:`, err);
+          failed.push(id);
+        }
+      }
       for (const id of want) {
         if (have.includes(id)) continue;
         try {
@@ -410,8 +428,6 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           failed.push(id);
         }
       }
-      const removed = have.filter((id) => !want.has(id));
-      for (const id of removed) await ch.permissionOverwrites.delete(id);     // PermissionOverwriteManager.delete :5330
       return { added, removed, failed };
     },
   };

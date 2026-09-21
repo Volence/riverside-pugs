@@ -7,6 +7,7 @@ import { publishTicketSignal } from '../src/tickets/signals.js';
 import { publishBanChange } from '../src/banEvents.js';
 import { staffThread } from '../src/tickets/threads.js';
 import { ticketDetail } from '../src/tickets/views.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { TicketSync } from '../src/discord/ticketSync.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -72,6 +73,29 @@ describe('forum access', () => {
     await sync.reconcile();
     expect(t.threadsById.get(post)!.deleted).toBe(true);
     expect(access()).toContain('905');
+  });
+
+  it('says so in the admin feed when someone who should lose the forum keeps it', async () => {
+    const events: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => events.push(e));
+    try {
+      sync.start();
+      await sync.idle();
+      expect(access()).toEqual(['906', '907']);
+      // Discord refuses to delete that overwrite: the demoted moderator can
+      // still read the forum, which is the half of this the feed must hear.
+      t.accessRemovalsRefused.add('906');
+      db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD);
+      publishTicketSignal({ kind: 'staff' });
+      await sync.idle();
+      expect(access()).toEqual(['906', '907']);
+      const problems = events.filter((e) => e.kind === 'problem').map((e) => (e as { text: string }).text);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(/can still read it: Discord refused/);
+      expect(problems[0]).not.toContain('906');
+    } finally {
+      off();
+    }
   });
 
   it('touches nothing while the forum is not configured', async () => {

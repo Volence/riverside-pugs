@@ -435,9 +435,18 @@ export class TicketSync {
     const { db, transport } = this.deps;
     const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
     if (!forumId) return;
-    const r = await transport.threads.syncMemberAccess(forumId, forumAudience(db));
+    const want = forumAudience(db);
+    const r = await transport.threads.syncMemberAccess(forumId, want);
     if (r.added.length || r.removed.length || r.failed.length) {
-      console.log(`[discord] tickets forum access: +${r.added.length} -${r.removed.length}, ${r.failed.length} not in the server`);
+      console.log(`[discord] tickets forum access: +${r.added.length} -${r.removed.length}, ${r.failed.length} refused`);
+    }
+    // Someone who could not be ADDED has simply left the server. Someone who
+    // could not be REMOVED still reads the forum, which is a different thing
+    // entirely and the one worth waking an admin for. Named by number only:
+    // every admin reads the feed.
+    const kept = r.failed.filter((id) => !want.includes(id));
+    if (kept.length > 0) {
+      this.problem(`${kept.length === 1 ? 'Someone who' : `${kept.length} people who`} should no longer see the tickets forum can still read it: Discord refused to take their access away. Check the bot's permissions on the forum. It is tried again every few minutes.`);
     }
   }
 }

@@ -50,6 +50,10 @@ export class FakeTransport implements BotTransport {
   /** User ids that are not in the server: adding them to a thread or to a
    *  channel's overwrites is refused, as Discord refuses it. */
   notInGuild = new Set<string>();
+  /** User ids whose permission overwrite Discord refuses to delete: they keep
+   *  the access they should have lost, which is the failure the caller has to
+   *  hear about. */
+  accessRemovalsRefused = new Set<string>();
   /** Make the next N thread operations throw. */
   failThreadOps = 0;
   opensModal: ((customId: string) => boolean) | null = null;
@@ -145,14 +149,20 @@ export class FakeTransport implements BotTransport {
       const have = this.channelAccess.get(channelId) ?? new Set<string>();
       const want = new Set(userIds);
       const added: string[] = [];
+      const removed: string[] = [];
       const failed: string[] = [];
+      // Revocations first, one by one, as the real transport does them: one
+      // the server refuses leaves that person with access and is reported.
+      for (const id of [...have]) {
+        if (want.has(id)) continue;
+        if (this.accessRemovalsRefused.has(id)) failed.push(id);
+        else { have.delete(id); removed.push(id); }
+      }
       for (const id of want) {
         if (have.has(id)) continue;
         if (this.notInGuild.has(id)) failed.push(id);
         else { have.add(id); added.push(id); }
       }
-      const removed = [...have].filter((id) => !want.has(id));
-      for (const id of removed) have.delete(id);
       this.channelAccess.set(channelId, have);
       return { added, removed, failed };
     },
