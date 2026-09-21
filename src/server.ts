@@ -280,13 +280,15 @@ function readShell(): Buffer | null {
  * One list, asked by both the SPA fallback and the malformed-URL handler
  * above it: two copies of "what counts as a page" would drift, and the one
  * that drifted would start answering a typo'd endpoint with a 200 full of
- * HTML that fails somewhere much less obvious. `/download` is a file, `/ws`
- * a socket, and neither wants the app shell. Non-GET methods are never a
- * page navigation.
+ * HTML that fails somewhere much less obvious. Non-GET methods are never a
+ * page navigation. The list is what the fallback has always used: a mistyped
+ * `/download/...` link still lands on the site's own not-found page rather
+ * than a JSON body, which is what somebody following a link from Discord
+ * should see.
  */
 function isPageRequest(method: string, url: string): boolean {
   if (method !== 'GET' && method !== 'HEAD') return false;
-  return !['/api/', '/auth/', '/ws', '/download/'].some((prefix) => url.startsWith(prefix));
+  return !['/api/', '/auth/', '/ws'].some((prefix) => url.startsWith(prefix));
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
