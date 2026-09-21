@@ -109,9 +109,9 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       case 'clock': {
-        // /admin?live=N today. The admin routing plan moves the board to
-        // /admin/live, and whichever of the two lands second changes this.
-        const board = `[live board](${this.deps.publicUrl}/admin?live=${e.matchId})`;
+        // The board's own URL, with the card to scroll to. The old
+        // /admin?live=N form still redirects here, for posts already sent.
+        const board = `[live board](${this.deps.publicUrl}/admin/live?live=${e.matchId})`;
         const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
         return {
           text: e.what === 'low_allowance'

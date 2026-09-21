@@ -11,7 +11,7 @@ import { fmtTime, useAction } from './useAction';
  * coverage; that section does not exist until the Setup plan lands, and
  * leaving the only way to start an analysis on a screen that is being
  * deleted would lose it. It sits under Needs a look, which is the screen its
- * output feeds, until Setup takes it.
+ * output feeds, until Setup's Servers section takes it.
  */
 export function AnalysisPanel() {
   const { data, reload } = useFetch((s) => adminApi.integrityJob(s), []);
@@ -47,7 +47,7 @@ export function AnalysisPanel() {
           ? ` ${pending} round${pending === 1 ? '' : 's'} waiting to be measured; the next pass picks ${pending === 1 ? 'it' : 'them'} up within a minute.`
           : ' Everything on disk has been measured.'}
         {' '}Re-analysing everything is for after a threshold change. This panel moves to Setup,
-        Servers when that desk is built.
+        Servers when that section is built.
       </p>
       {lostTotal > 0 && (
         <p class="muted">

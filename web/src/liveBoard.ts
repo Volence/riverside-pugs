@@ -39,8 +39,9 @@ export function reasonText(r: LiveBoardReason | null): string {
   return `rejected by the file check at ${at}`;
 }
 
-/** The match id in /admin?live=81, which is what the admin feed's low
- *  allowance warning links to. Moves to /admin/live with the routing plan. */
+/** The match id in /admin/live?live=81, which is what the admin feed's low
+ *  allowance warning links to. The old /admin?live=81 form redirects here,
+ *  query and all, so the parameter name is part of both. */
 export const liveFromUrl = (): number | null => {
   const raw = new URLSearchParams(location.search).get('live');
   const id = raw === null ? NaN : Number(raw);

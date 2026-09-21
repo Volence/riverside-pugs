@@ -203,7 +203,7 @@ describe('admin feed', () => {
     publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: IDS[2], matchId, remainingS: 197 });
     await feed.idle();
     expect(text(0)).toMatch(/player2.* has 85 s left/);
-    expect(text(0)).toContain(`https://pug.test/admin?live=${matchId}`);
+    expect(text(0)).toContain(`https://pug.test/admin/live?live=${matchId}`);
     expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
     expect(text(1)).toMatch(/hold on .*player2.* released itself/);
     expect(text(1)).toContain('197 s');

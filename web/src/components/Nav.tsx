@@ -61,12 +61,16 @@ export function Nav(
              rel={target ? 'noopener' : undefined}
              aria-current={path === href ? 'page' : undefined}>{label}</a>
         ))}
-        {/* The ban list is admins only for now, so its link is too. */}
-        {me?.isAdmin && (
-          <a href="/bans" aria-current={path === '/bans' ? 'page' : undefined}>Bans</a>
-        )}
+        {/* The ban list is a People screen now, and mods read it there. */}
         {(me?.isAdmin || me?.isMod) && (
-          <a href="/admin" aria-current={path === '/admin' ? 'page' : undefined}>{me?.isAdmin ? 'Admin' : 'Moderation'}</a>
+          <a href="/admin/people/bans" aria-current={path === '/admin/people/bans' ? 'page' : undefined}>Bans</a>
+        )}
+        {/* /admin sends you on to a desk, so the link is current for the whole
+            panel except the screen the Bans link owns. */}
+        {(me?.isAdmin || me?.isMod) && (
+          <a href="/admin" aria-current={path.startsWith('/admin') && path !== '/admin/people/bans' ? 'page' : undefined}>
+            {me?.isAdmin ? 'Admin' : 'Moderation'}
+          </a>
         )}
       </nav>
       {live && (
