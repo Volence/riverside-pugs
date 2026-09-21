@@ -88,14 +88,21 @@ export function getRatings(db: DB, steamids: string[]): Map<string, RatingRow> {
   return out;
 }
 
-export type LinkResult = { ok: true } | { ok: false; error: 'discord_taken' };
+export type LinkResult = { ok: true } | { ok: false; error: 'discord_taken' | 'already_linked' };
 
 /** Attach a Discord account to a player. Refuses an account already linked to
  *  someone else rather than moving it: that case is a second Steam account,
- *  and silently moving the link would orphan the first one's identity. */
+ *  and silently moving the link would orphan the first one's identity.
+ *
+ *  Refuses to REPLACE a link as well. A link is what lets somebody queue,
+ *  ready up and be sent the match password from Discord as this player, so a
+ *  new one landing on top of the old must be a decision (unlink, then link)
+ *  and never the side effect of following a URL somebody else sent. */
 export function linkDiscord(db: DB, steamid: string, discordId: string, discordName: string): LinkResult {
   const owner = playerByDiscordId(db, discordId);
   if (owner && owner.steamid !== steamid) return { ok: false, error: 'discord_taken' };
+  const current = getPlayer(db, steamid)?.discord_id ?? null;
+  if (current && current !== discordId) return { ok: false, error: 'already_linked' };
   db.prepare('UPDATE players SET discord_id = ?, discord_name = ? WHERE steamid = ?')
     .run(discordId, discordName, steamid);
   return { ok: true };
@@ -248,15 +255,31 @@ export function createLinkCode(db: DB, discordId: string, discordName: string, n
   return code;
 }
 
+type LinkCodeRow = { discord_id: string; discord_name: string; created_at: string; used_at: string | null };
+
+/** A link code that could still be spent right now, or undefined. */
+function pendingLinkCode(db: DB, code: string, now: Date): LinkCodeRow | undefined {
+  const row = db.prepare('SELECT * FROM discord_link_codes WHERE code = ?').get(code) as LinkCodeRow | undefined;
+  if (!row || row.used_at) return undefined;
+  if (now.getTime() - Date.parse(row.created_at) > LINK_CODE_TTL_MS) return undefined;
+  return row;
+}
+
+/** Whose Discord a link code is for, WITHOUT spending it. The link page shows
+ *  this and asks before anything is attached to anyone. */
+export function peekLinkCode(
+  db: DB, code: string, now: Date = new Date(),
+): { discordId: string; discordName: string } | null {
+  const row = pendingLinkCode(db, code, now);
+  return row ? { discordId: row.discord_id, discordName: row.discord_name } : null;
+}
+
 /** Spend a link code. Null when unknown, already used, or expired. */
 export function consumeLinkCode(
   db: DB, code: string, now: Date = new Date(),
 ): { discordId: string; discordName: string } | null {
-  const row = db.prepare('SELECT * FROM discord_link_codes WHERE code = ?').get(code) as
-    | { discord_id: string; discord_name: string; created_at: string; used_at: string | null }
-    | undefined;
-  if (!row || row.used_at) return null;
-  if (now.getTime() - Date.parse(row.created_at) > LINK_CODE_TTL_MS) return null;
+  const row = pendingLinkCode(db, code, now);
+  if (!row) return null;
   db.prepare('UPDATE discord_link_codes SET used_at = ? WHERE code = ?').run(now.toISOString(), code);
   return { discordId: row.discord_id, discordName: row.discord_name };
 }

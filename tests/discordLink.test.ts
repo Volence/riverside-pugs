@@ -29,10 +29,13 @@ describe('discord linking', () => {
     expect(getPlayer(db, P2)?.discord_id).toBeNull();
   });
 
-  it('relinking the same player to the same account is fine, and a new account replaces the old', () => {
+  it('relinking the same player to the same account is fine, but a different account is refused until they unlink', () => {
     linkDiscord(db, P1, '111', 'alice#1');
     expect(linkDiscord(db, P1, '111', 'alice renamed')).toEqual({ ok: true });
     expect(getPlayer(db, P1)?.discord_name).toBe('alice renamed');
+    expect(linkDiscord(db, P1, '222', 'alt')).toEqual({ ok: false, error: 'already_linked' });
+    expect(getPlayer(db, P1)?.discord_id).toBe('111');
+    unlinkDiscord(db, P1);
     expect(linkDiscord(db, P1, '222', 'alt')).toEqual({ ok: true });
     expect(playerByDiscordId(db, '111')).toBeUndefined();
   });

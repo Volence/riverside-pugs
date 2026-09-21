@@ -6,7 +6,7 @@ import type { DiscordApi } from '../discord/api.js';
 import { applyGate } from '../discord/gate.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getSession } from '../session.js';
-import { consumeLinkCode, getPlayer, linkDiscord, unlinkDiscord } from '../players.js';
+import { consumeLinkCode, getPlayer, linkDiscord, peekLinkCode, unlinkDiscord } from '../players.js';
 
 export interface DiscordAuthOpts { config: Config; db: DB; api: DiscordApi | null }
 
@@ -78,10 +78,23 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
       return back('failed');
     }
     const linked = linkDiscord(db, steamid, user.id, user.globalName ?? user.username);
-    if (!linked.ok) return back('taken');
+    if (!linked.ok) return back(linked.error === 'already_linked' ? 'already_linked' : 'taken');
     publishAdminEvent({ kind: 'account', steamid, what: 'linked', discordName: user.globalName ?? user.username });
     await applyGate(db, api!, steamid);
     return back('linked');
+  });
+
+  /** Whose Discord a link code is for, without spending it. The link page
+   *  shows this next to the signed-in Steam persona and only spends the code
+   *  when the player presses the button: a code that spent itself on page load
+   *  let anyone attach THEIR Discord to whoever opened the URL. */
+  app.get('/api/discord/link-code', async (req, reply) => {
+    const steamid = guard(req, reply);
+    if (!steamid) return reply;
+    const { code } = req.query as { code?: string };
+    const pending = typeof code === 'string' ? peekLinkCode(db, code) : null;
+    if (!pending) return reply.code(400).send({ error: 'invalid_code' });
+    return pending;
   });
 
   app.post('/api/discord/link-code', async (req, reply) => {
@@ -89,20 +102,21 @@ export async function discordAuthRoutes(app: FastifyInstance, opts: DiscordAuthO
     if (!steamid) return reply;
     const { code } = (req.body ?? {}) as { code?: string };
     if (typeof code !== 'string') return reply.code(400).send({ error: 'invalid_code' });
-    // Check ownership before spending the code, so a player who hits "taken"
-    // can sort it out and retry with the same link instead of asking the bot
-    // for another.
-    const peek = db.prepare('SELECT discord_id FROM discord_link_codes WHERE code = ?').get(code) as
-      | { discord_id: string } | undefined;
+    // Check before spending the code, so a player who hits "taken" or
+    // "already linked" can sort it out and retry with the same link instead
+    // of asking the bot for another.
+    const peek = peekLinkCode(db, code);
     if (peek) {
-      const owner = db.prepare('SELECT steamid FROM players WHERE discord_id = ?').get(peek.discord_id) as
+      const owner = db.prepare('SELECT steamid FROM players WHERE discord_id = ?').get(peek.discordId) as
         | { steamid: string } | undefined;
       if (owner && owner.steamid !== steamid) return reply.code(409).send({ error: 'discord_taken' });
+      const mine = getPlayer(db, steamid)?.discord_id ?? null;
+      if (mine && mine !== peek.discordId) return reply.code(409).send({ error: 'already_linked' });
     }
     const spent = consumeLinkCode(db, code);
     if (!spent) return reply.code(400).send({ error: 'invalid_code' });
     const linked = linkDiscord(db, steamid, spent.discordId, spent.discordName);
-    if (!linked.ok) return reply.code(409).send({ error: 'discord_taken' });
+    if (!linked.ok) return reply.code(409).send({ error: linked.error });
     publishAdminEvent({ kind: 'account', steamid, what: 'linked', discordName: spent.discordName });
     const active = await applyGate(db, api!, steamid);
     return { ok: true, active, discordName: spent.discordName };

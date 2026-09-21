@@ -1033,6 +1033,9 @@ export const api = {
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 
   register: (code: string) => post('/api/register', { code }),
+  /** Whose Discord a link code is for. Reads, never spends. */
+  peekDiscordCode: (code: string) =>
+    get<{ discordId: string; discordName: string }>(`/api/discord/link-code?code=${encodeURIComponent(code)}`),
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),

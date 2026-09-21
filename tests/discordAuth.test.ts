@@ -139,6 +139,53 @@ describe('discord auth, configured', () => {
     expect(res.statusCode).toBe(409);
   });
 
+  it('a pending link code can be read without spending it, so the page can ask first', async () => {
+    const cookies = authedCookie(app, db, P1, { active: false });
+    const code = createLinkCode(db, '111', 'Alice');
+    const peek = await app.inject({ method: 'GET', url: `/api/discord/link-code?code=${code}`, cookies });
+    expect(peek.statusCode).toBe(200);
+    expect(peek.json()).toEqual({ discordId: '111', discordName: 'Alice' });
+    // Reading it changed nothing, and it still works afterwards.
+    expect(getPlayer(db, P1)?.discord_id).toBeNull();
+    const res = await app.inject({ method: 'POST', url: '/api/discord/link-code', cookies, payload: { code } });
+    expect(res.statusCode).toBe(200);
+    const spent = await app.inject({ method: 'GET', url: `/api/discord/link-code?code=${code}`, cookies });
+    expect(spent.statusCode).toBe(400);
+    expect(spent.json().error).toBe('invalid_code');
+  });
+
+  it('reading a link code needs a session and a real code', async () => {
+    const code = createLinkCode(db, '111', 'Alice');
+    expect((await app.inject({ method: 'GET', url: `/api/discord/link-code?code=${code}` })).statusCode).toBe(401);
+    const cookies = authedCookie(app, db, P1, { active: false });
+    expect((await app.inject({ method: 'GET', url: '/api/discord/link-code?code=nope', cookies })).statusCode).toBe(400);
+  });
+
+  // The hijack: the attacker asks the bot for a code for HIS Discord and sends
+  // the victim the URL. It must never replace the Discord the victim has.
+  it('link-code refuses to replace a different Discord the account already has, and keeps the code', async () => {
+    const cookies = authedCookie(app, db, P1);
+    linkDiscord(db, P1, '111', 'Alice');
+    const code = createLinkCode(db, '666', 'Mallory');
+    const res = await app.inject({ method: 'POST', url: '/api/discord/link-code', cookies, payload: { code } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('already_linked');
+    expect(getPlayer(db, P1)?.discord_id).toBe('111');
+    expect(getPlayer(db, P1)?.discord_name).toBe('Alice');
+    // Not spent: after unlinking, the same link still works.
+    const row = db.prepare('SELECT used_at FROM discord_link_codes WHERE code = ?').get(code) as { used_at: string | null };
+    expect(row.used_at).toBeNull();
+  });
+
+  it('the OAuth callback refuses to replace a different Discord too', async () => {
+    const cookies = authedCookie(app, db, P1);
+    linkDiscord(db, P1, '999', 'Old');
+    const state = await stateFor(cookies);
+    const res = await app.inject({ method: 'GET', url: `/auth/discord/callback?code=good&state=${encodeURIComponent(state)}`, cookies });
+    expect(res.headers.location).toBe(`/player/${P1}?discord=already_linked`);
+    expect(getPlayer(db, P1)?.discord_id).toBe('999');
+  });
+
   it('link-code needs a session', async () => {
     const code = createLinkCode(db, '111', 'Alice');
     expect((await app.inject({ method: 'POST', url: '/api/discord/link-code', payload: { code } })).statusCode).toBe(401);
