@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isMapName } from './campaigns.js';
 
 /**
  * Just enough VPK to find a campaign's mission file, and just enough
@@ -78,7 +79,13 @@ export interface Mission { name: string; displayTitle: string; chapters: Mission
 const isNode = (v: string | KvNode | undefined): v is KvNode =>
   typeof v === 'object' && v !== null;
 
-/** Read a mission file's versus chapter list, in play order. */
+/** A mission file that was read fine and must still be refused. The message
+ *  is written for the person who uploaded it. */
+export class MissionError extends Error {}
+
+/** Read a mission file's versus chapter list, in play order. Null when there
+ *  is no versus mission in it; throws MissionError when there is one and it
+ *  names a map that could not be a map (see isMapName). */
 export function parseMission(text: string): Mission | null {
   const root = parseKeyValues(text);
   const mission = Object.entries(root).find(([k]) => k.toLowerCase() === 'mission')?.[1];
@@ -94,9 +101,15 @@ export function parseMission(text: string): Mission | null {
   const chapters = Object.entries(versus)
     .filter((e): e is [string, KvNode] => isNode(e[1]) && /^\d+$/.test(e[0]))
     .sort((a, b) => Number(a[0]) - Number(b[0]))
-    .map(([, ch]) => {
+    .map(([key, ch]) => {
       const map = typeof ch['Map'] === 'string' ? ch['Map'] : null;
       const display = typeof ch['DisplayName'] === 'string' ? ch['DisplayName'] : null;
+      if (map && !isMapName(map)) {
+        throw new MissionError(
+          `versus chapter ${key} has the map name ${JSON.stringify(map)}, which is not a valid map name `
+          + '(letters, digits and underscores only, 63 at most)',
+        );
+      }
       return map ? { map, display } : null;
     })
     .filter((c): c is MissionChapter => c !== null);

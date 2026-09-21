@@ -208,4 +208,35 @@ describe('login return-to', () => {
       expect(res.headers.location).toBe('/');
     }
   });
+
+  // A URL parser strips tab, CR and LF before it resolves anything, so
+  // "/<tab>/evil.example" is "//evil.example" to a browser: another host.
+  it('ignores a next that hides a second slash behind a control character', async () => {
+    // The exploit, stated with the same parser a browser uses.
+    expect(new URL('/\t/evil.example', 'https://pug.example').host).toBe('evil.example');
+    for (const next of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '/\t\\evil.example', '/x\u0000y']) {
+      const start = await app.inject({ method: 'GET', url: `/auth/steam?next=${encodeURIComponent(next)}` });
+      expect(start.cookies.find((x) => x.name === 'pug_next'), JSON.stringify(next)).toBeUndefined();
+    }
+  });
+
+  it('ignores a next that does not open with an ordinary path segment', async () => {
+    for (const next of ['/.', '/../x', '/@evil.example', '/%09/evil.example', '/?x=1', '/#x']) {
+      const start = await app.inject({ method: 'GET', url: `/auth/steam?next=${encodeURIComponent(next)}` });
+      expect(start.cookies.find((x) => x.name === 'pug_next'), next).toBeUndefined();
+    }
+  });
+
+  it('still accepts the paths the site really sends people back to', async () => {
+    for (const next of ['/', '/match/12', '/link/discord?code=abc', '/player/76561198000000001', '/how-to-play']) {
+      const start = await app.inject({ method: 'GET', url: `/auth/steam?next=${encodeURIComponent(next)}` });
+      const c = start.cookies.find((x) => x.name === 'pug_next');
+      expect(c, next).toBeTruthy();
+      const res = await app.inject({
+        method: 'GET', url: '/auth/steam/return?openid.mode=id_res',
+        cookies: { pug_next: c!.value },
+      });
+      expect(res.headers.location).toBe(next);
+    }
+  });
 });

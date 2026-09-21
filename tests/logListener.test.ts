@@ -69,6 +69,21 @@ describe('LogListener: self-started match admission', () => {
     expect(got.map((e) => e.kind)).toEqual(['match_create', 'match_roster', 'match_create_end']);
   });
 
+  it('does not take a self-start burst typed into chat on an allowed server', async () => {
+    // Chat leaves the box from the very address the allowlist trusts, and the
+    // forger picks the token, so neither gate can stop this. The parser does.
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    listener.allowMatchCreateFrom('127.0.0.1');
+    const port = await listener.listen(0);
+    const say = (text: string) => send(port, `"mallory<7><STEAM_1:0:5><Survivor>" say "${text} x"`);
+    await say(`PUG ${OTHER} MATCH_CREATE map=l4d_vs_hospital01_apartment players=1`);
+    await say(`PUG ${OTHER} MATCH_ROSTER steamid=76561198000000001 team=a name=victim`);
+    await say(`PUG ${OTHER} MATCH_CREATE_END players=1`);
+    await settle();
+    expect(got).toEqual([]);
+  });
+
   it('drops the self-start burst when no source is allowed', async () => {
     const got: LogEvent[] = [];
     listener = new LogListener((ev) => got.push(ev));

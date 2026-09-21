@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeVpk } from './fixtures/makeVpk.js';
-import { parseKeyValues, parseMission, missionFromVpk, listVpkPaths } from '../src/vpk.js';
+import { parseKeyValues, parseMission, missionFromVpk, listVpkPaths, MissionError } from '../src/vpk.js';
 
 const MISSION = `
 "mission"
@@ -61,6 +61,42 @@ describe('parseMission', () => {
   // cannot be played here, and an empty campaign row is worse than a refusal.
   it('returns null when there are no versus chapters', () => {
     expect(parseMission('"mission" { "Name" "x" "modes" { "coop" { } } }')).toBeNull();
+  });
+});
+
+// A chapter's map name goes onto an rcon command line (`changelevel <map>`),
+// and a mission file is whatever the uploader put in the VPK. The engine
+// splits a command on ';' even inside an argument, so this is refused at the
+// door rather than escaped at the far end.
+describe('parseMission refuses a map name that is not a map name', () => {
+  const withMap = (map: string) =>
+    `"mission" { "Name" "x" "modes" { "versus" { "1" { "Map" "ok1" } "2" { "Map" "${map}" } } } }`;
+
+  it.each([
+    ['a second command', 'x;rcon_password pwned'],
+    ['a space', 'm two'],
+    ['a newline', 'x\nquit'],
+    ['a path', '../x'],
+    ['a dash', 'm-2'],
+    ['a dot', 'm.2'],
+    ['64 characters', 'a'.repeat(64)],
+  ])('throws on %s', (_what, map) => {
+    expect(() => parseMission(withMap(map))).toThrow(MissionError);
+  });
+
+  it('names the offending chapter so the uploader can fix it', () => {
+    expect(() => parseMission(withMap('x;quit'))).toThrow(/chapter 2.*x;quit/);
+  });
+
+  it('accepts what real campaigns use', () => {
+    for (const map of ['l4d_vs_hospital01_apartment', 'c1m1_hotel', 'AirCrash', 'dbd10_roof', 'a'.repeat(63)]) {
+      expect(parseMission(withMap(map))!.chapters[1].map).toBe(map);
+    }
+  });
+
+  it('ignores the coop list, which is never played here', () => {
+    const text = '"mission" { "Name" "x" "modes" { "coop" { "1" { "Map" "x;quit" } } "versus" { "1" { "Map" "ok1" } } } }';
+    expect(parseMission(text)!.chapters.map((c) => c.map)).toEqual(['ok1']);
   });
 });
 

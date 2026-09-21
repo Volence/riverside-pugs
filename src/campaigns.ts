@@ -14,6 +14,19 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
 };
 
 /**
+ * What a map name may look like. A chapter's map name reaches an rcon command
+ * line (`changelevel <map>`), and for a community campaign it comes out of a
+ * file inside an uploaded VPK. Unquoted, a ';' in it starts a second command.
+ * Quoting does not settle it either: the engine's command buffer honours
+ * quotes for ';' but breaks on a newline wherever it finds one, and a mission
+ * file can put a newline between quotes. So the name is refused where it
+ * enters (parseMission) and asserted again where it leaves (the
+ * orchestrator). Every stock and dlc4 map passes.
+ */
+const MAP_NAME_RE = /^[A-Za-z0-9_]{1,63}$/;
+export const isMapName = (s: string): boolean => MAP_NAME_RE.test(s);
+
+/**
  * The campaigns that live in `left4dead_dlc4` rather than in the base game.
  *
  * A const set rather than something derived from which missions directory the
