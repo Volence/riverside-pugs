@@ -12,7 +12,7 @@ import { completeMatch } from './matchResult.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { clearLive } from './matchArchive.js';
-import { CAMPAIGNS } from './campaigns.js';
+import { CAMPAIGNS, isMapName } from './campaigns.js';
 import { campaignDisplayName, campaignRegistry, firstMapOf } from './campaignRegistry.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { stopAfterMap } from './stopPoint.js';
@@ -144,11 +144,14 @@ export class RealOrchestrator implements Orchestrator {
       // rather than guessed when we do not: the plugin then keeps using its own
       // NextMapIsFinale(), which is what every self-started match relies on and
       // what every match did before this argument existed.
-      // Quoted for the same reason the roster line below is: an uploaded VPK's
-      // mission file can put anything between quotes (src/vpk.ts does not
-      // validate map names), and an unquoted space would truncate the arg at
-      // GetCmdArg(4) while an unquoted ';' would inject a console command.
+      // Quoted for the same reason the roster line below is, and asserted as
+      // well: the name of a community campaign's map came out of an uploaded
+      // file. parseMission refuses a bad one at upload, but a row can predate
+      // that, and quotes alone do not stop a newline ending the command.
       const stopMap = stopAfterMap(this.db, match.campaign);
+      if (stopMap && !isMapName(stopMap)) {
+        throw new Error(`${match.campaign} stops after ${JSON.stringify(stopMap)}, which is not a valid map name`);
+      }
       const stopArg = stopMap ? ` "${stopMap}"` : '';
       await expectPugOk(rcon, `sm_pug_match ${matchId} ${token} ${match.campaign}${stopArg}`);
       // The steamid:team arg MUST be quoted: Source's console tokenizer splits
@@ -193,7 +196,13 @@ export class RealOrchestrator implements Orchestrator {
           console.error(`[orchestrator] beforeLive hook failed for match ${matchId} (non-fatal):`, err);
         }
       }
-      await rcon.exec(`changelevel ${firstMapOf(this.db, match.campaign)}`);
+      // Same assertion as the stop map above, and here there are no quotes
+      // at all: ';' in the name would be a second command.
+      const firstMap = firstMapOf(this.db, match.campaign);
+      if (!isMapName(firstMap)) {
+        throw new Error(`${entry.name} starts on ${JSON.stringify(firstMap)}, which is not a valid map name`);
+      }
+      await rcon.exec(`changelevel ${firstMap}`);
       markLive(this.db, server.id);
       this.db.prepare("UPDATE matches SET state = 'live', went_live_at = datetime('now') WHERE id = ?")
         .run(matchId);

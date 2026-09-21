@@ -18,7 +18,7 @@ import {
   chaptersOf, deleteCampaign, getCampaign, insertDraft, installsOf,
   listCampaigns, publishCampaign,
 } from '../customCampaigns.js';
-import { listVpkPaths, missionFromVpk } from '../vpk.js';
+import { listVpkPaths, missionFromVpk, MissionError } from '../vpk.js';
 import { collisionMessage, consistencyCollisions, loadConsistencyList } from '../consistencyList.js';
 import type { ServerRow } from '../serverPool.js';
 import { getCampaignPool, setSetting } from '../settings.js';
@@ -226,7 +226,13 @@ export async function campaignRoutes(
         return reply.code(413).send({ error: 'file exceeded the upload size limit' });
       }
 
-      const mission = missionFromVpk(tmp);
+      let mission;
+      try {
+        mission = missionFromVpk(tmp);
+      } catch (err) {
+        if (err instanceof MissionError) return reply.code(400).send({ error: err.message });
+        throw err;
+      }
       if (!mission) {
         return reply.code(400).send({ error: 'no versus mission found in that VPK' });
       }

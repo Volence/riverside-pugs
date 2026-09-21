@@ -265,6 +265,27 @@ describe('POST /api/admin/campaigns', () => {
     expect(createHash('sha256').update(landed).digest('hex')).toBe(body.sha256);
   });
 
+  // The map name ends up on an rcon command line. See tests/vpk.test.ts.
+  it('refuses a campaign whose chapter map name is not a map name, and says which', async () => {
+    const app = await buildTestApp({ db, addonsDir: addons });
+    const vpkPath = join(addons, 'source.vpk');
+    makeVpk(vpkPath, {
+      ext: 'txt', dir: 'missions', name: 'evil',
+      body: '"mission" { "Name" "evil" "modes" { "versus" { "1" { "Map" "x;rcon_password pwned" } } } }',
+    });
+    const form = new FormData();
+    form.set('file', new Blob([readFileSync(vpkPath)]), 'evil.vpk');
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/campaigns',
+      cookies: adminCookie(app, '76561198000000001'),
+      payload: form,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/chapter 1/);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM custom_campaigns').get()).toEqual({ n: 0 });
+    expect(existsSync(join(addons, 'evil.vpk'))).toBe(false);
+  });
+
   it('rejects a slug that collides with an existing custom campaign', async () => {
     insertDraft(db, {
       slug: 'dbd', name: 'DBD', vpkFilename: 'dbd.vpk',
