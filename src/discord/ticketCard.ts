@@ -126,3 +126,18 @@ export function closeModal(ticketId: number): ModalDef {
     ],
   };
 }
+
+/** Sent once to each person on a restricted ticket's access list. It names
+ *  nobody: the link does the telling, behind the site's own access check. */
+export function accessDm(ticketId: number, publicUrl: string): MessagePayload {
+  const url = `${publicUrl}/admin?ticket=${ticketId}`;
+  return {
+    content: [
+      'You have been given access to a restricted ticket. Only the people on its access list can see it.',
+      'Anyone with the Discord Administrator permission can read every thread on the Discord server, so if the ticket involves such a person, keep the discussion on the site.',
+    ].join('\n'),
+    embeds: [],
+    components: [[{ kind: 'link', url, label: `Open ticket #${ticketId}` }]],
+    mentionUserIds: [],
+  };
+}

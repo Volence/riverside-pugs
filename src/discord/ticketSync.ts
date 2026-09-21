@@ -4,9 +4,10 @@ import { getSetting } from '../settings.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
 import { getTicketRow, hasStaffFlag, type TicketRow } from '../tickets/store.js';
 import {
-  insertThread, setThreadCard, setThreadLocked, setThreadState, staffThread, type ThreadRow, type ThreadSurface,
+  forbiddenForumThreads, insertThread, setThreadCard, setThreadLocked, setThreadState, staffThread, threadsInState,
+  type ThreadRow, type ThreadSurface,
 } from '../tickets/threads.js';
-import { reportLine, ticketCard } from './ticketCard.js';
+import { accessDm, reportLine, ticketCard } from './ticketCard.js';
 import type { BotTransport } from './transport.js';
 
 /** The spec's figure: "A reconciler on bot ready and every five minutes". */
@@ -90,9 +91,16 @@ export class TicketSync {
     }
   }
 
-  /** A full pass: every open ticket, and every closed one whose thread the
-   *  bot has not locked yet. A closed and locked ticket costs nothing. */
+  /**
+   * A full pass. The order is the point:
+   *   1. delete forum posts that must not exist, BEFORE anything can widen
+   *      who reads the forum (Task 6 runs the access sync after this);
+   *   2. retire threads left behind by a fold;
+   *   3. every open ticket, and every closed one not yet locked.
+   */
   async reconcile(): Promise<void> {
+    await this.step(() => this.removeForbiddenPosts());
+    await this.step(() => this.retireFolded());
     const ids = (this.deps.db.prepare(
       `SELECT id FROM tickets WHERE status = 'open'
        UNION
@@ -103,14 +111,25 @@ export class TicketSync {
     for (const id of ids) await this.one(id);
   }
 
+  /** One stage of a pass, never throwing, so a failure in it cannot stop the
+   *  stages after it. */
+  private async step(fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      console.error('[discord] ticket sync step failed:', err);
+      this.problem(`Could not tidy the ticket threads in Discord: ${err instanceof Error ? err.message : String(err)}. It is tried again every few minutes.`);
+    }
+  }
+
   /** Where this ticket's staff thread belongs, or null for nowhere. */
   private surfaceFor(t: TicketRow): ThreadSurface | null {
     const { db } = this.deps;
-    // Task 5 gives a restricted ticket its private thread.
-    if (t.restricted === 1) return null;
+    if (t.restricted === 1) return (getSetting(db, 'discord_tickets_channel_id') ?? '') ? 'private' : null;
     // A normal ticket about staff has no Discord thread at all: the forum is
     // readable by the accused, and with no access list there is nobody to put
-    // in a private one. It is worked on the site.
+    // in a private one. It is worked on the site. This is the ticket that
+    // restrictOpenTicketAbout answered 'nobody' for.
     if (hasStaffFlag(db, t.target_id)) return null;
     return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? 'forum' : null;
   }
@@ -119,11 +138,23 @@ export class TicketSync {
     const { db, transport } = this.deps;
     const t = getTicketRow(db, id);
     if (!t) return;
+    await this.removeForbiddenPosts(id);
+    await this.retireFolded(id);
+    await this.notifyAccess(t);
     const surface = this.surfaceFor(t);
     let thread = staffThread(db, id);
     if (thread && !(await transport.threads.exists(thread.thread_id))) {
       // Deleted by hand in Discord. Remember that, and make another.
       setThreadState(db, thread.id, 'deleted');
+      thread = undefined;
+    }
+    // Only a private thread can be on the wrong surface here: a forum thread
+    // on a restricted ticket was deleted above. The restriction was lifted,
+    // so the thread's members are no longer the audience. `surface &&`: a
+    // null surface means a channel id was blanked in Settings, and a blanked
+    // setting ends nothing. The thread that exists is simply kept up.
+    if (thread && surface && thread.surface !== surface) {
+      await this.endThread(thread, 'This ticket is no longer restricted. Its discussion continues in the staff forum.');
       thread = undefined;
     }
     if (!thread && t.status === 'open' && surface) thread = await this.createThread(t, surface);
@@ -132,6 +163,9 @@ export class TicketSync {
     // Discord refuses a send or an edit in an archived thread.
     if (t.status === 'open') await this.syncLock(t, thread);
     if (thread.locked === 0) {
+      // Members before the card, so the card arrives as a new message for
+      // the people it is meant for.
+      if (thread.surface === 'private') await this.syncMembers(t, thread);
       await this.announceReports(t, thread);
       await this.refreshCard(t, thread);
     }
@@ -142,16 +176,113 @@ export class TicketSync {
   private async createThread(t: TicketRow, surface: ThreadSurface): Promise<ThreadRow> {
     const { db, transport, publicUrl } = this.deps;
     const card = ticketCard(db, t.id, publicUrl)!;
-    const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
-    const made = await transport.threads.createForumPost(forumId, { name: card.name, message: card.payload, tags: card.tags });
-    const row = insertThread(db, {
-      ticketId: t.id, kind: 'staff', surface, channelId: forumId, threadId: made.threadId,
-      cardMessageId: made.messageId, cardHash: card.hash,
-    });
+    let row: ThreadRow;
+    if (surface === 'forum') {
+      const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
+      const made = await transport.threads.createForumPost(forumId, { name: card.name, message: card.payload, tags: card.tags });
+      row = insertThread(db, {
+        ticketId: t.id, kind: 'staff', surface, channelId: forumId, threadId: made.threadId,
+        cardMessageId: made.messageId, cardHash: card.hash,
+      });
+    } else {
+      const channelId = getSetting(db, 'discord_tickets_channel_id') ?? '';
+      const made = await transport.threads.createPrivateThread(channelId, { name: card.name });
+      // The row goes in with no card: refreshCard sends it, after the members
+      // are in. If that send fails, the next pass finds this row and sends
+      // the card then, instead of making a second thread.
+      row = insertThread(db, { ticketId: t.id, kind: 'staff', surface, channelId, threadId: made.threadId });
+    }
     // The card counts every report there is, so none of them needs a line.
     db.prepare('UPDATE ticket_reports SET announced_at = ? WHERE ticket_id = ? AND announced_at IS NULL')
       .run(new Date().toISOString(), t.id);
     return row;
+  }
+
+  /** Rule 2. Marked 'deleted' only after Discord deleted it, so a failure is
+   *  retried, and Task 6 keeps the accused out of the forum until it works. */
+  private async removeForbiddenPosts(ticketId?: number): Promise<void> {
+    const { db, transport } = this.deps;
+    for (const th of forbiddenForumThreads(db, ticketId)) {
+      await transport.threads.deleteThread(th.thread_id);
+      setThreadState(db, th.id, 'deleted');
+    }
+  }
+
+  /** Rule 3. foldTicket marked these; say where the other discussion was,
+   *  then lock and archive it. */
+  private async retireFolded(ticketId?: number): Promise<void> {
+    const { db, transport } = this.deps;
+    for (const th of threadsInState(db, 'folded', ticketId)) {
+      const survivor = staffThread(db, th.ticket_id);
+      if (survivor && survivor.locked === 0) {
+        await transport.send(survivor.thread_id, {
+          embeds: [{ description: `Another ticket about this player was folded into this one. Its discussion was in <#${th.thread_id}>, which is now locked.` }],
+          components: [], mentionUserIds: [],
+        });
+      }
+      await this.endThread(th, null);
+    }
+  }
+
+  /** Lock and archive a thread that is no longer the ticket's, saying why
+   *  first when there is something to say. */
+  private async endThread(th: ThreadRow, farewell: string | null): Promise<void> {
+    const { db, transport } = this.deps;
+    if (await transport.threads.exists(th.thread_id)) {
+      // Unarchive first: Discord may have auto-archived it after a quiet
+      // week, and an archived thread takes no message and no lock.
+      await transport.threads.setArchived(th.thread_id, false);
+      if (farewell) await transport.send(th.thread_id, { embeds: [{ description: farewell }], components: [], mentionUserIds: [] });
+      await transport.threads.setLocked(th.thread_id, true);
+      await transport.threads.setArchived(th.thread_id, true);
+    }
+    setThreadState(db, th.id, 'ended');
+    setThreadLocked(db, th.id, true);
+  }
+
+  /** Rule 1: the thread's members are the access list, no more and no fewer.
+   *  Someone on the list with no Discord linked simply is not in the thread;
+   *  the next pass after they link adds them. */
+  private async syncMembers(t: TicketRow, thread: ThreadRow): Promise<void> {
+    const { db, transport } = this.deps;
+    const have = await transport.threads.memberIds(thread.thread_id);
+    if (have === null) return;
+    const want = (db.prepare(
+      `SELECT p.discord_id FROM ticket_access a JOIN players p ON p.steamid = a.steamid
+       WHERE a.ticket_id = ? AND p.discord_id IS NOT NULL`,
+    ).all(t.id) as { discord_id: string }[]).map((r) => r.discord_id);
+    for (const id of want) {
+      if (have.includes(id)) continue;
+      try {
+        await transport.threads.addMember(thread.thread_id, id);
+      } catch (err) {
+        // Ordinary: they have left the server. They still have the site.
+        console.warn('[discord] could not add someone to a restricted ticket thread:', err instanceof Error ? err.message : err);
+      }
+    }
+    for (const id of have) {
+      if (!want.includes(id)) await transport.threads.removeMember(thread.thread_id, id);
+    }
+  }
+
+  /** One DM per person per ticket, with the site link. Charged before the
+   *  send, as signonDropNotify charges its hour: a DM Discord refuses (closed
+   *  DMs, left the server) is dropped silently and never tried again. Sent
+   *  whether or not a tickets channel is set: the link is to the site. */
+  private async notifyAccess(t: TicketRow): Promise<void> {
+    if (t.restricted !== 1 || t.status !== 'open') return;
+    const { db, transport, publicUrl } = this.deps;
+    const rows = db.prepare(
+      `SELECT a.steamid, p.discord_id FROM ticket_access a JOIN players p ON p.steamid = a.steamid
+       WHERE a.ticket_id = ? AND a.notified_at IS NULL AND p.discord_id IS NOT NULL`,
+    ).all(t.id) as { steamid: string; discord_id: string }[];
+    for (const r of rows) {
+      db.prepare('UPDATE ticket_access SET notified_at = ? WHERE ticket_id = ? AND steamid = ?')
+        .run(new Date().toISOString(), t.id, r.steamid);
+      try {
+        await transport.dm(r.discord_id, accessDm(t.id, publicUrl));
+      } catch { /* refused: dropped, like every other DM this bot sends */ }
+    }
   }
 
   /** One line per report the thread has not heard about, oldest first. Marked
