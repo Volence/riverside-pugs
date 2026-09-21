@@ -91,21 +91,6 @@ export interface StateSnapshot {
   lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
 }
 
-/** One row of the public ban list. Nothing private is on it: see
- *  `publicBans` in src/admin/players.ts. */
-export interface PublicBan {
-  steamid: string;
-  name: string;
-  reason: string;
-  createdAt: string;
-  expiresAt: string | null;
-  permanent: boolean;
-  active: boolean;
-  bannedByName: string | null;
-  liftedByName: string | null;
-  liftedAt: string | null;
-}
-
 /** What a merge is about to move, or just moved. */
 export interface MergePlan {
   from: string;
@@ -881,40 +866,6 @@ export interface MyReport {
   matchId: number | null; createdAt: string; status: 'open' | 'closed';
 }
 
-/** One row of the integrity board. trackShare, occZ, teamGap and their percentiles are nullable:
- *  a map with too little recorded history gets no occupancy score at all, and
- *  that must never be confused with an average (0) score. composite is a sort
- *  key, not a verdict. */
-export interface IntegrityPlayerRow {
-  steamid: string;
-  /** Resolved name, or the SteamID when the server has never seen one. */
-  name: string;
-  rounds: number;
-  /** Clips in existence for this player. Zero on every row means nothing has
-   *  been flagged at all, and a ranking with nothing flagged is a list of your
-   *  best players by another name. */
-  clips: number;
-  /** Rounds in which the detector had at least one chance. A player under the
-   *  server's minimum is listed but not ranked. */
-  eligibleRounds: number;
-  ranked: boolean;
-  /** The best single tracking window in their history. Context only: it is a
-   *  maximum, so it rises with playtime, and nothing is ranked on it. */
-  fidMax: number;
-  fidP95: number;
-  scoreable: number;
-  /** Tracking as ranked: summed fidelity over scoreable windows. Null with too
-   *  few windows to make a ratio of. */
-  trackShare: number | null;
-  occZ: number | null;
-  teamGap: number | null;
-  pFid: number | null;
-  pOcc: number | null;
-  pGap: number | null;
-  /** Null when unranked. */
-  composite: number | null;
-}
-
 /** A flag raised live by another plugin (today Little Anti-Cheat) rather than
  *  by replay analysis. No clip behind it, so nothing to watch. */
 /** One row of the cross-player flag feed: LilAC hits and input-stat detections
@@ -1198,10 +1149,6 @@ export const modApi = {
 };
 
 export const adminApi = {
-  players: (q: string, signal?: AbortSignal) =>
-    get<{ players: AdminPlayerRow[] }>(`/api/admin/players?q=${encodeURIComponent(q)}`, signal),
-  player: (steamid: string, signal?: AbortSignal) =>
-    get<AdminPlayerDetail>(`/api/admin/players/${encodeURIComponent(steamid)}`, signal),
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
   unban: (steamid: string) => post(`/api/admin/players/${steamid}/unban`),
@@ -1242,13 +1189,6 @@ export const adminApi = {
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
-  integrity: (season: string, signal?: AbortSignal) =>
-    get<{ players: IntegrityPlayerRow[]; flags: RecentFlag[]; health: CaptureHealth }>(
-      `/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
-  /** Flags raised live by another plugin (today Little Anti-Cheat). No replay
-   *  behind them, so they are listed beside the clips rather than among them. */
-  integrityPlayer: (steamid: string, signal?: AbortSignal) =>
-    get<{ rounds: IntegrityRound[]; clips: IntegrityClip[]; flags: IntegrityFlag[] }>(`/api/admin/integrity/${steamid}`, signal),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
   integrityJob: (signal?: AbortSignal) =>
@@ -1313,8 +1253,6 @@ export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
-  bans: (q = '', signal?: AbortSignal) =>
-    get<{ bans: PublicBan[] }>(`/api/bans${q ? `?q=${encodeURIComponent(q)}` : ''}`, signal),
   queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
   leaderboard: (signal?: AbortSignal, season?: number) =>
     get<Leaderboard>(season === undefined ? '/api/leaderboard' : `/api/leaderboard?season=${season}`, signal),
