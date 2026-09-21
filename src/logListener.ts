@@ -17,6 +17,13 @@ import { parseLogDatagram, type LogEvent } from './logParse.js';
  *  a score. */
 const SELF_START_KINDS = new Set(['match_create', 'match_roster', 'match_create_end']);
 
+/** What the listener knows about a datagram beyond the address it came from. */
+export interface LogMeta {
+  /** The sender's UDP port. srcds sends from its game socket, so this is what
+   *  tells two servers on one machine apart (resolveServerBySource). */
+  port: number;
+}
+
 export class LogListener {
   private sock: dgram.Socket | null = null;
   private tokens = new Set<string>();
@@ -24,8 +31,8 @@ export class LogListener {
   private matchCreateCheck: ((address: string) => boolean) | null = null;
 
   /** `source` is the datagram's sender address, which self-started matches use
-   *  to tell which game server they are on. */
-  constructor(private onEvent: (ev: LogEvent, source: string) => void) {}
+   *  to tell which game server they are on; `meta` carries the rest. */
+  constructor(private onEvent: (ev: LogEvent, source: string, meta: LogMeta) => void) {}
 
   listen(port: number, address = '0.0.0.0'): Promise<number> {
     return new Promise((resolve, reject) => {
@@ -35,6 +42,7 @@ export class LogListener {
       sock.on('message', (msg, rinfo) => {
         const ev = parseLogDatagram(msg);
         if (!ev) return;
+        const meta: LogMeta = { port: rinfo.port };
         // Both address-pinned paths below ask the same question: is this
         // datagram from a game server we know? UDP source addresses are
         // trivially spoofable off-path but not from the open internet against
@@ -47,14 +55,14 @@ export class LogListener {
         // unconditionally: nothing below may ever see an event without a token.
         if (ev.kind === 'signon_drop' || ev.kind === 'entered' || ev.kind === 'player_net'
             || ev.kind === 'input_burst' || ev.kind === 'input_cap' || ev.kind === 'lilac_flag') {
-          if (fromGameServer()) this.onEvent(ev, rinfo.address);
+          if (fromGameServer()) this.onEvent(ev, rinfo.address, meta);
           return;
         }
-        if (this.tokens.has(ev.token)) return this.onEvent(ev, rinfo.address);
+        if (this.tokens.has(ev.token)) return this.onEvent(ev, rinfo.address, meta);
         // MATCH_CREATE is the first line that can cause database writes.
         // Admission is therefore pinned to the configured game server's address.
         if (SELF_START_KINDS.has(ev.kind) && fromGameServer()) {
-          return this.onEvent(ev, rinfo.address);
+          return this.onEvent(ev, rinfo.address, meta);
         }
       });
       sock.bind(port, address, () => {

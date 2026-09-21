@@ -236,3 +236,22 @@ describe('LogListener: token-less lines are admitted by source address alone', (
     expect(got.map((e) => e.kind)).toEqual(['heartbeat']);
   });
 });
+
+// Two srcds on one machine share an address, and srcds sends its log datagrams
+// from its game socket, so the sender's port is what tells them apart.
+describe('LogListener: the sender port rides along', () => {
+  it("hands the callback the datagram's source port", async () => {
+    const got: number[] = [];
+    listener = new LogListener((_ev, _source, meta) => got.push(meta.port));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.register(TOKEN);
+    const c = dgram.createSocket('udp4');
+    await new Promise<void>((r) => c.bind(0, '127.0.0.1', () => r()));
+    const from = c.address().port;
+    const pkt = Buffer.from(`L 07/30/2026 - 14:23:01: PUG ${TOKEN} HEARTBEAT\n`, 'utf8');
+    await new Promise<void>((resolve, reject) => c.send(pkt, port, '127.0.0.1', (err) => (err ? reject(err) : resolve())));
+    await new Promise((r) => setTimeout(r, 60));
+    c.close();
+    expect(got).toEqual([from]);
+  });
+});

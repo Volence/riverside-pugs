@@ -46,14 +46,14 @@ import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestr
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
-import { resolveServerBySource, type ServerRow } from './serverPool.js';
+import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
 import { rconRestarter, type ServerRestarter } from './serverRestart.js';
-import { LogListener } from './logListener.js';
+import { LogListener, type LogMeta } from './logListener.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
 import {
@@ -466,7 +466,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      logListener = new LogListener((raw, source) => {
+      // Which server row a datagram belongs to. Address AND port, because two
+      // srcds on one machine share an address (Riverside #3 and #4).
+      const serverOf = (source: string, meta: LogMeta): number | null =>
+        resolveServerBySource(deps.db, source, feedHost, meta.port);
+      logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
         // merged into their main arrives here as the main, so the roster,
@@ -485,7 +489,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             const kind = cheatName(ev.cheat);
             // Stored whether or not the player is in a live match: unlike an
@@ -510,7 +514,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Same rules as a burst: evidence only, live matches only, and never
           // allowed to take the listener down.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             // The player's own match, like a burst: two live matches can share
             // a server id while the Riverside boxes share an address.
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
@@ -527,7 +531,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             // Rostered players in a live match only: a burst that belongs to
             // no match is not evidence about a ranked game, and storing warmup
@@ -598,7 +602,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
-          selfStarted?.handle(ev, source);
+          // SelfStartedMatches keeps the sender of a burst's first line as an
+          // opaque string and hands it back to resolveServerId below, so the
+          // port rides along inside it.
+          selfStarted?.handle(ev, `${source}|${meta.port}`);
           return;
         }
         // Spectator feed. Cosmetic by design, so a throw here must never take
@@ -760,11 +767,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       for (const s of servers) logListener.allowMatchCreateFrom(s.host);
       const feedHost = deps.config.logPublicAddress.split(':')[0];
       if (feedHost) logListener.allowMatchCreateFrom(feedHost);
-      logListener.allowMatchCreateWhen((address) => resolveServerBySource(deps.db, address, feedHost) !== null);
+      logListener.allowMatchCreateWhen((address) => isKnownServerAddress(deps.db, address, feedHost));
       selfStarted = new SelfStartedMatches({
         db: deps.db,
         listener: logListener,
-        resolveServerId: (source) => resolveServerBySource(deps.db, source, feedHost),
+        resolveServerId: (key) => {
+          const [address, port] = key.split('|');
+          return resolveServerBySource(deps.db, address, feedHost, Number(port));
+        },
         setMatchId: (token, matchId, serverId) =>
           (orchestrator as RealOrchestrator).assignMatchId(serverId, token, matchId),
         adminSteamIds: deps.config.adminSteamIds,
