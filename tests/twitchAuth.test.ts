@@ -160,6 +160,33 @@ describe('twitch configured', () => {
     expect(res.headers.location).toBe(`/player/${P1}?twitch=failed`);
   });
 
+  it('only an active, unbanned player may link, and nothing is sent to Twitch for anyone else', async () => {
+    const { banPlayer } = await import('../src/admin/players.js');
+    await build(ENV);
+    const invited = authedCookie(app, db, P1, { active: false });
+    const start = await app.inject({ method: 'GET', url: '/auth/twitch', cookies: invited });
+    expect(start.statusCode).toBe(403);
+    expect(start.headers.location).toBeUndefined();
+
+    // A state issued while active is no use once banned.
+    const cookies = authedCookie(app, db, P2);
+    const state = await startFlow(cookies);
+    banPlayer(db, P2, P1, 'toxic', 60);
+    const res = await app.inject({ method: 'GET', url: `/auth/twitch/callback?code=good&state=${state}`, cookies });
+    expect(res.statusCode).toBe(403);
+    expect(db.prepare('SELECT twitch_id FROM players WHERE steamid = ?').get(P2)).toEqual({ twitch_id: null });
+  });
+
+  it('a banned player can still unlink: taking a channel off the site is never refused', async () => {
+    const { banPlayer } = await import('../src/admin/players.js');
+    await build(ENV);
+    const cookies = authedCookie(app, db, P1);
+    db.prepare("UPDATE players SET twitch_id = '999', twitch_name = 'alicetv' WHERE steamid = ?").run(P1);
+    banPlayer(db, P1, P2, 'toxic', 60);
+    expect((await app.inject({ method: 'POST', url: '/api/twitch/unlink', cookies })).statusCode).toBe(200);
+    expect(db.prepare('SELECT twitch_id FROM players WHERE steamid = ?').get(P1)).toEqual({ twitch_id: null });
+  });
+
   it('unlinks', async () => {
     await build(ENV);
     const cookies = authedCookie(app, db, P1);

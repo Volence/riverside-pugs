@@ -1632,6 +1632,17 @@ describe('Profile Discord card', () => {
     expect(screen.queryByText('Connect Discord')).toBeNull();
   });
 
+  it('offers Edit profile to an active player only: the backend refuses the write from anyone else', async () => {
+    mockApi.profile.mockResolvedValue(profile);
+    const { unmount } = render(<Profile steamid="1" session={{ kind: 'active', me }} refresh={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Edit profile')).toBeTruthy());
+    unmount();
+    render(<Profile steamid="1" session={{ kind: 'pending', me: { ...me, status: 'invited' } }} refresh={() => {}} />);
+    // Still offered the Discord link, which is how a pending account gets in.
+    await waitFor(() => expect(screen.getByText('Connect Discord')).toBeTruthy());
+    expect(screen.queryByText('Edit profile')).toBeNull();
+  });
+
   it('says why when the backend refuses to disconnect Discord', async () => {
     const { ApiError } = await import('../api');
     mockApi.profile.mockResolvedValue(profile);

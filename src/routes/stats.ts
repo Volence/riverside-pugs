@@ -18,6 +18,7 @@ import { mapDetail, mapIndex } from '../playerStats.js';
 import { displaySr, matchForecast } from '../rating.js';
 import { currentSeasonId, getPlayer, saveProfileFields } from '../players.js';
 import { getSession } from '../session.js';
+import { inGoodStanding } from '../standing.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
@@ -119,12 +120,18 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   /** A player editing their own profile. The steamid comes from the session
    *  and never from the body: there is no "edit as" and no admin override on
    *  this route, so a body carrying somebody else's id is ignored rather than
-   *  honoured. A test pins that. */
+   *  honoured. A test pins that.
+   *
+   *  Members in good standing only. A bio and a row of social links are
+   *  public text on a public page, and an account nobody has let in, or one
+   *  that has been banned, has no business publishing any. Reading your own
+   *  profile is a different route and stays open. */
   app.post('/api/profile', async (req, reply) => {
     const steamid = getSession(req);
     if (!steamid || !getPlayer(db, steamid)) {
       return reply.code(401).send({ error: 'not logged in' });
     }
+    if (!inGoodStanding(db, steamid)) return reply.code(403).send({ error: 'not an active player' });
     const result = saveProfileFields(db, steamid, req.body);
     if (!result.ok) return reply.code(400).send({ error: result.error });
     return { ok: true };

@@ -5,6 +5,7 @@ import type { DB } from '../db.js';
 import type { TwitchApi } from '../twitch/api.js';
 import { getSession } from '../session.js';
 import { getPlayer, linkTwitch, unlinkTwitch } from '../players.js';
+import { inGoodStanding } from '../standing.js';
 
 export interface TwitchAuthOpts { config: Config; db: DB; api: TwitchApi | null }
 
@@ -53,8 +54,23 @@ export async function twitchAuthRoutes(app: FastifyInstance, opts: TwitchAuthOpt
     return steamid;
   };
 
-  app.get('/auth/twitch', async (req, reply) => {
+  /** Linking puts a channel, and with it a title and a thumbnail somebody
+   *  else controls, on the public Streams page. That is for members: an
+   *  active player with no ban in force, the same test the queue applies.
+   *  Unlinking is deliberately NOT behind this. Taking a channel off the site
+   *  is never the thing to refuse, least of all to somebody who was banned. */
+  const member = (req: FastifyRequest, reply: FastifyReply): string | null => {
     const steamid = guard(req, reply);
+    if (!steamid) return null;
+    if (!inGoodStanding(db, steamid)) {
+      reply.code(403).send({ error: 'not an active player' });
+      return null;
+    }
+    return steamid;
+  };
+
+  app.get('/auth/twitch', async (req, reply) => {
+    const steamid = member(req, reply);
     if (!steamid) return reply;
     const params = new URLSearchParams({
       client_id: twitch!.clientId,
@@ -70,7 +86,7 @@ export async function twitchAuthRoutes(app: FastifyInstance, opts: TwitchAuthOpt
   });
 
   app.get('/auth/twitch/callback', async (req, reply) => {
-    const steamid = guard(req, reply);
+    const steamid = member(req, reply);
     if (!steamid) return reply;
     const { code, state } = req.query as { code?: string; state?: string };
     if (!code || !state || !verifyState(config.cookieSecret, steamid, state)) {
