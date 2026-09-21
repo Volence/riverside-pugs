@@ -1,0 +1,106 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { DB } from '../db.js';
+import { makeRequireMod } from './guards.js';
+import { logAdmin } from '../admin/audit.js';
+import { addNote, searchPlayers } from '../admin/players.js';
+import { captureHealth } from '../integrityFlags.js';
+import { canDo, canOpenFile, fileViewer, type FileAction } from '../admin/fileAccess.js';
+import { needsALook } from '../admin/needsALook.js';
+import { peopleBans } from '../admin/peopleBans.js';
+import { playerFile } from '../admin/playerFile.js';
+import { markLookedAt } from '../admin/reviews.js';
+import { getPlayer } from '../players.js';
+
+export interface PeopleRouteOpts {
+  db: DB;
+}
+
+/**
+ * The People desk: search, the Player File, Needs a look and the ban list.
+ *
+ * Every route is behind makeRequireMod, and every one then asks fileAccess
+ * whether this particular file is open to this particular viewer. A refusal
+ * is a 404 with the same body as a genuinely missing player: telling a
+ * moderator that a file exists but is not theirs to read is telling them who
+ * is staff and who has a case open.
+ *
+ * The admin-only mutations are NOT here. Ban, timeout, merge, sign out and
+ * the staff flags stay on /api/admin/players behind requireAdmin, and the
+ * Player File page calls them there, so this file cannot become a second,
+ * looser door onto them.
+ */
+export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts): Promise<void> {
+  const { db } = opts;
+  const requireMod = makeRequireMod(db);
+
+  /** Staff, then a target whose file this viewer may act on with `action`. */
+  const onFile = (req: FastifyRequest, reply: FastifyReply, action: FileAction) => {
+    const me = requireMod(req, reply);
+    if (!me) return null;
+    const viewer = fileViewer(db, me);
+    const { steamid } = req.params as { steamid: string };
+    if (!getPlayer(db, steamid) || !canDo(db, viewer, steamid, action)) {
+      reply.code(404).send({ error: 'no such player' });
+      return null;
+    }
+    return { me, viewer, steamid };
+  };
+
+  app.get('/api/admin/people', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const viewer = fileViewer(db, me);
+    const q = String((req.query as { q?: string }).q ?? '').trim().slice(0, 100);
+    return { players: searchPlayers(db, q).filter((p) => canOpenFile(db, viewer, p.steamid)) };
+  });
+
+  app.get('/api/admin/people/review', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    // Capture health rides along for the same reason it rides along with the
+    // board today: an empty list cannot otherwise tell "nobody flagged"
+    // apart from "the pipeline is silently broken".
+    return { players: needsALook(db, fileViewer(db, me)), health: captureHealth(db) };
+  });
+
+  app.get('/api/admin/people/bans', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { filter, q } = req.query as { filter?: string; q?: string };
+    const chosen = filter === 'active' || filter === 'expired' ? filter : 'all';
+    return { bans: peopleBans(db, fileViewer(db, me), { filter: chosen, q: String(q ?? '').slice(0, 64) }) };
+  });
+
+  app.get('/api/admin/people/:steamid', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { steamid } = req.params as { steamid: string };
+    const file = playerFile(db, steamid, fileViewer(db, me));
+    if (!file) return reply.code(404).send({ error: 'no such player' });
+    return file;
+  });
+
+  app.post('/api/admin/people/:steamid/notes', async (req, reply) => {
+    const t = onFile(req, reply, 'note');
+    if (!t) return reply;
+    const { text } = (req.body ?? {}) as { text?: unknown };
+    if (typeof text !== 'string' || !text.trim() || text.length > 2000) {
+      return reply.code(400).send({ error: 'a note needs text (up to 2000 characters)' });
+    }
+    addNote(db, t.steamid, t.me, text.trim());
+    logAdmin(db, t.me, 'note', t.steamid);
+    return { ok: true };
+  });
+
+  app.post('/api/admin/people/:steamid/looked-at', async (req, reply) => {
+    const t = onFile(req, reply, 'looked_at');
+    if (!t) return reply;
+    const { note } = (req.body ?? {}) as { note?: unknown };
+    if (note !== undefined && typeof note !== 'string') {
+      return reply.code(400).send({ error: 'a note must be text' });
+    }
+    const review = markLookedAt(db, t.steamid, t.me, (note ?? '').toString().trim());
+    logAdmin(db, t.me, 'looked_at', t.steamid, { note: review.note });
+    return { ok: true, review };
+  });
+}

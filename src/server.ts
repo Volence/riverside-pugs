@@ -17,6 +17,7 @@ import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
 import { createDjsTransport } from './discord/djsTransport.js';
@@ -1092,6 +1093,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
       : undefined,
   });
+  await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
   await app.register(campaignRoutes, {

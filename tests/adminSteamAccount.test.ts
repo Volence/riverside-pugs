@@ -270,7 +270,7 @@ describe('steam account over HTTP', () => {
     const allowed = new Set([
       'src/steamSignals.ts', 'src/admin/steamAccount.ts', 'src/admin/players.ts', 'src/mergePlayers.ts',
       'src/db.ts', 'src/server.ts', 'src/admin/timeline/steam.ts',
-      'src/admin/playerFile.ts', 'src/admin/playerFileSummary.ts',
+      'src/admin/playerFile.ts', 'src/admin/playerFileSummary.ts', 'src/routes/people.ts',
     ]);
     const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
