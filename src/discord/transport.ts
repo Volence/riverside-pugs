@@ -45,6 +45,17 @@ export interface MessagePayload {
   mentionRoleIds?: string[];
 }
 
+/** One field of a modal. Discord allows five per modal. */
+export type ModalField =
+  | { kind: 'text'; id: string; label: string; style: 'short' | 'paragraph'; required?: boolean; maxLength?: number }
+  | { kind: 'select'; id: string; label: string; options: { label: string; value: string }[] };
+
+export interface ModalDef {
+  customId: string;
+  title: string;
+  fields: ModalField[];
+}
+
 export type BotInteraction =
   | { kind: 'button'; customId: string; userId: string; userName: string }
   | {
@@ -54,11 +65,20 @@ export type BotInteraction =
       userName: string;
       /** String options by name. A user option carries the user id. */
       options: Record<string, string>;
-    };
+    }
+  /** A submitted modal. `fields` is each field's value by id; a select
+   *  carries the one value picked. */
+  | { kind: 'modal'; customId: string; userId: string; userName: string; fields: Record<string, string> };
 
 export interface InteractionReply {
   ephemeral: boolean;
   payload: MessagePayload;
+  /** Answer a button with a form instead of a message. Only honoured for a
+   *  button the transport was told opens one (see onInteraction's opensModal):
+   *  a modal has to be Discord's FIRST response to a press, and every other
+   *  button is deferred before the handler runs. `payload` is what is said
+   *  when the modal cannot be shown. */
+  modal?: ModalDef;
 }
 
 export interface SlashOption {
@@ -109,6 +129,47 @@ export interface RoleOps {
   has(userId: string, roleId: string): Promise<boolean | null>;
 }
 
+/**
+ * Threads, for tickets. Ids are Discord snowflakes.
+ *
+ * Narrow on purpose, like RoleOps. A forum post is addressed by its thread
+ * id; its first message (the case card) has the same id as the thread, which
+ * is how Discord numbers forum posts, so `send` and `edit` with the thread id
+ * as the channel reach the inside of a thread with no new method.
+ *
+ * Tags are passed by NAME. The implementation creates any the forum lacks and
+ * translates: tag ids are per forum and the bot's logic should not hold them.
+ */
+export interface ThreadOps {
+  createForumPost(
+    forumId: string, post: { name: string; message: MessagePayload; tags: string[] },
+  ): Promise<{ threadId: string; messageId: string }>;
+  /** A private thread nobody can invite to. It starts with the bot alone. */
+  createPrivateThread(channelId: string, thread: { name: string }): Promise<{ threadId: string }>;
+  /** False once the thread has been deleted, by the bot or by hand. */
+  exists(threadId: string): Promise<boolean>;
+  /** Rejects for someone who is not in the server. */
+  addMember(threadId: string, userId: string): Promise<void>;
+  removeMember(threadId: string, userId: string): Promise<void>;
+  /** Everyone in the thread but the bot; null when the thread is gone. */
+  memberIds(threadId: string): Promise<string[] | null>;
+  setLocked(threadId: string, locked: boolean): Promise<void>;
+  /** An archived thread accepts no send and no edit until it is unarchived. */
+  setArchived(threadId: string, archived: boolean): Promise<void>;
+  setTags(threadId: string, tags: string[]): Promise<void>;
+  /** Deleting a thread that is already gone is not an error. */
+  deleteThread(threadId: string): Promise<void>;
+  /**
+   * Make the channel's per-member permission overwrites exactly this set:
+   * view, read history, talk inside threads, attach files. Overwrites on one
+   * channel and never a role, so a bug here cannot hand anyone anything
+   * anywhere else. The bot's own overwrite and every role overwrite are left
+   * alone. `failed` is who could not be added, which is ordinary: they have
+   * left the server.
+   */
+  syncMemberAccess(channelId: string, userIds: string[]): Promise<{ added: string[]; removed: string[]; failed: string[] }>;
+}
+
 export interface BotTransport {
   send(channelId: string, payload: MessagePayload): Promise<string>;
   /** False when the message no longer exists (deleted by hand). */
@@ -118,7 +179,13 @@ export interface BotTransport {
    *  ordinary: the user has DMs from server members closed, or has left the
    *  guild and shares no server with the bot. Callers decide what that means. */
   dm(userId: string, payload: MessagePayload): Promise<void>;
-  onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>): void;
+  onInteraction(
+    handler: (i: BotInteraction) => Promise<InteractionReply>,
+    /** `opensModal`: which buttons answer with a modal, asked BEFORE the
+     *  handler runs. Such a button is not deferred, so its handler must be a
+     *  quick database read. */
+    opts?: { opensModal?: (customId: string) => boolean },
+  ): void;
   registerCommands(defs: SlashCommandDef[]): Promise<void>;
   /** Load the server's member list, then report joins and leaves. */
   watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void>;
@@ -127,4 +194,5 @@ export interface BotTransport {
   watchVoice(h: { all(states: [userId: string, channelId: string][]): void; update(userId: string, channelId: string | null): void }): Promise<void>;
   voice: VoiceOps;
   roles: RoleOps;
+  threads: ThreadOps;
 }

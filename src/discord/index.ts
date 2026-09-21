@@ -26,6 +26,11 @@ export interface BotDeps {
   onConnected?: (transport: BotTransport) => void | Promise<void>;
   /** Buttons outside the queue flow, by custom_id prefix (e.g. 'r:' for report cards). */
   extraButtons?: Record<string, (i: Extract<BotInteraction, { kind: 'button' }>) => Promise<InteractionReply>>;
+  /** Modal submits outside the queue flow, by custom_id prefix, the same way. */
+  extraModals?: Record<string, (i: Extract<BotInteraction, { kind: 'modal' }>) => Promise<InteractionReply>>;
+  /** Which buttons answer with a modal. Handed to the transport, which has to
+   *  know before it runs the handler: see BotTransport.onInteraction. */
+  opensModal?: (customId: string) => boolean;
   commands?: {
     defs: SlashCommandDef[];
     handle: (i: Extract<BotInteraction, { kind: 'command' }>) => Promise<InteractionReply>;
@@ -63,9 +68,14 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
       if (prefix) return deps.extraButtons![prefix](i);
       return handleButton(controllerDeps, i);
     }
+    if (i.kind === 'modal') {
+      const prefix = Object.keys(deps.extraModals ?? {}).find((p) => i.customId.startsWith(p));
+      if (prefix) return deps.extraModals![prefix](i);
+      return { ephemeral: true, payload: { content: 'That form no longer does anything.', embeds: [], components: [] } };
+    }
     if (deps.commands) return deps.commands.handle(i);
     return { ephemeral: true, payload: { content: 'Unknown command.', embeds: [], components: [] } };
-  });
+  }, { opensModal: deps.opensModal });
   if (deps.commands) {
     await transport.registerCommands(deps.commands.defs).catch((err) =>
       console.error('[discord] registering slash commands failed:', err));

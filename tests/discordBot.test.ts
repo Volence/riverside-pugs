@@ -103,4 +103,20 @@ describe('startBot extras', () => {
     await bot!.stop();
     expect(presence.inVoice('2')).toBeNull();
   });
+
+  it('routes a modal submit by prefix and tells the transport which buttons open a modal', async () => {
+    const s = setup(ENV);
+    const bot = await startBot({
+      ...s, connect: async () => s.t,
+      opensModal: (customId) => customId.endsWith(':close'),
+      extraModals: { 't:': async (i) => ({ ephemeral: true, payload: { content: `closed with ${i.fields.outcome}`, embeds: [], components: [] } }) },
+    });
+    expect(s.t.opensModal?.('t:1:close')).toBe(true);
+    expect(s.t.opensModal?.('t:1:claim')).toBe(false);
+    const r = await s.t.handler!({ kind: 'modal', customId: 't:1:close', userId: '1', userName: 'x', fields: { outcome: 'warned' } });
+    expect(r.payload.content).toBe('closed with warned');
+    const stray = await s.t.handler!({ kind: 'modal', customId: 'zz:1', userId: '1', userName: 'x', fields: {} });
+    expect(stray.ephemeral).toBe(true);
+    await bot!.stop();
+  });
 });

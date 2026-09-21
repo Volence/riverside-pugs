@@ -1,8 +1,20 @@
 import type {
-  BotInteraction, BotTransport, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, VoiceOps,
+  BotInteraction, BotTransport, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from '../../src/discord/transport.js';
 
 export interface FakeMessage { channelId: string; id: string; payload: MessagePayload; deleted: boolean }
+
+export interface FakeThread {
+  id: string;
+  parentId: string;
+  surface: 'forum' | 'private';
+  name: string;
+  tags: string[];
+  members: Set<string>;
+  locked: boolean;
+  archived: boolean;
+  deleted: boolean;
+}
 
 /** In-memory Discord. Messages are kept (with a deleted flag) so tests can
  *  assert on ordering and on what was removed. */
@@ -31,16 +43,114 @@ export class FakeTransport implements BotTransport {
   /** Make the next N edits throw, the transient that used to freeze a card. */
   failEdits = 0;
 
+  // Thread world.
+  threadsById = new Map<string, FakeThread>();
+  /** channelId -> the members holding a permission overwrite on it. */
+  channelAccess = new Map<string, Set<string>>();
+  /** User ids that are not in the server: adding them to a thread or to a
+   *  channel's overwrites is refused, as Discord refuses it. */
+  notInGuild = new Set<string>();
+  /** Make the next N thread operations throw. */
+  failThreadOps = 0;
+  opensModal: ((customId: string) => boolean) | null = null;
+
+  threadsIn(parentId: string): FakeThread[] {
+    return [...this.threadsById.values()].filter((th) => th.parentId === parentId && !th.deleted);
+  }
+
+  /** What Discord says about writing into this channel, when it is a thread. */
+  private guardThread(channelId: string): void {
+    const th = this.threadsById.get(channelId);
+    if (!th) return;
+    if (th.deleted) throw new Error('Unknown Channel');
+    if (th.archived) throw new Error('Thread is archived');
+  }
+
+  private threadOp(): void {
+    if (this.failThreadOps > 0) { this.failThreadOps--; throw new Error('discord down'); }
+  }
+
+  private liveThread(threadId: string): FakeThread {
+    const th = this.threadsById.get(threadId);
+    if (!th || th.deleted) throw new Error('Unknown Channel');
+    return th;
+  }
+
+  /** Snowflake-shaped on purpose: phase 2b orders messages by id. */
+  private snowflake(): string {
+    return String(100000 + ++this.seq);
+  }
+
+  threads: ThreadOps = {
+    createForumPost: async (forumId, post) => {
+      this.threadOp();
+      const id = this.snowflake();
+      this.threadsById.set(id, { id, parentId: forumId, surface: 'forum', name: post.name, tags: [...post.tags], members: new Set(), locked: false, archived: false, deleted: false });
+      // Discord gives a forum post's first message the thread's own id.
+      this.messages.push({ channelId: id, id, payload: post.message, deleted: false });
+      return { threadId: id, messageId: id };
+    },
+    createPrivateThread: async (channelId, thread) => {
+      this.threadOp();
+      const id = this.snowflake();
+      this.threadsById.set(id, { id, parentId: channelId, surface: 'private', name: thread.name, tags: [], members: new Set(), locked: false, archived: false, deleted: false });
+      return { threadId: id };
+    },
+    exists: async (threadId) => {
+      const th = this.threadsById.get(threadId);
+      return !!th && !th.deleted;
+    },
+    addMember: async (threadId, userId) => {
+      this.threadOp();
+      if (this.notInGuild.has(userId)) throw new Error('Unknown Member');
+      this.liveThread(threadId).members.add(userId);
+    },
+    removeMember: async (threadId, userId) => {
+      this.threadOp();
+      this.liveThread(threadId).members.delete(userId);
+    },
+    memberIds: async (threadId) => {
+      const th = this.threadsById.get(threadId);
+      return !th || th.deleted ? null : [...th.members];
+    },
+    setLocked: async (threadId, locked) => { this.threadOp(); this.liveThread(threadId).locked = locked; },
+    setArchived: async (threadId, archived) => { this.threadOp(); this.liveThread(threadId).archived = archived; },
+    setTags: async (threadId, tags) => { this.threadOp(); this.liveThread(threadId).tags = [...tags]; },
+    deleteThread: async (threadId) => {
+      this.threadOp();
+      const th = this.threadsById.get(threadId);
+      if (th) th.deleted = true;
+    },
+    syncMemberAccess: async (channelId, userIds) => {
+      this.threadOp();
+      const have = this.channelAccess.get(channelId) ?? new Set<string>();
+      const want = new Set(userIds);
+      const added: string[] = [];
+      const failed: string[] = [];
+      for (const id of want) {
+        if (have.has(id)) continue;
+        if (this.notInGuild.has(id)) failed.push(id);
+        else { have.add(id); added.push(id); }
+      }
+      const removed = [...have].filter((id) => !want.has(id));
+      for (const id of removed) have.delete(id);
+      this.channelAccess.set(channelId, have);
+      return { added, removed, failed };
+    },
+  };
+
   async send(channelId: string, payload: MessagePayload): Promise<string> {
     if (this.failSends > 0) { this.failSends--; throw new Error('discord down'); }
+    this.guardThread(channelId);
     const id = `m${++this.seq}`;
     this.sends++;
     this.messages.push({ channelId, id, payload, deleted: false });
     return id;
   }
 
-  async edit(_channelId: string, messageId: string, payload: MessagePayload): Promise<boolean> {
+  async edit(channelId: string, messageId: string, payload: MessagePayload): Promise<boolean> {
     if (this.failEdits > 0) { this.failEdits--; throw new Error('discord down'); }
+    this.guardThread(channelId);
     const m = this.messages.find((x) => x.id === messageId && !x.deleted);
     if (!m) return false;
     this.edits++;
@@ -63,8 +173,9 @@ export class FakeTransport implements BotTransport {
     if (m) m.deleted = true;
   }
 
-  onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>): void {
+  onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>, opts?: { opensModal?: (customId: string) => boolean }): void {
     this.handler = handler;
+    this.opensModal = opts?.opensModal ?? null;
   }
 
   async registerCommands(defs: SlashCommandDef[]): Promise<void> {

@@ -1,10 +1,11 @@
 import {
-  ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, Events, GatewayIntentBits, MessageFlags,
-  OverwriteType, PermissionFlagsBits, type Guild, type Interaction, type TextBasedChannel,
+  ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
+  OverwriteType, PermissionFlagsBits, ThreadAutoArchiveDuration,
+  type AnyThreadChannel, type ForumChannel, type Guild, type Interaction, type TextBasedChannel,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
 import type {
-  BotInteraction, BotTransport, Button, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, VoiceOps,
+  BotInteraction, BotTransport, Button, InteractionReply, MessagePayload, ModalDef, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from './transport.js';
 
 /**
@@ -16,6 +17,7 @@ import type {
 const STYLE = { primary: 1, secondary: 2, success: 3, danger: 4 } as const;
 const UNKNOWN_MESSAGE = 10008;
 const UNKNOWN_CHANNEL = 10003;
+const UNKNOWN_MEMBER = 10007;
 
 function toButton(b: Button) {
   return b.kind === 'link'
@@ -41,6 +43,28 @@ function toMessage(p: MessagePayload) {
   };
 }
 
+/**
+ * A modal as raw API JSON, like toButton. Every field is wrapped in a Label
+ * (component type 18), the only way a select can sit in a modal. A text input
+ * inside a Label must NOT carry its own `label`: discord-api-types says so at
+ * payloads/v10/message.d.ts:1463 ("Cannot be used in a label component").
+ * Verified: LabelComponentData typings/index.d.ts:401, ModalComponentData
+ * :2846, StringSelectMenuComponentData :7483, TextInputComponentData :7532.
+ */
+function toModal(m: ModalDef) {
+  return {
+    custom_id: m.customId,
+    title: m.title.slice(0, 45),
+    components: m.fields.map((f) => ({
+      type: 18,
+      label: f.label.slice(0, 45),
+      component: f.kind === 'select'
+        ? { type: 3, custom_id: f.id, required: true, options: f.options.map((o) => ({ label: o.label, value: o.value })) }
+        : { type: 4, custom_id: f.id, style: f.style === 'paragraph' ? 2 : 1, required: f.required ?? false, max_length: f.maxLength },
+    })),
+  };
+}
+
 const codeOf = (err: unknown): number | undefined => (err as { code?: number }).code;
 
 export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTransport & { destroy(): Promise<void> }> {
@@ -62,11 +86,30 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
   };
 
   let handler: ((i: BotInteraction) => Promise<InteractionReply>) | null = null;
+  let opensModal: ((customId: string) => boolean) | null = null;
 
   client.on(Events.InteractionCreate, async (i: Interaction) => {
     if (!handler) return;
     try {
       if (i.isButton()) {
+        if (opensModal?.(i.customId)) {
+          // showModal has to be the first response to the press, so this one
+          // button is not deferred (showModal: typings/index.d.ts:684). Its
+          // handler is a database read and answers well inside three seconds.
+          const reply = await handler({
+            kind: 'button', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          });
+          if (reply.modal) {
+            await i.showModal(toModal(reply.modal));
+          } else {
+            const m = toMessage(reply.payload);
+            await i.reply({
+              content: m.content || undefined, embeds: m.embeds, components: m.components as never,
+              allowedMentions: m.allowedMentions, flags: MessageFlags.Ephemeral,
+            });
+          }
+          return;
+        }
         // Every button reply is private; defer first so a slow handler never
         // blows Discord's three second window.
         //
@@ -100,6 +143,21 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           content: m.content || undefined, embeds: m.embeds, components: m.components as never,
           allowedMentions: m.allowedMentions, flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
         });
+      } else if (i.isModalSubmit()) {
+        // isModalSubmit: typings/index.d.ts:2215. Deferred like a button: the
+        // handler writes to the database and the reply is always private.
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        const fields: Record<string, string> = {};
+        // ModalSubmitFields.fields :2936, getStringSelectValues :2946.
+        for (const [id, f] of i.fields.fields) {
+          fields[id] = f.type === ComponentType.TextInput ? f.value
+            : f.type === ComponentType.StringSelect ? (i.fields.getStringSelectValues(id)[0] ?? '') : '';
+        }
+        const reply = await handler({
+          kind: 'modal', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username, fields,
+        });
+        const m = toMessage(reply.payload);
+        await i.editReply({ content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
       }
     } catch (err) {
       console.error('[discord] interaction failed:', err);
@@ -225,6 +283,127 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
   };
 
+  const threadById = async (id: string): Promise<AnyThreadChannel | null> => {
+    // guild.channels holds threads too (GuildBasedChannel :7965, fetch :5040).
+    // An archived thread is not cached, so this falls through to a fetch.
+    const ch = await channelById(id);
+    return ch && ch.isThread() ? ch : null;                                   // isThread :1108
+  };
+  const needThread = async (id: string): Promise<AnyThreadChannel> => {
+    const th = await threadById(id);
+    if (!th) throw new Error(`thread ${id} does not exist`);
+    return th;
+  };
+
+  /** Tag names to this forum's tag ids, creating what is missing. Moderated,
+   *  so only the bot (Manage Threads) can put them on a post. A post carries
+   *  at most five. availableTags :3147, setAvailableTags :3155,
+   *  GuildForumTagData :3122. */
+  const tagIds = async (forum: ForumChannel, names: string[]): Promise<string[]> => {
+    const missing = names.filter((n) => !forum.availableTags.some((t) => t.name === n));
+    const current = missing.length === 0 ? forum
+      : await forum.setAvailableTags([...forum.availableTags, ...missing.map((name) => ({ name, moderated: true }))]);
+    return names.map((n) => current.availableTags.find((t) => t.name === n)?.id).filter((id): id is string => !!id).slice(0, 5);
+  };
+
+  const threads: ThreadOps = {
+    async createForumPost(forumId, post) {
+      const forum = await channelById(forumId);
+      if (!forum || forum.type !== ChannelType.GuildForum) throw new Error(`channel ${forumId} is not a forum`);
+      const m = toMessage(post.message);
+      // GuildForumThreadManager.create :5406, GuildForumThreadCreateOptions
+      // :7987 ({ name, message, appliedTags }), StartThreadOptions :7865.
+      const thread = await forum.threads.create({
+        name: post.name.slice(0, 100),
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+        message: { content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions },
+        appliedTags: await tagIds(forum, post.tags),
+      });
+      // A forum post's first message has the id of the thread itself.
+      return { threadId: thread.id, messageId: thread.id };
+    },
+    async createPrivateThread(channelId, thread) {
+      const ch = await channelById(channelId);
+      if (!ch || ch.type !== ChannelType.GuildText) throw new Error(`channel ${channelId} is not a text channel`);
+      // GuildTextThreadManager.create :5400, GuildTextThreadCreateOptions
+      // :7981 ({ type, invitable }). invitable false: only the bot adds people.
+      const made = await ch.threads.create({
+        name: thread.name.slice(0, 100),
+        type: ChannelType.PrivateThread,
+        invitable: false,
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+      });
+      return { threadId: made.id };
+    },
+    async exists(threadId) {
+      return (await threadById(threadId)) !== null;
+    },
+    async addMember(threadId, userId) {
+      await (await needThread(threadId)).members.add(userId);                 // ThreadMemberManager.add :5416
+    },
+    async removeMember(threadId, userId) {
+      try {
+        await (await needThread(threadId)).members.remove(userId);            // ThreadMemberManager.remove :5435
+      } catch (err) {
+        if (codeOf(err) !== UNKNOWN_MEMBER) throw err;
+      }
+    },
+    async memberIds(threadId) {
+      const th = await threadById(threadId);
+      if (!th) return null;
+      const members = await th.members.fetch();                               // ThreadMemberManager.fetch :5431
+      return [...members.keys()].filter((id) => id !== client.user!.id);
+    },
+    async setLocked(threadId, locked) {
+      await (await needThread(threadId)).setLocked(locked);                   // ThreadChannel.setLocked :3980
+    },
+    async setArchived(threadId, archived) {
+      await (await needThread(threadId)).setArchived(archived);               // ThreadChannel.setArchived :3977
+    },
+    async setTags(threadId, tags) {
+      const th = await needThread(threadId);
+      const forum = th.parent;
+      if (!forum || forum.type !== ChannelType.GuildForum) return;
+      await th.setAppliedTags(await tagIds(forum, tags));                     // ThreadChannel.setAppliedTags :3983
+    },
+    async deleteThread(threadId) {
+      const th = await threadById(threadId);
+      await th?.delete().catch((err: unknown) => {                            // ThreadChannel.delete :3966
+        if (codeOf(err) !== UNKNOWN_CHANNEL) throw err;
+      });
+    },
+    async syncMemberAccess(channelId, userIds) {
+      const ch = await channelById(channelId);
+      if (!ch || !('permissionOverwrites' in ch)) throw new Error(`channel ${channelId} cannot hold permission overwrites`);
+      const me = client.user!.id;
+      // Member overwrites only, and never the bot's own: the owner's role
+      // overwrites (everyone denied, the bot's role allowed) are not ours.
+      const have = [...ch.permissionOverwrites.cache.values()]                // permissionOverwrites :1827
+        .filter((o) => o.type === OverwriteType.Member && o.id !== me).map((o) => o.id);
+      const want = new Set(userIds);
+      const added: string[] = [];
+      const failed: string[] = [];
+      for (const id of want) {
+        if (have.includes(id)) continue;
+        try {
+          // An overwrite for someone who is not in the guild is rejected.
+          await guild.members.fetch(id);
+          await ch.permissionOverwrites.create(id, {                          // PermissionOverwriteManager.create :5320
+            ViewChannel: true, ReadMessageHistory: true, SendMessagesInThreads: true,
+            AttachFiles: true, EmbedLinks: true, AddReactions: true,
+          });
+          added.push(id);
+        } catch (err) {
+          console.error(`[discord] could not give ${id} access to ${channelId}:`, err);
+          failed.push(id);
+        }
+      }
+      const removed = have.filter((id) => !want.has(id));
+      for (const id of removed) await ch.permissionOverwrites.delete(id);     // PermissionOverwriteManager.delete :5330
+      return { added, removed, failed };
+    },
+  };
+
   return {
     roles,
     async send(channelId, payload) {
@@ -263,8 +442,9 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         allowedMentions: m.allowedMentions,
       });
     },
-    onInteraction(h) {
+    onInteraction(h, opts) {
       handler = h;
+      opensModal = opts?.opensModal ?? null;
     },
     async registerCommands(defs: SlashCommandDef[]) {
       await guild.commands.set(defs.map((d) => ({
@@ -302,6 +482,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       console.log(`[discord] tracking voice: ${states.length} in a channel`);
     },
     voice,
+    threads,
     async destroy() {
       await client.destroy();
     },
