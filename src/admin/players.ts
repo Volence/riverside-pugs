@@ -191,20 +191,50 @@ export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] 
   }));
 }
 
-export function playerDetail(db: DB, steamid: string, viewer: string = '') {
-  const p = getPlayer(db, steamid);
-  if (!p) return null;
-  const [row] = searchPlayers(db, steamid, 1).filter((x) => x.steamid === steamid);
-  const bans = (db.prepare(`${BAN_SELECT} WHERE b.player_id = ? ORDER BY b.id DESC`).all(steamid) as Parameters<typeof toBan>[0][]).map(toBan);
-  const notes = (db.prepare(
+export interface PlayerNoteRow {
+  id: number;
+  authorId: string;
+  authorName: string | null;
+  text: string;
+  createdAt: string;
+}
+
+/** A player's own bans, newest first, unredacted: callers who must not show
+ *  a restricted ticket's reason (the file, the panel ban list) redact at
+ *  their own call site rather than here, since only they know their viewer. */
+export function bansOf(db: DB, steamid: string): BanRow[] {
+  return (db.prepare(`${BAN_SELECT} WHERE b.player_id = ? ORDER BY b.id DESC`).all(steamid) as Parameters<typeof toBan>[0][]).map(toBan);
+}
+
+export function notesOf(db: DB, steamid: string): PlayerNoteRow[] {
+  return (db.prepare(
     `SELECT n.id, n.author_id, a.name AS author_name, n.text, n.created_at FROM player_notes n
      LEFT JOIN players a ON a.steamid = n.author_id WHERE n.player_id = ? ORDER BY n.id DESC`,
   ).all(steamid) as { id: number; author_id: string; author_name: string | null; text: string; created_at: string }[])
     .map((n) => ({ id: n.id, authorId: n.author_id, authorName: n.author_name, text: n.text, createdAt: n.created_at }));
-  const matches = db.prepare(
+}
+
+export interface RecentMatchRow {
+  id: number;
+  campaign: string;
+  state: string;
+  endedAt: string | null;
+  winner: string | null;
+  team: string;
+  connectedAt: string | null;
+}
+
+export function recentMatchesOf(db: DB, steamid: string, limit = 20): RecentMatchRow[] {
+  return db.prepare(
     `SELECT m.id, m.campaign, m.state, m.ended_at AS endedAt, m.winner, mp.team, mp.connected_at AS connectedAt
-     FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.player_id = ? ORDER BY m.id DESC LIMIT 20`,
-  ).all(steamid);
+     FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.player_id = ? ORDER BY m.id DESC LIMIT ?`,
+  ).all(steamid, limit) as RecentMatchRow[];
+}
+
+export function playerDetail(db: DB, steamid: string, viewer: string = '') {
+  const p = getPlayer(db, steamid);
+  if (!p) return null;
+  const [row] = searchPlayers(db, steamid, 1).filter((x) => x.steamid === steamid);
   return {
     ...(row ?? {}),
     steamid: p.steamid,
@@ -214,9 +244,9 @@ export function playerDetail(db: DB, steamid: string, viewer: string = '') {
     // an alt this site has.
     discordHistory: discordHistoryOf(db, steamid),
     activeBan: activeBan(db, steamid),
-    bans,
-    notes,
-    matches,
+    bans: bansOf(db, steamid),
+    notes: notesOf(db, steamid),
+    matches: recentMatchesOf(db, steamid),
     penalties: penaltyHistory(db, steamid),
     // Tickets about this player that the viewing admin may see. A restricted
     // one is simply absent for an admin who is not on its list.
