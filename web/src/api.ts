@@ -746,7 +746,7 @@ export interface ReportEligibility {
   targets?: { steamid: string; name: string; alreadyReported: boolean }[];
 }
 
-/** One row of the integrity board. occZ, teamGap, pOcc and pGap are nullable:
+/** One row of the integrity board. trackShare, occZ, teamGap and their percentiles are nullable:
  *  a map with too little recorded history gets no occupancy score at all, and
  *  that must never be confused with an average (0) score. composite is a sort
  *  key, not a verdict. */
@@ -759,14 +759,25 @@ export interface IntegrityPlayerRow {
    *  been flagged at all, and a ranking with nothing flagged is a list of your
    *  best players by another name. */
   clips: number;
+  /** Rounds in which the detector had at least one chance. A player under the
+   *  server's minimum is listed but not ranked. */
+  eligibleRounds: number;
+  ranked: boolean;
+  /** The best single tracking window in their history. Context only: it is a
+   *  maximum, so it rises with playtime, and nothing is ranked on it. */
   fidMax: number;
   fidP95: number;
+  scoreable: number;
+  /** Tracking as ranked: summed fidelity over scoreable windows. Null with too
+   *  few windows to make a ratio of. */
+  trackShare: number | null;
   occZ: number | null;
   teamGap: number | null;
-  pFid: number;
+  pFid: number | null;
   pOcc: number | null;
   pGap: number | null;
-  composite: number;
+  /** Null when unranked. */
+  composite: number | null;
 }
 
 /** A flag raised live by another plugin (today Little Anti-Cheat) rather than
@@ -826,8 +837,13 @@ export interface IntegrityRound {
   slot: number;
   campaign: string | null;
   metrics: {
-    fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null;
-    teamGap: number | null;
+    fidMax: number; fidP95: number;
+    /** Tracking windows that formed, how many held enough ghost movement to
+     *  score, and the sum of those scores. */
+    windows: number; scoreable: number; fidSum: number;
+    /** Metric B as sums over 2 second blocks, null on a map with no baseline
+     *  yet. The score on the board is worked out from these on the server. */
+    occ: { observed: number; expected: number; expectedSq: number; blocks: number; pairs: number } | null;
     /** Pairs that cleared every eligibility gate: how many chances the
      *  detector actually had. Zero here means it never ran, which is a very
      *  different statement from a clean round. */
@@ -858,6 +874,9 @@ export type IntegrityJobInfo =
     };
     /** Indexed rounds no current-version analysis has measured. */
     pending: number;
+    /** Rounds the current analyzer tried and could not measure. Not pending:
+     *  it will not try them again until the analyzer changes. */
+    unanalysable?: { missing: number; unreadable: number };
     matchInFlight: boolean;
   };
 

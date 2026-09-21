@@ -90,6 +90,19 @@ metric is defined on yaw alone, which is unaffected by eye height entirely. This
 deliberate limitation of the 10 Hz retrospective pass; the plugin phase has real eye
 positions and real traces and does not inherit it.
 
+**The pitch gate (added in version 4; version 3 shipped without it).** "On target", for
+metric A's `E_TRACK` and metric B's `E_DWELL` alike, also requires the survivor's pitch to
+be within `PITCH_TOL` (20 degrees) of the pitch that would look at the ghost, taking the eye
+as 62 units above the survivor's origin and the aim point as 36 above the ghost's. Source
+pitch is negative up. That was verified against the replays rather than assumed: over 13261
+frames in which a survivor fired with their yaw inside 3 degrees of a spawned special
+infected, pitch against elevation has slope -0.87 and r = -0.84, and the residual with those
+two heights is inside 8.0 degrees at p90 and 16.2 at p95. The gate is not an eligibility
+gate and does not appear in the gate tally, because where the player looked is the thing
+being measured, not a reason to discard the frame. The aim prior has no pitch, having no
+target to take an elevation to, so in metric B the gate can only lower `observed` against
+`expected`: it costs sensitivity and cannot flag anyone.
+
 For a survivor `s` and ghost `g` in frame `f`:
 
 - `bearing(s, g, f)` is `atan2` of the XY offset, in degrees.
@@ -162,6 +175,37 @@ a player-round, with the ghost in cell `c`:
 - The statistic is the excess of observed over expected, as a z-score against the binomial
   spread of `expected`.
 
+**Amended 2026-09-21 (analyzer version 4): what it took to make that a z-score.** The first
+implementation did the arithmetic above frame by frame and the result was not one. Three
+things were wrong, all measured on the 189 replays then in hand.
+
+- *Frames are not independent draws.* The on-target indicator correlates 0.70 with itself
+  one frame later, 0.25 at 2 s and 0.16 at 5 s, so a four second stare was forty pieces of
+  evidence and real values ran from -9.6 to 62.8. The unit is now a **block**: one ghost
+  over one `OCC_BLOCK_MS` (2 s) stretch. Within a block the frames count as one draw,
+  `observed` as the fraction of them on target and `expected` as their mean prior. 2 s is
+  the shortest block at which the per-round spread comes in under 1 (0.95; 1 s gives 1.19,
+  frames 3.42).
+- *The prior is not the probability it was used as.* It records how often any survivor's
+  wedge touched the ghost's 256 unit cell, from anywhere, through walls, and it is compared
+  against frames that have already lost every moment something visible stood near the
+  ghost's bearing, which is when people look that way. Players were on a ghost 0.47 times
+  as often as the prior said, from 0.20 on one map to 0.97 on another, so the typical honest
+  round scored -0.6 and a player's pooled history -3.9. The prior is therefore used for its
+  shape and **calibrated per map at read time**: `k` is observed over expected across the
+  rows on the board for that map, and the score is
+  `(observed - k * expected) / sqrt(k * expected - k^2 * expectedSq)`. The analyzer stores
+  the three sums and the block count; `score.ts` does the rest, so the calibration can
+  never be stale.
+- *`observed` had no range limit and the prior does.* The wedge stops at `R_MAX`, so a pair
+  further apart than that is left out of metric B altogether (it still counts as coverage).
+
+Result over 708 player-rounds: mean -0.01, sd 0.95, p05 -1.03, median -0.27, p95 1.68,
+3.7 percent beyond 2 either way (a normal gives 4.6), maximum 6.4. The median is below the
+mean and the low tail is short because a count that cannot go below zero is skewed. Paused
+frames, which produced the 62.8, are dropped before any of this (see `unpausedFrames`).
+Metric C moved to read time with it, since it is a difference of these scores.
+
 A player exploiting nothing but map knowledge scores zero excess **by construction**,
 because the prior already contains their map knowledge. Aiming at a ghost sitting in the
 famous doorway earns almost nothing, since everyone aims there. Being on a ghost that is
@@ -184,9 +228,46 @@ The plugin phase has real traces and does not inherit it.
 **A. Tracking fidelity.** The backbone, and the one the owner's spawn-knowledge objection
 does not touch at all. Over a sliding window of `W` frames (20, which is 2 seconds at 10 Hz)
 in which the same ghost stays eligible throughout and `|err|` stays under `E_TRACK` (12
-degrees) throughout, how much of the motion needed to follow the ghost the crosshair actually
-produced: `max(0, 1 - RMS(dYaw - dBearing) / RMS(dBearing))`, where the deltas are
-frame to frame. 1 is exact tracking, 0 is none of the required motion.
+degrees) throughout, how much better "the crosshair followed the ghost" explains the yaw
+than the best innocent explanation does:
+`max(0, 1 - RMS(dYaw - dBearing) / min(RMS(dBearing), RMS(dGhost)))`, where the deltas are
+frame to frame. 1 is exact tracking, 0 is no better than innocent.
+
+`dGhost` is the share of each bearing change that the ghost's own step caused: the bearing
+to where it is now minus the bearing to where it was, both from the survivor's current
+position. **Amended 2026-09-21 (analyzer version 4).** The first implementation divided by
+`RMS(dBearing)` alone, and `dBearing` includes the survivor's own translation. A survivor
+holding a door frame while running past it turns their view by the parallax of that door,
+which is also the parallax of a ghost standing behind it, so they were credited with
+tracking something that never moved: 0.70 to 0.97 on synthetic frames, and the highest
+score in real history (0.622) was against a ghost that moved 0 units. There are two
+innocent explanations and the residual has to beat both:
+
+- **Held an angle.** The yaw does not change. Its error against the bearing is `dBearing`.
+- **Held a world point.** The yaw changes by the survivor's own parallax only. Its error
+  against the bearing is `dGhost`.
+
+Dividing by `RMS(dGhost)` alone, which is the obvious fix, breaks the first case. When the
+survivor sidesteps with the crosshair dead still and the ghost sidesteps the same way, the
+two causes cancel, the bearing barely changes, and a held angle scores 0.51 (a real window,
+`pug_777fde4d..._1_2` at 56.2 s). Hence the minimum.
+
+**What this cannot see, by construction.** A cheat user watching a ghost that is standing
+still behind a wall, while strafing, does exactly what an honest player holding that corner
+does, and both score 0. So does anyone watching a ghost that moves in step with them. No
+function of yaw and position separates those; only a ghost whose own movement demanded
+crosshair movement is evidence. The plugin phase, with real line of sight, is where the
+stationary case gets answered.
+
+**Minimum signal (version 4).** A window scores only when the required motion, which is
+whichever of the two series above the score is normalised by, sums to at least `MIN_TRAVEL`
+(4 degrees) frame to frame. Positions are int16 and one unit of rounding is 0.19 degrees at
+`D_MIN`, so a ghost that barely moves produces a required motion made of rounding alone, and
+version 3 scored windows whose bearing moved 0.09 degrees a frame. Over 1325 real windows,
+the 524 where the ghost stood still or moved under 20 units never exceeded 1.96 degrees,
+while the 437 where it moved 300 units or more had a median of 8.3 and 86 percent of them
+clear 4. A window under the bar is still recorded, with fidelity 0 and its travel, so the
+number of windows that formed and the number that could be scored are both known.
 
 Pre-aiming a spawn spot is a static crosshair. It produces none of the motion needed to
 follow a moving target, so it scores zero no matter how well chosen the spot was. Following
@@ -202,8 +283,20 @@ so a crosshair producing half the required motion, perfectly proportioned, would
 perfect 1. The normalised residual above has neither problem and expresses the same intent
 more directly.
 
-Recorded per player-round: the maximum window fidelity and the 95th percentile of window
-fidelities.
+Recorded per player-round: the maximum window fidelity, the 95th percentile of window
+fidelities, how many windows formed, how many of them could be scored, and the sum of
+those scores.
+
+**What the board ranks on (version 4).** Not the maximum. The first board ranked a player
+on their best window in any round, and a maximum over rounds can only rise: on the live
+board it averaged 0.00 for players with 8 to 15 rounds and 0.25 for players with 64 or
+more, so the column ranked playtime. The key is now the **tracking share**, the summed
+fidelity of every scoreable window over the number of them, pooled across a player's rounds,
+n/a under `MIN_TRACK_WINDOWS` (20). The case for the maximum, that one round of following
+an invisible target must not be averaged away, is answered by clips: a single window over
+`CLIP_MIN` is surfaced for review whatever the share is. The best window is still shown,
+labelled as context. A player with fewer than `MIN_BOARD_ROUNDS` (8) eligible rounds is
+listed last, unranked, and left out of everyone else's percentiles.
 
 **Coverage, recorded alongside the metrics.** Every player-round also stores a gate tally:
 how many survivor-and-infected pairs were considered, and how many were dropped at each of
@@ -238,8 +331,32 @@ start and end `tMs`, the ghost's slot, the fidelity, the mean `|err|`, the mean
 distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows per
 player-round are kept.
 
+**Calibration against a known positive (2026-09-21).** `CLIP_MIN` was chosen before the
+analyzer had seen anyone track a ghost. `scripts/inject-synthetic-tracker.ts` rewrites one
+survivor's view in a real round so that they follow a ghost for the whole round, with a
+stated reaction lag and RMS aim error drifting over 300 ms, and scores the result with the
+real analyzer. Share of 92 injected rounds whose best window reaches each bar:
+
+| lag ms | error deg | >= 0.3 | >= 0.4 | >= 0.5 | >= 0.7 |
+|-------:|----------:|-------:|-------:|-------:|-------:|
+|      0 |       0.5 |   0.87 |   0.86 |   0.83 |   0.74 |
+|    150 |       0.5 |   0.78 |   0.64 |   0.59 |   0.17 |
+|    150 |         1 |   0.61 |   0.54 |   0.40 |   0.07 |
+|    150 |         2 |   0.32 |   0.18 |   0.08 |   0.00 |
+|    250 |         2 |   0.08 |   0.02 |   0.02 |   0.00 |
+
+As played, the best window in all 737 real player-rounds in hand is 0.151. So at 0.7 the
+detector flags a lock-on and misses every plausible human, and a bar of 0.3 to 0.4 would cost
+nothing in the history so far. It was left at 0.7 pending a look at the top of the version 4
+backfill over production's full history, which is three times the sample. The larger weakness
+is lag rather than the bar: a crosshair a frame and a half behind a ghost that changes
+direction disagrees with the bearing frame to frame even when it is following well. Scoring
+each window at the best of a few whole-frame lags is the candidate fix and is a change of
+metric.
+
 The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
-`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
+`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `EYE_Z`, `TARGET_Z`, `PITCH_TOL`, `MIN_TRAVEL`, `E_DWELL`,
+`OCC_BLOCK_MS`, `MIN_CAL_EXPECTED`, `MIN_BOARD_ROUNDS`, `MIN_TRACK_WINDOWS`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
 in one exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring
@@ -263,7 +380,7 @@ integrity_prior    map PRIMARY KEY
                    frames INTEGER, rounds INTEGER, counts TEXT (JSON), analyzer_version
 
 integrity_prior_rounds (match_id, ordinal, half) PRIMARY KEY
-                   frames INTEGER, counts TEXT (JSON)
+                   frames INTEGER, counts TEXT (JSON), map, analyzer_version
 ```
 
 `integrity_prior` is the cached grid from section 1, one row per map with the whole cell
@@ -281,6 +398,22 @@ contribution from the pool, so the contribution has to survive as the exact numb
 added, not as something re-derived later from a file that may no longer parse the same way.
 One producer writes it, `src/integrity/round.ts` `buildRoundPrior`, and both the pooling
 pass and the scoring pass use that one function.
+
+**The pool is the sum of its shares, by construction (version 4).** A map's row in
+`integrity_prior` is defined as the sum of that map's `integrity_prior_rounds` rows at the
+current analyzer version, and `poolRounds` in `store.ts` is the only writer of either table,
+in one transaction. The first implementation let them drift in two ways. The automatic
+post-match pass wrote shares and never pooled them, so a map only crossed
+`MIN_PRIOR_ROUNDS` when somebody ran a full backfill by hand. And after an
+`ANALYZER_VERSION` bump that same pass subtracted each round's new share from the OLD
+analyzer's pool, which had never contained it; `subtractRound` clamps that to zero rather
+than failing, so nothing reported it. Now the post-match pass pools what it measures before
+it scores, a share or pool written by another version is never loaded, and leave-one-out is
+applied only to a round that has a current share, which is the same thing as a round the
+pool contains. When a pass carries a map over `MIN_PRIOR_ROUNDS`, the rounds of that map
+measured earlier without a prior are measured again in the same pass. A side effect worth
+having: a round whose replay has been pruned stays in its map's prior for as long as its
+share is current.
 
 Order matters when recomputing: the prior must be rebuilt before any round is scored
 against it, because a player's own frames are excluded from their prior and the exclusion

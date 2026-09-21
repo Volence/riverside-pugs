@@ -28,6 +28,26 @@ export function aimError(yaw: number, from: Pt, to: Pt): number {
   return wrapDeg(bearing(from, to) - yaw);
 }
 
+export type Pt3 = Pt & { z: number };
+
+/** Degrees between the survivor's pitch and the pitch that would put the
+ *  crosshair on the target. Positive means they are looking too low.
+ *
+ *  Source pitch is NEGATIVE UP, which is easy to get backwards and was checked
+ *  against real replays rather than trusted: see EYE_Z. */
+export function pitchError(from: Pt3 & { pitch: number }, to: Pt3): number {
+  const rise = (to.z + TUNING.TARGET_Z) - (from.z + TUNING.EYE_Z);
+  const wanted = -Math.atan2(rise, dist2d(from, to)) * 180 / Math.PI;
+  return from.pitch - wanted;
+}
+
+/** Whether the view is on the target: yaw inside `yawTol`, and pitch inside
+ *  PITCH_TOL. Yaw is the measurement. Pitch only answers "is that even the
+ *  floor they are looking at", which is all its accuracy supports. */
+export function onTarget(from: Pt3 & { yaw: number; pitch: number }, to: Pt3, yawTol: number): boolean {
+  return Math.abs(aimError(from.yaw, from, to)) <= yawTol && Math.abs(pitchError(from, to)) <= TUNING.PITCH_TOL;
+}
+
 export function dist2d(a: Pt, b: Pt): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }

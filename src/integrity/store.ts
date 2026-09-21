@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import type { PriorTable } from './aimPrior.js';
+import { PriorBuilder, type PriorTable } from './aimPrior.js';
 import type { TrackWindow } from './ghostTrack.js';
 import type { RoundMetrics } from './round.js';
 
@@ -12,8 +12,19 @@ import type { RoundMetrics } from './round.js';
  *
  *  3: the occlusion guard no longer lets an entity carrying the GHOST bit veto
  *  a frame. AI controlled special infected are recorded as entities and can be
- *  unspawned, so version 2 dropped frames because of something invisible. */
-export const ANALYZER_VERSION = 3;
+ *  unspawned, so version 2 dropped frames because of something invisible.
+ *
+ *  4: the 2026-09-21 audit. Nothing version 3 measured means the same thing.
+ *  Paused frames are dropped before anything sees them. Fidelity is measured
+ *  against the better of two innocent explanations, so a survivor's own
+ *  movement no longer scores as tracking, and only in windows holding
+ *  MIN_TRAVEL degrees of required motion. "On target" needs the pitch as well
+ *  as the yaw. Occupancy is stored as sums over 2 second blocks, bounded by
+ *  R_MAX, and scored at read time against a per-map calibration, with the team
+ *  gap; RoundMetrics lost occZ, teamRank and teamGap and gained occ, windows,
+ *  scoreable and fidSum. Pools and shares of the aim prior are versioned, so
+ *  this bump also rebuilds every prior as the rounds are re-measured. */
+export const ANALYZER_VERSION = 4;
 
 export interface RoundKey { matchId: number; ordinal: number; half: number }
 export interface SaveRow { slot: number; steamid: string; metrics: RoundMetrics; clips: TrackWindow[] }
@@ -32,6 +43,9 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       .run(key.matchId, key.ordinal, key.half);
     db.prepare('DELETE FROM integrity_clips WHERE match_id = ? AND ordinal = ? AND half = ?')
       .run(key.matchId, key.ordinal, key.half);
+    // Measured, so whatever stopped it being measured before is over.
+    db.prepare('DELETE FROM integrity_unanalysable WHERE match_id = ? AND ordinal = ? AND half = ?')
+      .run(key.matchId, key.ordinal, key.half);
     const insRound = db.prepare(
       `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -45,7 +59,7 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       for (const c of r.clips) {
         insClip.run(
           key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
-          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist }),
+          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel }),
           ANALYZER_VERSION,
         );
       }
@@ -54,33 +68,137 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
   tx();
 }
 
-export function savePrior(db: DB, map: string, pool: PriorTable, rounds: number): void {
-  db.prepare(
+export interface PoolEntry { key: RoundKey; map: string; prior: PriorTable }
+
+/**
+ * Store some rounds' shares of the aim prior and re-pool the maps they touch.
+ *
+ * THE INVARIANT, and the only writer that can break it: a map's pool is the
+ * sum of that map's shares at the current analyzer version, exactly. Both
+ * tables are written here, in one transaction, and nowhere else.
+ *
+ * That is what leave-one-round-out rests on. `subtractRound` clamps a share
+ * the pool never contained to zero instead of failing, so a pool and a share
+ * that disagree shift every occupancy score silently. Version 3 had two ways
+ * to get there: the pending pass wrote shares and never pooled them, and after
+ * a version bump it subtracted new shares from the old analyzer's pool. With
+ * the invariant, "this share can be loaded" means "the pool contains it".
+ *
+ * The pool is re-summed from the stored shares rather than adjusted in place,
+ * so a round pooled twice is counted once, and a round whose replay has since
+ * been pruned stays in its map's prior for as long as its share is current.
+ *
+ * Returns how many rounds each touched map had before and after, which is how
+ * a caller notices a map crossing MIN_PRIOR_ROUNDS.
+ */
+export function poolRounds(db: DB, entries: PoolEntry[]): Map<string, { before: number; after: number }> {
+  const out = new Map<string, { before: number; after: number }>();
+  const upsert = db.prepare(
+    `INSERT INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts, map, analyzer_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(match_id, ordinal, half) DO UPDATE SET frames = excluded.frames, counts = excluded.counts,
+       map = excluded.map, analyzer_version = excluded.analyzer_version`,
+  );
+  const shares = db.prepare('SELECT frames, counts FROM integrity_prior_rounds WHERE map = ? AND analyzer_version = ?');
+  const savePool = db.prepare(
     `INSERT INTO integrity_prior (map, frames, rounds, counts, analyzer_version) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(map) DO UPDATE SET frames = excluded.frames, rounds = excluded.rounds,
        counts = excluded.counts, analyzer_version = excluded.analyzer_version`,
-  ).run(map, pool.frames, rounds, countsToJson(pool.counts), ANALYZER_VERSION);
+  );
+  db.transaction(() => {
+    for (const map of new Set(entries.map((e) => e.map))) {
+      out.set(map, { before: loadPrior(db, map)?.rounds ?? 0, after: 0 });
+    }
+    for (const e of entries) {
+      upsert.run(e.key.matchId, e.key.ordinal, e.key.half, e.prior.frames, countsToJson(e.prior.counts), e.map, ANALYZER_VERSION);
+    }
+    for (const [map, n] of out) {
+      const pool = new PriorBuilder();
+      const rows = shares.all(map, ANALYZER_VERSION) as { frames: number; counts: string }[];
+      for (const r of rows) pool.add({ frames: r.frames, counts: countsFromJson(r.counts) });
+      savePool.run(map, pool.frames, rows.length, countsToJson(pool.counts), ANALYZER_VERSION);
+      n.after = rows.length;
+    }
+  })();
+  return out;
 }
 
+/** A map's pool, or null when there is none THIS analyzer built. An older
+ *  version's pool is a different measurement and is never handed back. */
 export function loadPrior(db: DB, map: string): { table: PriorTable; rounds: number } | null {
-  const row = db.prepare('SELECT frames, rounds, counts FROM integrity_prior WHERE map = ?').get(map) as
-    { frames: number; rounds: number; counts: string } | undefined;
+  const row = db.prepare('SELECT frames, rounds, counts FROM integrity_prior WHERE map = ? AND analyzer_version = ?')
+    .get(map, ANALYZER_VERSION) as { frames: number; rounds: number; counts: string } | undefined;
   if (!row) return null;
   return { table: { frames: row.frames, counts: countsFromJson(row.counts) }, rounds: row.rounds };
 }
 
-export function saveRoundPrior(db: DB, key: RoundKey, p: PriorTable): void {
-  db.prepare(
-    `INSERT INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(match_id, ordinal, half) DO UPDATE SET frames = excluded.frames, counts = excluded.counts`,
-  ).run(key.matchId, key.ordinal, key.half, p.frames, countsToJson(p.counts));
-}
-
+/** A round's share, or null when it has none at this version, which by the
+ *  invariant above is the same as "its map's pool does not contain it". */
 export function loadRoundPrior(db: DB, key: RoundKey): PriorTable | null {
-  const row = db.prepare('SELECT frames, counts FROM integrity_prior_rounds WHERE match_id = ? AND ordinal = ? AND half = ?')
-    .get(key.matchId, key.ordinal, key.half) as { frames: number; counts: string } | undefined;
+  const row = db.prepare(
+    'SELECT frames, counts FROM integrity_prior_rounds WHERE match_id = ? AND ordinal = ? AND half = ? AND analyzer_version = ?',
+  ).get(key.matchId, key.ordinal, key.half, ANALYZER_VERSION) as { frames: number; counts: string } | undefined;
   if (!row) return null;
   return { frames: row.frames, counts: countsFromJson(row.counts) };
+}
+
+/** Round keys whose share is in this map's pool. */
+export function pooledRounds(db: DB, map: string): RoundKey[] {
+  return (db.prepare('SELECT match_id, ordinal, half FROM integrity_prior_rounds WHERE map = ? AND analyzer_version = ?')
+    .all(map, ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number }[])
+    .map((r) => ({ matchId: r.match_id, ordinal: r.ordinal, half: r.half }));
+}
+
+/**
+ * Indexed rounds the automatic pass still has to deal with: no measurement at
+ * the current version, no failure recorded at the current version, and a
+ * replay that has not been pruned.
+ *
+ * The ONE definition of pending. `pendingRoundCount` decides whether to start
+ * the pass and `analyzePending` decides what the pass does, and when those two
+ * disagreed about a single round, a corrupt replay say, the server started a
+ * process for it every sixty seconds for ever and the process found nothing to
+ * do. A round measured by an older analyzer is pending, so bumping
+ * ANALYZER_VERSION re-measures history on its own; a pruned round is not,
+ * because there is nothing left to measure it from and that is nobody's
+ * failure.
+ */
+export function pendingRounds(db: DB): { key: RoundKey; filename: string }[] {
+  return (db.prepare(
+    `SELECT r.match_id, r.ordinal, r.half, r.filename FROM match_replays r
+     WHERE r.pruned_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM integrity_rounds i
+         WHERE i.match_id = r.match_id AND i.ordinal = r.ordinal AND i.half = r.half
+           AND i.analyzer_version = ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM integrity_unanalysable u
+         WHERE u.match_id = r.match_id AND u.ordinal = r.ordinal AND u.half = r.half
+           AND u.analyzer_version = ?)
+     ORDER BY r.match_id, r.ordinal, r.half`,
+  ).all(ANALYZER_VERSION, ANALYZER_VERSION) as { match_id: number; ordinal: number; half: number; filename: string }[])
+    .map((r) => ({ key: { matchId: r.match_id, ordinal: r.ordinal, half: r.half }, filename: r.filename }));
+}
+
+/** `missing`: the indexed file is not on disk. `unreadable`: it is, and it is
+ *  not a replay this analyzer can read, or it has no survivors in it. */
+export type UnanalysableReason = 'missing' | 'unreadable';
+
+export function markUnanalysable(db: DB, key: RoundKey, reason: UnanalysableReason): void {
+  db.prepare(
+    `INSERT INTO integrity_unanalysable (match_id, ordinal, half, analyzer_version, reason, at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(match_id, ordinal, half) DO UPDATE SET analyzer_version = excluded.analyzer_version,
+       reason = excluded.reason, at = excluded.at`,
+  ).run(key.matchId, key.ordinal, key.half, ANALYZER_VERSION, reason, new Date().toISOString());
+}
+
+/** How many rounds the current analyzer has given up on, by reason. */
+export function unanalysableCounts(db: DB): Record<UnanalysableReason, number> {
+  const out: Record<UnanalysableReason, number> = { missing: 0, unreadable: 0 };
+  for (const r of db.prepare(
+    'SELECT reason, COUNT(*) AS n FROM integrity_unanalysable WHERE analyzer_version = ? GROUP BY reason',
+  ).all(ANALYZER_VERSION) as { reason: UnanalysableReason; n: number }[]) out[r.reason] = r.n;
+  return out;
 }
 
 export function setReview(db: DB, key: RoundKey, slot: number, state: string, note: string, adminId: string): void {
