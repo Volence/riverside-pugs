@@ -186,7 +186,10 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	if ((buttons & IN_JUMP) && !(prev & IN_JUMP) && g_iGroundStartTick[client] > 0 && ground) {
 		int onGround = tick - g_iGroundStartTick[client];
 		if (onGround >= 0 && onGround <= BURST_GAP_TICKS) {
-			EmitBurst(client, "bhop", "", 1, onGround, 0, tick, cmdnum, "!");
+			char one[2];
+			int oneTick[1]; oneTick[0] = 1;
+			Encode(oneTick, 1, one, sizeof(one));
+			EmitBurst(client, "bhop", "", 1, onGround, 0, tick, cmdnum, one);
 		}
 		g_iGroundStartTick[client] = 0;
 	}
@@ -230,7 +233,10 @@ void FlushAir(int client, int tick)
 	if (g_iAirCount[client] >= MIN_BURST_PRESSES - 1) {
 		char d[MAX_INTERVALS + 1];
 		Encode(g_iAirTicks[client], g_iAirCount[client], d, sizeof(d));
-		if (d[0] == '\0') { d = "!"; }
+		if (d[0] == '\0') {
+			int oneTick[1]; oneTick[0] = 1;
+			Encode(oneTick, 1, d, sizeof(d));
+		}
 		char weapon[32];
 		GetActiveWeapon(client, weapon, sizeof(weapon));
 		int airTicks = g_iAirStartTick[client] > 0 ? tick - g_iAirStartTick[client] : 0;

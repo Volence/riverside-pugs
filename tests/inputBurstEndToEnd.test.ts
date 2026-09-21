@@ -13,6 +13,11 @@ const REAL = [
   'L 09/21/2026 - 03:38:03: L4DM id=76561197960287930 k=pounce w=test_weapon n=21 g=4 a=22 st=101 ct=0 d=678678678678678678678',
   'L 09/21/2026 - 03:38:03: L4DM id=76561197960287930 k=fire w=test_weapon n=12 g=4 a=13 st=101 ct=0 d=678678678678',
   'L 09/21/2026 - 03:38:03: L4DM id=76561197960287930 k=bhop w=test_weapon n=4 g=4 a=5 st=101 ct=0 d=6786',
+  // A single-interval bhop line. This one exists because the bhop path once
+  // emitted a literal '!', a leftover from the base 33 alphabet, which meant
+  // EVERY real bhop line would have been refused by the parser. Nothing caught
+  // it but reading the wire.
+  'L 09/21/2026 - 03:42:30: L4DM id=76561197960287930 k=bhop w=test_weapon n=1 g=4 a=2 st=101 ct=0 d=6',
 ];
 
 describe('lines the plugin actually emitted', () => {
