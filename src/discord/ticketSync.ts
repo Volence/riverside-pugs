@@ -141,7 +141,8 @@ export class TicketSync {
     await this.removeForbiddenPosts(id);
     await this.retireFolded(id);
     await this.notifyAccess(t);
-    const { surface } = surfaceFor(db, t);
+    const where = surfaceFor(db, t);
+    const { surface } = where;
     let thread = staffThread(db, id);
     if (thread && !(await transport.threads.exists(thread.thread_id))) {
       // Deleted by hand in Discord. Remember that, and make another.
@@ -158,7 +159,10 @@ export class TicketSync {
       thread = undefined;
     }
     if (!thread && t.status === 'open' && surface) thread = await this.createThread(t, surface);
-    if (!thread) return;
+    if (!thread) {
+      this.announceInFeed(t, where.why);
+      return;
+    }
     // A reopened ticket is unarchived BEFORE anything is written into it:
     // Discord refuses a send or an edit in an archived thread.
     if (t.status === 'open') await this.syncLock(t, thread);
@@ -171,6 +175,33 @@ export class TicketSync {
     }
     // A closed ticket is locked AFTER its card said so, for the same reason.
     await this.syncLock(t, thread);
+  }
+
+  /**
+   * The interim line in the admin channel, for a ticket that has no thread
+   * because no forum is set. Once a forum is set the post is the
+   * announcement and this says nothing.
+   *
+   * Never for a restricted ticket and never for a ticket about staff
+   * (`why` is then 'about_staff'): every admin reads the feed, and one of
+   * them may be who the ticket is about. The event carries no reporter.
+   *
+   * Marked before it is published: publishing cannot fail, and a report must
+   * never be said twice.
+   */
+  private announceInFeed(t: TicketRow, why: 'ok' | 'unconfigured' | 'about_staff'): void {
+    if (t.restricted === 1 || why !== 'unconfigured' || t.status !== 'open') return;
+    const { db } = this.deps;
+    const rows = db.prepare(
+      'SELECT id, category FROM ticket_reports WHERE ticket_id = ? AND announced_at IS NULL ORDER BY id',
+    ).all(t.id) as { id: number; category: string }[];
+    for (const r of rows) {
+      db.prepare('UPDATE ticket_reports SET announced_at = ? WHERE id = ?').run(new Date().toISOString(), r.id);
+      // "New ticket" for the report that opened it, "Another report" after.
+      const first = t.opened_by === null
+        && !db.prepare('SELECT 1 FROM ticket_reports WHERE ticket_id = ? AND id < ?').get(t.id, r.id);
+      publishAdminEvent({ kind: 'report', ticketId: t.id, targetId: t.target_id, category: r.category, created: first });
+    }
   }
 
   private async createThread(t: TicketRow, surface: ThreadSurface): Promise<ThreadRow> {

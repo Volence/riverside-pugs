@@ -7,6 +7,7 @@ import { recordPenalty } from '../src/penalties.js';
 import { logAdmin } from '../src/admin/audit.js';
 import { publishAdminEvent } from '../src/adminFeed.js';
 import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
+import { TicketSync } from '../src/discord/ticketSync.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -14,6 +15,7 @@ const ADMIN = IDS[7];
 let db: DB;
 let t: FakeTransport;
 let feed: AdminFeedPoster;
+let sync: TicketSync;
 let matchId: number;
 
 beforeEach(() => {
@@ -31,18 +33,22 @@ beforeEach(() => {
   t = new FakeTransport();
   feed = new AdminFeedPoster({ db, transport: t, publicUrl: 'https://pug.test' });
   feed.start();
+  sync = new TicketSync({ db, transport: t, publicUrl: 'https://pug.test', intervalMs: 0 });
+  sync.start();
 });
-afterEach(() => feed.stop());
+afterEach(() => { sync.stop(); feed.stop(); });
 
 const text = (i: number) => JSON.stringify(t.live()[i]?.payload);
+/** The reconciler publishes, then the poster delivers: wait for both, in that order. */
+const settled = async () => { await sync.idle(); await feed.idle(); };
+const inFeed = () => t.live().filter((m) => m.channelId === 'admins');
 
 describe('admin feed', () => {
-  it('posts one plain line for a new ticket and another for a further report, never naming the reporter', async () => {
+  it('with no forum set, posts one plain line for a new ticket and another for a further report, never naming the reporter', async () => {
     const a = fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId }, { adminSteamIds: [] }) as { ticketId: number };
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });
-    await feed.idle();
-    expect(t.live()).toHaveLength(2);
-    expect(t.live()[0].channelId).toBe('admins');
+    await settled();
+    expect(inFeed()).toHaveLength(2);
     expect(text(0)).toContain(`https://pug.test/admin?ticket=${a.ticketId}`);
     expect(text(0)).toContain('player5');
     expect(text(0)).toContain('griefing');
@@ -52,13 +58,53 @@ describe('admin feed', () => {
     expect(text(0) + text(1)).not.toContain('player1');
     expect(text(0)).not.toContain('kept killing us');
     expect(t.live()[0].payload.components).toEqual([]);
+    // Said once: a later pass finds nothing left to say.
+    await sync.reconcile();
+    await feed.idle();
+    expect(inFeed()).toHaveLength(2);
   });
 
-  it('a restricted ticket posts nothing', async () => {
+  it('with the forum set, the post is the announcement and the feed hears nothing', async () => {
+    setSetting(db, 'discord_tickets_forum_id', 'forum1');
+    fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: '' }, { adminSteamIds: [] });
+    fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });
+    await settled();
+    expect(t.threadsIn('forum1')).toHaveLength(1);
+    expect(inFeed()).toEqual([]);
+  });
+
+  it('a report filed while the bot was down is said when it comes back', async () => {
+    sync.stop();
+    fileReport(db, IDS[0], { targetId: IDS[5], category: 'afk', text: '' }, { adminSteamIds: [] });
+    await settled();
+    expect(inFeed()).toEqual([]);
+    sync = new TicketSync({ db, transport: t, publicUrl: 'https://pug.test', intervalMs: 0 });
+    sync.start();
+    await settled();
+    expect(inFeed()).toHaveLength(1);
+  });
+
+  it('a restricted ticket posts nothing, with or without a forum', async () => {
     fileReport(db, IDS[0], { targetId: IDS[5], category: 'unsafe', text: 'details' }, { adminSteamIds: [] });
     fileReport(db, IDS[0], { targetId: ADMIN, category: 'toxicity', text: '' }, { adminSteamIds: [] });
-    await feed.idle();
+    await settled();
+    setSetting(db, 'discord_tickets_forum_id', 'forum1');
+    fileReport(db, IDS[1], { targetId: IDS[5], category: 'unsafe', text: 'more' }, { adminSteamIds: [] });
+    await settled();
+    // No tickets channel is set, so there is no private thread either.
     expect(t.live()).toHaveLength(0);
+  });
+
+  it('a normal ticket about someone who has since been made staff posts nothing', async () => {
+    sync.stop();
+    fileReport(db, IDS[1], { targetId: IDS[3], category: 'afk', text: '' }, { adminSteamIds: [] });
+    // Promoted by hand, with nobody to restrict the ticket to: the case
+    // restrictOpenTicketAbout answers 'nobody' for. The accused reads the feed.
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[3]);
+    sync = new TicketSync({ db, transport: t, publicUrl: 'https://pug.test', intervalMs: 0 });
+    sync.start();
+    await settled();
+    expect(inFeed()).toEqual([]);
   });
 
   it('a button on an old report card answers instead of failing', async () => {

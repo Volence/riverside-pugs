@@ -1,5 +1,4 @@
 import type { DB } from '../db.js';
-import { publishAdminEvent } from '../adminFeed.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess } from './store.js';
@@ -105,12 +104,10 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };
   })();
   // After the commit. The signal goes out for a restricted ticket too: it
-  // carries an id, stays in this process, and is how the private thread gets
-  // made. The admin feed line does not.
+  // carries an id and stays in this process. Whether anything is SAID about
+  // the report, and where, is TicketSync's decision: in the ticket's thread,
+  // or as a line in the admin channel while no forum is set.
   if (result.ok) publishTicketSignal({ kind: 'ticket', ticketId: result.ticketId });
-  if (result.ok && !result.restricted) {
-    publishAdminEvent({ kind: 'report', ticketId: result.ticketId, targetId: target.steamid, category, created: result.created });
-  }
   return result;
 }
 

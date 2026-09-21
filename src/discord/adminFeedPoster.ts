@@ -11,10 +11,11 @@ const COLOR = { report: 0xde4e40, action: 0xc9a45c, penalty: 0x8a7f73, account: 
 /**
  * Posts the admin feed to the private admin channel.
  *
- * A report is one plain line, whether it opens a ticket or joins one already
- * open; there is no card and nothing to edit, because tickets are worked from
- * the admin panel, not from Discord. Everything else is one short line per
- * event too. Posts go out one at a time so the channel keeps event order.
+ * A report is one plain line, and only while no tickets forum is set: once
+ * there is a forum the ticket's own post is the announcement (TicketSync
+ * decides which). There is no card and nothing to edit.
+ * Everything else is one short line per event too. Posts go out one at a
+ * time so the channel keeps event order.
  */
 export class AdminFeedPoster {
   private chain: Promise<void> = Promise.resolve();

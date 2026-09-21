@@ -9,9 +9,11 @@
  */
 
 export type AdminEvent =
-  // A report landed on a normal ticket. `created` is whether it opened the
-  // ticket or joined one. Never published for a restricted ticket, and it
-  // carries no reporter: the feed channel is wider than the ticket.
+  // A report landed on a normal ticket that has no Discord thread because no
+  // tickets forum is set. Published by TicketSync, never by filing, and never
+  // for a restricted ticket or a ticket about staff. It carries no reporter:
+  // the feed channel is wider than the ticket. `created` is whether the
+  // report opened the ticket or joined one.
   | { kind: 'report'; ticketId: number; targetId: string; category: string; created: boolean }
   | { kind: 'admin_action'; adminId: string; action: string; target: string; detail: Record<string, unknown> }
   | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
