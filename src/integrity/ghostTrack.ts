@@ -72,14 +72,13 @@ import {
 export function trackFidelity(dYaw: number[], dBearing: number[], dGhost: number[] = dBearing): number {
   const n = Math.min(dYaw.length, dBearing.length, dGhost.length);
   if (n < 1) return 0;
-  let residual = 0, vsAngle = 0, vsPoint = 0;
+  const need = requiredMotion(dBearing, dGhost);
+  let residual = 0, total = 0;
   for (let i = 0; i < n; i++) {
     const d = dYaw[i] - dBearing[i];
     residual += d * d;
-    vsAngle += dBearing[i] * dBearing[i];
-    vsPoint += dGhost[i] * dGhost[i];
+    total += need[i] * need[i];
   }
-  const total = Math.min(vsAngle, vsPoint);
   // An innocent explanation fits exactly, so following the ghost required
   // nothing that holding still would not also have produced. No evidence, not
   // perfect evidence.
@@ -89,11 +88,25 @@ export function trackFidelity(dYaw: number[], dBearing: number[], dGhost: number
   return Math.max(0, 1 - Math.sqrt(residual / total));
 }
 
+/** The crosshair motion that neither innocent explanation accounts for: the
+ *  error series of whichever of them fits better. `trackFidelity` normalises by
+ *  it and the minimum-signal gate measures its travel, and they must be the
+ *  same series, or a window could be let in on one and scored on the other. */
+export function requiredMotion(dBearing: number[], dGhost: number[]): number[] {
+  const sq = (xs: number[]) => xs.reduce((a, x) => a + x * x, 0);
+  return sq(dBearing) <= sq(dGhost) ? dBearing : dGhost;
+}
+
 export interface TrackWindow {
   startMs: number;
   endMs: number;
   ghostSlot: number;
+  /** Zero when `travel` is under MIN_TRAVEL: the window formed, and is counted
+   *  as having formed, but held nothing to follow. */
   fidelity: number;
+  /** Degrees of required motion in the window, summed frame to frame. See
+   *  MIN_TRAVEL. */
+  travel: number;
   meanErr: number;
   meanDist: number;
 }
@@ -149,11 +162,13 @@ export function trackWindows(frames: Frame[], slot: number): TrackWindow[] {
           // the survivor did, because the positions are integers.
           dg.push(wrapDeg(w[k].bear - bearing(w[k].s, w[k - 1].g)));
         }
+        const travel = requiredMotion(db, dg).reduce((a, x) => a + Math.abs(x), 0);
         out.push({
           startMs: w[0].tMs,
           endMs: w[w.length - 1].tMs,
           ghostSlot: gs,
-          fidelity: trackFidelity(dy, db, dg),
+          fidelity: travel >= TUNING.MIN_TRAVEL ? trackFidelity(dy, db, dg) : 0,
+          travel,
           meanErr: w.reduce((s, x) => s + Math.abs(x.err), 0) / w.length,
           meanDist: w.reduce((s, x) => s + x.dist, 0) / w.length,
         });

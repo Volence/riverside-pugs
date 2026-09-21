@@ -215,6 +215,16 @@ function of yaw and position separates those; only a ghost whose own movement de
 crosshair movement is evidence. The plugin phase, with real line of sight, is where the
 stationary case gets answered.
 
+**Minimum signal (version 4).** A window scores only when the required motion, which is
+whichever of the two series above the score is normalised by, sums to at least `MIN_TRAVEL`
+(4 degrees) frame to frame. Positions are int16 and one unit of rounding is 0.19 degrees at
+`D_MIN`, so a ghost that barely moves produces a required motion made of rounding alone, and
+version 3 scored windows whose bearing moved 0.09 degrees a frame. Over 1325 real windows,
+the 524 where the ghost stood still or moved under 20 units never exceeded 1.96 degrees,
+while the 437 where it moved 300 units or more had a median of 8.3 and 86 percent of them
+clear 4. A window under the bar is still recorded, with fidelity 0 and its travel, so the
+number of windows that formed and the number that could be scored are both known.
+
 Pre-aiming a spawn spot is a static crosshair. It produces none of the motion needed to
 follow a moving target, so it scores zero no matter how well chosen the spot was. Following
 an invisible target that is moving scores high, and the more the ghost moves the harder the
@@ -266,7 +276,7 @@ distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows p
 player-round are kept.
 
 The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
-`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
+`R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `MIN_TRAVEL`, `E_DWELL`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
 in one exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring

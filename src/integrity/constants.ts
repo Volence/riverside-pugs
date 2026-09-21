@@ -66,6 +66,27 @@ export const TUNING = {
   /** A fidelity window requires the aim to stay inside this many degrees of
    *  the ghost for its whole length. */
   E_TRACK: 12,
+  /** A fidelity window scores only when the motion it required, summed frame to
+   *  frame, comes to at least this many degrees. "Required" is the series
+   *  `trackFidelity` normalises by, so it is already net of the survivor's own
+   *  movement.
+   *
+   *  Positions are int16. One unit of rounding is 0.19 degrees at D_MIN, so a
+   *  ghost that barely moves produces a required motion made of rounding and
+   *  nothing else, and a ratio of two rounding errors is not a measurement.
+   *  Version 3 scored windows whose bearing moved 0.09 degrees a frame.
+   *
+   *  Measured over the 189 replays in hand on 2026-09-21, 1325 windows:
+   *    ghost still, or moved under 20 units in the 2 s (524 windows, 40% of
+   *      them all): travel 0 at the median, 1.96 at the most. Expected from
+   *      rounding alone at D_MIN is about 1.2.
+   *    ghost moved 300 units or more (437 windows), which is a ghost actually
+   *      going somewhere: 3.2 at p10, 5.6 at p25, 8.3 median, 10.7 at p75.
+   *  4 is twice the worst rounding-only window and keeps 86% of the real
+   *  movement. The 10 to 15 first suggested for this would have kept 29% and
+   *  15% of it, which is a detector that mostly does not run. No window at or
+   *  above 4 scored over 0.21, so nothing is being let in by the low bar. */
+  MIN_TRAVEL: 4,
   /** "On target" for the occupancy metric, in degrees. */
   E_DWELL: 5,
   /** Windows above this fidelity become reviewable clips. */

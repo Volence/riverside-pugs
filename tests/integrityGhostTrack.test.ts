@@ -390,6 +390,49 @@ describe('trackWindows and the survivor\'s own movement', () => {
 });
 
 /**
+ * A window has to contain something to follow.
+ *
+ * Positions are int16, so one unit of rounding is 0.19 degrees of bearing at
+ * D_MIN. A ghost that is standing still, or shuffling a few units, produces a
+ * "required motion" made of nothing else, and version 3 scored windows whose
+ * bearing moved 0.13 degrees a frame.
+ */
+describe('trackWindows and the minimum signal', () => {
+  /** The ghost creeps sideways at 5 units a second, 400 away: 10 units and
+   *  about 1.4 degrees in a window, all of it arriving as one-unit steps. */
+  const creep = (yawOf: (b: number) => number) => scene(40, (t) => {
+    const gy = Math.round(5 * t);
+    return { sx: 0, sy: 0, yaw: yawOf(deg(Math.atan2(gy, 400))), gx: 400, gy };
+  });
+
+  it('does not score a window whose required motion is position rounding', () => {
+    // The crosshair matches the rounded bearing exactly, which is the most
+    // favourable case there is and was a perfect 1.
+    const w = trackWindows(creep((b) => b), 0);
+    expect(w.length).toBeGreaterThan(0);
+    for (const x of w) {
+      expect(x.travel).toBeLessThan(TUNING.MIN_TRAVEL);
+      expect(x.fidelity).toBe(0);
+    }
+  });
+
+  it('reports the travel it gated on, and scores a window that has enough of it', () => {
+    const w = trackWindows(round(40, (_i, b) => b, 1200, 0.5), 0);
+    // Half a degree a frame, 19 deltas.
+    expect(w[0].travel).toBeCloseTo(9.5, 1);
+    expect(w[0].fidelity).toBeGreaterThan(0.9);
+  });
+
+  it('measures travel on the series the score is normalised by, so a cancelled bearing has none', () => {
+    // The parallel sidestep again, faster: the ghost's own steps sweep well
+    // over MIN_TRAVEL, the bearing does not move, and nothing was required.
+    const w = trackWindows(scene(40, (t) => ({ sx: 0, sy: 200 * t, yaw: 0, gx: 400, gy: 200 * t })), 0);
+    expect(w.length).toBeGreaterThan(0);
+    for (const x of w) expect(x.travel).toBeLessThan(TUNING.MIN_TRAVEL);
+  });
+});
+
+/**
  * Coverage, which is the difference between "four hundred clean chances and
  * never a tracking window" and "the gates dropped every frame and the detector
  * never ran". The first backfill over real history could not tell those apart.
@@ -468,7 +511,7 @@ describe('scanPairs', () => {
 
 describe('pickClips', () => {
   const win = (startMs: number, endMs: number, fidelity: number): TrackWindow =>
-    ({ startMs, endMs, ghostSlot: 4, fidelity, meanErr: 1, meanDist: 900 });
+    ({ startMs, endMs, ghostSlot: 4, fidelity, travel: 20, meanErr: 1, meanDist: 900 });
 
   it('drops anything under CLIP_MIN', () => {
     expect(pickClips([win(0, 2000, TUNING.CLIP_MIN - 0.01)])).toEqual([]);

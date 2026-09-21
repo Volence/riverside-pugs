@@ -45,7 +45,7 @@ export function saveRound(db: DB, key: RoundKey, rows: SaveRow[]): void {
       for (const c of r.clips) {
         insClip.run(
           key.matchId, key.ordinal, key.half, r.slot, r.steamid, c.startMs, c.endMs,
-          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist }),
+          'ghost_track', c.fidelity, JSON.stringify({ ghostSlot: c.ghostSlot, meanErr: c.meanErr, meanDist: c.meanDist, travel: c.travel }),
           ANALYZER_VERSION,
         );
       }
