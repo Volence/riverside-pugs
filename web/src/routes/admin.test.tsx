@@ -16,7 +16,7 @@ async function confirmDialog(name?: string | RegExp) {
 
 const { mockAdmin, mockApi, mockPeople } = vi.hoisted(() => ({
   mockAdmin: {
-    players: vi.fn(), overview: vi.fn(), live: vi.fn(), leaveClock: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
+    overview: vi.fn(), live: vi.fn(), leaveClock: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrityJob: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
@@ -87,7 +87,7 @@ describe('Admin page', () => {
   it('refuses a non-admin without calling the admin API', () => {
     renderAdmin('/admin/people', { kind: 'active', me: { ...me, isAdmin: false } });
     expect(screen.getByText('Staff only.')).toBeTruthy();
-    expect(mockAdmin.players).not.toHaveBeenCalled();
+    expect(mockPeople.people).not.toHaveBeenCalled();
   });
 
   it('lands an admin on the live board, which is the first desk', async () => {
@@ -96,7 +96,7 @@ describe('Admin page', () => {
     expect(tabs[0].textContent).toBe('Live');
     expect(tabs[0].getAttribute('aria-selected')).toBe('true');
     expect(await screen.findByText('No match is running.')).toBeTruthy();
-    expect(mockAdmin.players).not.toHaveBeenCalled();
+    expect(mockPeople.people).not.toHaveBeenCalled();
   });
 
   it('does not offer the live board to a moderator', () => {

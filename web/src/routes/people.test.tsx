@@ -150,6 +150,7 @@ describe('the analysis panel', () => {
     mockAdmin.integrityJob.mockResolvedValue({ available: false });
     render(<AnalysisPanel />);
     expect(await screen.findByText(/nothing to analyse/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Re-analyse all replays' })).toBeNull();
   });
 
   it('says how many rounds are waiting and that they are picked up automatically', async () => {
@@ -237,5 +238,42 @@ describe('the ban list', () => {
     expect(await screen.findByText('Withheld (restricted ticket)')).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'griefer' })).toBeNull();
     expect(screen.getByText('griefer')).toBeTruthy();
+  });
+
+  it('clears the search query', async () => {
+    mockPeople.bans.mockResolvedValue({ bans: [ban] });
+    render(<PeopleBans />);
+    await screen.findByText('griefer');
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+    fireEvent.input(screen.getByLabelText('Search bans'), { target: { value: 'walls' } });
+    fireEvent.submit(screen.getByLabelText('Search bans').closest('form')!);
+    await waitFor(() => expect(mockPeople.bans).toHaveBeenCalledWith('active', 'walls', expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(mockPeople.bans).toHaveBeenCalledWith('active', '', expect.anything()));
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+  });
+
+  it('shows in-force and on-record figures for the full list', async () => {
+    mockPeople.bans.mockResolvedValue({
+      bans: [ban, { ...ban, id: 2, active: false, liftedAt: '2026-09-21T00:00:00.000Z' }],
+    });
+    render(<PeopleBans />);
+    await screen.findAllByText('griefer');
+    // Not shown on the default Active tab: every row there already shares one
+    // status, so the figures would just repeat the row count. "In force" is
+    // also a tab label, so scope to .figures rather than matching plain text.
+    expect(document.querySelector('.figures')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }));
+    await waitFor(() => expect(mockPeople.bans).toHaveBeenCalledWith('all', '', expect.anything()));
+    const figures = await waitFor(() => {
+      const el = document.querySelector('.figures');
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(within(figures as HTMLElement).getByText('In force')).toBeTruthy();
+    expect(within(figures as HTMLElement).getByText('On record')).toBeTruthy();
+    const values = [...figures.querySelectorAll('.figure')].map((f) => f.textContent);
+    expect(values.some((t) => t?.includes('In force') && t?.includes('1'))).toBe(true);
+    expect(values.some((t) => t?.includes('On record') && t?.includes('2'))).toBe(true);
   });
 });

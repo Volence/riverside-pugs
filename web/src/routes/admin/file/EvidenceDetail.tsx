@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { adminApi, type IntegrityClip, type PlayerFileData } from '../../../api';
-import { Panel } from '../../../components/bits';
+import { Empty, Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
 
 /** Clips sharing one player-round. Review state is keyed by the round, so
@@ -89,6 +89,7 @@ export function EvidenceDetail(
           </dd>
         </dl>
       </details>
+      {e.clips.length === 0 && <Empty>No flagged moments from replay analysis for this player.</Empty>}
       <ul class="admin-list">
         {groupByRound(e.clips).map((g) => {
           const first = g.clips[0];
@@ -138,18 +139,30 @@ export function EvidenceDetail(
 
       <h4>Live anti-cheat</h4>
       {e.flags.length === 0 ? <p class="muted">Nothing flagged by the live anti-cheat.</p> : (
-        <ul class="admin-list">
-          {e.flags.map((f) => (
-            <li key={f.id}>
-              {fmtTime(f.at)}: <code>{f.kind}</code>
-              {f.severity === 'banned' ? <strong class="admin-warn"> · banned by LilAC</strong> : <span class="muted"> · suspected</span>}
-              {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
-            </li>
-          ))}
-        </ul>
+        <>
+          <p class="muted">
+            Raised by Little Anti-Cheat during play, not by replay analysis, so there is no clip to
+            watch. Its own documentation says few and rare suspicions are usually false positives;
+            a pattern is what matters.
+          </p>
+          <ul class="admin-list">
+            {e.flags.map((f) => (
+              <li key={f.id}>
+                {fmtTime(f.at)}: <code>{f.kind}</code>
+                {f.severity === 'banned' ? <strong class="admin-warn"> · banned by LilAC</strong> : <span class="muted"> · suspected</span>}
+                {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       <h4>Input timing</h4>
+      <p class="muted">
+        Button timing that does not look like a hand, repeated across several separate bursts in
+        one match. These are low-severity evidence to weigh against the replay, not a verdict:
+        watch the round before acting on one.
+      </p>
       {e.inputCaps.length > 0 && (
         <p class="admin-warn">
           Capture was cut short by the game server's per-round budget {e.inputCaps.length}
@@ -178,11 +191,17 @@ export function EvidenceDetail(
                         {b.ratePerSec.toFixed(1)}/s over {b.presses} presses
                         {b.weapon ? <> on <code>{b.weapon}</code></> : null}
                         {b.hold
-                          ? <> · held {b.hold.medianTicks} ticks median, {Math.round(b.hold.oneTickFrac * 100)}% one-tick · <strong>{b.annotation}</strong></>
+                          ? <> · held {b.hold.medianTicks} ticks median ({b.hold.minTicks} to {b.hold.maxTicks}, sd {b.hold.sdTicks.toFixed(1)}), {Math.round(b.hold.oneTickFrac * 100)}% one-tick · <strong>{b.annotation}</strong></>
                           : <span class="muted"> · no hold data</span>}
+                        {b.wire === 1 && <span class="muted"> · plugin 0.1.0: server tick timing, ghosts not excluded</span>}
                       </li>
                     ))}
                   </ul>
+                  <p class="muted">
+                    wheel-like: nearly every press down for a single tick, which is a mouse wheel bind or a
+                    script that taps with no hold. fixed-hold: a constant hold time, as a scripted macro has.
+                    variable-hold: what a hand does. This describes the evidence; it does not change the flag.
+                  </p>
                 </details>
               )}
             </li>

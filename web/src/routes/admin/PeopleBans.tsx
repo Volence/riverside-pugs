@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { peopleApi } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel, Tabs } from '../../components/bits';
+import { Figure, Figures } from '../../components/PageHeader';
 import { fmtTime } from './useAction';
 import { fileUrl, ticketUrl } from './adminRoutes';
 
@@ -28,11 +29,26 @@ export function PeopleBans() {
 
   return (
     <Panel class="panel--table">
+      {/* Only meaningful on the All tab: on Active or Expired every row already
+          shares the same status, so "in force" and "on record" would just
+          repeat the row count. All is the one view where the payload already
+          holds both figures without a second request. */}
+      {filter === 'all' && bans.length > 0 && (
+        <Figures>
+          <Figure label="In force" value={bans.filter((b) => b.active).length} />
+          <Figure label="On record" value={bans.length} />
+        </Figures>
+      )}
       <Tabs tabs={FILTERS} active={filter} onSelect={(k) => setFilter(k as typeof filter)} />
       <form class="admin-search" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
         <input value={q} placeholder="Name or SteamID64" aria-label="Search bans"
           onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
         <button class="btn" type="submit">Search</button>
+        {query && (
+          <button class="btn btn--ghost" type="button" onClick={() => { setQ(''); setQuery(''); }}>
+            Clear
+          </button>
+        )}
       </form>
       {error && <Empty>Could not load the ban list.</Empty>}
       {data && bans.length === 0 && <Empty>{query ? 'Nobody by that name or ID.' : 'No bans here.'}</Empty>}

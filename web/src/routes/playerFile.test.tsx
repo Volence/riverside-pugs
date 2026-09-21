@@ -196,8 +196,13 @@ describe('the Player File', () => {
     expect(screen.getByRole('button', { name: 'Check now' })).toBeTruthy();
   });
 
-  it('previews a merge before offering to run one', async () => {
-    mockAdmin.mergePlayer.mockResolvedValue({ plan: { from: P, into: '76561199000000002', matchesMoved: 3, matchesCollapsed: 1, rowsByTable: { bans: 1 }, seasons: [1] } });
+  it('previews a merge before offering to run one, with what it moves table by table', async () => {
+    mockAdmin.mergePlayer.mockResolvedValue({
+      plan: {
+        from: P, into: '76561199000000002', matchesMoved: 3, matchesCollapsed: 1,
+        rowsByTable: { bans: 1, notes: 2 }, seasons: [1],
+      },
+    });
     render(<PlayerFile steamid={P} me="76561199000000009" />);
     await screen.findByRole('heading', { name: /griefer/ });
     fireEvent.input(screen.getByPlaceholderText('SteamID64 to keep'), { target: { value: '76561199000000002' } });
@@ -206,6 +211,11 @@ describe('the Player File', () => {
     // A bare /3/ also matches the header's join date and the "3 days" steam
     // flag; pin this to the plan's own bolded matchesMoved count instead.
     expect(await screen.findByText((_, el) => el?.tagName === 'STRONG' && el.textContent === '3')).toBeTruthy();
+    // An admin must see what a merge will move, table by table, before
+    // confirming: matchesMoved alone hides everything else that comes along.
+    const plan = document.querySelector('.admin-merge__plan') as HTMLElement;
+    expect(within(plan).getByText('bans').closest('li')?.textContent).toBe('bans 1');
+    expect(within(plan).getByText('notes').closest('li')?.textContent).toBe('notes 2');
     expect(screen.getByRole('button', { name: 'Merge and recompute' })).toBeTruthy();
   });
 });
@@ -300,6 +310,10 @@ describe('the evidence detail', () => {
     expect(screen.getByText(/pistol_rate/)).toBeTruthy();
     expect(screen.getByText(/3 of 40/)).toBeTruthy();
     expect(screen.getByText(/651 files enforced/)).toBeTruthy();
+    // Few and rare LilAC suspicions are usually false positives; only a
+    // pattern is worth reading as something. This is the whole reason the
+    // flag exists at all next to a real person's name.
+    expect(screen.getByText(/few and rare suspicions are usually false positives/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Mark this round reviewed/ }));
     await waitFor(() => expect(mockAdmin.integrityReview).toHaveBeenCalledWith(7, 2, 1, 3, 'reviewed', ''));
 
@@ -309,6 +323,12 @@ describe('the evidence detail', () => {
     expect(link.getAttribute('href')).toBe('/match/7?ordinal=2&half=1&t=61500');
     expect(screen.getByText(/fidelity 0\.82/)).toBeTruthy();
     expect(screen.getByText(/6\.0s/)).toBeTruthy();
+  });
+
+  it('says so when nobody has a flagged moment from replay analysis', async () => {
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.getByText('No flagged moments from replay analysis for this player.')).toBeTruthy();
   });
 
   // The column key shipped live and invisible for a day: it used `class="key"`,
@@ -336,7 +356,7 @@ describe('the evidence detail', () => {
             at: '2026-09-21T12:05:00.000Z', hits: 2, note: 'wheel-like',
             bursts: [{
               id: 8, at: '2026-09-21T12:04:00.000Z', weapon: 'weapon_pistol', presses: 51, ratePerSec: 13.04, meanTicks: 7.67,
-              wire: 2, serverSpan: 384, annotation: 'wheel-like',
+              wire: 1, serverSpan: 384, annotation: 'wheel-like',
               hold: { n: 51, medianTicks: 1, minTicks: 1, maxTicks: 2, sdTicks: 0.2, oneTickFrac: 0.96, nearMedianFrac: 1 },
             }],
           }],
@@ -346,12 +366,20 @@ describe('the evidence detail', () => {
     }));
     render(<PlayerFile steamid={P} me="76561199000000009" />);
     await screen.findByRole('heading', { name: /griefer/ });
+    // Not a verdict: low-severity input evidence gets the same caveat the
+    // old screen gave it, before any burst detail.
+    expect(screen.getByText(/Button timing that does not look like a hand/)).toBeTruthy();
     fireEvent.click(screen.getByText('The bursts that counted'));
     const text = screen.getByText(/pistol_rate/).closest('li')!.textContent!;
     expect(text).toContain('pistol_rate on 2 fire bursts');
     expect(text).toContain('low · holds: wheel-like');
     expect(text).toContain('13.0/s over 51 presses');
+    expect(text).toContain('held 1 ticks median (1 to 2, sd 0.2)');
     expect(text).toContain('96% one-tick');
+    // wire 1 means the plugin version that did not exclude ghosts yet.
+    expect(text).toContain('plugin 0.1.0: server tick timing, ghosts not excluded');
+    expect(text).toContain('wheel-like: nearly every press down for a single tick');
+    expect(text).toContain('This describes the evidence; it does not change the flag.');
     const capText = screen.getByText(/Capture was cut short/).textContent!;
     expect(capText).toContain('Capture was cut short by the game server\'s per-round budget 1 time');
     // Which round it was cut short on is what a reviewer needs to correlate

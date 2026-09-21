@@ -127,6 +127,9 @@ export function IdentitySection(
                 Season {plan.seasons.join(', ')} will be recomputed, which changes the rating of
                 everyone who played in those matches, not only these two accounts. There is no undo.
               </p>
+              <ul class="muted">
+                {Object.entries(plan.rowsByTable).sort().map(([t, n]) => <li key={t}><code>{t}</code> {n}</li>)}
+              </ul>
               <button class="btn" type="button" disabled={busy}
                 onClick={() => run(
                   () => adminApi.mergePlayer(d.steamid, into.trim()),
