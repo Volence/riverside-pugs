@@ -462,6 +462,17 @@ export interface StreamsView {
   offlineTotal: number;
 }
 
+/** One line of the profile's chemistry panel. `winRate` is 0 to 1. */
+export interface ChemistryLine { steamid: string; name: string; games: number; wins: number; winRate: number }
+
+/** Null lines are absent lines: the two rates are gated by a minimum number
+ *  of shared games and are simply not shown until somebody clears it. */
+export interface Chemistry {
+  mostPlayedWith: ChemistryLine | null;
+  bestWith: ChemistryLine | null;
+  worstAgainst: ChemistryLine | null;
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -499,6 +510,8 @@ export interface Profile {
    *  Keyed like the stat bag, plus `winrate` and `boomer_rate`. Empty for a
    *  provisional player. */
   standings?: Record<string, Standing>;
+  /** Optional only for a server older than the feature. */
+  chemistry?: Chemistry;
 }
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share. */
