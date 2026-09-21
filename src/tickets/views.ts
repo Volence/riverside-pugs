@@ -39,6 +39,18 @@ export function listTickets(db: DB, viewer: string, filter: TicketFilter): Ticke
     .all({ viewer }) as SummaryRow[]).map(toSummary);
 }
 
+/** How many tickets sit behind each filter, for this viewer. Counted with
+ *  the same VISIBLE clause as the list, so a count can never give away a
+ *  restricted ticket the list would not show. */
+export function ticketCounts(db: DB, viewer: string): { open: number; mine: number; closed: number } {
+  return db.prepare(
+    `SELECT COALESCE(SUM(t.status = 'open'), 0) AS open,
+            COALESCE(SUM(t.status = 'open' AND t.claimed_by = @viewer), 0) AS mine,
+            COALESCE(SUM(t.status = 'closed'), 0) AS closed
+     FROM tickets t WHERE ${VISIBLE}`,
+  ).get({ viewer }) as { open: number; mine: number; closed: number };
+}
+
 /** Every ticket about one player that this viewer may see, newest first. */
 export function ticketsAbout(db: DB, targetId: string, viewer: string): TicketSummary[] {
   return (db.prepare(`${SUMMARY} WHERE ${VISIBLE} AND t.target_id = @targetId ORDER BY t.id DESC LIMIT 50`)

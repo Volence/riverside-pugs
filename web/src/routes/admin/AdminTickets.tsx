@@ -5,7 +5,9 @@ import { Empty, Panel, Tabs } from '../../components/bits';
 import { AdminTicket } from './AdminTicket';
 import { fmtTime } from './useAction';
 
-const FILTERS = [{ key: 'open', label: 'Open' }, { key: 'mine', label: 'Mine' }, { key: 'closed', label: 'Closed' }];
+const FILTERS: { key: 'open' | 'mine' | 'closed'; label: string }[] = [
+  { key: 'open', label: 'Open' }, { key: 'mine', label: 'Mine' }, { key: 'closed', label: 'Closed' },
+];
 const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
 
 /** "2 reports from 2 people", or what a hand-opened ticket has instead. */
@@ -34,7 +36,8 @@ export function AdminTickets() {
 
   return (
     <Panel>
-      <Tabs active={filter} onSelect={(k) => setFilter(k as typeof filter)} tabs={FILTERS} />
+      <Tabs active={filter} onSelect={(k) => setFilter(k as typeof filter)}
+        tabs={FILTERS.map((f) => ({ ...f, count: data?.counts[f.key] }))} />
       {data && data.tickets.length === 0 && <Empty>No {filter === 'mine' ? 'tickets claimed by you' : `${filter} tickets`}.</Empty>}
       <ul class="tickets">
         {data?.tickets.map((t) => (

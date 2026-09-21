@@ -38,7 +38,7 @@ const mod = { steamid: '1', name: 'mod', avatar: null, status: 'active', isAdmin
 afterEach(() => { cleanup(); history.replaceState(null, '', '/admin'); });
 beforeEach(() => {
   for (const fn of [...Object.values(mockMod), ...Object.values(mockAdmin)]) fn.mockReset();
-  mockMod.tickets.mockResolvedValue({ tickets: [summary] });
+  mockMod.tickets.mockResolvedValue({ tickets: [summary], counts: { open: 3, mine: 1, closed: 12 } });
   mockMod.ticket.mockResolvedValue(detail());
   for (const k of ['claim', 'restrict', 'access', 'ban', 'close', 'reopen'] as const) mockMod[k].mockResolvedValue({ ok: true });
 });
@@ -57,6 +57,14 @@ describe('the Tickets tab', () => {
     expect(screen.queryByRole('tab', { name: 'Players' })).toBeNull();
     expect(mockAdmin.players).not.toHaveBeenCalled();
     expect(screen.getByText(/2 reports from 2 people/)).toBeTruthy();
+  });
+
+  it('shows a count on each filter', async () => {
+    render(<Admin session={{ kind: 'active', me: mod }} />);
+    await screen.findByText('Walls');
+    expect(screen.getByRole('tab', { name: /Open/ }).textContent).toBe('Open3');
+    expect(screen.getByRole('tab', { name: /Mine/ }).textContent).toBe('Mine1');
+    expect(screen.getByRole('tab', { name: /Closed/ }).textContent).toBe('Closed12');
   });
 
   it('opens a ticket, shows the report with its replay link, and claims it', async () => {

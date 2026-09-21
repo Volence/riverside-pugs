@@ -25,6 +25,7 @@ const eventText = (e: TicketEvent): string => {
     case 'banned': return `${who} banned the player: ${String(e.detail.reason ?? '')}`;
     case 'closed': return `${who} closed it: ${String(e.detail.outcome ?? '').replace(/_/g, ' ')}${e.detail.note ? ` (${String(e.detail.note)})` : ''}`;
     case 'reopened': return `${who} reopened it`;
+    case 'folded': return `Ticket #${String(e.detail.from ?? '')} about the same player was folded into this one`;
     default: return `${who}: ${e.kind.replace(/_/g, ' ')}`;
   }
 };

@@ -928,9 +928,11 @@ export interface TicketDetail {
   viewer: { isAdmin: boolean; banCapMinutes: number | null };
 }
 
+export interface TicketCounts { open: number; mine: number; closed: number }
+
 export const modApi = {
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
-    get<{ tickets: TicketSummary[] }>(`/api/mod/tickets?filter=${filter}`, signal),
+    get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
   ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),
   /** ticketId is null when the ticket is restricted and the opener is not on
    *  its access list: the note landed, and there is nothing to open. */

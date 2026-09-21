@@ -6,7 +6,7 @@ import { logAdmin } from '../admin/audit.js';
 import { getTicketRow } from '../tickets/store.js';
 import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
-import { listTickets, ticketDetail, type TicketFilter } from '../tickets/views.js';
+import { listTickets, ticketCounts, ticketDetail, type TicketFilter } from '../tickets/views.js';
 import { caseFile } from '../tickets/caseFile.js';
 
 export interface TicketRouteOpts {
@@ -47,7 +47,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     if (!me) return reply;
     const filter = String((req.query as { filter?: string }).filter ?? 'open');
     if (!['open', 'mine', 'closed'].includes(filter)) return reply.code(400).send({ error: 'bad filter' });
-    return { tickets: listTickets(db, me, filter as TicketFilter) };
+    return { tickets: listTickets(db, me, filter as TicketFilter), counts: ticketCounts(db, me) };
   });
 
   app.post('/api/mod/tickets', async (req, reply) => {

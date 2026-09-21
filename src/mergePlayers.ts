@@ -1,7 +1,8 @@
 import type { DB } from './db.js';
 import { addAlias } from './aliases.js';
 import { recomputeSeasonRatings } from './rating.js';
-import { hasStaffFlag, restrictOpenTicketAbout } from './tickets/store.js';
+import { publishAdminEvent } from './adminFeed.js';
+import { foldTicket, hasStaffFlag, reseedOrphanedTickets, restrictOpenTicketAbout, type RestrictOutcome } from './tickets/store.js';
 
 /**
  * Fold one Steam account into another, as if the second had always been the
@@ -101,7 +102,12 @@ export interface MergePlan {
 }
 
 export function mergePlayers(
-  db: DB, opts: { from: string; into: string; dryRun?: boolean; by?: string },
+  db: DB,
+  opts: {
+    from: string; into: string; dryRun?: boolean; by?: string;
+    /** config.adminSteamIds: who a ticket that becomes restricted is given to. */
+    adminSteamIds?: string[];
+  },
 ): MergePlan {
   const { from, into } = opts;
   if (from === into) throw new MergeError('from and into are the same account');
@@ -148,6 +154,11 @@ export function mergePlayers(
   const plan: MergePlan = { from, into, matchesMoved, matchesCollapsed, rowsByTable, seasons };
   if (opts.dryRun) return plan;
 
+  const owners = opts.adminSteamIds ?? [];
+  // `as`, not a type annotation: TypeScript does not see the assignment made
+  // inside the transaction closure, and would narrow this to 'none' for good.
+  let restrictOutcome = 'none' as RestrictOutcome;
+  let orphaned = 0;
   db.transaction(() => {
     // 1. Matches both accounts were rostered in: add the figures together and
     //    keep one row. Summing is right even though one row is usually a ghost
@@ -196,25 +207,22 @@ export function mergePlayers(
       const gone = open(from);
       const keep = open(into);
       if (!gone || !keep) continue;
-      db.prepare('UPDATE ticket_reports SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
-      db.prepare('UPDATE ticket_events SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
-      db.prepare('UPDATE OR IGNORE ticket_access SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
-      db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone.id);
-      db.prepare('UPDATE bans SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
-      db.prepare('DELETE FROM tickets WHERE id = ?').run(gone.id);
+      foldTicket(db, gone.id, keep.id, 'merge');
     }
     db.prepare('UPDATE tickets SET target_id = ? WHERE target_id = ?').run(into, from);
     // Merging a player into a staff account makes an ordinary ticket a ticket
-    // about staff. No owner list is to hand here, so seedAccess falls back to
-    // every admin but the accused, as the legacy migration does. Before the
-    // access tidy-up below, so a seeded row naming the losing account is
-    // rewritten with the rest rather than left behind.
-    if (hasStaffFlag(db, into)) restrictOpenTicketAbout(db, into, []);
+    // about staff. `from` is excluded from the seed: it still has a player
+    // row here, and an access row naming it would be rewritten onto `into`
+    // by the tidy-up below and then deleted as the accused's own.
+    if (hasStaffFlag(db, into)) restrictOutcome = restrictOpenTicketAbout(db, into, owners, new Date(), [from]);
     // A merged account must never sit on the access list of a ticket that is
     // now about itself.
     db.prepare('UPDATE OR IGNORE ticket_access SET steamid = ? WHERE steamid = ?').run(into, from);
     db.prepare('DELETE FROM ticket_access WHERE steamid = ?').run(from);
     db.prepare('DELETE FROM ticket_access WHERE steamid = ? AND ticket_id IN (SELECT id FROM tickets WHERE target_id = ?)').run(into, into);
+    // The tidy-up can take the last person off a list. Fill it again now,
+    // while it is still one transaction.
+    orphaned = reseedOrphanedTickets(db, owners, [from]).stillEmpty;
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
@@ -286,6 +294,16 @@ export function mergePlayers(
     db.prepare('DELETE FROM players WHERE steamid = ?').run(from);
     addAlias(db, { steamid: from, canonical: into, by: opts.by ?? 'merge' });
   })();
+
+  // After the commit: a subscriber posts to Discord. Neither line names the
+  // player or the ticket, because every admin reads the feed and one of them
+  // may be who the ticket is about.
+  if (restrictOutcome === 'nobody') {
+    publishAdminEvent({ kind: 'problem', text: 'A ticket about a player who is now staff could not be restricted: there is nobody else to give it to. Add another admin or set ADMIN_STEAMIDS, then restrict it from the ticket page.' });
+  }
+  if (orphaned > 0) {
+    publishAdminEvent({ kind: 'problem', text: `${orphaned} restricted ticket${orphaned === 1 ? ' has' : 's have'} nobody on the access list after a merge. It is handed to the next admin that is created.` });
+  }
 
   // Outside the transaction above because it opens its own.
   for (const season of seasons) recomputeSeasonRatings(db, season);

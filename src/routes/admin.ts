@@ -23,7 +23,7 @@ import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
-import { restrictOpenTicketAbout } from '../tickets/store.js';
+import { reseedOrphanedTickets, restrictOpenTicketAbout, type RestrictOutcome } from '../tickets/store.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 
 export interface AdminRouteOpts {
@@ -45,6 +45,8 @@ export interface AdminRouteOpts {
    *  because the player it is about was just promoted. */
   adminSteamIds: string[];
 }
+
+const NOBODY_TO_RESTRICT = 'A ticket about a player who is now staff could not be restricted: there is nobody else to give it to. Add another admin or set ADMIN_STEAMIDS, then restrict it from the ticket page.';
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
@@ -125,11 +127,20 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { isAdmin } = (req.body ?? {}) as { isAdmin?: unknown };
     if (typeof isAdmin !== 'boolean') return reply.code(400).send({ error: 'isAdmin must be true or false' });
     if (t.steamid === t.adminId && !isAdmin) return reply.code(400).send({ error: 'you cannot remove your own admin' });
+    // `as`, not an annotation: the assignment inside the closure is invisible
+    // to TypeScript's narrowing, which would pin this to 'none'.
+    let outcome = 'none' as RestrictOutcome;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
-      if (isAdmin) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      if (isAdmin) {
+        outcome = restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+        // A restricted ticket nobody could be given is given to the first
+        // admin who could take it, which may be this one.
+        reseedOrphanedTickets(db, adminSteamIds);
+      }
     })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
+    if (outcome === 'nobody') publishAdminEvent({ kind: 'problem', text: NOBODY_TO_RESTRICT });
     return { ok: true };
   });
 
@@ -138,11 +149,15 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!t) return reply;
     const { isMod } = (req.body ?? {}) as { isMod?: unknown };
     if (typeof isMod !== 'boolean') return reply.code(400).send({ error: 'isMod must be true or false' });
+    // `as`, not an annotation: the assignment inside the closure is invisible
+    // to TypeScript's narrowing, which would pin this to 'none'.
+    let outcome = 'none' as RestrictOutcome;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
-      if (isMod) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      if (isMod) outcome = restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
     })();
     logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
+    if (outcome === 'nobody') publishAdminEvent({ kind: 'problem', text: NOBODY_TO_RESTRICT });
     return { ok: true };
   });
 
@@ -173,7 +188,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     }
     try {
       const plan = mergePlayers(db, {
-        from: t.steamid, into, dryRun: dryRun === true, by: t.adminId,
+        from: t.steamid, into, dryRun: dryRun === true, by: t.adminId, adminSteamIds,
       });
       if (dryRun === true) return { plan };
       logAdmin(db, t.adminId, 'merge_player', t.steamid, { ...plan });
