@@ -5,6 +5,12 @@ import type { LiveBoardReason } from './api';
 export const OLD_PLUGIN_REASON =
   'This server runs a pug-match older than 0.3.4, which cannot hold the clock. Update the plugin on it to use these.';
 
+/** The same, for a match the site never set up: pug-leave.inc runs no
+ *  reconnect clock for one that was started in game, so every clock control
+ *  would answer PUGERR. */
+export const SELF_STARTED_REASON =
+  'This match was started in game, so the server is not tracking reconnect time for it.';
+
 /** A figure the server gave in seconds, counted down by the whole seconds
  *  since the payload arrived. `running` false is a held clock, which stands
  *  still. Null in, null out: an allowance the server did not know is not 0. */

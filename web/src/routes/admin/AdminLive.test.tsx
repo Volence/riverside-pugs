@@ -34,7 +34,7 @@ const board = (over: Partial<LiveBoard['matches'][number]> = {}): LiveBoard => (
   matches: [{
     id: 81, campaign: 'no_mercy', map: 'l4d_hospital02_subway', state: 'paused', phase: 'paused',
     server: { id: 1, name: 'Dallas' }, teamAScore: 412, teamBScore: 380, elapsedS: 1325,
-    spectate: null, leaveControl: 'ok',
+    spectate: null, leaveControl: 'ok', leaveTracking: true,
     teamA: [
       player('1', 'alice', 'a', { kind: 'connected', remainingS: null }),
       player('2', 'bob', 'a', { kind: 'dropped', sinceS: 42, remainingS: 258, held: false, holdLeftS: null }, { kind: 'signon_drop', at: '2026-09-21T20:09:00.000Z' }),
@@ -138,6 +138,20 @@ describe('the live board', () => {
       expect((within(bob).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
     }
     expect(screen.getByText(/older than 0\.3\.4/)).toBeTruthy();
+    fireEvent.click(within(bob).getByRole('button', { name: 'Hold' }));
+    expect(mockAdmin.leaveClock).not.toHaveBeenCalled();
+  });
+
+  it('disables the clock controls, and says why, on a match that was started in game', async () => {
+    // The plugin runs no reconnect clock for a self-started match, so every
+    // one of these buttons would come back PUGERR. Say so before it is pressed.
+    mockAdmin.live.mockResolvedValue(board({ leaveTracking: false }));
+    render(<AdminLive />);
+    const bob = await row('bob');
+    for (const name of ['Hold', '+5 min', 'End now']) {
+      expect((within(bob).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(screen.getByText(/started in game/)).toBeTruthy();
     fireEvent.click(within(bob).getByRole('button', { name: 'Hold' }));
     expect(mockAdmin.leaveClock).not.toHaveBeenCalled();
   });

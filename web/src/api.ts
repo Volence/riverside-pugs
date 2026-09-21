@@ -788,6 +788,9 @@ export interface LiveBoardMatch {
   spectate: SpectateInfo | null;
   /** old_plugin: the server's pug-match predates 0.3.4 and has no clock control. */
   leaveControl: 'ok' | 'old_plugin' | 'unknown';
+  /** False when the game server runs no reconnect clock for this match at
+   *  all, which is every match that was started in game. */
+  leaveTracking: boolean;
   teamA: LiveBoardPlayer[];
   teamB: LiveBoardPlayer[];
   clocks: LiveBoardClock[];

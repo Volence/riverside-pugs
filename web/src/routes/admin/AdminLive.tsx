@@ -8,7 +8,7 @@ import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
 import { AdminQueuePanel, AdminServersPanel, RecentResultsPanel } from './MatchPanels';
-import { OLD_PLUGIN_REASON, countdown, countUp, liveFromUrl, reasonText } from '../../liveBoard';
+import { OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
  *  the socket was reconnecting must not leave a countdown wrong for long. */
@@ -88,7 +88,12 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
   useEffect(() => {
     if (isTarget) el.current?.scrollIntoView?.({ block: 'start' });
   }, [isTarget]);
-  const blocked = m.leaveControl === 'old_plugin' ? OLD_PLUGIN_REASON : null;
+  // Why the clock controls are off, or null when they are live. Both reasons
+  // are facts about the server, not about this admin, so they are said on the
+  // card rather than discovered by pressing a button and reading a PUGERR.
+  const blocked = m.leaveControl === 'old_plugin' ? OLD_PLUGIN_REASON
+    : !m.leaveTracking ? SELF_STARTED_REASON
+    : null;
 
   return (
     <section class={`panel live-card${isTarget ? ' is-target' : ''}`} ref={el}>

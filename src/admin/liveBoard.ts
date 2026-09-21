@@ -48,6 +48,12 @@ export interface BoardMatch {
   elapsedS: number;
   spectate: SpectateInfo | null;
   leaveControl: 'ok' | 'old_plugin' | 'unknown';
+  /** False when the game server is not running a reconnect clock for this
+   *  match at all, so every clock control would answer `PUGERR leave tracking
+   *  is off`: pug-leave.inc's LeaveTracking() excludes a self-started match.
+   *  The board disables the buttons and says so, rather than letting an admin
+   *  find out by pressing one in the seconds that matter. */
+  leaveTracking: boolean;
   teamA: BoardPlayer[];
   teamB: BoardPlayer[];
   clocks: BoardClock[];
@@ -66,6 +72,8 @@ interface MatchRow {
 
 interface PlayerRow extends Partial<Pick<PresenceRow, 'state' | 'since' | 'remaining_s' | 'remaining_at' | 'held' | 'hold_until'>> {
   steamid: string; name: string; team: 'a' | 'b'; discordId: string | null; connectedAt: string | null;
+  /** 'web' for a roster the site built, 'udp' for one read off a game server. */
+  source: string;
 }
 
 export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: Date }): LiveBoard {
@@ -82,6 +90,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
 
   const playersOf = db.prepare(
     `SELECT mp.player_id AS steamid, p.name, mp.team, p.discord_id AS discordId, mp.connected_at AS connectedAt,
+            mp.source,
             pr.state, pr.since, pr.remaining_s, pr.remaining_at, pr.held, pr.hold_until
      FROM match_players mp
      JOIN players p ON p.steamid = mp.player_id
@@ -117,9 +126,17 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
             held,
             holdLeftS: held && p.hold_until ? Math.max(0, Math.ceil((Date.parse(p.hold_until) - now.getTime()) / 1000)) : null,
           };
-        } else if (p.state === 'connected' || p.connectedAt !== null) {
+        } else if (p.state === 'connected' || p.connectedAt !== null || p.source === 'udp') {
           // connected_at alone covers a match that was already running when
           // this table arrived, and a box whose first connect line was lost.
+          //
+          // source = 'udp' covers the roster of a match started in game: it
+          // was read off a server where those players were playing, which is
+          // why they are on it. Neither of the two writers that would say so
+          // can ever fire for them, because the plugin emits PLAYER connect
+          // only for a client joining a match that already holds a roster, so
+          // without this every player of every self-started match read "Never
+          // connected" for the whole match.
           status = { kind: 'connected', remainingS: p.remaining_s ?? null };
         } else {
           status = { kind: 'never_connected', sincePopS: secondsSince(poppedMs, now) };
@@ -155,6 +172,11 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
         elapsedS: secondsSince(m.wentLiveAt ? toMs(m.wentLiveAt) : poppedMs, now),
         spectate: spectateFor(db, m.serverId),
         leaveControl: m.leaveControl === null ? 'unknown' : m.leaveControl === 1 ? 'ok' : 'old_plugin',
+        // A live match the site never set up is one src/selfStarted.ts
+        // adopted, and went_live_at is what says so: setupMatch stamps it and
+        // the adoption deliberately does not (src/admin/players.ts reads the
+        // column the same way). A configuring match is always the site's own.
+        leaveTracking: !(m.state === 'live' && m.wentLiveAt === null),
         teamA: players.filter((p) => p.team === 'a'),
         teamB: players.filter((p) => p.team === 'b'),
         clocks,

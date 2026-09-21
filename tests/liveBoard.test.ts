@@ -105,6 +105,37 @@ describe('exactly one status per player', () => {
   });
 });
 
+describe('a match that was started in game', () => {
+  /** What src/selfStarted.ts leaves behind: a roster of players who were
+   *  ALREADY playing, every row source = 'udp', and no went_live_at because
+   *  the site never set the match up. */
+  const adopt = () => {
+    db.prepare('UPDATE matches SET went_live_at = NULL WHERE id = ?').run(matchId);
+    db.prepare("UPDATE match_players SET source = 'udp' WHERE match_id = ?").run(matchId);
+  };
+
+  it('does not read its whole roster as never connected', () => {
+    // The plugin only emits PLAYER connect for a client who joins a match
+    // that already holds a roster, so nobody on an adopted one ever gets a
+    // presence row or a connected_at, and every player used to say "Never
+    // connected" on the one screen that exists to show who is missing.
+    adopt();
+    expect(find(IDS[0]).status).toEqual({ kind: 'connected', remainingS: null });
+  });
+
+  it('still believes a presence row that says otherwise', () => {
+    adopt();
+    recordPresenceLine(db, { kind: 'leave', token: TOKEN, steamid: IDS[2], remaining: 300 }, at(9, 18));
+    expect(find(IDS[2]).status).toMatchObject({ kind: 'dropped', remainingS: 258 });
+  });
+
+  it('says the game server is not tracking reconnect time for it', () => {
+    expect(board().matches[0].leaveTracking).toBe(true);
+    adopt();
+    expect(board().matches[0].leaveTracking).toBe(false);
+  });
+});
+
 describe('a reason, when known and never guessed', () => {
   it('rejected by the file check, from a connect drop since the pop with no entry after it', () => {
     recordSignonDrop(db, { steamid: IDS[0], name: 'p0', secs: 14, forced: 651 }, at(4));
