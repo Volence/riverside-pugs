@@ -3,11 +3,12 @@
  *
  * Design: docs/superpowers/specs/2026-09-21-input-macro-detection-design.md
  *
- * Captures the timing of button PRESS EDGES and ships one line per burst. It
- * computes no verdicts: every statistic and threshold lives on the web side, so
- * a signature can be improved and re-run over stored history without anything
- * being redeployed to a game server. That matters here because the cheats are
- * frozen (nobody writes new ones for a 2008 game) while our tooling is not.
+ * Captures the timing of button PRESS EDGES, and how long each press was held,
+ * and ships one line per burst. It computes no verdicts: every statistic and
+ * threshold lives on the web side, so a signature can be improved and re-run
+ * over stored history without anything being redeployed to a game server. That
+ * matters here because the cheats are frozen (nobody writes new ones for a 2008
+ * game) while our tooling is not.
  *
  * THIS PLUGIN IS INCAPABLE OF CHANGING THE GAME: it hooks OnPlayerRunCmdPre,
  * whose parameters are read-only by signature. That is also why it sees the
