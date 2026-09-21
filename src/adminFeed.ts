@@ -9,7 +9,10 @@
  */
 
 export type AdminEvent =
-  | { kind: 'report'; reportId: number }
+  // A report landed on a normal ticket. `created` is whether it opened the
+  // ticket or joined one. Never published for a restricted ticket, and it
+  // carries no reporter: the feed channel is wider than the ticket.
+  | { kind: 'report'; ticketId: number; targetId: string; category: string; created: boolean }
   | { kind: 'admin_action'; adminId: string; action: string; target: string; detail: Record<string, unknown> }
   | { kind: 'penalty'; steamid: string; penalty: 'ready_fail' | 'no_show'; matchId: number | null }
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }

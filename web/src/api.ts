@@ -14,6 +14,8 @@ export interface Me {
   avatar: string | null;
   status: string;
   isAdmin: boolean;
+  /** May open the Tickets tab. */
+  isMod?: boolean;
   /** False when the server has no Discord app configured: hide every Discord control. */
   discordEnabled?: boolean;
   discord?: { id: string; name: string } | null;
@@ -612,6 +614,7 @@ export interface AdminPlayerRow {
   avatar: string | null;
   status: string;
   isAdmin: boolean;
+  isMod: boolean;
   discordName: string | null;
   sr: number | null;
   games: number;
@@ -622,13 +625,6 @@ export interface AdminPlayerRow {
 export interface AdminBan {
   id: number; reason: string; createdBy: string; createdByName?: string | null; createdAt: string;
   expiresAt: string | null; liftedBy: string | null; liftedByName?: string | null; liftedAt: string | null;
-}
-
-export interface AdminReport {
-  id: number; matchId: number; campaign: string | null;
-  reporterId: string; reporterName: string | null; targetId: string; targetName: string | null;
-  category: string; text: string; status: string;
-  resolvedBy: string | null; resolutionNote: string | null; createdAt: string; resolvedAt: string | null;
 }
 
 export interface AdminPlayerDetail extends AdminPlayerRow {
@@ -647,7 +643,7 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   matches: { id: number; campaign: string; state: string; endedAt: string | null; winner: string | null; team: string; connectedAt: string | null }[];
   penalties: { id: number; kind: string; matchId: number | null; createdAt: string; clearedBy: string | null; clearedAt: string | null }[];
   timeout: { until: string; offenses: number } | null;
-  reportsAgainst: AdminReport[];
+  tickets: TicketSummary[];
   /** Connects that ended before the player was in game, on a map that forced
    *  files. Likely a file-consistency rejection; a cancelled loading screen
    *  looks identical. `enteredAfterAt` is when they next got in, null if never. */
@@ -813,6 +809,11 @@ export interface ReportEligibility {
   targets?: { steamid: string; name: string; alreadyReported: boolean }[];
 }
 
+export interface MyReport {
+  id: number; targetId: string; targetName: string | null; category: string;
+  matchId: number | null; createdAt: string; status: 'open' | 'closed';
+}
+
 /** One row of the integrity board. trackShare, occZ, teamGap and their percentiles are nullable:
  *  a map with too little recorded history gets no occupancy score at all, and
  *  that must never be confused with an average (0) score. composite is a sort
@@ -948,6 +949,58 @@ export type IntegrityJobInfo =
     matchInFlight: boolean;
   };
 
+// ---------- tickets ----------
+
+export interface TicketSummary {
+  id: number; targetId: string; targetName: string | null; status: 'open' | 'closed'; outcome: string | null;
+  restricted: boolean; claimedBy: string | null; claimedByName: string | null;
+  reports: number; reporters: number; categories: string[];
+  createdAt: string; lastReportAt: string | null; closedAt: string | null;
+}
+export interface TicketReport {
+  id: number; reporterId: string; reporterName: string | null; category: string; text: string;
+  matchId: number | null; campaign: string | null; moment: { ordinal: number; half: number; tMs: number } | null; createdAt: string;
+}
+export interface TicketEvent {
+  id: number; actorId: string | null; actorName: string | null; kind: string; detail: Record<string, unknown>; createdAt: string;
+}
+/** The accused, as a moderator may see them. Narrower than AdminPlayerDetail
+ *  on purpose: no notes, no match list, no hashed network rows. */
+export interface CaseFile {
+  steamid: string; name: string; avatar: string | null; status: string; sr: number | null; games: number; createdAt: string | null;
+  activeBan: AdminBan | null; bans: AdminBan[];
+  penalties: AdminPlayerDetail['penalties']; timeout: AdminPlayerDetail['timeout'];
+  inputFlags: AdminPlayerDetail['inputFlags']; aliases: AdminPlayerDetail['aliases'];
+  sharesAddressWith: AdminPlayerDetail['sharesAddressWith']; tickets: TicketSummary[];
+}
+export interface TicketDetail {
+  ticket: TicketSummary & { outcomeNote: string; openedBy: string | null; openedByName: string | null; closedBy: string | null; closedByName: string | null };
+  reports: TicketReport[];
+  events: TicketEvent[];
+  bans: { id: number; reason: string; createdBy: string; createdByName: string | null; createdAt: string; expiresAt: string | null; liftedAt: string | null }[];
+  access: { steamid: string; name: string }[];
+  accessCandidates: { steamid: string; name: string }[];
+  caseFile: CaseFile | null;
+  /** banCapMinutes null means no cap: the viewer is an admin. */
+  viewer: { isAdmin: boolean; banCapMinutes: number | null };
+}
+
+export const modApi = {
+  tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
+    get<{ tickets: TicketSummary[] }>(`/api/mod/tickets?filter=${filter}`, signal),
+  ticket: (id: number, signal?: AbortSignal) => get<TicketDetail>(`/api/mod/tickets/${id}`, signal),
+  /** ticketId is null when the ticket is restricted and the opener is not on
+   *  its access list: the note landed, and there is nothing to open. */
+  open: (targetId: string, note: string, restricted: boolean) =>
+    post<{ ok: true; ticketId: number | null }>('/api/mod/tickets', { targetId, note, restricted }),
+  claim: (id: number, claim: boolean) => post(`/api/mod/tickets/${id}/claim`, { claim }),
+  restrict: (id: number, restricted: boolean) => post(`/api/mod/tickets/${id}/restrict`, { restricted }),
+  access: (id: number, steamid: string) => post(`/api/mod/tickets/${id}/access`, { steamid }),
+  ban: (id: number, reason: string, minutes: number | null) => post(`/api/mod/tickets/${id}/ban`, { reason, minutes }),
+  close: (id: number, outcome: string, note: string) => post(`/api/mod/tickets/${id}/close`, { outcome, note }),
+  reopen: (id: number) => post(`/api/mod/tickets/${id}/reopen`),
+};
+
 export const adminApi = {
   players: (q: string, signal?: AbortSignal) =>
     get<{ players: AdminPlayerRow[] }>(`/api/admin/players?q=${encodeURIComponent(q)}`, signal),
@@ -958,6 +1011,7 @@ export const adminApi = {
   unban: (steamid: string) => post(`/api/admin/players/${steamid}/unban`),
   activate: (steamid: string) => post(`/api/admin/players/${steamid}/activate`),
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
+  setMod: (steamid: string, isMod: boolean) => post(`/api/admin/players/${steamid}/mod`, { isMod }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
   /** Ends every session the player holds, on every device. */
   signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
@@ -976,10 +1030,6 @@ export const adminApi = {
   serverSourcetv: (id: number, enabled: boolean, port: string, password: string) =>
     post(`/api/admin/servers/${id}/sourcetv`, { enabled, port, password }),
   queueRemove: (steamid: string) => post('/api/admin/queue/remove', { steamid }),
-  reports: (status: string, signal?: AbortSignal) =>
-    get<{ reports: AdminReport[] }>(`/api/admin/reports?status=${status}`, signal),
-  resolveReport: (id: number, status: 'resolved' | 'dismissed', note: string) =>
-    post(`/api/admin/reports/${id}/resolve`, { status, note }),
   settings: (signal?: AbortSignal) =>
     get<{ settings: AdminSetting[]; campaigns: { slug: string; name: string }[]; serversMissingDlc4: string[] }>('/api/admin/settings', signal),
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
@@ -1111,6 +1161,9 @@ export const api = {
     get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
   report: (matchId: number, targetId: string, category: string, text: string) =>
     post(`/api/matches/${matchId}/reports`, { targetId, category, text }),
+  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: { ordinal: number; half: number; tMs: number } }) =>
+    post('/api/reports', body),
+  myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   ready: () => post('/api/lobby/ready'),

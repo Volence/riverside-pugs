@@ -133,6 +133,21 @@ describe('sessions', () => {
       expect((await me(cookies)).statusCode).toBe(200);
     });
 
+    it('a change of moderator flag does the same, so a demoted moderator loses the tickets at once', async () => {
+      const cookies = authedCookie(app, db, P1);
+      await post(`/api/admin/players/${P1}/mod`, { isMod: true });
+      expect((await me(cookies)).statusCode).toBe(401);
+      const asMod = authedCookie(app, db, P1);
+      expect((await app.inject({ method: 'GET', url: '/api/mod/tickets', cookies: asMod })).statusCode).toBe(200);
+      // Saved again as it already is: nobody is signed out.
+      await post(`/api/admin/players/${P1}/mod`, { isMod: true });
+      expect((await app.inject({ method: 'GET', url: '/api/mod/tickets', cookies: asMod })).statusCode).toBe(200);
+      await post(`/api/admin/players/${P1}/mod`, { isMod: false });
+      expect((await app.inject({ method: 'GET', url: '/api/mod/tickets', cookies: asMod })).statusCode).toBe(401);
+      // And signed in again they are a player, not staff.
+      expect((await app.inject({ method: 'GET', url: '/api/mod/tickets', cookies: authedCookie(app, db, P1) })).statusCode).toBe(403);
+    });
+
     it('an admin can sign a player out everywhere, and it is audited', async () => {
       const cookies = authedCookie(app, db, P1);
       const res = await post(`/api/admin/players/${P1}/sign-out`);

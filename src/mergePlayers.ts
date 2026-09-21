@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { addAlias } from './aliases.js';
 import { recomputeSeasonRatings } from './rating.js';
+import { hasStaffFlag, restrictOpenTicketAbout } from './tickets/store.js';
 
 /**
  * Fold one Steam account into another, as if the second had always been the
@@ -32,6 +33,11 @@ const PLAIN: [table: string, column: string][] = [
   ['reports', 'target_id'],
   ['integrity_rounds', 'steamid'],
   ['integrity_clips', 'steamid'],
+  ['ticket_reports', 'reporter_id'],
+  ['ticket_events', 'actor_id'],
+  ['tickets', 'claimed_by'],
+  ['tickets', 'opened_by'],
+  ['tickets', 'closed_by'],
   // Evidence. None of it has a foreign key, so leaving it behind never
   // failed: it just stayed on an id with no player row and no admin page.
   ['integrity_flags', 'steamid'],
@@ -82,6 +88,10 @@ export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
   ['endorsements', 'to_id'],
   ['player_steam_signals', 'steamid'],
   ['steam_signal_alerts', 'player_id'],
+  // By hand in the ticket block: two open tickets about one player cannot
+  // simply be repointed, tickets_one_open would refuse the second.
+  ['tickets', 'target_id'],
+  ['ticket_access', 'steamid'],
 ];
 
 export interface MergePlan {
@@ -195,6 +205,35 @@ export function mergePlayers(
     db.prepare(
       "UPDATE discord_link_history SET unlinked_at = ?, unlinked_by = 'merge' WHERE steamid = ? AND unlinked_at IS NULL",
     ).run(new Date().toISOString(), from);
+    // Tickets ABOUT the merged account. tickets_one_open allows one open
+    // ticket per player per flavour, so where both accounts have one the
+    // alt's reports and history move into the main's and the empty shell
+    // goes. Closed tickets cannot collide and are simply repointed.
+    for (const restricted of [0, 1]) {
+      const open = (id: string) => db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
+        .get(id, restricted) as { id: number } | undefined;
+      const gone = open(from);
+      const keep = open(into);
+      if (!gone || !keep) continue;
+      db.prepare('UPDATE ticket_reports SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('UPDATE ticket_events SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('UPDATE OR IGNORE ticket_access SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone.id);
+      db.prepare('UPDATE bans SET ticket_id = ? WHERE ticket_id = ?').run(keep.id, gone.id);
+      db.prepare('DELETE FROM tickets WHERE id = ?').run(gone.id);
+    }
+    db.prepare('UPDATE tickets SET target_id = ? WHERE target_id = ?').run(into, from);
+    // Merging a player into a staff account makes an ordinary ticket a ticket
+    // about staff. No owner list is to hand here, so seedAccess falls back to
+    // every admin but the accused, as the legacy migration does. Before the
+    // access tidy-up below, so a seeded row naming the losing account is
+    // rewritten with the rest rather than left behind.
+    if (hasStaffFlag(db, into)) restrictOpenTicketAbout(db, into, []);
+    // A merged account must never sit on the access list of a ticket that is
+    // now about itself.
+    db.prepare('UPDATE OR IGNORE ticket_access SET steamid = ? WHERE steamid = ?').run(into, from);
+    db.prepare('DELETE FROM ticket_access WHERE steamid = ?').run(from);
+    db.prepare('DELETE FROM ticket_access WHERE steamid = ? AND ticket_id IN (SELECT id FROM tickets WHERE target_id = ?)').run(into, into);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

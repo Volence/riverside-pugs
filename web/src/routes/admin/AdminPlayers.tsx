@@ -30,7 +30,7 @@ export function AdminPlayers({ me }: { me: string }) {
               <tbody>
                 {list.data.players.map((p) => (
                   <tr key={p.steamid} class={`is-clickable${selected === p.steamid ? ' is-me' : ''}`} onClick={() => setSelected(p.steamid)}>
-                    <td>{p.name}{p.isAdmin && <span class="admin-tag">admin</span>}</td>
+                    <td>{p.name}{p.isAdmin && <span class="admin-tag">admin</span>}{p.isMod && <span class="admin-tag">mod</span>}</td>
                     <td><span class={`admin-status admin-status--${p.status}`}>{p.status}</span></td>
                     <td class="num">{p.sr ?? <span class="muted">n/a</span>}</td>
                     <td class="num">{p.games}</td>
@@ -101,6 +101,14 @@ function PlayerDetail(
             {d.isAdmin ? 'Remove admin' : 'Make admin'}
           </button>
         )}
+        <button class="chip" disabled={busy}
+          onClick={() => run(() => adminApi.setMod(d.steamid, !d.isMod), d.isMod ? undefined : {
+            title: `Make ${d.name} a moderator?`,
+            body: 'They can see and work tickets, and ban for up to the moderator limit. They get no settings and nothing on the game servers.',
+            confirmLabel: 'Make moderator',
+          })}>
+          {d.isMod ? 'Remove moderator' : 'Make moderator'}
+        </button>
         {d.discordName && <button class="chip" disabled={busy} onClick={() => run(() => adminApi.unlinkDiscord(d.steamid), {
           title: `Unlink ${d.name}'s Discord?`,
           body: 'They will have to link it again before they can queue, if Discord is required to queue.',
@@ -184,13 +192,12 @@ function PlayerDetail(
       </section>
 
       <section>
-        <h4>Reports against</h4>
-        {d.reportsAgainst.length === 0 ? <p class="muted">None.</p> : (
+        <h4>Tickets</h4>
+        {d.tickets.length === 0 ? <p class="muted">None.</p> : (
           <ul class="admin-list">
-            {d.reportsAgainst.map((r) => (
-              <li key={r.id}>
-                {fmtTime(r.createdAt)} · {r.category} by {r.reporterName ?? r.reporterId} in <a href={`/match/${r.matchId}`}>#{r.matchId}</a> · {r.status}
-                {r.text && <div class="muted">{r.text}</div>}
+            {d.tickets.map((t) => (
+              <li key={t.id}>
+                <a href={`/admin?ticket=${t.id}`}>#{t.id}</a> · {t.categories.join(', ') || 'opened by staff'} · {t.status === 'open' ? 'open' : (t.outcome ?? 'closed').replace(/_/g, ' ')} · {fmtTime(t.createdAt)}
               </li>
             ))}
           </ul>

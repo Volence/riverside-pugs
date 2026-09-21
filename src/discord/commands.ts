@@ -5,7 +5,7 @@ import { campaignDisplayName } from '../campaignRegistry.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
-import { fileReport, reportEligibility } from '../reports.js';
+import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
@@ -16,7 +16,18 @@ export interface CommandDeps {
   publicUrl: string;
   /** The ban explanation (reason, expiry), as the button controller has it. */
   banMessage?: (steamid: string) => string;
+  adminSteamIds?: string[];
 }
+
+/** Labels for the report categories, in the order they should list. */
+const REPORT_LABELS: Record<ReportCategory, string> = {
+  griefing: 'Griefing / throwing',
+  cheating: 'Cheating',
+  toxicity: 'Toxicity / harassment',
+  afk: 'AFK / left the game',
+  unsafe: 'Safety concern (handled privately)',
+  other: 'Something else',
+};
 
 export const COMMAND_DEFS: SlashCommandDef[] = [
   {
@@ -34,18 +45,12 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'link', description: 'Link your Discord to your Steam account' },
   {
     name: 'report',
-    description: 'Privately report a player from a match you played together',
+    description: 'Privately report a player, with your latest match together attached if there is one',
     options: [
       { name: 'player', description: 'Who you are reporting', type: 'user', required: true },
       {
         name: 'reason', description: 'What happened', type: 'string', required: true,
-        choices: [
-          { name: 'Griefing / throwing', value: 'griefing' },
-          { name: 'Cheating', value: 'cheating' },
-          { name: 'Toxicity / harassment', value: 'toxicity' },
-          { name: 'AFK / left the game', value: 'afk' },
-          { name: 'Something else', value: 'other' },
-        ],
+        choices: REPORT_CATEGORIES.map((c) => ({ name: REPORT_LABELS[c], value: c })),
       },
       { name: 'details', description: 'When, which map, what they did', type: 'string' },
       { name: 'match', description: 'Match number (default: your latest match together)', type: 'integer' },
@@ -205,26 +210,29 @@ function report(deps: CommandDeps, i: Cmd): InteractionReply {
   const reporter = who.player;
   const target = playerByDiscordId(deps.db, i.options.player ?? '');
   if (!target) {
-    return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report a player on the match page instead.' });
+    return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report on their profile on the website instead.' });
   }
   if (target.steamid === reporter.steamid) return priv({ content: 'You cannot report yourself.' });
 
+  // A match is optional. With none given, attach the latest one you shared in
+  // the last 48 hours if there is one, because that is nearly always what the
+  // report is about; otherwise file it with no match.
   let matchId: number | null = i.options.match ? Number(i.options.match) : null;
   if (matchId === null) {
     const shared = deps.db.prepare(
       `SELECT m.id FROM matches m
        JOIN match_players a ON a.match_id = m.id AND a.player_id = ?
        JOIN match_players b ON b.match_id = m.id AND b.player_id = ?
-       WHERE m.state IN ('live', 'completed', 'aborted') ORDER BY m.id DESC LIMIT 10`,
-    ).all(reporter.steamid, target.steamid) as { id: number }[];
-    matchId = shared.find((m) => reportEligibility(deps.db, m.id, reporter.steamid).canReport)?.id ?? null;
-    if (matchId === null) {
-      return priv({ content: `You have not played a match with ${escapeName(target.name)} in the last 48 hours. Reports have to be about a match you were both in.` });
-    }
+       WHERE m.state IN ('live', 'completed', 'aborted')
+         AND (m.ended_at IS NULL OR m.ended_at > datetime('now', '-48 hours'))
+       ORDER BY m.id DESC LIMIT 1`,
+    ).get(reporter.steamid, target.steamid) as { id: number } | undefined;
+    matchId = shared?.id ?? null;
   }
-  const r = fileReport(deps.db, matchId, reporter.steamid, {
-    targetId: target.steamid, category: i.options.reason, text: i.options.details ?? '',
-  });
+  const r = fileReport(deps.db, reporter.steamid, {
+    targetId: target.steamid, category: i.options.reason, text: i.options.details ?? '', matchId,
+  }, { adminSteamIds: deps.adminSteamIds ?? [] });
   if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
-  return priv({ content: `Reported ${escapeName(target.name)} for match #${matchId}. Thanks, an admin will look at it. They will not be told who reported them.` });
+  const about = matchId === null ? '' : ` for match #${matchId}`;
+  return priv({ content: `Reported ${escapeName(target.name)}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
 }

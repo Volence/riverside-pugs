@@ -13,6 +13,8 @@ export interface PlayerRow {
   avatar: string | null;
   status: 'invited' | 'active' | 'banned';
   is_admin: number;
+  /** May work tickets. Nothing else: no settings, no game server rights. */
+  is_mod: number;
   created_at: string;
   discord_id: string | null;
   discord_name: string | null;

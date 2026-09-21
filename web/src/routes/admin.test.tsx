@@ -17,7 +17,7 @@ async function confirmDialog(name?: string | RegExp) {
 const { mockAdmin, mockApi } = vi.hoisted(() => ({
   mockAdmin: {
     players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), steamRefresh: vi.fn(), overview: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
-    reports: vi.fn(), audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
+    audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
     integrity: vi.fn(), integrityPlayer: vi.fn(), integrityReview: vi.fn(),
     integrityJob: vi.fn(), integrityRun: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
@@ -53,7 +53,7 @@ const me = { steamid: '1', name: 'boss', avatar: null, status: 'active', isAdmin
 describe('Admin page', () => {
   it('refuses a non-admin without calling the admin API', () => {
     render(<Admin session={{ kind: 'active', me: { ...me, isAdmin: false } }} />);
-    expect(screen.getByText('Admins only.')).toBeTruthy();
+    expect(screen.getByText('Staff only.')).toBeTruthy();
     expect(mockAdmin.players).not.toHaveBeenCalled();
   });
 
@@ -61,7 +61,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'griefer', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 2 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
       inputCaps: [],
@@ -85,7 +85,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'skinner', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       inputFlags: [],
       inputCaps: [],
       signonDrops: {
@@ -117,7 +117,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'newcomer', avatar: null, status: 'active', isAdmin: false, discordName: 'Alice', sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: '111', activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: '111', activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
       inputCaps: [],
@@ -137,7 +137,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'phished', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
       inputCaps: [],
@@ -156,7 +156,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'clean', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
       inputCaps: [],
@@ -170,7 +170,7 @@ describe('Admin page', () => {
 
   const steamRow = { steamid: '2', name: 'borrower', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 2400, games: 9, createdAt: '2026-09-01', offenses: 0 };
   const steamDetail = {
-    ...steamRow, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+    ...steamRow, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
     signonDrops: { count: 0, lastAt: null, rows: [] }, inputFlags: [], inputCaps: [],
   };
 
@@ -267,7 +267,7 @@ describe('Admin page', () => {
     const row = { steamid: '2', name: 'clicker', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
     mockAdmin.players.mockResolvedValue({ players: [row] });
     mockAdmin.player.mockResolvedValue({
-      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, reportsAgainst: [],
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputCaps: [{ matchId: 41, kind: 'bhop', serverTick: 9000, at: '2026-09-21T12:00:00.000Z' }],
       inputFlags: [{
@@ -355,7 +355,7 @@ describe('ReportPlayer', () => {
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'afk' } });
     fireEvent.click(screen.getByText('Send report'));
     await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(7, '5', 'afk', ''));
-    await waitFor(() => expect(screen.getByText(/An admin will look at it/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/The moderators will look at it/)).toBeTruthy());
   });
 
   it('shows why reporting is closed', async () => {

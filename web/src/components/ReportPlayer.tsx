@@ -6,16 +6,16 @@ const CATEGORIES = [
   ['cheating', 'Cheating'],
   ['toxicity', 'Toxicity / harassment'],
   ['afk', 'AFK / left the game'],
+  ['unsafe', 'Safety concern (handled privately)'],
   ['other', 'Something else'],
 ] as const;
 
 /**
- * "Report a player" on a match page. Shown only to signed-in players; whether
- * they may report (on the roster, within 48 hours) is asked of the server when
- * they open it, since only the server knows the roster rules. Admins see
- * reports in the admin panel; the reported player is never told who filed one.
+ * "Report a player". Two homes: a match page (pass matchId, pick someone from
+ * that match's roster) and a profile (pass target, no match). Moderators see
+ * reports as tickets; the reported player is never told who filed one.
  */
-export function ReportPlayer({ matchId }: { matchId: number }) {
+export function ReportPlayer({ matchId, target: fixed }: { matchId?: number; target?: { steamid: string; name: string } }) {
   const [open, setOpen] = useState(false);
   const [elig, setElig] = useState<ReportEligibility | null>(null);
   const [target, setTarget] = useState('');
@@ -27,10 +27,11 @@ export function ReportPlayer({ matchId }: { matchId: number }) {
   const start = async () => {
     setOpen(true);
     setMsg(null);
+    if (fixed || matchId === undefined) return;
     try {
       setElig(await api.reportEligibility(matchId));
     } catch {
-      setElig({ canReport: false, reason: 'Could not check whether you can report on this match.' });
+      setElig({ canReport: false, reason: 'Could not load the players in this match.' });
     }
   };
 
@@ -39,12 +40,13 @@ export function ReportPlayer({ matchId }: { matchId: number }) {
     setBusy(true);
     setMsg(null);
     try {
-      await api.report(matchId, target, category, text);
-      setMsg({ ok: true, text: 'Thanks. An admin will look at it.' });
+      if (fixed) await api.fileReport({ targetId: fixed.steamid, category, text });
+      else await api.report(matchId!, target, category, text);
+      setMsg({ ok: true, text: 'Thanks. The moderators will look at it.' });
       setTarget('');
       setCategory('');
       setText('');
-      setElig(await api.reportEligibility(matchId));
+      if (!fixed && matchId !== undefined) setElig(await api.reportEligibility(matchId));
     } catch (err) {
       setMsg({ ok: false, text: err instanceof ApiError ? err.message : 'Could not send the report.' });
     } finally {
@@ -53,32 +55,41 @@ export function ReportPlayer({ matchId }: { matchId: number }) {
   };
 
   if (!open) {
-    return <button class="chip report" type="button" onClick={start}>Report a player</button>;
+    return <button class="chip report" type="button" onClick={start}>{fixed ? `Report ${fixed.name}` : 'Report a player'}</button>;
   }
 
+  const ready = fixed ? true : elig?.canReport === true;
+  const needsText = category === 'unsafe';
   return (
     <div class="report">
-      <h3>Report a player</h3>
-      {!elig && <p class="muted">Checking...</p>}
-      {elig && !elig.canReport && <p class="muted">{capitalise(elig.reason ?? 'You cannot report on this match')}.</p>}
-      {elig?.canReport && (
+      <h3>{fixed ? `Report ${fixed.name}` : 'Report a player'}</h3>
+      {!fixed && !elig && <p class="muted">Checking...</p>}
+      {!fixed && elig && !elig.canReport && <p class="muted">{capitalise(elig.reason ?? 'You cannot report on this match')}.</p>}
+      {ready && (
         <form class="report__form" onSubmit={submit}>
-          <select value={target} aria-label="Player" onChange={(e) => setTarget((e.target as HTMLSelectElement).value)}>
-            <option value="">Who?</option>
-            {elig.targets!.map((t) => (
-              <option key={t.steamid} value={t.steamid} disabled={t.alreadyReported}>
-                {t.name}{t.alreadyReported ? ' (reported)' : ''}
-              </option>
-            ))}
-          </select>
+          {!fixed && (
+            <select value={target} aria-label="Player" onChange={(e) => setTarget((e.target as HTMLSelectElement).value)}>
+              <option value="">Who?</option>
+              {/* Marked, never disabled: a safety report about someone you
+                  already reported for this match is a different report, and
+                  the server refuses the true duplicates. */}
+              {elig!.targets!.map((t) => (
+                <option key={t.steamid} value={t.steamid}>
+                  {t.name}{t.alreadyReported ? ' (reported)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <select value={category} aria-label="Reason" onChange={(e) => setCategory((e.target as HTMLSelectElement).value)}>
             <option value="">What happened?</option>
             {CATEGORIES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
           </select>
-          <textarea value={text} maxLength={1000} placeholder="Details (optional): when, which map, what they did"
-            aria-label="Details" onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
+          {needsText && <p class="muted">This is seen only by the people who run the community, not by the whole moderator team. Say what happened in as much detail as you are comfortable with.</p>}
+          <textarea value={text} maxLength={1000} aria-label="Details"
+            placeholder={needsText ? 'What happened (required)' : 'Details (optional): when, which map, what they did'}
+            onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
           <div class="admin-form">
-            <button class="btn" type="submit" disabled={busy || !target || !category}>Send report</button>
+            <button class="btn" type="submit" disabled={busy || (!fixed && !target) || !category || (needsText && !text.trim())}>Send report</button>
             <button class="chip" type="button" onClick={() => setOpen(false)}>Close</button>
           </div>
         </form>

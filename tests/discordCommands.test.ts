@@ -100,14 +100,22 @@ describe('slash commands', () => {
 });
 
 describe('/report', () => {
+  const rows = () => db.prepare('SELECT r.match_id, r.reporter_id, t.target_id, r.category, r.text FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id ORDER BY r.id').all();
+
   it('files against your latest match together, privately', async () => {
     play('a');
     const latest = play('b');
     const r = await run('report', { player: '905', reason: 'afk', details: 'gone all of map 2' });
     expect(r.ephemeral).toBe(true);
     expect(text(r)).toContain(`match #${latest}`);
-    const row = db.prepare('SELECT match_id, reporter_id, target_id, category, text FROM reports').get();
-    expect(row).toEqual({ match_id: latest, reporter_id: IDS[0], target_id: IDS[5], category: 'afk', text: 'gone all of map 2' });
+    expect(rows()).toEqual([{ match_id: latest, reporter_id: IDS[0], target_id: IDS[5], category: 'afk', text: 'gone all of map 2' }]);
+  });
+
+  it('files with no match at all when you have none together', async () => {
+    const r = await run('report', { player: '905', reason: 'toxicity', details: 'in voice' });
+    expect(text(r)).toMatch(/reported player5/i);
+    expect(text(r)).not.toMatch(/match #/);
+    expect(rows()).toEqual([{ match_id: null, reporter_id: IDS[0], target_id: IDS[5], category: 'toxicity', text: 'in voice' }]);
   });
 
   it('takes an explicit match, refuses a repeat, yourself, and unlinked targets', async () => {
@@ -119,16 +127,18 @@ describe('/report', () => {
     expect(text(await run('report', { player: '999', reason: 'afk' }))).toMatch(/not linked/);
   });
 
-  it('says so when you have no recent match together', async () => {
-    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/last 48 hours/);
+  it('offers the safety category and insists on details for it', async () => {
+    const def = COMMAND_DEFS.find((d) => d.name === 'report')!;
+    expect(JSON.stringify(def)).toContain('unsafe');
+    expect(text(await run('report', { player: '905', reason: 'unsafe' }))).toMatch(/say what happened/i);
   });
   // The web route has always required an active player. The command checked
   // nothing, so a banned player could keep filing reports from Discord.
   it('refuses a reporter who is banned, not yet active, or merged away, and files nothing', async () => {
     const { banPlayer, unbanPlayer } = await import('../src/admin/players.js');
-    const { addAlias } = await import('../src/aliases.js');
+    const { addAlias, removeAlias } = await import('../src/aliases.js');
     play('a');
-    const filed = () => (db.prepare('SELECT COUNT(*) AS n FROM reports').get() as { n: number }).n;
+    const filed = () => (db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get() as { n: number }).n;
 
     banPlayer(db, IDS[0], IDS[1], 'toxic', 60);
     expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/banned/i);
@@ -142,5 +152,10 @@ describe('/report', () => {
     expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/merged into another/i);
 
     expect(filed()).toBe(0);
+    // And it was the standing that refused each time: the same command from
+    // the same player goes through once nothing is wrong with them.
+    removeAlias(db, IDS[0]);
+    expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/reported player5/i);
+    expect(filed()).toBe(1);
   });
 });

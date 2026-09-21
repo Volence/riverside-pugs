@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { ensureTicketSchema } from './tickets/schema.js';
+import { migrateLegacyReports } from './tickets/migrate.js';
 
 export type DB = Database.Database;
 
@@ -746,6 +748,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // played least.
   standing_min_games: '10',
   admin_feed_reports: '1',
+  ticket_mod_ban_max_minutes: '10080',
+  ticket_reports_per_day: '5',
   admin_feed_actions: '1',
   admin_feed_penalties: '1',
   admin_feed_accounts: '1',
@@ -1004,6 +1008,14 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'servers', 'log_auth', "TEXT NOT NULL DEFAULT 'off'");
   ensureColumn(db, 'servers', 'log_auth_boot', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'servers', 'log_auth_seq', 'INTEGER NOT NULL DEFAULT 0');
+  // Moderators: may work tickets and nothing else. Deliberately not read by
+  // serverAdmins.ts, so the flag grants nothing on a game server.
+  ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');
+  // The ticket a ban was issued from, so the ban list and the ticket point at
+  // each other. Null for every ban issued from the Players tab.
+  ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
+  ensureTicketSchema(db);
+  migrateLegacyReports(db);
   seed(db);
   return db;
 }

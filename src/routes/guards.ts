@@ -59,3 +59,25 @@ export function makeRequireAdmin(db: DB) {
     return steamid;
   };
 }
+
+/** Per-route guard for tickets: an active moderator or admin's steamid, or
+ *  the 401/403 reply sent and null. "Active" is inGoodStanding, as for every
+ *  other guard here, so a moderator who is banned, or whose SteamID has been
+ *  merged into another account, is refused whatever status still says. Which
+ *  tickets that person may see is a separate question, answered per ticket
+ *  by canSeeTicket. */
+export function makeRequireMod(db: DB) {
+  return function requireMod(req: FastifyRequest, reply: FastifyReply): string | null {
+    const steamid = getSession(req, db);
+    if (!steamid) {
+      reply.code(401).send({ error: 'not logged in' });
+      return null;
+    }
+    const player = getPlayer(db, steamid);
+    if (!player || (player.is_admin !== 1 && player.is_mod !== 1) || !inGoodStanding(db, steamid)) {
+      reply.code(403).send({ error: 'staff only' });
+      return null;
+    }
+    return steamid;
+  };
+}

@@ -2044,3 +2044,15 @@ tbody tr.is-lifted td { opacity: 0.55; }
    choice already made. One neutral treatment for all three kinds: the word is
    the payoff, and three colours would turn rosters into confetti. */
 .titletag { display: inline-block; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); border: 1px solid var(--border-strong); border-radius: 2px; padding: 0 var(--sp-1); margin-left: var(--sp-2); vertical-align: middle; white-space: nowrap; }
+
+/* Tickets. A row is a button so the whole line is one target. */
+.tickets { list-style: none; margin: 0; padding: 0; }
+.ticket-row {
+  display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline;
+  width: 100%; padding: 0.6rem 0.25rem; text-align: left;
+  background: none; border: 0; border-bottom: 1px solid var(--border);
+  color: inherit; font: inherit; cursor: pointer;
+}
+.ticket-row:hover, .ticket-row:focus-visible { background: rgba(255, 255, 255, 0.04); }
+.ticket-row__id { font-variant-numeric: tabular-nums; opacity: 0.7; }
+.ticket-restricted { border-left: 3px solid #de4e40; padding-left: 0.75rem; margin: 0.75rem 0; }

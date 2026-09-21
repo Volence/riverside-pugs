@@ -70,6 +70,7 @@ import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
 import { apiRoutes } from './routes/api.js';
+import { ticketRoutes } from './routes/tickets.js';
 import { statsRoutes } from './routes/stats.js';
 import { replayRoutes } from './routes/replays.js';
 import { devRoutes } from './routes/dev.js';
@@ -1043,6 +1044,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         handle: (i) => handleCommand({
           db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
           banMessage: (steamid) => banMessage(deps.db, steamid),
+          adminSteamIds: deps.config.adminSteamIds,
         }, i),
       },
     })
@@ -1066,10 +1068,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // that is lost.
     try { logAuth.flush(); } catch { /* database already closed */ }
   });
-  await app.register(apiRoutes, { db: deps.db, matchmaker });
+  await app.register(apiRoutes, {
+    db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds, broadcast: (e) => hub.broadcast(e),
+  });
+  await app.register(ticketRoutes, {
+    db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
+  });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
-    dlc4Probe: deps.dlc4Probe, adminSync, logAuth,
+    dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
     logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {

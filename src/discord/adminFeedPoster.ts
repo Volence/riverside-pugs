@@ -1,26 +1,21 @@
 import type { DB } from '../db.js';
 import { FEED_SETTING, subscribeAdminEvents, type AdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
-import { getPlayer, playerByDiscordId } from '../players.js';
+import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
-import { getReport, resolveReport } from '../reports.js';
 import { activeTimeout } from '../penalties.js';
-import { logAdmin } from '../admin/audit.js';
-import { campaignDisplayName } from '../campaignRegistry.js';
 import { escapeName } from './presenter.js';
-import { getMessage, saveMessage } from './messageStore.js';
-import type { BotInteraction, BotTransport, InteractionReply, MessagePayload } from './transport.js';
+import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
 const COLOR = { report: 0xde4e40, action: 0xc9a45c, penalty: 0x8a7f73, account: 0x45b39c, problem: 0xde4e40 };
 
 /**
  * Posts the admin feed to the private admin channel.
  *
- * Reports get a card with Resolve / Dismiss buttons, and that card is edited
- * in place whenever the report is settled, from Discord or from the website,
- * so the channel never carries a stale open report. Everything else is one
- * short line per event. Posts go out one at a time so the channel keeps event
- * order.
+ * A report is one plain line, whether it opens a ticket or joins one already
+ * open; there is no card and nothing to edit, because tickets are worked from
+ * the admin panel, not from Discord. Everything else is one short line per
+ * event too. Posts go out one at a time so the channel keeps event order.
  */
 export class AdminFeedPoster {
   private chain: Promise<void> = Promise.resolve();
@@ -54,21 +49,8 @@ export class AdminFeedPoster {
   }
 
   private async deliver(e: AdminEvent): Promise<void> {
-    // A settled report edits its card whatever the toggles say: the card is
-    // already in the channel and must not be left showing buttons.
-    if (e.kind === 'admin_action' && e.action === 'resolve_report') {
-      await this.refreshReport(Number(e.target));
-      return;
-    }
     const channelId = this.channel(e.kind);
     if (!channelId) return;
-    if (e.kind === 'report') {
-      const payload = this.reportCard(e.reportId);
-      if (!payload) return;
-      const messageId = await this.deps.transport.send(channelId, payload);
-      saveMessage(this.deps.db, { kind: 'report', ref: String(e.reportId), channelId, messageId });
-      return;
-    }
     const line = this.line(e);
     if (!line) return;
     await this.deps.transport.send(channelId, {
@@ -76,39 +58,17 @@ export class AdminFeedPoster {
     });
   }
 
-  private reportCard(id: number): MessagePayload | null {
-    const r = getReport(this.deps.db, id);
-    if (!r) return null;
-    const match = `[#${r.matchId}${r.campaign ? ` ${campaignDisplayName(this.deps.db, r.campaign)}` : ''}](${this.deps.publicUrl}/match/${r.matchId})`;
-    const lines = [
-      `**${escapeName(r.targetName ?? r.targetId)}** reported for **${r.category}** by ${escapeName(r.reporterName ?? r.reporterId)} in ${match}`,
-    ];
-    if (r.text) lines.push(`> ${escapeName(r.text).replace(/\n/g, '\n> ')}`);
-    if (r.status !== 'open') {
-      lines.push(`**${r.status === 'resolved' ? 'Resolved' : 'Dismissed'}** by ${this.name(r.resolvedBy ?? '')}${r.resolutionNote ? `: ${escapeName(r.resolutionNote)}` : ''}`);
-    }
-    return {
-      embeds: [{ title: `Report #${r.id}`, url: `${this.deps.publicUrl}/admin`, description: lines.join('\n'), color: r.status === 'open' ? COLOR.report : 0x4a4540 }],
-      components: r.status === 'open'
-        ? [[
-          { kind: 'button', customId: `r:${r.id}:resolve`, label: 'Resolve', style: 'success' },
-          { kind: 'button', customId: `r:${r.id}:dismiss`, label: 'Dismiss', style: 'secondary' },
-          { kind: 'link', url: `${this.deps.publicUrl}/admin`, label: 'Admin panel' },
-        ]]
-        : [],
-      mentionUserIds: [],
-    };
-  }
-
-  private async refreshReport(id: number): Promise<void> {
-    const stored = getMessage(this.deps.db, 'report', String(id));
-    const payload = this.reportCard(id);
-    if (!stored || !payload) return;
-    await this.deps.transport.edit(stored.channel_id, stored.message_id, payload);
-  }
-
-  private line(e: Exclude<AdminEvent, { kind: 'report' }>): { text: string; color: number } | null {
+  private line(e: AdminEvent): { text: string; color: number } | null {
     switch (e.kind) {
+      case 'report': {
+        const link = `[#${e.ticketId}](${this.deps.publicUrl}/admin?ticket=${e.ticketId})`;
+        return {
+          text: e.created
+            ? `🎫 New ticket ${link} about **${this.name(e.targetId)}** (${e.category}).`
+            : `🎫 Another report on ticket ${link} about **${this.name(e.targetId)}** (${e.category}).`,
+          color: COLOR.report,
+        };
+      }
       case 'admin_action': return { text: this.actionText(e), color: COLOR.action };
       case 'penalty': {
         const t = activeTimeout(this.deps.db, e.steamid);
@@ -200,6 +160,7 @@ export class AdminFeedPoster {
       case 'unban': return `${who} unbanned ${target}`;
       case 'activate': return `${who} activated ${target}`;
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;
+      case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
       case 'note': return `${who} added a note on ${target}`;
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;
@@ -217,24 +178,29 @@ export class AdminFeedPoster {
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``
         : `${who} changed the ${e.target} setting`;
+      case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
+      case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': {
+        const ticket = `ticket [#${e.target}](${this.deps.publicUrl}/admin?ticket=${e.target})`;
+        switch (e.action) {
+          case 'ticket_open': return `${who} opened ${ticket}`;
+          case 'ticket_claim': return `${who} ${d.claim === false ? 'released' : 'claimed'} ${ticket}`;
+          case 'ticket_close': return `${who} closed ${ticket}: ${String(d.outcome ?? '').replace(/_/g, ' ')}`;
+          case 'ticket_reopen': return `${who} reopened ${ticket}`;
+          case 'ticket_ban': return `${who} banned from ${ticket}: ${escapeName(String(d.reason ?? ''))} (${d.minutes ? fmtMinutes(Number(d.minutes)) : 'permanent'})`;
+          default: return `${who} updated ${ticket}`;
+        }
+      }
       default: return `${who} ${e.action.replace(/_/g, ' ')} ${e.target}`;
     }
   }
 
-  /** Resolve / Dismiss from the report card. Admins only. */
-  async handleButton(i: Extract<BotInteraction, { kind: 'button' }>): Promise<InteractionReply> {
-    const say = (content: string): InteractionReply => ({ ephemeral: true, payload: { content, embeds: [], components: [], mentionUserIds: [] } });
-    const [, idRaw, action] = i.customId.split(':');
-    const admin = playerByDiscordId(this.deps.db, i.userId);
-    if (!admin || admin.is_admin !== 1 || admin.status !== 'active') return say('Admins only.');
-    const id = Number(idRaw);
-    const report = getReport(this.deps.db, id);
-    if (!report) return say('That report no longer exists.');
-    if (report.status !== 'open') return say(`Already ${report.status}.`);
-    const status = action === 'dismiss' ? 'dismissed' : 'resolved';
-    resolveReport(this.deps.db, id, admin.steamid, status, '');
-    logAdmin(this.deps.db, admin.steamid, 'resolve_report', id, { status, note: '', via: 'discord' });
-    return say(`Report #${id} ${status}. Add a note in the admin panel if you want one on record.`);
+  /** Report cards posted before tickets existed still carry Resolve and
+   *  Dismiss. They must answer, not time out. */
+  async handleButton(_i: Extract<BotInteraction, { kind: 'button' }>): Promise<InteractionReply> {
+    return {
+      ephemeral: true,
+      payload: { content: `Reports are tickets now. Open ${this.deps.publicUrl}/admin and use the Tickets tab.`, embeds: [], components: [], mentionUserIds: [] },
+    };
   }
 }
 

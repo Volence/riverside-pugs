@@ -15,7 +15,6 @@ import {
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { clearPenalties } from '../penalties.js';
-import { listReports, resolveReport } from '../reports.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
@@ -26,6 +25,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { publishBanChange } from '../banEvents.js';
 import { hasActiveBan } from '../banState.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
+import { restrictOpenTicketAbout } from '../tickets/store.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
 import { endSessions } from '../session.js';
@@ -53,12 +53,15 @@ export interface AdminRouteOpts {
   /** Asks Steam about one player now and resolves with the rows written.
    *  Absent on an install with no Steam api key, where the route says so. */
   refreshSignals?: (steamid: string) => Promise<number>;
+  /** config.adminSteamIds: who is let into a ticket that becomes restricted
+   *  because the player it is about was just promoted. */
+  adminSteamIds: string[];
 }
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
 export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): Promise<void> {
-  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher } = opts;
+  const { db, matchmaker, releaser, broadcast, integrityJobs, adminSync, logAuth, logSecretPusher, adminSteamIds } = opts;
   const requireAdmin = makeRequireAdmin(db);
   const dlc4Probe = opts.dlc4Probe ?? serverHasDlc4;
 
@@ -69,8 +72,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.get('/api/admin/players/:steamid', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    const detail = playerDetail(db, (req.params as { steamid: string }).steamid);
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const detail = playerDetail(db, (req.params as { steamid: string }).steamid, adminId);
     if (!detail) return reply.code(404).send({ error: 'no such player' });
     return detail;
   });
@@ -135,11 +139,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (typeof isAdmin !== 'boolean') return reply.code(400).send({ error: 'isAdmin must be true or false' });
     if (t.steamid === t.adminId && !isAdmin) return reply.code(400).send({ error: 'you cannot remove your own admin' });
     const was = getPlayer(db, t.steamid)?.is_admin === 1;
-    db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
-    // A change of rights starts from a fresh sign-in: a session that was open
-    // while somebody was an admin does not outlive their being one. Only on
-    // a real change, so re-saving the same value signs nobody out.
-    if (was !== isAdmin) endSessions(db, t.steamid);
+    db.transaction(() => {
+      db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
+      if (isAdmin) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      // A change of rights starts from a fresh sign-in: a session that was open
+      // while somebody was an admin does not outlive their being one. Only on
+      // a real change, so re-saving the same value signs nobody out.
+      if (was !== isAdmin) endSessions(db, t.steamid);
+    })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
     return { ok: true };
   });
@@ -152,6 +159,24 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!t) return reply;
     endSessions(db, t.steamid);
     logAdmin(db, t.adminId, 'sign_out', t.steamid);
+    return { ok: true };
+  });
+
+  app.post('/api/admin/players/:steamid/mod', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const { isMod } = (req.body ?? {}) as { isMod?: unknown };
+    if (typeof isMod !== 'boolean') return reply.code(400).send({ error: 'isMod must be true or false' });
+    const was = getPlayer(db, t.steamid)?.is_mod === 1;
+    db.transaction(() => {
+      db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
+      if (isMod) restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      // The same rule as the admin flag above: a demoted moderator loses the
+      // tickets now, not when a 30 day session runs out, and a promoted one
+      // starts from a fresh sign-in. Only on a real change.
+      if (was !== isMod) endSessions(db, t.steamid);
+    })();
+    logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
     return { ok: true };
   });
 
@@ -506,25 +531,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true, value: v.value };
   });
 
-  app.get('/api/admin/reports', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    const status = String((req.query as { status?: string }).status ?? 'open');
-    if (!['open', 'resolved', 'dismissed', 'all'].includes(status)) return reply.code(400).send({ error: 'bad status' });
-    return { reports: listReports(db, status) };
-  });
-
-  app.post('/api/admin/reports/:id/resolve', async (req, reply) => {
-    const adminId = requireAdmin(req, reply);
-    if (!adminId) return reply;
-    const id = Number((req.params as { id: string }).id);
-    const { status, note } = (req.body ?? {}) as { status?: unknown; note?: unknown };
-    if (status !== 'resolved' && status !== 'dismissed') return reply.code(400).send({ error: 'status must be resolved or dismissed' });
-    const text = typeof note === 'string' ? note.trim().slice(0, 1000) : '';
-    if (!resolveReport(db, id, adminId, status, text)) return reply.code(404).send({ error: 'no such report' });
-    logAdmin(db, adminId, 'resolve_report', id, { status, note: text });
-    return { ok: true };
-  });
-
   const REVIEW_STATES = new Set(['new', 'reviewed', 'dismissed']);
 
   app.get('/api/admin/integrity', async (req, reply) => {
@@ -636,7 +642,8 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   app.get('/api/admin/audit', async (req, reply) => {
-    if (!requireAdmin(req, reply)) return reply;
-    return { actions: recentActions(db) };
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    return { actions: recentActions(db, adminId) };
   });
 }
