@@ -24,6 +24,9 @@ export type AdminEvent =
   // once per player per match, never per burst: a macro trips on every pounce
   // and per-burst posting would bury the feed under one player's round. This is
   // evidence to look at, not a verdict.
+  // Little Anti-Cheat raised a flag on a player. Posted once per player per
+  // cheat per match; LilAC fires repeatedly while a cheat looks active.
+  | { kind: 'lilac_flag'; steamid: string; cheat: string; banned: boolean; matchId: number | null }
   | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string };
 
 /** The settings toggle that silences each kind in the admin channel. */
@@ -36,6 +39,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   abandon: 'admin_feed_penalties',
   signon_drop: 'admin_feed_problems',
   input_flag: 'admin_feed_problems',
+  lilac_flag: 'admin_feed_problems',
 };
 
 type Listener = (e: AdminEvent) => void;

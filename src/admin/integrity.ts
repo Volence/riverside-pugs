@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import type { RoundMetrics } from '../integrity/round.js';
 import { aggregate, scorePlayers, type ScoredPlayer } from '../integrity/score.js';
+import { flagsForPlayer, type IntegrityFlagRow } from '../integrityFlags.js';
 
 export interface IntegrityRoundRow {
   matchId: number;
@@ -63,7 +64,9 @@ export function integrityBoard(db: DB, seasonId: number | null): IntegrityBoardR
     .map((p) => ({ ...p, name: names.get(p.steamid) || p.steamid, clips: clips.get(p.steamid) ?? 0 }));
 }
 
-export function integrityPlayer(db: DB, steamid: string): { rounds: IntegrityRoundRow[]; clips: IntegrityClipRow[] } {
+export function integrityPlayer(
+  db: DB, steamid: string,
+): { rounds: IntegrityRoundRow[]; clips: IntegrityClipRow[]; flags: IntegrityFlagRow[] } {
   const rounds = (db.prepare(
     `SELECT r.match_id, r.ordinal, r.half, r.slot, m.campaign, r.metrics, r.computed_at,
             COALESCE(v.state, 'new') AS state, COALESCE(v.note, '') AS note
@@ -94,5 +97,7 @@ export function integrityPlayer(db: DB, steamid: string): { rounds: IntegrityRou
     detail: JSON.parse(c.detail) as Record<string, unknown>,
   }));
 
-  return { rounds, clips };
+  // A separate list, not folded into clips: a flag has no replay behind it and
+  // nothing to watch, so it belongs beside them rather than among them.
+  return { rounds, clips, flags: flagsForPlayer(db, steamid) };
 }
