@@ -1,8 +1,9 @@
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
-import type { LiveEvent, StatDef } from '../api';
+import type { EndorseKind, LiveEvent, StatDef } from '../api';
 import { deriveLiveStats, labelFor, liveGroupStarts } from '../format';
 import { PlayerLink } from './bits';
+import { TitleTag } from './TitleTag';
 import { markColumn, directionOf, type Mark } from '../outliers';
 import { EVENT_KINDS, valueText } from '../replay/eventText';
 import { enrichEvents, enrichmentText, fromLiveEvents } from '../eventEnrich';
@@ -17,6 +18,9 @@ export interface StatRow {
    *  would read as the worst numbers in the match; the row renders dashes
    *  instead and takes no part in marks or totals. Absent means captured. */
   captured?: boolean;
+  /** The endorsement title they have earned, if any. The match page passes
+   *  it; the live scoreboard does not. */
+  title?: EndorseKind | null;
 }
 
 /** What an uncaptured cell reads. An en dash, not a zero and not "n/a":
@@ -100,7 +104,7 @@ export function StatTable(
       </tr>,
       ...players.map((p, i) => (
         <tr key={p.steamid} title={p.captured === false ? UNCAPTURED_TITLE : undefined}>
-          <td class="live__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
+          <td class="live__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /><TitleTag kind={p.title} /></td>
           {cols.map((k) => {
             if (p.captured === false) {
               return <td class={`${cls(k)} is-dim`} key={k}>{UNCAPTURED}</td>;

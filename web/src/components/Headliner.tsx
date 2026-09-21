@@ -1,17 +1,20 @@
+import type { EndorseKind } from '../api';
 import { fmtDelta, deltaClass } from '../format';
+import { TitleTag } from './TitleTag';
 
 /**
  * The rating hero: eyebrow, name in Anton, rating in gold Anton at hero size
  * with a season delta beside it, then a small grid of eyebrowed numbers.
  * The profile's hero and the leaderboard's side card are this one shape.
  *
- * The identity line (flag, pronouns) and the bio are optional, because the
- * leaderboard's side card uses this component too and has none of them.
+ * The identity line (flag, pronouns), the bio and the title are optional,
+ * because the leaderboard's side card uses this component too and has none
+ * of them.
  */
 export function Headliner(
   {
     eyebrow, name, rating, delta, stats, avatar,
-    pronouns, countryCode, countryLabel, countryFlag, bio,
+    pronouns, countryCode, countryLabel, countryFlag, bio, title,
   }: {
     eyebrow: string;
     name: string;
@@ -24,6 +27,8 @@ export function Headliner(
     countryLabel?: string | null;
     countryFlag?: string | null;
     bio?: string | null;
+    /** The endorsement title, shown beside the name. */
+    title?: EndorseKind | null;
   },
 ) {
   const hasIdentity = Boolean(countryFlag || pronouns);
@@ -31,7 +36,7 @@ export function Headliner(
     <section class={`panel headliner${avatar ? ' headliner--avatar' : ''}`}>
       {avatar && <img class="headliner__avatar" src={avatar} alt="" />}
       <p class="eyebrow headliner__eyebrow">{eyebrow}</p>
-      <h2 class="headliner__name">{name}</h2>
+      <h2 class="headliner__name">{name}<TitleTag kind={title} /></h2>
       {hasIdentity && (
         <div class="headliner__identity">
           {countryFlag && (

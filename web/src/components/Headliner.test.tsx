@@ -29,4 +29,11 @@ describe('Headliner', () => {
     rerender(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} />);
     expect(container.querySelector('.headliner')?.classList.contains('headliner--avatar')).toBe(false);
   });
+
+  it('shows an earned title beside the name, and nothing when there is none', () => {
+    const { rerender } = render(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} title="caller" />);
+    expect(screen.getByText('Caller').classList.contains('titletag')).toBe(true);
+    rerender(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} />);
+    expect(screen.queryByText('Caller')).toBeNull();
+  });
 });

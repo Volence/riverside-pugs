@@ -149,6 +149,8 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** The endorsement title they have earned, if any. */
+  title?: EndorseKind | null;
 }
 
 export interface Leaderboard {
@@ -180,6 +182,8 @@ export interface MatchPlayerStats {
   /** Skill-detect stats, already filtered server-side for the viewer: a
    *  self-visibility stat is present only when the viewer is the subject. */
   stats: Record<string, number>;
+  /** The endorsement title they have earned, if any. */
+  title?: EndorseKind | null;
 }
 
 export interface StatDef {
@@ -490,6 +494,14 @@ export interface Chemistry {
   worstAgainst: ChemistryLine | null;
 }
 
+/** Aggregate and anonymous: what was received, never from whom. */
+export interface EndorsementSummary {
+  counts: Record<EndorseKind, number>;
+  total: number;
+  perMatch: number;
+  title: EndorseKind | null;
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -529,6 +541,8 @@ export interface Profile {
   standings?: Record<string, Standing>;
   /** Optional only for a server older than the feature. */
   chemistry?: Chemistry;
+  /** Optional only for a server older than the feature. */
+  endorsements?: EndorsementSummary;
 }
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share. */

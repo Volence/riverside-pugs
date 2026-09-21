@@ -6,6 +6,7 @@ import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statL
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
+import { TitleTag } from '../components/TitleTag';
 
 /** Columns that are not stats and so are not part of the stat bag.
  *
@@ -175,7 +176,7 @@ export function Leaderboard({ me }: { me: string | null }) {
                           {/* The cell is a fixed width so SR can pin beside it on a
                               phone; a long name is clipped, and the title carries
                               the rest. */}
-                          <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /></td>
+                          <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /><TitleTag kind={r.title} /></td>
                           <td class="num sr lb__sr">{r.sr}</td>
                           <td class="num lb__wl">{r.wins}</td>
                           <td class="num lb__wl">{r.losses}</td>
