@@ -146,6 +146,18 @@ describe('matchReportTargets and myReports', () => {
     expect(matchReportTargets(db, 999, R1)).toMatchObject({ canReport: false, status: 404 });
   });
 
+  // A merge can leave a report whose reporter is now the accused, and a
+  // legacy self-report has the same shape. Either way the accused must not
+  // learn from the list that a case about them exists.
+  it('hides a report that ended up on a ticket about the reporter', () => {
+    const id = Number(db.prepare("INSERT INTO tickets (target_id, restricted, created_at) VALUES (?, 0, '2026-09-20T10:00:00.000Z')").run(R1).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, created_at)
+       VALUES (?, ?, 'afk', '', '2026-09-20T10:00:00.000Z')`,
+    ).run(id, R1);
+    expect(myReports(db, R1)).toEqual([]);
+  });
+
   it('shows a reporter their own reports with open or closed and nothing else', () => {
     fileReport(db, R1, { targetId: ACCUSED, category: 'cheating', text: 'x', matchId }, deps);
     db.prepare("UPDATE tickets SET status = 'closed', outcome = 'action_taken', outcome_note = 'banned'").run();
