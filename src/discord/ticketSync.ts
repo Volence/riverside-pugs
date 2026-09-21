@@ -116,7 +116,9 @@ export class TicketSync {
    *      who reads the forum;
    *   2. retire threads left behind by a fold;
    *   3. every open ticket, and every closed one not yet locked;
-   *   4. last, sync the forum's access list, so a post that step 1 or the
+   *   4. sweep the forum for posts with no ticket behind them, while that has
+   *      never yet worked;
+   *   5. last, sync the forum's access list, so a post that step 1 or the
    *      per-ticket pass failed to delete still keeps its subject out.
    *
    * `scope` is step 0's reach, and cost: reading a thread's members is a REST
