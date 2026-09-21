@@ -331,6 +331,29 @@ start and end `tMs`, the ghost's slot, the fidelity, the mean `|err|`, the mean
 distance. Up to `CLIPS_PER_ROUND` (5) highest-scoring, non-overlapping windows per
 player-round are kept.
 
+**Calibration against a known positive (2026-09-21).** `CLIP_MIN` was chosen before the
+analyzer had seen anyone track a ghost. `scripts/inject-synthetic-tracker.ts` rewrites one
+survivor's view in a real round so that they follow a ghost for the whole round, with a
+stated reaction lag and RMS aim error drifting over 300 ms, and scores the result with the
+real analyzer. Share of 92 injected rounds whose best window reaches each bar:
+
+| lag ms | error deg | >= 0.3 | >= 0.4 | >= 0.5 | >= 0.7 |
+|-------:|----------:|-------:|-------:|-------:|-------:|
+|      0 |       0.5 |   0.87 |   0.86 |   0.83 |   0.74 |
+|    150 |       0.5 |   0.78 |   0.64 |   0.59 |   0.17 |
+|    150 |         1 |   0.61 |   0.54 |   0.40 |   0.07 |
+|    150 |         2 |   0.32 |   0.18 |   0.08 |   0.00 |
+|    250 |         2 |   0.08 |   0.02 |   0.02 |   0.00 |
+
+As played, the best window in all 737 real player-rounds in hand is 0.151. So at 0.7 the
+detector flags a lock-on and misses every plausible human, and a bar of 0.3 to 0.4 would cost
+nothing in the history so far. It was left at 0.7 pending a look at the top of the version 4
+backfill over production's full history, which is three times the sample. The larger weakness
+is lag rather than the bar: a crosshair a frame and a half behind a ghost that changes
+direction disagrees with the bearing frame to frame even when it is following well. Scoring
+each window at the best of a few whole-frame lags is the candidate fix and is a change of
+metric.
+
 The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
 `R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `EYE_Z`, `TARGET_Z`, `PITCH_TOL`, `MIN_TRAVEL`, `E_DWELL`,
 `OCC_BLOCK_MS`, `MIN_CAL_EXPECTED`, `MIN_BOARD_ROUNDS`, `MIN_TRACK_WINDOWS`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live

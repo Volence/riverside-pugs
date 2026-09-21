@@ -153,7 +153,37 @@ export const TUNING = {
    *  stretches. They are scarce: the 189 replays in hand on 2026-09-21 hold 478
    *  between 16 players, about two per three player-rounds, 0 to 124 each. */
   MIN_TRACK_WINDOWS: 20,
-  /** Windows above this fidelity become reviewable clips. */
+  /** Windows above this fidelity become reviewable clips.
+   *
+   *  CALIBRATED 2026-09-21, AND IT LOOKS TOO HIGH. Left at 0.7 on purpose: the
+   *  evidence is below and the decision is the owner's. Until that day this
+   *  number had never seen a known positive. `scripts/inject-synthetic-tracker.ts`
+   *  makes one: a real round with one survivor's view rewritten to follow a
+   *  ghost for the WHOLE round, at a stated reaction lag and RMS aim error (the
+   *  error drifting over 300 ms, as a hand does). Share of 92 injected rounds
+   *  whose best window reaches each bar, under the version 4 metric:
+   *
+   *    lag ms  error   >=0.3  >=0.4  >=0.5  >=0.7
+   *       0     0.5     0.87   0.86   0.83   0.74    a lock-on
+   *     150     0.5     0.78   0.64   0.59   0.17
+   *     150     1       0.61   0.54   0.40   0.07
+   *     150     2       0.32   0.18   0.08   0.00    a plausible person
+   *     250     2       0.08   0.02   0.02   0.00
+   *
+   *  Against that, as played: across all 737 real player-rounds in hand the
+   *  best window anywhere is 0.151, so nothing at all reaches even 0.2. At 0.7
+   *  the detector flags an aimbot and misses every human. Something near 0.3
+   *  to 0.4 would catch a third to a half of the rounds of a person who tracks
+   *  at 1 to 2 degrees, at no cost in the history so far. Reasons not to have
+   *  simply done it: the 737 are a third of production's rounds and the
+   *  maximum of a larger sample will be higher, so look at the top of the
+   *  version 4 backfill on the real box first.
+   *
+   *  The bigger lever is lag, not the bar. 150 ms is a frame and a half, and a
+   *  ghost that changes direction makes a late crosshair's frame to frame
+   *  changes disagree with the bearing's even when it is following well. Scoring
+   *  each window at the best of a few whole-frame lags would be the fix, and is
+   *  a change of metric, not of threshold. */
   CLIP_MIN: 0.7,
   /** Most clips kept per player-round. */
   CLIPS_PER_ROUND: 5,
