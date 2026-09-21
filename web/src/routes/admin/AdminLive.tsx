@@ -81,9 +81,20 @@ export function AdminLive() {
 function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
   match: LiveBoardMatch; elapsedS: number; holdMaxMinutes: number; reload: () => void; isTarget: boolean;
 }) {
-  // Per card, so a failure shows on the match it happened to and a busy
-  // button on one match does not freeze the Hold on another.
-  const { busy, error, run } = useAction(reload);
+  // The error is per card, so a failure shows on the match it happened to.
+  // Busy is per PLAYER: an rcon call can take the whole rcon timeout against
+  // a slow box, and for that window the one thing that must stay pressable is
+  // Hold for the other player whose clock is still running.
+  const { error, run } = useAction(reload);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const runFor = (steamid: string): Run => async (fn, ask) => {
+    setBusyId(steamid);
+    try {
+      await run(fn, ask);
+    } finally {
+      setBusyId(null);
+    }
+  };
   const el = useRef<HTMLElement>(null);
   useEffect(() => {
     if (isTarget) el.current?.scrollIntoView?.({ block: 'start' });
@@ -130,7 +141,8 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, reload, isTarget }: {
             <ul class="live-roster">
               {team.map((p) => (
                 <PlayerRow key={p.steamid} match={m} player={p} elapsedS={elapsedS}
-                  holdMaxMinutes={holdMaxMinutes} busy={busy} run={run} blocked={blocked} />
+                  holdMaxMinutes={holdMaxMinutes} busy={busyId === p.steamid} run={runFor(p.steamid)}
+                  blocked={blocked} />
               ))}
             </ul>
           </div>

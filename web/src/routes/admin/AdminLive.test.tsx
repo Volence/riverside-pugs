@@ -156,6 +156,29 @@ describe('the live board', () => {
     expect(mockAdmin.leaveClock).not.toHaveBeenCalled();
   });
 
+  it('locks only the row being acted on, so one stuck request cannot grey out the other Hold', async () => {
+    // Two players dropped on one match is exactly when this matters: an rcon
+    // call against a slow box takes up to its timeout, and for that whole
+    // window the second player's clock is running with no button to stop it.
+    mockAdmin.live.mockResolvedValue(board({
+      teamA: [
+        player('2', 'bob', 'a', { kind: 'dropped', sinceS: 42, remainingS: 258, held: false, holdLeftS: null }),
+        player('3', 'carol', 'a', { kind: 'dropped', sinceS: 20, remainingS: 100, held: false, holdLeftS: null }),
+      ],
+      teamB: [],
+    }));
+    mockAdmin.leaveClock.mockReturnValue(new Promise(() => {}));
+    render(<AdminLive />);
+    fireEvent.click(within(await row('bob')).getByRole('button', { name: 'Hold' }));
+    await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '2', 'hold'));
+    expect((within(await row('bob')).getByRole('button', { name: 'Hold' }) as HTMLButtonElement).disabled).toBe(true);
+
+    const carol = within(await row('carol')).getByRole('button', { name: 'Hold' }) as HTMLButtonElement;
+    expect(carol.disabled).toBe(false);
+    fireEvent.click(carol);
+    await waitFor(() => expect(mockAdmin.leaveClock).toHaveBeenCalledWith(81, '3', 'hold'));
+  });
+
   it('puts a failure on the card it happened on', async () => {
     mockAdmin.leaveClock.mockRejectedValue(new ApiError(502, 'could not reach Dallas: rcon connect timeout'));
     render(<AdminLive />);
