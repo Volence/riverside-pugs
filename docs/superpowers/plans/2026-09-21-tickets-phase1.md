@@ -2863,3 +2863,93 @@ These are in the spec and not in this plan. They are listed so nobody mistakes t
 - **`ticket_threads`, `ticket_messages`, `ticket_attachments`** and removal: phase 2 creates them when it needs them.
 
 "My reports" is in the spec's phase 3 list. It is here instead because it needs nothing from Discord and phase 1 removes the only other feedback a reporter had.
+
+## Verification (2026-09-21)
+
+Task 9 was run for real, against a running server and a real browser, in the
+`worktree-tickets` worktree. Nothing here touched production.
+
+**Suite and build.** `npm test`: 198 files, 2637 tests, all passing (the
+ECONNREFUSED/AbortError lines in the output are expected noise from
+network-mocked tests, not failures). `npm run typecheck`: clean. `npm run
+build`: succeeded, `dist/public` produced.
+
+**Server.** Started with `DEV_MODE=1 PORT=8099 DB_PATH=<scratch>/tickets.sqlite
+REPLAY_DIR=<scratch>/replays ADMIN_STEAMIDS=76561199000000001 npx tsx
+src/index.ts` against a brand-new sqlite file under a scratch directory
+outside the repo. `SELECT COUNT(*) FROM servers` was confirmed 0 before any
+clicking. Killed and port 8099 confirmed free at the end.
+
+**Accounts.** Seven steamids logged in through `POST /api/dev/login`. That
+route creates and activates a player but does not consult `ADMIN_STEAMIDS`
+(it calls `upsertPlayer` with an empty admin list), so it never grants
+`is_admin`/`is_mod` on its own; those flags were set directly against the
+scratch database with `sqlite3` for the owner (admin), a second admin, and a
+moderator, exactly as the brief anticipated.
+
+**Filing and grouping.** Three different players filed reports about one
+target: a `griefing` report with a real match (a match row and its
+`match_players` roster were inserted directly in the scratch db, since no dev
+route builds a match with a chosen roster), a `toxicity` report with no
+match, and an `unsafe` report. Result: exactly two open tickets on that
+player, a normal one with 2 reports from 2 reporters, and a separate
+restricted one with 1 report, as designed.
+
+**Visibility.** As the owner, `GET /api/mod/tickets?filter=open` listed both.
+As a second admin who is not the owner, the same call listed only the normal
+ticket, and `GET /api/mod/tickets/2` (the restricted one) returned 404. As
+the moderator, the list also showed only the normal ticket.
+
+**Actions and audit.** Claim, Ban, Close and Reopen were all driven over HTTP
+against the normal ticket as the owner. The ban flipped `players.status` to
+`banned` and the `bans` row carried `ticket_id = 1`. All four actions
+(`ticket_claim`, `ticket_ban`, `ticket_close`, `ticket_reopen`) appeared in
+`GET /api/admin/audit`.
+
+**Reporter view.** After closing, `GET /api/reports/mine` for both reporters
+on the normal ticket showed `"status":"closed"` with no `outcome` field
+anywhere in the response. The ticket was reopened afterwards to leave
+Claim/Ban visible for the browser pass.
+
+**Moderator limits.** `GET /api/admin/players` as the moderator returned 403
+`{"error":"admins only"}`. `GET /api/me` as the moderator returned
+`isMod: true, isAdmin: false`.
+
+**Redaction.** A ban was placed from the restricted ticket as the owner with
+a distinctive reason string. Fetching the normal ticket's case file as the
+moderator (`GET /api/mod/tickets/1`) showed `"reason":"Withheld (restricted
+ticket)"` for that ban and the distinctive string did not appear anywhere in
+the response (checked by grep, zero matches). The rendered admin page showed
+the same withheld line under "About dev_0099".
+
+**Browser.** Headless `google-chrome-stable` is available on this machine. A
+throwaway CDP script adapted from `scripts/shoot-pages.mjs` (kept outside the
+repo, under the scratch directory) logged in via an in-page `fetch` to
+`/api/dev/login` so the real signed session cookie was set, then captured:
+`/admin?ticket=1` (the normal ticket) as the moderator at 1280px and 400px,
+`/admin` (the ticket list) as the moderator at 400px, and `/admin?ticket=2`
+(the restricted ticket) as the owner at 1280px. All pages rendered real data
+from the running server, not mocks. An automated scrollWidth/clientWidth
+probe found no horizontal overflow on any capture, and manual inspection of
+all four images confirmed it: `.ticket-row` and `.admin-form` wrap cleanly at
+400px. The restricted notice, access list and unredacted ban reason were all
+present on the restricted ticket as viewed by the owner. No CSS or code
+changes were needed.
+
+**Not verified, and why.** Nothing was run against a real game server (the
+scratch database's `servers` table stayed empty throughout, confirmed before
+starting). Nothing was run with Discord: `DEV_MODE=1` keeps the bot off and
+`/api/me` showed `discordEnabled: false` throughout. No production data was
+read, copied or migrated; only a fresh sqlite file under `/tmp` was used, and
+the worktree's own `data/` directory was never written to. `addAccess` (the
+"give access" control on a restricted ticket) and lifting a restriction were
+not exercised over HTTP, only rendered in the screenshot. Moderator ban-cap
+enforcement (a moderator attempting more than `ticket_mod_ban_max_minutes`)
+was not exercised over HTTP; only an admin ban was driven, since the account
+doing the driving needed to be an admin to check the audit log. A report
+carrying a replay `moment` was not created, since the brief only asked for a
+matched and an unmatched report and moment-capture UI is explicitly out of
+scope for this phase. Live refresh of an open ticket page and the Discord-side
+notifications (access-list DM, close DM, admin feed post for a restricted
+ticket) were not exercised; all are explicitly deferred to later phases
+above.
