@@ -193,13 +193,20 @@ export class TicketSync {
     if (t.restricted === 1 || why !== 'unconfigured' || t.status !== 'open') return;
     const { db } = this.deps;
     const rows = db.prepare(
-      'SELECT id, category FROM ticket_reports WHERE ticket_id = ? AND announced_at IS NULL ORDER BY id',
-    ).all(t.id) as { id: number; category: string }[];
+      'SELECT id, category, feed_held FROM ticket_reports WHERE ticket_id = ? AND announced_at IS NULL ORDER BY id',
+    ).all(t.id) as { id: number; category: string; feed_held: number }[];
     for (const r of rows) {
+      // Marked whether or not it is said: announced_at means "never
+      // reconsidered", and a held report must never be reconsidered either.
       db.prepare('UPDATE ticket_reports SET announced_at = ? WHERE id = ?').run(new Date().toISOString(), r.id);
-      // "New ticket" for the report that opened it, "Another report" after.
+      if (r.feed_held === 1) continue;
+      // "New ticket" for the report that opened it, "Another report" after,
+      // counted only over reports that could ever be said: a held sibling
+      // (one filed, or that arrived, while the ticket was restricted or
+      // about staff) does not count, so the first sayable report reads as a
+      // new ticket rather than hinting at a case the feed never heard of.
       const first = t.opened_by === null
-        && !db.prepare('SELECT 1 FROM ticket_reports WHERE ticket_id = ? AND id < ?').get(t.id, r.id);
+        && !db.prepare('SELECT 1 FROM ticket_reports WHERE ticket_id = ? AND id < ? AND feed_held = 0').get(t.id, r.id);
       publishAdminEvent({ kind: 'report', ticketId: t.id, targetId: t.target_id, category: r.category, created: first });
     }
   }

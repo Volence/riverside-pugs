@@ -96,10 +96,16 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
 
   const result = db.transaction((): FileResult => {
     const ticket = findOrOpen(db, target.steamid, restricted, null, deps);
+    // feed_held is set here, not decided later: whether this report may ever
+    // reach the admin feed is fixed at the moment it lands, by whether the
+    // ticket it lands on is restricted right now.
     const reportId = Number(db.prepare(
-      `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, map_ordinal, half, t_ms, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(ticket.id, reporter, category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null, now.toISOString()).lastInsertRowid);
+      `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      ticket.id, reporter, category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null,
+      now.toISOString(), restricted ? 1 : 0,
+    ).lastInsertRowid);
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };
   })();

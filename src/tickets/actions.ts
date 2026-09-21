@@ -59,7 +59,13 @@ export function setRestricted(db: DB, id: number, by: string, restricted: boolea
   }
   return told(id, guardUnique(() => db.transaction(() => {
     db.prepare('UPDATE tickets SET restricted = ? WHERE id = ?').run(restricted ? 1 : 0, id);
-    if (restricted) seedAccess(db, id, t.target_id, adminSteamIds, [by]);
+    if (restricted) {
+      seedAccess(db, id, t.target_id, adminSteamIds, [by]);
+      // Every report this ticket already holds is held from the feed for
+      // good: un-restricting later must not un-say what happened while it
+      // was restricted.
+      db.prepare('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id = ?').run(id);
+    }
     addTicketEvent(db, id, by, restricted ? 'restricted' : 'unrestricted');
   })(), `there is already an open ${restricted ? 'restricted' : 'normal'} ticket about this player`));
 }

@@ -83,6 +83,12 @@ export function seedAccess(
  */
 export function foldTicket(db: DB, gone: number, keep: number, access: 'merge' | 'drop', now = new Date()): void {
   db.prepare('UPDATE ticket_reports SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
+  // A restricted survivor's reports must never reach the admin feed, whatever
+  // ticket they used to live on: feed_held follows the survivor's current
+  // state, covering the ones that just moved in.
+  if ((db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(keep) as { restricted: number } | undefined)?.restricted === 1) {
+    db.prepare('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id = ?').run(keep);
+  }
   db.prepare('UPDATE ticket_events SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   db.prepare('UPDATE bans SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   if (access === 'merge') db.prepare('UPDATE OR IGNORE ticket_access SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
@@ -134,9 +140,15 @@ export function restrictOpenTicketAbout(
     foldTicket(db, normal.id, sibling.id, 'drop', now);
     return 'folded';
   }
-  if (accessSeed(db, targetId, adminSteamIds, exclude).length === 0) return 'nobody';
+  if (accessSeed(db, targetId, adminSteamIds, exclude).length === 0) {
+    // Nobody to give it to: it stays a normal ticket nobody restricted, but
+    // it is about staff, and its reports must never reach the admin feed.
+    db.prepare('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id = ?').run(normal.id);
+    return 'nobody';
+  }
   db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(normal.id);
   seedAccess(db, normal.id, targetId, adminSteamIds, [], now, exclude);
+  db.prepare('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id = ?').run(normal.id);
   addTicketEvent(db, normal.id, null, 'restricted', {}, now);
   return 'restricted';
 }

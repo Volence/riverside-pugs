@@ -919,6 +919,15 @@ export function openDb(path: string): DB {
   const announcedIsNew = !(db.prepare('PRAGMA table_info(ticket_reports)').all() as { name: string }[])
     .some((c) => c.name === 'announced_at');
   ensureColumn(db, 'ticket_reports', 'announced_at', 'TEXT');
+  // Whether this report must never reach the admin feed. Fixed by the
+  // report's history, not by its ticket's current state: set the moment it
+  // lands on, or its ticket becomes, a restricted or about-staff case, and
+  // never cleared, so un-restricting a ticket later cannot open the gate on
+  // what happened while it was restricted. See fileReport, setRestricted and
+  // restrictOpenTicketAbout for where it is set.
+  const feedHeldIsNew = !(db.prepare('PRAGMA table_info(ticket_reports)').all() as { name: string }[])
+    .some((c) => c.name === 'feed_held');
+  ensureColumn(db, 'ticket_reports', 'feed_held', 'INTEGER NOT NULL DEFAULT 0');
   // When this person was sent the DM saying they are on a restricted
   // ticket's access list. Charged before the send, so a refused DM is never
   // retried.
@@ -926,6 +935,9 @@ export function openDb(path: string): DB {
   migrateLegacyReports(db);
   // After the migration, so reports it has just created are covered too.
   if (announcedIsNew) db.exec('UPDATE ticket_reports SET announced_at = created_at WHERE announced_at IS NULL');
+  // One-time backfill: every report already sitting on a restricted ticket
+  // was always meant to be held, whether or not it predates this column.
+  if (feedHeldIsNew) db.exec('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id IN (SELECT id FROM tickets WHERE restricted = 1)');
   seed(db);
   return db;
 }
