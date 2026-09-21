@@ -22,7 +22,8 @@ import { Crosshair } from './routes/Crosshair';
 import { ReplayPage } from './routes/ReplayPage';
 import { LinkDiscord } from './routes/LinkDiscord';
 import { Admin } from './routes/Admin';
-import { Bans } from './routes/Bans';
+import { ADMIN_ROUTE_PATHS } from './routes/admin/adminRoutes';
+import { Redirect } from './components/Redirect';
 import { HowToPlay } from './routes/HowToPlay';
 import { HelpConsistency } from './routes/HelpConsistency';
 import { Panel } from './components/bits';
@@ -54,6 +55,10 @@ function NotFound() {
     </div>
   );
 }
+
+/** The ban list lives on the People desk now. Declared here rather than
+ *  inline, so the router is not handed a new component type every render. */
+const BansMoved = () => <Redirect to="/admin/people/bans" />;
 
 /** Live state is held at the root rather than inside the Play route, because
  *  the websocket connection and the ready-check countdown must survive
@@ -87,8 +92,11 @@ function App() {
           <Route path="/replay/file/:name" component={ReplayPage} />
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
-          <Route path="/admin" component={Admin} session={session} />
-          <Route path="/bans" component={Bans} session={session} />
+          {/* Every screen in the panel is a path now, so the shell needs the
+              whole subtree rather than one route. */}
+          {ADMIN_ROUTE_PATHS.map((p) => <Route key={p} path={p} component={Admin} session={session} />)}
+          {/* The ban list moved into the panel; the old URL is in bookmarks. */}
+          <Route path="/bans" component={BansMoved} />
           <Route path="/how-to-play" component={HowToPlay} session={session} />
           <Route path="/help/consistency" component={HelpConsistency} />
           <Route path="/link/discord" component={LinkDiscord} session={session} refresh={refresh} />

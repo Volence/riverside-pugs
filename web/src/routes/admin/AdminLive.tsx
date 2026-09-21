@@ -7,7 +7,7 @@ import { campaignName, fmtClock, mapName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { SpectatePanel } from '../../components/SpectatePanel';
 import { useAction, type Run } from './useAction';
-import { AdminQueuePanel, AdminServersPanel, RecentResultsPanel } from './MatchPanels';
+import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPanel } from './MatchPanels';
 import { OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
@@ -67,6 +67,9 @@ export function AdminLive() {
       {overview.data && (
         <>
           {panels.error && <p class="error">{panels.error}</p>}
+          {/* The same overview the panels below are built from, so the table
+              and the cards above it can never disagree about a match. */}
+          <OpenMatchesPanel open={overview.data.open} busy={panels.busy} run={panels.run} />
           <div class="admin-split admin-split--even">
             <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run} />
             <AdminQueuePanel queue={overview.data.queue} busy={panels.busy} run={panels.run} />

@@ -14,7 +14,7 @@ async function confirmDialog(name?: string | RegExp) {
   fireEvent.click(within(dialog).getByRole('button', { name: name ?? 'Confirm' }));
 }
 
-const { mockAdmin, mockApi } = vi.hoisted(() => ({
+const { mockAdmin, mockApi, mockPeople } = vi.hoisted(() => ({
   mockAdmin: {
     players: vi.fn(), player: vi.fn(), ban: vi.fn(), signOutPlayer: vi.fn(), steamRefresh: vi.fn(), overview: vi.fn(), live: vi.fn(), leaveClock: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
@@ -24,20 +24,37 @@ const { mockAdmin, mockApi } = vi.hoisted(() => ({
     reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(), setMapsToPlay: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
+  // The People desk is where a moderator lands, so a shell test reaches its
+  // search screen even when it is testing the redirect and nothing else.
+  mockPeople: { people: vi.fn() },
 }));
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin }, api: { ...actual.api, ...mockApi } };
+  return {
+    ...actual,
+    adminApi: { ...actual.adminApi, ...mockAdmin },
+    api: { ...actual.api, ...mockApi },
+    peopleApi: { ...actual.peopleApi, ...mockPeople },
+  };
 });
 
 const { Admin } = await import('./Admin');
 const { QueuePanel } = await import('./Play');
 const { ReportPlayer } = await import('../components/ReportPlayer');
+const { LocationProvider, Route, Router } = await import('preact-iso');
+const { ADMIN_ROUTE_PATHS } = await import('./admin/adminRoutes');
+const { Redirect } = await import('../components/Redirect');
+// The player detail and the integrity board are off the shell and are deleted
+// in the next step of this plan. Until they are, the cases that cover them
+// render them directly rather than through a desk.
+const { AdminPlayers } = await import('./admin/AdminPlayers');
+const { AdminIntegrity } = await import('./admin/AdminIntegrity');
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
 beforeEach(() => {
-  for (const fn of [...Object.values(mockAdmin), ...Object.values(mockApi)]) fn.mockReset();
+  for (const fn of [...Object.values(mockAdmin), ...Object.values(mockApi), ...Object.values(mockPeople)]) fn.mockReset();
+  mockPeople.people.mockResolvedValue({ players: [] });
   // The Integrity tab always asks for the analysis job's state, so every test
   // that opens it needs an answer whether or not it cares about one.
   mockAdmin.integrityJob.mockResolvedValue({
@@ -58,18 +75,28 @@ beforeEach(() => {
 
 const me = { steamid: '1', name: 'boss', avatar: null, status: 'active', isAdmin: true };
 
-/** Players was the default tab until Live became the landing page. */
-const openPlayers = () => fireEvent.click(screen.getByRole('tab', { name: 'Players' }));
+/** Every screen in the panel is a URL now, so tests navigate rather than
+ *  clicking a tab. ConfirmHost rides along: it renders nothing until an
+ *  action asks a question. */
+const renderAdmin = (path: string, session: Parameters<typeof Admin>[0]['session'] = { kind: 'active', me }) => {
+  history.replaceState(null, '', path);
+  return render(
+    <LocationProvider>
+      <Admin session={session} />
+      <ConfirmHost />
+    </LocationProvider>,
+  );
+};
 
 describe('Admin page', () => {
   it('refuses a non-admin without calling the admin API', () => {
-    render(<Admin session={{ kind: 'active', me: { ...me, isAdmin: false } }} />);
+    renderAdmin('/admin/people', { kind: 'active', me: { ...me, isAdmin: false } });
     expect(screen.getByText('Staff only.')).toBeTruthy();
     expect(mockAdmin.players).not.toHaveBeenCalled();
   });
 
-  it('lands an admin on the live board, which is the first tab', async () => {
-    render(<Admin session={{ kind: 'active', me }} />);
+  it('lands an admin on the live board, which is the first desk', async () => {
+    renderAdmin('/admin/live');
     const tabs = screen.getAllByRole('tab');
     expect(tabs[0].textContent).toBe('Live');
     expect(tabs[0].getAttribute('aria-selected')).toBe('true');
@@ -78,7 +105,7 @@ describe('Admin page', () => {
   });
 
   it('does not offer the live board to a moderator', () => {
-    render(<Admin session={{ kind: 'active', me: { ...me, isAdmin: false, isMod: true } }} />);
+    renderAdmin('/admin/people', { kind: 'active', me: { ...me, isAdmin: false, isMod: true } });
     expect(screen.queryByRole('tab', { name: 'Live' })).toBeNull();
     expect(mockAdmin.live).not.toHaveBeenCalled();
   });
@@ -93,8 +120,7 @@ describe('Admin page', () => {
       inputCaps: [],
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
-    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
-    openPlayers();
+    render(<><AdminPlayers me={me.steamid} /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('griefer')).toBeTruthy());
     fireEvent.click(screen.getByText('griefer'));
     await waitFor(() => expect(screen.getByPlaceholderText('Reason (shown to them)')).toBeTruthy());
@@ -123,8 +149,7 @@ describe('Admin page', () => {
         ],
       },
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('skinner')).toBeTruthy());
     fireEvent.click(screen.getByText('skinner'));
 
@@ -154,8 +179,7 @@ describe('Admin page', () => {
         others: [{ steamid: '9', name: 'banned main', linkedAt: '2026-08-01T00:00:00.000Z', unlinkedAt: '2026-09-19T00:00:00.000Z' }],
       }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('newcomer')).toBeTruthy());
     fireEvent.click(screen.getByText('newcomer'));
     await waitFor(() => expect(screen.getByText(/This Discord was previously linked to/)).toBeTruthy());
@@ -172,8 +196,7 @@ describe('Admin page', () => {
       inputCaps: [],
     });
     mockAdmin.signOutPlayer.mockResolvedValue({ ok: true });
-    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
-    openPlayers();
+    render(<><AdminPlayers me={me.steamid} /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('phished')).toBeTruthy());
     fireEvent.click(screen.getByText('phished'));
     fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Sign out everywhere' })));
@@ -191,8 +214,7 @@ describe('Admin page', () => {
       inputFlags: [],
       inputCaps: [],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
     fireEvent.click(screen.getByText('clean'));
     await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
@@ -230,8 +252,7 @@ describe('Admin page', () => {
           ],
         },
       }));
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
     fireEvent.click(screen.getByText('borrower'));
 
@@ -268,8 +289,7 @@ describe('Admin page', () => {
         flags: [{ kind: 'private_profile', text: 'Private profile: Steam will not show this account\'s age, hours or level. Plenty of people keep it that way.' }],
       },
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
     fireEvent.click(screen.getByText('borrower'));
     const section = await steamSection();
@@ -286,8 +306,7 @@ describe('Admin page', () => {
     mockAdmin.players.mockResolvedValue({ players: [steamRow] });
     mockAdmin.player.mockResolvedValue({ ...steamDetail, steamAccount: null });
     mockAdmin.steamRefresh.mockResolvedValue({ ok: true, refreshed: 1 });
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('borrower')).toBeTruthy());
     fireEvent.click(screen.getByText('borrower'));
     const section = await steamSection();
@@ -314,8 +333,7 @@ describe('Admin page', () => {
         }],
       }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    openPlayers();
+    render(<AdminPlayers me={me.steamid} />);
     await waitFor(() => expect(screen.getByText('clicker')).toBeTruthy());
     fireEvent.click(screen.getByText('clicker'));
     await waitFor(() => expect(document.getElementById('input-flags')).toBeTruthy());
@@ -329,26 +347,22 @@ describe('Admin page', () => {
   });
 
   it('settings tab shows grouped settings', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.settings.mockResolvedValue({
       settings: [{ key: 'ready_seconds', label: 'Ready check seconds', help: 'h', group: 'Queue', value: '120', type: { kind: 'int', min: 15, max: 600 } }],
       campaigns: [],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    renderAdmin('/admin/setup/settings');
     await waitFor(() => expect(screen.getByText('Ready check seconds')).toBeTruthy());
     expect((screen.getByLabelText('Ready check seconds') as HTMLInputElement).value).toBe('120');
   });
 
   it('says which servers are missing the mappack next to the campaign pool', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.settings.mockResolvedValue({
       settings: [{ key: 'map_pool', label: 'Campaign pool', help: 'h', group: 'Queue', value: '["no_mercy"]', type: { kind: 'campaigns' } }],
       campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }],
       serversMissingDlc4: ['Chicago'],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    renderAdmin('/admin/setup/settings');
     expect(await screen.findByText(/Chicago/)).toBeTruthy();
     expect(screen.getByText(/needs the L4D2 mappack/i)).toBeTruthy();
   });
@@ -358,13 +372,11 @@ describe('Admin page', () => {
   // The panel must degrade to "no notice", not take down every other
   // setting on the page.
   it('renders the campaign pool when the payload omits serversMissingDlc4 entirely', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.settings.mockResolvedValue({
       settings: [{ key: 'map_pool', label: 'Campaign pool', help: 'h', group: 'Queue', value: '["no_mercy"]', type: { kind: 'campaigns' } }],
       campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    renderAdmin('/admin/setup/settings');
     await waitFor(() => expect(screen.getByText('Campaign pool')).toBeTruthy());
     expect(screen.getByText('No Mercy')).toBeTruthy();
   });
@@ -401,7 +413,7 @@ describe('ReportPlayer', () => {
   });
 });
 
-describe('AdminMatches layout', () => {
+describe('the panels under the live board', () => {
   const overview = (): AdminOverview => ({
     open: [{
       id: 40, campaign: 'death_toll', state: 'live', serverId: 1, connected: 8, rostered: 8,
@@ -426,30 +438,25 @@ describe('AdminMatches layout', () => {
   });
 
   const openTab = async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.overview.mockResolvedValue(overview());
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
   };
 
   // Log signing (audit 2026-09-21 item 15): the secret is set up from here,
   // and the counters are what an admin watches before flipping to enforce.
   it('offers to set up log signing on a server that has no secret', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     (o.servers[0] as Record<string, unknown>).logAuth = { mode: 'off', hasSecret: false, counters: null };
     mockAdmin.overview.mockResolvedValue(o);
     mockAdmin.serverLogSecret.mockResolvedValue({ ok: true, pushed: true, rotated: false });
-    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     fireEvent.click(await screen.findByRole('button', { name: 'Set up' }));
     await confirmDialog('Generate and push');
     await waitFor(() => expect(mockAdmin.serverLogSecret).toHaveBeenCalledWith(1));
   });
 
   it('shows the signature counters and asks before enforcing', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     (o.servers[0] as Record<string, unknown>).logAuth = {
       mode: 'log', hasSecret: true,
@@ -457,8 +464,7 @@ describe('AdminMatches layout', () => {
     };
     mockAdmin.overview.mockResolvedValue(o);
     mockAdmin.serverLogAuth.mockResolvedValue({ ok: true });
-    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     expect(await screen.findByText(/ok 412 · unsigned 3 · bad 1 · replayed 0/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Log signing mode for Dallas'), { target: { value: 'enforce' } });
     await confirmDialog('Enforce');
@@ -468,15 +474,13 @@ describe('AdminMatches layout', () => {
   // The index into what abandoned matches left behind. Without it an aborted
   // match is only reachable from a Discord post that scrolls away.
   it('lists aborted matches with the leaver and a link to the record', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     o.aborted = [{
       id: 80, campaign: 'no_mercy', endedAt: '2026-09-20T21:58:52Z',
       teamAScore: 181, teamBScore: 105, abandonedBy: 'mayhem',
     }];
     mockAdmin.overview.mockResolvedValue(o);
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
     expect(screen.getByText('Aborted')).toBeTruthy();
     expect(screen.getByText(/181 - 105/)).toBeTruthy();
@@ -500,7 +504,6 @@ describe('AdminMatches layout', () => {
   // The pause ledger is for disputes: when one side says the other paused
   // them to death, the admin sees who paused, for how long, and on which map.
   it('lists each recent match\'s pauses with who and for how long', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     o.recent = [{
       id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
@@ -511,15 +514,13 @@ describe('AdminMatches layout', () => {
       ],
     }];
     mockAdmin.overview.mockResolvedValue(o);
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
     expect(screen.getByText('Team B 1:30 on map 2')).toBeTruthy();
     expect(screen.getByText('Reconnect 0:20 on map 3')).toBeTruthy();
   });
 
   it('lists each recent match\'s ready-ups with how long and who readied last', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     o.recent = [{
       id: 39, campaign: 'no_mercy', endedAt: '2026-09-18T04:00:00Z', teamAScore: 800, teamBScore: 600, winner: 'a', forecast: null,
@@ -533,23 +534,20 @@ describe('AdminMatches layout', () => {
       ],
     }];
     mockAdmin.overview.mockResolvedValue(o);
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
     expect(screen.getByText('2:10 on map 1, last killshot')).toBeTruthy();
     expect(screen.getByText('0:25 on map 2')).toBeTruthy();
   });
 
   it('shows the slow-to-ready table so a repeat offender stands out', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     o.slowToReady = [
       { steamid: '76561198000000001', name: 'killshot', readyups: 6, timesLast: 5, totalSeconds: 600, avgSeconds: 100 },
       { steamid: '76561198000000002', name: 'goober', readyups: 4, timesLast: 0, totalSeconds: 40, avgSeconds: 10 },
     ];
     mockAdmin.overview.mockResolvedValue(o);
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
     expect(screen.getByText('Slow to ready')).toBeTruthy();
     const row = screen.getByText('killshot').closest('tr')!;
@@ -559,12 +557,10 @@ describe('AdminMatches layout', () => {
   });
 
   it('shows no connect line for a match with no server yet', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     const o = overview();
     o.open[0] = { ...o.open[0], state: 'configuring', serverId: null, connect: null };
     mockAdmin.overview.mockResolvedValue(o);
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
     expect(screen.queryByText(/connect 45.32/)).toBeNull();
   });
@@ -575,10 +571,8 @@ describe('AdminMatches layout', () => {
   // .profile-grid both carry a comment about it) and missed on two of the
   // three tables on this tab.
   it('keeps every table inside a scroll wrapper so none can overflow its panel', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.overview.mockResolvedValue(overview());
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Matches' }));
+    const { container } = renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
 
     const tables = [...container.querySelectorAll('table.admin-table')];
@@ -609,8 +603,7 @@ describe('AdminIntegrity', () => {
   });
 
   const open = async (name = 'Tino') => {
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText(name)).toBeTruthy());
     fireEvent.click(screen.getByText(name));
     await waitFor(() => expect(mockAdmin.integrityPlayer).toHaveBeenCalled());
@@ -627,10 +620,8 @@ describe('AdminIntegrity', () => {
   /** Open the Integrity tab with the board empty, which is where the run
    *  controls matter most. */
   const openTab = async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [] });
-    render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    render(<><AdminIntegrity /><ConfirmHost /></>);
   };
 
   /** The column key shipped live and invisible for a day: it used `class="key"`,
@@ -728,15 +719,13 @@ describe('AdminIntegrity', () => {
   });
 
   it('ranks the higher composite first and calls the number theoretical, not a verdict', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
       players: [
         row(),
         row({ steamid: '20', name: 'PowerMustache', occZ: null, teamGap: null, fidMax: 0.2, fidP95: 0.1, pFid: 0.1, pOcc: null, pGap: null, composite: 0.1 }),
       ],
     });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
 
     const rows = container.querySelectorAll('tbody tr');
@@ -762,15 +751,13 @@ describe('AdminIntegrity', () => {
   // along as context. The best window used to BE the column, and a maximum over
   // rounds ranks whoever has played most.
   it('shows tracking as a share with the best window beside it, and n/a when there were too few windows', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
       players: [
         row(),
         row({ steamid: '20', name: 'PowerMustache', trackShare: null, pFid: null, fidMax: 0.12, composite: 0.4 }),
       ],
     });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
     const rows = container.querySelectorAll('tbody tr');
     expect(rows[0].textContent).toContain('0.310');
@@ -780,7 +767,6 @@ describe('AdminIntegrity', () => {
   });
 
   it('does not rank a player with too few rounds, and does not count them in anyone else\'s rank', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
       players: [
         row(),
@@ -791,8 +777,7 @@ describe('AdminIntegrity', () => {
         }),
       ],
     });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('JustArrived')).toBeTruthy());
     const rows = container.querySelectorAll('tbody tr');
     expect(within(rows[0] as HTMLElement).getByText('1 of 2')).toBeTruthy();
@@ -802,12 +787,10 @@ describe('AdminIntegrity', () => {
   });
 
   it('identifies people by name, falling back to the SteamID the server sent', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
       players: [row(), row({ steamid: '76561198000000020', name: '76561198000000020' })],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
     expect(screen.getByText('76561198000000020')).toBeTruthy();
   });
@@ -815,29 +798,24 @@ describe('AdminIntegrity', () => {
   it('says so and dims the board when nobody has a clip at all', async () => {
     // A ranking with nothing flagged is a list of your best players by another
     // name, which decision 5 of the design names as the failure to avoid.
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({
       players: [row({ clips: 0 }), row({ steamid: '20', name: 'PowerMustache', clips: 0, composite: 0.1 })],
     });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
     expect(screen.getByText(/No clips have been flagged for anyone/)).toBeTruthy();
     expect(container.querySelector('.table-wrap.muted')).toBeTruthy();
   });
 
   it('leaves the board undimmed once anything is flagged', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row({ clips: 1 })] });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
     expect(screen.queryByText(/No clips have been flagged for anyone/)).toBeNull();
     expect(container.querySelector('.table-wrap.muted')).toBeNull();
   });
 
   it('opens a player to a clip that links to its match and shows the flagged moment', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({
       rounds: [],
@@ -859,7 +837,6 @@ describe('AdminIntegrity', () => {
     // Review state is keyed by the player-round, so a control per clip meant
     // clicking Reviewed on one six-second moment silently triaged up to five,
     // and typing in one note box updated the others as you typed.
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({
       rounds: [round()],
@@ -875,7 +852,6 @@ describe('AdminIntegrity', () => {
   });
 
   it('marks a round Reviewed with the typed note, in the exact (matchId, ordinal, half, slot, state, note) order', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({ rounds: [], clips: [clip()] });
     mockAdmin.integrityReview.mockResolvedValue({ ok: true });
@@ -892,7 +868,6 @@ describe('AdminIntegrity', () => {
   });
 
   it('marks a round Dismissed with a different state string than Reviewed', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({ rounds: [], clips: [clip()] });
     mockAdmin.integrityReview.mockResolvedValue({ ok: true });
@@ -906,14 +881,12 @@ describe('AdminIntegrity', () => {
   });
 
   it('shows a clip whose round is already dismissed as visibly reviewed, with its note', async () => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({
       rounds: [round({ reviewState: 'dismissed', reviewNote: 'heard the spawn' })],
       clips: [clip()],
     });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
     fireEvent.click(screen.getByText('Tino'));
 
@@ -928,7 +901,6 @@ describe('AdminIntegrity', () => {
     // cannot detect a future partial-key lookup that drops half or slot: it
     // would still match, and the test would still pass, while an admin was
     // shown that a moment had already been cleared when it had not.
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.integrity.mockResolvedValue({ players: [row()] });
     mockAdmin.integrityPlayer.mockResolvedValue({
       rounds: [
@@ -943,8 +915,7 @@ describe('AdminIntegrity', () => {
       ],
     });
     mockAdmin.integrityReview.mockResolvedValue({ ok: true });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    const { container } = render(<><AdminIntegrity /><ConfirmHost /></>);
     await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
     fireEvent.click(screen.getByText('Tino'));
     await waitFor(() => expect(screen.getAllByPlaceholderText('Review note')).toHaveLength(3));
@@ -982,14 +953,12 @@ describe('AdminCampaigns', () => {
     { id: 2, name: 'Backup', host: 'h', port: 1, status: 'live', enabled: 1, tvPort: null, tvPassword: null, tvEnabled: 0 },
   ];
   beforeEach(() => {
-    mockAdmin.players.mockResolvedValue({ players: [] });
     mockAdmin.overview.mockResolvedValue({ open: [], recent: [], voided: [], queue: [], servers: twoServers });
   });
 
   it('shows free disk space so an admin sees headroom before uploading', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [] });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     expect(await waitFor(() => screen.getByText(/11(\.0)? GB free/i))).toBeTruthy();
   });
 
@@ -1018,8 +987,7 @@ describe('AdminCampaigns', () => {
         installs: [], mapsToPlay: null, maps: ['dbd1', 'dbd2', 'dbd3'], stock: false,
       }],
     });
-    const { container } = render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    const { container } = renderAdmin('/admin/setup/campaigns');
     await waitFor(() => screen.getByText('Alley'));
 
     const rows = [...container.querySelectorAll('ol.admin-list li')].map((li) => li.textContent);
@@ -1038,8 +1006,7 @@ describe('AdminCampaigns', () => {
       return new Promise((resolve) => { finish = () => resolve({ slug: 'x', name: 'x', sizeBytes: 1, chapters: [] }); });
     });
 
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const input = await waitFor(() => screen.getByLabelText('Upload campaign'));
     const file = new File(['x'], 'c.vpk');
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
@@ -1063,8 +1030,7 @@ describe('AdminCampaigns', () => {
       return new Promise(() => {});
     });
 
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const input = await waitFor(() => screen.getByLabelText('Upload campaign'));
     Object.defineProperty(input, 'files', { value: [new File(['x'], 'c.vpk')], configurable: true });
     fireEvent.change(input);
@@ -1089,8 +1055,7 @@ describe('AdminCampaigns', () => {
         mapsToPlay: null, maps: ['dbd1'], stock: false,
       }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     expect(await waitFor(() => screen.getByText(/connection refused/))).toBeTruthy();
   });
 
@@ -1109,8 +1074,7 @@ describe('AdminCampaigns', () => {
         mapsToPlay: null, maps: [], stock: false,
       }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     expect(await waitFor(() => screen.getByText(/cannot be added to the vote/i))).toBeTruthy();
     // It must not claim the download is blocked, because it is not.
     expect(screen.getByText(/can still download/i)).toBeTruthy();
@@ -1128,8 +1092,7 @@ describe('AdminCampaigns', () => {
 
   it('renders a draft with its parsed name editable and its chapters listed', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const input = await waitFor(() => screen.getByLabelText('Campaign name') as HTMLInputElement);
     expect(input.value).toBe('DBD');
     expect(screen.getByText('One')).toBeTruthy();
@@ -1138,8 +1101,7 @@ describe('AdminCampaigns', () => {
   it('publishes with the slug and the current, possibly edited, name', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
     mockAdmin.publishCampaign.mockResolvedValue({ ok: true });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const input = await waitFor(() => screen.getByLabelText('Campaign name'));
     fireEvent.input(input, { target: { value: 'Dead Before Dawn' } });
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
@@ -1148,8 +1110,7 @@ describe('AdminCampaigns', () => {
 
   it('disables Publish when the name is empty or whitespace, so an empty-name publish cannot be submitted', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [draft()] });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const input = await waitFor(() => screen.getByLabelText('Campaign name'));
     fireEvent.input(input, { target: { value: '   ' } });
     // Same toBeDisabled() unavailability as the pool-gate checkbox above.
@@ -1170,8 +1131,7 @@ describe('AdminCampaigns', () => {
 
   it('describes the unconfigured default as every map but the last', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [fiveMapCampaign()] });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const select = await waitFor(() => screen.getByLabelText('Maps to play') as HTMLSelectElement);
     expect(select.value).toBe('');
     expect(screen.getByText(/Default \(4 maps, no finale\)/)).toBeTruthy();
@@ -1180,8 +1140,7 @@ describe('AdminCampaigns', () => {
   it('calls setMapsToPlay when an admin picks how many maps to play', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [fiveMapCampaign()] });
     mockAdmin.setMapsToPlay.mockResolvedValue({ ok: true });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     const select = await waitFor(() => screen.getByLabelText('Maps to play'));
     fireEvent.change(select, { target: { value: '5' } });
     await waitFor(() => expect(mockAdmin.setMapsToPlay).toHaveBeenCalledWith('five', 5));
@@ -1200,8 +1159,7 @@ describe('AdminCampaigns', () => {
         stock: true,
       }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     await waitFor(() => screen.getByText('No Mercy'));
     expect(screen.getByLabelText('Maps to play')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Reinstall' })).toBeNull();
@@ -1229,10 +1187,84 @@ describe('AdminCampaigns', () => {
         stock: true,
       }],
     });
-    render(<Admin session={{ kind: 'active', me }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Campaigns' }));
+    renderAdmin('/admin/setup/campaigns');
     await waitFor(() => screen.getByText('Dead Air'));
     expect(screen.getByText('The Greenhouse')).toBeTruthy();
     expect(screen.getByText('The Crane')).toBeTruthy();
+  });
+});
+
+describe('the panel shell', () => {
+  const asMod = { kind: 'active' as const, me: { ...me, isAdmin: false, isMod: true } };
+
+  it('lands an admin on Live and a moderator on People', async () => {
+    renderAdmin('/admin');
+    await waitFor(() => expect(location.pathname).toBe('/admin/live'));
+    cleanup();
+    renderAdmin('/admin', asMod);
+    await waitFor(() => expect(location.pathname).toBe('/admin/people'));
+  });
+
+  it('keeps a moderator out of the other two desks, and off their APIs', async () => {
+    renderAdmin('/admin/setup/settings', asMod);
+    await waitFor(() => expect(location.pathname).toBe('/admin/people'));
+    expect(mockAdmin.settings).not.toHaveBeenCalled();
+    cleanup();
+    renderAdmin('/admin/live', asMod);
+    await waitFor(() => expect(location.pathname).toBe('/admin/people'));
+    expect(mockAdmin.live).not.toHaveBeenCalled();
+    expect(mockAdmin.overview).not.toHaveBeenCalled();
+  });
+
+  // The low-allowance post in the admin feed is this link, and the card it
+  // names is the whole reason anyone clicks it.
+  it('carries an old feed link to a card over to the board', async () => {
+    renderAdmin('/admin?live=81');
+    await waitFor(() => expect(location.pathname + location.search).toBe('/admin/live?live=81'));
+  });
+
+  it('says so for a URL that is not a screen', async () => {
+    renderAdmin('/admin/people/nonsense');
+    expect(await screen.findByText('No such page in the panel.')).toBeTruthy();
+    cleanup();
+    renderAdmin('/admin/setup/nonsense');
+    expect(await screen.findByText('No such page in the panel.')).toBeTruthy();
+  });
+
+  // Desks and sections are links, not buttons: a real href can be opened in
+  // a new tab and copied out of the address bar, which is the point of
+  // putting every screen on a URL.
+  it('moves between desks by following a link', async () => {
+    mockAdmin.settings.mockResolvedValue({ settings: [], campaigns: [] });
+    renderAdmin('/admin/live');
+    const setup = screen.getByRole('tab', { name: 'Setup' });
+    expect(setup.tagName).toBe('A');
+    expect(setup.getAttribute('href')).toBe('/admin/setup');
+    fireEvent.click(setup);
+    await waitFor(() => expect(location.pathname).toBe('/admin/setup'));
+    expect(screen.getByRole('tab', { name: 'Settings' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  // The bug this pins: with only <Route path="/admin">, every deep link in
+  // the panel lands on the site's 404.
+  it('mounts at a deep URL through the routes main.tsx declares', async () => {
+    mockAdmin.audit.mockResolvedValue({ actions: [] });
+    history.replaceState(null, '', '/admin/setup/audit');
+    render(
+      <LocationProvider>
+        <Router>
+          {ADMIN_ROUTE_PATHS.map((p) => <Route key={p} path={p} component={Admin} session={{ kind: 'active', me }} />)}
+          <Route default component={() => <p>Page not found</p>} />
+        </Router>
+      </LocationProvider>,
+    );
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Audit' }).getAttribute('aria-selected')).toBe('true'));
+    expect(screen.queryByText('Page not found')).toBeNull();
+  });
+
+  it('sends the old ban list URL into the panel', async () => {
+    history.replaceState(null, '', '/bans');
+    render(<LocationProvider><Redirect to="/admin/people/bans" /></LocationProvider>);
+    await waitFor(() => expect(location.pathname).toBe('/admin/people/bans'));
   });
 });

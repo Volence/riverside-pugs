@@ -7,10 +7,10 @@ import { formatTime } from '../../replay/ReplayControls';
 import type { MatchPause, MatchReadyup } from '../../api';
 
 /**
- * The three panels that sit under whatever is showing the open matches: the
- * servers, the queue and the recent results. They lived inline in
- * AdminMatches until the live board needed the same three underneath it, and
- * two copies of the void form is how one of them stops working unnoticed.
+ * The panels of the Live desk: open matches, the servers, the queue and the
+ * recent results. They lived inline in the old Matches screen until the live
+ * board needed the same ones underneath it, and two copies of the void form
+ * is how one of them stops working unnoticed.
  */
 
 /**
@@ -94,6 +94,54 @@ export function AdminServersPanel({ servers, busy, run }: { servers: AdminOvervi
         </div>
       )}
       <AdminSyncButton />
+    </Panel>
+  );
+}
+
+/**
+ * Every match that is configuring or live, as a table.
+ *
+ * The live board above it says who is missing and holds the clocks; this
+ * says what an admin needs about the match itself, the console line for the
+ * real server included. Abort stays here until the cancel dialog with its
+ * penalty choice replaces it, which is a later plan.
+ */
+export function OpenMatchesPanel({ open, busy, run }: { open: AdminOverview['open']; busy: boolean; run: Run }) {
+  return (
+    <Panel class="panel--table">
+      <h3>Open matches</h3>
+      {open.length === 0 ? <Empty>No match is configuring or live.</Empty> : (
+        <div class="table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>Match</th><th>State</th><th>Server</th><th class="num">Connected</th><th>Odds</th><th>Join</th><th>Live since</th><th /></tr></thead>
+            <tbody>
+              {open.map((m) => (
+                <tr key={m.id}>
+                  <td><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</td>
+                  <td>{m.state}{m.state === 'configuring' && m.serverId === null ? ' (waiting for a server)' : ''}</td>
+                  <td>{m.serverId ?? <span class="muted">none</span>}</td>
+                  <td class="num">{m.connected}/{m.rostered}</td>
+                  <td><Odds f={m.forecast} /></td>
+                  {/* The real game server, not SourceTV. An admin watching a
+                      match they are not in has no Connect button anywhere,
+                      because the match card is the roster's. */}
+                  <td>{m.connect
+                    ? <code class="mono">{`password ${m.connect.password}; connect ${m.connect.host}:${m.connect.port}`}</code>
+                    : <span class="muted">no server yet</span>}</td>
+                  <td>{fmtTime(m.wentLiveAt) || <span class="muted">not yet</span>}</td>
+                  <td><button class="chip" disabled={busy}
+                    onClick={() => run(() => adminApi.abortMatch(m.id), {
+                      title: `Abort match #${m.id}?`,
+                      body: 'The server is freed and nothing is rated. The roster and how far it got stay on the match page.',
+                      confirmLabel: 'Abort match',
+                      danger: true,
+                    })}>Abort</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Panel>
   );
 }

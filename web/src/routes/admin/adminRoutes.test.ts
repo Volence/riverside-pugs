@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
+import { ADMIN_ROUTE_PATHS, fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
+import { exec } from 'preact-iso/router';
 
 const asAdmin = { isAdmin: true };
 const asMod = { isAdmin: false };
@@ -31,11 +32,33 @@ describe('the panel URL parser', () => {
 
   it('sends the old links and the bare /admin somewhere real', () => {
     expect(legacyRedirect('/admin', '?ticket=12', true)).toBe('/admin/people/tickets/12');
+    // The board reads ?live= for itself, so the query has to survive the
+    // redirect: every low-allowance post in the admin feed is that link.
+    expect(legacyRedirect('/admin', '?live=81', true)).toBe('/admin/live?live=81');
+    expect(legacyRedirect('/admin', '?live=nonsense', true)).toBe('/admin/live');
+    expect(legacyRedirect('/admin', '?live=81', false)).toBe('/admin/people');
     expect(legacyRedirect('/admin', '', true)).toBe('/admin/live');
     expect(legacyRedirect('/admin', '', false)).toBe('/admin/people');
     expect(legacyRedirect('/admin/live', '', false)).toBe('/admin/people');
     expect(legacyRedirect('/admin/people/review', '', false)).toBeNull();
     expect(legacyRedirect('/admin/live', '', true)).toBeNull();
+  });
+
+  // The bug this pins: one <Route path="/admin"> matches the bare path and
+  // nothing under it, so every deep link would have landed on the site's 404
+  // with no sign of why.
+  it('declares route paths that reach every screen', () => {
+    // exec is typed as always returning a match; it returns undefined when
+    // the pattern does not fit, which is the whole question here.
+    const matched = (url: string) => ADMIN_ROUTE_PATHS.some(
+      (p) => (exec(url, p, { path: url, query: {}, params: {} }) as unknown) !== undefined,
+    );
+    for (const url of [
+      '/admin', '/admin/live', '/admin/people', '/admin/people/review', '/admin/people/bans',
+      '/admin/people/tickets', '/admin/people/tickets/12', '/admin/people/76561199000000001',
+      '/admin/setup', '/admin/setup/settings', '/admin/setup/audit',
+    ]) expect(matched(url), url).toBe(true);
+    expect(matched('/bans')).toBe(false);
   });
 
   it('builds the links everything else points at', () => {

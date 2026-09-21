@@ -4,7 +4,7 @@ import type { LiveBoard, LiveBoardPlayer, LiveBoardStatus, LiveBoardReason } fro
 import { ConfirmHost } from '../../components/Confirm';
 
 const { mockAdmin } = vi.hoisted(() => ({
-  mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn() },
+  mockAdmin: { live: vi.fn(), overview: vi.fn(), leaveClock: vi.fn(), abortMatch: vi.fn() },
 }));
 
 vi.mock('../../api', async (importOriginal) => {
@@ -56,6 +56,7 @@ beforeEach(() => {
   mockAdmin.live.mockResolvedValue(board());
   mockAdmin.overview.mockResolvedValue(emptyOverview);
   mockAdmin.leaveClock.mockResolvedValue({ ok: true, reply: 'PUGOK leave' });
+  mockAdmin.abortMatch.mockResolvedValue({ ok: true });
   FakeSocket.all = [];
   vi.stubGlobal('WebSocket', FakeSocket);
 });
@@ -263,6 +264,27 @@ describe('the live board', () => {
     render(<AdminLive />);
     const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
     expect(card.className).toContain('is-target');
+  });
+
+  // Abort lives on the board until the cancel dialog with its penalty choice
+  // replaces it, and it is the one control that ends a stuck match.
+  it('lists the open matches under the board, and aborts one after asking', async () => {
+    mockAdmin.overview.mockResolvedValue({
+      ...emptyOverview,
+      open: [{
+        id: 81, campaign: 'no_mercy', state: 'live', serverId: 1, connected: 7, rostered: 8,
+        createdAt: '2026-09-21T19:40:00.000Z', wentLiveAt: '2026-09-21T19:48:00.000Z',
+        connect: { host: '45.32.199.85', port: 27015, password: 'pug_ab12cd34' }, forecast: null,
+      }],
+    });
+    render(<><AdminLive /><ConfirmHost /></>);
+    const panel = (await screen.findByRole('heading', { name: 'Open matches' })).closest('.panel') as HTMLElement;
+    expect(panel.textContent).toContain('7/8');
+    expect(panel.textContent).toContain('connect 45.32.199.85:27015');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Abort' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81));
   });
 
   it('renders the servers, queue and recent results underneath', async () => {

@@ -41,6 +41,16 @@ export const SETUP_TABS: { key: string; label: string; path: string }[] = [
   { key: 'audit', label: 'Audit', path: '/admin/setup/audit' },
 ];
 
+/**
+ * What main.tsx hands preact-iso for the panel.
+ *
+ * Two entries, because its matcher takes neither on its own: `/admin` matches
+ * the bare path and nothing under it, and `/admin/*` needs a segment after
+ * the star to match at all. A deep link with no route lands on the site's
+ * 404, which is a hard thing to diagnose from a bookmark that used to work.
+ */
+export const ADMIN_ROUTE_PATHS: readonly string[] = ['/admin', '/admin/*'];
+
 export const landingFor = (isAdmin: boolean): string => (isAdmin ? '/admin/live' : '/admin/people');
 export const fileUrl = (steamid: string): string => `/admin/people/${encodeURIComponent(steamid)}`;
 export const ticketUrl = (id: number | string): string => `/admin/people/tickets/${id}`;
@@ -83,8 +93,14 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
 export function legacyRedirect(path: string, search: string, isAdmin: boolean): string | null {
   const bare = path === '/admin' || path === '/admin/';
   if (bare) {
-    const ticket = new URLSearchParams(search).get('ticket');
+    const q = new URLSearchParams(search);
+    const ticket = q.get('ticket');
     if (ticket !== null && /^\d+$/.test(ticket)) return ticketUrl(ticket);
+    // The board reads ?live= itself, so that one is carried over rather than
+    // dropped: it is the whole point of the link the admin feed posts when a
+    // dropped player is nearly out of reconnect time.
+    const live = q.get('live');
+    if (isAdmin && live !== null && /^\d+$/.test(live)) return `/admin/live?live=${live}`;
     return landingFor(isAdmin);
   }
   if (!isAdmin && !path.startsWith('/admin/people')) return '/admin/people';

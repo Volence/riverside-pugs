@@ -1480,6 +1480,10 @@ body.is-theater { overflow: hidden; }
 /* ---------- admin ---------- */
 
 .page--admin { max-width: 1320px; }
+/* The sections of a desk, as chips under the desk tabs. Wraps rather than
+ * scrolls: four of them do not fit a phone in one line, and a section you
+ * cannot see is a section nobody opens. */
+.admin-sections { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-3); }
 .admin-body { margin-top: var(--sp-4); }
 .admin-split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
 .admin-split--even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
