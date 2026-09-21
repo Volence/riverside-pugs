@@ -101,6 +101,21 @@ CREATE TABLE IF NOT EXISTS match_players (
   joined_map INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, player_id)
 );
+-- Post-match endorsements. The primary key is an anti abuse rule expressed
+-- structurally: one endorsement per giver per recipient per match, so nobody
+-- stacks all three kinds on one friend. Everything a CHECK cannot see (both
+-- rostered, match completed, inside the window, within the budget, not self)
+-- is enforced by src/endorsements.ts. from_id is never shown to anybody; it is
+-- kept so farming can be audited if it ever happens.
+CREATE TABLE IF NOT EXISTS endorsements (
+  match_id   INTEGER NOT NULL REFERENCES matches(id),
+  from_id    TEXT NOT NULL REFERENCES players(steamid),
+  to_id      TEXT NOT NULL REFERENCES players(steamid),
+  kind       TEXT NOT NULL CHECK (kind IN ('caller','clutch','vibes')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (match_id, from_id, to_id)
+);
+CREATE INDEX IF NOT EXISTS idx_endorsements_to ON endorsements (to_id, kind);
 CREATE TABLE IF NOT EXISTS match_maps (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   ordinal INTEGER NOT NULL,
@@ -385,6 +400,22 @@ CREATE TABLE IF NOT EXISTS integrity_prior_rounds (
   half     INTEGER NOT NULL,
   frames   INTEGER NOT NULL,
   counts   TEXT    NOT NULL,
+  map      TEXT,
+  analyzer_version INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (match_id, ordinal, half)
+);
+-- Rounds the analyzer tried and could not measure: the replay is not on disk,
+-- or is not something this analyzer version can read. Without this a round
+-- like that is pending for ever and the server starts an analysis process for
+-- it every minute. Keyed to the version that failed, so a newer analyzer tries
+-- again, and cleared by saveRound the moment the round is measured.
+CREATE TABLE IF NOT EXISTS integrity_unanalysable (
+  match_id         INTEGER NOT NULL REFERENCES matches(id),
+  ordinal          INTEGER NOT NULL,
+  half             INTEGER NOT NULL,
+  analyzer_version INTEGER NOT NULL,
+  reason           TEXT    NOT NULL,
+  at               TEXT    NOT NULL,
   PRIMARY KEY (match_id, ordinal, half)
 );
 -- One-time codes a Discord user follows to link their Steam account from
@@ -567,10 +598,37 @@ CREATE TABLE IF NOT EXISTS input_bursts (
   server_tick INTEGER NOT NULL,
   client_tick INTEGER NOT NULL,
   intervals TEXT NOT NULL,
-  at TEXT NOT NULL
+  at TEXT NOT NULL,
+  -- 1: plugin 0.1.0, intervals are SERVER TICKS, and usercmds bunched into one
+  -- tick after lag were dropped. 2: intervals are USERCMDS (cmdnum deltas).
+  wire INTEGER NOT NULL DEFAULT 1,
+  -- Server ticks from first press to last; wire 2 only. A cross-check on the
+  -- sum of the intervals, which is the client's own command sequence.
+  server_span INTEGER,
+  -- How long each press was held down, one character per PRESS, same encoding
+  -- as intervals. NULL from plugin 0.1.0. It separates a mouse wheel (one
+  -- tick), a scripted hold (constant) and a hand (5 to 12 ticks, never the
+  -- same), and unlike a signature it cannot be backfilled: if it was not
+  -- captured, it is gone.
+  holds TEXT
 );
 CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
 CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
+
+-- The plugin stops sending a kind of burst for a player once that kind's
+-- budget for the round is spent, and says so once. A row here means the
+-- capture for that player, kind and round is TRUNCATED, which is not the same
+-- thing as nothing having happened.
+CREATE TABLE IF NOT EXISTS input_caps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER,
+  server_id INTEGER,
+  steamid TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  server_tick INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS input_caps_steamid ON input_caps(steamid, at);
 
 -- One row per signature that fired on a burst. Separate from the burst so that
 -- re-running an improved signature adds rows without rewriting the evidence.
@@ -583,6 +641,14 @@ CREATE TABLE IF NOT EXISTS input_detections (
   signature TEXT NOT NULL,
   severity TEXT NOT NULL,
   at TEXT NOT NULL,
+  -- Bursts that qualified in this match so far, and their ids as a JSON array.
+  -- A detection is one row per player, match and signature, written only once
+  -- the signature has repeated; burst_id is the burst that completed it.
+  hits INTEGER NOT NULL DEFAULT 1,
+  evidence TEXT NOT NULL DEFAULT '[]',
+  -- What the holds across the evidence look like (wheel-like, fixed-hold,
+  -- variable-hold, no-hold-data). An annotation for the admin, not a verdict.
+  note TEXT NOT NULL DEFAULT '',
   UNIQUE(burst_id, signature)
 );
 CREATE INDEX IF NOT EXISTS input_detections_steamid ON input_detections(steamid, at);
@@ -607,10 +673,14 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // Discord turns into being dropped out of voice when the channel goes.
   discord_lobby_channel_id: '',
   // Queueing needs a linked Discord account that is in the guild.
-  // Airborne +attack presses before a pounce burst is flagged. A human issues
-  // one or two; a held button issues dozens. Raise it if a real match ever
-  // shows a legitimate player above it; never lower it below 3.
-  input_pounce_spam_threshold: '12',
+  // Presses per second, in the air on the hunter claw, at or above which an
+  // airborne phase counts toward pounce_spam. See DEFAULT_THRESHOLDS in
+  // src/inputStats.ts for why 12. A NEW key on purpose: the first signature
+  // seeded input_pounce_spam_threshold = 12 TICKS into production, and seeding
+  // never overwrites, so that row is now ignored rather than reinterpreted.
+  input_pounce_min_rate: '12',
+  // The same, for primary fire on a pistol sustained over three seconds.
+  input_pistol_min_rate: '12',
   require_discord_to_queue: '1',
   // Pressing Ready needs that account to be in a voice channel on the guild.
   require_voice_to_ready: '1',
@@ -704,6 +774,13 @@ export function openDb(path: string): DB {
   // millisecond of a round). -1 means "recorded before round timing existed".
   ensureColumn(db, 'match_live_events', 'half', 'INTEGER NOT NULL DEFAULT -1');
   ensureColumn(db, 'match_live_events', 't_ms', 'INTEGER NOT NULL DEFAULT -1');
+  // Which map a round's share of the aim prior belongs to, and which analyzer
+  // built it. A map's pool is DEFINED as the sum of its current-version shares
+  // (see poolRounds in src/integrity/store.ts), so a share has to say both. A
+  // row from before these existed reads as map NULL, version 0, which no pool
+  // will ever sum: it is rebuilt the next time its round is measured.
+  ensureColumn(db, 'integrity_prior_rounds', 'map', 'TEXT');
+  ensureColumn(db, 'integrity_prior_rounds', 'analyzer_version', 'INTEGER NOT NULL DEFAULT 0');
   // Which map a player was rostered on: 0 for the starting roster, later for a
   // sub rostered at a go-live. The rating step skips anyone who played under
   // half the maps.
@@ -715,6 +792,17 @@ export function openDb(path: string): DB {
   // First time this rostered player was seen connected to the match server.
   // Null means they never turned up, which is what the no-show reaper counts.
   ensureColumn(db, 'match_players', 'connected_at', 'TEXT');
+  // Input detections became one row per player, match and signature, carrying
+  // how many bursts qualified and which. Rows from before this default to one
+  // hit and no evidence list; scripts/rerun-input-signatures.ts rebuilds them.
+  ensureColumn(db, 'input_detections', 'hits', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'input_detections', 'evidence', "TEXT NOT NULL DEFAULT '[]'");
+  // Which clock a burst's intervals are in. Everything stored before this was
+  // plugin 0.1.0, which is what the default says.
+  ensureColumn(db, 'input_bursts', 'wire', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'input_bursts', 'server_span', 'INTEGER');
+  ensureColumn(db, 'input_bursts', 'holds', 'TEXT');
+  ensureColumn(db, 'input_detections', 'note', "TEXT NOT NULL DEFAULT ''");
   // How many survivors were still standing when the round ended. NULL, not 0,
   // as the default: every round recorded before the plugin emitted this was
   // simply not measured, and 0 is a real value here (a wipe). Defaulting to 0

@@ -38,6 +38,12 @@ const PLAIN: [table: string, column: string][] = [
   ['tickets', 'claimed_by'],
   ['tickets', 'opened_by'],
   ['tickets', 'closed_by'],
+  // Evidence. None of it has a foreign key, so leaving it behind never
+  // failed: it just stayed on an id with no player row and no admin page.
+  ['integrity_flags', 'steamid'],
+  ['input_bursts', 'steamid'],
+  ['input_detections', 'steamid'],
+  ['signon_drops', 'steamid'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -49,12 +55,39 @@ const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
   ['match_live_map_stats', 'player_id'],
   ['match_readyup_players', 'player_id'],
+  // A handle per platform. Where both accounts have one, `into` keeps its own.
+  ['player_links', 'player_id'],
+  // Summed first, below, where both accounts were seen on one address.
+  ['player_networks', 'player_id'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
  *  a fault. Routes turn this into a 400 and let everything else be a 500, so
  *  a programming error is never disguised as bad input. */
 export class MergeError extends Error {}
+
+/** Every (table, column) pair the merge rewrites when folding `from` into
+ *  `into`: PLAIN and KEYED, plus the tables handled by hand because their key
+ *  or their arithmetic does not fit either list. A test enumerates every
+ *  foreign key that actually points at players and checks it against this,
+ *  so a table added later without being taught to the merge fails loudly
+ *  instead of throwing at merge time on whoever happens to hold a row in it. */
+export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
+  ...PLAIN,
+  ...KEYED,
+  ['match_players', 'player_id'],
+  ['match_player_stats', 'player_id'],
+  ['player_ratings', 'player_id'],
+  ['rating_history', 'player_id'],
+  ['player_aliases', 'canonical_id'],
+  ['twitch_status', 'player_id'],
+  ['endorsements', 'from_id'],
+  ['endorsements', 'to_id'],
+  // By hand in the ticket block: two open tickets about one player cannot
+  // simply be repointed, tickets_one_open would refuse the second.
+  ['tickets', 'target_id'],
+  ['ticket_access', 'steamid'],
+];
 
 export interface MergePlan {
   from: string;
@@ -93,6 +126,8 @@ export function mergePlayers(
   note('match_player_stats', count('SELECT COUNT(*) AS n FROM match_player_stats WHERE player_id = ?', from));
   note('player_ratings', count('SELECT COUNT(*) AS n FROM player_ratings WHERE player_id = ?', from));
   note('rating_history', count('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?', from));
+  note('endorsements', count('SELECT COUNT(*) AS n FROM endorsements WHERE from_id = ? OR to_id = ?', from, from));
+  note('twitch_status', count('SELECT COUNT(*) AS n FROM twitch_status WHERE player_id = ?', from));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -184,6 +219,37 @@ export function mergePlayers(
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
     }
+
+    // An address both accounts were seen on is one sighting history, not two:
+    // add the counts and take the widest span, then let KEYED drop the row.
+    db.prepare(
+      `UPDATE player_networks AS keep SET
+         seen_count = keep.seen_count + gone.seen_count,
+         first_seen = MIN(keep.first_seen, gone.first_seen),
+         last_seen  = MAX(keep.last_seen, gone.last_seen),
+         country    = COALESCE(keep.country, gone.country)
+       FROM player_networks AS gone
+       WHERE gone.ip_hash = keep.ip_hash AND keep.player_id = ? AND gone.player_id = ?`,
+    ).run(into, from);
+
+    // Twitch. The link is two columns on the player row plus the poll cache,
+    // and the cache references players with no cascade, so it has to be gone
+    // before the row is. The link follows the person when `into` has none of
+    // its own; otherwise `into` keeps its own and this one is released. The
+    // cache only ever moves WITH the link: on its own it would show `into`
+    // live on somebody else's channel until the next poll.
+    const twitchOf = (id: string) => db.prepare('SELECT twitch_id, twitch_name FROM players WHERE steamid = ?')
+      .get(id) as { twitch_id: string | null; twitch_name: string | null };
+    const gone = twitchOf(from);
+    if (gone.twitch_id && !twitchOf(into).twitch_id) {
+      // Cleared first: twitch_id is unique, and both rows still exist here.
+      db.prepare('UPDATE players SET twitch_id = NULL, twitch_name = NULL WHERE steamid = ?').run(from);
+      db.prepare('UPDATE players SET twitch_id = ?, twitch_name = ? WHERE steamid = ?')
+        .run(gone.twitch_id, gone.twitch_name, into);
+      db.prepare('UPDATE OR IGNORE twitch_status SET player_id = ? WHERE player_id = ?').run(into, from);
+    }
+    db.prepare('DELETE FROM twitch_status WHERE player_id = ?').run(from);
+
     for (const [table, column] of KEYED) {
       db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);
       db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(from);
@@ -195,6 +261,18 @@ export function mergePlayers(
     //    recompute below rebuilds them from the merged rosters.
     db.prepare('DELETE FROM rating_history WHERE player_id IN (?, ?)').run(from, into);
     db.prepare('DELETE FROM player_ratings WHERE player_id = ?').run(from);
+
+    // 4. Endorsements have TWO player columns inside one primary key
+    //    (match_id, from_id, to_id), so they fit neither PLAIN nor KEYED: a
+    //    row can collide on either column independently of the other. Each
+    //    column is moved and its leftovers dropped in turn, the same way
+    //    KEYED does it, then a row that now points at the same player on
+    //    both sides is dropped rather than survive as a self endorsement.
+    db.prepare('UPDATE OR IGNORE endorsements SET from_id = ? WHERE from_id = ?').run(into, from);
+    db.prepare('DELETE FROM endorsements WHERE from_id = ?').run(from);
+    db.prepare('UPDATE OR IGNORE endorsements SET to_id = ? WHERE to_id = ?').run(into, from);
+    db.prepare('DELETE FROM endorsements WHERE to_id = ?').run(from);
+    db.prepare('DELETE FROM endorsements WHERE from_id = to_id').run();
 
     // The alias outlives the player row and is the whole reason this merge
     // is not a one-off tidy-up: without it the same person logs in on the

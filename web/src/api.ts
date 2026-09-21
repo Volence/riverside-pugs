@@ -151,6 +151,8 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** The endorsement title they have earned, if any. */
+  title?: EndorseKind | null;
 }
 
 export interface Leaderboard {
@@ -182,6 +184,8 @@ export interface MatchPlayerStats {
   /** Skill-detect stats, already filtered server-side for the viewer: a
    *  self-visibility stat is present only when the viewer is the subject. */
   stats: Record<string, number>;
+  /** The endorsement title they have earned, if any. */
+  title?: EndorseKind | null;
 }
 
 export interface StatDef {
@@ -464,6 +468,42 @@ export interface StreamsView {
   offlineTotal: number;
 }
 
+export type EndorseKind = 'caller' | 'clutch' | 'vibes';
+
+/** One player's endorse panel for one match. `given` is the viewer's OWN
+ *  choices; nothing anywhere says who endorsed whom. */
+export interface EndorseState {
+  eligible: boolean;
+  reason: string | null;
+  /** UTC, `YYYY-MM-DD HH:MM:SS`. */
+  closesAt: string | null;
+  budget: number;
+  remaining: number;
+  given: { to: string; kind: EndorseKind }[];
+  candidates: { steamid: string; name: string; team: Team }[];
+}
+
+export interface PendingEndorsement { matchId: number; remaining: number }
+
+/** One line of the profile's chemistry panel. `winRate` is 0 to 1. */
+export interface ChemistryLine { steamid: string; name: string; games: number; wins: number; winRate: number }
+
+/** Null lines are absent lines: the two rates are gated by a minimum number
+ *  of shared games and are simply not shown until somebody clears it. */
+export interface Chemistry {
+  mostPlayedWith: ChemistryLine | null;
+  bestWith: ChemistryLine | null;
+  worstAgainst: ChemistryLine | null;
+}
+
+/** Aggregate and anonymous: what was received, never from whom. */
+export interface EndorsementSummary {
+  counts: Record<EndorseKind, number>;
+  total: number;
+  perMatch: number;
+  title: EndorseKind | null;
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -501,6 +541,10 @@ export interface Profile {
    *  Keyed like the stat bag, plus `winrate` and `boomer_rate`. Empty for a
    *  provisional player. */
   standings?: Record<string, Standing>;
+  /** Optional only for a server older than the feature. */
+  chemistry?: Chemistry;
+  /** Optional only for a server older than the feature. */
+  endorsements?: EndorsementSummary;
 }
 
 /** A place on this season's board: `rank` of `of` ranked players. Ties share. */
@@ -601,7 +645,17 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   /** Input signatures that fired on this player's button timing. Evidence to
    *  read next to the replay, never a verdict: the only signature shipped is
    *  the one that needs no statistical tuning. */
-  inputFlags: { id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string }[];
+  inputCaps: { matchId: number | null; kind: string; serverTick: number; at: string }[];
+  inputFlags: {
+    id: number; burstId: number; matchId: number | null; steamid: string; kind: string; signature: string; severity: string; at: string; hits: number;
+    /** What the holds across the evidence look like: wheel-like, fixed-hold, variable-hold, no-hold-data. */
+    note: string;
+    bursts: {
+      id: number; at: string; weapon: string; presses: number; ratePerSec: number; meanTicks: number;
+      wire: number; serverSpan: number | null; annotation: string;
+      hold: { n: number; medianTicks: number; minTicks: number; maxTicks: number; sdTicks: number; oneTickFrac: number; nearMedianFrac: number } | null;
+    }[];
+  }[];
   /** Second Steam accounts folded into this one by a merge. Their SteamIDs
    *  still resolve here on every line the game server sends. */
   aliases: { steamid: string; canonical: string; created_at: string; created_by: string }[];
@@ -703,7 +757,7 @@ export interface MyReport {
   matchId: number | null; createdAt: string; status: 'open' | 'closed';
 }
 
-/** One row of the integrity board. occZ, teamGap, pOcc and pGap are nullable:
+/** One row of the integrity board. trackShare, occZ, teamGap and their percentiles are nullable:
  *  a map with too little recorded history gets no occupancy score at all, and
  *  that must never be confused with an average (0) score. composite is a sort
  *  key, not a verdict. */
@@ -716,18 +770,54 @@ export interface IntegrityPlayerRow {
    *  been flagged at all, and a ranking with nothing flagged is a list of your
    *  best players by another name. */
   clips: number;
+  /** Rounds in which the detector had at least one chance. A player under the
+   *  server's minimum is listed but not ranked. */
+  eligibleRounds: number;
+  ranked: boolean;
+  /** The best single tracking window in their history. Context only: it is a
+   *  maximum, so it rises with playtime, and nothing is ranked on it. */
   fidMax: number;
   fidP95: number;
+  scoreable: number;
+  /** Tracking as ranked: summed fidelity over scoreable windows. Null with too
+   *  few windows to make a ratio of. */
+  trackShare: number | null;
   occZ: number | null;
   teamGap: number | null;
-  pFid: number;
+  pFid: number | null;
   pOcc: number | null;
   pGap: number | null;
-  composite: number;
+  /** Null when unranked. */
+  composite: number | null;
 }
 
 /** A flag raised live by another plugin (today Little Anti-Cheat) rather than
  *  by replay analysis. No clip behind it, so nothing to watch. */
+/** One row of the cross-player flag feed: LilAC hits and input-stat detections
+ *  merged, so the panel has a front door. */
+export interface RecentFlag {
+  id: number;
+  kind: string;
+  source: string;
+  severity: string;
+  steamid: string;
+  name: string;
+  matchId: number | null;
+  at: string;
+}
+
+/** Whether anything is being captured at all. An empty panel cannot otherwise
+ *  tell "nothing suspicious" apart from "silently broken". */
+export interface CaptureHealth {
+  bursts: number;
+  detections: number;
+  lilacFlags: number;
+  lastBurstAt: string | null;
+  lastFlagAt: string | null;
+  matchesWithBursts: number;
+  caps: number;
+}
+
 export interface IntegrityFlag {
   id: number;
   matchId: number | null;
@@ -759,8 +849,13 @@ export interface IntegrityRound {
   slot: number;
   campaign: string | null;
   metrics: {
-    fidMax: number; fidP95: number; occZ: number | null; teamRank: number | null;
-    teamGap: number | null;
+    fidMax: number; fidP95: number;
+    /** Tracking windows that formed, how many held enough ghost movement to
+     *  score, and the sum of those scores. */
+    windows: number; scoreable: number; fidSum: number;
+    /** Metric B as sums over 2 second blocks, null on a map with no baseline
+     *  yet. The score on the board is worked out from these on the server. */
+    occ: { observed: number; expected: number; expectedSq: number; blocks: number; pairs: number } | null;
     /** Pairs that cleared every eligibility gate: how many chances the
      *  detector actually had. Zero here means it never ran, which is a very
      *  different statement from a clean round. */
@@ -791,6 +886,9 @@ export type IntegrityJobInfo =
     };
     /** Indexed rounds no current-version analysis has measured. */
     pending: number;
+    /** Rounds the current analyzer tried and could not measure. Not pending:
+     *  it will not try them again until the analyzer changes. */
+    unanalysable?: { missing: number; unreadable: number };
     matchInFlight: boolean;
   };
 
@@ -882,7 +980,8 @@ export const adminApi = {
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
   integrity: (season: string, signal?: AbortSignal) =>
-    get<{ players: IntegrityPlayerRow[] }>(`/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
+    get<{ players: IntegrityPlayerRow[]; flags: RecentFlag[]; health: CaptureHealth }>(
+      `/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
   /** Flags raised live by another plugin (today Little Anti-Cheat). No replay
    *  behind them, so they are listed beside the clips rather than among them. */
   integrityPlayer: (steamid: string, signal?: AbortSignal) =>
@@ -974,6 +1073,12 @@ export const api = {
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
     get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
+  endorseState: (matchId: number, signal?: AbortSignal) =>
+    get<EndorseState>(`/api/matches/${matchId}/endorse`, signal),
+  endorse: (matchId: number, to: string, kind: EndorseKind) =>
+    post<{ ok: true; remaining: number; state: EndorseState }>(`/api/matches/${matchId}/endorse`, { to, kind }),
+  endorsePending: (signal?: AbortSignal) =>
+    get<{ pending: PendingEndorsement[] }>('/api/endorse/pending', signal),
   profile: (steamid: string, signal?: AbortSignal) =>
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 

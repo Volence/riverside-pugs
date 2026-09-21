@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { SelfStartedMatches } from '../src/selfStarted.js';
@@ -245,9 +245,10 @@ describe('SelfStartedMatches', () => {
   });
 
   it('refuses an unknown map rather than filing it under a wrong campaign', async () => {
-    adopter.handle(create(TOKEN, 1, 'de_dust2'));
-    adopter.handle(roster(ids(1)[0], 'a', 'Alice'));
-    adopter.handle(end(1));
+    adopter.handle(create(TOKEN, 2, 'de_dust2'));
+    adopter.handle(roster(ids(2)[0], 'a', 'Alice'));
+    adopter.handle(roster(ids(2)[1], 'b', 'Bob'));
+    adopter.handle(end(2));
     await new Promise((r) => setTimeout(r, 30));
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM matches').get()).toEqual({ n: 0 });
@@ -256,9 +257,10 @@ describe('SelfStartedMatches', () => {
 
   it('refuses to adopt when no server can be resolved', async () => {
     build(null);
-    adopter.handle(create(TOKEN, 1));
-    adopter.handle(roster(ids(1)[0], 'a', 'Alice'));
-    adopter.handle(end(1));
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(ids(2)[0], 'a', 'Alice'));
+    adopter.handle(roster(ids(2)[1], 'b', 'Bob'));
+    adopter.handle(end(2));
     await new Promise((r) => setTimeout(r, 30));
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM matches').get()).toEqual({ n: 0 });
@@ -275,9 +277,10 @@ describe('SelfStartedMatches', () => {
     db.prepare(
       "INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)",
     ).run(TOKEN);
-    adopter.handle(create(TOKEN, 1));
-    adopter.handle(roster(ids(1)[0], 'a', 'Alice'));
-    adopter.handle(end(1));
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(ids(2)[0], 'a', 'Alice'));
+    adopter.handle(roster(ids(2)[1], 'b', 'Bob'));
+    adopter.handle(end(2));
     await new Promise((r) => setTimeout(r, 30));
 
     const n = db.prepare('SELECT COUNT(*) AS n FROM matches').get() as { n: number };
@@ -296,9 +299,10 @@ describe('SelfStartedMatches', () => {
       resolveServerId: () => 1,
       adminSteamIds: [],
     });
-    adopter.handle(create(TOKEN, 1));
-    adopter.handle(roster(ids(1)[0], 'a', 'Alice'));
-    adopter.handle(end(1));
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(ids(2)[0], 'a', 'Alice'));
+    adopter.handle(roster(ids(2)[1], 'b', 'Bob'));
+    adopter.handle(end(2));
     await vi.waitFor(() => {
       const n = db.prepare('SELECT COUNT(*) AS n FROM matches').get() as { n: number };
       expect(n.n).toBe(1);
@@ -331,5 +335,149 @@ describe('SelfStartedMatches: the no-show reaper must not see these', () => {
       { state: string; went_live_at: string | null };
     expect(m.state).toBe('live');
     expect(m.went_live_at).toBeNull();
+  });
+});
+
+// A self-started match is rated like any other, so what gets adopted has to
+// be a match: two sides, on a server that is not already running one.
+describe('SelfStartedMatches: what is not a match is not adopted', () => {
+  const problems: Array<{ text: string; matchId?: number }> = [];
+  let unsub: () => void;
+  beforeEach(() => {
+    problems.length = 0;
+    unsub?.();
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push({ text: e.text, matchId: e.matchId }); });
+    vi.useFakeTimers();
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const matches = () => (db.prepare('SELECT COUNT(*) AS n FROM matches').get() as { n: number }).n;
+
+  it('refuses a roster with nobody on one side, and says so once the burst is over', () => {
+    const [a, b] = ids(2);
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(a, 'a', 'Alice'));
+    adopter.handle(roster(b, 'a', 'Bob'));
+    adopter.handle(end(2));
+    expect(matches()).toBe(0);
+    // Not yet a refusal: the other side's lines may simply be behind.
+    expect(problems).toEqual([]);
+
+    vi.advanceTimersByTime(5_000);
+    expect(matches()).toBe(0);
+    expect(setIds).toEqual([]);
+    expect(registered).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM players').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT status FROM servers WHERE id = 1').get()).toEqual({ status: 'idle' });
+    expect(problems).toHaveLength(1);
+    expect(problems[0].text).toMatch(/team B/);
+  });
+
+  it('refuses a one-player roster, which used to be adopted and rated', () => {
+    adopter.handle(create(TOKEN, 1));
+    adopter.handle(roster(ids(1)[0], 'a', 'Alice'));
+    adopter.handle(end(1));
+    vi.advanceTimersByTime(5_000);
+    expect(matches()).toBe(0);
+  });
+
+  it('still adopts when the other side arrives after MATCH_CREATE_END', () => {
+    // UDP reorders. One side being early is not one side being absent.
+    const [a, b] = ids(2);
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(a, 'a', 'Alice'));
+    adopter.handle(end(2));
+    expect(matches()).toBe(0);
+    adopter.handle(roster(b, 'b', 'Bob'));
+    expect(matches()).toBe(1);
+    expect(problems).toEqual([]);
+  });
+
+  it.each(['live', 'configuring'])('refuses when the server already has a %s match, and tells the admins', (state) => {
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token) VALUES (7, 1, ?, 'dead_air', 1, ?)")
+      .run(state, 'f'.repeat(32));
+    const [a, b] = ids(2);
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(a, 'a', 'Alice'));
+    adopter.handle(roster(b, 'b', 'Bob'));
+    adopter.handle(end(2));
+
+    expect(matches()).toBe(1);
+    expect(setIds).toEqual([]);
+    expect(registered).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM players').get()).toEqual({ n: 0 });
+    expect(problems).toHaveLength(1);
+    expect(problems[0].matchId).toBe(7);
+    expect(problems[0].text).toMatch(/#7/);
+  });
+
+  it('is not put off by a finished match on the server, or a live one elsewhere', () => {
+    db.prepare("INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('u','127.0.0.2',27015,27015,'x','live')").run();
+    db.prepare("INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, 'completed', 'dead_air', 1)").run();
+    db.prepare("INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, 'aborted', 'dead_air', 1)").run();
+    db.prepare("INSERT INTO matches (season_id, state, campaign, server_id) VALUES (1, 'live', 'dead_air', 2)").run();
+    const [a, b] = ids(2);
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(a, 'a', 'Alice'));
+    adopter.handle(roster(b, 'b', 'Bob'));
+    expect(matches()).toBe(4);
+    expect(problems).toEqual([]);
+  });
+
+  it('a repeat of the burst it just adopted is not a second match on a busy server', () => {
+    const [a, b] = ids(2);
+    const send = () => {
+      adopter.handle(create(TOKEN, 2));
+      adopter.handle(roster(a, 'a', 'Alice'));
+      adopter.handle(roster(b, 'b', 'Bob'));
+      adopter.handle(end(2));
+    };
+    send();
+    send();
+    vi.advanceTimersByTime(5_000);
+    expect(matches()).toBe(1);
+    expect(problems).toEqual([]);
+  });
+});
+
+// Roster lines that never get their MATCH_CREATE have no grace timer, so they
+// used to sit in memory for the life of the process, one entry per token, and
+// a token costs whoever is sending them nothing.
+describe('SelfStartedMatches: a burst that never completes is forgotten', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const tokenN = (n: number) => n.toString(16).padStart(32, '0');
+
+  it('drops pending entries a minute after they were first seen, on the next line', () => {
+    for (let i = 0; i < 500; i++) adopter.handle(roster(ids(1)[0], 'a', 'x', tokenN(i)));
+    expect(adopter.pendingCount).toBe(500);
+
+    vi.advanceTimersByTime(59_000);
+    adopter.handle(roster(ids(1)[0], 'a', 'x', tokenN(500)));
+    expect(adopter.pendingCount).toBe(501);
+
+    vi.advanceTimersByTime(2_000);
+    adopter.handle(roster(ids(1)[0], 'a', 'x', tokenN(501)));
+    // The 500 old ones are gone; the two recent ones remain.
+    expect(adopter.pendingCount).toBe(2);
+  });
+
+  it('does not build a match out of a stale half and a fresh half', () => {
+    const [a, b] = ids(2);
+    adopter.handle(roster(a, 'a', 'Alice'));
+    vi.advanceTimersByTime(61_000);
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(b, 'b', 'Bob'));
+    adopter.handle(end(2));
+    expect(db.prepare('SELECT COUNT(*) AS n FROM matches').get()).toEqual({ n: 0 });
+  });
+
+  it('forgets a create with no roster too, once its grace timer has been and gone', () => {
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(end(2));
+    vi.advanceTimersByTime(61_000);
+    adopter.handle(roster(ids(1)[0], 'a', 'x', tokenN(1)));
+    expect(adopter.pendingCount).toBe(1);
   });
 });

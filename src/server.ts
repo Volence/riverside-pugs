@@ -44,8 +44,8 @@ import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { cheatName, recordIntegrityFlag } from './integrityFlags.js';
-import { isFirstDetectionInMatch, recordInputBurst, pounceSpamThreshold } from './inputBursts.js';
+import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
+import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
@@ -482,25 +482,40 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // not take down the listener that also carries match_end.
           try {
             const serverId = resolveServerBySource(deps.db, source, feedHost);
-            const live = serverId === null ? undefined : deps.db
-              .prepare("SELECT id FROM matches WHERE state = 'live' AND server_id = ? ORDER BY id DESC LIMIT 1")
-              .get(serverId) as { id: number } | undefined;
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             const kind = cheatName(ev.cheat);
-            // Stored whether or not a match is live: unlike an input burst,
-            // a LilAC flag is worth keeping even in warmup, and there is one
-            // row per event rather than thousands.
+            // Stored whether or not the player is in a live match: unlike an
+            // input burst, a LilAC flag is worth keeping in warmup or on a
+            // spectator, and there is one row per event rather than thousands.
             const stored = recordIntegrityFlag(deps.db, {
-              matchId: live?.id ?? null, serverId, steamid: ev.steamid, source: 'lilac',
+              matchId, serverId, steamid: ev.steamid, source: 'lilac',
               kind, severity: ev.banned ? 'banned' : 'suspected', detail: '',
             });
             if (stored) {
               publishAdminEvent({
                 kind: 'lilac_flag', steamid: ev.steamid, cheat: kind,
-                banned: ev.banned, matchId: live?.id ?? null,
+                banned: ev.banned, matchId,
               });
             }
           } catch (err) {
             console.error('[lilac] failed to record a flag:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'input_cap') {
+          // Same rules as a burst: evidence only, live matches only, and never
+          // allowed to take the listener down.
+          try {
+            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            // The player's own match, like a burst: two live matches can share
+            // a server id while the Riverside boxes share an address.
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            if (matchId === null) return;
+            recordInputCap(deps.db, {
+              matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, serverTick: ev.serverTick,
+            });
+          } catch (err) {
+            console.error('[inputstats] failed to record a capture cap:', err);
           }
           return;
         }
@@ -509,24 +524,25 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // not take down the listener that also carries match_end.
           try {
             const serverId = resolveServerBySource(deps.db, source, feedHost);
-            const live = serverId === null ? undefined : deps.db
-              .prepare("SELECT id FROM matches WHERE state = 'live' AND server_id = ? ORDER BY id DESC LIMIT 1")
-              .get(serverId) as { id: number } | undefined;
-            // Live matches only: a burst that belongs to no match is not
-            // evidence about a ranked game, and storing warmup would grow the
-            // table for nothing. Dropped rather than stored with a null match.
-            if (!live) return;
-            const matchId = live.id;
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            // Rostered players in a live match only: a burst that belongs to
+            // no match is not evidence about a ranked game, and storing warmup
+            // and spectators would grow the table for nothing. Dropped rather
+            // than stored with a null match.
+            if (matchId === null) return;
             const stored = recordInputBurst(deps.db, {
               matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
               airPresses: ev.airPresses, groundTicks: ev.groundTicks,
               serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
-            }, pounceSpamThreshold(deps.db));
-            for (const signature of stored.detections) {
-              if (!isFirstDetectionInMatch(deps.db, ev.steamid, matchId)) continue;
+              wire: ev.wire, serverSpan: ev.serverSpan, holds: ev.holds,
+            }, inputThresholds(deps.db));
+            // `detections` names a signature only on the burst that completed
+            // its repeat count, so this posts once per player, match and
+            // signature however many bursts qualify afterwards.
+            for (const { signature, note } of stored.created) {
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
-                detail: `${ev.burstKind}, ${ev.airPresses} presses in the air`,
+                detail: `repeated across separate ${ev.burstKind} bursts this match; holds: ${note}`,
               });
             }
           } catch (err) {

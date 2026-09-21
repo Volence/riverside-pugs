@@ -437,6 +437,27 @@ describe('custom campaign availability', () => {
     expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
   });
 
+  // Defence in depth. parseMission refuses such a name at upload, but a row
+  // can predate that check or be written some other way, and changelevel is
+  // an rcon command line: ';' starts a second command.
+  it('refuses to changelevel to a first map that is not a map name', async () => {
+    const { orch, cmds, serverId } = await setup();
+    insertDraft(db, {
+      slug: 'evil', name: 'Evil', vpkFilename: 'evil.vpk',
+      sizeBytes: 9, sha256: 'e'.repeat(64), uploadedBy: null,
+    }, [{ map: 'x;rcon_password pwned', display: null, isFinale: true }]);
+    publishCampaign(db, 'evil', 'Evil');
+    setInstall(db, 'evil', serverId, 'installed');
+    invalidateCampaignCache();
+    const mid = seedMatch(db, 'evil');
+
+    await orch.setupMatch(mid);
+
+    expect(cmds.some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect(cmds.some((c) => c.includes('rcon_password'))).toBe(false);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+  });
+
   // Stock campaigns have no VPK to install, so they must not be gated by a
   // table that will never have a row for them.
   it('never gates a stock campaign on an install row', async () => {
@@ -557,25 +578,28 @@ describe('stop-after map', () => {
     expect(matchCmd(cmds).endsWith(' "m4"')).toBe(true);
   });
 
-  // A map name straight out of an uploaded VPK's mission file is not
-  // validated (src/vpk.ts tokenizes any bytes between quotes), so a name with
-  // a space must still survive as a single fourth argument. Unquoted, Source's
-  // console tokenizer would split it and GetCmdArg(4) would see only the
-  // first word, silently breaking the stop point with no error anywhere.
-  it('quotes a stop map whose name contains a space', async () => {
-    const { orch, cmds } = await setup();
-    insertDraft(db, {
-      slug: 'spacey', name: 'Spacey', vpkFilename: 'spacey.vpk',
-      sizeBytes: 1, sha256: 'b'.repeat(64), uploadedBy: null,
-    }, [1, 2, 3].map((n) => ({ map: n === 2 ? 'm two' : `m${n}`, display: null, isFinale: n === 3 })));
-    publishCampaign(db, 'spacey', 'Spacey');
-    invalidateCampaignCache();
-    const mid = seedMatch(db, 'spacey');
+  // A map name out of an uploaded VPK is refused at upload now (parseMission),
+  // and the orchestrator asserts it again rather than trust every row to have
+  // come through that door. Quotes would carry a space, but they do not stop
+  // a newline ending the command, so there is one rule for every name: the
+  // match is refused before the line is ever sent.
+  it.each([['a space', 'm two'], ['a newline', 'm2\nrcon_password pwned']])(
+    'refuses a stop map whose name contains %s', async (_what, bad) => {
+      const { orch, cmds } = await setup();
+      insertDraft(db, {
+        slug: 'spacey', name: 'Spacey', vpkFilename: 'spacey.vpk',
+        sizeBytes: 1, sha256: 'b'.repeat(64), uploadedBy: null,
+      }, [1, 2, 3].map((n) => ({ map: n === 2 ? bad : `m${n}`, display: null, isFinale: n === 3 })));
+      publishCampaign(db, 'spacey', 'Spacey');
+      invalidateCampaignCache();
+      const mid = seedMatch(db, 'spacey');
 
-    await orch.setupMatch(mid);
+      await orch.setupMatch(mid);
 
-    expect(matchCmd(cmds).endsWith(' "m two"')).toBe(true);
-  });
+      expect(matchCmd(cmds)).toBe('');
+      expect(cmds.some((c) => c.includes('rcon_password'))).toBe(false);
+      expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('aborted');
+    });
 
   // This is the regression guard for every match the site already runs. A
   // stock campaign has no known chapters until a missions directory is

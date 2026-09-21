@@ -194,19 +194,57 @@ function PlayerDetail({ steamid, me, onChanged }: { steamid: string; me: string;
         )}
       </section>
 
-      {d.inputFlags.length > 0 && (
+      {(
         <section id="input-flags">
           <h4>Input flags</h4>
           <p class="muted">
-            Button timing that does not look like a hand. These are evidence to weigh against the
-            replay, not a verdict: watch the round before acting on one.
+            Button timing that does not look like a hand, repeated across several separate bursts in
+            one match. These are low-severity evidence to weigh against the replay, not a verdict:
+            watch the round before acting on one.
           </p>
+          {d.inputFlags.length === 0 && (
+            <p class="muted">Nothing flagged for this player by input timing.</p>
+          )}
+          {d.inputCaps.length > 0 && (
+            <p class="admin-warn">
+              Capture truncated: the game server's per-round budget ran out for this player
+              {' '}{d.inputCaps.length} time{d.inputCaps.length === 1 ? '' : 's'}, so bursts after that point
+              in the round were never sent. Most recent:{' '}
+              {d.inputCaps.slice(0, 3).map((c, i) => (
+                <span key={`${c.at}-${c.kind}`}>
+                  {i > 0 ? ', ' : ''}{c.kind}{c.matchId ? <> in <a href={`/match/${c.matchId}`}>#{c.matchId}</a></> : null} ({fmtTime(c.at)})
+                </span>
+              ))}. No flag below does not mean a clean round there.
+            </p>
+          )}
           <ul class="admin-list">
             {d.inputFlags.map((f) => (
               <li key={f.id}>
-                {fmtTime(f.at)}: <code>{f.signature}</code> on a {f.kind} burst
+                {fmtTime(f.at)}: <code>{f.signature}</code> on {f.hits} {f.kind} burst{f.hits === 1 ? '' : 's'}
                 {f.matchId ? <> in <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
-                <span class="muted"> · {f.severity}</span>
+                <span class="muted"> · {f.severity}{f.note ? ` · holds: ${f.note}` : ''}</span>
+                {f.bursts.length > 0 && (
+                  <details>
+                    <summary class="muted">The bursts that counted</summary>
+                    <ul class="admin-list">
+                      {f.bursts.map((b) => (
+                        <li key={b.id}>
+                          {b.ratePerSec.toFixed(1)}/s over {b.presses} presses
+                          {b.weapon ? <> on <code>{b.weapon}</code></> : null}
+                          {b.hold
+                            ? <> · held {b.hold.medianTicks} ticks median ({b.hold.minTicks} to {b.hold.maxTicks}, sd {b.hold.sdTicks.toFixed(1)}), {Math.round(b.hold.oneTickFrac * 100)}% one-tick · <strong>{b.annotation}</strong></>
+                            : <span class="muted"> · no hold data</span>}
+                          {b.wire === 1 && <span class="muted"> · plugin 0.1.0: server tick timing, ghosts not excluded</span>}
+                        </li>
+                      ))}
+                    </ul>
+                    <p class="muted">
+                      wheel-like: nearly every press down for a single tick, which is a mouse wheel bind or a
+                      script that taps with no hold. fixed-hold: a constant hold time, as a scripted macro has.
+                      variable-hold: what a hand does. This describes the evidence; it does not change the flag.
+                    </p>
+                  </details>
+                )}
               </li>
             ))}
           </ul>

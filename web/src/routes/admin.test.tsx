@@ -64,6 +64,7 @@ describe('Admin page', () => {
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
+      inputCaps: [],
     });
     mockAdmin.ban.mockResolvedValue({ ok: true });
     render(<><Admin session={{ kind: 'active', me }} /><ConfirmHost /></>);
@@ -86,6 +87,7 @@ describe('Admin page', () => {
     mockAdmin.player.mockResolvedValue({
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       inputFlags: [],
+      inputCaps: [],
       signonDrops: {
         count: 2, lastAt: '2026-09-19T21:00:00.000Z',
         rows: [
@@ -118,12 +120,43 @@ describe('Admin page', () => {
       ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
       signonDrops: { count: 0, lastAt: null, rows: [] },
       inputFlags: [],
+      inputCaps: [],
     });
     render(<Admin session={{ kind: 'active', me }} />);
     await waitFor(() => expect(screen.getByText('clean')).toBeTruthy());
     fireEvent.click(screen.getByText('clean'));
     await waitFor(() => expect(screen.getByText(/Connect drops: none/)).toBeTruthy());
     expect(document.getElementById('connect-drops')).toBeNull();
+  });
+
+  it('shows what an input flag rests on, what its holds look like, and any truncated capture', async () => {
+    const row = { steamid: '2', name: 'clicker', avatar: null, status: 'active', isAdmin: false, discordName: null, sr: 900, games: 4, createdAt: '2026-09-01', offenses: 0 };
+    mockAdmin.players.mockResolvedValue({ players: [row] });
+    mockAdmin.player.mockResolvedValue({
+      ...row, discordId: null, activeBan: null, bans: [], notes: [], matches: [], penalties: [], timeout: null, tickets: [],
+      signonDrops: { count: 0, lastAt: null, rows: [] },
+      inputCaps: [{ matchId: 41, kind: 'bhop', serverTick: 9000, at: '2026-09-21T12:00:00.000Z' }],
+      inputFlags: [{
+        id: 1, burstId: 9, matchId: 41, steamid: '2', kind: 'fire', signature: 'pistol_rate', severity: 'low',
+        at: '2026-09-21T12:05:00.000Z', hits: 2, note: 'wheel-like',
+        bursts: [{
+          id: 8, at: '2026-09-21T12:04:00.000Z', weapon: 'weapon_pistol', presses: 51, ratePerSec: 13.04, meanTicks: 7.67,
+          wire: 2, serverSpan: 384, annotation: 'wheel-like',
+          hold: { n: 51, medianTicks: 1, minTicks: 1, maxTicks: 2, sdTicks: 0.2, oneTickFrac: 0.96, nearMedianFrac: 1 },
+        }],
+      }],
+    });
+    render(<Admin session={{ kind: 'active', me }} />);
+    await waitFor(() => expect(screen.getByText('clicker')).toBeTruthy());
+    fireEvent.click(screen.getByText('clicker'));
+    await waitFor(() => expect(document.getElementById('input-flags')).toBeTruthy());
+    const text = document.getElementById('input-flags')!.textContent!;
+    expect(text).toContain('pistol_rate on 2 fire bursts');
+    expect(text).toContain('low · holds: wheel-like');
+    expect(text).toContain('13.0/s over 51 presses');
+    expect(text).toContain('96% one-tick');
+    expect(text).toContain('Capture truncated');
+    expect(text).toContain('bhop in #41');
   });
 
   it('settings tab shows grouped settings', async () => {
@@ -355,7 +388,8 @@ describe('AdminMatches layout', () => {
 
 describe('AdminIntegrity', () => {
   const row = (over: Partial<IntegrityPlayerRow> = {}): IntegrityPlayerRow => ({
-    steamid: '10', name: 'Tino', rounds: 5, clips: 2, fidMax: 0.9, fidP95: 0.4,
+    steamid: '10', name: 'Tino', rounds: 25, eligibleRounds: 24, clips: 2, fidMax: 0.9, fidP95: 0.4,
+    scoreable: 60, trackShare: 0.31, ranked: true,
     occZ: 3.1, teamGap: 2.2, pFid: 0.95, pOcc: 0.9, pGap: 0.8, composite: 0.98, ...over,
   });
 
@@ -367,7 +401,7 @@ describe('AdminIntegrity', () => {
   const round = (over: Partial<IntegrityRound> = {}): IntegrityRound => ({
     matchId: 42, ordinal: 2, half: 1, slot: 3, campaign: 'farm',
     metrics: {
-      fidMax: 0.5, fidP95: 0.3, occZ: null, teamRank: null, teamGap: null, eligiblePairs: 10,
+      fidMax: 0.5, fidP95: 0.3, windows: 4, scoreable: 2, fidSum: 0.6, occ: null, eligiblePairs: 10,
       gates: { considered: 40, notLive: 5, notGhost: 10, inGrace: 5, tooClose: 5, occluded: 5, passed: 10 },
     },
     computedAt: '2026-09-17T00:00:00Z', reviewState: 'new', reviewNote: '', ...over,
@@ -427,6 +461,22 @@ describe('AdminIntegrity', () => {
     await openTab();
     await waitFor(() => expect(screen.getByText(/3 rounds waiting to be measured/)).toBeTruthy());
     expect(screen.getByText(/measured automatically once a match finishes/)).toBeTruthy();
+  });
+
+  // A replay that is gone or will not decode is given up on, and the panel has
+  // to say so: otherwise "everything has been measured" is quietly untrue.
+  it('says how many rounds could not be analysed, and why', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo({ unanalysable: { missing: 2, unreadable: 1 } }));
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/3 rounds could not be analysed/)).toBeTruthy());
+    expect(screen.getByText(/2 with no replay on disk, 1 that would not decode/)).toBeTruthy();
+  });
+
+  it('says nothing about that when there are none', async () => {
+    mockAdmin.integrityJob.mockResolvedValue(jobInfo());
+    await openTab();
+    await waitFor(() => expect(screen.getByText(/measured automatically/)).toBeTruthy());
+    expect(screen.queryByText(/could not be analysed/)).toBeNull();
   });
 
   // The guard that matters: this decodes every replay on disk on the same two
@@ -505,6 +555,49 @@ describe('AdminIntegrity', () => {
     expect(within(rows[1] as HTMLElement).queryByText('0.00')).toBeNull();
 
     expect(screen.getByText(/theoretical/i)).toBeTruthy();
+  });
+
+  // Tracking is a share of scoreable windows, and the best single window rides
+  // along as context. The best window used to BE the column, and a maximum over
+  // rounds ranks whoever has played most.
+  it('shows tracking as a share with the best window beside it, and n/a when there were too few windows', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({
+      players: [
+        row(),
+        row({ steamid: '20', name: 'PowerMustache', trackShare: null, pFid: null, fidMax: 0.12, composite: 0.4 }),
+      ],
+    });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('Tino')).toBeTruthy());
+    const rows = container.querySelectorAll('tbody tr');
+    expect(rows[0].textContent).toContain('0.310');
+    expect(rows[0].textContent).toContain('best 0.90');
+    expect(rows[1].textContent).toContain('n/a');
+    expect(rows[1].textContent).toContain('best 0.12');
+  });
+
+  it('does not rank a player with too few rounds, and does not count them in anyone else\'s rank', async () => {
+    mockAdmin.players.mockResolvedValue({ players: [] });
+    mockAdmin.integrity.mockResolvedValue({
+      players: [
+        row(),
+        row({ steamid: '20', name: 'PowerMustache', composite: 0.1 }),
+        row({
+          steamid: '30', name: 'JustArrived', rounds: 1, eligibleRounds: 1, ranked: false,
+          pFid: null, pOcc: null, pGap: null, composite: null,
+        }),
+      ],
+    });
+    const { container } = render(<Admin session={{ kind: 'active', me }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrity' }));
+    await waitFor(() => expect(screen.getByText('JustArrived')).toBeTruthy());
+    const rows = container.querySelectorAll('tbody tr');
+    expect(within(rows[0] as HTMLElement).getByText('1 of 2')).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText('2 of 2')).toBeTruthy();
+    expect(within(rows[2] as HTMLElement).getByText('too few rounds')).toBeTruthy();
+    expect(screen.getByText(/within the 2 players/)).toBeTruthy();
   });
 
   it('identifies people by name, falling back to the SteamID the server sent', async () => {

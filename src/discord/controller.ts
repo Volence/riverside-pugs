@@ -6,6 +6,8 @@ import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js
 import { spectateFor } from '../spectate.js';
 import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from './transport.js';
 import { getSetting } from '../settings.js';
+import { ENDORSE_ERROR_TEXT, ENDORSE_LABEL, endorseState, giveEndorsement } from '../endorsements.js';
+import { escapeName, renderEndorseKinds, renderEndorsePicker } from './presenter.js';
 
 export interface ControllerDeps {
   db: DB;
@@ -59,7 +61,8 @@ function resolve(
  * calls, so the two surfaces cannot disagree about who may do what.
  *
  * custom_id scheme: q:join, q:leave, l:<lobbyId>:ready,
- * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect.
+ * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect, m:<matchId>:endorse,
+ * e:<matchId>:p:<steamid>, e:<matchId>:k:<steamid>:<kind>.
  */
 export async function handleButton(
   deps: ControllerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
@@ -67,7 +70,8 @@ export async function handleButton(
   const parts = i.customId.split(':');
   const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave' || parts[1] === 'notify'))
     || (parts[0] === 'l' && parts.length >= 3)
-    || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate'));
+    || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate' || parts[2] === 'endorse'))
+    || (parts[0] === 'e' && parts.length >= 4 && (parts[2] === 'p' || parts[2] === 'k'));
   if (!known) return say('That button no longer does anything.');
 
   // Before resolve(), deliberately. Wanting to be told when games are filling
@@ -116,6 +120,34 @@ export async function handleButton(
       return say(`You voted ${campaignDisplayName(deps.db, campaign)}.`);
     }
     return say('That button no longer does anything.');
+  }
+
+  // Endorsements. `steamid` is the LINKED player resolve() found, which is the
+  // only identity these calls ever see: the Discord id alone authorises
+  // nothing, and the steamid inside the custom id is only ever the RECIPIENT,
+  // which giveEndorsement checks against the roster like any other input.
+  if (parts[0] === 'm' && parts[2] === 'endorse') return endorsePicker(deps, Number(parts[1]), steamid);
+  if (parts[0] === 'e') {
+    const endorseMatch = Number(parts[1]);
+    const target = parts[3];
+    if (parts[2] === 'p') {
+      const st = endorseState(deps.db, endorseMatch, steamid);
+      if (!st.eligible) return say(ENDORSE_ERROR_TEXT[st.reason ?? 'no_match']);
+      const c = st.candidates.find((x) => x.steamid === target);
+      if (!c) return say(ENDORSE_ERROR_TEXT.target_not_rostered);
+      const already = st.given.some((g) => g.to === target);
+      if (st.remaining <= 0 || already) return endorsePicker(deps, endorseMatch, steamid);
+      return { ephemeral: true, payload: renderEndorseKinds({ matchId: endorseMatch, steamid: target, name: c.name }) };
+    }
+    const r = giveEndorsement(deps.db, { matchId: endorseMatch, from: steamid, to: target, kind: parts[4] ?? '' });
+    if (!r.ok) return endorsePicker(deps, endorseMatch, steamid, ENDORSE_ERROR_TEXT[r.error]);
+    const st = endorseState(deps.db, endorseMatch, steamid);
+    const name = st.candidates.find((x) => x.steamid === target)?.name ?? 'them';
+    const kind = st.given.find((g) => g.to === target)?.kind;
+    return endorsePicker(
+      deps, endorseMatch, steamid,
+      `Endorsed ${escapeName(name)}${kind ? ` as ${ENDORSE_LABEL[kind]}` : ''}.`,
+    );
   }
 
   const matchId = Number(parts[1]);
@@ -180,4 +212,18 @@ async function toggleAlertRole(deps: ControllerDeps, userId: string): Promise<In
     // can act on rather than "try again".
     return say('Could not change that. An admin may need to move the bot\'s role above the alert role.');
   }
+}
+
+/** The picker, or the sentence explaining why this player gets none. */
+function endorsePicker(deps: ControllerDeps, matchId: number, steamid: string, notice?: string): InteractionReply {
+  const st = endorseState(deps.db, matchId, steamid);
+  if (!st.eligible) return say(ENDORSE_ERROR_TEXT[st.reason ?? 'no_match']);
+  const given = new Map(st.given.map((g) => [g.to, g.kind]));
+  return {
+    ephemeral: true,
+    payload: renderEndorsePicker({
+      matchId, budget: st.budget, remaining: st.remaining, notice,
+      candidates: st.candidates.map((c) => ({ steamid: c.steamid, name: c.name, given: given.get(c.steamid) ?? null })),
+    }),
+  };
 }

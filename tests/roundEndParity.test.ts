@@ -48,7 +48,9 @@ describe('ROUND_END parity between plugin and parser', () => {
     let i = 0;
     const body = fmt.replace(/%[sd]/g, () => values[i++]);
     const token = 'a'.repeat(32);
-    const ev = parseLogDatagram(Buffer.from(`\xff\xff\xff\xffPUG ${token} ${body}\n`, 'binary'));
+    // The live framing (see logParse.test.ts): header, engine stamp, line.
+    const ev = parseLogDatagram(Buffer.from(
+      `\xff\xff\xff\xffRL 08/29/2026 - 15:29:00: PUG ${token} ${body}\n\x00`, 'binary'));
     expect(ev).toMatchObject({
       kind: 'round_end', map: 'l4d_vs_hospital01_apartment', half: 2, surv: 'b', score: 412, alive: 3,
     });

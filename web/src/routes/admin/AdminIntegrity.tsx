@@ -6,6 +6,7 @@ import { fmtTime, useAction } from './useAction';
 
 const pct = (v: number | null): string => (v == null ? 'n/a' : `${Math.round(v * 100)}%`);
 const num = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(2));
+const num3 = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(3));
 
 /** Clips sharing one player-round, in the order the server ranked them.
  *
@@ -48,8 +49,8 @@ export function groupByRound(clips: IntegrityClip[]): { key: string; clips: Inte
  * Until this existed the only caller of the integrity analysis anywhere was a
  * script someone had to SSH in and run, so the board was empty until somebody
  * remembered and stale again after the next match. The automatic per-match
- * pass fixes the staleness; this button is for the other case, re-measuring
- * everything against rebuilt priors or a changed threshold.
+ * pass fixes the staleness, priors included; this button is for the other
+ * case, re-measuring everything after a changed threshold.
  *
  * The run happens in its own process (see src/integrity/job.ts) and this polls
  * its state while it goes, showing the script's own output, which already
@@ -78,6 +79,8 @@ function BackfillControl() {
   }
 
   const { job, pending, matchInFlight } = data;
+  const lost = data.unanalysable ?? { missing: 0, unreadable: 0 };
+  const lostTotal = lost.missing + lost.unreadable;
   return (
     <Panel>
       <h3>Analysis</h3>
@@ -86,9 +89,17 @@ function BackfillControl() {
         {pending > 0
           ? ` ${pending} round${pending === 1 ? '' : 's'} waiting to be measured; the next pass picks ${pending === 1 ? 'it' : 'them'} up within a minute.`
           : ' Everything on disk has been measured.'}
-        {' '}Re-analysing everything is for after a threshold change, or once more maps have
-        enough rounds to score against.
+        {' '}Each pass also adds what it measured to that map's baseline, so a map starts being
+        scored for occupancy by itself once it has enough rounds. Re-analysing everything is
+        for after a threshold change.
       </p>
+      {lostTotal > 0 && (
+        <p class="muted">
+          {lostTotal} round{lostTotal === 1 ? '' : 's'} could not be analysed and {lostTotal === 1 ? 'is' : 'are'} not
+          counted as waiting: {lost.missing} with no replay on disk, {lost.unreadable} that would not
+          decode. Re-analysing everything tries any whose file is there again.
+        </p>
+      )}
       <div class="admin-row">
         <button
           class="btn"
@@ -136,6 +147,7 @@ export function AdminIntegrity() {
   const detail = useFetch((s) => (steamid ? adminApi.integrityPlayer(steamid, s) : Promise.resolve(null)), [steamid]);
   const { busy, error, run } = useAction(() => { reload(); detail.reload(); });
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState('');
 
   if (steamid && detail.data) {
     // Review state is keyed by player-round (matchId/ordinal/half/slot), and each
@@ -148,9 +160,12 @@ export function AdminIntegrity() {
       <Panel>
         <button class="chip" onClick={() => setSteamid(null)}>Back to board</button>
         {error && <p class="error">{error}</p>}
-        {(detail.data.flags?.length ?? 0) > 0 && (
-          <section class="integrity-flags">
-            <h4>Live anti-cheat flags</h4>
+        <section class="integrity-flags">
+          <h4>Live anti-cheat flags</h4>
+          {(detail.data.flags?.length ?? 0) === 0 ? (
+            <p class="muted">Nothing flagged for this player by the live anti-cheat.</p>
+          ) : (
+          <>
             <p class="muted">
               Raised by Little Anti-Cheat during play, not by replay analysis, so there is no clip to
               watch. Its own documentation says few and rare suspicions are usually false positives;
@@ -167,9 +182,12 @@ export function AdminIntegrity() {
                 </li>
               ))}
             </ul>
-          </section>
+          </>
+          )}
+        </section>
+        {detail.data.clips.length === 0 && (
+          <Empty>No flagged moments from replay analysis for this player.</Empty>
         )}
-        {detail.data.clips.length === 0 && <Empty>No flagged moments for this player.</Empty>}
         <ul class="admin-list">
           {groupByRound(detail.data.clips).map((g) => {
             const first = g.clips[0];
@@ -218,6 +236,17 @@ export function AdminIntegrity() {
 
   const players = data?.players ?? [];
   const noClips = players.length > 0 && players.every((p) => p.clips === 0);
+  // Rank is the player's place in the WHOLE board. Taking it from the filtered
+  // array index would renumber everyone the moment you typed in the search box,
+  // turning a search into a different-looking ranking.
+  // Unranked players arrive after every ranked one, so the index is the rank
+  // for exactly the rows that have one.
+  const rankedCount = players.filter((p) => p.ranked).length;
+  const ranked = players.map((p, i) => ({ ...p, rank: i + 1 }));
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? ranked.filter((p) => p.name.toLowerCase().includes(needle) || p.steamid.includes(needle))
+    : ranked;
 
   return (
     <>
@@ -228,19 +257,31 @@ export function AdminIntegrity() {
           <dl class="colkey__list">
             <dt>Tracking</dt>
             <dd>
-              Did the crosshair <strong>move with</strong> an invisible infected. 1 is exactly the
-              motion needed to follow it, 0 is none of it. This is the backbone: sitting still
-              aimed at a known spawn spot scores <strong>zero</strong> however good the spot was,
-              because a held angle produces none of the motion. Shown as a player's single
-              highest round, not an average, since one round of following something you cannot
-              see is the thing worth looking at and twenty clean rounds should not average it away.
+              Did the crosshair <strong>move with</strong> an invisible infected. Each two second
+              window in which they stayed aimed near a ghost that was itself moving scores from
+              1, exactly the motion needed to follow it, down to 0, none of it. Sitting still
+              aimed at a known spawn spot scores <strong>zero</strong> however good the spot
+              was, and so does holding a corner while strafing or running past it: turning to
+              keep a fixed point in view is the player's own movement, not the ghost's. It also
+              cannot see someone watching a ghost that is <em>standing still</em>, because that
+              looks exactly like holding the corner. The number is the total of those scores
+              over the number of windows, across all their rounds, so it is a rate and does not
+              grow with playtime; with fewer than 20 windows it reads n/a. "Best" is their single
+              highest window, shown for context only: it is a maximum, the more someone plays
+              the higher it gets, and nothing is ranked on it. One window over the review
+              threshold becomes a clip whatever the rate is.
             </dd>
             <dt>Occupancy</dt>
             <dd>
               How much more often they were aimed at a ghost than <em>this map's own looking
-              habits</em> predict, as a z-score. The baseline is built from everyone's rounds on
-              that map, so a player whose whole edge is knowing where infected spawn scores zero
-              by construction: that knowledge is already in the baseline. Only the excess counts.
+              habits</em> predict. The baseline is built from everyone's rounds on that map, so a
+              player whose whole edge is knowing where infected spawn scores zero by
+              construction: that knowledge is already in the baseline. Only the excess counts.
+              It is in standard deviations, averaged over their rounds: a stare counts once per
+              two seconds rather than once per frame, and the level is set by what the players
+              on this board actually do on that map, so an ordinary round reads about 0 and
+              roughly one honest round in twenty reads beyond 2 either way. One round at 2 is
+              therefore nothing. An average that stays there is.
             </dd>
             <dt>Team gap</dt>
             <dd>
@@ -255,9 +296,12 @@ export function AdminIntegrity() {
             </dd>
             <dt>Rank</dt>
             <dd>
-              Position by the composite, which is the mean of whichever percentiles a player has.
-              It is a <strong>sort key, not a claim</strong>, and it only ranks within the
-              population listed here.
+              Position by the composite, which is the mean of the three percentiles with a
+              missing one counted as the middle. It is a <strong>sort key, not a claim</strong>,
+              and it only ranks within the ranked players listed here. A player with fewer than
+              8 rounds in which the analysis had anything to measure is listed last and not
+              ranked: one or two rounds are noise in either direction, and they are left out of
+              everyone else's percentiles too.
             </dd>
             <dt>Clips</dt>
             <dd>
@@ -274,11 +318,45 @@ export function AdminIntegrity() {
         </details>
       </Panel>
     <Panel>
+      <h3>Live anti-cheat</h3>
+      {data?.health && (
+        // Rendered even when everything is zero. An empty panel that shows
+        // nothing cannot tell "capturing, nobody flagged" apart from "silently
+        // broken", and on a new detector that is the only thing worth knowing.
+        <p class="muted">
+          {data!.health.bursts === 0
+            ? 'No input bursts captured yet. Bursts are only recorded during a live match, so this stays empty until a PUG runs.'
+            : `${data!.health.bursts.toLocaleString()} input bursts across ${data!.health.matchesWithBursts} match${data!.health.matchesWithBursts === 1 ? '' : 'es'}, most recent ${fmtTime(data!.health.lastBurstAt!)}.`}
+          {' '}
+          {data!.health.detections === 0 && data!.health.lilacFlags === 0
+            ? 'Nothing flagged.'
+            : `${data!.health.detections} input detection${data!.health.detections === 1 ? '' : 's'}, ${data!.health.lilacFlags} Little Anti-Cheat flag${data!.health.lilacFlags === 1 ? '' : 's'}.`}
+          {data!.health.caps > 0 && ` Capture was truncated ${data!.health.caps} time${data!.health.caps === 1 ? '' : 's'} by the per-round budget; the player's page says where.`}
+        </p>
+      )}
+      {(data?.flags?.length ?? 0) === 0
+        ? <Empty>Nothing flagged by the live anti-cheat. This is the normal, healthy state.</Empty>
+        : (
+          <ul class="admin-list">
+            {data!.flags.map((f) => (
+              <li key={`${f.source}-${f.id}`}>
+                {fmtTime(f.at)}: <button class="linklike" onClick={() => setSteamid(f.steamid)}>{f.name}</button>
+                {' '}<code>{f.kind}</code>
+                <span class="muted"> · {f.source === 'lilac' ? 'Little Anti-Cheat' : 'input timing'}</span>
+                {f.severity === 'banned' && <strong class="admin-warn"> · banned</strong>}
+                {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+    </Panel>
+
+    <Panel>
       <p class="muted">
         Theoretical only. These numbers rank who is worth watching a clip of; they are not
         evidence of anything on their own, and nothing here is visible outside this panel.
-        Ranks are within the {players.length} players on this board, so the top row is top
-        of this list and nothing more.
+        Ranks are within the {rankedCount} players on this board with enough rounds to rank, so
+        the top row is top of this list and nothing more.
       </p>
       {data && players.length === 0 && <Empty>Nothing analysed yet. Run the backfill.</Empty>}
       {noClips && (
@@ -292,7 +370,23 @@ export function AdminIntegrity() {
           over clean measurements, not a suspicion list, and nobody on it has been flagged.
         </p>
       )}
-      {players.length > 0 && (
+      {players.length > 8 && (
+        <div class="admin-row">
+          <input
+            class="admin-search"
+            type="search"
+            placeholder={`Search ${players.length} players`}
+            aria-label="Search players"
+            value={filter}
+            onInput={(e) => setFilter((e.target as HTMLInputElement).value)}
+          />
+          {filter && <span class="muted">{shown.length} of {players.length}</span>}
+        </div>
+      )}
+      {players.length > 0 && shown.length === 0 && (
+        <Empty>No player on this board matches "{filter}".</Empty>
+      )}
+      {shown.length > 0 && (
         <div class={noClips ? 'table-wrap muted' : 'table-wrap'}>
           <table class="admin-table">
             <thead>
@@ -302,13 +396,13 @@ export function AdminIntegrity() {
               </tr>
             </thead>
             <tbody>
-              {players.map((p, i) => (
+              {shown.map((p) => (
                 <tr key={p.steamid} class="is-clickable" onClick={() => setSteamid(p.steamid)}>
                   <td>{p.name}</td>
                   <td>{p.rounds}</td>
                   <td>{p.clips}</td>
-                  <td>{`${i + 1} of ${players.length}`}</td>
-                  <td>{num(p.fidMax)} <span class="muted">({pct(p.pFid)})</span></td>
+                  <td>{p.ranked ? `${p.rank} of ${rankedCount}` : <span class="muted">too few rounds</span>}</td>
+                  <td>{num3(p.trackShare)} <span class="muted">({pct(p.pFid)}) · best {num(p.fidMax)}</span></td>
                   <td>{num(p.occZ)} <span class="muted">({pct(p.pOcc)})</span></td>
                   <td>{num(p.teamGap)} <span class="muted">({pct(p.pGap)})</span></td>
                 </tr>

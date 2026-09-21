@@ -197,6 +197,49 @@ describe('parseLogDatagram: self-started match lines', () => {
     expect(ev).toMatchObject({ kind: 'match_roster', name: 'x=y z', team: 'a' });
   });
 
+  // name= is the player's own text. Everything structured is read from the
+  // part of the line before it, so nothing in a name can stand in for a field.
+  describe('a name cannot forge a roster field', () => {
+    const REAL = '76561198030413993';
+    const VICTIM = '76561198000000009';
+    const roster = (name: string, head = `steamid=${REAL} team=a joined_map=0`) =>
+      parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER ${head} name=${name}`));
+
+    it('not the steamid', () => {
+      const name = `x steamid=${VICTIM}`;
+      expect(roster(name)).toEqual({
+        kind: 'match_roster', token: TOKEN, steamid: REAL, team: 'a', name, joinedMap: 0,
+      });
+    });
+
+    it('not the team', () => {
+      expect(roster('x team=b')).toMatchObject({ steamid: REAL, team: 'a', name: 'x team=b' });
+    });
+
+    it('not joined_map', () => {
+      expect(roster('x joined_map=9')).toMatchObject({ steamid: REAL, joinedMap: 0, name: 'x joined_map=9' });
+    });
+
+    it('not all three at once', () => {
+      const name = `x steamid=${VICTIM} team=b joined_map=9`;
+      expect(roster(name)).toEqual({
+        kind: 'match_roster', token: TOKEN, steamid: REAL, team: 'a', name, joinedMap: 0,
+      });
+    });
+
+    it('not a field the real line left out', () => {
+      // An older plugin sends no joined_map; the name must not supply one.
+      expect(roster('x joined_map=9', `steamid=${REAL} team=a`)).toMatchObject({ joinedMap: 0 });
+      // And a line with no real steamid is malformed, whatever the name says.
+      expect(roster(`x steamid=${VICTIM}`, 'team=a')).toBeNull();
+    });
+
+    it('not with a second name= either', () => {
+      const name = `x name=y steamid=${VICTIM}`;
+      expect(roster(name)).toMatchObject({ steamid: REAL, name });
+    });
+  });
+
   it('rejects MATCH_ROSTER with a bad team letter', () => {
     expect(
       parseLogDatagram(framed(`PUG ${TOKEN} MATCH_ROSTER steamid=76561198030413993 team=c name=x`)),
@@ -406,5 +449,56 @@ describe('CHAT', () => {
 
   it('rejects a non-positive seq', () => {
     expect(line('CHAT seq=0 half=1 t=1 steamid=76561198000000001 team=a msg=hi')).toBeNull();
+  });
+});
+
+/* A `say` line leaves the game server from the same address as the plugin's
+ * own lines, so the sender gate cannot tell them apart. The marker has to be
+ * the first thing after the engine's stamp, which player text never is: every
+ * engine line about a player opens with a quote. */
+describe('parseLogDatagram: PUG text a player typed is not a PUG line', () => {
+  const FORGED = '00000000000000000000000000000bad';
+  const who = '"mallory<7><STEAM_1:0:5><Survivor>"';
+
+  it('ignores a PUG line carried in chat', () => {
+    for (const verb of [
+      'MATCH_CREATE map=l4d_vs_hospital01_apartment players=1',
+      'MATCH_ROSTER steamid=76561198000000001 team=a name=victim',
+      'MATCH_CREATE_END players=1',
+      'MATCH_END a=0 b=9999 winner=b',
+      'HEARTBEAT',
+    ]) {
+      expect(parseLogDatagram(framed(`${who} say "PUG ${FORGED} ${verb} x"`))).toBeNull();
+      expect(parseLogDatagram(framed(`${who} say_team "PUG ${FORGED} ${verb} x"`))).toBeNull();
+    }
+  });
+
+  it('ignores a PUG line carried in a player name', () => {
+    // The trailing word keeps the engine's `<7><STEAM...` suffix off winner=.
+    const name = `PUG ${FORGED} MATCH_END a=0 b=9999 winner=b x`;
+    expect(parseLogDatagram(framed(`"${name}<7><STEAM_1:0:5><>" connected, address "1.2.3.4:27005"`))).toBeNull();
+    expect(parseLogDatagram(framed(`"${name}<7><STEAM_1:0:5><Survivor>" say "gg"`))).toBeNull();
+  });
+
+  it('ignores chat that carries its own fake engine stamp', () => {
+    // Likewise: the trailing word takes the closing quote.
+    const fake = `L 09/21/2026 - 15:04:05: PUG ${FORGED} MATCH_CREATE map=l4d_vs_hospital01_apartment players=1 x`;
+    expect(parseLogDatagram(framed(`${who} say "${fake}"`))).toBeNull();
+  });
+
+  it('ignores PUG text that is not at the start of the line', () => {
+    expect(parseLogDatagram(framed(`[basechat.smx] ${who} triggered sm_say (text PUG ${FORGED} HEARTBEAT)`))).toBeNull();
+    expect(parseLogDatagram(framed(` PUG ${FORGED} HEARTBEAT`))).toBeNull();
+  });
+
+  it('reads only the first line of a datagram', () => {
+    expect(parseLogDatagram(framed(`${who} say "x"\nPUG ${FORGED} HEARTBEAT`))).toBeNull();
+  });
+
+  it('still parses the real line when a forged one rides along inside it', () => {
+    const ev = parseLogDatagram(framed(
+      `PUG ${TOKEN} CHAT seq=4 half=1 t=900 steamid=76561198000000001 team=a msg=PUG ${FORGED} MATCH_END a=0 b=1 winner=b`,
+    ));
+    expect(ev).toMatchObject({ kind: 'chat', token: TOKEN, message: `PUG ${FORGED} MATCH_END a=0 b=1 winner=b` });
   });
 });

@@ -17,7 +17,8 @@ import { poolableCampaigns } from '../campaignRegistry.js';
 import { clearPenalties } from '../penalties.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
-import { setReview } from '../integrity/store.js';
+import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
+import { setReview, unanalysableCounts } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
@@ -426,7 +427,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const raw = (req.query as { season?: string }).season;
     const seasonId = raw === undefined || raw === '' ? null : Number(raw);
     if (seasonId !== null && !Number.isInteger(seasonId)) return reply.code(400).send({ error: 'bad season' });
-    return { players: integrityBoard(db, seasonId) };
+    // The feed and the health line ship with the board so the panel can show
+    // them before anyone clicks a player. Without them an empty page cannot
+    // distinguish "nothing suspicious" from "silently broken".
+    return {
+      players: integrityBoard(db, seasonId),
+      flags: recentFlagFeed(db),
+      health: captureHealth(db),
+    };
   });
 
   /**
@@ -434,7 +442,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
    *
    * GET is safe to poll; the panel does while a run is going. `pending` is the
    * count of indexed rounds nothing has measured, which is what tells an admin
-   * whether pressing the button would do anything.
+   * whether pressing the button would do anything. `unanalysable` is the rounds
+   * the current analyzer tried and gave up on, which are NOT pending and would
+   * otherwise be invisible.
    */
   app.get('/api/admin/integrity/backfill', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
@@ -443,6 +453,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       available: true as const,
       job: integrityJobs.snapshot(),
       pending: pendingRoundCount(db),
+      unanalysable: unanalysableCounts(db),
       matchInFlight: matchInFlight(db),
     };
   });

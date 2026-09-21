@@ -1,4 +1,5 @@
 import type { Frame } from '../replayFormat.js';
+import { TUNING } from './constants.js';
 import { isLiveSurvivor } from './geometry.js';
 import { pickClips, trackWindows, type GateTally, type TrackWindow } from './ghostTrack.js';
 import { occupancyWithGates, type OccResult } from './occupancy.js';
@@ -9,18 +10,24 @@ import { PriorBuilder, type PriorTable } from './aimPrior.js';
  *
  * Kept apart from the metric primitives because it sits at a different
  * abstraction level. `ghostTrack.ts` answers "what did this one crosshair do";
- * this answers "what does that mean next to the four other people in the
- * round", which is metric C.
+ * this runs it for everyone in the round. What a player's numbers mean next to
+ * their teammates', which is metric C, is a read-time question: see `score.ts`.
  */
 
 export interface RoundMetrics {
   fidMax: number;
   fidP95: number;
-  occZ: number | null;
-  /** 1 is the highest occupancy z on this side this round. Null without a prior. */
-  teamRank: number | null;
-  /** This player's z minus the mean of their teammates'. Null without a prior. */
-  teamGap: number | null;
+  /** Fidelity windows that formed, how many of them held enough motion to be
+   *  scored (MIN_TRAVEL), and the sum of those scores. The board divides the
+   *  last by the second, pooled over a player's rounds, so tracking is a rate
+   *  over chances rather than a maximum over playtime. */
+  windows: number;
+  scoreable: number;
+  fidSum: number;
+  /** Metric B as sums, null without a prior. The score, and the team gap that
+   *  is metric C, are worked out from these at read time in `score.ts`: both
+   *  need a calibration only the whole board can supply. */
+  occ: OccResult | null;
   /** Pairs that cleared every gate. Always `gates.passed`; kept as its own
    *  field because it is the one coverage number every consumer wants and
    *  because it predates the tally. It used to be read off the occupancy
@@ -29,6 +36,32 @@ export interface RoundMetrics {
   eligiblePairs: number;
   /** Where the frames went. The diagnosable half of "no clips". */
   gates: GateTally;
+}
+
+/**
+ * The frames in which time actually passed.
+ *
+ * An engine pause keeps the frame writer running with the clock stopped: 11 of
+ * the 189 replays in hand on 2026-09-21 hold a run of frames with tMs frozen,
+ * 5865 frames in all and the longest 1197, byte-identical in all but 22. Each
+ * copy used to count as a fresh look in the aim prior and as a fresh
+ * observation in metric B, which is how one 385 frame pause gave match 37 an
+ * occupancy of 62.8.
+ *
+ * A frame is kept only when its tMs is greater than the last KEPT frame's, so a
+ * clock that steps backwards is dropped along with one that stands still. No
+ * replay in hand has a backwards step; the rule covers it because the cost of
+ * being wrong is a delta taken across negative time.
+ */
+export function unpausedFrames(frames: Frame[]): Frame[] {
+  const out: Frame[] = [];
+  let last = -Infinity;
+  for (const f of frames) {
+    if (f.tMs <= last) continue;
+    out.push(f);
+    last = f.tMs;
+  }
+  return out;
 }
 
 /**
@@ -60,48 +93,33 @@ function p95(xs: number[]): number {
 /**
  * One round, every survivor.
  *
- * Also returns the round's own contribution to the aim prior, which the caller
- * subtracts before scoring so nobody is measured against a baseline they helped
- * build. See `subtractRound`.
+ * `prior` is the map's pool with this round already taken out, so nobody is
+ * measured against a baseline they helped build. Taking it out is the caller's
+ * job (`analyzeOneRound`), because only the caller knows whether the pool ever
+ * contained this round.
  */
 export function analyzeRound(
   frames: Frame[], survivorSlots: number[], prior: PriorTable | null,
-): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]>; roundPrior: PriorBuilder } {
+): { metrics: Map<number, RoundMetrics>; clips: Map<number, TrackWindow[]> } {
   const metrics = new Map<number, RoundMetrics>();
   const clips = new Map<number, TrackWindow[]>();
-  const occ = new Map<number, OccResult | null>();
-  const roundPrior = buildRoundPrior(frames, survivorSlots);
 
   for (const slot of survivorSlots) {
     const windows = trackWindows(frames, slot);
     clips.set(slot, pickClips(windows));
-    const { occ: o, gates } = occupancyWithGates(frames, slot, prior);
-    occ.set(slot, o);
+    const { occ, gates } = occupancyWithGates(frames, slot, prior);
     const fids = windows.map((w) => w.fidelity);
+    const scoreable = windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
     metrics.set(slot, {
       fidMax: fids.length ? Math.max(...fids) : 0,
       fidP95: p95(fids),
-      occZ: o?.z ?? null,
-      teamRank: null,
-      teamGap: null,
+      windows: windows.length,
+      scoreable: scoreable.length,
+      fidSum: scoreable.reduce((a, w) => a + w.fidelity, 0),
+      occ,
       eligiblePairs: gates.passed,
       gates,
     });
   }
-
-  // Metric C. A second control on a different axis from the prior: the prior
-  // removes what is normal for this MAP across all history, this removes what
-  // was normal for this ROUND, including whatever the director happened to do.
-  const scored = survivorSlots.filter((s) => occ.get(s) != null);
-  if (scored.length > 1) {
-    const byZ = [...scored].sort((a, b) => (occ.get(b)!.z) - (occ.get(a)!.z));
-    for (const slot of scored) {
-      const mine = occ.get(slot)!.z;
-      const others = scored.filter((s) => s !== slot).map((s) => occ.get(s)!.z);
-      const m = metrics.get(slot)!;
-      m.teamRank = byZ.indexOf(slot) + 1;
-      m.teamGap = mine - (others.reduce((a, b) => a + b, 0) / others.length);
-    }
-  }
-  return { metrics, clips, roundPrior };
+  return { metrics, clips };
 }
