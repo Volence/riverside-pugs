@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import { playerDetail, type BanRow } from '../admin/players.js';
+import { playerDetail } from '../admin/players.js';
 import { getPlayer } from '../players.js';
 import { banRedactor } from '../admin/banRedaction.js';
 import { ticketsAbout } from './views.js';

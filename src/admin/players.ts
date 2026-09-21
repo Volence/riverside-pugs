@@ -303,7 +303,7 @@ export interface PublicBan {
 }
 
 /**
- * The ban list as anyone may read it, signed in or not.
+ * The ban list as the public page reads it, with one rule applied per viewer.
  *
  * Public on purpose. A ban list nobody outside the admin team can see asks
  * players to take enforcement on trust, and the reason text is already shown
@@ -311,6 +311,11 @@ export interface PublicBan {
  * here is everything else on a player's admin page: notes, reports, penalty
  * history, connect drops. Those were never shown to anyone and this route is
  * not a way to reach them.
+ *
+ * Not viewer-independent any more, which is why `viewer` is required rather
+ * than defaulted: every row goes through the ticket rule below, so two people
+ * asking for this list can be answered differently and neither answer can be
+ * cached as "the ban list".
  *
  * Lifted and expired bans stay listed. A record that quietly deletes its
  * mistakes is not a record, and "unbanned by, and when" is the part that
