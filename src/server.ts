@@ -38,6 +38,7 @@ import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
+import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
@@ -88,6 +89,10 @@ export interface ServerDeps {
    *  means "no Twitch even though it is configured", which is how a test keeps
    *  the poller from starting. */
   twitchApi?: TwitchApi | null;
+  /** Every Steam Web API call the signals and the persona backfill make.
+   *  Injected in tests, which also keeps the background refresher from
+   *  starting; production leaves it out and gets the real fetch. */
+  steamFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
   /** Runs a batch of console commands on one server, for the ban sync.
@@ -275,9 +280,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   // Best effort and never awaited: a Steam outage must not delay boot.
-  void backfillPersonas(deps.db, deps.config.steamApiKey)
+  void backfillPersonas(deps.db, deps.config.steamApiKey, deps.steamFetch)
     .then((n) => { if (n > 0) console.log(`[persona] backfilled ${n} player(s)`); })
     .catch((err) => console.error('[persona] backfill failed:', err));
+
+  // What Steam says about each account, for the admin player page. Without an
+  // api key every call below is a no-op, so nothing here is conditional on it.
+  const signalDeps: SignalDeps = { db: deps.db, apiKey: deps.config.steamApiKey, fetchFn: deps.steamFetch };
+  // Fire and forget, always: a caller is a login or a log event, and neither
+  // may wait on Steam or fail because of it. refreshSteamSignals does not
+  // throw; the catch is for whatever it has not thought of.
+  const refreshSignals = (steamids: string[], opts: Parameters<typeof refreshSteamSignals>[2] = {}): void => {
+    void refreshSteamSignals(signalDeps, steamids, opts)
+      .catch((err) => console.error('[steamSignals] refresh failed:', err));
+  };
+  // Same rule as the Twitch poller below: tests inject the fetch and drive the
+  // refresh directly, so a timer started for them would only outlive the test.
+  const stopSignalRefresh = deps.steamFetch === undefined ? startSteamSignalRefresh(signalDeps) : null;
 
   await app.register(cookie, { secret: deps.config.cookieSecret });
   await app.register(websocket);
@@ -296,6 +315,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db,
     verifyLogin: deps.verifyLogin ?? realVerifyLogin,
     fetchPersona: deps.fetchPersona ?? realFetchPersona,
+    refreshSignals: (steamid) => refreshSignals([steamid]),
     discordApi,
     membership,
   });
@@ -599,7 +619,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         // Spectator feed. Cosmetic by design, so a throw here must never take
         // down the listener that also carries match_end.
         try {
-          if (ev.kind === 'match_start') recordMatchStart(deps.db, ev.token, ev.map);
+          if (ev.kind === 'match_start') {
+            recordMatchStart(deps.db, ev.token, ev.map);
+            // Everyone has readied up, so everyone rostered is in game: the one
+            // moment the Family Sharing question means anything, and the point
+            // at which a ban elsewhere is worth an admin's attention.
+            const started = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (started) {
+              const roster = deps.db.prepare('SELECT player_id FROM match_players WHERE match_id = ?')
+                .all(started.id) as { player_id: string }[];
+              refreshSignals(roster.map((r) => r.player_id), { sharing: true, matchId: started.id });
+            }
+          }
           else if (ev.kind === 'heartbeat') {
             recordHeartbeat(deps.db, ev.token);
             // The heartbeat repeats the phase so a lost PHASE datagram is
@@ -627,6 +659,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // The engine's own "entered the game" line normally gets here
             // first; this is the second chance when that datagram was lost.
             signonDrops?.onEntered(ev.steamid);
+            // Covers whoever the match-start pass cannot: a late joiner, and a
+            // reconnect on a different copy of the game. Someone checked
+            // within the hour is only asked whose copy they are playing on.
+            const joined = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (joined) refreshSignals([ev.steamid], { sharing: true, matchId: joined.id, freshMs: 60 * 60 * 1000 });
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
@@ -958,6 +996,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(pruneTimer);
     stopTwitchPoll?.();
+    stopSignalRefresh?.();
     clearTimeout(pruneOnBoot);
     banSync.stop();
     adminSync.stop();

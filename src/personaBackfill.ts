@@ -1,7 +1,7 @@
 import type { DB } from './db.js';
 import { fetchPersonas } from './steamAuth.js';
 
-type FetchFn = typeof fetch;
+type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
  * Give roster-created players their real Steam name and avatar.
