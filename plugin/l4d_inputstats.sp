@@ -18,7 +18,7 @@
 #include <sourcemod>
 #include <sdktools>
 
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.2.0"
 
 /** A burst closes after this much silence. 30 ticks at 100 tick = 300ms.
  *  Measured, not guessed: a human sample containing one 31-second idle gap had
@@ -171,47 +171,47 @@ public void OnPluginStart()
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("round_end", Event_RoundEnd, EventHookMode_PostNoCopy);
 	HookEvent("player_death", Event_PlayerDeath);
+#if defined DEBUG
 	RegAdminCmd("sm_inputstats_emit", Cmd_Emit, ADMFLAG_ROOT,
-		"TEST: sm_inputstats_emit <fire|pounce|bhop> <presses> - ship a synthetic burst through the real encode and emit path.");
+		"DEBUG BUILD: sm_inputstats_emit <fire|pounce|bhop> <intervals> - ship a synthetic burst through the real encode and emit path.");
+#endif
 }
 
-/** Exercises the real Encode and EmitBurst path with known values, so the wire
- *  format can be verified against the parser without a player at a keyboard. */
+#if defined DEBUG
+/**
+ * Exercises the real Encode and EmitLine path with known values, so the wire
+ * format can be checked against the parser without a player at a keyboard.
+ *
+ * NOT IN THE SHIPPED PLUGIN. It was, as a ROOT command, and it attributed its
+ * synthetic burst to the first human on the server: one mistyped command on a
+ * live box and a real player has a fabricated 12/s burst against their name
+ * in a table whose whole purpose is evidence. It now compiles only with
+ * `spcomp l4d_inputstats.sp DEBUG=1`, and even then it only ever emits for a
+ * fixed test steamid, never for a connected player.
+ */
 public Action Cmd_Emit(int client, int args)
 {
 	char kind[16], sn[8];
 	GetCmdArg(1, kind, sizeof(kind));
 	GetCmdArg(2, sn, sizeof(sn));
 	int n = StringToInt(sn);
-	if (kind[0] == '\0' || n < 1 || n > MAX_INTERVALS) {
-		ReplyToCommand(client, "usage: sm_inputstats_emit <fire|pounce|bhop> <presses 1..%d>", MAX_INTERVALS);
+	bool hop = StrEqual(kind, "bhop");
+	if (hop) n = 1;
+	if ((!hop && !StrEqual(kind, "fire") && !StrEqual(kind, "pounce")) || n < 1 || n > MAX_INTERVALS) {
+		ReplyToCommand(client, "usage: sm_inputstats_emit <fire|pounce|bhop> <intervals 1..%d>", MAX_INTERVALS);
 		return Plugin_Handled;
 	}
-	int ticks[MAX_INTERVALS];
-	for (int i = 0; i < n; i++) ticks[i] = 7 + (i % 3);   // 7,8,9 repeating
+	int ticks[MAX_INTERVALS], holds[MAX_HOLDS];
+	for (int i = 0; i < n; i++) ticks[i] = 7 + (i % 3);    // 7,8,9 repeating
+	for (int i = 0; i <= n; i++) holds[i] = 3 + (i % 2);   // 3,4 repeating
 	char d[MAX_INTERVALS + 1], h[MAX_HOLDS + 1];
 	Encode(ticks, n, d, sizeof(d));
-	int holds[MAX_HOLDS];
-	for (int i = 0; i <= n; i++) holds[i] = 3 + (i % 2);   // 3,4 repeating
-	Encode(holds, n + 1, h, sizeof(h));
-	int target = client > 0 ? client : FirstHuman();
-	if (target > 0) {
-		int k = StrEqual(kind, "pounce") ? KIND_POUNCE : StrEqual(kind, "bhop") ? KIND_BHOP : KIND_FIRE;
-		EmitBurst(target, k, "test_weapon", n, 4, n + 1, 0, d, h);
-		ReplyToCommand(client, "[inputstats] emitted a synthetic %s burst of %d for %N", kind, n, target);
-	} else {
-		// Nobody connected: still exercise the real format, with a literal id.
-		EmitLine("76561197960287930", kind, "test_weapon", n, 4, n + 1, GetGameTickCount(), 0, 0, d, h);
-		ReplyToCommand(client, "[inputstats] emitted a synthetic %s burst of %d for a test steamid", kind, n);
-	}
+	Encode(holds, hop ? 1 : n + 1, h, sizeof(h));
+	EmitLine("76561197960287930", kind, "test_weapon", n, 4, hop ? 0 : n + 1, GetGameTickCount(), 0, 0, d, h);
+	ReplyToCommand(client, "[inputstats] emitted a synthetic %s burst of %d intervals for the test steamid", kind, n);
 	return Plugin_Handled;
 }
-
-int FirstHuman()
-{
-	for (int i = 1; i <= MaxClients; i++) if (IsClientConnected(i) && !IsFakeClient(i)) return i;
-	return -1;
-}
+#endif
 
 // A burst used to be emitted only by the NEXT press after it, or by a landing.
 // The last burst of a life, a round or a session has no next press, so it was
