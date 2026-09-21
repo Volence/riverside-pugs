@@ -7,6 +7,7 @@ import { claimTicket, closeTicket, reopenTicket } from '../src/tickets/actions.j
 import { staffThread, threadsInState } from '../src/tickets/threads.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { TicketSync } from '../src/discord/ticketSync.js';
+import type { MessagePayload } from '../src/discord/transport.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -41,6 +42,7 @@ beforeEach(() => {
 afterEach(() => { sync.stop(); off(); });
 
 const file = (reporter: string, body: object) => (fileReport(db, reporter, body, deps) as { ticketId: number }).ticketId;
+const card: MessagePayload = { content: 'x', embeds: [], components: [] };
 const cardOf = (threadId: string) => t.byId(threadId)!.payload;
 const buttons = (threadId: string) => cardOf(threadId).components.flat().map((b) => (b.kind === 'button' ? `${b.customId}=${b.label}` : `link=${b.url}`));
 
@@ -221,6 +223,34 @@ describe('the staff forum post', () => {
     const links = [...unescaped.matchAll(/\[([^[\]]*)\]\(([^()]*)\)/g)];
     expect(links).toHaveLength(1);
     expect(links[0][0]).toBe(`[profile](https://pug.test/player/${IDS[5]})`);
+  });
+
+  it('deletes its own orphan post on the first pass and leaves anyone else\'s alone', async () => {
+    const id = file(IDS[0], { targetId: IDS[5], category: 'afk', text: '' });
+    // Left in the forum before the bot started: a post it made whose row
+    // never landed, and a post somebody else made in the same forum.
+    const orphan = (await t.threads.createForumPost('forum1', { name: 'orphan', message: card, tags: [] })).threadId;
+    const theirs = (await t.threads.createForumPost('forum1', { name: 'theirs', message: card, tags: [] })).threadId;
+    t.threadsById.get(theirs)!.ownerId = 'somebody-else';
+    sync.start();
+    await sync.idle();
+    expect(t.threadsById.get(orphan)!.deleted).toBe(true);
+    expect(t.threadsById.get(theirs)!.deleted).toBe(false);
+    // The post made in this very pass has a row, so it stands.
+    expect(t.threadsById.get(staffThread(db, id)!.thread_id)!.deleted).toBe(false);
+  });
+
+  it('holds the forum\'s access list back until that sweep has worked once', async () => {
+    const orphan = (await t.threads.createForumPost('forum1', { name: 'orphan', message: card, tags: [] })).threadId;
+    // Discord refuses the listing itself on the first pass.
+    t.failThreadOps = 1;
+    sync.start();
+    await sync.idle();
+    expect(t.threadsById.get(orphan)!.deleted).toBe(false);
+    expect(t.channelAccess.get('forum1')).toBeUndefined();
+    await sync.reconcile();
+    expect(t.threadsById.get(orphan)!.deleted).toBe(true);
+    expect([...t.channelAccess.get('forum1')!].sort()).toEqual(['906', '907']);
   });
 
   it('a post deleted by hand is made again', async () => {

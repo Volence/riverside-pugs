@@ -343,6 +343,66 @@ describe('blanking the tickets channel setting ends nothing, on the private side
   });
 });
 
+describe('a ticket folded away while Discord was still making its forum post', () => {
+  /** Fold the accused's normal ticket into its restricted sibling from inside
+   *  createForumPost: the REST call has landed, and the row for it can no
+   *  longer be written. What a promotion in a request handler does. */
+  const foldWhileCreating = (andThen: () => void = () => {}) => {
+    const create = t.threads.createForumPost;
+    t.threads.createForumPost = async (forumId, p) => {
+      const made = await create(forumId, p);
+      db.transaction(() => {
+        db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
+        expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded');
+      })();
+      andThen();
+      return made;
+    };
+    return () => { t.threads.createForumPost = create; };
+  };
+
+  it('deletes the post it could not remember, so nothing about the accused is left in the forum', async () => {
+    file(IDS[0], IDS[5], 'unsafe');
+    await sync.idle();
+    file(IDS[1], IDS[5], 'griefing');
+    const restore = foldWhileCreating();
+    try {
+      await sync.idle();
+    } finally {
+      restore();
+    }
+    expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_threads WHERE surface = 'forum'").get()).toEqual({ n: 0 });
+    expect(t.threadsIn('forum1')).toEqual([]);
+    await sync.reconcile();
+    expect(t.threadsIn('forum1')).toEqual([]);
+  });
+
+  it('keeps the accused out of the forum while a post it could not delete is still standing', async () => {
+    file(IDS[0], IDS[5], 'unsafe');
+    await sync.idle();
+    expect([...(t.channelAccess.get('forum1') ?? [])].sort()).toEqual(['906', '907']);
+    file(IDS[1], IDS[5], 'griefing');
+    // Discord refuses the deletion that follows the failed insert too.
+    const restore = foldWhileCreating(() => { t.failThreadOps = 1; });
+    try {
+      await sync.idle();
+    } finally {
+      restore();
+    }
+    const stranded = t.threadsIn('forum1');
+    expect(stranded).toHaveLength(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_threads WHERE surface = 'forum'").get()).toEqual({ n: 0 });
+    // The accused is staff now, and a post about them is standing that
+    // nothing in the database can see, so the forum's access list is left
+    // exactly as it was rather than letting them in to read it.
+    expect([...(t.channelAccess.get('forum1') ?? [])].sort()).toEqual(['906', '907']);
+    // The next pass sweeps the post up, and only then does the forum grow.
+    await sync.reconcile();
+    expect(t.threadsById.get(stranded[0].id)!.deleted).toBe(true);
+    expect([...(t.channelAccess.get('forum1') ?? [])].sort()).toEqual(['905', '906', '907']);
+  });
+});
+
 describe('a thread member who is no longer entitled to be there', () => {
   it('goes from an open thread and from a closed, locked one, which ends locked and archived', async () => {
     const open = file(IDS[0], IDS[5], 'unsafe');

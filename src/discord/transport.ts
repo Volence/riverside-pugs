@@ -148,6 +148,14 @@ export interface ThreadOps {
   createPrivateThread(channelId: string, thread: { name: string }): Promise<{ threadId: string }>;
   /** False once the thread has been deleted, by the bot or by hand. */
   exists(threadId: string): Promise<boolean>;
+  /**
+   * Every thread of this FORUM channel that the BOT ITSELF created, active
+   * and archived alike, with the id of that owner. Only its own: which user
+   * the bot is is known in the transport and nowhere else, and the caller
+   * sweeps up what it finds, which must never be somebody else's post.
+   * Throws when the channel is not a forum.
+   */
+  listThreads(channelId: string): Promise<{ threadId: string; ownerId: string | null }[]>;
   /** Rejects for someone who is not in the server. */
   addMember(threadId: string, userId: string): Promise<void>;
   removeMember(threadId: string, userId: string): Promise<void>;

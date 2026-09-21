@@ -46,6 +46,9 @@ export class TicketSync {
   /** Problems already told to the admin feed by this process. A permissions
    *  fault would otherwise post the same line every five minutes. */
   private reported = new Set<string>();
+  /** Whether the staff forum has been checked for posts with no ticket behind
+   *  them. Until it has, nobody is let into the forum: see sweepOrphanPosts. */
+  private orphansSwept = false;
 
   constructor(private deps: TicketSyncDeps) {}
 
@@ -134,6 +137,7 @@ export class TicketSync {
        ORDER BY 1`,
     ).all() as { id: number }[]).map((r) => r.id);
     for (const id of ids) await this.one(id);
+    await this.step(() => this.sweepOrphanPosts());
     // Last, on purpose: by now every post that must not exist is gone, or
     // forumAudience is still leaving its subject out.
     await this.step(() => this.syncAccess());
@@ -240,22 +244,79 @@ export class TicketSync {
     if (surface === 'forum') {
       const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
       const made = await transport.threads.createForumPost(forumId, { name: card.name, message: card.payload, tags: card.tags });
-      row = insertThread(db, {
+      row = await this.rememberThread(made.threadId, () => insertThread(db, {
         ticketId: t.id, kind: 'staff', surface, channelId: forumId, threadId: made.threadId,
         cardMessageId: made.messageId, cardHash: card.hash,
-      });
+      }));
     } else {
       const channelId = getSetting(db, 'discord_tickets_channel_id') ?? '';
       const made = await transport.threads.createPrivateThread(channelId, { name: card.name });
       // The row goes in with no card: refreshCard sends it, after the members
       // are in. If that send fails, the next pass finds this row and sends
       // the card then, instead of making a second thread.
-      row = insertThread(db, { ticketId: t.id, kind: 'staff', surface, channelId, threadId: made.threadId });
+      row = await this.rememberThread(made.threadId, () => insertThread(db, { ticketId: t.id, kind: 'staff', surface, channelId, threadId: made.threadId }));
     }
     // The card counts every report there is, so none of them needs a line.
     db.prepare('UPDATE ticket_reports SET announced_at = ? WHERE ticket_id = ? AND announced_at IS NULL')
       .run(new Date().toISOString(), t.id);
     return row;
+  }
+
+  /**
+   * The row for a thread Discord has just made, and the thread itself back
+   * again when that row cannot be written.
+   *
+   * A request handler can fold the ticket away while the REST call is in
+   * flight: a promotion with a restricted sibling waiting, or a player merge.
+   * The insert then fails on its foreign key and leaves a thread nothing
+   * knows about, which is the worst kind of forum post there is:
+   * forbiddenForumThreads cannot see it to delete it and forumAudience cannot
+   * see it to keep its subject out, so the next access sync would hand the
+   * accused their own case to read.
+   */
+  private async rememberThread(threadId: string, insert: () => ThreadRow): Promise<ThreadRow> {
+    try {
+      return insert();
+    } catch (err) {
+      console.error('[discord] a ticket thread outlived its ticket; deleting it:', err);
+      try {
+        await this.deps.transport.threads.deleteThread(threadId);
+      } catch (undeleted) {
+        // It is standing there with nothing pointing at it. The sweep goes
+        // back on the books, and until it has run the forum's access list
+        // does not move.
+        this.orphansSwept = false;
+        this.problem(`Could not delete a Discord thread whose ticket disappeared while it was being made: ${undeleted instanceof Error ? undeleted.message : String(undeleted)}. It is swept up on a later pass, and nobody new is let into the tickets forum until it is.`);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Posts in the staff forum that the bot made and the database has no row
+   * for: one whose row was lost to the race rememberThread covers, or to a
+   * hard kill in the same moment. Invisible to forbiddenForumThreads and to
+   * forumAudience alike, so the forum must never grow around one.
+   *
+   * Once per process, on the first pass that manages it: from then on every
+   * post the bot makes has its row written in the same tick, or is deleted
+   * again. Until it has managed it, syncAccess leaves the forum alone.
+   */
+  private async sweepOrphanPosts(): Promise<void> {
+    if (this.orphansSwept) return;
+    const { db, transport } = this.deps;
+    const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
+    // No forum: nothing to sweep, and nothing for syncAccess to do either.
+    // Left unswept on purpose, so configuring one later still gets a sweep.
+    if (!forumId) return;
+    const known = new Set((db.prepare("SELECT thread_id FROM ticket_threads WHERE surface = 'forum'")
+      .all() as { thread_id: string }[]).map((r) => r.thread_id));
+    for (const th of await transport.threads.listThreads(forumId)) {
+      if (known.has(th.threadId)) continue;
+      await transport.threads.deleteThread(th.threadId);
+      console.log('[discord] deleted a tickets forum post with no ticket behind it');
+    }
+    this.orphansSwept = true;
   }
 
   /**
@@ -477,6 +538,11 @@ export class TicketSync {
     const { db, transport } = this.deps;
     const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
     if (!forumId) return;
+    // Not while a post nothing in the database knows about may be standing in
+    // the forum: forumAudience cannot leave out the subject of a post it
+    // cannot see, so letting anyone in first could let them into their own
+    // case. The sweep runs ahead of this in every pass.
+    if (!this.orphansSwept) return;
     const want = forumAudience(db);
     const r = await transport.threads.syncMemberAccess(forumId, want);
     if (r.added.length || r.removed.length || r.failed.length) {

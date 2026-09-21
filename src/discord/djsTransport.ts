@@ -1,8 +1,8 @@
 import {
   ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
   OverwriteType, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
-  type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type ForumChannel, type Guild, type Interaction,
-  type TextBasedChannel,
+  type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type FetchedThreads, type ForumChannel, type Guild,
+  type Interaction, type TextBasedChannel,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
 import type {
@@ -346,6 +346,33 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
     async exists(threadId) {
       return (await threadById(threadId)) !== null;
+    },
+    async listThreads(channelId) {
+      const forum = await channelById(channelId);
+      if (!forum || forum.type !== ChannelType.GuildForum) throw new Error(`channel ${channelId} is not a forum`);
+      const me = client.user!.id;
+      const mine = new Map<string, { threadId: string; ownerId: string | null }>();
+      // The bot's own only: the caller deletes what it is given, and nobody
+      // else's post in this forum is ever ours to delete. ownerId :3960.
+      const keepMine = (page: FetchedThreads) => {
+        for (const th of page.threads.values()) {
+          if (th.ownerId === me) mine.set(th.id, { threadId: th.id, ownerId: th.ownerId });
+        }
+      };
+      keepMine(await forum.threads.fetchActive());                            // ThreadManager.fetchActive :5397
+      // Archived too: an archived post is still a post anyone in the forum
+      // can open. A forum's threads are public, and the archived list comes
+      // newest first, so each page asks for what was archived before the
+      // oldest of the last one. FetchedThreadsMore.hasMore :6564.
+      let before: Date | undefined;
+      for (;;) {
+        const page = await forum.threads.fetchArchived({ type: 'public', limit: 100, before }); // fetchArchived :5396
+        keepMine(page);
+        const oldest = [...page.threads.values()].pop();
+        if (!page.hasMore || !oldest?.archivedAt) break;                      // ThreadChannel.archivedAt :3936
+        before = oldest.archivedAt;
+      }
+      return [...mine.values()];
     },
     async addMember(threadId, userId) {
       await (await needThread(threadId)).members.add(userId);                 // ThreadMemberManager.add :5416

@@ -7,6 +7,9 @@ export interface FakeMessage { channelId: string; id: string; payload: MessagePa
 export interface FakeThread {
   id: string;
   parentId: string;
+  /** Who created it. Threads the fake makes belong to the bot; a test sets
+   *  this to somebody else to stand for a post the bot must not touch. */
+  ownerId: string;
   surface: 'forum' | 'private';
   name: string;
   tags: string[];
@@ -44,6 +47,8 @@ export class FakeTransport implements BotTransport {
   failEdits = 0;
 
   // Thread world.
+  /** The bot's own user id: what it creates, it owns. */
+  botUserId = 'bot';
   threadsById = new Map<string, FakeThread>();
   /** channelId -> the members holding a permission overwrite on it. */
   channelAccess = new Map<string, Set<string>>();
@@ -104,7 +109,7 @@ export class FakeTransport implements BotTransport {
       this.threadOp();
       this.needChannelId(forumId, 'is not a forum');
       const id = this.snowflake();
-      this.threadsById.set(id, { id, parentId: forumId, surface: 'forum', name: post.name, tags: [...post.tags], members: new Set(), locked: false, archived: false, deleted: false });
+      this.threadsById.set(id, { id, parentId: forumId, ownerId: this.botUserId, surface: 'forum', name: post.name, tags: [...post.tags], members: new Set(), locked: false, archived: false, deleted: false });
       // Discord gives a forum post's first message the thread's own id.
       this.messages.push({ channelId: id, id, payload: post.message, deleted: false });
       return { threadId: id, messageId: id };
@@ -113,12 +118,21 @@ export class FakeTransport implements BotTransport {
       this.threadOp();
       this.needChannelId(channelId, 'is not a text channel');
       const id = this.snowflake();
-      this.threadsById.set(id, { id, parentId: channelId, surface: 'private', name: thread.name, tags: [], members: new Set(), locked: false, archived: false, deleted: false });
+      this.threadsById.set(id, { id, parentId: channelId, ownerId: this.botUserId, surface: 'private', name: thread.name, tags: [], members: new Set(), locked: false, archived: false, deleted: false });
       return { threadId: id };
     },
     exists: async (threadId) => {
       const th = this.threadsById.get(threadId);
       return !!th && !th.deleted;
+    },
+    listThreads: async (channelId) => {
+      this.threadOp();
+      this.needChannelId(channelId, 'is not a forum');
+      // The bot's own only, as the real transport reports them: a sweep must
+      // never be handed a post somebody else made.
+      return [...this.threadsById.values()]
+        .filter((th) => th.parentId === channelId && !th.deleted && th.ownerId === this.botUserId)
+        .map((th) => ({ threadId: th.id, ownerId: th.ownerId }));
     },
     addMember: async (threadId, userId) => {
       this.threadOp();
