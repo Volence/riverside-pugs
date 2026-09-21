@@ -683,6 +683,20 @@ describe('analyzeRound', () => {
     expect(metrics.get(0)!.occ!.observed).toBeGreaterThan(metrics.get(1)!.occ!.observed);
   });
 
+  // What the board normalises tracking by. Without the counts a round with one
+  // window and a round with two hundred weigh the same.
+  it('counts the windows that formed, the ones that could be scored, and what they summed to', () => {
+    const tracked = analyzeRound(round(40, (_i, b) => b), [0], null).metrics.get(0)!;
+    expect(tracked.windows).toBe(21);
+    expect(tracked.scoreable).toBe(21);
+    expect(tracked.fidSum).toBeGreaterThan(0.9 * 21);
+    // A ghost that does not move forms windows and none of them can be scored.
+    const still = analyzeRound(round(40, () => 0, 1200, 0), [0], null).metrics.get(0)!;
+    expect(still.windows).toBe(21);
+    expect(still.scoreable).toBe(0);
+    expect(still.fidSum).toBe(0);
+  });
+
   it('leaves occupancy null and still reports fidelity when there is no prior', () => {
     const { metrics } = analyzeRound(round(40, (_i, b) => b), [0], null);
     expect(metrics.get(0)!.occ).toBeNull();

@@ -92,8 +92,18 @@ export function calibrate(rows: ScoreRow[]): (map: string | null | undefined) =>
 export interface PlayerAgg {
   steamid: string;
   rounds: number;
+  /** Rounds in which at least one pair cleared every gate: the rounds the
+   *  detector actually ran in. What MIN_BOARD_ROUNDS counts. */
+  eligibleRounds: number;
+  /** The best single window anywhere in their history. CONTEXT ONLY. It is a
+   *  maximum, so it can only rise with playtime, and it must not be ranked on. */
   fidMax: number;
   fidP95: number;
+  /** Fidelity windows that could be scored, over every round. */
+  scoreable: number;
+  /** Metric A as the board ranks it: the summed fidelity of those windows over
+   *  their number. Null under MIN_TRACK_WINDOWS. */
+  trackShare: number | null;
   occZ: number | null;
   teamGap: number | null;
 }
@@ -105,17 +115,25 @@ function meanOrNull(xs: (number | null)[]): number | null {
 
 /** Roll a player's rounds into one row.
  *
- *  fidMax is a MAXIMUM across rounds, not a mean: one round of following an
- *  invisible target is the thing worth looking at, and averaging it away with
- *  twenty clean rounds is how a detector misses. The rest are means, because a
- *  single high occupancy round really can be luck.
+ *  TRACKING IS A SHARE, NOT A MAXIMUM. Until version 4 the board ranked on
+ *  fidMax, the best window in any round, on the argument that one round of
+ *  following an invisible target should not be averaged away by twenty clean
+ *  ones. But a maximum can only go up: on the live board it averaged 0.00 for
+ *  players with 8 to 15 rounds and 0.25 for players with 64 or more, so the
+ *  column ranked playtime. The share is the summed fidelity of every window
+ *  that could be scored over the number of them, pooled across rounds rather
+ *  than averaged per round, so a round with more chances in it weighs more and
+ *  one lucky window is worth less the more chances there were. The argument
+ *  for the maximum is answered by clips, not by the ranking: a single window
+ *  over CLIP_MIN is surfaced for review whatever the player's share is.
  *
  *  Occupancy and the team gap are SCORED here, not read: each round's sums
  *  become a z against its map's calibration, and metric C is that z minus the
  *  mean of the teammates' in the same round. C is a second control on a
  *  different axis from the prior. The prior removes what is normal for this
  *  MAP across all history; this removes what was normal for this ROUND,
- *  including whatever the director happened to do. */
+ *  including whatever the director happened to do. Both are means over
+ *  rounds, because a single high occupancy round really can be luck. */
 export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
   const k = calibrate(rows);
   const scored = rows.map((r) => ({ ...r, z: r.metrics.occ ? occupancyZ(r.metrics.occ, k(r.map)) : null }));
@@ -134,23 +152,36 @@ export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
 
   const by = new Map<string, typeof scored>();
   for (const r of scored) by.set(r.steamid, [...(by.get(r.steamid) ?? []), r]);
-  return [...by.values()].map((list) => ({
-    steamid: list[0].steamid,
-    rounds: list.length,
-    fidMax: Math.max(...list.map((r) => r.metrics.fidMax)),
-    fidP95: meanOrNull(list.map((r) => r.metrics.fidP95)) ?? 0,
-    occZ: meanOrNull(list.map((r) => r.z)),
-    teamGap: meanOrNull(list.map(gapOf)),
-  }));
+  return [...by.values()].map((list) => {
+    // `?? 0`: a row written before these counts existed has none, and reads as
+    // a round with nothing scoreable in it until it is measured again.
+    const scoreable = list.reduce((a, r) => a + (r.metrics.scoreable ?? 0), 0);
+    const fidSum = list.reduce((a, r) => a + (r.metrics.fidSum ?? 0), 0);
+    return {
+      steamid: list[0].steamid,
+      rounds: list.length,
+      eligibleRounds: list.filter((r) => r.metrics.eligiblePairs > 0).length,
+      fidMax: Math.max(...list.map((r) => r.metrics.fidMax)),
+      fidP95: meanOrNull(list.map((r) => r.metrics.fidP95)) ?? 0,
+      scoreable,
+      trackShare: scoreable >= TUNING.MIN_TRACK_WINDOWS ? fidSum / scoreable : null,
+      occZ: meanOrNull(list.map((r) => r.z)),
+      teamGap: meanOrNull(list.map(gapOf)),
+    };
+  });
 }
 
 export interface ScoredPlayer extends PlayerAgg {
-  pFid: number;
+  /** False under MIN_BOARD_ROUNDS. An unranked player is listed, after
+   *  everyone ranked, with no percentiles and no composite. */
+  ranked: boolean;
+  pFid: number | null;
   pOcc: number | null;
   pGap: number | null;
   /** Mean of the three percentiles, with a MISSING one counted as the middle of
-   *  the population rather than dropped. A sort key, not a claim. */
-  composite: number;
+   *  the population rather than dropped. A sort key, not a claim. Null when
+   *  unranked. */
+  composite: number | null;
 }
 
 /** The middle of the population. An unmeasured metric says nothing about a
@@ -158,12 +189,17 @@ export interface ScoredPlayer extends PlayerAgg {
 export const NEUTRAL_PERCENTILE = 0.5;
 
 export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
-  const fids = aggs.map((a) => a.fidMax);
-  const occs = aggs.map((a) => a.occZ).filter((x): x is number => x != null);
-  const gaps = aggs.map((a) => a.teamGap).filter((x): x is number => x != null);
+  // The population is the RANKED players only. Someone with two rounds is not
+  // part of what "top of this board" means, in either direction: they cannot
+  // be placed in it and they must not move anyone else's place in it.
+  const pool = aggs.filter((a) => a.eligibleRounds >= TUNING.MIN_BOARD_ROUNDS);
+  const some = (xs: (number | null)[]) => xs.filter((x): x is number => x != null);
+  const fids = some(pool.map((a) => a.trackShare));
+  const occs = some(pool.map((a) => a.occZ));
+  const gaps = some(pool.map((a) => a.teamGap));
 
-  return aggs.map((a) => {
-    const pFid = percentile(fids, a.fidMax);
+  const ranked = pool.map((a) => {
+    const pFid = a.trackShare == null ? null : percentile(fids, a.trackShare);
     const pOcc = a.occZ == null ? null : percentile(occs, a.occZ);
     const pGap = a.teamGap == null ? null : percentile(gaps, a.teamGap);
     // A missing metric counts as NEUTRAL, not as absent. Averaging only the
@@ -173,6 +209,14 @@ export function scorePlayers(aggs: PlayerAgg[]): ScoredPlayer[] {
     // high on all three to match. Seen live on 2026-09-21, where a 3-round
     // player with two n/a ranked 1 of 82 on a single number.
     const parts = [pFid, pOcc, pGap].map((x) => (x == null ? NEUTRAL_PERCENTILE : x));
-    return { ...a, pFid, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
+    return { ...a, ranked: true, pFid, pOcc, pGap, composite: parts.reduce((x, y) => x + y, 0) / parts.length };
   }).sort((x, y) => y.composite - x.composite);
+
+  // Listed, because an admin searching for a name should find it, and last,
+  // because nothing is known about them. Most rounds first: the nearest to
+  // being ranked, and the most there is to look at in the meantime.
+  const unranked = aggs.filter((a) => a.eligibleRounds < TUNING.MIN_BOARD_ROUNDS)
+    .map((a) => ({ ...a, ranked: false, pFid: null, pOcc: null, pGap: null, composite: null }))
+    .sort((x, y) => y.eligibleRounds - x.eligibleRounds);
+  return [...ranked, ...unranked];
 }

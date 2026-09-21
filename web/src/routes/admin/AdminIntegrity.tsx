@@ -6,6 +6,7 @@ import { fmtTime, useAction } from './useAction';
 
 const pct = (v: number | null): string => (v == null ? 'n/a' : `${Math.round(v * 100)}%`);
 const num = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(2));
+const num3 = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(3));
 
 /** Clips sharing one player-round, in the order the server ranked them.
  *
@@ -229,6 +230,9 @@ export function AdminIntegrity() {
   // Rank is the player's place in the WHOLE board. Taking it from the filtered
   // array index would renumber everyone the moment you typed in the search box,
   // turning a search into a different-looking ranking.
+  // Unranked players arrive after every ranked one, so the index is the rank
+  // for exactly the rows that have one.
+  const rankedCount = players.filter((p) => p.ranked).length;
   const ranked = players.map((p, i) => ({ ...p, rank: i + 1 }));
   const needle = filter.trim().toLowerCase();
   const shown = needle
@@ -244,12 +248,19 @@ export function AdminIntegrity() {
           <dl class="colkey__list">
             <dt>Tracking</dt>
             <dd>
-              Did the crosshair <strong>move with</strong> an invisible infected. 1 is exactly the
-              motion needed to follow it, 0 is none of it. This is the backbone: sitting still
-              aimed at a known spawn spot scores <strong>zero</strong> however good the spot was,
-              because a held angle produces none of the motion. Shown as a player's single
-              highest round, not an average, since one round of following something you cannot
-              see is the thing worth looking at and twenty clean rounds should not average it away.
+              Did the crosshair <strong>move with</strong> an invisible infected. Each two second
+              window in which they stayed aimed near a ghost that was itself moving scores from
+              1, exactly the motion needed to follow it, down to 0, none of it. Sitting still
+              aimed at a known spawn spot scores <strong>zero</strong> however good the spot
+              was, and so does holding a corner while strafing or running past it: turning to
+              keep a fixed point in view is the player's own movement, not the ghost's. It also
+              cannot see someone watching a ghost that is <em>standing still</em>, because that
+              looks exactly like holding the corner. The number is the total of those scores
+              over the number of windows, across all their rounds, so it is a rate and does not
+              grow with playtime; with fewer than 20 windows it reads n/a. "Best" is their single
+              highest window, shown for context only: it is a maximum, the more someone plays
+              the higher it gets, and nothing is ranked on it. One window over the review
+              threshold becomes a clip whatever the rate is.
             </dd>
             <dt>Occupancy</dt>
             <dd>
@@ -276,9 +287,12 @@ export function AdminIntegrity() {
             </dd>
             <dt>Rank</dt>
             <dd>
-              Position by the composite, which is the mean of whichever percentiles a player has.
-              It is a <strong>sort key, not a claim</strong>, and it only ranks within the
-              population listed here.
+              Position by the composite, which is the mean of the three percentiles with a
+              missing one counted as the middle. It is a <strong>sort key, not a claim</strong>,
+              and it only ranks within the ranked players listed here. A player with fewer than
+              8 rounds in which the analysis had anything to measure is listed last and not
+              ranked: one or two rounds are noise in either direction, and they are left out of
+              everyone else's percentiles too.
             </dd>
             <dt>Clips</dt>
             <dd>
@@ -331,8 +345,8 @@ export function AdminIntegrity() {
       <p class="muted">
         Theoretical only. These numbers rank who is worth watching a clip of; they are not
         evidence of anything on their own, and nothing here is visible outside this panel.
-        Ranks are within the {players.length} players on this board, so the top row is top
-        of this list and nothing more.
+        Ranks are within the {rankedCount} players on this board with enough rounds to rank, so
+        the top row is top of this list and nothing more.
       </p>
       {data && players.length === 0 && <Empty>Nothing analysed yet. Run the backfill.</Empty>}
       {noClips && (
@@ -377,8 +391,8 @@ export function AdminIntegrity() {
                   <td>{p.name}</td>
                   <td>{p.rounds}</td>
                   <td>{p.clips}</td>
-                  <td>{`${p.rank} of ${players.length}`}</td>
-                  <td>{num(p.fidMax)} <span class="muted">({pct(p.pFid)})</span></td>
+                  <td>{p.ranked ? `${p.rank} of ${rankedCount}` : <span class="muted">too few rounds</span>}</td>
+                  <td>{num3(p.trackShare)} <span class="muted">({pct(p.pFid)}) · best {num(p.fidMax)}</span></td>
                   <td>{num(p.occZ)} <span class="muted">({pct(p.pOcc)})</span></td>
                   <td>{num(p.teamGap)} <span class="muted">({pct(p.pGap)})</span></td>
                 </tr>

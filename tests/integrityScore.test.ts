@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { percentile, aggregate, calibrate, occupancyZ, scorePlayers } from '../src/integrity/score.js';
+import { percentile, aggregate, calibrate, occupancyZ, scorePlayers, type PlayerAgg } from '../src/integrity/score.js';
+import { TUNING } from '../src/integrity/constants.js';
 import type { OccResult } from '../src/integrity/occupancy.js';
 import type { RoundMetrics } from '../src/integrity/round.js';
 
 const m = (over: Partial<RoundMetrics> = {}): RoundMetrics => ({
-  fidMax: 0.2, fidP95: 0.1, occ: null, eligiblePairs: 100,
+  fidMax: 0.2, fidP95: 0.1, windows: 12, scoreable: 10, fidSum: 0.1, occ: null, eligiblePairs: 100,
   gates: { considered: 400, notLive: 20, notGhost: 100, inGrace: 50, tooClose: 30, occluded: 100, passed: 100 },
   ...over,
 });
@@ -100,7 +101,7 @@ describe('calibrate', () => {
 });
 
 describe('aggregate', () => {
-  it('takes a player HIGHEST round for fidMax and their mean for the rest', () => {
+  it('keeps a player HIGHEST window as context and takes their mean for fidP95', () => {
     const got = aggregate([
       { steamid: 'a', metrics: m({ fidMax: 0.4, fidP95: 0.2 }) },
       { steamid: 'a', metrics: m({ fidMax: 0.9, fidP95: 0.4 }) },
@@ -108,6 +109,43 @@ describe('aggregate', () => {
     expect(got[0].rounds).toBe(2);
     expect(got[0].fidMax).toBeCloseTo(0.9);
     expect(got[0].fidP95).toBeCloseTo(0.3);
+  });
+
+  // fidMax was the board's tracking key, and a maximum over rounds can only go
+  // up: on the live board it averaged 0.00 for players with 8 to 15 rounds and
+  // 0.25 for players with 64 or more. That ranks playtime.
+  it('measures tracking as a share of the windows that could be scored, pooled over every round', () => {
+    const got = aggregate([
+      { steamid: 'a', metrics: m({ scoreable: 30, fidSum: 3 }) },
+      { steamid: 'a', metrics: m({ scoreable: 10, fidSum: 0 }) },
+    ]);
+    // 3 over 40, not the mean of 0.1 and 0: a round with more chances in it
+    // weighs more.
+    expect(got[0].trackShare).toBeCloseTo(3 / 40, 10);
+    expect(got[0].scoreable).toBe(40);
+  });
+
+  it('does not grow with playtime: the same one lucky window is worth less the more chances there were', () => {
+    const lucky = m({ fidMax: 0.6, scoreable: 10, fidSum: 0.6 });
+    const clean = m({ fidMax: 0, scoreable: 10, fidSum: 0 });
+    const few = aggregate([lucky, clean, clean].map((metrics) => ({ steamid: 'few', metrics })))[0];
+    const many = aggregate([lucky, ...Array.from({ length: 59 }, () => clean)].map((metrics) => ({ steamid: 'many', metrics })))[0];
+    expect(many.fidMax).toBe(few.fidMax);
+    expect(many.trackShare!).toBeLessThan(few.trackShare!);
+  });
+
+  it('has no tracking share at all under MIN_TRACK_WINDOWS, because a ratio of two or three runs is noise', () => {
+    const got = aggregate([{ steamid: 'a', metrics: m({ scoreable: TUNING.MIN_TRACK_WINDOWS - 1, fidSum: 5 }) }]);
+    expect(got[0].trackShare).toBeNull();
+  });
+
+  it('counts a round as eligible only when the detector had a chance in it', () => {
+    const got = aggregate([
+      { steamid: 'a', metrics: m() },
+      { steamid: 'a', metrics: m({ eligiblePairs: 0 }) },
+    ]);
+    expect(got[0].rounds).toBe(2);
+    expect(got[0].eligibleRounds).toBe(1);
   });
 
   it('leaves occZ null for a player whose rounds were all on unscored maps', () => {
@@ -149,6 +187,11 @@ describe('aggregate', () => {
   });
 });
 
+const agg = (steamid: string, over: Partial<PlayerAgg> = {}): PlayerAgg => ({
+  steamid, rounds: 20, eligibleRounds: 20, fidMax: 0, fidP95: 0, scoreable: 100,
+  trackShare: 0, occZ: 0, teamGap: 0, ...over,
+});
+
 describe('scorePlayers', () => {
   // CHANGED 2026-09-21. This previously asserted a composite of 1.0: only the
   // metrics a player actually had were averaged. That is a defensible reading
@@ -160,8 +203,8 @@ describe('scorePlayers', () => {
   // A missing metric now counts as the middle of the population.
   it('reports a missing metric as null but counts it as neutral in the composite', () => {
     const [a] = scorePlayers([
-      { steamid: 'a', rounds: 3, fidMax: 0.9, fidP95: 0.5, occZ: null, teamGap: null },
-      { steamid: 'b', rounds: 3, fidMax: 0.1, fidP95: 0.05, occZ: null, teamGap: null },
+      agg('a', { trackShare: 0.3, occZ: null, teamGap: null }),
+      agg('b', { trackShare: 0.01, occZ: null, teamGap: null }),
     ]);
     expect(a.pOcc).toBeNull();
     expect(a.composite).toBeCloseTo((1 + 0.5 + 0.5) / 3, 5);
@@ -169,12 +212,59 @@ describe('scorePlayers', () => {
 
   it('ranks the tracking player above the rest', () => {
     const got = scorePlayers([
-      { steamid: 'clean1', rounds: 5, fidMax: 0.2, fidP95: 0.1, occZ: 0.1, teamGap: 0 },
-      { steamid: 'clean2', rounds: 5, fidMax: 0.3, fidP95: 0.12, occZ: -0.2, teamGap: -0.1 },
-      { steamid: 'sus', rounds: 5, fidMax: 0.95, fidP95: 0.8, occZ: 4.2, teamGap: 3.9 },
+      agg('clean1', { trackShare: 0.002, occZ: 0.1, teamGap: 0 }),
+      agg('clean2', { trackShare: 0.004, occZ: -0.2, teamGap: -0.1 }),
+      agg('sus', { trackShare: 0.31, occZ: 1.9, teamGap: 1.7 }),
     ]);
     expect(got[0].steamid).toBe('sus');
-    expect(got[0].composite).toBeGreaterThan(got[1].composite);
+    expect(got[0].composite!).toBeGreaterThan(got[1].composite!);
+  });
+
+  it('ranks on the tracking share and not on the best window', () => {
+    const got = scorePlayers([
+      agg('veteran', { fidMax: 0.6, trackShare: 0.004, rounds: 120, eligibleRounds: 120 }),
+      agg('newer', { fidMax: 0.3, trackShare: 0.09 }),
+    ]);
+    expect(got.find((p) => p.steamid === 'newer')!.pFid).toBe(1);
+    expect(got.find((p) => p.steamid === 'veteran')!.pFid).toBe(0);
+  });
+});
+
+describe('the minimum rounds gate', () => {
+  it('does not rank a player with too few eligible rounds, whatever their one round said', () => {
+    const got = scorePlayers([
+      agg('one-round', { rounds: 1, eligibleRounds: 1, trackShare: 0.9, occZ: 6, teamGap: 6 }),
+      agg('a', { trackShare: 0.01, occZ: 0.5, teamGap: 0.2 }),
+      agg('b', { trackShare: 0.02, occZ: -0.5, teamGap: -0.2 }),
+    ]);
+    const last = got[got.length - 1];
+    expect(last.steamid).toBe('one-round');
+    expect(last.ranked).toBe(false);
+    expect(last.composite).toBeNull();
+    expect(last.pFid).toBeNull();
+  });
+
+  it('keeps them out of the population everyone else is ranked within', () => {
+    const got = scorePlayers([
+      agg('one-round', { rounds: 1, eligibleRounds: 1, trackShare: 0.9 }),
+      agg('a', { trackShare: 0.02 }),
+      agg('b', { trackShare: 0.01 }),
+    ]);
+    // Top of the RANKED population, which the one-round player is not part of.
+    expect(got.find((p) => p.steamid === 'a')!.pFid).toBe(1);
+  });
+
+  it('counts eligible rounds, so rounds the detector never ran in do not get a player over the line', () => {
+    const [p] = scorePlayers([agg('a', { rounds: 40, eligibleRounds: TUNING.MIN_BOARD_ROUNDS - 1 })]);
+    expect(p.ranked).toBe(false);
+  });
+
+  it('orders the unranked among themselves by how much there is to look at', () => {
+    const got = scorePlayers([
+      agg('x', { rounds: 2, eligibleRounds: 2 }),
+      agg('y', { rounds: 5, eligibleRounds: 5 }),
+    ]);
+    expect(got.map((p) => p.steamid)).toEqual(['y', 'x']);
   });
 });
 
@@ -184,16 +274,13 @@ describe('missing metrics do not inflate the composite', () => {
   // metric at the 95th percentile with nothing to average it down, while a
   // player measured on all three had to be high on all three to match. Having
   // LESS evidence made it EASIER to reach the top of the board.
-  const agg = (steamid: string, rounds: number, fidMax: number, occZ: number | null, teamGap: number | null) =>
-    ({ steamid, rounds, fidMax, fidP95: 0, occZ, teamGap });
-
   it('ranks a player measured on one metric below one high on all three', () => {
     const scored = scorePlayers([
-      agg('sparse', 3, 10, null, null),      // top of the fid distribution, nothing else
-      agg('full', 50, 9, 9, 9),              // high on all three
-      agg('a', 20, 1, 1, 1),
-      agg('b', 20, 2, 2, 2),
-      agg('c', 20, 3, 3, 3),
+      agg('sparse', { trackShare: 0.5, occZ: null, teamGap: null }),   // top of the tracking distribution, nothing else
+      agg('full', { trackShare: 0.4, occZ: 9, teamGap: 9 }),           // high on all three
+      agg('a', { trackShare: 0.01, occZ: 1, teamGap: 1 }),
+      agg('b', { trackShare: 0.02, occZ: 2, teamGap: 2 }),
+      agg('c', { trackShare: 0.03, occZ: 3, teamGap: 3 }),
     ]);
     expect(scored[0].steamid).toBe('full');
     expect(scored.findIndex((s) => s.steamid === 'sparse')).toBeGreaterThan(0);
@@ -201,19 +288,28 @@ describe('missing metrics do not inflate the composite', () => {
 
   it('treats a missing metric as the middle of the population, not as absent', () => {
     const [sparse] = scorePlayers([
-      agg('sparse', 3, 10, null, null),
-      agg('a', 20, 1, 1, 1),
-      agg('b', 20, 2, 2, 2),
+      agg('sparse', { trackShare: 0.5, occZ: null, teamGap: null }),
+      agg('a', { trackShare: 0.01, occZ: 1, teamGap: 1 }),
+      agg('b', { trackShare: 0.02, occZ: 2, teamGap: 2 }),
     ]).filter((s) => s.steamid === 'sparse');
     // pFid is 1.0 here; the two missing parts count as 0.5 each rather than
     // being dropped, so the composite is 2/3 rather than 1.0.
     expect(sparse.composite).toBeCloseTo((1 + 0.5 + 0.5) / 3, 5);
   });
 
+  it('counts a tracking share nobody could compute as neutral too', () => {
+    const [p] = scorePlayers([
+      agg('thin', { trackShare: null, occZ: 3, teamGap: 3 }),
+      agg('a', { trackShare: 0.01, occZ: 1, teamGap: 1 }),
+    ]).filter((s) => s.steamid === 'thin');
+    expect(p.pFid).toBeNull();
+    expect(p.composite).toBeCloseTo((0.5 + 1 + 1) / 3, 5);
+  });
+
   it('still ranks a fully measured player on their real numbers', () => {
     const scored = scorePlayers([
-      agg('x', 20, 3, 3, 3),
-      agg('y', 20, 1, 1, 1),
+      agg('x', { trackShare: 0.03, occZ: 3, teamGap: 3 }),
+      agg('y', { trackShare: 0.01, occZ: 1, teamGap: 1 }),
     ]);
     expect(scored[0].steamid).toBe('x');
   });

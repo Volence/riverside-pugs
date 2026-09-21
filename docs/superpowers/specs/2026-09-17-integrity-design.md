@@ -283,8 +283,20 @@ so a crosshair producing half the required motion, perfectly proportioned, would
 perfect 1. The normalised residual above has neither problem and expresses the same intent
 more directly.
 
-Recorded per player-round: the maximum window fidelity and the 95th percentile of window
-fidelities.
+Recorded per player-round: the maximum window fidelity, the 95th percentile of window
+fidelities, how many windows formed, how many of them could be scored, and the sum of
+those scores.
+
+**What the board ranks on (version 4).** Not the maximum. The first board ranked a player
+on their best window in any round, and a maximum over rounds can only rise: on the live
+board it averaged 0.00 for players with 8 to 15 rounds and 0.25 for players with 64 or
+more, so the column ranked playtime. The key is now the **tracking share**, the summed
+fidelity of every scoreable window over the number of them, pooled across a player's rounds,
+n/a under `MIN_TRACK_WINDOWS` (20). The case for the maximum, that one round of following
+an invisible target must not be averaged away, is answered by clips: a single window over
+`CLIP_MIN` is surfaced for review whatever the share is. The best window is still shown,
+labelled as context. A player with fewer than `MIN_BOARD_ROUNDS` (8) eligible rounds is
+listed last, unranked, and left out of everyone else's percentiles.
 
 **Coverage, recorded alongside the metrics.** Every player-round also stores a gate tally:
 how many survivor-and-infected pairs were considered, and how many were dropped at each of
@@ -321,7 +333,7 @@ player-round are kept.
 
 The constants above (`D_MIN`, `SPAWN_GRACE`, `OCCLUDE_WINDOW`, `OCCLUDE_MAX_DIST`, `CELL`,
 `R_MAX`, `MIN_PRIOR_ROUNDS`, `W`, `E_TRACK`, `EYE_Z`, `TARGET_Z`, `PITCH_TOL`, `MIN_TRAVEL`, `E_DWELL`,
-`OCC_BLOCK_MS`, `MIN_CAL_EXPECTED`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
+`OCC_BLOCK_MS`, `MIN_CAL_EXPECTED`, `MIN_BOARD_ROUNDS`, `MIN_TRACK_WINDOWS`, `CLIP_MIN`, `CLIPS_PER_ROUND`) live
 in one exported object so tuning is a single edit and the tests can pin them.
 
 ## 2. Storage and scoring

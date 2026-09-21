@@ -140,6 +140,19 @@ export const TUNING = {
    *  whole board's ratio is used instead. A player-round expects about 2.5,
    *  so this is roughly four of them. */
   MIN_CAL_EXPECTED: 10,
+  /** A player is ranked on the board only with at least this many ELIGIBLE
+   *  rounds, which are rounds where at least one pair cleared every gate. Under
+   *  it every number they have is one or two rounds of noise. On the live board
+   *  of 2026-09-21, 21 of 66 players were under 8, and a 3 round player had
+   *  ranked 1 of 82. A survivor plays four or five rounds a match, so this is
+   *  about two matches. */
+  MIN_BOARD_ROUNDS: 8,
+  /** The tracking share is a ratio over scoreable windows, and with fewer than
+   *  this it reads n/a. Windows slide a frame at a time, so one stretch of aim
+   *  near a moving ghost yields about ten of them and 20 is two or three such
+   *  stretches. They are scarce: the 189 replays in hand on 2026-09-21 hold 478
+   *  between 16 players, about two per three player-rounds, 0 to 124 each. */
+  MIN_TRACK_WINDOWS: 20,
   /** Windows above this fidelity become reviewable clips. */
   CLIP_MIN: 0.7,
   /** Most clips kept per player-round. */

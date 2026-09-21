@@ -5,6 +5,7 @@ import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import { ANALYZER_VERSION } from '../src/integrity/store.js';
+import { TUNING } from '../src/integrity/constants.js';
 
 const ADMIN = '76561198000000009';
 const SUS = '76561198000000001';
@@ -17,7 +18,7 @@ let userCookie: Record<string, string>;
 /** `observed` on-target blocks out of 40 that the prior expects 4 of. */
 const metrics = (fidMax: number, observed: number | null) =>
   JSON.stringify({
-    fidMax, fidP95: fidMax / 2, eligiblePairs: 200,
+    fidMax, fidP95: fidMax / 2, windows: 12, scoreable: 10, fidSum: fidMax * 5, eligiblePairs: 200,
     occ: observed == null ? null : { observed, expected: 4, expectedSq: 0.4, blocks: 40, pairs: 200 },
     gates: { considered: 600, notLive: 50, notGhost: 150, inGrace: 100, tooClose: 50, occluded: 50, passed: 200 },
   });
@@ -41,6 +42,18 @@ beforeEach(async () => {
   // still match and the review tests would still pass, while an admin was being
   // shown that a moment had already been cleared when it had not.
   ins.run(2, 1, 3, SUS, ANALYZER_VERSION, metrics(0.8, 9));
+  // Eight more rounds each, in a second match, because nobody is ranked under
+  // MIN_BOARD_ROUNDS eligible rounds. Slots 4 and 5, so the review tests above
+  // can still tell their two rounds apart by slot.
+  db.prepare("INSERT INTO matches (id, season_id, state, campaign) VALUES (2, 1, 'completed', 'farm')").run();
+  const insFiller = db.prepare(
+    `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
+     VALUES (2, ?, 1, ?, ?, ?, ?, datetime('now'))`,
+  );
+  for (let ordinal = 1; ordinal <= TUNING.MIN_BOARD_ROUNDS; ordinal++) {
+    insFiller.run(ordinal, 4, SUS, ANALYZER_VERSION, metrics(0.9, 12));
+    insFiller.run(ordinal, 5, CLEAN, ANALYZER_VERSION, metrics(0.1, 1));
+  }
   // The rounds' shares of the aim prior, which is where the board learns the map.
   const insShare = db.prepare(
     `INSERT INTO integrity_prior_rounds (match_id, ordinal, half, frames, counts, map, analyzer_version)
@@ -112,6 +125,19 @@ describe('GET /api/admin/integrity', () => {
     expect(clean.teamGap!).toBeCloseTo(-sus.teamGap!, 10);
   });
 
+  it('lists a player with too few rounds last and unranked, however their one round looked', async () => {
+    const NEW = '76561198000000003';
+    authedCookie(app, db, NEW);
+    db.prepare(
+      `INSERT INTO integrity_rounds (match_id, ordinal, half, slot, steamid, analyzer_version, metrics, computed_at)
+       VALUES (1, 1, 1, 2, ?, ?, ?, datetime('now'))`,
+    ).run(NEW, ANALYZER_VERSION, metrics(0.99, 30));
+    const r = await app.inject({ method: 'GET', url: '/api/admin/integrity', cookies: adminCookie });
+    const body = r.json() as { players: { steamid: string; ranked: boolean; composite: number | null }[] };
+    expect(body.players.map((p) => p.steamid)).toEqual([SUS, CLEAN, NEW]);
+    expect(body.players[2]).toMatchObject({ ranked: false, composite: null });
+  });
+
   it('names the players and counts their clips, so nobody is a 17 digit number', async () => {
     db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('tino', SUS);
     const r = await app.inject({ method: 'GET', url: '/api/admin/integrity', cookies: adminCookie });
@@ -135,7 +161,7 @@ describe('GET /api/admin/integrity/:steamid', () => {
   it('returns that player rounds and clips', async () => {
     const r = await app.inject({ method: 'GET', url: `/api/admin/integrity/${SUS}`, cookies: adminCookie });
     const body = r.json() as { rounds: unknown[]; clips: { startMs: number }[] };
-    expect(body.rounds).toHaveLength(2);
+    expect(body.rounds).toHaveLength(2 + TUNING.MIN_BOARD_ROUNDS);
     expect(body.clips[0].startMs).toBe(12000);
   });
 });

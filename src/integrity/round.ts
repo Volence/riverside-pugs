@@ -1,4 +1,5 @@
 import type { Frame } from '../replayFormat.js';
+import { TUNING } from './constants.js';
 import { isLiveSurvivor } from './geometry.js';
 import { pickClips, trackWindows, type GateTally, type TrackWindow } from './ghostTrack.js';
 import { occupancyWithGates, type OccResult } from './occupancy.js';
@@ -16,6 +17,13 @@ import { PriorBuilder, type PriorTable } from './aimPrior.js';
 export interface RoundMetrics {
   fidMax: number;
   fidP95: number;
+  /** Fidelity windows that formed, how many of them held enough motion to be
+   *  scored (MIN_TRAVEL), and the sum of those scores. The board divides the
+   *  last by the second, pooled over a player's rounds, so tracking is a rate
+   *  over chances rather than a maximum over playtime. */
+  windows: number;
+  scoreable: number;
+  fidSum: number;
   /** Metric B as sums, null without a prior. The score, and the team gap that
    *  is metric C, are worked out from these at read time in `score.ts`: both
    *  need a calibration only the whole board can supply. */
@@ -101,9 +109,13 @@ export function analyzeRound(
     clips.set(slot, pickClips(windows));
     const { occ, gates } = occupancyWithGates(frames, slot, prior);
     const fids = windows.map((w) => w.fidelity);
+    const scoreable = windows.filter((w) => w.travel >= TUNING.MIN_TRAVEL);
     metrics.set(slot, {
       fidMax: fids.length ? Math.max(...fids) : 0,
       fidP95: p95(fids),
+      windows: windows.length,
+      scoreable: scoreable.length,
+      fidSum: scoreable.reduce((a, w) => a + w.fidelity, 0),
       occ,
       eligiblePairs: gates.passed,
       gates,
