@@ -127,6 +127,123 @@ describe('mergePlayers', () => {
     expect((db.prepare('SELECT steamid FROM match_chat').get() as any).steamid).toBe(MAIN);
   });
 
+  // player_links and twitch_status both reference players with no cascade, so
+  // one TikTok handle on the alt used to make the whole merge throw
+  // "FOREIGN KEY constraint failed" and roll back.
+  describe('an alt with a social profile', () => {
+    const link = (player: string, platform: string, handle: string): void => {
+      db.prepare('INSERT INTO player_links (player_id, platform, handle) VALUES (?, ?, ?)').run(player, platform, handle);
+    };
+    const twitch = (player: string, id: string, name: string): void => {
+      db.prepare('UPDATE players SET twitch_id = ?, twitch_name = ? WHERE steamid = ?').run(id, name, player);
+      db.prepare("INSERT INTO twitch_status (player_id, is_live, checked_at) VALUES (?, 1, '2026-09-21T00:00:00Z')").run(player);
+    };
+    const linksOf = (player: string) =>
+      db.prepare('SELECT platform, handle FROM player_links WHERE player_id = ? ORDER BY platform').all(player);
+
+    it('merges an alt that has one social link', () => {
+      link(ALT, 'tiktok', 'alt_tt');
+      expect(() => mergePlayers(db, { from: ALT, into: MAIN })).not.toThrow();
+      expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get(ALT)).toBeUndefined();
+      expect(linksOf(MAIN)).toEqual([{ platform: 'tiktok', handle: 'alt_tt' }]);
+    });
+
+    it('keeps the main account\'s handle where both have the platform', () => {
+      link(MAIN, 'tiktok', 'main_tt');
+      link(ALT, 'tiktok', 'alt_tt');
+      link(ALT, 'youtube', 'alt_yt');
+      mergePlayers(db, { from: ALT, into: MAIN });
+      expect(linksOf(MAIN)).toEqual([
+        { platform: 'tiktok', handle: 'main_tt' },
+        { platform: 'youtube', handle: 'alt_yt' },
+      ]);
+      expect(linksOf(ALT)).toEqual([]);
+    });
+
+    it('carries the alt\'s Twitch link over when the main has none', () => {
+      twitch(ALT, '4242', 'alt_tv');
+      mergePlayers(db, { from: ALT, into: MAIN });
+      expect(db.prepare('SELECT twitch_id, twitch_name FROM players WHERE steamid = ?').get(MAIN))
+        .toEqual({ twitch_id: '4242', twitch_name: 'alt_tv' });
+      expect(db.prepare('SELECT player_id, is_live FROM twitch_status').all()).toEqual([{ player_id: MAIN, is_live: 1 }]);
+    });
+
+    it('keeps the main\'s Twitch link and drops the alt\'s when both have one', () => {
+      twitch(MAIN, '1111', 'main_tv');
+      twitch(ALT, '4242', 'alt_tv');
+      mergePlayers(db, { from: ALT, into: MAIN });
+      expect(db.prepare('SELECT twitch_id, twitch_name FROM players WHERE steamid = ?').get(MAIN))
+        .toEqual({ twitch_id: '1111', twitch_name: 'main_tv' });
+      expect(db.prepare('SELECT player_id FROM twitch_status').all()).toEqual([{ player_id: MAIN }]);
+      // The alt's Twitch account is free to be linked again, by anyone.
+      expect(db.prepare("SELECT 1 FROM players WHERE twitch_id = '4242'").get()).toBeUndefined();
+    });
+
+    it('counts both in a dry run, and changes nothing', () => {
+      link(ALT, 'tiktok', 'alt_tt');
+      twitch(ALT, '4242', 'alt_tv');
+      const plan = mergePlayers(db, { from: ALT, into: MAIN, dryRun: true });
+      expect(plan.rowsByTable.player_links).toBe(1);
+      expect(plan.rowsByTable.twitch_status).toBe(1);
+      expect(linksOf(ALT)).toHaveLength(1);
+      expect(linksOf(MAIN)).toHaveLength(0);
+    });
+  });
+
+  // Evidence against an alt is evidence against the person. None of these
+  // tables has a foreign key, so leaving them out never failed: the rows just
+  // stayed on an id with no player row and no admin page.
+  describe('anti-cheat evidence follows the merge', () => {
+    beforeEach(() => {
+      db.prepare(
+        "INSERT INTO integrity_flags (steamid, source, kind, severity, at) VALUES (?, 'lilac', 'aimbot', 'high', '2026-09-21T00:00:00Z')",
+      ).run(ALT);
+      db.prepare(
+        `INSERT INTO input_bursts (id, steamid, kind, n, ground_ticks, air_presses, server_tick, client_tick, intervals, at)
+         VALUES (1, ?, 'fire', 3, 0, 0, 1, 1, '3,3,3', '2026-09-21T00:00:00Z')`,
+      ).run(ALT);
+      db.prepare(
+        "INSERT INTO input_detections (burst_id, steamid, kind, signature, severity, at) VALUES (1, ?, 'fire', 'rate', 'high', '2026-09-21T00:00:00Z')",
+      ).run(ALT);
+      db.prepare(
+        "INSERT INTO signon_drops (steamid, name, secs_connected, forced_count, at) VALUES (?, 'alt', 4, 651, '2026-09-21T00:00:00Z')",
+      ).run(ALT);
+    });
+
+    it('moves flags, bursts, detections and signon drops', () => {
+      mergePlayers(db, { from: ALT, into: MAIN });
+      for (const table of ['integrity_flags', 'input_bursts', 'input_detections', 'signon_drops']) {
+        expect(db.prepare(`SELECT steamid FROM ${table}`).all(), table).toEqual([{ steamid: MAIN }]);
+      }
+    });
+
+    it('reports them in a dry run', () => {
+      const plan = mergePlayers(db, { from: ALT, into: MAIN, dryRun: true });
+      expect(plan.rowsByTable).toMatchObject({ integrity_flags: 1, input_bursts: 1, input_detections: 1, signon_drops: 1 });
+    });
+
+    it('moves network sightings, adding up an address both accounts were seen on', () => {
+      const seen = (player: string, hash: string, first: string, last: string, n: number): void => {
+        db.prepare(
+          'INSERT INTO player_networks (player_id, ip_hash, country, first_seen, last_seen, seen_count) VALUES (?, ?, NULL, ?, ?, ?)',
+        ).run(player, hash, first, last, n);
+      };
+      seen(MAIN, 'shared', '2026-09-10T00:00:00Z', '2026-09-12T00:00:00Z', 2);
+      seen(ALT, 'shared', '2026-09-08T00:00:00Z', '2026-09-20T00:00:00Z', 5);
+      seen(ALT, 'altonly', '2026-09-09T00:00:00Z', '2026-09-09T00:00:00Z', 1);
+
+      const plan = mergePlayers(db, { from: ALT, into: MAIN, dryRun: true });
+      expect(plan.rowsByTable.player_networks).toBe(2);
+      mergePlayers(db, { from: ALT, into: MAIN });
+
+      expect(db.prepare('SELECT player_id, ip_hash, first_seen, last_seen, seen_count FROM player_networks ORDER BY ip_hash').all())
+        .toEqual([
+          { player_id: MAIN, ip_hash: 'altonly', first_seen: '2026-09-09T00:00:00Z', last_seen: '2026-09-09T00:00:00Z', seen_count: 1 },
+          { player_id: MAIN, ip_hash: 'shared', first_seen: '2026-09-08T00:00:00Z', last_seen: '2026-09-20T00:00:00Z', seen_count: 7 },
+        ]);
+    });
+  });
+
   it('reports what it moved, so a dry run can be read before it is committed', () => {
     match(1);
     rosters(1, ALT, 'b');
