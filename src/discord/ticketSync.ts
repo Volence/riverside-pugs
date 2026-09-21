@@ -93,12 +93,15 @@ export class TicketSync {
 
   /**
    * A full pass. The order is the point:
+   *   0. eject the accused from their own private thread if a merge left
+   *      them a member, whatever that thread's lock state;
    *   1. delete forum posts that must not exist, BEFORE anything can widen
    *      who reads the forum (Task 6 runs the access sync after this);
    *   2. retire threads left behind by a fold;
    *   3. every open ticket, and every closed one not yet locked.
    */
   async reconcile(): Promise<void> {
+    await this.step(() => this.ejectAccused());
     await this.step(() => this.removeForbiddenPosts());
     await this.step(() => this.retireFolded());
     const ids = (this.deps.db.prepare(
@@ -138,6 +141,7 @@ export class TicketSync {
     const { db, transport } = this.deps;
     const t = getTicketRow(db, id);
     if (!t) return;
+    await this.ejectAccused(id);
     await this.removeForbiddenPosts(id);
     await this.retireFolded(id);
     await this.notifyAccess(t);
@@ -198,6 +202,47 @@ export class TicketSync {
     return row;
   }
 
+  /**
+   * A merge can repoint a restricted ticket's target_id onto someone who was
+   * already a member of its private thread (an admin merged into the person
+   * they were investigating), and the database's own tidy-up only drops
+   * that person's now-self-referential ticket_access row: nothing else
+   * touches Discord for a thread the ticket's own closedness has already
+   * locked and archived, since syncMembers only ever runs on an unlocked
+   * one. So this runs first and unconditionally, whatever the lock state,
+   * and puts a locked thread back exactly as it found it. Bounded to
+   * hasStaffFlag targets: only staff can ever have been on an access list,
+   * so only they can end up the accused this way.
+   */
+  private async ejectAccused(ticketId?: number): Promise<void> {
+    const { db, transport } = this.deps;
+    const rows = (ticketId === undefined
+      ? db.prepare(
+        `SELECT th.*, t.target_id AS accused FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
+         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'`,
+      ).all()
+      : db.prepare(
+        `SELECT th.*, t.target_id AS accused FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
+         WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted' AND th.ticket_id = ?`,
+      ).all(ticketId)) as (ThreadRow & { accused: string })[];
+    for (const th of rows) {
+      if (!hasStaffFlag(db, th.accused)) continue;
+      const p = db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(th.accused) as { discord_id: string | null } | undefined;
+      if (!p?.discord_id) continue;
+      if (!(await transport.threads.exists(th.thread_id))) continue;
+      const members = await transport.threads.memberIds(th.thread_id);
+      if (!members || !members.includes(p.discord_id)) continue;
+      const wasLocked = th.locked === 1;
+      // Unarchive first: an archived thread refuses removeMember too.
+      if (wasLocked) await transport.threads.setArchived(th.thread_id, false);
+      await transport.threads.removeMember(th.thread_id, p.discord_id);
+      if (wasLocked) {
+        await transport.threads.setLocked(th.thread_id, true);
+        await transport.threads.setArchived(th.thread_id, true);
+      }
+    }
+  }
+
   /** Rule 2. Marked 'deleted' only after Discord deleted it, so a failure is
    *  retried, and Task 6 keeps the accused out of the forum until it works. */
   private async removeForbiddenPosts(ticketId?: number): Promise<void> {
@@ -209,18 +254,34 @@ export class TicketSync {
   }
 
   /** Rule 3. foldTicket marked these; say where the other discussion was,
-   *  then lock and archive it. */
+   *  then lock and archive it. Each is its own try/catch: one thread Discord
+   *  refuses must not strand the rest of the pass, and is simply found
+   *  'folded' again on the next one. */
   private async retireFolded(ticketId?: number): Promise<void> {
     const { db, transport } = this.deps;
     for (const th of threadsInState(db, 'folded', ticketId)) {
-      const survivor = staffThread(db, th.ticket_id);
-      if (survivor && survivor.locked === 0) {
-        await transport.send(survivor.thread_id, {
-          embeds: [{ description: `Another ticket about this player was folded into this one. Its discussion was in <#${th.thread_id}>, which is now locked.` }],
-          components: [], mentionUserIds: [],
-        });
+      try {
+        const survivor = staffThread(db, th.ticket_id);
+        if (survivor && (await transport.threads.exists(survivor.thread_id))) {
+          // Unarchive first: Discord may have auto-archived the survivor
+          // after a quiet week, whether or not its own ticket is closed.
+          await transport.threads.setArchived(survivor.thread_id, false);
+          await transport.send(survivor.thread_id, {
+            embeds: [{ description: `Another ticket about this player was folded into this one. Its discussion was in <#${th.thread_id}>, which is now locked.` }],
+            components: [], mentionUserIds: [],
+          });
+          // Put back whatever the survivor's own thread should be: a closed
+          // ticket's thread stays locked and archived.
+          if (survivor.locked === 1) {
+            await transport.threads.setLocked(survivor.thread_id, true);
+            await transport.threads.setArchived(survivor.thread_id, true);
+          }
+        }
+        await this.endThread(th, null);
+      } catch (err) {
+        console.error('[discord] retiring a folded ticket thread failed:', err);
+        this.problem(`Could not tidy a folded ticket's Discord thread: ${err instanceof Error ? err.message : String(err)}. It is tried again every few minutes.`);
       }
-      await this.endThread(th, null);
     }
   }
 
@@ -261,7 +322,13 @@ export class TicketSync {
       }
     }
     for (const id of have) {
-      if (!want.includes(id)) await transport.threads.removeMember(thread.thread_id, id);
+      if (want.includes(id)) continue;
+      try {
+        await transport.threads.removeMember(thread.thread_id, id);
+      } catch (err) {
+        // Ordinary: they, or the bot, have left the server. Retried next pass.
+        console.warn('[discord] could not remove someone from a restricted ticket thread:', err instanceof Error ? err.message : err);
+      }
     }
   }
 

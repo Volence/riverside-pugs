@@ -4,7 +4,7 @@ import { upsertPlayer, activatePlayer, linkDiscord, unlinkDiscord } from '../src
 import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { addAccess, closeTicket, setRestricted } from '../src/tickets/actions.js';
-import { restrictOpenTicketAbout } from '../src/tickets/store.js';
+import { foldTicket, restrictOpenTicketAbout } from '../src/tickets/store.js';
 import { publishTicketSignal } from '../src/tickets/signals.js';
 import { staffThread, threadByDiscordId } from '../src/tickets/threads.js';
 import { mergePlayers } from '../src/mergePlayers.js';
@@ -83,6 +83,27 @@ describe('a restricted ticket in Discord', () => {
     await t.threads.addMember(threadId, '555');
     unlinkDiscord(db, MOD);
     await sync.idle();
+    expect(await members(threadId)).toEqual(['907']);
+  });
+
+  it('a removeMember Discord refuses is warned about, not thrown, so the rest of the ticket still syncs', async () => {
+    const id = file(IDS[0], IDS[5], 'unsafe');
+    addAccess(db, id, ADMIN, MOD);
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    // Raw SQL, not unlinkDiscord/claimTicket: those publish their own
+    // signals, and this test wants exactly one controlled pass.
+    db.prepare('UPDATE players SET discord_id = NULL WHERE steamid = ?').run(MOD);
+    db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?').run(ADMIN, id);
+    t.failThreadOps = 1;
+    await sync.reconcile();
+    // The removal failed, but the card still picked up the claim: syncMembers
+    // throwing did not abandon the rest of this ticket's pass.
+    const cardId = staffThread(db, id)!.card_message_id!;
+    expect(JSON.stringify(t.byId(cardId)!.payload)).toContain('claimed by');
+    expect(await members(threadId)).toEqual(['906', '907']);
+    t.failThreadOps = 0;
+    await sync.reconcile();
     expect(await members(threadId)).toEqual(['907']);
   });
 
@@ -202,5 +223,141 @@ describe('two tickets folded into one', () => {
     expect(JSON.stringify(t.byId(keepThread)!.payload)).toContain('2 from 2 people');
     await sync.reconcile();
     expect(t.live().filter((m) => m.channelId === keepThread && JSON.stringify(m.payload).includes(`<#${goneThread}>`))).toHaveLength(1);
+  });
+});
+
+describe('retireFolded and a closed, locked survivor', () => {
+  it('unarchives to send the fold line, then restores the closed lock', async () => {
+    const keep = file(IDS[0], IDS[5]);
+    const gone = file(IDS[1], IDS[4], 'cheating');
+    await sync.idle();
+    const keepThread = staffThread(db, keep)!.thread_id;
+    const goneThread = staffThread(db, gone)!.thread_id;
+    closeTicket(db, keep, MOD, 'no_action', '');
+    await sync.idle();
+    expect(t.threadsById.get(keepThread)).toMatchObject({ locked: true, archived: true });
+    // foldTicket marks the gone thread 'folded' onto keep: keepHasThread
+    // only checks the thread row's own state ('open', unaffected by the
+    // ticket's own closedness), so a fold can land on an already-closed
+    // survivor whenever a previous pass raced ahead of this one.
+    foldTicket(db, gone, keep, 'drop');
+    await sync.reconcile();
+    const said = t.live().filter((m) => m.channelId === keepThread).map((m) => JSON.stringify(m.payload)).join('\n');
+    expect(said).toContain(`<#${goneThread}>`);
+    expect(t.threadsById.get(keepThread)).toMatchObject({ locked: true, archived: true, deleted: false });
+    expect(threadByDiscordId(db, goneThread)).toMatchObject({ state: 'ended', locked: 1 });
+    expect(t.threadsById.get(goneThread)).toMatchObject({ locked: true, archived: true, deleted: false });
+  });
+
+  it('one folded thread failing does not stop another in the same pass', async () => {
+    const keep = file(IDS[0], IDS[5]);
+    const goneA = file(IDS[1], IDS[4], 'cheating');
+    const goneB = file(IDS[2], IDS[3], 'toxicity');
+    await sync.idle();
+    const keepThread = staffThread(db, keep)!.thread_id;
+    const goneAThread = staffThread(db, goneA)!.thread_id;
+    const goneBThread = staffThread(db, goneB)!.thread_id;
+    // keep is closed and locked, so it is left out of the per-ticket half of
+    // a pass: only the once-per-reconcile stage below ever touches these,
+    // which is what makes one failure here actually able to strand the other.
+    closeTicket(db, keep, MOD, 'no_action', '');
+    await sync.idle();
+    foldTicket(db, goneA, keep, 'drop');
+    foldTicket(db, goneB, keep, 'drop');
+    // goneA is processed first (lower id): make its very first Discord call
+    // throw, and confirm goneB still gets the full treatment.
+    t.failThreadOps = 1;
+    await sync.reconcile();
+    expect(threadByDiscordId(db, goneAThread)!.state).toBe('folded');
+    expect(threadByDiscordId(db, goneBThread)).toMatchObject({ state: 'ended', locked: 1 });
+    expect(t.threadsById.get(goneBThread)).toMatchObject({ locked: true, archived: true, deleted: false });
+    const said = t.live().filter((m) => m.channelId === keepThread).map((m) => JSON.stringify(m.payload)).join('\n');
+    expect(said).toContain(`<#${goneBThread}>`);
+    // The next pass finishes what the failure left behind.
+    await sync.reconcile();
+    expect(threadByDiscordId(db, goneAThread)!.state).toBe('ended');
+  });
+});
+
+describe('a fold that lands a forum thread on a restricted ticket', () => {
+  it('deletes the forum post instead of retiring it, and never mentions it anywhere', async () => {
+    const normal = file(IDS[0], IDS[5], 'griefing');
+    const restricted = file(IDS[1], IDS[5], 'unsafe');
+    await sync.idle();
+    const forumThread = staffThread(db, normal)!.thread_id;
+    db.transaction(() => { expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded'); })();
+    await sync.reconcile();
+    expect(threadByDiscordId(db, forumThread)!.state).toBe('deleted');
+    expect(t.threadsIn('forum1')).toEqual([]);
+    expect(t.threadsById.get(forumThread)!.deleted).toBe(true);
+    // Rule 2 wins outright over rule 3 here: a forbidden forum thread simply
+    // vanishes, with no "folded into this one, see <#...>" announcement
+    // anywhere (not even in the survivor's own private thread), because that
+    // announcement would itself be the one thing about the restricted ticket
+    // that must never surface.
+    expect(t.messages.some((m) => JSON.stringify(m.payload).includes(`<#${forumThread}>`))).toBe(false);
+    expect(staffThread(db, restricted)!.thread_id).not.toBe(forumThread);
+  });
+});
+
+describe('a forbidden forum post that Discord refuses to delete', () => {
+  it('stays open and undeleted until a later pass succeeds, never marked done early', async () => {
+    const id = file(IDS[0], IDS[5]);
+    await sync.idle();
+    const post = staffThread(db, id)!.thread_id;
+    expect(setRestricted(db, id, MOD, true, [ADMIN]).ok).toBe(true);
+    t.failThreadOps = 1;
+    await sync.idle();
+    expect(threadByDiscordId(db, post)).toMatchObject({ state: 'open', surface: 'forum' });
+    expect(t.threadsById.get(post)!.deleted).toBe(false);
+    await sync.reconcile();
+    expect(threadByDiscordId(db, post)!.state).toBe('deleted');
+    expect(t.threadsById.get(post)!.deleted).toBe(true);
+  });
+});
+
+describe('blanking the tickets channel setting ends nothing, on the private side too', () => {
+  it('leaves a live private thread unlocked and unarchived, with members and card still syncing', async () => {
+    const id = file(IDS[0], IDS[5], 'unsafe');
+    addAccess(db, id, ADMIN, MOD);
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    expect(await members(threadId)).toEqual(['906', '907']);
+    setSetting(db, 'discord_tickets_channel_id', '');
+    // A further report, so there is something new for the card and the
+    // announce-a-report line to pick up on this pass.
+    file(IDS[2], IDS[5], 'unsafe');
+    await sync.reconcile();
+    expect(threadByDiscordId(db, threadId)!.state).toBe('open');
+    expect(t.threadsById.get(threadId)).toMatchObject({ locked: false, archived: false, deleted: false });
+    // No farewell, and no other message that was not already going to be
+    // sent anyway (the further-report line).
+    const said = t.live().filter((m) => m.channelId === threadId).map((m) => JSON.stringify(m.payload));
+    expect(said.some((s) => s.includes('no longer restricted'))).toBe(false);
+    expect(await members(threadId)).toEqual(['906', '907']);
+    const cardId = staffThread(db, id)!.card_message_id!;
+    expect(JSON.stringify(t.byId(cardId)!.payload)).toContain('2 from 2 people');
+  });
+});
+
+describe('the accused must never be a member of their own thread', () => {
+  it('a merge that repoints a locked, archived thread onto one of its own members ejects them and keeps it locked', async () => {
+    const id = file(IDS[0], IDS[5], 'unsafe');
+    addAccess(db, id, ADMIN, MOD);
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    expect(await members(threadId)).toEqual(['906', '907']);
+    closeTicket(db, id, MOD, 'no_action', '');
+    await sync.idle();
+    expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true });
+    // What a merge does to a ticket whose target becomes one of its own
+    // access-list members: target_id is repointed, and the tidy-up drops
+    // their now-self-referential access row. Nothing else touches Discord
+    // for a locked, archived thread.
+    db.prepare('UPDATE tickets SET target_id = ? WHERE id = ?').run(MOD, id);
+    db.prepare('DELETE FROM ticket_access WHERE ticket_id = ? AND steamid = ?').run(id, MOD);
+    await sync.reconcile();
+    expect(await members(threadId)).toEqual(['907']);
+    expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true, deleted: false });
   });
 });
