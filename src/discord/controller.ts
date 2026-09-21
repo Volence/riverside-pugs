@@ -63,6 +63,9 @@ function resolve(
  * custom_id scheme: q:join, q:leave, l:<lobbyId>:ready,
  * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect, m:<matchId>:endorse,
  * e:<matchId>:p:<steamid>, e:<matchId>:k:<steamid>:<kind>.
+ *
+ * Ticket buttons (t:<ticketId>:...) are routed to ticketButtons.ts before
+ * they reach this function.
  */
 export async function handleButton(
   deps: ControllerDeps, i: Extract<BotInteraction, { kind: 'button' }>,

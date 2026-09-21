@@ -7,6 +7,7 @@ import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { TicketSync } from './discord/ticketSync.js';
+import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
 import { GuildMembership } from './discord/membership.js';
@@ -948,7 +949,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
+        't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
       },
+      extraModals: {
+        't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
+      },
+      opensModal: opensTicketModal,
       commands: {
         defs: COMMAND_DEFS,
         handle: (i) => handleCommand({ db: deps.db, matchmaker, publicUrl: deps.config.publicUrl, adminSteamIds: deps.config.adminSteamIds }, i),

@@ -156,8 +156,8 @@ export class AdminFeedPoster {
         const ticket = `ticket [#${e.target}](${this.deps.publicUrl}/admin?ticket=${e.target})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
-          case 'ticket_claim': return `${who} ${d.claim === false ? 'released' : 'claimed'} ${ticket}`;
-          case 'ticket_close': return `${who} closed ${ticket}: ${String(d.outcome ?? '').replace(/_/g, ' ')}`;
+          case 'ticket_claim': return `${who} ${d.claim === false ? 'released' : 'claimed'} ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
+          case 'ticket_close': return `${who} closed ${ticket}: ${String(d.outcome ?? '').replace(/_/g, ' ')}${d.via === 'discord' ? ' from Discord' : ''}`;
           case 'ticket_reopen': return `${who} reopened ${ticket}`;
           case 'ticket_ban': return `${who} banned from ${ticket}: ${escapeName(String(d.reason ?? ''))} (${d.minutes ? fmtMinutes(Number(d.minutes)) : 'permanent'})`;
           default: return `${who} updated ${ticket}`;
