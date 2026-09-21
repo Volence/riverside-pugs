@@ -1014,6 +1014,21 @@ export function openDb(path: string): DB {
   // The ticket a ban was issued from, so the ban list and the ticket point at
   // each other. Null for every ban issued from the Players tab.
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
+  // "Somebody has looked at this file." What takes a player off the Needs a
+  // look list, and what puts them back when something newer arrives.
+  //
+  // No foreign key on steamid, like the evidence tables: the evidence that
+  // raises a file can sit under a merged alt's id, and a review of that file
+  // must not be blocked by whether that id still has a player row. No CHECK
+  // anywhere: this is a log, and a log has nothing to constrain.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_reviews (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    steamid     TEXT NOT NULL,
+    reviewed_by TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT ''
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS player_reviews_steamid ON player_reviews (steamid, reviewed_at)');
   ensureTicketSchema(db);
   migrateLegacyReports(db);
   seed(db);

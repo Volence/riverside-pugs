@@ -47,6 +47,10 @@ const PLAIN: [table: string, column: string][] = [
   // The losing account's open link is closed first, below: the survivor
   // inherits the record of it, not the link.
   ['discord_link_history', 'steamid'],
+  // Reviews of the file. The steamid moves; so does the reviewer, for the
+  // case where a member of staff was themselves merged.
+  ['player_reviews', 'steamid'],
+  ['player_reviews', 'reviewed_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
