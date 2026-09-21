@@ -371,8 +371,11 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
     async setTags(threadId, tags) {
       const th = await needThread(threadId);
-      const forum = th.parent;
-      if (!forum || forum.type !== ChannelType.GuildForum) return;
+      const forum = th.parent;                                                // ThreadChannel.parent :3961
+      // Thrown, never shrugged off: the caller stores a card hash once this
+      // resolves, and a hash stored for tags nobody applied would leave the
+      // post's status tag wrong until something else changed the card.
+      if (!forum || forum.type !== ChannelType.GuildForum) throw new Error(`thread ${threadId} is not in a forum, so its tags cannot be set`);
       await th.setAppliedTags(await tagIds(forum, tags));                     // ThreadChannel.setAppliedTags :3983
     },
     async deleteThread(threadId) {
