@@ -13,11 +13,17 @@ export const WITHHELD_REASON = 'Withheld (restricted ticket)';
  *
  * One copy, used by the timeline, the file, the ban list and the ticket
  * page. Two copies of a rule like this is how the two drift apart.
+ *
+ * bans.ticket_id carries no foreign key, so a row that no longer resolves
+ * (never created, or the ticket since gone by some path that did not clear
+ * it) is treated as one the viewer may not open: the alternative is showing
+ * the real reason and issuer to everyone the moment the link breaks, and a
+ * confidentiality rule that fails open on a dangling pointer is not a rule.
  */
 export function banIsWithheld(db: DB, ticketId: number | null, viewer: string): boolean {
   if (ticketId === null) return false;
   const t = getTicketRow(db, ticketId);
-  return !!t && !canSeeTicket(db, t, viewer);
+  return !t || !canSeeTicket(db, t, viewer);
 }
 
 export function redactBan(ban: BanRow): BanRow {
