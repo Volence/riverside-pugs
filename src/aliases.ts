@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import type { LogEvent } from './logParse.js';
+import type { Dump, DumpPlayer, DumpSkill } from './dumpParse.js';
 import { MergeError } from './mergePlayers.js';
 
 /**
@@ -109,4 +110,44 @@ export function canonicalise(db: DB, ev: LogEvent): LogEvent {
     out[f] = canonical;
   }
   return (out ?? row) as unknown as LogEvent;
+}
+
+/**
+ * The same rewrite for the RCON dump, which does not come through the log
+ * listener and so never met canonicalise(). Without it a merged alt's STAT and
+ * SKILL lines name an account whose roster row was already rewritten to the
+ * canonical one, match nothing, and are dropped: the person is rated on a
+ * match with no stats.
+ *
+ * Somebody who played parts of one match on both accounts has two STAT lines
+ * that now carry one id. They are added up, since every field is a counter,
+ * and the earlier joined_map and the first team seen are kept.
+ */
+export function canonicaliseDump(db: DB, d: Dump): Dump {
+  const players = new Map<string, DumpPlayer>();
+  for (const p of d.players) {
+    const id = resolveAlias(db, p.steamid);
+    const seen = players.get(id);
+    if (!seen) {
+      players.set(id, { ...p, steamid: id });
+      continue;
+    }
+    seen.joinedMap = Math.min(seen.joinedMap ?? 0, p.joinedMap ?? 0);
+    seen.sidmg += p.sidmg;
+    seen.sikill += p.sikill;
+    seen.ck += p.ck;
+    seen.ff += p.ff;
+    seen.rev += p.rev;
+  }
+  const skills = new Map<string, DumpSkill>();
+  for (const s of d.skills) {
+    const id = resolveAlias(db, s.steamid);
+    const seen = skills.get(id);
+    if (!seen) {
+      skills.set(id, { steamid: id, stats: { ...s.stats } });
+      continue;
+    }
+    for (const [k, v] of Object.entries(s.stats)) seen.stats[k] = (seen.stats[k] ?? 0) + v;
+  }
+  return { ...d, players: [...players.values()], skills: [...skills.values()] };
 }

@@ -788,6 +788,17 @@ export function openDb(path: string): DB {
   // First time this rostered player was seen connected to the match server.
   // Null means they never turned up, which is what the no-show reaper counts.
   ensureColumn(db, 'match_players', 'connected_at', 'TEXT');
+  // Who put this player on the roster. 'web' is the site's own roster push for
+  // a match it queued. 'udp' is a MATCH_ROSTER line off the log stream: every
+  // player of a match started in game, and every late joiner on any match.
+  // The stream is lossy and forgeable, so a 'udp' row is only a claim until
+  // the RCON dump names the same player; see reconcile in src/matchResult.ts.
+  // Defaulted to 'web' so rows that predate it are never second-guessed.
+  ensureColumn(db, 'match_players', 'source', "TEXT NOT NULL DEFAULT 'web'");
+  // 0 keeps the row for the record and keeps the player out of the rating
+  // step, now and on every later recompute. unrated_reason says why.
+  ensureColumn(db, 'match_players', 'rated', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'match_players', 'unrated_reason', 'TEXT');
   // Input detections became one row per player, match and signature, carrying
   // how many bursts qualified and which. Rows from before this default to one
   // hit and no evidence list; scripts/rerun-input-signatures.ts rebuilds them.

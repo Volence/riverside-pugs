@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { displaySr, applyMatchRatings, ratedForMaps, matchForecast } from '../src/rating.js';
+import { displaySr, applyMatchRatings, ratedForMaps, matchForecast, recomputeSeasonRatings } from '../src/rating.js';
 import { upsertPlayer, ensureRating } from '../src/players.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -106,6 +106,28 @@ describe('applyMatchRatings', () => {
     applyMatchRatings(db, matchId);
     const row = db.prepare('SELECT season_id FROM rating_history WHERE match_id = ? LIMIT 1').get(matchId) as any;
     expect(row.season_id).toBe(1);
+  });
+});
+
+describe('applyMatchRatings and roster rows the dump disowned', () => {
+  it('leaves a rated = 0 row out, and a season recompute leaves it out again', () => {
+    const db = openDb(':memory:');
+    const matchId = seedCompletedMatch(db, 'a');
+    db.prepare("UPDATE match_players SET rated = 0, unrated_reason = 'not_in_dump' WHERE match_id = ? AND player_id = ?")
+      .run(matchId, IDS[7]);
+    expect(applyMatchRatings(db, matchId)).toMatchObject({ applied: true, ratedA: 4, ratedB: 3 });
+    const count = () => (db.prepare('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?').get(IDS[7]) as any).n;
+    expect(count()).toBe(0);
+    recomputeSeasonRatings(db, 1);
+    expect(count()).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM rating_history WHERE match_id = ?').get(matchId) as any).n).toBe(7);
+  });
+
+  it('says why when a side is too small to rate', () => {
+    const db = openDb(':memory:');
+    const matchId = seedCompletedMatch(db, 'a');
+    db.prepare('DELETE FROM match_players WHERE match_id = ? AND player_id IN (?, ?, ?)').run(matchId, IDS[5], IDS[6], IDS[7]);
+    expect(applyMatchRatings(db, matchId)).toEqual({ applied: false, reason: 'too_few', ratedA: 4, ratedB: 1 });
   });
 });
 

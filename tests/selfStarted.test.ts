@@ -161,6 +161,15 @@ describe('SelfStartedMatches', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM matches').get() as any).n).toBe(1);
   });
 
+  // completeMatch holds exactly these rows to the RCON dump before rating.
+  it("marks every row it writes as having come off the log stream", async () => {
+    await burst(2);
+    adopter.handle(roster('76561199000000055', 'a', 'Late', TOKEN, 1));
+    const rows = db.prepare('SELECT DISTINCT source FROM match_players').all();
+    expect(rows).toEqual([{ source: 'udp' }]);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM match_players').get() as any).n).toBe(3);
+  });
+
   it('creates a live match with the right campaign, players and teams', async () => {
     await burst(2);
     const [a, b] = ids(2);

@@ -154,7 +154,7 @@ export class SelfStartedMatches {
          ON CONFLICT(steamid) DO NOTHING`,
       ).run(ev.steamid, ev.name, isAdmin ? 'active' : 'invited', isAdmin ? 1 : 0);
       const r = db.prepare(
-        'INSERT OR IGNORE INTO match_players (match_id, player_id, team, joined_map) VALUES (?, ?, ?, ?)',
+        "INSERT OR IGNORE INTO match_players (match_id, player_id, team, joined_map, source) VALUES (?, ?, ?, ?, 'udp')",
       ).run(live.id, ev.steamid, ev.team, ev.joinedMap);
       if (r.changes > 0) console.log(`[selfStarted] match ${live.id}: rostered ${ev.steamid} on ${ev.team} at map ${ev.joinedMap}`);
     })();
@@ -323,7 +323,7 @@ export class SelfStartedMatches {
             .run(currentSeasonId(db), campaign, serverId, token).lastInsertRowid,
         );
 
-        const insMp = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
+        const insMp = db.prepare("INSERT INTO match_players (match_id, player_id, team, source) VALUES (?, ?, ?, 'udp')");
         for (const [steamid, { team }] of p.roster) insMp.run(id, steamid, team);
 
         // The box is now busy. Without this, claimIdle could hand the same

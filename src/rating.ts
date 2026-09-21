@@ -133,22 +133,47 @@ export function ratedForMaps(joinedMap: number, mapsPlayed: number): boolean {
   return (mapsPlayed - joinedMap) * 2 >= mapsPlayed;
 }
 
+/** Fewest rated players a side may have for the match to move ratings at
+ *  all. A 1v1 reached through an admin's !load used to be rated like a 4v4,
+ *  and one result between two people moved both a full match's worth. Counted
+ *  AFTER the two exclusions below, so neither a roster row the dump disowned
+ *  nor a last-map sub can lift a 1v1 over the line. */
+export const MIN_RATED_PER_TEAM = 2;
+
+export interface RatingOutcome {
+  applied: boolean;
+  /** Why not, when not. `too_few` is the only one worth telling anyone about:
+   *  the others are a match that is not finished, or one already rated. */
+  reason?: 'not_completed' | 'already' | 'too_few';
+  ratedA: number;
+  ratedB: number;
+}
+
 /** Apply OpenSkill updates for a completed match: player_ratings mu/sigma/W-L
  *  plus one rating_history row per player. Idempotent via rating_history guard.
- *  Draws update mu/sigma (rank tie) but count as neither win nor loss. */
-export function applyMatchRatings(db: DB, matchId: number): void {
+ *  Draws update mu/sigma (rank tie) but count as neither win nor loss.
+ *
+ *  Two kinds of roster row are left out: a sub who played under half the maps
+ *  (ratedForMaps), and a row marked rated = 0, which completeMatch sets on a
+ *  player the log stream rostered and the RCON dump never mentioned. The mark
+ *  lives on the row so a season recompute leaves the same people out. */
+export function applyMatchRatings(db: DB, matchId: number): RatingOutcome {
   const match = db
     .prepare('SELECT id, season_id, state, winner FROM matches WHERE id = ?')
     .get(matchId) as { id: number; season_id: number; state: string; winner: 'a' | 'b' | 'draw' | null } | undefined;
-  if (!match || match.state !== 'completed' || !match.winner) return;
-  if (db.prepare('SELECT 1 FROM rating_history WHERE match_id = ? LIMIT 1').get(matchId)) return;
+  if (!match || match.state !== 'completed' || !match.winner) return { applied: false, reason: 'not_completed', ratedA: 0, ratedB: 0 };
+  if (db.prepare('SELECT 1 FROM rating_history WHERE match_id = ? LIMIT 1').get(matchId)) {
+    return { applied: false, reason: 'already', ratedA: 0, ratedB: 0 };
+  }
 
-  const all = db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ?').all(matchId) as MpRow[];
+  const all = db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ? AND rated = 1').all(matchId) as MpRow[];
   const mapsPlayed = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
   const mps = all.filter((r) => ratedForMaps(r.joined_map, mapsPlayed));
   const teamA = mps.filter((r) => r.team === 'a').map((r) => r.player_id);
   const teamB = mps.filter((r) => r.team === 'b').map((r) => r.player_id);
-  if (teamA.length === 0 || teamB.length === 0) return;
+  if (teamA.length < MIN_RATED_PER_TEAM || teamB.length < MIN_RATED_PER_TEAM) {
+    return { applied: false, reason: 'too_few', ratedA: teamA.length, ratedB: teamB.length };
+  }
 
   const before = new Map(mps.map((r) => [r.player_id, ensureRating(db, r.player_id, match.season_id)]));
   const rank = match.winner === 'a' ? [1, 2] : match.winner === 'b' ? [2, 1] : [1, 1];
@@ -175,6 +200,7 @@ export function applyMatchRatings(db: DB, matchId: number): void {
     apply(teamA, newA, match.winner === 'a', match.winner === 'b');
     apply(teamB, newB, match.winner === 'b', match.winner === 'a');
   })();
+  return { applied: true, ratedA: teamA.length, ratedB: teamB.length };
 }
 
 /**

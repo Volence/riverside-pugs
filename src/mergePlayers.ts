@@ -153,7 +153,13 @@ export function mergePlayers(
          -- The earlier of the two: someone who was there from the start was
          -- there from the start, whichever account carried the row.
          joined_map   = MIN(keep.joined_map, gone.joined_map),
-         connected_at = COALESCE(keep.connected_at, gone.connected_at)
+         connected_at = COALESCE(keep.connected_at, gone.connected_at),
+         -- Rated if either row was. rated = 0 means the RCON dump never named
+         -- that account (see completeMatch), which is what the ghost half of
+         -- a two-account roster looks like; the person still played.
+         rated          = MAX(keep.rated, gone.rated),
+         unrated_reason = CASE WHEN MAX(keep.rated, gone.rated) = 1 THEN NULL
+                               ELSE COALESCE(keep.unrated_reason, gone.unrated_reason) END
        FROM match_players AS gone
        WHERE gone.match_id = keep.match_id AND keep.player_id = ? AND gone.player_id = ?`,
     ).run(into, from);
