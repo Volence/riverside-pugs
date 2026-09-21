@@ -14,13 +14,17 @@ import { activeBan } from '../admin/players.js';
 
 const NEXT_COOKIE = 'pug_next';
 
-/** Only same-site paths. Rejects protocol-relative (`//x`) and backslash
- *  tricks (`/\x`, which browsers normalise to `//x`), so the return-to can
- *  never become an open redirect. */
+/** Only same-site paths, so the return-to can never become an open redirect.
+ *  Said as what IS allowed rather than as a list of tricks: "/" alone, or a
+ *  slash followed by an ordinary path character. That refuses the
+ *  protocol-relative `//x` by construction. Backslashes and control
+ *  characters are refused anywhere, because a browser rewrites both before
+ *  it resolves the URL: `/\x` becomes `//x`, and tab, CR and LF are deleted,
+ *  so `/<tab>/x` becomes `//x` as well. */
 function safeNext(raw: unknown): string | null {
-  if (typeof raw !== 'string' || !raw.startsWith('/')) return null;
-  if (raw.startsWith('//') || raw.includes('\\')) return null;
-  return raw.length <= 512 ? raw : null;
+  if (typeof raw !== 'string' || raw.length > 512) return null;
+  if (/[\x00-\x1f\\]/.test(raw)) return null;
+  return raw === '/' || /^\/[A-Za-z0-9_-]/.test(raw) ? raw : null;
 }
 
 export interface AuthRouteOpts {
