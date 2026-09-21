@@ -10,6 +10,12 @@ import { QUEUE_SIZE } from './queue.js';
  *  matters when MATCH_CREATE_END is the datagram that got dropped. */
 const BURST_GRACE_MS = 5_000;
 
+/** How long a pending burst may sit before it is forgotten. A real burst is
+ *  emitted in one tick and settled by the grace timer at the latest, so
+ *  anything this old is never going to complete. Checked lazily, on the next
+ *  line to arrive, rather than on a timer of its own. */
+const PENDING_TTL_MS = 60_000;
+
 /** Players per side. A team over this is the signature of one person on two
  *  accounts, which is what `addLateJoiner` and `reportOverfull` exist for. */
 const TEAM_SIZE = QUEUE_SIZE / 2;
@@ -35,6 +41,8 @@ interface Pending {
   committed: boolean;
   /** Sender of the first line seen for this token. */
   source: string;
+  /** When the first line for this token arrived, epoch ms. */
+  seenAt: number;
 }
 
 /**
@@ -50,13 +58,22 @@ interface Pending {
  * token, and a commit is triggered by whichever happens first: the expected
  * number of roster lines arriving, MATCH_CREATE_END, or a short grace timer.
  * Commit is guarded so it happens exactly once per token.
+ *
+ * What is adopted is rated, so it has to be a match: players on BOTH sides,
+ * on a server that is not already running one. A roster with one side empty
+ * is left pending, since the other side may only be late, and is refused for
+ * good when the grace timer finds it still that way.
  */
 export class SelfStartedMatches {
   private pending = new Map<string, Pending>();
 
   constructor(private deps: SelfStartedDeps) {}
 
+  /** For tests only. */
+  get pendingCount(): number { return this.pending.size; }
+
   handle(ev: LogEvent, source = ''): void {
+    this.sweep();
     switch (ev.kind) {
       case 'match_create': {
         const p = this.ensure(ev.token, source);
@@ -172,17 +189,28 @@ export class SelfStartedMatches {
   private ensure(token: string, source: string): Pending {
     let p = this.pending.get(token);
     if (!p) {
-      p = { map: null, expected: 0, roster: new Map(), timer: null, committed: false, source };
+      p = { map: null, expected: 0, roster: new Map(), timer: null, committed: false, source, seenAt: Date.now() };
       this.pending.set(token, p);
     }
     return p;
+  }
+
+  /** Forget bursts that never completed. Roster lines whose MATCH_CREATE was
+   *  lost have no grace timer, and a create with no roster outlives its own,
+   *  so without this the map grows by one entry per token for the life of the
+   *  process, and a token costs whoever is sending them nothing. */
+  private sweep(): void {
+    const cutoff = Date.now() - PENDING_TTL_MS;
+    for (const [token, p] of this.pending) {
+      if (p.seenAt < cutoff) this.finish(token, p);
+    }
   }
 
   /** Commit on the grace timer too, so a dropped MATCH_CREATE_END cannot strand
    *  a match that is already being played. */
   private arm(token: string, p: Pending): void {
     if (p.timer) return;
-    p.timer = setTimeout(() => this.commit(token), BURST_GRACE_MS);
+    p.timer = setTimeout(() => this.commit(token, true), BURST_GRACE_MS);
     // Never hold the process open for this.
     if (typeof p.timer === 'object' && 'unref' in p.timer) p.timer.unref();
   }
@@ -193,10 +221,28 @@ export class SelfStartedMatches {
     if (p.expected > 0 && p.roster.size >= p.expected) this.commit(token);
   }
 
-  private commit(token: string): void {
+  /** `final` is the grace timer's attempt: the burst is over, so a roster
+   *  that is still not a match now never will be. */
+  private commit(token: string, final = false): void {
     const p = this.pending.get(token);
     if (!p || p.committed) return;
     if (!p.map || p.roster.size === 0) return;
+
+    // Both sides, or it is not a match. It used to be adopted with whatever
+    // had arrived, so a roster of one was a live match that went on to be
+    // rated. Not final until the timer says so: over UDP one side's lines
+    // being behind MATCH_CREATE_END looks exactly like this.
+    const empty = (['a', 'b'] as const).find((t) => ![...p.roster.values()].some((r) => r.team === t));
+    if (empty) {
+      if (!final) return;
+      const who = [...p.roster.entries()].map(([id, v]) => `${v.name} (${id})`).join(', ');
+      publishAdminEvent({
+        kind: 'problem',
+        text: `Refused to adopt a match started in-game on ${p.map}: nobody was rostered on team ${empty.toUpperCase()}. Roster as received: ${who}.`,
+      });
+      this.finish(token, p);
+      return;
+    }
 
     const campaign = resolveCampaignForMap(this.deps.db, p.map);
     if (!campaign) {
@@ -217,6 +263,23 @@ export class SelfStartedMatches {
     const { db } = this.deps;
     const existing = db.prepare('SELECT id FROM matches WHERE token = ?').get(token) as { id: number } | undefined;
     if (existing) {
+      this.finish(token, p);
+      return;
+    }
+
+    // After the token check, so a repeat of the burst that was just adopted
+    // is a duplicate and not a second match. One box cannot be playing two
+    // matches: adopting this one would put two live rows on the server, and
+    // whichever ended first would release the box under the other.
+    const busy = db.prepare(
+      "SELECT id, state FROM matches WHERE server_id = ? AND state IN ('configuring', 'live') ORDER BY id DESC LIMIT 1",
+    ).get(serverId) as { id: number; state: string } | undefined;
+    if (busy) {
+      publishAdminEvent({
+        kind: 'problem',
+        matchId: busy.id,
+        text: `Refused to adopt a match started in-game on ${p.map} with ${p.roster.size} players: that server already has match #${busy.id} (${busy.state}). If #${busy.id} is stale, void it and have the players start again.`,
+      });
       this.finish(token, p);
       return;
     }
