@@ -41,7 +41,8 @@
    - Whichever flips the row from held to not held publishes the feed line, so it posts once.
 6. **Old plugin detection is free and also lazy.**
    - The reply to the `sm_pug_leave_hold_max` push at setup is `Unknown command` on 0.3.3, and that is recorded in `matches.leave_control` (NULL unknown, 0 old, 1 ok).
-   - A match that never went through setup, or a box updated mid-match, is corrected by the first action's own answer.
+   - A match that never went through setup is `unknown`, which leaves the buttons enabled, and the first action's own answer records what the box really is.
+   - A box updated mid-match is NOT corrected by "the first action's own answer": with `leave_control` 0 the board disables the buttons, so no first action is reachable from the UI at all. What actually guarantees this is that the probe fails in the SAFE direction. If srcds's wording ever fails the strict per-line `isUnknownCvar` match, `leave_control` becomes 1 on an old plugin, the buttons stay live, and the first Hold falls through to `parseLeaveReply`'s broad `isUnknownCommand`, which corrects the column to 0. Greying out Hold is the failure that costs a ranked match; enabling a button that then explains itself is not.
    - The board greys the buttons with the reason when it is 0.
 7. **The RCON answer is what updates the board, not the UDP echo.** The route parses `PUGOK leave ...` and writes `match_presence` from it. The echo line arrives at the same state and is a no-op. A failure (no connection, `PUGERR`, unreadable answer) writes nothing and returns the error for the card.
 8. **Countdowns carry no wall-clock timestamps to the browser.**

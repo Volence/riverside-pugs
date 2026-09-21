@@ -378,7 +378,9 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     }
     let answer = parseLeaveReply(body);
     // An rcon response carries whatever else was on the console. An answer
-    // about another player is somebody else's answer.
+    // about another player is somebody else's answer, and leave_control is
+    // deliberately NOT set to 1 on it: an answer we are not reading tells us
+    // nothing about the plugin this command reached.
     if (answer.ok && answer.steamid !== steamid) answer = { ok: false, oldPlugin: false, error: 'the answer was about another player' };
     if (!answer.ok) {
       if (answer.oldPlugin) {

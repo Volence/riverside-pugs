@@ -430,4 +430,3 @@ async function expectPugOk(rcon: RconClient, cmd: string): Promise<string> {
   if (!res.includes('PUGOK')) throw new Error(`${cmd.split(' ')[0]} rejected: ${res.trim() || '(no response)'}`);
   return res;
 }
-
