@@ -17,6 +17,16 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/people/nonsense', asAdmin)).toEqual({ desk: 'people', section: 'unknown', param: null });
   });
 
+  // Each of these used to render something wrong: a desk nobody asked for,
+  // a ticket page fetching NaN, or a URIError that white-screened the site,
+  // since a bad escape in the path throws in decodeURIComponent.
+  it('says no such page for anything else', () => {
+    expect(parseAdminPath('/admin/servers', asAdmin)).toEqual({ desk: 'unknown', section: 'unknown', param: null });
+    expect(parseAdminPath('/admin/setup/nonsense', asAdmin)).toEqual({ desk: 'setup', section: 'unknown', param: null });
+    expect(parseAdminPath('/admin/people/tickets/abc', asAdmin)).toEqual({ desk: 'people', section: 'unknown', param: null });
+    expect(parseAdminPath('/admin/people/%E0%A4%A', asAdmin)).toEqual({ desk: 'people', section: 'unknown', param: null });
+  });
+
   it('leaves room for the other two desks', () => {
     expect(parseAdminPath('/admin/live', asAdmin)).toEqual({ desk: 'live', section: 'board', param: null });
     expect(parseAdminPath('/admin/setup', asAdmin)).toEqual({ desk: 'setup', section: 'settings', param: null });
@@ -40,6 +50,9 @@ describe('the panel URL parser', () => {
     expect(legacyRedirect('/admin', '', true)).toBe('/admin/live');
     expect(legacyRedirect('/admin', '', false)).toBe('/admin/people');
     expect(legacyRedirect('/admin/live', '', false)).toBe('/admin/people');
+    // Not a People path, however much it looks like one from the left.
+    expect(legacyRedirect('/admin/peoplefoo', '', false)).toBe('/admin/people');
+    expect(legacyRedirect('/admin/people', '', false)).toBeNull();
     expect(legacyRedirect('/admin/people/review', '', false)).toBeNull();
     expect(legacyRedirect('/admin/live', '', true)).toBeNull();
   });

@@ -13,7 +13,9 @@
 export type Desk = 'live' | 'people' | 'setup';
 
 export interface AdminRoute {
-  desk: Desk;
+  /** 'unknown' is a path that names no desk at all, such as /admin/servers. */
+  desk: Desk | 'unknown';
+  /** 'unknown' is a path whose desk exists but whose screen does not. */
   section: string;
   /** A SteamID on a file, the id on a ticket, otherwise null. */
   param: string | null;
@@ -56,9 +58,22 @@ export const fileUrl = (steamid: string): string => `/admin/people/${encodeURICo
 export const ticketUrl = (id: number | string): string => `/admin/people/tickets/${id}`;
 
 const STEAMID = /^\d{17}$/;
+const TICKET = /^\d+$/;
+const NOWHERE: AdminRoute = { desk: 'unknown', section: 'unknown', param: null };
+
+/** A path segment can hold a malformed escape, and decodeURIComponent throws
+ *  a URIError on one. Nothing above this catches it, so an unescaped throw
+ *  here white-screens the whole site over a mistyped link. */
+const decode = (segment: string): string => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+};
 
 export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminRoute {
-  const parts = path.split('/').filter(Boolean).map((p) => decodeURIComponent(p));
+  const parts = path.split('/').filter(Boolean).map(decode);
   const desk = parts[1] ?? '';
   const a = parts[2] ?? '';
   const b = parts[3] ?? '';
@@ -68,20 +83,29 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
     if (a === 'review') return { desk: 'people', section: 'review', param: null };
     if (a === 'bans') return { desk: 'people', section: 'bans', param: null };
     if (a === 'tickets') {
-      return b === ''
-        ? { desk: 'people', section: 'tickets', param: null }
-        : { desk: 'people', section: 'ticket', param: b };
+      if (b === '') return { desk: 'people', section: 'tickets', param: null };
+      // The ticket page fetches by id, so a param that is not one is a bad
+      // link rather than a page asking the API about NaN.
+      return TICKET.test(b) ? { desk: 'people', section: 'ticket', param: b } : { ...NOWHERE, desk: 'people' };
     }
     if (STEAMID.test(a)) return { desk: 'people', section: 'file', param: a };
-    return { desk: 'people', section: 'unknown', param: null };
+    return { ...NOWHERE, desk: 'people' };
   };
 
   // A moderator has one desk. Anything else lands on it rather than on a
   // screen every call inside would be refused on anyway.
   if (!opts.isAdmin) return desk === 'people' ? people() : { desk: 'people', section: 'search', param: null };
   if (desk === 'people') return people();
-  if (desk === 'setup') return { desk: 'setup', section: a === '' ? 'settings' : a, param: null };
-  return { desk: 'live', section: 'board', param: null };
+  if (desk === 'setup') {
+    const section = a === '' ? 'settings' : a;
+    return SETUP_TABS.some((t) => t.key === section)
+      ? { desk: 'setup', section, param: null }
+      : { ...NOWHERE, desk: 'setup' };
+  }
+  // The bare /admin is redirected to a desk before anything parses it; it is
+  // read as Live here so one frame of it cannot say the panel has no page.
+  if (desk === 'live' || desk === '') return { desk: 'live', section: 'board', param: null };
+  return NOWHERE;
 }
 
 /**
@@ -103,6 +127,9 @@ export function legacyRedirect(path: string, search: string, isAdmin: boolean): 
     if (isAdmin && live !== null && /^\d+$/.test(live)) return `/admin/live?live=${live}`;
     return landingFor(isAdmin);
   }
-  if (!isAdmin && !path.startsWith('/admin/people')) return '/admin/people';
+  // The People desk itself or something inside it. A prefix test alone would
+  // count /admin/peoplefoo as inside.
+  const inPeople = path === '/admin/people' || path.startsWith('/admin/people/');
+  if (!isAdmin && !inPeople) return '/admin/people';
   return null;
 }

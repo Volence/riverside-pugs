@@ -20,7 +20,7 @@ const num3 = (v: number | null): string => (v == null ? 'n/a' : v.toFixed(3));
  * arrived since the last time a person looked, and it empties as they are
  * worked through, which is the whole point.
  */
-export function NeedsALook() {
+export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
   const { data, reload } = useFetch((s) => peopleApi.review(s), []);
   const { busy, error, run } = useAction(reload);
   const [sort, setSort] = useState<SortKey>('newest');
@@ -109,7 +109,9 @@ export function NeedsALook() {
           </p>
         )}
       </Panel>
-      <AnalysisPanel />
+      {/* Admins only: it asks an admin-only endpoint, and a moderator would
+          get a 403 for a control they may not use anyway. */}
+      {isAdmin && <AnalysisPanel />}
     </>
   );
 }

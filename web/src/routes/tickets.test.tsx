@@ -91,6 +91,12 @@ describe('the Tickets section', () => {
     expect(location.pathname).toBe('/admin/people/tickets/12');
   });
 
+  it('refuses a ticket URL that is not an id', async () => {
+    renderAdmin('/admin/people/tickets/abc', mod);
+    expect(await screen.findByText('No such page in the panel.')).toBeTruthy();
+    expect(mockMod.ticket).not.toHaveBeenCalled();
+  });
+
   it('closes with an outcome and a note', async () => {
     renderAdmin('/admin/people/tickets/12', mod);
     await screen.findByText('saw me through a wall');

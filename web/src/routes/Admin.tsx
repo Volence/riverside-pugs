@@ -106,7 +106,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'live' && <AdminLive />}
         {r.desk === 'people' && r.section === 'search' && <PeopleSearch />}
         {r.desk === 'people' && r.section === 'file' && <PlayerFile steamid={r.param!} me={me} />}
-        {r.desk === 'people' && r.section === 'review' && <NeedsALook />}
+        {r.desk === 'people' && r.section === 'review' && <NeedsALook isAdmin={isAdmin} />}
         {r.desk === 'people' && r.section === 'bans' && <PeopleBans />}
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
         {r.desk === 'people' && r.section === 'ticket' && (
@@ -116,14 +116,13 @@ export function Admin({ session }: { session: Session }) {
             onOpen={(id) => route(ticketUrl(id))}
           />
         )}
-        {r.desk === 'people' && r.section === 'unknown' && <NoSuchPage />}
         {r.desk === 'setup' && r.section === 'campaigns' && <AdminCampaigns />}
         {r.desk === 'setup' && r.section === 'seasons' && <AdminSeasons />}
         {r.desk === 'setup' && r.section === 'settings' && <AdminSettings />}
         {r.desk === 'setup' && r.section === 'audit' && <AdminAudit />}
-        {/* Setup takes its section straight from the path, so a typo would
-            otherwise render a desk with nothing under it. */}
-        {r.desk === 'setup' && !SETUP_TABS.some((t) => t.key === r.section) && <NoSuchPage />}
+        {/* A desk that does not exist, or a section of one that does not.
+            Either way the panel says so rather than showing an empty page. */}
+        {r.section === 'unknown' && <NoSuchPage />}
       </div>
     </div>
   );

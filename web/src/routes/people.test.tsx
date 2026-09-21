@@ -86,7 +86,7 @@ describe('People search', () => {
 describe('Needs a look', () => {
   it('lists a player with their sources, rank and a way into the file', async () => {
     mockPeople.review.mockResolvedValue({ players: [lookRow], health: health() });
-    render(<NeedsALook />);
+    render(<NeedsALook isAdmin />);
     const link = await screen.findByRole('link', { name: 'griefer' });
     expect(link.getAttribute('href')).toBe('/admin/people/76561199000000001');
     // Scoped to the player's own row: the capture-health line below the table
@@ -102,13 +102,28 @@ describe('Needs a look', () => {
 
   it('marks a file looked at from the list', async () => {
     mockPeople.review.mockResolvedValue({ players: [lookRow], health: health() });
-    render(<NeedsALook />);
+    render(<NeedsALook isAdmin />);
     fireEvent.click(await screen.findByRole('button', { name: 'Looked at' }));
     await waitFor(() => expect(mockPeople.lookedAt).toHaveBeenCalledWith('76561199000000001', ''));
   });
 
+  // The analysis panel asks an admin-only endpoint, so a moderator opening
+  // this screen would have produced a 403 on every visit.
+  it('leaves the analysis panel off a moderator\'s screen', async () => {
+    render(<NeedsALook isAdmin={false} />);
+    expect(await screen.findByText('Nothing is waiting to be looked at.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Re-analyse all replays' })).toBeNull();
+    expect(mockAdmin.integrityJob).not.toHaveBeenCalled();
+  });
+
+  it('gives an admin the analysis panel', async () => {
+    render(<NeedsALook isAdmin />);
+    expect(await screen.findByRole('button', { name: 'Re-analyse all replays' })).toBeTruthy();
+    expect(mockAdmin.integrityJob).toHaveBeenCalled();
+  });
+
   it('says whether anything is being captured at all when the list is empty', async () => {
-    render(<NeedsALook />);
+    render(<NeedsALook isAdmin />);
     expect(await screen.findByText('Nothing is waiting to be looked at.')).toBeTruthy();
     expect(screen.getByText(/12 input bursts/)).toBeTruthy();
   });

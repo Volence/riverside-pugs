@@ -26,7 +26,7 @@ const { mockAdmin, mockApi, mockPeople } = vi.hoisted(() => ({
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
   // The People desk is where a moderator lands, so a shell test reaches its
   // search screen even when it is testing the redirect and nothing else.
-  mockPeople: { people: vi.fn() },
+  mockPeople: { people: vi.fn(), review: vi.fn() },
 }));
 
 vi.mock('../api', async (importOriginal) => {
@@ -55,6 +55,7 @@ afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
 beforeEach(() => {
   for (const fn of [...Object.values(mockAdmin), ...Object.values(mockApi), ...Object.values(mockPeople)]) fn.mockReset();
   mockPeople.people.mockResolvedValue({ players: [] });
+  mockPeople.review.mockResolvedValue({ players: [], health: null });
   // The Integrity tab always asks for the analysis job's state, so every test
   // that opens it needs an answer whether or not it cares about one.
   mockAdmin.integrityJob.mockResolvedValue({
@@ -1224,11 +1225,20 @@ describe('the panel shell', () => {
   });
 
   it('says so for a URL that is not a screen', async () => {
-    renderAdmin('/admin/people/nonsense');
-    expect(await screen.findByText('No such page in the panel.')).toBeTruthy();
-    cleanup();
-    renderAdmin('/admin/setup/nonsense');
-    expect(await screen.findByText('No such page in the panel.')).toBeTruthy();
+    for (const url of ['/admin/people/nonsense', '/admin/setup/nonsense', '/admin/servers']) {
+      renderAdmin(url);
+      expect(await screen.findByText('No such page in the panel.'), url).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  // The analysis panel asks an admin-only endpoint. The shell knows who is
+  // looking, so it is the shell that keeps a moderator off it.
+  it('leaves the analysis panel off a moderator\'s Needs a look', async () => {
+    mockPeople.review.mockResolvedValue({ players: [], health: null });
+    renderAdmin('/admin/people/review', asMod);
+    expect(await screen.findByText('Nothing is waiting to be looked at.')).toBeTruthy();
+    expect(mockAdmin.integrityJob).not.toHaveBeenCalled();
   });
 
   // Desks and sections are links, not buttons: a real href can be opened in
@@ -1262,9 +1272,12 @@ describe('the panel shell', () => {
     expect(screen.queryByText('Page not found')).toBeNull();
   });
 
-  it('sends the old ban list URL into the panel', async () => {
+  // The component only. That the site still routes /bans through it is
+  // asserted against the real route table, in appRoutes.test.tsx.
+  it('sends a moved URL on and renders nothing', async () => {
     history.replaceState(null, '', '/bans');
-    render(<LocationProvider><Redirect to="/admin/people/bans" /></LocationProvider>);
+    const { container } = render(<LocationProvider><Redirect to="/admin/people/bans" /></LocationProvider>);
     await waitFor(() => expect(location.pathname).toBe('/admin/people/bans'));
+    expect(container.textContent).toBe('');
   });
 });
