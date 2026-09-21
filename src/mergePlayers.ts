@@ -58,6 +58,9 @@ const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
   ['match_live_map_stats', 'player_id'],
   ['match_readyup_players', 'player_id'],
+  // Live scratch, like the rows above: if both accounts somehow have a row in
+  // one match, the survivor's is as good as the one dropped.
+  ['match_presence', 'steamid'],
   // A handle per platform. Where both accounts have one, `into` keeps its own.
   ['player_links', 'player_id'],
   // Summed first, below, where both accounts were seen on one address.

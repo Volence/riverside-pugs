@@ -772,6 +772,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // itself once everyone is back. Pushed to the plugin at match setup.
   leave_budget_seconds: '300',
   leave_auto_unpause: '1',
+  // The longest an admin may hold a clock from the live board, and how much
+  // of a dropped player's allowance is left when the admin feed says so.
+  clock_hold_max_minutes: '30',
+  abandon_low_alert_seconds: '90',
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
@@ -1016,6 +1020,33 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
   ensureTicketSchema(db);
   migrateLegacyReports(db);
+  // Who is on the game server right now, one row per rostered player, written
+  // from PLAYER connect, LEAVE and RETURN and from the plugin's own answer to
+  // an admin clock action (src/presence.ts). `since` is when the current state
+  // began. `remaining_s` is the reconnect allowance as of `remaining_at`,
+  // which is a different instant after a hold, a release or an add, so the two
+  // cannot share a column. `low_alert_at` is what makes the admin feed warning
+  // once per drop, and what stops a restart from posting it again.
+  // No CHECK on state, and steamid is deliberately not a foreign key: the
+  // roster check happens at write time, against match_players.
+  db.exec(`CREATE TABLE IF NOT EXISTS match_presence (
+    match_id INTEGER NOT NULL REFERENCES matches(id),
+    steamid TEXT NOT NULL,
+    state TEXT NOT NULL,
+    since TEXT NOT NULL,
+    remaining_s INTEGER,
+    remaining_at TEXT,
+    held INTEGER NOT NULL DEFAULT 0,
+    hold_until TEXT,
+    low_alert_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (match_id, steamid)
+  )`);
+  // Whether this match's server understands sm_pug_leave (pug-match 0.3.4).
+  // NULL until something has asked: the setup path learns it for free from the
+  // reply to the hold ceiling cvar, and an action learns it from its own answer.
+  ensureColumn(db, 'matches', 'leave_control', 'INTEGER');
+
   seed(db);
   return db;
 }
