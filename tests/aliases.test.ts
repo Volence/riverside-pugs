@@ -135,6 +135,7 @@ describe('canonicalise covers anti-cheat evidence', () => {
     const burst: LogEvent = {
       kind: 'input_burst', steamid: ALT, burstKind: 'fire', weapon: 'pistol',
       groundTicks: 0, airPresses: 0, serverTick: 100, clientTick: 100, intervals: [3, 3, 3],
+      wire: 2, serverSpan: 9, holds: null,
     };
     expect(canonicalise(db, burst)).toEqual({ ...burst, steamid: MAIN });
   });

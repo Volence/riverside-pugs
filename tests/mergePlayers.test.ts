@@ -335,6 +335,10 @@ describe('mergePlayers', () => {
 
   it('moves player_links and twitch_status onto the surviving account', () => {
     db.prepare("INSERT INTO player_links (player_id, platform, handle) VALUES (?, 'twitter', 'alt_handle')").run(ALT);
+    // The cached status follows the Twitch link and nothing else, so the alt
+    // needs a linked channel for its row to move: a status without a link
+    // would show the survivor live on a channel that is not theirs.
+    db.prepare("UPDATE players SET twitch_id = 'tw_alt', twitch_name = 'alt_tv' WHERE steamid = ?").run(ALT);
     db.prepare("INSERT INTO twitch_status (player_id, is_live, checked_at) VALUES (?, 0, datetime('now'))").run(ALT);
 
     mergePlayers(db, { from: ALT, into: MAIN });
