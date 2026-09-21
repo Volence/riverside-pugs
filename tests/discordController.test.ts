@@ -228,3 +228,81 @@ describe('queue alert opt-in toggle', () => {
     expect(body(r)).toMatch(/role above the alert role/i);
   });
 });
+
+describe('endorse buttons', () => {
+  const STRANGER_SID = '76561198000000099';
+
+  function seedCompleted(id: number, hoursAgo = 0): void {
+    db.prepare(
+      `INSERT INTO matches (id, season_id, state, campaign, winner, ended_at)
+       VALUES (?, 1, 'completed', 'no_mercy', 'a', datetime('now', ?))`,
+    ).run(id, `-${hoursAgo} hours`);
+    IDS.forEach((p, i) => {
+      db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)').run(id, p, i < 4 ? 'a' : 'b');
+    });
+  }
+  const given = () => db.prepare('SELECT match_id, from_id, to_id, kind FROM endorsements ORDER BY to_id').all();
+  const ids = (r: InteractionReply) => r.payload.components.flat().map((b) => (b.kind === 'button' ? b.customId : ''));
+
+  it('opens a private picker of the seven other players', async () => {
+    seedCompleted(5);
+    const r = await press(0, 'm:5:endorse');
+    expect(r.ephemeral).toBe(true);
+    expect(ids(r)).toHaveLength(7);
+    expect(ids(r)).not.toContain(`e:5:p:${IDS[0]}`);
+  });
+
+  it('pick a player, pick a kind, and it is recorded against the LINKED player', async () => {
+    seedCompleted(5);
+    const kinds = await press(0, `e:5:p:${IDS[5]}`);
+    expect(ids(kinds)).toContain(`e:5:k:${IDS[5]}:clutch`);
+    const after = await press(0, `e:5:k:${IDS[5]}:clutch`);
+    expect(given()).toEqual([{ match_id: 5, from_id: IDS[0], to_id: IDS[5], kind: 'clutch' }]);
+    // Back on the picker, in place, showing what remains.
+    expect(body(after)).toContain('1 of 2');
+    expect(body(after)).toContain('Clutch');
+  });
+
+  it('tells somebody who was not on the roster so, and changes nothing', async () => {
+    seedCompleted(5);
+    upsertPlayer(db, { steamid: STRANGER_SID, name: 'stranger', avatar: null }, []);
+    activatePlayer(db, STRANGER_SID);
+    linkDiscord(db, STRANGER_SID, 'd-stranger', 'stranger');
+    const hit = (customId: string) => handleButton(
+      { db, matchmaker: mm, publicUrl: URL_ }, { kind: 'button', customId, userId: 'd-stranger', userName: 'stranger' },
+    );
+    expect(body(await hit('m:5:endorse'))).toMatch(/not in this match/i);
+    expect(body(await hit(`e:5:k:${IDS[5]}:clutch`))).toMatch(/not in this match/i);
+    expect(given()).toEqual([]);
+  });
+
+  it('an unlinked Discord user is asked to link, and nothing is written', async () => {
+    seedCompleted(5);
+    const r = await handleButton(
+      { db, matchmaker: mm, publicUrl: URL_ },
+      { kind: 'button', customId: `e:5:k:${IDS[5]}:clutch`, userId: 'nobody', userName: 'Nobody' },
+    );
+    expect(r.payload.components.flat().some((b) => b.kind === 'link' && b.url.includes('/link/discord'))).toBe(true);
+    expect(given()).toEqual([]);
+  });
+
+  it('a third click cannot overspend the budget', async () => {
+    seedCompleted(5);
+    await press(0, `e:5:k:${IDS[1]}:caller`);
+    await press(0, `e:5:k:${IDS[2]}:caller`);
+    const third = await press(0, `e:5:k:${IDS[3]}:caller`);
+    expect(given()).toHaveLength(2);
+    expect(body(third)).toMatch(/no endorsements left/i);
+  });
+
+  it('says so when the window has closed', async () => {
+    seedCompleted(5, 30);
+    expect(body(await press(0, 'm:5:endorse'))).toMatch(/closed/i);
+  });
+
+  it('cannot be aimed at oneself through a crafted custom id', async () => {
+    seedCompleted(5);
+    await press(0, `e:5:k:${IDS[0]}:caller`);
+    expect(given()).toEqual([]);
+  });
+});

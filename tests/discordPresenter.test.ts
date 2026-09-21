@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   renderPanel, renderLobby, renderLobbyFailed, renderMatch, renderResult, renderCancelled, playerLabel,
+  renderEndorsePicker, renderEndorseKinds,
 } from '../src/discord/presenter.js';
 import type { MessagePayload } from '../src/discord/transport.js';
+import type { EndorseKind } from '../src/endorsements.js';
 
 const URL_ = 'https://pug.test';
 const text = (p: MessagePayload) => JSON.stringify(p);
@@ -162,5 +164,67 @@ describe('copy rules', () => {
       renderCancelled(),
     ];
     for (const p of all) expect(text(p)).not.toContain('—');
+  });
+});
+
+describe('endorse flow payloads', () => {
+  const cands = (n: number) => Array.from({ length: n }, (_, i) => ({
+    steamid: `7656119800000000${i + 2}`, name: `p${i}`, given: null as EndorseKind | null,
+  }));
+
+  it('the result card carries an Endorse button beside the match page link', () => {
+    const p = renderResult({
+      matchId: 7, campaignName: 'No Mercy', publicUrl: 'https://pug.test',
+      scoreA: 10, scoreB: 5, winner: 'a', teamA: [], teamB: [],
+    });
+    const row = p.components[0];
+    expect(row).toHaveLength(2);
+    expect(row[0]).toMatchObject({ kind: 'link', label: 'Match page' });
+    expect(row[1]).toEqual({ kind: 'button', customId: 'm:7:endorse', label: 'Endorse', style: 'secondary' });
+  });
+
+  it('the picker fits seven players into two rows of at most five', () => {
+    const p = renderEndorsePicker({ matchId: 7, budget: 2, remaining: 2, candidates: cands(7) });
+    expect(p.components.map((r) => r.length)).toEqual([5, 2]);
+    expect(p.components.flat().every((b) => b.kind === 'button' && b.customId.startsWith('e:7:p:'))).toBe(true);
+    expect(p.content).toContain('2 of 2');
+    expect(p.embeds).toEqual([]);
+    expect(p.mentionUserIds).toEqual([]);
+  });
+
+  it('shows what was already given and locks that player', () => {
+    const list = cands(7);
+    list[0] = { ...list[0], given: 'caller' };
+    const p = renderEndorsePicker({ matchId: 7, budget: 2, remaining: 1, candidates: list, notice: 'Endorsed p0 as Caller.' });
+    const first = p.components[0][0];
+    expect(first).toMatchObject({ kind: 'button', label: 'p0: Caller', disabled: true, style: 'success' });
+    expect(p.components[0][1]).toMatchObject({ disabled: false });
+    expect(p.content?.startsWith('Endorsed p0 as Caller.')).toBe(true);
+  });
+
+  it('locks everything once the budget is spent', () => {
+    const p = renderEndorsePicker({ matchId: 7, budget: 2, remaining: 0, candidates: cands(7) });
+    expect(p.components.flat().every((b) => b.kind === 'button' && b.disabled === true)).toBe(true);
+    expect(p.content).toMatch(/given all/i);
+  });
+
+  it('never lets a long name break the 80 character label limit', () => {
+    const p = renderEndorsePicker({
+      matchId: 7, budget: 2, remaining: 2,
+      candidates: [{ steamid: '76561198000000002', name: 'x'.repeat(200), given: null }],
+    });
+    const b = p.components[0][0];
+    expect(b.kind === 'button' && b.label.length).toBe(80);
+  });
+
+  it('the kind step offers exactly the three kinds and a way back, and no negative one', () => {
+    const p = renderEndorseKinds({ matchId: 7, steamid: '76561198000000002', name: 'b*ob' });
+    expect(p.components).toHaveLength(1);
+    expect(p.components[0].map((b) => (b.kind === 'button' ? b.customId : ''))).toEqual([
+      'e:7:k:76561198000000002:caller', 'e:7:k:76561198000000002:clutch', 'e:7:k:76561198000000002:vibes', 'm:7:endorse',
+    ]);
+    expect(p.components[0].map((b) => b.label)).toEqual(['Caller', 'Clutch', 'Good vibes', 'Back']);
+    // Names are user text and the content is markdown.
+    expect(p.content).toContain('b\\*ob');
   });
 });

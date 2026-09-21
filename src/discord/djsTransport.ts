@@ -69,12 +69,21 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       if (i.isButton()) {
         // Every button reply is private; defer first so a slow handler never
         // blows Discord's three second window.
-        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        //
+        // A button that sits on one of our OWN ephemeral replies (the endorse
+        // picker) updates that reply in place rather than stacking a new one
+        // under it: pick a player, pick a kind, and the same message shows what
+        // remains. Buttons on public cards keep getting a fresh private reply.
+        const inPlace = i.message.flags.has(MessageFlags.Ephemeral);
+        if (inPlace) await i.deferUpdate();
+        else await i.deferReply({ flags: MessageFlags.Ephemeral });
         const reply = await handler({
           kind: 'button', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
         });
         const m = toMessage(reply.payload);
-        await i.editReply({ content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
+        // In place, an absent content must CLEAR the old text, and undefined
+        // means "leave it as it was" to Discord.
+        await i.editReply({ content: inPlace ? (m.content ?? '') : (m.content || undefined), embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
       } else if (i.isChatInputCommand()) {
         const options: Record<string, string> = {};
         for (const o of i.options.data) {
