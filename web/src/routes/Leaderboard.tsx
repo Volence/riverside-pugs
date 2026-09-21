@@ -49,6 +49,13 @@ function valueOf(r: Row, key: string, measure: StatMeasure): number | null {
   }
 }
 
+/** What separates two rows that `valueOf` scores the same. Zero everywhere it
+ *  has nothing to add, so equal values keep falling through to the name. The
+ *  base columns are never in `meanStats`, so they need no test here. */
+function tiebreak(r: Row, key: string, measure: StatMeasure): number {
+  return measure === 'median' ? r.meanStats?.[key] ?? 0 : 0;
+}
+
 export function Leaderboard({ me }: { me: string | null }) {
   const [season, setSeason] = useState<number | undefined>(undefined);
   const { data, error } = useFetch((s) => api.leaderboard(s, season), [season]);
@@ -82,7 +89,17 @@ export function Leaderboard({ me }: { me: string | null }) {
       if (a === null && b === null) return x.name.localeCompare(y.name);
       if (a === null) return 1;
       if (b === null) return -1;
-      if (a === b) return x.name.localeCompare(y.name);
+      if (a === b) {
+        // Rare-event columns have only a handful of distinct medians across
+        // the whole board, so a median sort leaves most of the table tied and
+        // ordered by name. The mean separates them by the same thing the
+        // median measures. Only under the median measure: totals are already
+        // distinct, and their ties are genuine.
+        const ax = tiebreak(x, sort.key, measure);
+        const bx = tiebreak(y, sort.key, measure);
+        if (ax !== bx) return sort.desc ? bx - ax : ax - bx;
+        return x.name.localeCompare(y.name);
+      }
       return sort.desc ? b - a : a - b;
     };
     return {

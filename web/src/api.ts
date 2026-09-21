@@ -153,6 +153,11 @@ export interface LeaderboardRow {
    *  A key is absent here exactly when it is absent from `stats`, since both
    *  are reduced from one set of per-match samples. */
   medianStats?: Record<string, number>;
+  /** The same keys again, as a mean over the matches that measured them. Not
+   *  displayed: it breaks ties in the median, which most of the rare-event
+   *  columns are full of. The season total cannot do that job, since among
+   *  players on the same median it ranks whoever has played most. */
+  meanStats?: Record<string, number>;
 }
 
 export interface Leaderboard {

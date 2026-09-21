@@ -1992,4 +1992,32 @@ describe('leaderboard measure', () => {
     const cell = document.querySelectorAll('tbody tr')[0].querySelectorAll('td')[7];
     expect(cell.getAttribute('title')).toBe('60 total this season');
   });
+
+  it('separates players who share a median on the mean behind it', async () => {
+    // Rare-event columns have few distinct medians, so a median sort leaves
+    // most of the board tied. Both of these sit on one crown a match. zoe
+    // scores more of them per match; alice's bigger total is attendance,
+    // which is what sorting on the median is here to keep out. zoe sorts
+    // second alphabetically, so a tie left to the name would not put her top.
+    mockApi.leaderboard.mockResolvedValue(board([
+      {
+        steamid: '3', name: 'alice', avatar: null, sr: 1200, wins: 5, losses: 5, games: 20,
+        ranked: true, stats: { crowns: 20 }, medianStats: { crowns: 1 }, meanStats: { crowns: 1 },
+      },
+      {
+        steamid: '4', name: 'zoe', avatar: null, sr: 1200, wins: 5, losses: 5, games: 5,
+        ranked: true, stats: { crowns: 10 }, medianStats: { crowns: 1 }, meanStats: { crowns: 2 },
+      },
+    ]));
+    render(<Leaderboard me={null} />);
+    await waitFor(() => expect(screen.getByTitle('Sort the table by Crowns')).toBeTruthy());
+    fireEvent.click(screen.getByTitle('Sort the table by Crowns'));
+
+    const names = () => Array.from(document.querySelectorAll('tbody tr .pname'))
+      .map((td) => td.textContent);
+    await waitFor(() => expect(names()).toEqual(['zoe', 'alice']));
+    // The totals are not tied, so that tab still orders on the number itself.
+    fireEvent.click(screen.getByRole('tab', { name: 'Totals' }));
+    await waitFor(() => expect(names()).toEqual(['alice', 'zoe']));
+  });
 });

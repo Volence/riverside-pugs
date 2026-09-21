@@ -70,18 +70,27 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
 
   const statsBy = new Map<string, Record<string, number>>();
   const medianBy = new Map<string, Record<string, number>>();
+  const meanBy = new Map<string, Record<string, number>>();
   for (const [steamid, bags] of samplesBy) {
     const totals: Record<string, number> = {};
     const medians: Record<string, number> = {};
+    const means: Record<string, number> = {};
     for (const [key, values] of bags) {
-      totals[key] = values.reduce((a, b) => a + b, 0);
+      const total = values.reduce((a, b) => a + b, 0);
+      totals[key] = total;
       // Never null here: a bag only exists once something has been pushed into
       // it. A key nobody recorded has no bag and so appears in neither result,
       // which is the absent-is-not-zero rule the rest of this file follows.
       medians[key] = quantiles(values)!.p50;
+      // Over the matches that MEASURED the key, not over games played: a stat
+      // is absent from every match the plugin ran without skill_detect, so the
+      // two denominators diverge. Three decimals is enough to separate a field
+      // of this size and keeps the payload small.
+      means[key] = Math.round((total / values.length) * 1000) / 1000;
     }
     statsBy.set(steamid, totals);
     medianBy.set(steamid, medians);
+    meanBy.set(steamid, means);
   }
 
   // How many matches have produced ratings this season. The page used to
@@ -101,6 +110,7 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
         ranked: r.games >= RANKED_MIN_GAMES,
         stats: statsBy.get(r.steamid) ?? {},
         medianStats: medianBy.get(r.steamid) ?? {},
+        meanStats: meanBy.get(r.steamid) ?? {},
       }))
       .sort((x, y) => y.sr - x.sr),
   };

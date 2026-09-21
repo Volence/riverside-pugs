@@ -147,6 +147,35 @@ describe('stats routes', () => {
     expect((await standingsOf(streaky)).skeets).toMatchObject({ rank: 2 });
   });
 
+  it('separates players who share a median on the mean behind it', async () => {
+    // Crowns come once or twice a season, so on the live board every player
+    // but one has a median of 0 and the whole field shares a rank. The mean
+    // is what tells a player who crowns in two matches of five from one who
+    // has never done it, and it measures the same thing the median does.
+    setSetting(db, 'standing_min_games', '3');
+    const often = IDS[0];
+    const once = IDS[1];
+    const never = IDS[2];
+    const perMatch: Record<string, number[]> = {
+      [often]: [1, 0, 1, 0, 0],
+      [once]: [0, 0, 1, 0, 0],
+      [never]: [0, 0, 0, 0, 0],
+    };
+    for (let i = 0; i < 5; i++) {
+      const m = playCompletedMatch(db, 'b');
+      for (const id of [often, once, never]) seedStats(db, m, id, { crowns: perMatch[id][i] });
+    }
+
+    const standingsOf = async (id: string) =>
+      (await app.inject({ method: 'GET', url: `/api/players/${id}` })).json().standings;
+
+    // All three medians are 0, so without the tiebreak all three share rank 1.
+    expect((await standingsOf(often)).crowns).toMatchObject({ rank: 1 });
+    expect((await standingsOf(once)).crowns).toMatchObject({ rank: 2 });
+    // A player who has never done it holds no place on that board at all.
+    expect(await standingsOf(never)).not.toHaveProperty('crowns');
+  });
+
   // Was: "rank 7 of 8 is outside the top five" and returned nothing at all.
   // Truncating server side meant #6 of 40 and #39 of 40 were the same absent
   // key, so a profile could not tell a near miss from a weakness. The top five
@@ -447,6 +476,22 @@ describe('stats routes', () => {
       // The loser of the comparison still has the bigger season total, which is
       // exactly what the old ordering was rewarding.
       expect(rows[1]).toMatchObject({ median: 3, matches: 6, total: 18 });
+    });
+
+    it('breaks a tied median on the mean, not on the season total', async () => {
+      // Both players' median match is one crown, so the median alone cannot
+      // order them. IDS[0] is the better crowner per match; IDS[1] only
+      // out-totals them by turning up to twice as many matches, which is what
+      // ordering on the total would have rewarded.
+      for (const v of [1, 1, 1, 5]) seedStats(db, playCompletedMatch(db), IDS[0], { crowns: v });
+      for (let i = 0; i < 10; i++) seedStats(db, playCompletedMatch(db), IDS[1], { crowns: 1 });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/crowns', cookies });
+      const rows = res.json().rows;
+      expect(rows.map((r: any) => r.steamid)).toEqual([IDS[0], IDS[1]]);
+      // Tied on the median. The mean favours IDS[0], the total favours IDS[1],
+      // so an ordering that used the total would reverse these two.
+      expect(rows[0]).toMatchObject({ median: 1, mean: 2, total: 8 });
+      expect(rows[1]).toMatchObject({ median: 1, mean: 1, total: 10 });
     });
 
     it('carries the spread beside the median so a reader can see how steady it is', async () => {

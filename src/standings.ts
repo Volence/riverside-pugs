@@ -131,40 +131,66 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
   }
 
   /**
+   * What a metric is ranked on: the median a badge sits beside, with the mean
+   * behind it to break ties.
+   *
+   * The median alone cannot order most of this board. Measured against the
+   * live season, 13 of the 29 rankable stats have three or fewer distinct
+   * medians across the whole ranked field, because their per-match counts are
+   * small integers: every crown but one is a median of 0, and `rev` puts 14 of
+   * 15 players in the top five. The mean separates them, and by the same
+   * thing the median measures, how much of it they do per match.
+   *
+   * Rates rank on themselves. `mean` is set to the rate so one comparator
+   * serves both without a special case.
+   */
+  interface Metric { median: number; mean: number }
+
+  /** Median first, mean behind it. Positive when `a` outranks `b`. */
+  const compare = (a: Metric, b: Metric) => a.median - b.median || a.mean - b.mean;
+
+  /**
    * Every metric for one player, absent where it has no denominator.
    *
-   * Counts are MEDIANS over matches, matching the figure each badge sits
-   * beside on the profile. They were means (a season total over matches
-   * played), which stopped agreeing with the tiles the moment those became
-   * medians: a streaky player showed "SI dmg / match 693" with a #1 badge
-   * earned by a mean of 1940. A badge has to rank the number it is next to.
-   *
-   * Win rate and boomer % stay POOLED ratios. A median of per-match rates
-   * would weigh a one-boomer night the same as a four-boomer night.
+   * Win rate and boomer % are POOLED ratios. A median of per-match rates would
+   * weigh a one-boomer night the same as a four-boomer night.
    */
-  const metricsOf = (r: (typeof ranked)[number]): Record<string, number> => {
-    const out: Record<string, number> = {};
+  const metricsOf = (r: (typeof ranked)[number]): Record<string, Metric> => {
+    const out: Record<string, Metric> = {};
     const decided = r.wins + r.losses;
-    if (decided > 0) out.winrate = r.wins / decided;
+    if (decided > 0) {
+      const winrate = r.wins / decided;
+      out.winrate = { median: winrate, mean: winrate };
+    }
     const bags = samplesBy.get(r.steamid);
     if (!bags) return out;
     for (const [k, values] of bags) {
-      if (rankable.has(k) || (FIXED_KEYS as readonly string[]).includes(k)) out[k] = quantiles(values)!.p50;
+      if (!rankable.has(k) && !(FIXED_KEYS as readonly string[]).includes(k)) continue;
+      out[k] = {
+        median: quantiles(values)!.p50,
+        mean: values.reduce((a, b) => a + b, 0) / values.length,
+      };
     }
     const sum = (k: string) => (bags.get(k) ?? []).reduce((a, b) => a + b, 0);
     const spawns = sum('boomer_spawns');
-    if (spawns > 0) out.boomer_rate = sum('boom_successes') / spawns;
+    if (spawns > 0) {
+      const rate = sum('boom_successes') / spawns;
+      out.boomer_rate = { median: rate, mean: rate };
+    }
     return out;
   };
 
   const all = ranked.map((r) => ({ steamid: r.steamid, m: metricsOf(r) }));
   const mine = all.find((x) => x.steamid === steamid)!.m;
   const out: Record<string, Standing> = {};
-  for (const [key, value] of Object.entries(mine)) {
-    if (!(value > 0)) continue;
-    const field = all.map((x) => x.m[key]).filter((v): v is number => v !== undefined);
-    const above = field.filter((v) => v > value).length;
-    const level = field.filter((v) => v === value).length;
+  for (const [key, metric] of Object.entries(mine)) {
+    // Gated on the mean, not on the median. A player who crowns in a third of
+    // their matches has a median of 0 and a real place on that board; gating
+    // on the median would tell them nothing about a stat they do score in.
+    if (!(metric.mean > 0)) continue;
+    const field = all.map((x) => x.m[key]).filter((v): v is Metric => v !== undefined);
+    const above = field.filter((v) => compare(v, metric) > 0).length;
+    const level = field.filter((v) => compare(v, metric) === 0).length;
     out[key] = {
       rank: 1 + above,
       of: field.length,

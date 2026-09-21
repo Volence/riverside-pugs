@@ -712,7 +712,12 @@ export const STAT_MEASURE_TABS = [
  * "third best, with none" is not a standing.
  */
 export function statLeaders(
-  rows: { steamid: string; name: string; stats?: Record<string, number>; medianStats?: Record<string, number> }[],
+  rows: {
+    steamid: string; name: string;
+    stats?: Record<string, number>;
+    medianStats?: Record<string, number>;
+    meanStats?: Record<string, number>;
+  }[],
   key: string,
   limit = 3,
   /** Which bag the cards lead on. The cards are also the table's sort control,
@@ -725,9 +730,13 @@ export function statLeaders(
     .map((r) => ({
       steamid: r.steamid, name: r.name,
       value: (measure === 'median' ? r.medianStats : r.stats)?.[key] ?? 0,
+      // Same tiebreak as the table's comparator, for the same reason: a median
+      // of 1 skeet is half the board, and a podium ordered alphabetically
+      // inside it would not match the table the card sorts.
+      tie: measure === 'median' ? r.meanStats?.[key] ?? 0 : 0,
     }))
     .filter((r) => r.value > 0)
-    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .sort((a, b) => b.value - a.value || b.tie - a.tie || a.name.localeCompare(b.name))
     .slice(0, limit);
 }
 
