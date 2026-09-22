@@ -58,6 +58,27 @@ describe('ReportPlayer on a match page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send report' }));
     await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(66, '7', 'unsafe', 'what happened'));
   });
+
+  it('opens itself when a replay moment is handed to it, says what is attached, and sends it', async () => {
+    mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [{ steamid: '7', name: 'Walls', alreadyReported: false }] });
+    mockApi.report.mockResolvedValue({ ok: true });
+    const cleared = vi.fn();
+    render(<ReportPlayer matchId={66} moment={{ ordinal: 2, half: 1, tMs: 61500 }} onClearMoment={cleared} />);
+    await screen.findByText(/map 3, round 1, at 1:01/);
+    fireEvent.change(await screen.findByLabelText('Player'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'cheating' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send report' }));
+    await waitFor(() => expect(mockApi.report).toHaveBeenCalledWith(66, '7', 'cheating', '', { ordinal: 2, half: 1, tMs: 61500 }));
+    await waitFor(() => expect(cleared).toHaveBeenCalled());
+  });
+
+  it('a moment can be taken off again before sending', async () => {
+    mockApi.reportEligibility.mockResolvedValue({ canReport: true, targets: [] });
+    const cleared = vi.fn();
+    render(<ReportPlayer matchId={66} moment={{ ordinal: 0, half: 2, tMs: 5000 }} onClearMoment={cleared} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Detach' }));
+    expect(cleared).toHaveBeenCalled();
+  });
 });
 
 describe('MyReports', () => {

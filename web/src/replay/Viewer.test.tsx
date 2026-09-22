@@ -327,6 +327,13 @@ describe('Viewer deep link seek', () => {
     const scrub = container.querySelector('.scrub__range') as HTMLInputElement;
     expect(scrub.value).toBe('0');
   });
+
+  it('writes its clock into momentRef, so a control outside it can ask what moment is on screen', () => {
+    const momentRef = { current: -1 };
+    const { container } = render(<Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} timeline={[]} seekMs={8000} momentRef={momentRef} />);
+    expect((container.querySelector('.scrub__range') as HTMLInputElement).value).toBe('8000');
+    expect(momentRef.current).toBe(8000);
+  });
 });
 
 describe('isDefaultCamera', () => {

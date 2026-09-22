@@ -1,5 +1,5 @@
-import { useState } from 'preact/hooks';
-import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type Team } from '../api';
+import { useRef, useState } from 'preact/hooks';
+import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
@@ -20,16 +20,19 @@ import { Viewer } from '../replay/Viewer';
  * called from inside a plain array-map callback.
  */
 function MapReplay(
-  { matchId, ordinal, names, initialHalf, seekMs }: {
+  { matchId, ordinal, names, initialHalf, seekMs, onMoment }: {
     matchId: number; ordinal: number; names: Record<string, string>;
     /** The round a deep link asked for, already validated by the caller
      *  against this match's own rounds. Undefined for an ordinary visit. */
     initialHalf?: number;
     /** Only meaningful for `initialHalf`'s own round: see the seek prop below. */
     seekMs?: number;
+    /** Given for a signed-in viewer: attach what is on screen to a report. */
+    onMoment?: (m: ReportMoment) => void;
   },
 ) {
   const [half, setHalf] = useState(initialHalf ?? 1);
+  const momentRef = useRef(0);
   const timeline = useFetch(
     (s) => api.replayTimeline(matchId, ordinal, half, s),
     [matchId, ordinal, half],
@@ -40,6 +43,12 @@ function MapReplay(
       <div class="replay__rounds">
         <button class={`chip ${half === 1 ? 'is-on' : ''}`} onClick={() => setHalf(1)}>Round 1</button>
         <button class={`chip ${half === 2 ? 'is-on' : ''}`} onClick={() => setHalf(2)}>Round 2</button>
+        {onMoment && (
+          <button class="chip" type="button" title="Pause on what you want the moderators to see, then press this"
+            onClick={() => onMoment({ ordinal, half, tMs: Math.round(momentRef.current) })}>
+            Report this moment
+          </button>
+        )}
       </div>
       {/* A map played before recording existed has no match_replays row.
           Viewer renders its own "couldn't load" state for that, which is the
@@ -54,6 +63,7 @@ function MapReplay(
         // possibility: Viewer never remounts across a half switch, only its
         // spec changes) never lands the wrong moment.
         seekMs={initialHalf != null && half === initialHalf ? seekMs : undefined}
+        momentRef={momentRef}
       />
     </>
   );
@@ -405,6 +415,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   const [ordinal, setOrdinal] = useState<number | null>(
     () => deepLink.ordinal ?? initialOrdinal(maps, typeof location === 'undefined' ? '' : location.hash),
   );
+  // A moment picked in the viewer, waiting in the report form below.
+  const [moment, setMoment] = useState<ReportMoment | null>(null);
   const selectMap = (o: number) => {
     setOrdinal(o);
     if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}`);
@@ -533,6 +545,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
                 names={playerNames}
                 initialHalf={linkedHere ? deepLink.half ?? undefined : undefined}
                 seekMs={linkedHere ? deepLink.seekMs : undefined}
+                onMoment={me ? setMoment : undefined}
               />
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (
@@ -575,7 +588,7 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
 
         {me && (
           <Panel>
-            <ReportPlayer matchId={match.id} />
+            <ReportPlayer matchId={match.id} moment={moment} onClearMoment={() => setMoment(null)} />
           </Panel>
         )}
       </div>

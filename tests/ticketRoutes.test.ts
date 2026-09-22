@@ -78,6 +78,13 @@ describe('filing over HTTP', () => {
   it('the old admin report routes are gone', async () => {
     expect((await get(ADMIN, '/api/admin/reports')).statusCode).toBe(404);
   });
+
+  it('the match page route carries a replay moment through', async () => {
+    const r = await post(R1, `/api/matches/${matchId}/reports`, { targetId: ACCUSED, category: 'cheating', text: 'here', moment: { ordinal: 2, half: 1, tMs: 61500 } });
+    expect(r.statusCode).toBe(200);
+    expect(db.prepare('SELECT map_ordinal, half, t_ms FROM ticket_reports').get()).toEqual({ map_ordinal: 2, half: 1, t_ms: 61500 });
+    expect((await post(R2, `/api/matches/${matchId}/reports`, { targetId: ACCUSED, category: 'cheating', text: '', moment: { ordinal: 2 } })).statusCode).toBe(400);
+  });
 });
 
 describe('working tickets over HTTP', () => {

@@ -1272,6 +1272,9 @@ export const adminApi = {
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
 };
 
+/** A second of a round: which map of the match, which half, how far in. */
+export interface ReportMoment { ordinal: number; half: number; tMs: number }
+
 export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
@@ -1319,9 +1322,9 @@ export const api = {
   unlinkTwitch: () => post<{ ok: true }>('/api/twitch/unlink'),
   reportEligibility: (matchId: number, signal?: AbortSignal) =>
     get<ReportEligibility>(`/api/matches/${matchId}/report-eligibility`, signal),
-  report: (matchId: number, targetId: string, category: string, text: string) =>
-    post(`/api/matches/${matchId}/reports`, { targetId, category, text }),
-  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: { ordinal: number; half: number; tMs: number } }) =>
+  report: (matchId: number, targetId: string, category: string, text: string, moment?: ReportMoment) =>
+    post(`/api/matches/${matchId}/reports`, moment ? { targetId, category, text, moment } : { targetId, category, text }),
+  fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: ReportMoment }) =>
     post('/api/reports', body),
   myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   joinQueue: () => post('/api/queue/join'),

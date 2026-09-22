@@ -90,15 +90,21 @@ export function edgeTop(chromeHeight: number): number {
 }
 
 export function Viewer(
-  { spec, live = false, names = NO_NAMES, timeline, seekMs }:
+  { spec, live = false, names = NO_NAMES, timeline, seekMs, momentRef }:
   {
     spec: ReplaySpec; live?: boolean; names?: Record<string, string>; timeline?: TimelineEntry[];
     seekMs?: number;
+    /** Written on every render with the clock the viewer is showing, in
+     *  milliseconds into the round, so a control OUTSIDE the viewer (the
+     *  match page's "Report this moment") can ask without the viewer knowing
+     *  what it is for. A ref, not a callback: it must never cause a render. */
+    momentRef?: { current: number };
   },
 ) {
   const { header, frames, closed, phase, tooNew, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live, closed });
+  if (momentRef) momentRef.current = playback.tMs;
 
   /** A deep link lands on a moment, not the start of the round. Fires once,
    *  when the frames first arrive: a viewer the user has since scrubbed must
