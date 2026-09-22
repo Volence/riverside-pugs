@@ -80,6 +80,16 @@ export interface InboundMessage {
  * else, and a transport hands over nothing when it answers false: not the
  * content, not the author, not the attachments. The bot sits in a server
  * full of conversations that are none of its business.
+ *
+ * No hook here may throw, and none may hand back work to wait on. They are
+ * called from inside Discord's packet handling, where a rejection ends the
+ * process and there is nothing to await a promise: a transport contains and
+ * logs what a hook throws, and never sees what it starts. A hook that needs
+ * to write to the database queues that on a chain of its own and returns.
+ *
+ * The bot's own messages come through too, `authorIsBot` set, both when it
+ * writes and when it deletes: Discord tells the bot about the bot. Filtering
+ * them out is the caller's job, not the transport's.
  */
 export interface MessageHooks {
   watches(threadId: string): boolean;

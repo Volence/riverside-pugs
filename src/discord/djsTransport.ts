@@ -1,6 +1,6 @@
 import {
   ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
-  OverwriteType, Partials, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
+  Options, OverwriteType, Partials, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
   type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type FetchedThreads, type ForumChannel, type Guild,
   type Interaction, type Message, type TextBasedChannel,
 } from 'discord.js';
@@ -91,6 +91,16 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     // message it has not cached, which is every message older than this
     // process. Partials :7735, ClientOptions.partials :6233.
     partials: [Partials.Message],
+    // GuildMessages would otherwise have discord.js hold the last 200
+    // messages of every channel the bot can see, content included, in memory
+    // behind this seam. Nothing here reads messages.cache: both fetches pass
+    // cache: false and the listeners use the event's own payload, so the
+    // limit costs nothing and the edit of an uncached message is fetched
+    // inside the watches gate either way. Options.cacheWithLimits :1280,
+    // DefaultMakeCacheSettings :1277 (MessageManager defaults to 200),
+    // CacheWithLimitsOptions :6023, MessageManager as a cache key :5995,
+    // ClientOptions.makeCache :6231.
+    makeCache: Options.cacheWithLimits({ ...Options.DefaultMakeCacheSettings, MessageManager: 0 }),
   });
   client.on(Events.Error, (err) => console.error('[discord] client error:', err));
 
@@ -132,34 +142,61 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     editedAt: m.editedTimestamp === null ? null : new Date(m.editedTimestamp).toISOString(),
   });
 
+  /**
+   * Everything a hook is asked, `watches` included, goes through here. These
+   * listeners run inside discord.js's packet handling, where a throw becomes
+   * an unhandled rejection and ends the process, and the hooks lead to SQLite:
+   * a locked database or a constraint would otherwise take the bot down with
+   * it. The error object alone is logged, never anything the message said.
+   */
+  const contained = (what: string, run: () => void): void => {
+    try {
+      run();
+    } catch (err) {
+      console.error(`[discord] handling ${what} in a ticket thread failed:`, err);
+    }
+  };
+
   // In all four listeners the FIRST thing read is the channel id, and the
   // first thing done is to ask whether that thread is a ticket. Nothing else
   // about a message is touched before the answer is yes.
   client.on(Events.MessageCreate, (m) => {                                    // messageCreate :6145
-    if (!hooks || !hooks.watches(m.channelId)) return;
-    hooks.create(toInbound(m));
+    contained('a new message', () => {
+      const h = hooks;
+      if (!h || !h.watches(m.channelId)) return;
+      h.create(toInbound(m));
+    });
   });
   client.on(Events.MessageUpdate, async (_old, m) => {                        // messageUpdate :6168
-    if (!hooks || !hooks.watches(m.channelId)) return;
+    const h = hooks;
     try {
+      if (!h || !h.watches(m.channelId)) return;
       // The typings promise a whole message here (partial :2493 is `false` on
       // Message), but discord.js builds this one out of whatever the gateway
       // sent, so an uncached edit really can arrive with no author and no
       // content; fetch it whole. Message.fetch :2529.
       const full = m.partial ? await m.fetch() : m;
-      hooks.update(toInbound(full));
+      h.update(toInbound(full));
     } catch (err) {
-      console.error('[discord] could not read an edited ticket message:', err);
+      // The fetch and the hook both land here. This listener is async, so an
+      // escaping rejection would be nobody's to catch.
+      console.error('[discord] handling an edited message in a ticket thread failed:', err);
     }
   });
   client.on(Events.MessageDelete, (m) => {                                    // messageDelete :6146
-    // A partial still carries both ids, which is all this needs.
-    if (!hooks || !hooks.watches(m.channelId)) return;
-    hooks.remove(m.channelId, m.id);
+    contained('a deleted message', () => {
+      // A partial still carries both ids, which is all this needs.
+      const h = hooks;
+      if (!h || !h.watches(m.channelId)) return;
+      h.remove(m.channelId, m.id);
+    });
   });
   client.on(Events.MessageBulkDelete, (messages, channel) => {                // messageDeleteBulk :6154
-    if (!hooks || !hooks.watches(channel.id)) return;
-    for (const id of messages.keys()) hooks.remove(channel.id, id);
+    contained('a bulk delete', () => {
+      const h = hooks;
+      if (!h || !h.watches(channel.id)) return;
+      for (const id of messages.keys()) h.remove(channel.id, id);
+    });
   });
 
   client.on(Events.InteractionCreate, async (i: Interaction) => {
@@ -510,7 +547,10 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         // cached copy may have expired, and a fresh link is the whole point.
         return toInbound(await th.messages.fetch({ message: messageId, force: true, cache: false }));
       } catch (err) {
-        if (codeOf(err) === UNKNOWN_MESSAGE) return null;
+        // The thread can go between the lookup and the fetch, and "gone" is
+        // one answer here: null, as the interface says.
+        const code = codeOf(err);
+        if (code === UNKNOWN_MESSAGE || code === UNKNOWN_CHANNEL) return null;
         throw err;
       }
     },

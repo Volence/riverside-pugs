@@ -70,14 +70,38 @@ export class FakeTransport implements BotTransport {
   messageCommands: MessageCommandDef[] = [];
   /** How many messages one fetchAfter returns. Discord's is 100. */
   fetchPageSize = 100;
+  /** What the hooks threw, in order. The transport contains a hook that
+   *  throws rather than letting it escape into Discord's packet handling, so
+   *  a test proving that still needs somewhere to look. */
+  hookErrors: unknown[] = [];
 
   watchMessages(h: MessageHooks): void {
     this.hooks = h;
   }
 
+  /** Every hook call goes through here, as it does in the real transport: a
+   *  mirror with a locked database must not fail the Discord side. */
+  private deliver(run: () => void): void {
+    try {
+      run();
+    } catch (err) {
+      this.hookErrors.push(err);
+    }
+  }
+
   private view(m: InboundMessage & { deleted: boolean }): InboundMessage {
     const { deleted: _deleted, ...rest } = m;
     return { ...rest, attachments: [...m.attachments] };
+  }
+
+  /** One of the bot's own messages as Discord reports it: through the hooks
+   *  when it is sent, and in the thread's history afterwards. */
+  private ownInbound(m: FakeMessage): InboundMessage {
+    return {
+      id: m.id, threadId: m.channelId, authorId: this.botUserId, authorName: 'bot', authorIsBot: true,
+      content: m.payload.content ?? '', attachments: [],
+      createdAt: new Date(Date.UTC(2026, 8, 22, 9, 0, 0)).toISOString(), editedAt: null,
+    };
   }
 
   /** Someone writes in a channel. `deliver: false` is a message the bot was
@@ -100,7 +124,7 @@ export class FakeTransport implements BotTransport {
     };
     this.inbox.push(msg);
     // As the real transport does: ask first, hand over nothing on a no.
-    if (deliver && this.hooks?.watches(threadId)) this.hooks.create(this.view(msg));
+    if (deliver) this.deliver(() => { if (this.hooks?.watches(threadId)) this.hooks.create(this.view(msg)); });
     return this.view(msg);
   }
 
@@ -109,23 +133,22 @@ export class FakeTransport implements BotTransport {
     if (!msg) throw new Error(`no such message ${messageId}`);
     msg.content = content;
     msg.editedAt = new Date(Date.UTC(2026, 8, 22, 11, 0, 0)).toISOString();
-    if (deliver && this.hooks?.watches(msg.threadId)) this.hooks.update(this.view(msg));
+    if (deliver) this.deliver(() => { if (this.hooks?.watches(msg.threadId)) this.hooks.update(this.view(msg)); });
   }
 
   userDelete(messageId: string, deliver = true): void {
     const msg = this.inbox.find((m) => m.id === messageId);
     if (!msg) throw new Error(`no such message ${messageId}`);
     msg.deleted = true;
-    if (deliver && this.hooks?.watches(msg.threadId)) this.hooks.remove(msg.threadId, messageId);
+    if (deliver) this.deliver(() => { if (this.hooks?.watches(msg.threadId)) this.hooks.remove(msg.threadId, messageId); });
   }
 
   /** A thread's whole history as Discord would list it: the bot's messages
    *  and everyone else's, oldest first. */
   private history(threadId: string): InboundMessage[] {
-    const bot = this.messages.filter((m) => m.channelId === threadId && !m.deleted && /^\d+$/.test(m.id)).map((m): InboundMessage => ({
-      id: m.id, threadId, authorId: 'bot', authorName: 'bot', authorIsBot: true, content: m.payload.content ?? '',
-      attachments: [], createdAt: new Date(Date.UTC(2026, 8, 22, 9, 0, 0)).toISOString(), editedAt: null,
-    }));
+    const bot = this.messages
+      .filter((m) => m.channelId === threadId && !m.deleted && /^\d+$/.test(m.id))
+      .map((m) => this.ownInbound(m));
     const people = this.inbox.filter((m) => m.threadId === threadId && !m.deleted).map((m) => this.view(m));
     return [...bot, ...people].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
   }
@@ -277,7 +300,12 @@ export class FakeTransport implements BotTransport {
     // else it stays 'm<n>', which a dozen older tests read.
     const id = this.threadsById.has(channelId) ? this.snowflake() : `m${++this.seq}`;
     this.sends++;
-    this.messages.push({ channelId, id, payload, deleted: false });
+    const msg = { channelId, id, payload, deleted: false };
+    this.messages.push(msg);
+    // Discord announces the bot's own message to the bot like anyone else's,
+    // and the listeners do not filter by author: the caller does. So the
+    // mirror is tested against a Discord that echoes.
+    this.deliver(() => { if (this.hooks?.watches(channelId)) this.hooks.create(this.ownInbound(msg)); });
     return id;
   }
 
@@ -304,9 +332,14 @@ export class FakeTransport implements BotTransport {
   async remove(channelId: string, messageId: string): Promise<void> {
     this.guardThread(channelId);
     const m = this.messages.find((x) => x.id === messageId);
-    if (m) m.deleted = true;
     const theirs = this.inbox.find((x) => x.id === messageId);
+    // Whether this call is the one that deleted it. Discord announces a
+    // delete it actually performed, so a second Remove of the same message
+    // says nothing, and the mirror has to survive hearing its own once.
+    const went = (!!m && !m.deleted) || (!!theirs && !theirs.deleted);
+    if (m) m.deleted = true;
     if (theirs) theirs.deleted = true;
+    if (went) this.deliver(() => { if (this.hooks?.watches(channelId)) this.hooks.remove(channelId, messageId); });
   }
 
   onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>, opts?: { opensModal?: (customId: string) => boolean }): void {
