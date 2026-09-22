@@ -1,6 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
-import { snap, nudge, nudgeCard, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild } from './Hud';
+import {
+  snap, nudge, nudgeCard, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
+  placeChild, nudgeChild, resizeChild,
+} from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
 
@@ -89,6 +92,27 @@ describe('patchChild', () => {
     expect(b.children.teamColumn).toEqual({ Head: { w: 30, h: 30, x: 5 } });
     expect(resetElement(b, 'teamColumn').children.teamColumn).toBeUndefined();
     expect(hasOverrides(b)).toBe(true);
+  });
+});
+
+describe('moving a teammate card child', () => {
+  it('clamps a placed child inside the unfitted card, not the fitted one, or nothing could grow', () => {
+    // Stock unfitted card 150 x 150; Head is 23 square.
+    expect(placeChild(DEFAULT_DESIGN, 'Head', 500, -20).children.teamColumn!.Head).toEqual({ x: 127, y: 0 });
+    expect(placeChild(DEFAULT_DESIGN, 'Head', 40.4, 50.6).children.teamColumn!.Head).toEqual({ x: 40, y: 51 });
+  });
+
+  it('nudges from where the child is now', () => {
+    expect(nudgeChild(DEFAULT_DESIGN, 'Head', 1, 0).children.teamColumn!.Head).toEqual({ x: 14, y: 38 });
+    // The down picture starts where the fit rule drew it: (13, 36) in the unfitted frame.
+    expect(nudgeChild(DEFAULT_DESIGN, 'Incapacitated', 0, 1).children.teamColumn!.Incapacitated).toEqual({ x: 13, y: 37 });
+  });
+
+  it('resizes square art keeping it square, and anything else freely, inside the card', () => {
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', { x: 13, y: 38, w: 23, h: 23 }, 5, 2).children.teamColumn!.Head).toEqual({ w: 28, h: 28 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', { x: 13, y: 38, w: 23, h: 23 }, 500, 0).children.teamColumn!.Head).toEqual({ w: 112, h: 112 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Health', { x: 37, y: 52, w: 96, h: 7 }, -48, 0).children.teamColumn!.Health).toEqual({ w: 48, h: 7 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Items', { x: 39, y: 36, w: 50, h: 14 }, 5, 5)).toBe(DEFAULT_DESIGN);
   });
 });
 
@@ -409,6 +433,26 @@ describe('Hud page', () => {
     fireEvent.pointerUp(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
     expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
     expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('241');
+  });
+
+  it('picks a child inside the selected teammates on the canvas, drags it, and steps back up with Escape', () => {
+    const { container } = render(<Hud />);
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    // Card 1 at (13, 441); the fitted Head is (0, 2, 23, 23) inside it, so its centre is (24.5, 454.5).
+    fireEvent.pointerDown(canvas, { clientX: 24, clientY: 454, pointerId: 1 });
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    fireEvent.pointerMove(canvas, { clientX: 34, clientY: 454, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 34, clientY: 454, pointerId: 1 });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('38');
+    fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('24');
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(screen.getByText('Reset this element')).toBeTruthy();
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(screen.getByText(/select an element/i)).toBeTruthy();
   });
 
   it('offers the Healthy, Down and Dead preview on the survivor side only', () => {

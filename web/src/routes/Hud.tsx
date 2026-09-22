@@ -4,14 +4,14 @@ import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, clampOverride, clampChild, DEFAULT_DESIGN,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, clampOverride, clampChild, DEFAULT_DESIGN, baseTeam,
   type HudDesign, type ElementOverride, type StyleOverride, type RangeKey, type TeamDir, type ChildOverride, type ChildRangeKey,
 } from '../hud/design';
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
 import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, baseHasChild, packHud, type BuildAssets } from '../hud/build';
 import { TEAM_PANEL, teamChild } from '../hud/children';
-import { drawHud, hitTest, freeCardAt, visibleElements, type Side } from '../hud/mock';
+import { drawHud, hitTest, freeCardAt, childAt, childCornerAt, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
@@ -217,6 +217,46 @@ export function nudgeCard(design: HudDesign, card: number, dx: number, dy: numbe
 export function patchChild(design: HudDesign, name: string, p: Partial<ChildOverride>): HudDesign {
   const kids = design.children.teamColumn ?? {};
   return { ...design, children: { ...design.children, teamColumn: { ...kids, [name]: { ...(kids[name] ?? {}), ...p } } } };
+}
+
+/**
+ * Place a teammate-card child at (x, y): unscaled units in the card file's
+ * own unfitted frame, rounded, clamped inside the unfitted card (150 x 150
+ * on stock). The clamp is the unfitted card, not the fitted one, or a child
+ * could never move past the card it currently makes and nothing could grow.
+ */
+export function placeChild(design: HudDesign, name: string, x: number, y: number): HudDesign {
+  const r = cardChild(design, name);
+  if (!r || !teamChild(name)?.move) return design;
+  const p = baseTeam(design.preset).card;
+  const cx = Math.round(Math.min(Math.max(0, p.w - r.w), Math.max(0, x)));
+  const cy = Math.round(Math.min(Math.max(0, p.h - r.h), Math.max(0, y)));
+  return patchChild(design, name, { x: clampChild('x', cx), y: clampChild('y', cy) });
+}
+
+/** Nudge a child from where it is now, through the same clamp as a drag. */
+export function nudgeChild(design: HudDesign, name: string, dx: number, dy: number): HudDesign {
+  const r = cardChild(design, name);
+  return r ? placeChild(design, name, r.x + dx, r.y + dy) : design;
+}
+
+/**
+ * Resize a child from `start` by (dw, dh), unscaled, inside the unfitted
+ * card. Square art keeps its ratio: the side grows by the larger of the two
+ * deltas. A child with no size of its own (the item icons) is unchanged.
+ */
+export function resizeChild(
+  design: HudDesign, name: string, start: { x: number; y: number; w: number; h: number }, dw: number, dh: number,
+): HudDesign {
+  const def = teamChild(name);
+  if (!def || def.box === 'none') return design;
+  const p = baseTeam(design.preset).card;
+  const fit = (v: number, room: number, key: 'w' | 'h') => clampChild(key, Math.round(Math.min(Math.max(1, room), Math.max(1, v))));
+  if (def.box === 'square') {
+    const side = fit(start.w + Math.max(dw, dh), Math.min(p.w - start.x, p.h - start.y), 'w');
+    return patchChild(design, name, { w: side, h: side });
+  }
+  return patchChild(design, name, { w: fit(start.w + dw, p.w - start.x, 'w'), h: fit(start.h + dh, p.h - start.y, 'h') });
 }
 
 const BACKDROPS: [Backdrop, string][] = [
@@ -692,10 +732,11 @@ function ChildControls(
 }
 
 type Rect4 = { x: number; y: number; w: number; h: number };
-/** What a pointer-down grabbed: an element (moved or resized) or one Free teammate card. */
+/** What a pointer-down grabbed: an element (moved or resized), one Free teammate card, or a teammate card child. */
 type Drag =
   | { kind: 'element'; id: string; mode: 'move' | 'resize'; startUx: number; startUy: number; startRect: Rect4 }
-  | { kind: 'card'; card: number; startUx: number; startUy: number; startRect: Rect4 };
+  | { kind: 'card'; card: number; startUx: number; startUy: number; startRect: Rect4 }
+  | { kind: 'child'; name: string; mode: 'move' | 'resize'; startUx: number; startUy: number; start: Rect4 };
 
 const CARD_STATES: { key: CardState; label: string }[] = [
   { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
@@ -815,6 +856,22 @@ export default function Hud() {
     if (!c) return;
     c.setPointerCapture(e.pointerId);
     const { ux, uy } = pointerUnits(e);
+    // Second level: inside the selected teammates, a child under the pointer
+    // is picked before the panel, and the picked child's corner resizes it.
+    if (selected === 'teamColumn') {
+      if (selectedChild && childCornerAt(design, cardState, selectedChild, ux, uy)) {
+        const start = cardChild(design, selectedChild);
+        if (start) { drag.current = { kind: 'child', name: selectedChild, mode: 'resize', startUx: ux, startUy: uy, start }; return; }
+      }
+      const child = childAt(design, cardState, ux, uy);
+      if (child) {
+        setSelectedChild(child.name);
+        const start = cardChild(design, child.name);
+        drag.current = start && teamChild(child.name)?.move
+          ? { kind: 'child', name: child.name, mode: 'move', startUx: ux, startUy: uy, start } : null;
+        return;
+      }
+    }
     const hit = hitTest(design, side, ux, uy);
     if (!hit) {
       selectEl(null);
@@ -850,6 +907,17 @@ export default function Hud() {
     const duy = uy - d.startUy;
     const extentW = screenW(design.aspect);
 
+    if (d.kind === 'child') {
+      // Pointer units are screen units; the stored numbers are unscaled.
+      const scale = design.elements.teamColumn?.scale ?? 1;
+      const parent = baseTeam(design.preset).card;
+      const s = d.start;
+      setDesign((cur) => (d.mode === 'resize'
+        ? resizeChild(cur, d.name, s, dux / scale, duy / scale)
+        : placeChild(cur, d.name, snap(s.x + dux / scale, s.w, parent.w), snap(s.y + duy / scale, s.h, parent.h))));
+      return;
+    }
+
     if (d.kind === 'card') {
       const r = d.startRect;
       setDesign((cur) => placeCard(cur, d.card,
@@ -879,8 +947,13 @@ export default function Hud() {
   // Arrows nudge, Escape deselects, Tab/Shift+Tab cycle the current side's
   // elements: the whole editor stays usable without a mouse.
   const onKeyDown = (e: KeyboardEvent) => {
-    // Escape steps up one level: a picked card to the teammates, the teammates to nothing.
-    if (e.key === 'Escape') { if (selectedCard !== null) setSelectedCard(null); else selectEl(null); return; }
+    // Escape steps up one level: a child or a picked card to the teammates, the teammates to nothing.
+    if (e.key === 'Escape') {
+      if (selectedChild) setSelectedChild(null);
+      else if (selectedCard !== null) setSelectedCard(null);
+      else selectEl(null);
+      return;
+    }
 
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -902,7 +975,10 @@ export default function Hud() {
     const delta = deltas[e.key];
     if (!delta) return;
     e.preventDefault();
-    if (selected === 'teamColumn' && selectedCard !== null && isFreeTeam(design)) {
+    if (selected === 'teamColumn' && selectedChild) {
+      const name = selectedChild;
+      setDesign((d) => nudgeChild(d, name, delta[0], delta[1]));
+    } else if (selected === 'teamColumn' && selectedCard !== null && isFreeTeam(design)) {
       const card = selectedCard;
       setDesign((d) => nudgeCard(d, card, delta[0], delta[1]));
     } else if (selected) setDesign((d) => nudge(d, selected, delta[0], delta[1]));
