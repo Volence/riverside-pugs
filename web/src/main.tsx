@@ -27,6 +27,9 @@ import { HowToPlay } from './routes/HowToPlay';
 import { HelpConsistency } from './routes/HelpConsistency';
 import { Panel } from './components/bits';
 import { PageHeader } from './components/PageHeader';
+import { lazy } from 'preact-iso';
+// The HUD editor carries ~170 KB of base HUD files, so it stays out of the main bundle.
+const Hud = lazy(() => import('./routes/Hud'));
 import './styles/app.css';
 
 /** The 404.
@@ -84,6 +87,7 @@ function App() {
           <Route path="/maps" component={Maps} />
           <Route path="/custom-campaigns" component={CustomCampaigns} />
           <Route path="/crosshair" component={Crosshair} />
+          <Route path="/hud" component={Hud} />
           <Route path="/replay/file/:name" component={ReplayPage} />
           <Route path="/map/:map" component={MapDetail} />
           <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />

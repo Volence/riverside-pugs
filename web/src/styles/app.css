@@ -180,6 +180,74 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   .xh__note { margin-left: 0; }
 }
 
+/* ---------- HUD editor ---------- */
+
+.hud { display: grid; grid-template-columns: 1fr 320px; gap: var(--sp-4); align-items: start; }
+
+.hud__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
+
+/* The backing store is sized to this box every draw, 1:1, so it must never be
+ * scaled by CSS after the fact. touch-action: none is what lets a drag win
+ * over the browser's own scroll/zoom gestures on a touch screen. aspect-ratio
+ * itself comes from an inline style: it tracks the design's own aspect, not a
+ * fixed one. */
+.hud__canvas { display: block; width: 100%; touch-action: none; border: 1px solid var(--border); background: #000; }
+
+.hud__list { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
+.hud__pill {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-dense);
+  cursor: pointer;
+}
+.hud__pill:hover { color: var(--text-bright); border-color: var(--border-strong); }
+.hud__pill.is-active { color: var(--text-bright); border-color: var(--accent); }
+/* A hidden element is still reachable, but struck through so the list also
+ * doubles as a visibility summary at a glance. */
+.hud__pill--hidden { text-decoration: line-through; }
+
+.hud__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; }
+.hud__group legend { padding: 0 var(--sp-2); }
+
+.hud__row { display: grid; grid-template-columns: 5.5rem 1fr 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+.hud__row > span:first-child { font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__row output { text-align: right; font-size: var(--fs-dense); }
+.hud__row input[type='range'] { width: 100%; accent-color: var(--accent); }
+.hud__row select, .hud__row input[type='number'] {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+}
+
+.hud__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-top: var(--sp-3); }
+.hud__field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__field input {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+}
+
+.hud__check { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__check input { accent-color: var(--accent); }
+
+.hud__note { margin-top: var(--sp-2); }
+.hud__reset { margin-top: var(--sp-4); }
+
+@media (max-width: 900px) {
+  .hud { grid-template-columns: 1fr; }
+}
+
 /* ---------- queue bar ---------- */
 
 /* The viewer's own queue, lobby or match, pinned under the nav on every page
