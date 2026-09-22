@@ -8,6 +8,7 @@ import {
   handleReportButton, handleReportModal,
 } from '../src/discord/reportButton.js';
 import { COMMAND_DEFS, REPORT_LABELS } from '../src/discord/commands.js';
+import { MAX_TEXT } from '../src/tickets/filing.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import { opensTicketModal } from '../src/discord/ticketButtons.js';
 
@@ -213,7 +214,7 @@ describe('reportModal', () => {
     if (name.kind !== 'text' || details.kind !== 'text') throw new Error('expected text fields');
     expect(name.required).toBe(false);
     expect(details.required).toBe(false);
-    expect(details.maxLength).toBe(1000);
+    expect(details.maxLength).toBe(MAX_TEXT);
     expect(details.style).toBe('paragraph');
   });
 

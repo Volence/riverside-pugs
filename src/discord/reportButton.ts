@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { fileReport, latestSharedMatch, REPORT_CATEGORIES } from '../tickets/filing.js';
+import { fileReport, latestSharedMatch, MAX_TEXT, REPORT_CATEGORIES } from '../tickets/filing.js';
 import { playerByDiscordId } from '../players.js';
 import { REPORT_LABELS } from './commands.js';
 import type { BotInteraction, BotTransport, InteractionReply, MessagePayload, ModalDef } from './transport.js';
@@ -92,7 +92,7 @@ export function reportModal(db: DB, reporter: string): ModalDef {
         label: 'What happened?',
         options: REPORT_CATEGORIES.map((c) => ({ label: REPORT_LABELS[c], value: c })),
       },
-      { kind: 'text', id: 'details', label: 'Details, in your own words', style: 'paragraph', required: false, maxLength: 1000 },
+      { kind: 'text', id: 'details', label: 'Details, in your own words', style: 'paragraph', required: false, maxLength: MAX_TEXT },
     ],
   };
 }
