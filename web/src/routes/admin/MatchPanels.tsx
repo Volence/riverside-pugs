@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type AdminOverview, type Forecast, type LogAuthMode, type ServerLogAuth } from '../../api';
+import { adminApi, type AdminOverview, type CaptureHealth, type Forecast, type LogAuthMode, type ServerLogAuth } from '../../api';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction, type Run } from './useAction';
@@ -42,7 +42,28 @@ export function Odds({ f, winner }: { f: Forecast | null; winner?: string | null
   );
 }
 
-export function AdminServersPanel({ servers, busy, run }: { servers: AdminOverview['servers']; busy: boolean; run: Run }) {
+/** The anti-cheat capture pipeline in one line. Rendered even when every
+ *  number is zero: an empty queue on People cannot otherwise tell "nobody
+ *  flagged" apart from "silently broken". */
+export function CaptureHealthLine({ health }: { health: CaptureHealth }) {
+  return (
+    <p class="muted">
+      Anti-cheat capture:{' '}
+      {health.bursts === 0
+        ? 'no input bursts captured yet. Bursts are only recorded during a live match.'
+        : `${health.bursts.toLocaleString()} input bursts across ${health.matchesWithBursts} match${health.matchesWithBursts === 1 ? '' : 'es'}, most recent ${fmtTime(health.lastBurstAt)}.`}
+      {' '}
+      {health.detections === 0 && health.lilacFlags === 0
+        ? 'Nothing flagged.'
+        : `${health.detections} input detection${health.detections === 1 ? '' : 's'}, ${health.lilacFlags} Little Anti-Cheat flag${health.lilacFlags === 1 ? '' : 's'}.`}
+      {health.caps > 0 && ` Capture was truncated ${health.caps} time${health.caps === 1 ? '' : 's'} by the per-round budget; each file says where.`}
+    </p>
+  );
+}
+
+export function AdminServersPanel({ servers, busy, run, health }: {
+  servers: AdminOverview['servers']; busy: boolean; run: Run; health?: CaptureHealth;
+}) {
   return (
     <Panel class="panel--table">
       <h3>Servers</h3>
@@ -94,6 +115,7 @@ export function AdminServersPanel({ servers, busy, run }: { servers: AdminOvervi
         </table>
         </div>
       )}
+      {health && <CaptureHealthLine health={health} />}
       <AdminSyncButton />
     </Panel>
   );

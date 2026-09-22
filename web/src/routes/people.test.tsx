@@ -94,19 +94,18 @@ describe('People search', () => {
 });
 
 describe('Needs a look', () => {
-  it('lists a player with their sources, rank and a way into the file', async () => {
-    mockPeople.review.mockResolvedValue({ players: [lookRow], measured: [], health: health() });
+  it('lists a player with what arrived in words, no scores, and a way into the file', async () => {
+    mockPeople.review.mockResolvedValue({
+      players: [{ ...lookRow, arrived: 'Little Anti-Cheat: aimlock ×2 · 1 flagged replay moment' }], measured: [], health: health(),
+    });
     render(<NeedsALook isAdmin />);
     const link = await screen.findByRole('link', { name: 'griefer' });
     expect(link.getAttribute('href')).toBe('/admin/people/76561199000000001');
-    // Scoped to the player's own row: the capture-health line below the table
-    // also says "Little Anti-Cheat" (its flag count), so an unscoped query is
-    // ambiguous between the row's source badge and that unrelated sentence.
     const row = link.closest('tr')!;
-    expect(within(row).getByText(/Little Anti-Cheat/)).toBeTruthy();
-    expect(within(row).getByText(/Replay analyzer/)).toBeTruthy();
-    expect(within(row).getByText(/3 of 40/)).toBeTruthy();
-    expect(screen.getByRole('link', { name: '1 open ticket' }).getAttribute('href'))
+    expect(within(row).getByText('Little Anti-Cheat: aimlock ×2 · 1 flagged replay moment')).toBeTruthy();
+    // The analyzer rank read like a verdict beside a flag; it lives on its own tab now.
+    expect(within(row).queryByText(/3 of 40/)).toBeNull();
+    expect(screen.getByRole('link', { name: '1 open' }).getAttribute('href'))
       .toBe('/admin/people/tickets');
     // Same pin as Recent results: the Looked at button is the last column,
     // and a phone would otherwise leave it inside the sideways scroll.
@@ -129,8 +128,9 @@ describe('Needs a look', () => {
     expect(mockAdmin.integrityJob).not.toHaveBeenCalled();
   });
 
-  it('gives an admin the analysis panel', async () => {
+  it('gives an admin the analysis panel on the ranking tab', async () => {
     render(<NeedsALook isAdmin />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Analyzer ranking' }));
     expect(await screen.findByRole('button', { name: 'Re-analyse all replays' })).toBeTruthy();
     expect(mockAdmin.integrityJob).toHaveBeenCalled();
   });
@@ -148,7 +148,7 @@ describe('Needs a look', () => {
     await screen.findByRole('link', { name: 'griefer' });
     expect(screen.queryByText('measured only')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /Everyone the analyzer has measured/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Analyzer ranking' }));
     expect(screen.getByText(/A sort key, not a claim/)).toBeTruthy();
     expect(names()).toEqual(['measured only', 'slower']);
     expect(screen.queryByText('griefer')).toBeNull();
@@ -169,7 +169,7 @@ describe('Needs a look', () => {
       health: health(),
     });
     render(<NeedsALook isAdmin />);
-    fireEvent.click(await screen.findByRole('button', { name: /Everyone the analyzer has measured/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Analyzer ranking' }));
     const row = screen.getByText('measured only').closest('tr')!;
     expect(within(row).getByText('too few rounds')).toBeTruthy();
 
@@ -179,10 +179,10 @@ describe('Needs a look', () => {
     expect(names()).toEqual(['tracker', 'measured only']);
   });
 
-  it('says whether anything is being captured at all when the list is empty', async () => {
+  it('says when nothing is waiting, and leaves pipeline health to the Servers panel', async () => {
     render(<NeedsALook isAdmin />);
     expect(await screen.findByText('Nothing is waiting to be looked at.')).toBeTruthy();
-    expect(screen.getByText(/12 input bursts/)).toBeTruthy();
+    expect(screen.queryByText(/input bursts/)).toBeNull();
   });
 });
 

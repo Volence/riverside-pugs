@@ -767,6 +767,8 @@ export interface AdminOverview {
   queue: NamedPlayer[];
   /** Across every counted match: who is habitually the one holding up the ready-up. */
   slowToReady: SlowToReady[];
+  /** Optional only for a browser holding new JS against an older server. */
+  captureHealth?: CaptureHealth;
 }
 
 /** The admin live board. Mirrors src/admin/liveBoard.ts field for field.
@@ -1117,6 +1119,8 @@ export interface PlayerFileData {
 export interface NeedsALookRow {
   steamid: string; name: string; avatar: string | null; status: string;
   newestEvidenceAt: string; sources: TimelineSource[];
+  /** What is new since the last look, in one sentence. Optional for an older server. */
+  arrived?: string;
   lastReviewAt: string | null; lastReviewBy: string | null;
   openTickets: number; analyzer: AnalyzerRank | null;
 }

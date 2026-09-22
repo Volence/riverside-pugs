@@ -4,7 +4,8 @@ import { getPlayer } from '../players.js';
 import { ticketsAbout } from '../tickets/views.js';
 import { analyzerRanks, type AnalyzerRank } from './analyzerRanks.js';
 import { canOpenFile, type FileViewer } from './fileAccess.js';
-import { ADAPTERS } from './playerTimeline.js';
+import { ADAPTERS, playerTimeline } from './playerTimeline.js';
+import { arrivedSince } from './arrived.js';
 import { lastReviewOf } from './reviews.js';
 import { toIso, type EvidenceSource, type TimelineAdapter } from './timeline/types.js';
 
@@ -15,6 +16,8 @@ export interface NeedsALookRow {
   status: string;
   newestEvidenceAt: string;
   sources: EvidenceSource[];
+  /** What is new since the last look, in one sentence (src/admin/arrived.ts). */
+  arrived: string;
   lastReviewAt: string | null;
   /** The reviewer as a person reads them: their name, or their id when the
    *  site has never seen one. */
@@ -78,6 +81,7 @@ export function needsALook(
       status: player.status,
       newestEvidenceAt: at,
       sources: [...sources].sort(),
+      arrived: arrivedSince(playerTimeline(db, steamid, viewer.steamid), review?.reviewedAt ?? null),
       lastReviewAt: review?.reviewedAt ?? null,
       lastReviewBy: review === null ? null : (review.reviewedByName ?? review.reviewedBy),
       openTickets: ticketsAbout(db, steamid, viewer.steamid).filter((t) => t.status === 'open').length,
