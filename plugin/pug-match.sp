@@ -384,6 +384,7 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
 	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
+	RegServerCmd("sm_pug_endkick_now", Cmd_EndKickNow, "sm_pug_endkick_now - run the end-of-match kick now, before the backend restarts the box");
 
 	// The in-game entry point. RegAdminCmd, not RegServerCmd: this one is meant
 	// to be typed as !load_4v4p in chat, which server commands cannot be.
@@ -2370,6 +2371,27 @@ bool NonceOk(const char[] nonce)
  *  This is the "what does the plugin actually think right now" command: state,
  *  roster with live connection and side, the orientation mapping and the vote
  *  that produced it, per-map results so far, and the pending-finalize flag. */
+/**
+ * The backend restarts a box between matches with `quit`, and that used to
+ * land before the end-of-match kick's first pass: players saw "Server
+ * shutting down" instead of the result. The backend now sends this first.
+ *
+ * The pending result is the kick message when there is one. When there is
+ * none (a cancelled match, or the kick already ran and someone reconnected)
+ * anyone still here is told plainly why they are leaving.
+ */
+public Action Cmd_EndKickNow(int args)
+{
+	char reason[128];
+	if (g_sEndKickReason[0] != '\0') strcopy(reason, sizeof(reason), g_sEndKickReason);
+	else strcopy(reason, sizeof(reason), "Match over. The server is restarting; queue again on the site.");
+	int present = CountHumans();
+	KickHumans(reason);
+	CancelEndKick();
+	PrintToServer("pug-match: endkick_now kicked=%d", present);
+	return Plugin_Handled;
+}
+
 public Action Cmd_Status(int args)
 {
 	DumpLine("STATUS state=%s match=%d token=%s campaign=%s map=%s stopAfterMap=%s",

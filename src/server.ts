@@ -67,7 +67,7 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
-import { rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { kickThenQuit, rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { LogListener, type LogMeta } from './logListener.js';
 import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -471,7 +471,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
         await rcon.connect();
-        await rcon.exec('quit');
+        await kickThenQuit(rcon, server.name);
       } finally {
         rcon.close();
       }
