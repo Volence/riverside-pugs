@@ -71,8 +71,10 @@ describe('forum access', () => {
     expect(t.threadsById.get(post)!.deleted).toBe(false);
     expect(access()).toEqual(['901', '906', '907']);
     db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(id);
-    // Discord refuses the deletion twice: once in the sweep, once for the ticket.
-    t.failThreadOps = 2;
+    // Discord refuses the deletion twice (once in the sweep, once for the
+    // ticket) and the new revoke-only forum sync once (harmless: it runs
+    // ahead of both deletion attempts, before either has removed the post).
+    t.failThreadOps = 3;
     await sync.reconcile();
     expect(t.threadsById.get(post)!.deleted).toBe(false);
     expect(access()).toEqual(['901', '906', '907']);

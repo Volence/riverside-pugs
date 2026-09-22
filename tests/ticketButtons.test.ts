@@ -127,6 +127,13 @@ describe('Close', () => {
     expect(content(again)).toMatch(/already closed/);
   });
 
+  it('says the post locks for an ordinary ticket, and that it is removed for one about staff', async () => {
+    const normalReply = content(await submit(MOD, `t:${normal}:close`, { outcome: 'warned', note: '' }));
+    expect(normalReply).toBe(`Ticket #${normal} is closed. The post locks in a moment.`);
+    const staffReply = content(await submit(MOD2, `t:${aboutStaff}:close`, { outcome: 'warned', note: '' }));
+    expect(staffReply).toBe(`Ticket #${aboutStaff} is closed. The post is removed in a moment; the discussion is kept on the site.`);
+  });
+
   it('end to end: a close from Discord locks and archives the post', async () => {
     setSetting(db, 'discord_tickets_forum_id', 'forum1');
     const t = new FakeTransport();

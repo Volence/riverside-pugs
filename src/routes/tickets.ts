@@ -223,15 +223,19 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       ? await mod.timeout(plan.discordId, plan.minutes as number, plan.reason)
       : await mod.ban(plan.discordId, plan.reason);
     if (!result.ok) return reply.code(409).send({ error: refusalText(result.why) });
+    // Quietness keyed the same way every other ticket audit site keys it
+    // (restricted, or about somebody with a staff flag), not plan.restricted
+    // alone: `quiet` fails closed if the ticket row is somehow gone by now.
+    const sanctionQuiet = quiet(id);
     try {
       recordDiscordSanction(db, plan, me);
     } catch (err) {
       // The admin feed reaches everyone with feed access, wider than a
-      // restricted ticket's own list, so a restricted ticket's problem event
-      // must not name who it is about: neutral wording, ticket number only.
+      // restricted ticket's own list, so a quiet ticket's problem event must
+      // not name who it is about: neutral wording, ticket number only.
       publishAdminEvent({
         kind: 'problem',
-        text: plan.restricted
+        text: sanctionQuiet
           ? `A Discord sanction on restricted ticket #${id} was applied in Discord but could not be recorded; ` +
             'someone on its access list should check it.'
           : `Discord ${plan.kind === 'ban' ? 'banned' : 'timed out'} ${plan.discordId} for ticket #${id}, ` +
@@ -242,7 +246,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     // The reason is not in the audit detail, as with removals: it is on the
     // ticket (recordDiscordSanction put it in a ticket_events row), and an
     // audit detail is read by more people than that.
-    logAdmin(db, me, 'ticket_discord_sanction', id, { kind: plan.kind, minutes: plan.minutes }, { quiet: plan.restricted });
+    logAdmin(db, me, 'ticket_discord_sanction', id, { kind: plan.kind, minutes: plan.minutes }, { quiet: sanctionQuiet });
     broadcast('refresh');
     return { ok: true };
   });
@@ -281,6 +285,9 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       }
       return reply.code(409).send({ error: refusalText(result.why) });
     }
+    // Same keying as the apply route above: no ticket means nothing to keep
+    // quiet about, and quiet fails closed if the ticket row is somehow gone.
+    const liftQuiet = plan.ticketId === null ? false : quiet(plan.ticketId);
     // Guards against two admins racing to lift the same sanction: the loser's
     // UPDATE changes nothing, recordLift reports that, and this answers 409
     // rather than writing a second event for a lift that already happened.
@@ -290,10 +297,10 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     } catch (err) {
       // Same shape as the apply route above: Discord already did it, so an
       // admin problem event says the write failed, with the same restricted
-      // wording (no Discord id, ticket number only) for a restricted ticket.
+      // wording (no Discord id, ticket number only) for a quiet ticket.
       publishAdminEvent({
         kind: 'problem',
-        text: plan.restricted
+        text: liftQuiet
           ? `A Discord sanction lift on restricted ticket #${plan.ticketId} was applied in Discord but could not be recorded; ` +
             'someone on its access list should check it.'
           : `Discord ${plan.kind === 'ban' ? 'unbanned' : 'ended the timeout for'} ${plan.discordId}` +
@@ -302,7 +309,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       return reply.code(500).send({ error: 'Discord applied it, but recording it failed; an admin has been told' });
     }
     if (!lifted) return reply.code(409).send({ error: 'that sanction is no longer in force' });
-    logAdmin(db, me, 'ticket_discord_sanction_lift', plan.ticketId ?? 0, { kind: plan.kind, sanctionId: plan.sanctionId }, { quiet: plan.restricted });
+    logAdmin(db, me, 'ticket_discord_sanction_lift', plan.ticketId ?? 0, { kind: plan.kind, sanctionId: plan.sanctionId }, { quiet: liftQuiet });
     broadcast('refresh');
     return { ok: true };
   });

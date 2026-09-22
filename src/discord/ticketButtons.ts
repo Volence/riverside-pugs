@@ -3,7 +3,7 @@ import { logAdmin } from '../admin/audit.js';
 import { playerByDiscordId } from '../players.js';
 import { inGoodStanding } from '../standing.js';
 import { claimTicket, closeTicket } from '../tickets/actions.js';
-import { canSeeTicket, getTicketRow, ticketIsQuiet, type TicketRow } from '../tickets/store.js';
+import { canSeeTicket, getTicketRow, hasStaffFlag, ticketIsQuiet, type TicketRow } from '../tickets/store.js';
 import { closeModal } from './ticketCard.js';
 import type { BotInteraction, InteractionReply } from './transport.js';
 
@@ -94,5 +94,11 @@ export async function handleTicketModal(
   if (!r.ok) return say(capitalise(r.error));
   // The note is internal and stays out of the audit detail, as on the site.
   logAdmin(deps.db, who.me, 'ticket_close', id, { outcome: i.fields.outcome, via: 'discord' }, { quiet: ticketIsQuiet(deps.db, who.ticket) });
-  return say(`Ticket #${id} is closed. The post locks in a moment.`);
+  // A ticket about staff has its forum post deleted rather than locked
+  // (forbiddenForumThreads, Rule 2): the accused would otherwise still be
+  // able to see the post's existence, so the discussion moves to the site.
+  const aftermath = hasStaffFlag(deps.db, who.ticket.target_id)
+    ? 'The post is removed in a moment; the discussion is kept on the site.'
+    : 'The post locks in a moment.';
+  return say(`Ticket #${id} is closed. ${aftermath}`);
 }

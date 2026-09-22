@@ -118,8 +118,11 @@ describe('a restricted ticket in Discord', () => {
     db.prepare('UPDATE players SET discord_id = NULL WHERE steamid = ?').run(MOD);
     db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?').run(ADMIN, id);
     // Three removals are attempted in one pass: the sweep at the top of it,
-    // this ticket's own sweep, and syncMembers. All three are refused.
-    t.failThreadOps = 3;
+    // this ticket's own sweep, and syncMembers. All three are refused, and so
+    // are the two revoke-only forum syncs now sandwiched around them (global,
+    // then per-ticket); the forum is configured even though this ticket is
+    // restricted and never posts to it.
+    t.failThreadOps = 5;
     await sync.reconcile();
     // The removal failed, but the card still picked up the claim: syncMembers
     // throwing did not abandon the rest of this ticket's pass.
@@ -176,6 +179,28 @@ describe('forum posts that must not exist', () => {
     expect(threadByDiscordId(db, priv)!.state).toBe('ended');
     expect(staffThread(db, id)!.surface).toBe('forum');
     expect(t.threadsIn('forum1')).toHaveLength(1);
+    const said = t.live().filter((m) => m.channelId === priv).map((m) => JSON.stringify(m.payload));
+    expect(said.some((s) => s.includes('continues in the staff forum'))).toBe(true);
+  });
+
+  it('un-restricting a CLOSED ticket with a legacy private thread does not claim a post is coming', async () => {
+    const id = file(IDS[0], IDS[5]);
+    setRestricted(db, id, MOD, true, [ADMIN]);
+    await sync.idle();
+    const priv = await legacyThread(id);
+    expect(closeTicket(db, id, MOD, 'no_action', '').ok).toBe(true);
+    await sync.idle();
+    expect(setRestricted(db, id, MOD, false, [ADMIN]).ok).toBe(true);
+    await sync.idle();
+    expect(t.threadsById.get(priv)).toMatchObject({ locked: true, archived: true, deleted: false });
+    expect(threadByDiscordId(db, priv)!.state).toBe('ended');
+    // Closed: no new post is made, so the farewell must not say one is
+    // coming, or claim the discussion "continues" anywhere.
+    expect(staffThread(db, id)).toBeUndefined();
+    expect(t.threadsIn('forum1')).toEqual([]);
+    const said = t.live().filter((m) => m.channelId === priv).map((m) => JSON.stringify(m.payload));
+    expect(said.some((s) => s.includes('continues in the staff forum'))).toBe(false);
+    expect(said.some((s) => s.includes('no longer restricted'))).toBe(true);
   });
 
   it('blanking a channel setting ends nothing: the thread that exists is kept', async () => {
@@ -269,9 +294,11 @@ describe('retireFolded and a closed, locked survivor', () => {
     await sync.idle();
     foldTicket(db, goneA, keep, 'drop');
     foldTicket(db, goneB, keep, 'drop');
-    // goneA is processed first (lower id): make its very first Discord call
-    // throw, and confirm goneB still gets the full treatment.
-    t.failThreadOps = 1;
+    // The new revoke-only forum sync runs once, harmlessly, ahead of this
+    // stage: fail it too, then goneA (processed first, lower id): make its
+    // very first Discord call throw, and confirm goneB still gets the full
+    // treatment.
+    t.failThreadOps = 2;
     await sync.reconcile();
     expect(threadByDiscordId(db, goneAThread)!.state).toBe('folded');
     expect(threadByDiscordId(db, goneBThread)).toMatchObject({ state: 'ended', locked: 1 });

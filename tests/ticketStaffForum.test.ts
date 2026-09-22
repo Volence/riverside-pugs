@@ -134,6 +134,41 @@ describe('a ticket about a member of staff in Discord', () => {
     expect(staffThread(db, id)).toMatchObject({ surface: 'forum' });
     expect(access()).not.toContain(D(STAFFER));
   });
+
+  it('a merge or relink that hands the subject a forum overwrite loses it at once, before step 5', async () => {
+    // An open ordinary ticket, with its post already up, about someone who is
+    // not yet staff.
+    const id = file(R2);
+    await sync.idle();
+    const threadId = staffThread(db, id)!.thread_id;
+    // They become staff (a merge into a staff main, or a Discord relink) and
+    // the fake stands in for Discord already holding the overwrite: the post
+    // existed before this happened, so keepSubjectOut (which only runs at
+    // post creation) never ran for it.
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(R2);
+    t.channelAccess.get('forum1')!.add(D(R2));
+    const order: string[] = [];
+    const syncMemberAccess = t.threads.syncMemberAccess;
+    t.threads.syncMemberAccess = async (channelId, ids, opts) => {
+      order.push('revoke');
+      return syncMemberAccess(channelId, ids, opts);
+    };
+    const exists = t.threads.exists;
+    t.threads.exists = async (tid) => {
+      if (tid === threadId) order.push('ticket-call');
+      return exists(tid);
+    };
+    try {
+      await sync.reconcile();
+    } finally {
+      t.threads.syncMemberAccess = syncMemberAccess;
+      t.threads.exists = exists;
+    }
+    expect(access()).not.toContain(D(R2));
+    expect(order).toContain('revoke');
+    expect(order).toContain('ticket-call');
+    expect(order.indexOf('revoke')).toBeLessThan(order.indexOf('ticket-call'));
+  });
 });
 
 describe('the rules as functions', () => {

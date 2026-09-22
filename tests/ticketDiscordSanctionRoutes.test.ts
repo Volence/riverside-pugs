@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { openDb, type DB } from '../src/db.js';
+import { foldTicket } from '../src/tickets/store.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
@@ -211,6 +212,65 @@ describe('Discord sanctions over HTTP', () => {
       expect(text).toContain(`ticket #${ticketId}`);
       expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'ticket_discord_sanction'").get()).toEqual({ n: 0 });
       expect(fake.moderationCalls).toHaveLength(1);
+    });
+  });
+
+  // Task 7: quietness now comes from ticketIsQuiet on the ticket row, not
+  // the plan's `restricted` snapshot taken at check time, and fails closed
+  // when the row is gone. A ticket that was never restricted still gets the
+  // neutral, no-Discord-id wording once it has vanished by the time the
+  // write happens, which plan.restricted (still false) would have missed.
+  describe('quietness fails closed when the ticket row is gone by the time it writes', () => {
+    it('apply: neutral wording, even though the ticket was never restricted', async () => {
+      const timeout = fake.moderation.timeout;
+      fake.moderation.timeout = async (userId, minutes, reason) => {
+        db.prepare('DELETE FROM tickets WHERE id = ?').run(ticketId);
+        return timeout(userId, minutes, reason);
+      };
+      // The write itself fails too: recordDiscordSanction's insert carries a
+      // ticket_id foreign key, and that ticket is now gone.
+      try {
+        const seen: AdminEvent[] = [];
+        const off = subscribeAdminEvents((e) => seen.push(e));
+        const r = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'timeout', minutes: 60, reason: 'x' });
+        off();
+        expect(r.statusCode).toBe(500);
+        const problems = seen.filter((e) => e.kind === 'problem');
+        expect(problems).toHaveLength(1);
+        const text = (problems[0] as Extract<AdminEvent, { kind: 'problem' }>).text;
+        expect(text).not.toContain('990');
+        expect(text).toContain(`ticket #${ticketId}`);
+      } finally {
+        fake.moderation.timeout = timeout;
+      }
+    });
+
+    it('lift: neutral wording, even though the ticket was never restricted (folded away mid-request)', async () => {
+      await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });
+      const sid = (db.prepare('SELECT id FROM discord_sanctions').get() as { id: number }).id;
+      // A second ticket to fold this one into: foldTicket repoints every
+      // foreign key (discord_sanctions among them) onto it and only then
+      // deletes the original row, exactly as a real merge mid-request would.
+      const other = Number(db.prepare("INSERT INTO tickets (target_discord_id, target_name, created_at) VALUES ('991', 'Other', 'x')").run().lastInsertRowid);
+      const unban = fake.moderation.unban;
+      fake.moderation.unban = async (userId, reason) => {
+        foldTicket(db, ticketId, other, 'drop');
+        return unban(userId, reason);
+      };
+      try {
+        const seen: AdminEvent[] = [];
+        const off = subscribeAdminEvents((e) => seen.push(e));
+        const r = await post(ADMIN, `/api/mod/discord-sanctions/${sid}/lift`);
+        off();
+        expect(r.statusCode).toBe(500);
+        const problems = seen.filter((e) => e.kind === 'problem');
+        expect(problems).toHaveLength(1);
+        const text = (problems[0] as Extract<AdminEvent, { kind: 'problem' }>).text;
+        expect(text).not.toContain('990');
+        expect(text).toContain(`ticket #${ticketId}`);
+      } finally {
+        fake.moderation.unban = unban;
+      }
     });
   });
 });

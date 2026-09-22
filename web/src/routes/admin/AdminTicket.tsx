@@ -40,9 +40,9 @@ function Discussion({ d }: { d: TicketDiscussion }) {
       </p>
     );
   }
-  const text = d.state === 'unconfigured' ? 'Discord discussion is not configured. An admin can set the tickets forum and the tickets channel in Settings; until then this ticket is worked here.'
+  const text = d.state === 'unconfigured' ? 'Discord discussion is not configured. An admin can set the tickets forum in Settings; until then this ticket is worked here.'
     : d.state === 'pending' ? 'The Discord thread for this ticket has not been made yet. The bot makes it within a few minutes of being online.'
-      : d.state === 'restricted' ? 'Restricted tickets have no Discord thread. Work it here: the people on its access list were sent a link to this page.'
+      : d.state === 'restricted' ? 'Restricted tickets have no Discord thread. Work it here: linked people on its access list are DMed a link to this page.'
         : 'This ticket has no Discord thread.';
   return <p class="muted">{text}</p>;
 }

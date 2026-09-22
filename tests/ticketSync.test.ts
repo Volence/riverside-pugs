@@ -101,16 +101,19 @@ describe('the staff forum post', () => {
     expect(staffThread(db, id)).toBeTruthy();
   });
 
-  it('a failure is reported once, and the next pass makes the post', async () => {
+  it('a failure is reported, and the next pass makes the post', async () => {
     sync.start();
     await sync.idle();
-    t.failThreadOps = 1;
+    // Two Discord calls now stand between a filed report and its post: the
+    // new revoke-only forum sync (harmless here, nothing to revoke), then
+    // keepSubjectOut's own. Fail both.
+    t.failThreadOps = 2;
     const id = file(IDS[0], { targetId: IDS[5], category: 'afk', text: '' });
     await sync.idle();
     expect(staffThread(db, id)).toBeUndefined();
     const problems = events.filter((e) => e.kind === 'problem');
-    expect(problems).toHaveLength(1);
-    expect(JSON.stringify(problems[0])).not.toContain('player5');
+    expect(problems.length).toBeGreaterThan(0);
+    for (const p of problems) expect(JSON.stringify(p)).not.toContain('player5');
     await sync.reconcile();
     expect(staffThread(db, id)).toBeTruthy();
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_threads').get()).toEqual({ n: 1 });
@@ -242,8 +245,10 @@ describe('the staff forum post', () => {
 
   it('lets nobody into the forum until that sweep has worked once', async () => {
     const orphan = (await t.threads.createForumPost('forum1', { name: 'orphan', message: card, tags: [] })).threadId;
-    // Discord refuses the listing itself on the first pass.
-    t.failThreadOps = 1;
+    // Discord refuses two calls on the first pass: the new revoke-only forum
+    // sync that now runs ahead of the sweep (harmless here, nothing to
+    // revoke), and the listing itself.
+    t.failThreadOps = 2;
     sync.start();
     await sync.idle();
     expect(t.threadsById.get(orphan)!.deleted).toBe(false);

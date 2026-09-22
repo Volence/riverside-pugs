@@ -161,6 +161,9 @@ export class TicketSync {
    *      it, whatever that thread's lock state;
    *   1. delete forum posts that must not exist, BEFORE anything can widen
    *      who reads the forum;
+   *   1b. a revoke-only forum sync, so a merge or a relink that hands
+   *      somebody an overwrite on a post that already existed (so
+   *      keepSubjectOut never ran) loses it at once rather than at step 5;
    *   2. retire threads left behind by a fold;
    *   3. every open ticket, and every closed one not yet locked;
    *   4. sweep the forum for posts with no ticket behind them, while that has
@@ -177,6 +180,7 @@ export class TicketSync {
   async reconcile(scope: 'all' | 'open' = 'all'): Promise<void> {
     await this.step(() => this.ejectOutsiders(undefined, scope));
     await this.step(() => this.removeForbiddenPosts());
+    await this.step(() => this.revokeForumAccess());
     await this.step(() => this.retireFolded());
     const ids = (this.deps.db.prepare(
       `SELECT id FROM tickets WHERE status = 'open'
@@ -211,6 +215,11 @@ export class TicketSync {
     // stop the deletion of a forum post that must not exist.
     await this.step(() => this.ejectOutsiders(id));
     await this.removeForbiddenPosts(id);
+    // Its own stage, unlike removeForbiddenPosts above: this is a global
+    // forum-wide sync, not about this ticket's own post, so a refusal here
+    // must not stop the rest of this ticket's pass (its card, its members,
+    // its reports).
+    await this.step(() => this.revokeForumAccess());
     await this.retireFolded(id);
     await this.notifyAccess(t);
     const where = surfaceFor(db, t);
@@ -227,7 +236,12 @@ export class TicketSync {
     // A null answer ends nothing: a blanked setting, and a restricted
     // ticket's surviving private thread, are simply kept up.
     if (thread && surface && thread.surface !== surface) {
-      await this.endThread(thread, 'This ticket is no longer restricted. Its discussion continues in the staff forum.');
+      // A closed ticket gets no new post (thread creation below is guarded on
+      // t.status === 'open'), so its farewell must not claim one is coming.
+      const farewell = t.status === 'open'
+        ? 'This ticket is no longer restricted. Its discussion continues in the staff forum.'
+        : 'This ticket is no longer restricted.';
+      await this.endThread(thread, farewell);
       thread = undefined;
     }
     if (!thread && t.status === 'open' && surface) thread = await this.createThread(t, surface);
@@ -634,6 +648,22 @@ export class TicketSync {
     if (r.failed.includes(subject)) {
       throw new Error('Discord would not take the person this ticket is about out of the tickets forum, so its post was not made');
     }
+  }
+
+  /**
+   * Revoke-only forum sync, right after removeForbiddenPosts, in both a full
+   * pass and a single ticket's. Closes a gap step 5's full syncAccess leaves
+   * open until the end of a pass: a merge that folds an alt's open ordinary
+   * ticket (with its own forum post) into a staff main, or a Discord relink,
+   * can hand somebody a forum overwrite without keepSubjectOut ever running,
+   * because the post already existed before the change. This only ever takes
+   * access away, so it is safe to run this early and this often.
+   */
+  private async revokeForumAccess(): Promise<void> {
+    const { db, transport } = this.deps;
+    const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
+    if (!forumId) return;
+    await transport.threads.syncMemberAccess(forumId, forumAudience(db), { revokeOnly: true });
   }
 
   /** The forum's member overwrites are exactly forumAudience, or, while the
