@@ -266,8 +266,10 @@ any `HudEd_` copy), so a font size edit shows at the right size.
    only renames faces and demands the ttf bytes, and the preview draws every label in Roboto
    Condensed regardless. `buildHud` is unchanged and still runs all six.
 2. Walks the root's children in file order, later over earlier, honouring a `zpos` key where
-   present, skipping `visible 0` and `other` children that the preview does not draw
-   (`Incapacitated`, `Dead`, `Voice`, `SkullIconPlacement`: the healthy, alive state).
+   present, skipping `visible 0` and the children whose visibility game code decides
+   (`Incapacitated`, `Dead`, `Voice`, `SkullIconPlacement`, and `DuckingIcon`, which shows
+   only while crouching): the healthy, standing, alive state. Those children keep their
+   registry entries, so they can still be hidden or moved.
 3. Draws by kind. `image` with an `image` key: the art index texture; or, when the key
    points at `hud/hudeditor/<slot>` because `stylePass` repointed it, the slot's generated
    texture, which the renderer produces itself from `design.styles` with `textures.ts`'s
