@@ -94,6 +94,10 @@ export interface InboundMessage {
 export interface MessageHooks {
   watches(threadId: string): boolean;
   create(m: InboundMessage): void;
+  /** Real Discord fires this for the bot's OWN edits too (every card refresh
+   *  is one), and the fake does not echo those, so a mirror cannot rely on
+   *  the fake to catch a missing bot-author filter here: filter on
+   *  authorIsBot in update exactly as in create. */
   update(m: InboundMessage): void;
   remove(threadId: string, messageId: string): void;
 }
