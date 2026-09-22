@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import type { DB } from '../db.js';
 import { playerByDiscordId } from '../players.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
-import { threadByDiscordId, type ThreadRow } from '../tickets/threads.js';
+import { setThreadLocked, threadByDiscordId, type ThreadRow } from '../tickets/threads.js';
 import {
   attachmentsOf, insertAttachment, insertMessage, lastMessageId, markDeleted, messageByDiscordId, messageById, recordEdit,
   updateAttachment,
@@ -183,10 +183,11 @@ export class TicketMirror {
    * It rejects when, and only when, the message is still there: the delete
    * itself failed, or the thread could not be opened to do it in. The thread
    * or the message already being gone is not a failure, and neither is
-   * failing to archive the thread again afterwards, because by then the
-   * message is irreversibly gone and what is left is untidy rather than
-   * wrong. Whoever waits on this decides whether a deletion happened, so
-   * that distinction is the whole contract.
+   * failing to archive the thread again afterwards: by then the message is
+   * irreversibly gone, and the thread row is marked unlocked so that the
+   * reconciler's next pass re-locks and re-archives it. Whoever waits on this
+   * decides whether a deletion happened, so that distinction is the whole
+   * contract.
    */
   removeInDiscord(threadId: string, discordMessageId: string): Promise<void> {
     const serialise = this.deps.serialise ?? ((fn: () => Promise<void>) => fn());
@@ -206,15 +207,20 @@ export class TicketMirror {
       // In a finally, as the reconciler does it: a closed ticket's thread must
       // not be left open because the delete failed. The row says what it goes
       // back to; it was never unlocked, so only the archiving is undone.
-      //
-      // Swallowed on purpose. The message is already gone by here, and a
-      // thread left unarchived is repaired by the reconciler's next pass
-      // (syncLock locks and archives a closed ticket's thread). Letting this
-      // out would report an irreversible deletion as one that never happened.
-      try {
-        if (threadByDiscordId(db, threadId)?.locked === 1) await transport.threads.setArchived(threadId, true);
-      } catch (err) {
-        console.error('[discord] could not archive a ticket thread again after deleting a message in it; the next reconcile pass puts it back:', err instanceof Error ? err.message : err);
+      const th = threadByDiscordId(db, threadId);
+      if (th?.locked === 1) {
+        try {
+          await transport.threads.setArchived(threadId, true);
+        } catch (err) {
+          // Swallowed, because the message is already gone by here and what is
+          // left is untidy rather than wrong. Recorded on the ROW, though,
+          // because the row is the reconciler's only input and one still
+          // saying locked is one it leaves alone: marked unlocked, the next
+          // pass finds a closed ticket whose thread is not locked, locks and
+          // archives it, and writes locked = 1 back (syncLock).
+          setThreadLocked(db, th.id, false);
+          console.error('[discord] could not archive a ticket thread again after deleting a message in it; the row is marked unlocked so the next reconcile pass re-locks and re-archives it:', err instanceof Error ? err.message : err);
+        }
       }
     }
   }

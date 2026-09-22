@@ -9,6 +9,7 @@ import { buildServer } from '../src/server.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { insertThread, setThreadLocked, threadByDiscordId } from '../src/tickets/threads.js';
+import { closeTicket } from '../src/tickets/actions.js';
 import { attachmentsOf, messageByDiscordId, messageById } from '../src/tickets/messages.js';
 import { AttachmentStore, type AttachmentFetcher } from '../src/tickets/attachments.js';
 import { removeMessage } from '../src/tickets/removal.js';
@@ -350,10 +351,12 @@ describe('Remove from ticket, the Discord command', () => {
     mirror = newMirror();
     return missed;
   }
-  /** A closed ticket's thread, archived with the row saying locked, and a
-   *  Discord that refuses to archive it again. Everything up to and including
-   *  the delete works; only the tidying up after it fails. */
-  async function refusesReArchiving(thread: string) {
+  /** A closed ticket, its thread locked and archived as the reconciler leaves
+   *  one, and a Discord that refuses to archive it again. Everything up to and
+   *  including the delete works; only the tidying up after it fails. Returns
+   *  the way to let Discord recover. */
+  async function refusesReArchiving(ticketId: number, thread: string): Promise<() => void> {
+    expect(closeTicket(db, ticketId, MOD, 'no_action', '')).toEqual({ ok: true });
     setThreadLocked(db, threadByDiscordId(db, thread)!.id, true);
     await t.threads.setLocked(thread, true);
     await t.threads.setArchived(thread, true);
@@ -362,6 +365,7 @@ describe('Remove from ticket, the Discord command', () => {
       if (archived) throw new Error('discord down');
       await real(id, archived);
     };
+    return () => { t.threads.setArchived = real; };
   }
 
   it('a delete Discord refuses is not audited as one that happened', async () => {
@@ -384,25 +388,35 @@ describe('Remove from ticket, the Discord command', () => {
 
   /** The audit records what happened to the MESSAGE. A thread left unarchived
    *  is a tidiness problem the reconciler's next pass repairs. */
-  it('records the deletion when only the tidying up afterwards failed', async () => {
+  it('records the deletion when only the tidying up afterwards failed, and has the reconciler finish it', async () => {
     const { id, thread } = await ticketWithThread(ACCUSED);
     const missed = await unmirrored(thread);
-    await refusesReArchiving(thread);
+    const recover = await refusesReArchiving(id, thread);
 
     expect(said(await run('906', thread, missed.id))).toMatch(/^Deleted\./);
 
     expect(t.inbox.find((m) => m.id === missed.id)!.deleted).toBe(true);
     expect(auditRows()).toEqual([{ admin_id: MOD, action: 'ticket_remove', target: String(id), detail: { mirrored: false, via: 'discord' } }]);
     expect(db.prepare("SELECT detail FROM ticket_events WHERE ticket_id = ? AND kind = 'removed'").get(id)).toEqual({ detail: '{"mirrored":false}' });
-    // Left open, for the reconciler to close again.
+    // Left open in Discord, and the ROW says so: the reconciler reads the row
+    // and nothing else, and a row still saying locked is a row it skips.
     expect(t.threadsById.get(thread)).toMatchObject({ archived: false, locked: true });
+    expect(threadByDiscordId(db, thread)!.locked).toBe(0);
+
+    // So the next pass puts Discord back the way the closed ticket says.
+    recover();
+    const sync = new TicketSync({ db, transport: t, publicUrl: 'http://x', intervalMs: 0 });
+    await sync.reconcile();
+    sync.stop();
+    expect(t.threadsById.get(thread)).toMatchObject({ archived: true, locked: true });
+    expect(threadByDiscordId(db, thread)!.locked).toBe(1);
   });
 
   it('counts the Discord half as done for a mirrored message when only the tidying up failed', async () => {
     const { id, thread } = await ticketWithThread(ACCUSED);
     mirror.start();
     const { discordId, row } = await horrible(thread);
-    await refusesReArchiving(thread);
+    await refusesReArchiving(id, thread);
 
     expect(said(await run('906', thread, discordId))).toMatch(/the message is deleted here/);
 
