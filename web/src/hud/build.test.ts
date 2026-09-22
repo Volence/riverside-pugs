@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildHud, elementRect, teamLayout, packHud, buildTrees } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
-import { parseKv, kvFind, kvGet, type KvNode } from './kv';
+import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
 import { PANEL_FILE } from './render';
@@ -13,6 +13,109 @@ const text = (files: { path: string; data: Uint8Array }[], path: string) => {
 const layoutOf = (files: { path: string; data: Uint8Array }[]) =>
   parseKv(text(files, 'scripts/hudlayout.res')!)[0].value as KvNode[];
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), ...patch });
+const CARD_FILE = 'resource/ui/hud/teammatepanel.res';
+const TEAM_FILE = 'resource/ui/hud/teamdisplayhud.res';
+const SCHEME_FILE = 'resource/clientscheme.res';
+/** A file's root children as the build wrote it, or the base file when the build left it alone (as the game would read it). */
+const tree = (files: { path: string; data: Uint8Array }[], path: string, preset: 'stock' | 'modern' = 'stock') =>
+  parseKv(text(files, path) ?? baseFile(preset, path))[0].value as KvNode[];
+const cardAt = (nodes: KvNode[], name: string) => ['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(kvFind(nodes, [name])!, k));
+
+describe('buildHud, childPass', () => {
+  const kids = (c: Record<string, unknown>) => ({ teamColumn: c }) as HudDesign['children'];
+
+  it('writes only the overridden keys', () => {
+    const got = tree(buildHud(design({ children: kids({ Name: { x: 20 } }) })), CARD_FILE);
+    const expected = parseKv(baseFile('stock', CARD_FILE))[0].value as KvNode[];
+    kvSet(kvFind(expected, ['Name'])!, 'xpos', '20');
+    expect(got).toEqual(expected);
+  });
+
+  it('hides a child', () => {
+    const got = tree(buildHud(design({ children: kids({ Head: { visible: false } }) })), CARD_FILE);
+    expect(kvGet(kvFind(got, ['Head'])!, 'visible')).toBe('0');
+  });
+
+  it('adds the health number after Name on stock, and removes it on Modern', () => {
+    const stock = tree(buildHud(design({ children: kids({ HealthNumber: { on: true } }) })), CARD_FILE);
+    const at = stock.findIndex((n) => n.key === 'HealthNumber');
+    expect(stock[at - 1].key).toBe('Name');
+    expect(cardAt(stock, 'HealthNumber')).toEqual(['103', '60', '30', '12']);
+    expect(kvGet(stock[at], 'labelText')).toBe('%HealthNumber%');
+
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const modern = tree(buildHud(design({ preset: 'modern', children: kids({ HealthNumber: { on: false } }) }), { fonts }), CARD_FILE, 'modern');
+    expect(kvFind(modern, ['HealthNumber'])).toBeUndefined();
+  });
+
+  it('ignores edits to an addable child that is off in this preset', () => {
+    const files = buildHud(design({ children: kids({ HealthNumber: { x: 5 } }) }));
+    expect(kvFind(tree(files, CARD_FILE), ['HealthNumber'])).toBeUndefined();
+  });
+
+  it('writes a label colour raw', () => {
+    const got = tree(buildHud(design({ children: kids({ Name: { color: '10 20 30 255' } }) })), CARD_FILE);
+    expect(kvGet(kvFind(got, ['Name'])!, 'fgcolor_override')).toBe('10 20 30 255');
+  });
+
+  it('points a sized label at a HudEd_<font>_t<size> copy of its font', () => {
+    const files = buildHud(design({ children: kids({ Name: { fontSize: 14 } }) }));
+    expect(kvGet(kvFind(tree(files, CARD_FILE), ['Name'])!, 'font')).toBe('HudEd_PlayerDisplayName_t14');
+    const copy = kvFind(tree(files, SCHEME_FILE), ['Fonts', 'HudEd_PlayerDisplayName_t14', '1'])!;
+    expect(kvGet(copy, 'tall')).toBe('14');
+    // Other labels on the same font keep the original.
+    expect(kvGet(kvFind(tree(files, CARD_FILE), ['Status'])!, 'font')).toBe('PlayerDisplayName');
+  });
+
+  it('sizes the item icons by their font and grows the label with them', () => {
+    const files = buildHud(design({ children: kids({ Items: { fontSize: 22 } }) }));
+    const items = kvFind(tree(files, CARD_FILE), ['Items'])!;
+    expect(kvGet(items, 'font')).toBe('HudEd_L4D_Icons_medium_t22');
+    expect(kvGet(items, 'tall')).toBe('22');
+  });
+
+  // childPass writes unscaled numbers before scalePass, which multiplies them with the rest of the file.
+  it('lets the element scale multiply the edited values', () => {
+    const files = buildHud(design({ elements: { teamColumn: { scale: 1.5 } }, children: kids({ Name: { x: 20, fontSize: 14 } }) }));
+    const name = kvFind(tree(files, CARD_FILE), ['Name'])!;
+    expect(kvGet(name, 'xpos')).toBe('30');
+    // scalePass collects the t14 leaf like any other font and clones it again.
+    expect(kvGet(name, 'font')).toBe('HudEd_HudEd_PlayerDisplayName_t14_150');
+    const copy = kvFind(tree(files, SCHEME_FILE), ['Fonts', 'HudEd_HudEd_PlayerDisplayName_t14_150', '1'])!;
+    expect(kvGet(copy, 'tall')).toBe(String(Math.round(14 * 1.5)));
+  });
+
+  // The `t` in the tag: without it a size-60 label and a 0.60 scale on the same font would share one key.
+  it('keeps a size-60 label and a 0.60 scale on the same font apart', () => {
+    const files = buildHud(design({ elements: { teamColumn: { scale: 0.6 } }, children: kids({ Name: { fontSize: 60 } }) }));
+    const fonts = kvFind(tree(files, SCHEME_FILE), ['Fonts'])!.value as KvNode[];
+    expect(kvGet(kvFind(fonts, ['HudEd_PlayerDisplayName_60', '1'])!, 'tall')).toBe(String(Math.round(12 * 0.6)));
+    expect(kvGet(kvFind(fonts, ['HudEd_HudEd_PlayerDisplayName_t60_60', '1'])!, 'tall')).toBe('36');
+  });
+
+  // childPass and fontPass are order independent: fontPass renames every face in the scheme, copies included.
+  it('gives a sized label the chosen font', () => {
+    const files = buildHud(design({ font: 'roboto', children: kids({ Name: { fontSize: 14 } }) }),
+      { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+    const copy = kvFind(tree(files, SCHEME_FILE), ['Fonts', 'HudEd_PlayerDisplayName_t14', '1'])!;
+    expect(kvGet(copy, 'name')).toBe('Roboto Condensed');
+  });
+
+  it('fails naming the file and child for an edit the child cannot take', () => {
+    // validateDesign strips these; this is the guard for a design that skipped it.
+    expect(() => buildHud(design({ children: kids({ HealthNumber: { on: true, color: '1 2 3 255' } }) })))
+      .toThrow(/teammatepanel\.res: HealthNumber takes no colour/);
+    expect(() => buildHud(design({ children: kids({ Head: { fontSize: 20 } }) })))
+      .toThrow(/teammatepanel\.res: Head takes no text size/);
+    expect(() => buildHud(design({ children: kids({ Nope: { x: 1 } }) })))
+      .toThrow(/teammatepanel\.res: Nope is not an editable child/);
+    // D2: a wrong-kind edit fails the same way for size and position.
+    expect(() => buildHud(design({ children: kids({ BackgroundImage: { w: 10, h: 10 } }) })))
+      .toThrow(/teammatepanel\.res: BackgroundImage takes no size/);
+    expect(() => buildHud(design({ children: kids({ BackgroundImage: { x: 1, y: 1 } }) })))
+      .toThrow(/teammatepanel\.res: BackgroundImage cannot move/);
+  });
+});
 
 describe('buildHud, layout', () => {
   it('ships stock hudlayout plus the xHair element for an empty design', () => {
@@ -429,7 +532,8 @@ describe('buildTrees', () => {
         const d = design({ preset, advanced,
           elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
             teamColumn: { scale: 1.5, dir: 'column', spacing: 40 } },
-          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } } });
+          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } },
+          children: { teamColumn: { Name: { x: 20, fontSize: 14 }, Head: { visible: false } } } });
         const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
         const paths = [...Object.values(PANEL_FILE), 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res', 'resource/clientscheme.res'];
         for (const path of paths) {

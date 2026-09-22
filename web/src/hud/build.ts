@@ -14,7 +14,8 @@ import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Asp
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
-import type { HudDesign, ElementOverride } from './design';
+import type { HudDesign, ElementOverride, ChildOverride } from './design';
+import { panelChildren, type ChildDef } from './children';
 
 /** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
 export interface BuildAssets { fonts?: { regular: Uint8Array; bold: Uint8Array }; images?: Record<string, Uint8ClampedArray> }
@@ -29,6 +30,13 @@ const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 class Work {
   private trees = new Map<string, KvNode[]>();
   private texts = new Map<string, string>();
+  /**
+   * HudEd_ font copies made so far, by the copy's own name: that name, or
+   * null when the scheme does not define the font. One map for the whole
+   * build, shared by scalePass and childPass, so two asks for the same copy
+   * never push a duplicate key into a shipped scheme.
+   */
+  readonly fonts = new Map<string, string | null>();
   constructor(readonly preset: Preset) {}
   /** The children of the file's single root block. */
   tree(path: string): KvNode[] {
@@ -106,6 +114,67 @@ function layoutPass(work: Work, design: HudDesign) {
       // Three animation events hard-code the chat position and would snap a moved chat box back.
       work.setText(ANIMS, work.text(ANIMS).replace(/(Animate\s+HudChat\s+Position\s+")[^"]*(")/g, `$1${p.xpos} ${p.ypos}$2`));
     }
+  }
+}
+
+/**
+ * Write the player's edits inside a card file (the v2 spec's child pass,
+ * teammate card only in this phase). Values are the stored unscaled numbers,
+ * written before fitPass, which fits the card around what this pass left,
+ * and before scalePass, which multiplies them with the rest of the file.
+ *
+ * An addable child (the stock card's health number) is cloned from its
+ * template after its sibling when turned on and removed when turned off. An
+ * addable child that is absent and not turned on has nothing to edit yet, so
+ * its other fields wait: that is what lets a design switch presets without
+ * pruning. Anything else missing, or an edit the child cannot take, fails the
+ * build naming the file and child, before any of it is written.
+ */
+function childPass(work: Work, design: HudDesign) {
+  for (const [panelId, kids] of Object.entries(design.children)) {
+    const panel = panelChildren(panelId);
+    if (!panel) throw new Error(`No inside-editable panel ${panelId}`);
+    for (const [name, o] of Object.entries(kids)) {
+      const def = panel.children.find((c) => c.name === name);
+      if (!def) throw new Error(`${panel.file}: ${name} is not an editable child`);
+      const nodes = work.tree(panel.file);
+      let block = kvFind(nodes, [name]);
+      if (def.addable) {
+        if (o.on === false) { if (block) nodes.splice(nodes.indexOf(block), 1); continue; }
+        if (o.on === true && !block) {
+          const after = def.addable.after.toLowerCase();
+          const at = nodes.findIndex((n) => n.key.toLowerCase() === after);
+          if (at < 0) throw new Error(`${panel.file}: no ${def.addable.after} to add ${name} after`);
+          block = structuredClone(def.addable.template);
+          nodes.splice(at + 1, 0, block);
+        }
+        if (!block) continue;
+      }
+      if (!block) throw new Error(`${panel.file}: no child ${name}`);
+      applyChild(work, panel.file, def, block, o);
+    }
+  }
+}
+
+function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: ChildOverride) {
+  if (o.color !== undefined && !def.colour) throw new Error(`${file}: ${def.name} takes no colour`);
+  if (o.fontSize !== undefined && !def.font) throw new Error(`${file}: ${def.name} takes no text size`);
+  if ((o.w !== undefined || o.h !== undefined) && def.box === 'none') throw new Error(`${file}: ${def.name} takes no size`);
+  if ((o.x !== undefined || o.y !== undefined) && !def.move) throw new Error(`${file}: ${def.name} cannot move`);
+  if (o.visible !== undefined) kvSet(block, 'visible', o.visible ? '1' : '0');
+  const set = (key: string, v: number | undefined) => { if (v !== undefined) kvSet(block, key, String(Math.round(v))); };
+  set('xpos', o.x); set('ypos', o.y); set('wide', o.w); set('tall', o.h);
+  if (o.color !== undefined) kvSet(block, 'fgcolor_override', o.color);
+  if (o.fontSize !== undefined) {
+    const leaf = typeof block.value === 'string' ? undefined
+      : block.value.find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
+    if (!leaf) throw new Error(`${file}: ${def.name} has no font`);
+    const size = Math.round(o.fontSize);
+    useFontCopy(work, leaf, `t${size}`, () => size);
+    // The item icons are glyphs in their font with no size of their own: the
+    // label's tall follows the font so the icons are not cut off and the
+    // fitted card grows with them.
+    if (def.box === 'none') kvSet(block, 'tall', String(size));
   }
 }
 
@@ -271,12 +340,40 @@ function scaleBlock(nodes: KvNode[], k: number, fontLeaves: KvNode[]) {
   }
 }
 
+/**
+ * Point a font leaf at a HudEd_<font>_<tag> copy of its scheme entry, every
+ * size's `tall` rewritten by `tall`, creating the copy the first time any
+ * pass asks for that name. scalePass tags by percent (`_150`), childPass by
+ * size (`_t14`); the `t` is load bearing, or a size-60 label and a 0.60 scale
+ * on the same font would collide on one key with two meanings. A font the
+ * scheme does not define (an icon font defined elsewhere) is left exactly as
+ * the base file had it, or the child would lose its font. The scheme is only
+ * pulled into the build when a leaf actually asks.
+ */
+function useFontCopy(work: Work, leaf: KvNode, tag: string, tall: (t: number) => number) {
+  const name = leaf.value as string;
+  const newName = `HudEd_${name}_${tag}`;
+  if (!work.fonts.has(newName)) {
+    const schemeFonts = work.panel(SCHEME, ['Fonts']);
+    const src = kvFind(schemeFonts.value as KvNode[], [name]);
+    if (!src) {
+      work.fonts.set(newName, null);
+    } else {
+      const copy = structuredClone(src);
+      copy.key = newName;
+      for (const size of copy.value as KvNode[]) {
+        if (typeof size.value === 'string') continue;
+        const t = kvGet(size, 'tall');
+        if (t !== undefined) kvSet(size, 'tall', String(tall(parseFloat(t))));
+      }
+      (schemeFonts.value as KvNode[]).push(copy);
+      work.fonts.set(newName, newName);
+    }
+  }
+  if (work.fonts.get(newName)) leaf.value = newName;
+}
+
 function scalePass(work: Work, design: HudDesign) {
-  // One map for the whole pass, keyed by the scaled entry's own name: two
-  // elements scaled to the same rounded percent that share a font would
-  // otherwise each push their own HudEd_<font>_<tag> block, a duplicate key
-  // in a shipped file.
-  const renamed = new Map<string, string | null>();      // scaled entry name -> that name, or null when the scheme lacks the font
   for (const el of ELEMENTS) {
     const k = design.elements[el.id]?.scale;
     if (el.resize !== 'scale' || k === undefined || k === 1) continue;
@@ -291,36 +388,9 @@ function scalePass(work: Work, design: HudDesign) {
     }
     for (const file of el.children) scaleBlock(work.tree(file), k, fontLeaves);
     // The generator never writes a file the design did not change: an
-    // element whose children reference no font at all must leave
-    // clientscheme.res completely alone rather than pull it into the
-    // working set only to re-serialise it unchanged (dropping its comments).
-    if (fontLeaves.length === 0) continue;
-    // Second walk: for every font leaf collected above, look it up in the
-    // scheme once per distinct name (a font can be used by more than one
-    // leaf, in more than one file) and rename the leaf only once that
-    // lookup has succeeded and a scaled entry exists to point at.
-    const schemeFonts = work.panel(SCHEME, ['Fonts']);
-    for (const leaf of fontLeaves) {
-      const name = leaf.value as string;
-      const newName = `HudEd_${name}_${tag}`;
-      if (!renamed.has(newName)) {
-        const src = kvFind(schemeFonts.value as KvNode[], [name]);
-        if (!src) {
-          renamed.set(newName, null);                    // an icon font the scheme defines elsewhere: leave it alone
-        } else {
-          const copy = structuredClone(src);
-          copy.key = newName;
-          for (const size of copy.value as KvNode[]) {
-            if (typeof size.value === 'string') continue;
-            const tall = kvGet(size, 'tall');
-            if (tall !== undefined) kvSet(size, 'tall', String(Math.round(parseFloat(tall) * k)));
-          }
-          (schemeFonts.value as KvNode[]).push(copy);
-          renamed.set(newName, newName);
-        }
-      }
-      if (renamed.get(newName)) leaf.value = newName;
-    }
+    // element whose children reference no font at all leaves
+    // clientscheme.res alone, since useFontCopy only opens it for a leaf.
+    for (const leaf of fontLeaves) useFontCopy(work, leaf, tag, (t) => Math.round(t * k));
   }
 }
 
@@ -389,8 +459,14 @@ function addonInfo(name: string): string {
 }
 
 /**
- * The pass order is not load bearing anywhere here.
+ * Where the pass order matters, and where it does not.
  *
+ * - `childPass` runs after `layoutPass` and before `scalePass`: it writes the
+ *   stored unscaled numbers and scalePass multiplies them with the rest of
+ *   the card file. A HudEd_<font>_t<size> copy it makes is a font leaf that
+ *   scalePass then clones again as HudEd_HudEd_<font>_t<size>_<pct>.
+ * - `childPass` and `fontPass` are order independent, for the same reason as
+ *   scalePass below: both edit the one memoised scheme tree.
  * - `scalePass` and `fontPass` can run in either order. scalePass pushes
  *   structuredClone copies of existing font entries into the scheme's Fonts
  *   block as HudEd_<font>_<tag>. Work.tree memoises the parsed scheme by
@@ -412,6 +488,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   const work = new Work(design.preset);
   const extra: VpkFile[] = [];
   layoutPass(work, design);
+  childPass(work, design);
   teamPass(work, design);
   scalePass(work, design);
   fontPass(work, design, assets, extra);
@@ -469,6 +546,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     work = new Work(design.preset);
     const discard: VpkFile[] = [];
     layoutPass(work, design);
+    childPass(work, design);
     teamPass(work, design);
     scalePass(work, design);
     stylePass(work, design, {}, discard);
