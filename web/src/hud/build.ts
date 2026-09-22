@@ -87,6 +87,10 @@ function layoutPass(work: Work, design: HudDesign) {
   if (design.xhair && !has) layout.unshift(structuredClone(XHAIR));
   if (!design.xhair && has) layout.splice(layout.indexOf(has), 1);
 
+  // Probe T2: the engine crosshair honours never_draw, so a player with an
+  // image crosshair can hide the game's own one underneath it.
+  if (design.hideGameCrosshair) kvSet(work.panel(LAYOUT, ['HudCrosshair']), 'never_draw', '1');
+
   for (const el of ELEMENTS) {
     const o = design.elements[el.id];
     if (!o || el.id === 'xhair') continue;

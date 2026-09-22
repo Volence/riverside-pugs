@@ -42,6 +42,8 @@ export interface HudDesign {
   elements: Record<string, ElementOverride>;
   styles: Record<string, StyleOverride>;
   images: Record<string, UploadedImage>;
+  /** Write never_draw on HudCrosshair so an image crosshair can replace the game's own (probe T2). */
+  hideGameCrosshair?: boolean;
 }
 
 export const DEFAULT_DESIGN: HudDesign = {
@@ -109,6 +111,7 @@ export function validateDesign(raw: unknown): HudDesign {
   d.font = oneOf(raw.font, ['preset', 'roboto'] as const, 'preset');
   d.advanced = raw.advanced === true;
   d.xhair = raw.xhair !== false;
+  if (raw.hideGameCrosshair === true) d.hideGameCrosshair = true;
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
     // An element the registry no longer has (the kill feed, say) has nothing to apply to.
     if (!ID.test(id) || !elementById(id)) continue;

@@ -46,6 +46,12 @@ describe('validateDesign', () => {
     const d = validateDesign({ v: 1, elements: { killFeed: { visible: false }, chat: { x: 5 } } });
     expect(d.elements).toEqual({ chat: { x: 5 } });
   });
+
+  it('keeps hideGameCrosshair only when it is true', () => {
+    expect(validateDesign({ v: 1, hideGameCrosshair: true }).hideGameCrosshair).toBe(true);
+    expect('hideGameCrosshair' in validateDesign({ v: 1, hideGameCrosshair: 'yes' })).toBe(false);
+    expect('hideGameCrosshair' in validateDesign({ v: 1 })).toBe(false);
+  });
 });
 
 describe('clampOverride', () => {

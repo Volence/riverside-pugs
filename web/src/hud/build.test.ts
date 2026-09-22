@@ -35,6 +35,17 @@ describe('buildHud, layout', () => {
     expect(got.filter((n) => n.key.toLowerCase() === 'xhair').length).toBe(1);
   });
 
+  // Probe T2: never_draw on HudCrosshair hides the engine crosshair for both teams.
+  it('writes never_draw on HudCrosshair only when the player hides the game crosshair', () => {
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    for (const preset of ['stock', 'modern'] as const) {
+      const on = kvFind(layoutOf(buildHud(design({ preset, hideGameCrosshair: true }), { fonts })), ['HudCrosshair'])!;
+      expect(kvGet(on, 'never_draw'), preset).toBe('1');
+      const off = kvFind(layoutOf(buildHud(design({ preset }), { fonts })), ['HudCrosshair'])!;
+      expect(kvGet(off, 'never_draw'), preset).toBeUndefined();
+    }
+  });
+
   it('moves one element and nothing else', () => {
     const got = layoutOf(buildHud(design({ elements: { ownHealth: { x: 8, y: 400 } } })));
     const p = kvFind(got, ['CHudLocalPlayerDisplay'])!;
