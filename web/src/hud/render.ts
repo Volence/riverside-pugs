@@ -165,8 +165,46 @@ export function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, 
   return true;
 }
 
-/** Test seam: forget every loaded image and every warned-about material. */
-export function _resetAssetCache(): void { images.clear(); missing.clear(); }
+/**
+ * An ImagePanel's drawColor multiplies its texture: the stock infected card
+ * draws its frame at 64 64 64, about a quarter brightness. Canvas 2D has no
+ * tinted drawImage, and a multiply fill over the child's rect on the page
+ * would also darken whatever shows through the texture's transparent parts
+ * (most of that frame), so the tint is made once on a scratch canvas:
+ * multiply by the colour, then cut back to the texture's own alpha. Where
+ * there is no scratch canvas (happy-dom has none) the texture draws untinted.
+ */
+let canvasFactory: (w: number, h: number) => HTMLCanvasElement | null = defaultCanvas;
+function defaultCanvas(w: number, h: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+export function _setCanvasFactory(f: ((w: number, h: number) => HTMLCanvasElement | null) | null): void { canvasFactory = f ?? defaultCanvas; }
+const tints = new Map<string, CanvasImageSource>();
+
+function tinted(img: HTMLImageElement, material: string, r: number, g: number, b: number): CanvasImageSource {
+  const key = `${material}|${r},${g},${b}`;
+  const cached = tints.get(key);
+  if (cached) return cached;
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const c = canvasFactory(w, h);
+  const t = c?.getContext('2d');
+  if (!c || !t) return img;
+  t.drawImage(img, 0, 0, w, h);
+  t.globalCompositeOperation = 'multiply';
+  t.fillStyle = `rgb(${r},${g},${b})`;
+  t.fillRect(0, 0, w, h);
+  t.globalCompositeOperation = 'destination-in';
+  t.drawImage(img, 0, 0, w, h);
+  t.globalCompositeOperation = 'source-over';
+  tints.set(key, c);
+  return c;
+}
+
+/** Test seam: forget every loaded image, tint and warned-about material. */
+export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); }
 
 function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();
@@ -202,8 +240,6 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
   const image = kvGet(n, 'image');
   const fill = kvGet(n, 'fillcolor');
   const lname = n.key.toLowerCase();
-  let src: CanvasImageSource | undefined;
-  let natural: { w: number; h: number } | undefined;
   if (lname === 'playerimage') { silhouette(ctx, r); return; }      // the special infected's own head: no survivor portrait
   if (lname === 'head') {
     // Game code picks the portrait; the preview picks a fixed one per card.
@@ -218,13 +254,16 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     if (material.startsWith('vgui/hud/hudeditor/')) {
       drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r);   // false: an upload; the game shows it, we cannot yet
       return;
-    } else {
-      const img = artImage(material, opts.onAsset);
-      if (!img) { if (missing.has(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
-      src = img; natural = { w: img.naturalWidth, h: img.naturalHeight };
     }
-    if ((kvGet(n, 'scaleImage') ?? '0') !== '0' || !natural) ctx.drawImage(src, r.x, r.y, r.w, r.h);
-    else ctx.drawImage(src, r.x, r.y, natural.w * k, natural.h * k);   // unscaled: texture pixels are HUD units
+    const img = artImage(material, opts.onAsset);
+    if (!img) { if (missing.has(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
+    const [tr, tg, tb, ta] = parseColour(kvGet(n, 'drawColor') ?? '255 255 255 255');
+    const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
+    ctx.save();
+    ctx.globalAlpha *= ta / 255;
+    if ((kvGet(n, 'scaleImage') ?? '0') !== '0') ctx.drawImage(src, r.x, r.y, r.w, r.h);
+    else ctx.drawImage(src, r.x, r.y, img.naturalWidth * k, img.naturalHeight * k);   // unscaled: texture pixels are HUD units
+    ctx.restore();
     return;
   }
   if (fill) { ctx.fillStyle = colourOf(design, fill); ctx.fillRect(r.x, r.y, r.w, r.h); }

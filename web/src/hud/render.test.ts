@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, drawSlotStyle, PANEL_FILE, _setImageFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, drawSlotStyle, PANEL_FILE, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
 import { buildHud, buildTrees } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
@@ -11,12 +11,13 @@ const text = (files: { path: string; data: Uint8Array }[], path: string) =>
 
 /** A recording 2D context: every method the renderer calls is a no-op that logs its name. */
 function recCtx() {
-  const calls: { m: string; a: unknown[]; font: string; fill: string }[] = [];
-  // Each call snapshots ctx.font and ctx.fillStyle at the moment it was made, so a test can pin how a child was drawn.
-  const noop = (m: string) => (...a: unknown[]) => { calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle }); };
+  const calls: { m: string; a: unknown[]; font: string; fill: string; op: string }[] = [];
+  // Each call snapshots ctx.font, ctx.fillStyle and the composite op at the moment it was made, so a test can pin how a child was drawn.
+  const noop = (m: string) => (...a: unknown[]) => { calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, op: ctx.globalCompositeOperation }); };
   const ctx = {
     canvas: { width: 853, height: 480 },
     fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1, lineWidth: 1,
+    globalCompositeOperation: 'source-over',
     save: noop('save'), restore: noop('restore'), beginPath: noop('beginPath'), rect: noop('rect'), clip: noop('clip'),
     fillRect: noop('fillRect'), strokeRect: noop('strokeRect'), fillText: noop('fillText'), drawImage: noop('drawImage'),
     setLineDash: noop('setLineDash'), moveTo: noop('moveTo'), lineTo: noop('lineTo'), stroke: noop('stroke'), fill: noop('fill'),
@@ -207,6 +208,33 @@ describe('drawPanel', () => {
       drawPanel(second.ctx, d, 'ownHealth', { x: 0, y: 0 }, 1, { onAsset: () => { redraws++; } });
       expect(second.calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y, r.w, r.h]);
     } finally { warn.mockRestore(); }
+  });
+
+  it("tints an image by its drawColor, as the stock infected card's dark frame is drawn", () => {
+    // Stock zombieteamdisplayplayer.res draws BackgroundImage with drawColor 64 64 64 255: about a quarter
+    // brightness. The tint is made on a scratch canvas (multiply, then cut back to the image's own alpha) so
+    // the frame's transparent parts do not darken whatever is behind the card; the card then draws that.
+    const scratch = recCtx();
+    const made: { width: number; height: number }[] = [];
+    _setCanvasFactory((w, h) => {
+      const c = { width: w, height: h, getContext: () => scratch.ctx } as unknown as HTMLCanvasElement;
+      made.push(c);
+      return c;
+    });
+    try {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, design({}), 'infectedRow', { x: 0, y: 0 }, 1, { card: 0 });
+      const bg = childRects(design({}), 'infectedRow', { x: 0, y: 0 }, 1).find((c) => c.name === 'BackgroundImage')!;
+      expect(made).toHaveLength(1);
+      const multiply = scratch.calls.find((c) => c.m === 'fillRect' && c.op === 'multiply');
+      expect(multiply?.fill).toBe('rgb(64,64,64)');
+      expect(scratch.calls.some((c) => c.m === 'drawImage' && c.op === 'destination-in')).toBe(true);
+      expect(calls.some((c) => c.m === 'drawImage' && c.a[0] === made[0]
+        && c.a[1] === bg.x && c.a[2] === bg.y && c.a[3] === bg.w && c.a[4] === bg.h)).toBe(true);
+      // A child with no drawColor (the bar frames on the survivor card) draws its art untinted.
+      drawPanel(recCtx().ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
+      expect(made).toHaveLength(1);
+    } finally { _setCanvasFactory(null); }
   });
 
   it('draws the infected card head as a silhouette, never a survivor portrait', () => {
