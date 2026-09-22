@@ -4,6 +4,7 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import { allowedType, attachmentPath } from '../tickets/attachments.js';
 import type { AttachmentRow } from '../tickets/messages.js';
 import { canSeeTicket, getTicketRow } from '../tickets/store.js';
@@ -11,9 +12,23 @@ import { removeMessage } from '../tickets/removal.js';
 import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
 import { listTickets, ticketCounts, ticketDetail, type TicketFilter } from '../tickets/views.js';
+import { checkDiscordSanction, checkLift, recordDiscordSanction, recordLift } from '../tickets/discordSanctions.js';
 import { caseFile } from '../tickets/caseFile.js';
 import { fileViewer } from '../admin/fileAccess.js';
 import { playerFileSummary } from '../admin/playerFileSummary.js';
+import type { ModerationOps } from '../discord/transport.js';
+
+/** Why Discord said no, in the words the site shows, for APPLYING a
+ *  sanction. Lifting a timeout has its own wording for not_member (see the
+ *  lift route below): the bot cannot end a timeout for someone who is no
+ *  longer in the server, which is a different situation from having nobody
+ *  to time out in the first place. */
+const refusalText = (why: 'hierarchy' | 'not_member' | 'unknown_user' | 'other'): string => ({
+  hierarchy: 'Discord refused: their role is above the bot\'s, or they are an administrator',
+  not_member: 'they are no longer in the Discord server, so there is nothing to time out; an admin can still ban them',
+  unknown_user: 'Discord has no account with that id',
+  other: 'Discord refused the action; try again, or do it by hand in Discord',
+})[why];
 
 export interface TicketRouteOpts {
   db: DB;
@@ -27,13 +42,18 @@ export interface TicketRouteOpts {
   /** Called after a removal committed: pokes the bot, if it is running, to
    *  delete the message in Discord. Never awaited by the route. */
   afterRemove: () => void;
+  /** The running bot's moderation surface, or null when Discord is not
+   *  connected. Read per call, like the bot itself: a route dialled before
+   *  the bot finishes logging in, or after it drops, must see null rather
+   *  than a stale reference. */
+  moderation: () => ModerationOps | null;
 }
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
  *  ticket is restricted. */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
-  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove } = opts;
+  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove, moderation } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
@@ -167,6 +187,93 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     afterRemove();
     // No broadcast('refresh'): removeMessage published the ticket signal, and
     // the staff-scoped nudge tells the pages that may see it.
+    return { ok: true };
+  });
+
+  /**
+   * Time out or ban, in Discord, the Discord-only person a ticket is about.
+   * Discord first, then the record: checkDiscordSanction decides whether this
+   * is allowed at all (caps, reason, admin-vs-mod) before Discord is ever
+   * dialled, so a refused check never reaches Discord; a refusal FROM Discord
+   * writes nothing here either. Only once Discord has accepted does the row
+   * get written, and if that write throws, an admin problem event says the
+   * action happened but was not recorded.
+   *
+   * Not through act(): it awaits Discord before it can decide what, if
+   * anything, to write, same as messages/:mid/remove bypasses it for its own
+   * reason.
+   */
+  app.post('/api/mod/tickets/:id/discord-sanction', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const c = checkDiscordSanction(db, id, me, (req.body ?? {}) as object);
+    if (!c.ok) return reply.code(c.status).send({ error: c.error });
+    const mod = moderation();
+    if (!mod) return reply.code(503).send({ error: 'the Discord bot is not running' });
+    const { plan } = c;
+    const result = plan.kind === 'timeout'
+      ? await mod.timeout(plan.discordId, plan.minutes as number, plan.reason)
+      : await mod.ban(plan.discordId, plan.reason);
+    if (!result.ok) return reply.code(409).send({ error: refusalText(result.why) });
+    try {
+      recordDiscordSanction(db, plan, me);
+    } catch (err) {
+      publishAdminEvent({
+        kind: 'problem',
+        text: `Discord ${plan.kind === 'ban' ? 'banned' : 'timed out'} ${plan.discordId} for ticket #${id}, ` +
+          `but recording the sanction failed: ${String(err)}`,
+      });
+      return reply.code(500).send({ error: 'Discord applied it, but recording it failed; an admin has been told' });
+    }
+    // The reason is not in the audit detail, as with removals: it is on the
+    // ticket (recordDiscordSanction put it in a ticket_events row), and an
+    // audit detail is read by more people than that.
+    logAdmin(db, me, 'ticket_discord_sanction', id, { kind: plan.kind, minutes: plan.minutes }, { quiet: plan.restricted });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /**
+   * Lift a Discord sanction. Only an admin, which checkLift enforces (it also
+   * answers the same 404 a missing sanction would for one on a restricted
+   * ticket the caller cannot see). Discord first, as above.
+   *
+   * A timeout whose member has since left the server cannot be lifted at
+   * all: Discord has nothing to remove a timeout FROM, so removeTimeout comes
+   * back not_member, and that gets its own wording here rather than the one
+   * checkDiscordSanction's refusalText uses for applying one, because "there
+   * is nothing to time out" does not fit a timeout that is already running.
+   * Nothing is recorded when this happens; it lapses on its own.
+   */
+  app.post('/api/mod/discord-sanctions/:sid/lift', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const sid = Number((req.params as { sid: string }).sid);
+    const c = checkLift(db, sid, me);
+    if (!c.ok) return reply.code(c.status).send({ error: c.error });
+    const mod = moderation();
+    if (!mod) return reply.code(503).send({ error: 'the Discord bot is not running' });
+    const { plan } = c;
+    const result = plan.kind === 'timeout'
+      ? await mod.removeTimeout(plan.discordId, 'ticket sanction lifted')
+      : await mod.unban(plan.discordId, 'ticket sanction lifted');
+    if (!result.ok) {
+      if (result.why === 'not_member') {
+        const row = db.prepare('SELECT until FROM discord_sanctions WHERE id = ?').get(sid) as { until: string | null } | undefined;
+        const at = row?.until ? ` at ${row.until}` : '';
+        return reply.code(409).send({
+          error: `they are no longer in the Discord server, so the bot cannot lift the timeout; it ends on its own${at}`,
+        });
+      }
+      return reply.code(409).send({ error: refusalText(result.why) });
+    }
+    // Guards against two admins racing to lift the same sanction: the loser's
+    // UPDATE changes nothing, recordLift reports that, and this answers 409
+    // rather than writing a second event for a lift that already happened.
+    if (!recordLift(db, plan, me)) return reply.code(409).send({ error: 'that sanction is no longer in force' });
+    logAdmin(db, me, 'ticket_discord_sanction_lift', plan.ticketId ?? 0, { kind: plan.kind, sanctionId: plan.sanctionId }, { quiet: plan.restricted });
+    broadcast('refresh');
     return { ok: true };
   });
 

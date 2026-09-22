@@ -102,15 +102,22 @@ export function checkLift(db: DB, sanctionId: number, by: string, now = new Date
   return { ok: true, plan: { sanctionId: row.id, discordId: row.discord_id, kind: row.kind, ticketId: row.ticket_id, restricted } };
 }
 
-/** Mark the row lifted, and log it on the ticket if it has one. */
-export function recordLift(db: DB, plan: LiftPlan, by: string, now = new Date()): void {
-  db.transaction(() => {
-    db.prepare('UPDATE discord_sanctions SET lifted_by = ?, lifted_at = ? WHERE id = ?').run(by, now.toISOString(), plan.sanctionId);
-    if (plan.ticketId !== null) {
+/** Mark the row lifted, and log it on the ticket if it has one. Guarded with
+ *  `AND lifted_at IS NULL` so two admins racing to lift the same sanction
+ *  cannot both record it: the loser's UPDATE changes nothing, and this
+ *  returns false, so the caller (the route) can answer 409 rather than write
+ *  a second event and re-notify the ticket. */
+export function recordLift(db: DB, plan: LiftPlan, by: string, now = new Date()): boolean {
+  const changed = db.transaction(() => {
+    const c = db.prepare('UPDATE discord_sanctions SET lifted_by = ?, lifted_at = ? WHERE id = ? AND lifted_at IS NULL')
+      .run(by, now.toISOString(), plan.sanctionId).changes > 0;
+    if (c && plan.ticketId !== null) {
       addTicketEvent(db, plan.ticketId, by, 'discord_sanction_lifted', { kind: plan.kind }, now);
     }
+    return c;
   })();
-  if (plan.ticketId !== null) publishTicketSignal({ kind: 'ticket', ticketId: plan.ticketId });
+  if (changed && plan.ticketId !== null) publishTicketSignal({ kind: 'ticket', ticketId: plan.ticketId });
+  return changed;
 }
 
 export interface SanctionRow {

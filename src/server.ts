@@ -32,6 +32,7 @@ import { createDjsTransport } from './discord/djsTransport.js';
 import { VoiceChannels } from './discord/voice.js';
 import { COMMAND_DEFS, handleCommand } from './discord/commands.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
+import type { ModerationOps } from './discord/transport.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
@@ -142,6 +143,10 @@ export interface ServerDeps {
   /** Runs one console command on one server and returns the reply, for the
    *  live board's clock actions. Injected in tests so they never dial a box. */
   serverQuery?: ServerQuery;
+  /** Test seam: stands in for the running bot's moderation surface, so a
+   *  ticket-discord-sanction route can be tested without a real bot. When
+   *  set, it wins over whatever the bot (if any) is actually running. */
+  discordModeration?: ModerationOps;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -1285,6 +1290,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     guildId: deps.config.discord?.guildId ?? null,
     attachmentsDir: deps.config.ticketAttachmentsDir,
     afterRemove: () => { void ticketMirror?.sweepRemovals(); },
+    moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,

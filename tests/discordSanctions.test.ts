@@ -90,6 +90,17 @@ describe('recording and lifting', () => {
     expect(sanctionsFor(db, LURKER, now)).toMatchObject([{ id, kind: 'ban', active: false, liftedBy: ADMIN }]);
   });
 
+  it('a second recordLift on the same sanction changes nothing and writes no second event', () => {
+    const c = ask(ADMIN, { kind: 'ban', reason: 'x' });
+    if (!c.ok) throw new Error('check failed');
+    const id = recordDiscordSanction(db, c.plan, ADMIN, now);
+    const l = checkLift(db, id, ADMIN, now);
+    if (!l.ok) throw new Error('lift check failed');
+    expect(recordLift(db, l.plan, ADMIN, now)).toBe(true);
+    expect(recordLift(db, l.plan, ADMIN, now)).toBe(false);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_events WHERE kind = 'discord_sanction_lifted'").get()).toEqual({ n: 1 });
+  });
+
   it('an expired timeout cannot be lifted', () => {
     const c = ask(MOD, { kind: 'timeout', minutes: 1, reason: 'x' });
     if (!c.ok) throw new Error('check failed');
