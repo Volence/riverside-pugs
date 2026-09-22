@@ -334,6 +334,32 @@ describe('the standing message', () => {
     expect(stored(db)!.message_id).not.toBe(first);
     expect(standing(t)).toHaveLength(1);
   });
+
+  it('does not re-send when an edit throws, because a throw means Discord is down (or rate limited, or permissions were pulled), never that the message is gone', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    const first = stored(db)!.message_id;
+    t.failEdits = 1;
+    // A throw must propagate out of the edit call and be swallowed by tick's
+    // own catch, exactly like ensureMessage seeing nothing else go wrong: it
+    // must never be treated as "Discord lost the message", which is what a
+    // `false` return means, or this would post a fresh standing message every
+    // five minutes forever.
+    await rb.tick();
+    expect(stored(db)!.message_id).toBe(first);
+    expect(standing(t)).toHaveLength(1);
+  });
+
+  it('recovers once Discord is back, after a send that threw on the very first tick, without ever having written a report_message row for the failure', async () => {
+    const rb = liveIn(db, t, 'c1');
+    t.failSends = 1;
+    await rb.tick();
+    expect(stored(db)).toBeUndefined();
+    expect(standing(t)).toHaveLength(0);
+    await rb.tick();
+    expect(stored(db)).toMatchObject({ channel_id: 'c1' });
+    expect(standing(t)).toHaveLength(1);
+  });
 });
 
 describe('reaping drafts', () => {
