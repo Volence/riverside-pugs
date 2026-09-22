@@ -167,13 +167,6 @@ function paintChat(ctx: CanvasRenderingContext2D, r: Rect) {
   text(ctx, 'Francis: got it', r.x + 4, r.y + r.h - 12, 12, '#e8e8e8');
 }
 
-function paintKillFeed(ctx: CanvasRenderingContext2D, r: Rect) {
-  ctx.textAlign = 'right';
-  text(ctx, 'Louis killed a Hunter', r.x + r.w, r.y + 16, 12, '#e8e8e8');
-  text(ctx, 'A Smoker killed Zoey', r.x + r.w, r.y + 34, 12, '#e8e8e8');
-  ctx.textAlign = 'left';
-}
-
 function paintTargetId(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.textAlign = 'center';
   text(ctx, 'Louis', r.x + r.w / 2, r.y + r.h / 2 + 4, 12, '#ffffff');
@@ -241,7 +234,6 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   teamColumn: paintTeamColumn,
   weaponSelection: paintWeaponSelection,
   chat: paintChat,
-  killFeed: paintKillFeed,
   targetId: paintTargetId,
   progressBar: paintProgressBar,
   xhair: paintXhair,

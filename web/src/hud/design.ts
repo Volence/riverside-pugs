@@ -9,6 +9,7 @@
  */
 import type { Preset } from './base';
 import type { Aspect } from './units';
+import { elementById } from './elements';
 
 export interface ElementOverride {
   visible?: boolean;
@@ -108,7 +109,8 @@ export function validateDesign(raw: unknown): HudDesign {
   d.advanced = raw.advanced === true;
   d.xhair = raw.xhair !== false;
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
-    if (!ID.test(id)) continue;
+    // An element the registry no longer has (the kill feed, say) has nothing to apply to.
+    if (!ID.test(id) || !elementById(id)) continue;
     const e = element(v);
     if (Object.keys(e).length) d.elements[id] = e;
   }

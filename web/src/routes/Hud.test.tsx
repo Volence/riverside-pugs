@@ -19,7 +19,7 @@ describe('nudge', () => {
     expect(d.elements.ownHealth).toEqual({ x: 718, y: 389 });
   });
   it('does nothing to an element that cannot move', () => {
-    expect(nudge(DEFAULT_DESIGN, 'killFeed', 5, 5)).toBe(DEFAULT_DESIGN);
+    expect(nudge(DEFAULT_DESIGN, 'targetId', 5, 5)).toBe(DEFAULT_DESIGN);
   });
 
   // Dragging clamps to an 8-unit floor via clampSpan; a plain x + dx nudge
@@ -91,6 +91,13 @@ describe('Hud page', () => {
     render(<Hud />);
     expect(screen.getByRole('combobox', { name: /preset/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /download/i })).toBeTruthy();
+  });
+
+  it('says the infected health card is shown as the Hunter and that the Tank uses the same file', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Your infected health' }));
+    expect(screen.getByText('Shown as the Hunter; the Tank uses the same file.')).toBeTruthy();
   });
 
   it('reveals the advanced-only style rows and switches the download button to a zip', () => {

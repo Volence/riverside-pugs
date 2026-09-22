@@ -280,6 +280,10 @@ function ElementControls(
         <p class="muted hud__note">The game places this one. It can be hidden but not moved.</p>
       )}
 
+      {id === 'siHealth' && (
+        <p class="muted hud__note">Shown as the Hunter; the Tank uses the same file.</p>
+      )}
+
       {el.move && (
         <div class="hud__row2">
           <label class="hud__field">

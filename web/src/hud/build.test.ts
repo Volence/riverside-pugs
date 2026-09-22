@@ -46,8 +46,8 @@ describe('buildHud, layout', () => {
   });
 
   it('hides an element', () => {
-    const got = layoutOf(buildHud(design({ elements: { killFeed: { visible: false } } })));
-    expect(kvGet(kvFind(got, ['HudDeathNotice'])!, 'visible')).toBe('0');
+    const got = layoutOf(buildHud(design({ elements: { targetId: { visible: false } } })));
+    expect(kvGet(kvFind(got, ['TargetID'])!, 'visible')).toBe('0');
   });
 
   it('ignores a move on an element that cannot move', () => {
@@ -124,11 +124,12 @@ describe('buildHud, scale', () => {
     expect(paths).not.toContain('resource/clientscheme.res');
   });
 
-  it('scales all six infected health files together', () => {
+  it('scales the five infected health files the game reads, and never writes tankhealth.res', () => {
     const paths = buildHud(design({ elements: { siHealth: { scale: 1.2 } } })).map((f) => f.path);
-    for (const n of ['boomerhealth', 'hunterhealth', 'smokerhealth', 'tankhealth', 'zombiehealthleft_large', 'zombiehealthleft_small']) {
+    for (const n of ['boomerhealth', 'hunterhealth', 'smokerhealth', 'zombiehealthleft_large', 'zombiehealthleft_small']) {
       expect(paths).toContain(`resource/ui/hud/${n}.res`);
     }
+    expect(paths).not.toContain('resource/ui/hud/tankhealth.res');
   });
 });
 

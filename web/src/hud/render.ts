@@ -34,7 +34,7 @@ export interface DrawOpts { card?: number; onAsset?: () => void }
 
 const SCHEME = 'resource/clientscheme.res';
 
-/** The file each inside-editable panel draws from. siHealth is six files that are one card at six placements; the Hunter's is the one shown. */
+/** The file each inside-editable panel draws from. siHealth is five files that are one card at five placements; the Hunter's is the one shown. */
 export const PANEL_FILE: Record<string, string> = {
   ownHealth: 'resource/ui/hud/localplayerpanel.res',
   teamColumn: 'resource/ui/hud/teammatepanel.res',

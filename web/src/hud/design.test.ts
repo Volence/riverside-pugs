@@ -33,6 +33,11 @@ describe('validateDesign', () => {
     } });
     expect(Object.keys(d.images)).toEqual(['ok']);
   });
+
+  it('drops overrides for elements the editor no longer has', () => {
+    const d = validateDesign({ v: 1, elements: { killFeed: { visible: false }, chat: { x: 5 } } });
+    expect(d.elements).toEqual({ chat: { x: 5 } });
+  });
 });
 
 describe('clampOverride', () => {

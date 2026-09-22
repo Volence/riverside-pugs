@@ -37,7 +37,12 @@ export interface HudElement {
   props: Prop[];
 }
 
-const SI_HEALTH = ['boomerhealth', 'hunterhealth', 'smokerhealth', 'tankhealth', 'zombiehealthleft_large', 'zombiehealthleft_small']
+/**
+ * The special infected health files the game reads. The Tank reads
+ * hunterhealth.res (probe T1), so tankhealth.res is never loaded and is not
+ * listed: scaling it only shipped a file the game ignores.
+ */
+const SI_HEALTH = ['boomerhealth', 'hunterhealth', 'smokerhealth', 'zombiehealthleft_large', 'zombiehealthleft_small']
   .map((n) => `resource/ui/hud/${n}.res`);
 
 export const ELEMENTS: HudElement[] = [
@@ -51,8 +56,6 @@ export const ELEMENTS: HudElement[] = [
   { id: 'weaponSelection', label: 'Weapons', side: 'survivor', key: 'HudWeaponSelection', move: true, resize: 'none',
     children: [], props: ['visible'] },
   { id: 'chat', label: 'Chat', side: 'both', key: 'HudChat', move: true, resize: 'free', children: [], props: ['visible'] },
-  { id: 'killFeed', label: 'Kill feed', side: 'both', key: 'HudDeathNotice', move: false, resize: 'none', children: [],
-    mockSize: { stock: { w: 200, h: 60 }, modern: { w: 200, h: 60 } }, mockPos: { x: 'r204', y: '4' }, props: ['visible'] },
   { id: 'targetId', label: 'Player name under crosshair', side: 'both', key: 'TargetID', move: false, resize: 'none',
     children: [], mockSize: { stock: { w: 160, h: 16 }, modern: { w: 160, h: 16 } }, mockPos: { x: 'c-80', y: 'c30' },
     props: ['visible'] },
