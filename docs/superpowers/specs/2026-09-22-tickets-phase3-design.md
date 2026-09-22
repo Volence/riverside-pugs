@@ -89,12 +89,11 @@ and a second open is a no-op.
 ### Linking folds a Discord person into a player
 
 `adoptDiscordPerson(db, discordId, steamid)` in `src/tickets/adopt.ts` moves every
-`tickets.target_discord_id`, `ticket_reports.reporter_discord_id`,
-and `ticket_threads.reporter_discord_id` reference over to the steamid.
-`discord_sanctions` rows stay keyed by Discord id, because Discord acts on that id; the People
-desk shows them on the player's case view through the link. If that leaves two open
+`tickets.target_discord_id`, `ticket_reports.reporter_discord_id` and
+`ticket_threads.reporter_discord_id` reference over to the steamid. If that leaves two open
 tickets about the same person with the same `restricted` flag, they fold the way
-`mergePlayers` folds them. `linkDiscord` in `src/players.ts` calls it inside its
+`mergePlayers` folds them. `discord_sanctions` rows stay keyed by Discord id, because Discord
+acts on that id; the People desk shows them on the player's case view through the link. `linkDiscord` in `src/players.ts` calls it inside its
 transaction. `MERGE_HANDLED_PLAYER_COLUMNS` gains the new nullable steamid columns.
 
 ### Auto-restrict
