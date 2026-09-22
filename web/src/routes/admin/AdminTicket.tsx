@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { modApi, type TicketDiscussion } from '../../api';
+import { modApi, type TicketDiscussion, type DiscordSanction } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { useTicketNudge } from '../../hooks/useTicketNudge';
 import { campaignName } from '../../format';
@@ -20,6 +20,15 @@ const DISCORD_TIMEOUT_MAX_MINUTES = 40320;
 const TIMEOUT_LENGTHS: [minutes: number, label: string][] = [
   [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [20160, '14 days'], [40320, '28 days'],
 ];
+
+/** One Discord sanction as a line. A redacted row (a restricted ticket this
+ *  viewer is off) has no issuer: no "by" clause rather than a dangling one. */
+export function sanctionText(s: DiscordSanction): string {
+  const by = s.createdByName || s.createdBy || '';
+  const what = s.kind === 'ban' ? 'Banned from the Discord' : `Timed out until ${fmtTime(s.until!)}`;
+  const state = s.liftedAt ? ` (lifted ${fmtTime(s.liftedAt)})` : s.active ? '' : ' (ended)';
+  return `${what}${by ? ` by ${by}` : ''}: ${s.reason}${state}`;
+}
 
 /** What to say about Discord, in plain words, for each state. */
 function Discussion({ d }: { d: TicketDiscussion }) {
@@ -139,6 +148,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
             <li>{c.bans.length} ban{c.bans.length === 1 ? '' : 's'} on record, {c.penalties.length} penalt{c.penalties.length === 1 ? 'y' : 'ies'}, {c.inputFlags.length} input flag{c.inputFlags.length === 1 ? '' : 's'}</li>
             {c.aliases.length > 0 && <li>{c.aliases.length} merged second account{c.aliases.length === 1 ? '' : 's'}</li>}
             {c.sharesAddressWith.length > 0 && <li>Shares a connection with: {c.sharesAddressWith.map((s) => s.name).join(', ')}</li>}
+            {(c.discordSanctions ?? []).map((s) => <li key={`ds${s.id}`}>{sanctionText(s)}</li>)}
           </ul>
           {c.tickets.filter((o) => o.id !== t.id).length > 0 && (
             <>
@@ -160,23 +170,16 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
         <section>
           <h4>Discord sanctions</h4>
           <ul class="admin-list">
-            {data.discordSanctions.map((s) => {
-              // A redacted row (ticketId null) has createdBy '' and
-              // createdByName null: show no "by" clause rather than a
-              // dangling "by ".
-              const by = s.createdByName || s.createdBy || '';
-              return (
-                <li key={s.id}>
-                  {s.kind === 'ban' ? 'Banned from the Discord' : `Timed out until ${fmtTime(s.until!)}`}{by ? ` by ${by}` : ''}: {s.reason}
-                  {s.liftedAt ? ` (lifted ${fmtTime(s.liftedAt)})` : s.active ? '' : ' (ended)'}
-                  {s.active && s.ticketId !== null && data.viewer.isAdmin && (
-                    <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.liftDiscordSanction(s.id), {
-                      title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
-                    })}>Lift</button>
-                  )}
-                </li>
-              );
-            })}
+            {data.discordSanctions.map((s) => (
+              <li key={s.id}>
+                {sanctionText(s)}
+                {s.active && s.ticketId !== null && data.viewer.isAdmin && (
+                  <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.liftDiscordSanction(s.id), {
+                    title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
+                  })}>Lift</button>
+                )}
+              </li>
+            ))}
           </ul>
         </section>
       )}

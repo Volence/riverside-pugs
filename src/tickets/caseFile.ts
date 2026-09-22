@@ -2,7 +2,8 @@ import type { DB } from '../db.js';
 import { playerDetail } from '../admin/players.js';
 import { getPlayer } from '../players.js';
 import { banRedactor } from '../admin/banRedaction.js';
-import { ticketsAbout } from './views.js';
+import { ticketsAbout, redactDiscordSanction } from './views.js';
+import { sanctionsForPlayer } from './discordSanctions.js';
 
 /**
  * What a moderator sees about the accused beside a ticket. Picked from
@@ -37,5 +38,9 @@ export function caseFile(db: DB, steamid: string, viewer: string) {
     aliases: d.aliases,
     sharesAddressWith: d.sharesAddressWith,
     tickets: ticketsAbout(db, steamid, viewer),
+    // Timeouts and bans the bot carried out in Discord, on any Discord id
+    // this player has linked: most were placed before they had a player
+    // account at all. Redacted per viewer like a ban from a restricted ticket.
+    discordSanctions: sanctionsForPlayer(db, steamid).map((s) => redactDiscordSanction(db, s, viewer)),
   };
 }

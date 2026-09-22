@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, type FileAction, type PlayerFileData } from '../../../api';
 import { Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
+import { sanctionText } from '../AdminTicket';
 
 const LENGTHS: [value: string, label: string][] = [
   ['', 'Permanent'], ['60', '1 hour'], ['1440', '1 day'], ['10080', '1 week'], ['43200', '30 days'],
@@ -66,6 +67,15 @@ export function StandingSection(
             </li>
           ))}
         </ul>
+      )}
+
+      {(s.discordSanctions ?? []).length > 0 && (
+        <>
+          <h4>Discord</h4>
+          <ul class="admin-list">
+            {s.discordSanctions!.map((x) => <li key={x.id}>{sanctionText(x)}</li>)}
+          </ul>
+        </>
       )}
 
       <h4>

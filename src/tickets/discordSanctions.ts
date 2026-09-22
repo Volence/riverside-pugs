@@ -191,3 +191,20 @@ export function sanctionsFor(db: DB, discordId: string, now = new Date()): Sanct
     active: r.lifted_at === null && (r.until === null || r.until > nowIso),
   }));
 }
+
+/**
+ * Every sanction on any Discord id this player has ever linked, newest first.
+ * The rows stay keyed by Discord id (Discord acts on that id), so once a
+ * Discord-only person links Steam, this is how their player case view still
+ * finds what was done to them before. discord_link_history keeps every link,
+ * and a merge moves those rows onto the survivor. Not redacted: callers pass
+ * each row through redactDiscordSanction for their viewer.
+ */
+export function sanctionsForPlayer(db: DB, steamid: string, now = new Date()): SanctionRow[] {
+  const ids = (db.prepare(
+    `SELECT discord_id FROM discord_link_history WHERE steamid = ?
+     UNION SELECT discord_id FROM players WHERE steamid = ? AND discord_id IS NOT NULL`,
+  ).all(steamid, steamid) as { discord_id: string }[]).map((r) => r.discord_id);
+  return ids.flatMap((id) => sanctionsFor(db, id, now))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id));
+}

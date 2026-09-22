@@ -72,7 +72,7 @@ export function ticketsAbout(db: DB, targetId: string, viewer: string): TicketSu
  * stands in for createdBy because SanctionRow types it as string, not
  * string | null, matching redactBan's own reasoning for BanRow.
  */
-function redactDiscordSanction(db: DB, s: SanctionRow, viewer: string): SanctionRow {
+export function redactDiscordSanction(db: DB, s: SanctionRow, viewer: string): SanctionRow {
   if (!banIsWithheld(db, s.ticketId, viewer)) return s;
   return { ...s, reason: WITHHELD_REASON, ticketId: null, createdBy: '', createdByName: null, liftedBy: null };
 }

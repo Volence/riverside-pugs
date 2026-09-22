@@ -170,6 +170,12 @@ describe('AdminTicket', () => {
     expect(screen.queryByRole('button', { name: 'Lift' })).toBeNull();
   });
 
+  it('lists the accused\'s Discord sanctions in the case file', async () => {
+    mockMod.ticket.mockResolvedValue(detail({ caseFile: { ...caseFile, discordSanctions: [redactedSanctionRow] } }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByText('Banned from the Discord: Withheld (restricted ticket)')).toBeTruthy();
+  });
+
   it('caps the Time out select at a day for a moderator capped there, and offers no Permanent', async () => {
     mockMod.ticket.mockResolvedValue(detail({
       ticket: { ...detail().ticket, ...DISCORD_TARGET },

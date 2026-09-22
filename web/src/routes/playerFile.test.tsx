@@ -123,6 +123,18 @@ describe('the Player File', () => {
     expect(screen.getByText(/4 connects, United States/)).toBeTruthy();
   });
 
+  it('lists Discord sanctions from before the player linked Steam', async () => {
+    const base = file();
+    mockPeople.file.mockResolvedValue(file({
+      sections: { ...base.sections, standing: { ...base.sections.standing, discordSanctions: [{
+        id: 3, kind: 'ban', until: null, reason: 'spam raid', ticketId: 4, createdBy: '9', createdByName: 'boss',
+        createdAt: '2026-09-01T00:00:00.000Z', liftedBy: null, liftedAt: null, active: true,
+      }] } },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    expect(await screen.findByText('Banned from the Discord by boss: spam raid')).toBeTruthy();
+  });
+
   it('shows ready-up and pause conduct beside the league, and links each match to its chat', async () => {
     mockPeople.file.mockResolvedValue(file({
       sections: {

@@ -5,7 +5,8 @@ import { penaltyHistory, activeTimeout } from '../penalties.js';
 import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
 import { signonDropSummary } from '../signonDrops.js';
-import { ticketsAbout } from '../tickets/views.js';
+import { ticketsAbout, redactDiscordSanction } from '../tickets/views.js';
+import { sanctionsForPlayer, type SanctionRow } from '../tickets/discordSanctions.js';
 import {
   activeBan, bansOf, notesOf, recentMatchesOf, searchPlayers,
   type BanRow, type PlayerNoteRow, type RecentMatchRow,
@@ -44,6 +45,7 @@ export interface PlayerFile {
       bans: BanRow[];
       penalties: ReturnType<typeof penaltyHistory>;
       timeout: { until: string; offenses: number } | null;
+      discordSanctions: SanctionRow[];
     };
     matches: RecentMatchRow[];
     conduct: ConductSection;
@@ -143,6 +145,7 @@ export function playerFile(
         bans,
         penalties: penaltyHistory(db, canonical),
         timeout: timeout ? { until: timeout.until.toISOString(), offenses: timeout.offenses } : null,
+        discordSanctions: sanctionsForPlayer(db, canonical).map((s) => redactDiscordSanction(db, s, viewer.steamid)),
       },
       matches,
       conduct: conductOf(db, canonical),

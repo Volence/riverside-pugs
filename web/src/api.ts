@@ -978,6 +978,8 @@ export interface CaseFile {
   penalties: AdminPlayerDetail['penalties']; timeout: AdminPlayerDetail['timeout'];
   inputFlags: AdminPlayerDetail['inputFlags']; aliases: AdminPlayerDetail['aliases'];
   sharesAddressWith: AdminPlayerDetail['sharesAddressWith']; tickets: TicketSummary[];
+  /** Optional only for a browser holding new JS against an older server. */
+  discordSanctions?: DiscordSanction[];
 }
 /** A Discord-side timeout or ban, on a Discord-only accused. Every row for
  *  their Discord id across every ticket, redacted server-side where the row
@@ -1107,6 +1109,8 @@ export interface PlayerFileData {
       bans: AdminBan[];
       penalties: AdminPlayerDetail['penalties'];
       timeout: AdminPlayerDetail['timeout'];
+      /** Optional only for a browser holding new JS against an older server. */
+      discordSanctions?: DiscordSanction[];
     };
     matches: AdminPlayerDetail['matches'];
     /** Optional only for a browser holding new JS against an older server. */
