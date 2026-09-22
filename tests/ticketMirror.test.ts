@@ -100,6 +100,40 @@ describe('live', () => {
     expect(JSON.parse(row.history)).toEqual([]);
   });
 
+  it('ignores a snapshot older than what is stored, so a message edited before the backfill reached it keeps no phantom version', async () => {
+    const a = await ticketWithThread(IDS[5]);
+    await ticketWithThread(IDS[4]);
+    mirror.start();
+    // Written and edited in the same tick, ahead of the backfill the start
+    // queued: the backfill reads the thread and stores the edited text, and
+    // the live create queued behind it is carrying the text before the edit.
+    const m = t.userPost(a.thread, { authorId: '906', content: 'v1' });
+    t.userEdit(m.id, 'v2');
+    await mirror.idle();
+    const row = messageByDiscordId(db, m.id)!;
+    expect(row.content).toBe('v2');
+    // Not ['v2', 'v1']: the version before the edit was never the current one
+    // as far as this process is concerned, so it is no part of the history a
+    // moderator reads as evidence.
+    expect(JSON.parse(row.history)).toEqual([]);
+  });
+
+  it('records each edit of a message it saw first, in order', async () => {
+    const { thread } = await ticketWithThread(IDS[5]);
+    mirror.start();
+    const m = t.userPost(thread, { authorId: '906', content: 'w1' });
+    await mirror.idle();
+    t.userEdit(m.id, 'w2');
+    await mirror.idle();
+    // Discord stamps both edits the same in the fake: an edit as new as what
+    // is stored is still an edit.
+    t.userEdit(m.id, 'w3');
+    await mirror.idle();
+    const row = messageByDiscordId(db, m.id)!;
+    expect(row.content).toBe('w3');
+    expect(JSON.parse(row.history)).toEqual(['w1', 'w2']);
+  });
+
   it('stores an author nobody on the site knows under their Discord name, with no player', async () => {
     const { thread } = await ticketWithThread(IDS[5]);
     mirror.start();

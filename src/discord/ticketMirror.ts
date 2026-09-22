@@ -299,7 +299,16 @@ export class TicketMirror {
     const row = messageByDiscordId(db, m.id)!;
     // A removed message stays blank whatever Discord says afterwards.
     if (row.removed_at !== null) return;
-    let changed = recordEdit(db, row.id, m.content, m.editedAt ?? new Date().toISOString());
+    // A snapshot older than what is stored is not an edit: a message created
+    // and edited before the backfill reached it arrives here as the live
+    // create still carrying the text from before the edit, which the backfill
+    // has already gone past. Recording it would put a version into the history
+    // that was never the current one, and put it there out of order. An equal
+    // stamp still counts: Discord's edit timestamp has a second's resolution,
+    // and two edits inside one second are still two edits.
+    const seen = m.editedAt ?? m.createdAt;
+    const have = row.edited_at ?? row.created_at;
+    let changed = seen >= have && recordEdit(db, row.id, m.content, m.editedAt ?? new Date().toISOString());
     // Files already recorded are never fetched a second time: that is what
     // makes a duplicate delivery cost nothing. One with no row at all was
     // never fetched even once, which is where a bot killed between a message

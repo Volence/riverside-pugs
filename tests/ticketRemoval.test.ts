@@ -70,11 +70,15 @@ async function ticketWithThread(targetId: string, category = 'griefing'): Promis
   insertThread(db, { ticketId: id, kind: 'staff', surface: 'forum', channelId: 'forum1', threadId: made.threadId, cardMessageId: made.messageId, cardHash: 'h' });
   return { id, thread: made.threadId };
 }
-/** Someone posts the horrible thing with a picture, edits it once, and the mirror copies it all. */
+/** Someone posts the horrible thing with a picture, edits it once, and the
+ *  mirror copies it all. Mirrored BEFORE the edit, because that is what leaves
+ *  the earlier version in the history: a message edited before the mirror ever
+ *  saw it is stored as it reads now, with nothing behind it. */
 async function horrible(thread: string) {
   const m = t.userPost(thread, { authorId: '555', authorName: 'A Stranger', content: 'an earlier version', attachments: [
     { id: 'a1', name: 'picture.png', contentType: 'image/png', size: 50, url: 'https://cdn.discordapp.com/1/picture.png' },
   ] });
+  await mirror.idle();
   t.userEdit(m.id, HORRIBLE);
   await mirror.idle();
   return { discordId: m.id, row: messageByDiscordId(db, m.id)! };
