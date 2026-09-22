@@ -184,8 +184,8 @@ describe('working tickets over HTTP', () => {
 });
 
 describe('restricted tickets over HTTP', () => {
-  it('a ticket about a mod is invisible to that mod and to everyone off the list, and its audit rows stay off the feed', async () => {
-    await file(R1, { targetId: MOD, category: 'toxicity', text: 'abusive' });
+  it('a restricted ticket about a mod is invisible to that mod and to everyone off the list, and its audit rows stay off the feed', async () => {
+    await file(R1, { targetId: MOD, category: 'unsafe', text: 'abusive' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
     for (const who of [MOD, MOD2, ADMIN]) {
       expect((await get(who, '/api/mod/tickets')).json().tickets).toEqual([]);
@@ -218,7 +218,7 @@ describe('restricted tickets over HTTP', () => {
   });
 
   it('audit rows about a restricted ticket reach only its access list', async () => {
-    await file(R1, { targetId: MOD, category: 'toxicity', text: 'abusive' });
+    await file(R1, { targetId: MOD, category: 'unsafe', text: 'abusive' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
     expect((await post(OWNER, `/api/mod/tickets/${id}/claim`, { claim: true })).statusCode).toBe(200);
     expect((await post(OWNER, `/api/mod/tickets/${id}/close`, { outcome: 'no_action', note: 'nothing in it' })).statusCode).toBe(200);
@@ -231,26 +231,25 @@ describe('restricted tickets over HTTP', () => {
     expect(await ticketRows(MOD)).toEqual([]);
   });
 
-  it('promoting a player restricts the open ticket about them', async () => {
+  it('promoting a player leaves the open ticket about them ordinary and hides it from them', async () => {
     await file(R1, { targetId: R2, category: 'griefing', text: 'threw' });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
-    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(200);
     expect((await post(OWNER, `/api/admin/players/${R2}/mod`, { isMod: true })).statusCode).toBe(200);
-    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 1 });
-    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
-    expect((await get(OWNER, `/api/mod/tickets/${id}`)).json().events.map((e: { kind: string }) => e.kind))
-      .toEqual(['opened', 'restricted']);
+    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 0 });
+    expect((await get(MOD, `/api/mod/tickets/${id}`)).statusCode).toBe(200);
+    // Promoting R2 ends their sessions (src/routes/admin.ts): re-sign-in, as
+    // they would have to for real, before checking what they can see.
+    cookie[R2] = authedCookie(app, db, R2);
+    expect((await get(R2, `/api/mod/tickets/${id}`)).statusCode).toBe(404);
+    expect((await get(OWNER, `/api/mod/tickets/${id}`)).json().events.map((e: { kind: string }) => e.kind)).toEqual(['opened']);
   });
 
-  it('promoting a player with both flavours open leaves one restricted ticket holding both reports', async () => {
+  it('promoting a player with both flavours open leaves both tickets as they were', async () => {
     await file(R1, { targetId: R2, category: 'griefing', text: 'threw' });
     await file(R1, { targetId: R2, category: 'unsafe', text: 'threats' });
-    const normalId = (db.prepare('SELECT id FROM tickets WHERE restricted = 0').get() as { id: number }).id;
-    const restrictedId = (db.prepare('SELECT id FROM tickets WHERE restricted = 1').get() as { id: number }).id;
+    const before = db.prepare('SELECT id, restricted FROM tickets ORDER BY id').all();
     expect((await post(OWNER, `/api/admin/players/${R2}/admin`, { isAdmin: true })).statusCode).toBe(200);
-    expect(db.prepare('SELECT id FROM tickets').all()).toEqual([{ id: restrictedId }]);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(restrictedId)).toEqual({ n: 2 });
-    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE ticket_id = ?').get(normalId)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT id, restricted FROM tickets ORDER BY id').all()).toEqual(before);
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 

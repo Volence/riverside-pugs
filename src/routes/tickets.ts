@@ -7,7 +7,7 @@ import { logAdmin } from '../admin/audit.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { allowedType, attachmentPath } from '../tickets/attachments.js';
 import type { AttachmentRow } from '../tickets/messages.js';
-import { canSeeTicket, getTicketRow } from '../tickets/store.js';
+import { canSeeTicket, getTicketRow, ticketIsQuiet } from '../tickets/store.js';
 import { removeMessage } from '../tickets/removal.js';
 import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
@@ -51,12 +51,19 @@ export interface TicketRouteOpts {
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
- *  ticket is restricted. */
+ *  ticket is restricted or about staff (ticketIsQuiet). */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
   const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove, moderation } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
+  /** Whether a ticket action's audit row stays off the admin feed. A ticket
+   *  that has gone by the time the row is written (folded away mid-request)
+   *  counts as quiet: this fails closed. */
+  const quiet = (id: number): boolean => {
+    const t = getTicketRow(db, id);
+    return !t || ticketIsQuiet(db, t);
+  };
 
   app.post('/api/reports', async (req, reply) => {
     const steamid = requireActive(req, reply);
@@ -91,7 +98,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     // auditId goes in the log and nowhere else: ticketId is null when the
     // opener is off a restricted ticket's access list, and telling them the
     // id would be telling them the ticket exists.
-    logAdmin(db, me, 'ticket_open', r.auditId, {}, { quiet: getTicketRow(db, r.auditId)?.restricted === 1 });
+    logAdmin(db, me, 'ticket_open', r.auditId, {}, { quiet: quiet(r.auditId) });
     broadcast('refresh');
     return { ok: true, ticketId: r.ticketId };
   });
@@ -182,7 +189,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       // The reason is not in here: it is on the message, where the page reads
       // it from, and an audit detail is read by more people than that.
       { messageId: Number(mid), files: r.files, mirrored: true, via: 'site' },
-      { quiet: getTicketRow(db, Number(id))?.restricted === 1 },
+      { quiet: quiet(Number(id)) },
     );
     afterRemove();
     // No broadcast('refresh'): removeMessage published the ticket signal, and
@@ -312,7 +319,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     const body = (req.body ?? {}) as Record<string, unknown>;
     const r = run(id, me, body);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, me, action, id, detail(body), { quiet: getTicketRow(db, id)?.restricted === 1 });
+    logAdmin(db, me, action, id, detail(body), { quiet: quiet(id) });
     broadcast('refresh');
     return { ok: true };
   };

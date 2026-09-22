@@ -25,7 +25,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { publishBanChange } from '../banEvents.js';
 import { hasActiveBan } from '../banState.js';
 import { matchInFlight, pendingRoundCount, type IntegrityJobs, type JobMode } from '../integrity/job.js';
-import { reseedOrphanedTickets, restrictOpenTicketAbout, type RestrictOutcome } from '../tickets/store.js';
+import { holdFeedAbout, reseedOrphanedTickets } from '../tickets/store.js';
 import { publishTicketSignal } from '../tickets/signals.js';
 import type { ServerAdminSync } from '../serverAdmins.js';
 import { LOG_AUTH_MODES, newLogSecret, setLogAuthMode, setLogSecret, type LogAuth, type LogAuthMode } from '../logAuth.js';
@@ -69,8 +69,6 @@ export interface AdminRouteOpts {
    *  because the player it is about was just promoted. */
   adminSteamIds: string[];
 }
-
-const NOBODY_TO_RESTRICT = 'A ticket about a player who is now staff could not be restricted: there is nobody else to give it to. Add another admin or set ADMIN_STEAMIDS, then restrict it from the ticket page.';
 
 /** Everything under /api/admin. Each route starts with requireAdmin and each
  *  mutation ends with logAdmin. */
@@ -152,14 +150,11 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const { isAdmin } = (req.body ?? {}) as { isAdmin?: unknown };
     if (typeof isAdmin !== 'boolean') return reply.code(400).send({ error: 'isAdmin must be true or false' });
     if (t.steamid === t.adminId && !isAdmin) return reply.code(400).send({ error: 'you cannot remove your own admin' });
-    // `as`, not an annotation: the assignment inside the closure is invisible
-    // to TypeScript's narrowing, which would pin this to 'none'.
-    let outcome = 'none' as RestrictOutcome;
     const was = getPlayer(db, t.steamid)?.is_admin === 1;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_admin = ? WHERE steamid = ?').run(isAdmin ? 1 : 0, t.steamid);
       if (isAdmin) {
-        outcome = restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+        holdFeedAbout(db, t.steamid);
         // A restricted ticket nobody could be given is given to the first
         // admin who could take it, which may be this one.
         reseedOrphanedTickets(db, adminSteamIds);
@@ -171,7 +166,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     })();
     logAdmin(db, t.adminId, 'set_admin', t.steamid, { isAdmin });
     publishTicketSignal({ kind: 'staff' });
-    if (outcome === 'nobody') publishAdminEvent({ kind: 'problem', text: NOBODY_TO_RESTRICT });
     return { ok: true };
   });
 
@@ -191,13 +185,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!t) return reply;
     const { isMod } = (req.body ?? {}) as { isMod?: unknown };
     if (typeof isMod !== 'boolean') return reply.code(400).send({ error: 'isMod must be true or false' });
-    // `as`, not an annotation: the assignment inside the closure is invisible
-    // to TypeScript's narrowing, which would pin this to 'none'.
-    let outcome = 'none' as RestrictOutcome;
     const was = getPlayer(db, t.steamid)?.is_mod === 1;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = ? WHERE steamid = ?').run(isMod ? 1 : 0, t.steamid);
-      if (isMod) outcome = restrictOpenTicketAbout(db, t.steamid, adminSteamIds);
+      if (isMod) holdFeedAbout(db, t.steamid);
       // The same rule as the admin flag above: a demoted moderator loses the
       // tickets now, not when a 30 day session runs out, and a promoted one
       // starts from a fresh sign-in. Only on a real change.
@@ -205,7 +196,6 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     })();
     logAdmin(db, t.adminId, 'set_mod', t.steamid, { isMod });
     publishTicketSignal({ kind: 'staff' });
-    if (outcome === 'nobody') publishAdminEvent({ kind: 'problem', text: NOBODY_TO_RESTRICT });
     return { ok: true };
   });
 

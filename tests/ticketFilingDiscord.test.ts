@@ -88,8 +88,8 @@ describe('fileReport with Discord people', () => {
     expect(fileReport(db, P1, { category: 'afk', text: '', matchId: 1 }, withTarget())).toMatchObject({ ok: false, status: 400 });
   });
 
-  it('restricts a report about a Discord administrator, and an unsafe one', () => {
-    expect(fileReport(db, P1, { category: 'toxicity', text: '' }, withTarget({ administrator: true }))).toMatchObject({ ok: true, restricted: true });
+  it('restricts an unsafe report, and never one only because the accused is a Discord administrator', () => {
+    expect(fileReport(db, P1, { category: 'toxicity', text: '' }, withTarget({ administrator: true }))).toMatchObject({ ok: true, restricted: false });
     expect(fileReport(db, P1, { category: 'unsafe', text: 'x' }, withTarget({ discordId: '903' }))).toMatchObject({ ok: true, restricted: true });
   });
 

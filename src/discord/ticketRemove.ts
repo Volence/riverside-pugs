@@ -5,7 +5,7 @@ import { inGoodStanding } from '../standing.js';
 import { messageByDiscordId, messageById } from '../tickets/messages.js';
 import { removeMessage } from '../tickets/removal.js';
 import { publishTicketSignal } from '../tickets/signals.js';
-import { addTicketEvent, canSeeTicket, getTicketRow } from '../tickets/store.js';
+import { addTicketEvent, canSeeTicket, getTicketRow, ticketIsQuiet } from '../tickets/store.js';
 import { threadByDiscordId } from '../tickets/threads.js';
 import type { TicketMirror } from './ticketMirror.js';
 import type { BotInteraction, InteractionReply } from './transport.js';
@@ -57,7 +57,7 @@ export async function handleRemoveCommand(
   const ticket = thread ? getTicketRow(db, thread.ticket_id) : undefined;
   if (!thread || !ticket || !canSeeTicket(db, ticket, p.steamid)) return say(NOT_HERE);
   if (i.messageId === thread.card_message_id) return say('That is the ticket\'s own card. It is not part of the discussion, so there is nothing to remove.');
-  const quiet = ticket.restricted === 1;
+  const quiet = ticketIsQuiet(db, ticket);
 
   const m = messageByDiscordId(db, i.messageId);
   if (m && m.thread_id !== i.channelId) return say(NOT_HERE);

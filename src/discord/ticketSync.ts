@@ -4,7 +4,7 @@ import { getSetting } from '../settings.js';
 import { subscribeBanChanges } from '../banEvents.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
 import { targetLabel } from '../tickets/person.js';
-import { getTicketRow, type TicketRow } from '../tickets/store.js';
+import { getTicketRow, hasStaffFlag, holdFeedAbout, type TicketRow } from '../tickets/store.js';
 import {
   forbiddenForumThreads, forumAudience, insertThread, privateThreadAudience, setThreadCard, setThreadLocked,
   setThreadState, staffThread, surfaceFor, threadsInState, type ThreadRow, type ThreadSurface,
@@ -267,6 +267,11 @@ export class TicketSync {
   private announceInFeed(t: TicketRow, why: 'ok' | 'unconfigured' | 'about_staff'): void {
     if (t.restricted === 1 || why !== 'unconfigured' || t.status !== 'open') return;
     const { db } = this.deps;
+    // Promoted by some path that did not hold the feed (a flag set by hand in
+    // the database): held here, before anything is said, so a report about
+    // somebody who reads the feed is never said. Its own write, because this
+    // runs outside any request.
+    if (hasStaffFlag(db, t.target_id)) holdFeedAbout(db, t.target_id!);
     const rows = db.prepare(
       'SELECT id, category, feed_held FROM ticket_reports WHERE ticket_id = ? AND announced_at IS NULL ORDER BY id',
     ).all(t.id) as { id: number; category: string; feed_held: number }[];

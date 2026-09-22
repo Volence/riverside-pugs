@@ -98,8 +98,8 @@ describe('admin feed', () => {
   it('a normal ticket about someone who has since been made staff posts nothing', async () => {
     sync.stop();
     fileReport(db, IDS[1], { targetId: IDS[3], category: 'afk', text: '' }, { adminSteamIds: [] });
-    // Promoted by hand, with nobody to restrict the ticket to: the case
-    // restrictOpenTicketAbout answers 'nobody' for. The accused reads the feed.
+    // Promoted by hand, with no promotion route to hold the feed:
+    // announceInFeed holds it itself. The accused reads the feed.
     db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[3]);
     sync = new TicketSync({ db, transport: t, publicUrl: 'https://pug.test', intervalMs: 0 });
     sync.start();

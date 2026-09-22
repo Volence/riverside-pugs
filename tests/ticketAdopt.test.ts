@@ -39,10 +39,11 @@ describe('adoptDiscordPerson through linkDiscord', () => {
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
-  it('restricts the adopted case when the player is staff', () => {
+  it('keeps the adopted case ordinary when the player is staff, and holds it from the feed', () => {
     db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(NEWBIE);
     fileReport(db, P1, { category: 'toxicity', text: '' }, { ...deps, targetDiscord: lurker });
     linkDiscord(db, NEWBIE, '950', 'Lurky', { adminSteamIds: [OWNER] });
-    expect(db.prepare('SELECT restricted FROM tickets').get()).toEqual({ restricted: 1 });
+    expect(db.prepare('SELECT restricted FROM tickets').get()).toEqual({ restricted: 0 });
+    expect(db.prepare('SELECT feed_held FROM ticket_reports').get()).toEqual({ feed_held: 1 });
   });
 });

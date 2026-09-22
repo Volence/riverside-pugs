@@ -8,6 +8,7 @@ import {
 } from './profileFields.js';
 import { publishTicketSignal } from './tickets/signals.js';
 import { adoptDiscordPerson } from './tickets/adopt.js';
+import { publishAdminEvent } from './adminFeed.js';
 
 export interface PlayerRow {
   steamid: string;
@@ -136,6 +137,7 @@ export function linkDiscord(
   ).get(discordId, steamid) as { steamid: string; unlinked_at: string | null } | undefined;
   if (last && hasActiveBan(db, last.steamid, now)) return { ok: false, error: 'discord_banned' };
 
+  let orphaned = 0;
   db.transaction(() => {
     db.prepare('UPDATE players SET discord_id = ?, discord_name = ? WHERE steamid = ?')
       .run(discordId, discordName, steamid);
@@ -150,11 +152,15 @@ export function linkDiscord(
       ).run(steamid, discordId, discordName, now.toISOString(), opts.by ?? steamid);
     }
     // Reports about or by this Discord account from before they linked.
-    adoptDiscordPerson(db, discordId, steamid, opts.adminSteamIds ?? [], now);
+    orphaned = adoptDiscordPerson(db, discordId, steamid, opts.adminSteamIds ?? [], now).stillEmpty;
   })();
 
   // Forum access and private thread membership are keyed on the Discord id.
   // After the commit: a subscriber dials Discord.
+  // Names nothing: every admin reads the feed, and the ticket may be about one.
+  if (orphaned > 0) {
+    publishAdminEvent({ kind: 'problem', text: `${orphaned} restricted ticket${orphaned === 1 ? ' has' : 's have'} nobody on its access list after a Discord account was linked. It is handed to the next admin that is created.` });
+  }
   publishTicketSignal({ kind: 'staff' });
   const recent = last?.unlinked_at && now.getTime() - Date.parse(last.unlinked_at) <= DISCORD_MOVE_WINDOW_MS;
   // Only when it actually moved: a relink of the link already held is not news.

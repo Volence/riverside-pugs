@@ -91,8 +91,7 @@ export function surfaceFor(
   }
   // A normal ticket about staff has no Discord thread at all: the forum is
   // readable by the accused, and with no access list there is nobody to put
-  // in a private one. This is the ticket restrictOpenTicketAbout answered
-  // 'nobody' for. It is worked on the site.
+  // in a private one. It is worked on the site.
   if (hasStaffFlag(db, t.target_id)) return { surface: null, why: 'about_staff' };
   return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? { surface: 'forum', why: 'ok' } : { surface: null, why: 'unconfigured' };
 }

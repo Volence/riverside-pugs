@@ -4,7 +4,7 @@ import { upsertPlayer, activatePlayer, linkDiscord, unlinkDiscord } from '../src
 import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { addAccess, closeTicket, setRestricted } from '../src/tickets/actions.js';
-import { foldTicket, restrictOpenTicketAbout } from '../src/tickets/store.js';
+import { foldTicket, holdFeedAbout } from '../src/tickets/store.js';
 import { publishTicketSignal } from '../src/tickets/signals.js';
 import { publishBanChange } from '../src/banEvents.js';
 import { staffThread, threadByDiscordId } from '../src/tickets/threads.js';
@@ -180,17 +180,17 @@ describe('forum posts that must not exist', () => {
     // What POST /api/admin/players/:id/mod does.
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
-      restrictOpenTicketAbout(db, IDS[5], [ADMIN]);
+      holdFeedAbout(db, IDS[5]);
     })();
     publishTicketSignal({ kind: 'staff' });
     await sync.idle();
     expect(posts.map((p) => t.threadsById.get(p)!.deleted)).toEqual([true, true]);
     expect(t.threadsIn('forum1')).toEqual([]);
-    expect(staffThread(db, open)!.surface).toBe('private');
+    expect(staffThread(db, open)).toBeUndefined();
     expect(staffThread(db, closed)).toBeUndefined();
   });
 
-  it('a normal ticket about staff that could not be restricted has no Discord thread at all', async () => {
+  it('a normal ticket about staff has no Discord thread yet', async () => {
     // Nobody to give it to: the only admin is the accused.
     const id = file(IDS[0], IDS[5]);
     await sync.idle();
@@ -198,7 +198,7 @@ describe('forum posts that must not exist', () => {
     db.prepare('UPDATE players SET is_admin = 0 WHERE steamid = ?').run(ADMIN);
     db.transaction(() => {
       db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(IDS[5]);
-      expect(restrictOpenTicketAbout(db, IDS[5], [])).toBe('nobody');
+      holdFeedAbout(db, IDS[5]);
     })();
     publishTicketSignal({ kind: 'staff' });
     await sync.idle();
@@ -288,7 +288,7 @@ describe('a fold that lands a forum thread on a restricted ticket', () => {
     const restricted = file(IDS[1], IDS[5], 'unsafe');
     await sync.idle();
     const forumThread = staffThread(db, normal)!.thread_id;
-    db.transaction(() => { expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded'); })();
+    db.transaction(() => foldTicket(db, normal, restricted, 'drop'))();
     await sync.reconcile();
     expect(threadByDiscordId(db, forumThread)!.state).toBe('deleted');
     expect(t.threadsIn('forum1')).toEqual([]);
@@ -353,7 +353,9 @@ describe('a ticket folded away while Discord was still making its forum post', (
       const made = await create(forumId, p);
       db.transaction(() => {
         db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
-        expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded');
+        const normal = (db.prepare("SELECT id FROM tickets WHERE restricted = 0 AND status = 'open'").get() as { id: number }).id;
+        const sibling = (db.prepare("SELECT id FROM tickets WHERE restricted = 1 AND status = 'open'").get() as { id: number }).id;
+        foldTicket(db, normal, sibling, 'drop');
       })();
       andThen();
       return made;
@@ -520,7 +522,7 @@ describe('the accused must never be a member of their own thread', () => {
     // one, so its forum post is now a post about a restricted case.
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
-      expect(restrictOpenTicketAbout(db, IDS[5], [ADMIN])).toBe('folded');
+      foldTicket(db, normal, restricted, 'drop');
     })();
     t.failThreadOps = 1;
     publishTicketSignal({ kind: 'ticket', ticketId: restricted });

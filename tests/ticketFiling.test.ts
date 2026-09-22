@@ -54,10 +54,11 @@ describe('fileReport', () => {
     expect(access.map((a) => a.steamid)).toEqual([OWNER]);
   });
 
-  it('a report about staff is restricted, and the accused is never on the access list', () => {
-    expect(fileReport(db, R1, { targetId: MOD, category: 'toxicity', text: '' }, deps)).toMatchObject({ restricted: true });
-    fileReport(db, R1, { targetId: OWNER, category: 'toxicity', text: '' }, deps);
+  it('a report about staff is ordinary unless it is a safety report, and the accused is never on a list', () => {
+    expect(fileReport(db, R1, { targetId: MOD, category: 'toxicity', text: '' }, deps)).toMatchObject({ restricted: false });
+    fileReport(db, R1, { targetId: OWNER, category: 'unsafe', text: 'threats' }, deps);
     const t = tickets().find((x) => x.target_id === OWNER)!;
+    expect(t.restricted).toBe(1);
     const access = (db.prepare('SELECT steamid FROM ticket_access WHERE ticket_id = ?').all(t.id) as { steamid: string }[]).map((a) => a.steamid);
     expect(access).toEqual([ADMIN]);
   });

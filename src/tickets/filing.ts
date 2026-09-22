@@ -46,7 +46,8 @@ export interface FilingDeps {
   /** A member picked in a Discord surface, with the facts Discord supplied
    *  about them. Only a Discord surface sets this, per call, never from a
    *  request body: the body is untrusted, and `bot`/`administrator` decide
-   *  whether the report is even allowed and whether it is restricted. */
+   *  whether the report is even allowed and whether it may reach the admin
+   *  feed. */
   targetDiscord?: PickedTarget;
 }
 
@@ -194,9 +195,17 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
   // Which ticket this report would land on, which is also which ticket both
   // duplicate limits are counted against: a safety report belongs to the
   // restricted sibling and is not a duplicate of a normal one, with or
-  // without a match. Without this a safety report about a match you had
-  // already reported would have to give up its match to get through.
-  const restricted = category === 'unsafe'
+  // without a match.
+  //
+  // Restricted means a safety report, whoever it is about (owner,
+  // 2026-09-22). A report that a moderator is slow to ready up or rude is an
+  // ordinary ticket the whole team works; the accused is still kept out of it
+  // everywhere, by canSeeTicket on the site and forumAudience in Discord.
+  const restricted = category === 'unsafe';
+  // Held from the admin feed for good when the accused may be reading it:
+  // somebody with a staff flag, or a Discord member with the Administrator
+  // permission, who can read every channel there is.
+  const feedHeld = restricted
     || (target.kind === 'player' ? hasStaffFlag(db, target.steamid) : deps.targetDiscord!.administrator);
   const targetKey = personKey(target);
   const dupe = matchId !== null
@@ -213,8 +222,8 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
   const result = db.transaction((): FileResult => {
     const ticket = findOrOpen(db, target, restricted, null, deps);
     // feed_held is set here, not decided later: whether this report may ever
-    // reach the admin feed is fixed at the moment it lands, by whether the
-    // ticket it lands on is restricted right now.
+    // reach the admin feed is fixed at the moment it lands, by whether its
+    // ticket is restricted or its accused may be reading the feed.
     const reportId = Number(db.prepare(
       `INSERT INTO ticket_reports (ticket_id, reporter_id, reporter_discord_id, reporter_name, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -224,7 +233,7 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
       reporter.kind === 'discord' ? reporter.discordId : null,
       reporter.kind === 'discord' ? reporter.name.slice(0, 100) : '',
       category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null,
-      now.toISOString(), restricted ? 1 : 0,
+      now.toISOString(), feedHeld ? 1 : 0,
     ).lastInsertRowid);
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
     return { ok: true, reportId, ticketId: ticket.id, created: ticket.created, restricted };
@@ -259,7 +268,7 @@ export function openStaffTicket(
   if (body.targetId === by) return fail(400, 'you cannot open a ticket about yourself');
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, MAX_TEXT) : '';
   const targetId = body.targetId;
-  const restricted = body.restricted === true || hasStaffFlag(db, targetId);
+  const restricted = body.restricted === true;
   const opened = db.transaction(() => {
     const ticket = findOrOpen(db, { kind: 'player', steamid: targetId }, restricted, by, deps);
     if (note) addTicketEvent(db, ticket.id, by, 'note', { text: note }, now);

@@ -2,7 +2,7 @@ import type { DB } from './db.js';
 import { addAlias } from './aliases.js';
 import { recomputeSeasonRatings } from './rating.js';
 import { publishAdminEvent } from './adminFeed.js';
-import { foldTicket, hasStaffFlag, reseedOrphanedTickets, restrictOpenTicketAbout, type RestrictOutcome } from './tickets/store.js';
+import { foldTicket, hasStaffFlag, holdFeedAbout, reseedOrphanedTickets } from './tickets/store.js';
 import { publishTicketSignal } from './tickets/signals.js';
 
 /**
@@ -180,9 +180,6 @@ export function mergePlayers(
   if (opts.dryRun) return plan;
 
   const owners = opts.adminSteamIds ?? [];
-  // `as`, not a type annotation: TypeScript does not see the assignment made
-  // inside the transaction closure, and would narrow this to 'none' for good.
-  let restrictOutcome = 'none' as RestrictOutcome;
   let orphaned = 0;
   db.transaction(() => {
     // 1. Matches both accounts were rostered in: add the figures together and
@@ -247,11 +244,10 @@ export function mergePlayers(
       foldTicket(db, gone.id, keep.id, 'merge');
     }
     db.prepare('UPDATE tickets SET target_id = ? WHERE target_id = ?').run(into, from);
-    // Merging a player into a staff account makes an ordinary ticket a ticket
-    // about staff. `from` is excluded from the seed: it still has a player
-    // row here, and an access row naming it would be rewritten onto `into`
-    // by the tidy-up below and then deleted as the accused's own.
-    if (hasStaffFlag(db, into)) restrictOutcome = restrictOpenTicketAbout(db, into, owners, new Date(), [from]);
+    // Merging a player into a staff account makes a ticket about the alt a
+    // ticket about staff. It stays ordinary (owner, 2026-09-22); what it must
+    // not do any more is reach the admin feed, which the survivor may read.
+    if (hasStaffFlag(db, into)) holdFeedAbout(db, into);
     // A merged account must never sit on the access list of a ticket that is
     // now about itself.
     db.prepare('UPDATE OR IGNORE ticket_access SET steamid = ? WHERE steamid = ?').run(into, from);
@@ -339,17 +335,14 @@ export function mergePlayers(
     addAlias(db, { steamid: from, canonical: into, by: opts.by ?? 'merge' });
   })();
 
-  // After the commit: a subscriber posts to Discord. Neither line names the
-  // player or the ticket, because every admin reads the feed and one of them
-  // may be who the ticket is about.
-  if (restrictOutcome === 'nobody') {
-    publishAdminEvent({ kind: 'problem', text: 'A ticket about a player who is now staff could not be restricted: there is nobody else to give it to. Add another admin or set ADMIN_STEAMIDS, then restrict it from the ticket page.' });
-  }
+  // After the commit: a subscriber posts to Discord. The line names no player
+  // and no ticket, because every admin reads the feed and one of them may be
+  // who the ticket is about.
   if (orphaned > 0) {
     publishAdminEvent({ kind: 'problem', text: `${orphaned} restricted ticket${orphaned === 1 ? ' has' : 's have'} nobody on the access list after a merge. It is handed to the next admin that is created.` });
   }
-  // Tickets may have been folded or restricted, and a Discord link may have
-  // moved: let the reconciler look at everything.
+  // Tickets may have been folded, and a Discord link may have moved: let the
+  // reconciler look at everything.
   publishTicketSignal({ kind: 'staff' });
 
   // Outside the transaction above because it opens its own.

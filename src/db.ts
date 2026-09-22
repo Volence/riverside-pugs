@@ -1060,7 +1060,7 @@ export function openDb(path: string): DB {
   // lands on, or its ticket becomes, a restricted or about-staff case, and
   // never cleared, so un-restricting a ticket later cannot open the gate on
   // what happened while it was restricted. See fileReport, setRestricted and
-  // restrictOpenTicketAbout for where it is set.
+  // holdFeedAbout for where it is set.
   const feedHeldIsNew = !(db.prepare('PRAGMA table_info(ticket_reports)').all() as { name: string }[])
     .some((c) => c.name === 'feed_held');
   ensureColumn(db, 'ticket_reports', 'feed_held', 'INTEGER NOT NULL DEFAULT 0');

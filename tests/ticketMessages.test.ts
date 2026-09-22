@@ -5,7 +5,7 @@ import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { getSetting } from '../src/settings.js';
 import { ensureTicketSchema } from '../src/tickets/schema.js';
 import { fileReport } from '../src/tickets/filing.js';
-import { foldTicket, restrictOpenTicketAbout } from '../src/tickets/store.js';
+import { foldTicket } from '../src/tickets/store.js';
 import { mergePlayers } from '../src/mergePlayers.js';
 import {
   attachmentsOf, insertAttachment, insertMessage, lastMessageId, markDeleted, messageByDiscordId, messageById,
@@ -102,14 +102,11 @@ describe('rows follow their ticket', () => {
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
-  it('so does the fold into a restricted sibling when the accused becomes staff', () => {
+  it('so does a fold into a restricted sibling', () => {
     const normal = file(R1, ACCUSED);
     const sibling = file(R2, ACCUSED, 'unsafe');
     const m = say(normal, '100001');
-    db.transaction(() => {
-      db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(ACCUSED);
-      expect(restrictOpenTicketAbout(db, ACCUSED, [ADMIN])).toBe('folded');
-    })();
+    db.transaction(() => foldTicket(db, normal, sibling, 'drop'))();
     expect(messageById(db, m.id)!.ticket_id).toBe(sibling);
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });

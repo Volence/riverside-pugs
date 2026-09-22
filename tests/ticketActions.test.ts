@@ -39,7 +39,7 @@ describe('claim', () => {
 
 describe('visibility', () => {
   it('a ticket the actor cannot see is a 404 for every action', () => {
-    const about = (fileReport(db, R1, { targetId: MOD, category: 'toxicity', text: '' }, deps) as { ticketId: number }).ticketId;
+    const about = (fileReport(db, R1, { targetId: MOD, category: 'unsafe', text: 'threats' }, deps) as { ticketId: number }).ticketId;
     for (const who of [MOD, MOD2, ADMIN]) {
       expect(claimTicket(db, about, who, true)).toMatchObject({ ok: false, status: 404 });
       expect(closeTicket(db, about, who, 'no_action', '')).toMatchObject({ ok: false, status: 404 });
@@ -61,9 +61,10 @@ describe('restrict and access', () => {
     expect(addAccess(db, ticket, MOD, R2)).toMatchObject({ ok: false, status: 400 });
   });
 
-  it('un-restricting is refused while the accused is staff or a report is unsafe', () => {
+  it('un-restricting is refused while a report is unsafe, and allowed for a ticket about staff', () => {
     const staff = (fileReport(db, R1, { targetId: MOD, category: 'toxicity', text: '' }, deps) as { ticketId: number }).ticketId;
-    expect(setRestricted(db, staff, OWNER, false, deps.adminSteamIds)).toMatchObject({ ok: false, status: 400 });
+    expect(setRestricted(db, staff, OWNER, true, deps.adminSteamIds)).toEqual({ ok: true });
+    expect(setRestricted(db, staff, OWNER, false, deps.adminSteamIds)).toEqual({ ok: true });
     const unsafe = (fileReport(db, R2, { targetId: ACCUSED, category: 'unsafe', text: 'details' }, deps) as { ticketId: number }).ticketId;
     expect(setRestricted(db, unsafe, OWNER, false, deps.adminSteamIds)).toMatchObject({ ok: false, status: 400 });
   });
@@ -110,7 +111,7 @@ describe('ban from a ticket', () => {
   });
 
   it('a moderator cannot ban an admin, even from a ticket they were let into', () => {
-    const about = (fileReport(db, R1, { targetId: ADMIN, category: 'toxicity', text: 'x' }, deps) as { ticketId: number }).ticketId;
+    const about = (fileReport(db, R1, { targetId: ADMIN, category: 'unsafe', text: 'x' }, deps) as { ticketId: number }).ticketId;
     expect(addAccess(db, about, OWNER, MOD)).toEqual({ ok: true });
     expect(banFromTicket(db, about, MOD, 'abuse', 60)).toMatchObject({ ok: false, status: 403 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 0 });

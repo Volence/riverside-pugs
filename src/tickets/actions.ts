@@ -53,7 +53,6 @@ export function setRestricted(db: DB, id: number, by: string, restricted: boolea
   if (!t) return fail(404, 'no such ticket');
   if ((t.restricted === 1) === restricted) return OK;
   if (!restricted) {
-    if (hasStaffFlag(db, t.target_id)) return fail(400, 'a ticket about staff stays restricted');
     if (db.prepare("SELECT 1 FROM ticket_reports WHERE ticket_id = ? AND category = 'unsafe'").get(id)) {
       return fail(400, 'a ticket holding a safety report stays restricted');
     }

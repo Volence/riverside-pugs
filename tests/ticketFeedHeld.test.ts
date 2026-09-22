@@ -4,7 +4,7 @@ import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { setRestricted } from '../src/tickets/actions.js';
-import { restrictOpenTicketAbout } from '../src/tickets/store.js';
+import { holdFeedAbout } from '../src/tickets/store.js';
 import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
 import { TicketSync } from '../src/discord/ticketSync.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
@@ -70,16 +70,14 @@ describe('a report held from the feed by its history', () => {
     expect(inFeed()).toHaveLength(1);
   });
 
-  it('T3: promoting the accused then demoting and un-restricting never announces a report pending across it', async () => {
+  it('T3: promoting the accused then demoting them never announces a report pending across it', async () => {
     sync.stop();
     fileReport(db, IDS[1], { targetId: IDS[3], category: 'afk', text: '' }, { adminSteamIds: [ADMIN] });
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[3]);
-      expect(restrictOpenTicketAbout(db, IDS[3], [ADMIN])).toBe('restricted');
+      expect(holdFeedAbout(db, IDS[3])).toBe(1);
     })();
-    const id = (db.prepare("SELECT id FROM tickets WHERE target_id = ?").get(IDS[3]) as { id: number }).id;
     db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(IDS[3]);
-    expect(setRestricted(db, id, ADMIN, false, [ADMIN]).ok).toBe(true);
     sync = new TicketSync({ db, transport: t, publicUrl: 'https://pug.test', intervalMs: 0 });
     sync.start();
     await settled();

@@ -6,7 +6,7 @@ import { buildServer } from '../src/server.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { claimTicket } from '../src/tickets/actions.js';
-import { reseedOrphanedTickets, restrictOpenTicketAbout } from '../src/tickets/store.js';
+import { reseedOrphanedTickets, holdFeedAbout } from '../src/tickets/store.js';
 import { mergePlayers } from '../src/mergePlayers.js';
 import { logAdmin, recentActions } from '../src/admin/audit.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
@@ -38,45 +38,31 @@ beforeEach(() => {
 afterEach(() => off());
 
 describe('a restricted ticket always has somebody on it', () => {
-  it('does not restrict when nobody could be given access, and says so', () => {
+  it('a promotion never restricts an ordinary ticket, it only holds it from the feed', () => {
     const id = file(R1, PLAYER);
-    expect(restrictOpenTicketAbout(db, PLAYER, [])).toBe('nobody');
+    flag('is_mod', PLAYER);
+    expect(holdFeedAbout(db, PLAYER)).toBe(1);
     expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 0 });
     expect(accessOf(id)).toEqual([]);
+    expect(events.filter((e) => e.kind === 'problem')).toEqual([]);
   });
 
-  it('a merge into the only admin leaves the ticket normal and reports a problem that names nobody', () => {
+  it('a merge into a staff account leaves the ticket ordinary and reports nothing', () => {
     flag('is_admin', MAIN);
     const id = file(R1, ALT);
     mergePlayers(db, { from: ALT, into: MAIN, by: MAIN, adminSteamIds: [] });
     expect(db.prepare('SELECT target_id, restricted FROM tickets WHERE id = ?').get(id)).toEqual({ target_id: MAIN, restricted: 0 });
-    const problems = events.filter((e) => e.kind === 'problem');
-    expect(problems).toHaveLength(1);
-    expect(JSON.stringify(problems[0])).toMatch(/could not be restricted/);
-    expect(JSON.stringify(problems[0])).not.toContain(MAIN);
-    expect(JSON.stringify(problems[0])).not.toContain(String(id));
-  });
-
-  it('a merge takes its owners from the caller', () => {
-    flag('is_mod', MAIN);
-    flag('is_admin', ADMIN, OWNER);
-    const id = file(R1, PLAYER);
-    // PLAYER becomes MAIN, a moderator. With no owner list the fallback would
-    // be every admin, ADMIN included.
-    mergePlayers(db, { from: PLAYER, into: MAIN, by: OWNER, adminSteamIds: [OWNER] });
-    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 1 });
-    expect(accessOf(id)).toEqual([OWNER]);
+    expect(events.filter((e) => e.kind === 'problem')).toEqual([]);
   });
 
   it('never seeds the account that is being merged away', () => {
     flag('is_mod', MAIN);
-    const id = file(R1, ALT);
-    // Made an admin by hand after the report, so the ticket is still normal
-    // and ALT is the only admin there is. Seeding ALT would restrict the
-    // ticket and then empty its list in the same transaction.
     flag('is_admin', ALT);
+    const id = file(R1, MAIN, 'unsafe', 'threats');
+    // ALT was the only admin, so it was seeded; the merge empties the list
+    // and must not seed ALT again, because ALT is about to stop existing.
+    expect(accessOf(id)).toEqual([ALT]);
     mergePlayers(db, { from: ALT, into: MAIN, by: OWNER, adminSteamIds: [] });
-    expect(db.prepare('SELECT restricted FROM tickets WHERE id = ?').get(id)).toEqual({ restricted: 0 });
     expect(accessOf(id)).toEqual([]);
     expect(events.filter((e) => e.kind === 'problem')).toHaveLength(1);
   });
@@ -84,7 +70,7 @@ describe('a restricted ticket always has somebody on it', () => {
   it('a list emptied by the merge itself is filled again from the owners', () => {
     flag('is_mod', MAIN);
     flag('is_admin', ALT, OWNER);
-    const id = file(R1, MAIN, 'toxicity');
+    const id = file(R1, MAIN, 'unsafe', 'threats');
     db.prepare('DELETE FROM ticket_access WHERE ticket_id = ? AND steamid != ?').run(id, ALT);
     expect(accessOf(id)).toEqual([ALT]);
     mergePlayers(db, { from: ALT, into: MAIN, by: OWNER, adminSteamIds: [OWNER] });
@@ -94,7 +80,7 @@ describe('a restricted ticket always has somebody on it', () => {
 
   it('an orphaned ticket is handed to whoever can take it, and counts what is left', () => {
     flag('is_mod', MAIN);
-    const id = file(R1, MAIN, 'toxicity');
+    const id = file(R1, MAIN, 'unsafe', 'threats');
     expect(accessOf(id)).toEqual([]);
     expect(reseedOrphanedTickets(db, [])).toEqual({ seeded: 0, stillEmpty: 1 });
     flag('is_admin', ADMIN);

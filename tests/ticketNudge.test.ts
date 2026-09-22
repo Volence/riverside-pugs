@@ -48,10 +48,10 @@ describe('who hears that a ticket changed', () => {
     nudge(file(ACCUSED, 'unsafe'));
     expect(heard()).toEqual([OWNER]);
 
-    // A ticket about a member of staff: restricted, and never the accused.
+    // A ticket about a member of staff: every other member of staff, never the accused.
     reset();
     nudge(file(STAFF_ACCUSED));
-    expect(heard()).toEqual([OWNER]);
+    expect(heard()).toEqual([MOD, ADMIN, OWNER]);
 
     // A banned moderator stops hearing at once, on the socket they still hold.
     reset();

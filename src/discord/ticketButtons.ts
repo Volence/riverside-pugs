@@ -3,7 +3,7 @@ import { logAdmin } from '../admin/audit.js';
 import { playerByDiscordId } from '../players.js';
 import { inGoodStanding } from '../standing.js';
 import { claimTicket, closeTicket } from '../tickets/actions.js';
-import { canSeeTicket, getTicketRow, type TicketRow } from '../tickets/store.js';
+import { canSeeTicket, getTicketRow, ticketIsQuiet, type TicketRow } from '../tickets/store.js';
 import { closeModal } from './ticketCard.js';
 import type { BotInteraction, InteractionReply } from './transport.js';
 
@@ -55,7 +55,7 @@ function resolve(
  * custom_id scheme: t:<ticketId>:claim, t:<ticketId>:close. Each calls
  * exactly what the site's route calls, so the two surfaces cannot disagree
  * about who may do what, and each is audited like the route, with
- * `via: 'discord'`, quietly for a restricted ticket.
+ * `via: 'discord'`, quietly for a restricted ticket or one about staff.
  */
 export async function handleTicketButton(
   deps: TicketButtonDeps, i: Extract<BotInteraction, { kind: 'button' }>,
@@ -78,7 +78,7 @@ export async function handleTicketButton(
   const claim = ticket.claimed_by === null;
   const r = claimTicket(deps.db, id, me, claim);
   if (!r.ok) return say(capitalise(r.error));
-  logAdmin(deps.db, me, 'ticket_claim', id, { claim, via: 'discord' }, { quiet: ticket.restricted === 1 });
+  logAdmin(deps.db, me, 'ticket_claim', id, { claim, via: 'discord' }, { quiet: ticketIsQuiet(deps.db, ticket) });
   return say(claim ? `You claimed ticket #${id}.` : `You released ticket #${id}.`);
 }
 
@@ -93,6 +93,6 @@ export async function handleTicketModal(
   const r = closeTicket(deps.db, id, who.me, i.fields.outcome, i.fields.note ?? '');
   if (!r.ok) return say(capitalise(r.error));
   // The note is internal and stays out of the audit detail, as on the site.
-  logAdmin(deps.db, who.me, 'ticket_close', id, { outcome: i.fields.outcome, via: 'discord' }, { quiet: who.ticket.restricted === 1 });
+  logAdmin(deps.db, who.me, 'ticket_close', id, { outcome: i.fields.outcome, via: 'discord' }, { quiet: ticketIsQuiet(deps.db, who.ticket) });
   return say(`Ticket #${id} is closed. The post locks in a moment.`);
 }

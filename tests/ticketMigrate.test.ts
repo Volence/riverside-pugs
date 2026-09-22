@@ -148,13 +148,13 @@ describe('merging players', () => {
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
-  it('restricts an open ticket that the merge turns into a ticket about staff', () => {
+  it('keeps an open ticket ordinary when the merge turns it into a ticket about staff', () => {
     const deps = { adminSteamIds: [] };
     db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(T1);
     const id = (fileReport(db, R1, { targetId: ALT, category: 'griefing', text: 'threw' }, deps) as { ticketId: number }).ticketId;
     mergePlayers(db, { from: ALT, into: T1, by: ADMIN });
-    expect(db.prepare('SELECT target_id, restricted FROM tickets WHERE id = ?').get(id)).toEqual({ target_id: T1, restricted: 1 });
-    expect(db.prepare('SELECT steamid FROM ticket_access WHERE ticket_id = ?').all(id)).toEqual([{ steamid: ADMIN }]);
+    expect(db.prepare('SELECT target_id, restricted FROM tickets WHERE id = ?').get(id)).toEqual({ target_id: T1, restricted: 0 });
+    expect(db.prepare('SELECT steamid FROM ticket_access WHERE ticket_id = ?').all(id)).toEqual([]);
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 });

@@ -35,11 +35,11 @@ describe('the ticket page and the Player File share one summary', () => {
   });
 
   it('gives no file link to a viewer who may not open the file', async () => {
-    // A ticket about a member of staff is restricted by the tickets rules.
+    // A restricted ticket about a member of staff.
     // A second moderator let onto the access list may work that ticket and
     // still may not open the colleague's whole file, which is the one case
     // where the summary renders without a way through to it.
-    await app.inject({ method: 'POST', url: '/api/mod/tickets', cookies: cookie[OWNER], payload: { targetId: MOD } });
+    await app.inject({ method: 'POST', url: '/api/mod/tickets', cookies: cookie[OWNER], payload: { targetId: MOD, restricted: true } });
     const id = (db.prepare('SELECT id FROM tickets').get() as { id: number }).id;
     await app.inject({ method: 'POST', url: `/api/mod/tickets/${id}/access`, cookies: cookie[OWNER], payload: { steamid: MOD2 } });
     const detail = (await app.inject({ method: 'GET', url: `/api/mod/tickets/${id}`, cookies: cookie[MOD2] })).json();

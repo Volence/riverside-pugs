@@ -122,54 +122,45 @@ export function foldTicket(db: DB, gone: number, keep: number, access: 'merge' |
   addTicketEvent(db, keep, null, 'folded', { from: gone }, now);
 }
 
-export type RestrictOutcome = 'none' | 'restricted' | 'folded' | 'nobody';
+/**
+ * Keep everything about this player that the admin feed has not said yet out
+ * of it for good. Called the moment somebody becomes staff (promotion, a
+ * merge into a staff account, a Discord link that adopts a staff player's
+ * old cases): every admin reads the feed, and they may be reading it now.
+ *
+ * Only reports not yet announced: one already said cannot be unsaid, and
+ * marking it would change nothing. Runs inside the caller's transaction.
+ *
+ * This is what is left of restrictOpenTicketAbout. A ticket about staff is
+ * no longer restricted for it (owner, 2026-09-22): the whole team works it,
+ * and the accused is kept out by canSeeTicket on the site and by
+ * forumAudience in Discord.
+ */
+export function holdFeedAbout(db: DB, steamid: string): number {
+  return db.prepare(
+    `UPDATE ticket_reports SET feed_held = 1
+     WHERE feed_held = 0 AND announced_at IS NULL
+       AND ticket_id IN (SELECT id FROM tickets WHERE target_id = ?)`,
+  ).run(steamid).changes;
+}
 
 /**
- * Close the gap between "this player is now staff" and "the case about them
- * is readable by every moderator". Called when a player is promoted and when
- * one is merged into a staff account.
- *
- * tickets_one_open allows one open ticket of each flavour, so where the
- * player already has an open restricted ticket the normal one is folded into
- * it rather than restricted.
- *
- * 'nobody' means there is no one to give the ticket to. It is then left as it
- * was: a normal ticket is still hidden from the accused by canSeeTicket, and
- * a restricted ticket nobody can open is a ticket nobody can work or repair.
- * The caller reports it once its transaction has committed. Runs inside the
- * caller's transaction.
+ * Whether an audit row about this ticket must stay off the admin feed:
+ * restricted, or about somebody with a staff flag. The feed line names only
+ * the ticket number, but an accused admin who sees activity on a ticket the
+ * site answers 404 for has learned that a case about them exists.
  */
-export function restrictOpenTicketAbout(
-  db: DB, targetId: string, adminSteamIds: string[], now = new Date(), exclude: string[] = [],
-): RestrictOutcome {
-  const open = (restricted: number) => db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
-    .get(targetId, restricted) as { id: number } | undefined;
-  const normal = open(0);
-  if (!normal) return 'none';
-  const sibling = open(1);
-  if (sibling) {
-    foldTicket(db, normal.id, sibling.id, 'drop', now);
-    return 'folded';
-  }
-  if (accessSeed(db, targetId, adminSteamIds, exclude).length === 0) {
-    // Nobody to give it to: it stays a normal ticket nobody restricted, but
-    // it is about staff, and its reports must never reach the admin feed.
-    db.prepare('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id = ?').run(normal.id);
-    return 'nobody';
-  }
-  db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(normal.id);
-  seedAccess(db, normal.id, targetId, adminSteamIds, [], now, exclude);
-  db.prepare('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id = ?').run(normal.id);
-  addTicketEvent(db, normal.id, null, 'restricted', {}, now);
-  return 'restricted';
+export function ticketIsQuiet(db: DB, t: { restricted: number; target_id: string | null }): boolean {
+  return t.restricted === 1 || hasStaffFlag(db, t.target_id);
 }
 
 /**
  * Open restricted tickets with nobody on their list, given to whoever can
  * take them now. A list empties when the only person on it is merged into
- * the accused, and starts empty when a report is filed about the only admin.
- * Called at the end of a merge and whenever an admin is created, so such a
- * ticket surfaces the moment there is somebody to show it to.
+ * the accused, and starts empty when a safety report is filed while there is
+ * no admin to give it to. Called at the end of a merge and whenever an admin
+ * is created, so such a ticket surfaces the moment there is somebody to show
+ * it to.
  */
 export function reseedOrphanedTickets(
   db: DB, adminSteamIds: string[], exclude: string[] = [], now = new Date(),
