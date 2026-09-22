@@ -342,6 +342,28 @@ export async function handleReportModal(
   return hold(deps, me, typed, category, text, found);
 }
 
+/** '/report' gets its match from the same lookup. Without this, every report
+ *  filed through this button carried no match at all: moderators lost the
+ *  link on exactly the griefing and AFK reports the button exists to catch,
+ *  and fileReport's duplicate rule (keyed on the match) collapsed to "one
+ *  open report about this player, ever", refusing a second night's report
+ *  that '/report' would have let through. A match is only ever attached
+ *  between two players, so a Discord-only reporter or a picked member who is
+ *  not a linked player carries none. A picked member who IS a linked player
+ *  still resolves to that player's steamid here, even though the report
+ *  travels to fileReport as `targetDiscord` (which resolves the same link):
+ *  without this the member picker would file every report with no match at
+ *  all, the exact regression the paragraph above describes, just reached
+ *  through a different field. */
+function matchIdFor(
+  db: DB, reporter: Me, target: { targetId: string } | { targetDiscord: PickedTarget },
+): number | null {
+  if (reporter.kind !== 'player') return null;
+  if ('targetId' in target) return latestSharedMatch(db, reporter.steamid, target.targetId);
+  const linked = playerByDiscordId(db, target.targetDiscord.discordId);
+  return linked ? latestSharedMatch(db, reporter.steamid, linked.steamid) : null;
+}
+
 /** The one place a report is actually filed, so every path shares the same
  *  refusals and the same wording. Returns fileReport's own ok flag alongside
  *  the reply, so a caller that must act differently on success (the pick
@@ -356,15 +378,7 @@ function file(
   deps: ReportHandlerDeps, reporter: Me, target: { targetId: string } | { targetDiscord: PickedTarget },
   category: string, text: string,
 ): { ok: boolean; reply: InteractionReply } {
-  // '/report' gets its match from the same lookup. Without this, every report
-  // filed through this button carried no match at all: moderators lost the
-  // link on exactly the griefing and AFK reports the button exists to catch,
-  // and fileReport's duplicate rule (keyed on the match) collapsed to "one
-  // open report about this player, ever", refusing a second night's report
-  // that '/report' would have let through. A match is only ever attached
-  // between two players.
-  const matchId = reporter.kind === 'player' && 'targetId' in target
-    ? latestSharedMatch(deps.db, reporter.steamid, target.targetId) : null;
+  const matchId = matchIdFor(deps.db, reporter, target);
   const body = { category, text, matchId, ...('targetId' in target ? { targetId: target.targetId } : {}) };
   const r = fileReport(deps.db, reporter.kind === 'player' ? reporter.steamid : reporter, body, {
     adminSteamIds: deps.adminSteamIds,

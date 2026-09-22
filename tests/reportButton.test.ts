@@ -521,6 +521,25 @@ describe('Discord members on the form', () => {
     expect(db.prepare('SELECT reporter_discord_id FROM ticket_reports').get()).toEqual({ reporter_discord_id: 'd-new' });
   });
 
+  it('carries the reporter\'s shared match when the picked member is a linked player', async () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    db.prepare("UPDATE players SET discord_id = 'd-alice' WHERE steamid = ?").run(ALICE);
+    const alicePick: PickedMember = { id: 'd-alice', name: 'Alice', bot: false, administrator: false };
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: 'd-alice', name: '', reason: 'griefing', details: '' }, { member: alicePick }));
+    expect(r.payload.content).toMatch(/^Thanks/);
+    expect(db.prepare('SELECT match_id FROM ticket_reports').get()).toEqual({ match_id: 1 });
+  });
+
+  it('files when the dropdown pick and the member picker name the same linked player, and still carries the match', async () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    db.prepare("UPDATE players SET discord_id = 'd-alice' WHERE steamid = ?").run(ALICE);
+    const alicePick: PickedMember = { id: 'd-alice', name: 'Alice', bot: false, administrator: false };
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: ALICE, member: 'd-alice', name: '', reason: 'griefing', details: '' }, { member: alicePick }));
+    expect(r.payload.content).toMatch(/^Thanks/);
+    expect(db.prepare('SELECT r.match_id AS matchId, t.target_id AS targetId FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id').get())
+      .toEqual({ matchId: 1, targetId: ALICE });
+  });
+
   it('a Discord-only reporter who types an ambiguous name gets a draft of their own', async () => {
     const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: '', name: 'bob', reason: 'afk', details: '' }, {}, 'd-new'));
     expect(r.payload.content).toMatch(/More than one player/);
