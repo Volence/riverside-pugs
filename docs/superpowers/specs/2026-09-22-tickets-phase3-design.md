@@ -94,7 +94,8 @@ and a second open is a no-op.
 tickets about the same person with the same `restricted` flag, they fold the way
 `mergePlayers` folds them. `discord_sanctions` rows stay keyed by Discord id, because Discord
 acts on that id; the People desk shows them on the player's case view through the link. `linkDiscord` in `src/players.ts` calls it inside its
-transaction. `MERGE_HANDLED_PLAYER_COLUMNS` gains the new nullable steamid columns.
+transaction. `MERGE_HANDLED_PLAYER_COLUMNS` needs no change: no new column points at
+players.
 
 ### Auto-restrict
 
@@ -122,8 +123,9 @@ Discord-only reporters see the same form. Their dropdown holds only the sentinel
 
 ### `/report`
 
-Gains an optional `member` user option beside the existing player option, with the same
-resolution and the same two-people refusal.
+Its `player` option is already a Discord user picker; today it refuses anyone who has not
+linked. That refusal goes: an unlinked member is reported by Discord id. An unlinked presser
+may use it too. (Corrected while planning: the spec first said a new `member` option.)
 
 ### `fileReport`
 
@@ -143,8 +145,9 @@ are players.
 
 ### Transport
 
-`transport.ts` gains a `userSelect` modal field and a `user` slash option type, implemented in
-`djsTransport.ts`. They are on the live checklist, since the fake cannot prove them.
+`transport.ts` gains a `user` modal field, and command and modal interactions carry the
+picked member (name, bot, administrator) and the presser's timeout, read from Discord's
+interaction payload, implemented in `djsTransport.ts`. They are on the live checklist, since the fake cannot prove them.
 
 ### Receipt
 
