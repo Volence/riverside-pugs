@@ -15,6 +15,7 @@ import {
 } from '../tickets/threads.js';
 import { accessDm, closeDm, reportLine, reporterWroteDm, ticketCard } from './ticketCard.js';
 import { CHAT_ENDED_ON_CLOSE, endReporterThread } from './reporterChats.js';
+import { syncRelay } from './reporterRelay.js';
 import type { BotTransport } from './transport.js';
 
 /** The spec's figure: "A reconciler on bot ready and every five minutes". */
@@ -286,6 +287,7 @@ export class TicketSync {
       if (thread.surface === 'private') await this.syncMembers(t, thread);
       await this.announceReports(t, thread);
       await this.pingInPost(t, thread);
+      if (thread.surface === 'forum') await syncRelay(this.deps, t, thread);
       await this.refreshCard(t, thread);
     }
     // A closed ticket is locked AFTER its card said so, for the same reason.
