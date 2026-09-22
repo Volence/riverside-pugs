@@ -442,8 +442,22 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
-    drawHud(ctx, w, h, design, side, selected);
+    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1));
   }, [design, side, selected, backdrop, imgTick]);
+
+  // The preview draws labels in Roboto Condensed, the Modern preset's real
+  // font and the closest shipped stand-in for stock's Trade Gothic. Canvas
+  // text only uses a web font once the browser has it, so register the two
+  // faces on mount and redraw when they arrive. happy-dom has no FontFace,
+  // and a browser that refuses is left drawing the fallback stack.
+  useEffect(() => {
+    try {
+      const faces = [new FontFace('Roboto Condensed', `url(${regularUrl})`),
+                     new FontFace('Roboto Condensed', `url(${boldUrl})`, { weight: '700' })];
+      for (const f of faces) document.fonts.add(f);
+      Promise.all(faces.map((f) => f.load())).then(() => setImgTick((t) => t + 1)).catch(() => { /* fallback stack stays */ });
+    } catch { /* no FontFace here: the fallback stack stays */ }
+  }, []);
 
   // Debounced rather than immediate: a drag calls setDesign on every
   // pointermove, and an undebounced save would run a synchronous

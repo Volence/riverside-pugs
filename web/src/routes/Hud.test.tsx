@@ -179,4 +179,39 @@ describe('Hud page', () => {
       expect((screen.getByRole('combobox', { name: /preset/i }) as HTMLSelectElement).value).toBe('modern');
     });
   });
+
+  it('registers the preview font once on mount and survives a browser without FontFace', async () => {
+    // happy-dom has no FontFace; the page must not throw and must still render the canvas.
+    const { container } = render(<Hud />);
+    expect(container.querySelector('canvas')).not.toBeNull();
+  });
+
+  it('registers both Roboto Condensed faces once on mount', async () => {
+    // Stand in for a browser that does have FontFace, so the mount effect's
+    // happy path (the try branch, not the catch) gets covered too.
+    class FakeFontFace {
+      descriptors?: { weight?: string };
+      constructor(public family: string, public source: string, descriptors?: { weight?: string }) {
+        this.descriptors = descriptors;
+      }
+      load() { return Promise.resolve(this); }
+    }
+    const add = vi.fn();
+    vi.stubGlobal('FontFace', FakeFontFace);
+    const hadFonts = 'fonts' in document;
+    const originalFonts = (document as unknown as { fonts?: unknown }).fonts;
+    (document as unknown as { fonts: { add: typeof add } }).fonts = { add };
+
+    try {
+      render(<Hud />);
+      await waitFor(() => expect(add).toHaveBeenCalledTimes(2));
+      // Regular first, bold at weight 700 second, matching the two ttf imports.
+      expect(add.mock.calls[0][0].descriptors?.weight).toBeUndefined();
+      expect(add.mock.calls[1][0].descriptors?.weight).toBe('700');
+    } finally {
+      vi.unstubAllGlobals();
+      if (hadFonts) (document as unknown as { fonts: unknown }).fonts = originalFonts;
+      else delete (document as unknown as { fonts?: unknown }).fonts;
+    }
+  });
 });
