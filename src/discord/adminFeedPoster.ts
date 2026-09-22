@@ -141,6 +141,13 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'cvar_flag': {
+        return {
+          text: `🔧 ${this.name(e.steamid)} is playing match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) `
+            + `with \`${e.cvar} ${e.value}\`, which thins smoke and fire enough to see through (the settings check expects 1 or higher).`,
+          color: COLOR.problem,
+        };
+      }
       case 'steam_signal': {
         // Context, worded as context. A ban in some other game is not a ban
         // in this one, and a borrowed library is how siblings share a PC.

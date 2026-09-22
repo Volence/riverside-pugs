@@ -5,6 +5,10 @@ const TOKEN_RE = /^[0-9a-f]{32}$/;
 
 export const PHASE_STATES = ['live', 'paused', 'readyup', 'roundover', 'loading'] as const;
 export type PhaseState = typeof PHASE_STATES[number];
+/** Client settings l4d_cvarwatch reports. Anything else on an L4DV line is refused. */
+export const WATCHED_CVARS = ['cpu_level'] as const;
+export type WatchedCvar = typeof WATCHED_CVARS[number];
+
 export interface Phase {
   state: PhaseState;
   /** Who is charged for a pause, or null: a disconnect pause, an admin, or
@@ -117,6 +121,10 @@ export type LogEvent =
   // not read the connection time.
   | { kind: 'signon_drop'; steamid: string; secs: number; forced: number; name: string }
   | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean }
+  // A client setting that matters for fairness, from l4d_cvarwatch.smx: once
+  // per connection, only when the value is out of bounds. Only cpu_level so
+  // far (0 thins smoke, fire and the boomer cloud enough to see through).
+  | { kind: 'cvar_flag'; steamid: string; cvar: WatchedCvar; value: number }
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
@@ -280,6 +288,16 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (cheat === null || cheat < 0 || cheat >= LILAC_CHEAT_MAX) return null;
     if (banned !== '0' && banned !== '1') return null;
     return { kind: 'lilac_flag', steamid, cheat, banned: banned === '1' };
+  }
+
+  // Client settings from l4d_cvarwatch.smx. Anchored like L4DL, and the value
+  // is the client's own string, so only a plain number gets through.
+  if (body.startsWith('L4DV ')) {
+    const f = kv(body.split(/\s+/).slice(1));
+    const steamid = steamId64Of(f.id ?? '');
+    if (!steamid || !(WATCHED_CVARS as readonly string[]).includes(f.cvar ?? '')) return null;
+    if (!/^-?\d{1,6}(\.\d{1,6})?$/.test(f.value ?? '')) return null;
+    return { kind: 'cvar_flag', steamid, cvar: f.cvar as WatchedCvar, value: Number(f.value) };
   }
 
   // Input bursts from l4d_inputstats.smx. Same anchoring as SIGNON_DROP and for
