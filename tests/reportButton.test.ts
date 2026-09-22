@@ -293,6 +293,43 @@ describe('the standing message', () => {
     await rb.tick();
     expect(stored(db)).toMatchObject({ channel_id: 'c2' });
   });
+
+  it('edits a stale message in place, without re-sending, when the copy changed but the channel did not', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    const first = stored(db)!.message_id;
+    // Stand in for the button's copy changing between deploys: the row on
+    // disk is now stale relative to whatever standingPayload() builds today.
+    db.prepare("UPDATE report_message SET hash = 'stale' WHERE id = 1").run();
+    await rb.tick();
+    expect(stored(db)!.message_id).toBe(first);
+    expect(standing(t)).toHaveLength(1);
+
+    const hash = (db.prepare('SELECT hash FROM report_message WHERE id = 1').get() as { hash: string }).hash;
+    expect(hash).not.toBe('stale');
+    // Prove it is not just SOME new value, but the actual hash a fresh tick
+    // would compute: run one on a brand new database and channel, with no
+    // stale row to react to, and it must land on the same value.
+    const freshDb = openDb(':memory:');
+    seedPlayers(freshDb);
+    await liveIn(freshDb, new FakeTransport(), 'somewhere-else').tick();
+    const freshHash = (freshDb.prepare('SELECT hash FROM report_message WHERE id = 1').get() as { hash: string }).hash;
+    expect(hash).toBe(freshHash);
+  });
+
+  it('never treats a failed edit on a stale message as success, so it sends fresh instead', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    const first = stored(db)!.message_id;
+    db.prepare("UPDATE report_message SET hash = 'stale' WHERE id = 1").run();
+    // Discord has lost the message (not merely "Discord is down" for this
+    // one call): the edit call finds nothing and reports false, which is the
+    // exact case a false return exists to catch.
+    t.messages.find((m) => m.id === first)!.deleted = true;
+    await rb.tick();
+    expect(stored(db)!.message_id).not.toBe(first);
+    expect(standing(t)).toHaveLength(1);
+  });
 });
 
 describe('reaping drafts', () => {
