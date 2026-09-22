@@ -115,4 +115,29 @@ describe('widenTicketIdentity', () => {
     raw.close();
     expect(() => openDb(path)).toThrow(/surprise/);
   });
+
+  it('scopes the foreign_key_check to tickets and what points at it, so an unrelated orphan elsewhere in the database does not block the boot', () => {
+    // A pre-existing orphan in a table the rebuild never touches (here,
+    // player_links, which points at players, not tickets) must not stop
+    // openDb: an unscoped foreign_key_check would inspect the whole
+    // database and fail the boot on a row this migration has nothing to
+    // do with.
+    const okPath = join(dir, 'ok.db');
+    oldShape(okPath);
+    const rawOk = new Database(okPath);
+    rawOk.pragma('foreign_keys = OFF');
+    rawOk.exec("INSERT INTO player_links (player_id, platform, handle) VALUES ('999999999999999999', 'twitch', 'ghost')");
+    rawOk.close();
+    expect(() => openDb(okPath)).not.toThrow();
+
+    // An orphan in a table that does point at tickets (ticket_events) must
+    // still be caught: this is what the scoped check exists to catch.
+    const badPath = join(dir, 'bad.db');
+    oldShape(badPath);
+    const rawBad = new Database(badPath);
+    rawBad.pragma('foreign_keys = OFF');
+    rawBad.exec("INSERT INTO ticket_events (ticket_id, kind, created_at) VALUES (999, 'test', 'x')");
+    rawBad.close();
+    expect(() => openDb(badPath)).toThrow(/foreign_key_check failed/);
+  });
 });

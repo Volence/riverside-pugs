@@ -20,6 +20,15 @@ const indexesOf = (db: DB, table: string, skip: string[]) =>
   (db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL").all(table) as { name: string; sql: string }[])
     .filter((i) => !skip.includes(i.name));
 
+/** Every table with a foreign key pointing at `target`, found by asking
+ *  the schema rather than hard-coding a list, so a table added later that
+ *  references tickets is picked up without editing this file. */
+function tablesReferencing(db: DB, target: string): string[] {
+  const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[])
+    .map((t) => t.name);
+  return tables.filter((t) => (db.pragma(`foreign_key_list(${t})`) as { table: string }[]).some((fk) => fk.table === target));
+}
+
 /**
  * Phase 3: each side of a report is a player OR a Discord member. Rebuilds
  * tickets, ticket_reports and pending_reports so their player column is
@@ -32,7 +41,13 @@ const indexesOf = (db: DB, table: string, skip: string[]) =>
  *
  * The 12-step SQLite recipe: foreign keys off (only possible outside a
  * transaction), everything else in one transaction, foreign_key_check before
- * commit, foreign keys back on.
+ * commit, foreign keys back on. The check is scoped to the tables this
+ * rebuild can affect (tickets, ticket_reports, pending_reports, and every
+ * table with a foreign key pointing at tickets) rather than the whole
+ * database: an unscoped foreign_key_check inspects every table, so a
+ * pre-existing orphan row anywhere else (a table this rebuild never
+ * touches, or something hand-edited on the production box) would make
+ * openDb throw and the server fail to boot on every restart.
  */
 export function widenTicketIdentity(db: DB): void {
   db.exec(`CREATE TABLE IF NOT EXISTS discord_sanctions (
@@ -136,7 +151,8 @@ export function widenTicketIdentity(db: DB): void {
         if (has) db.prepare('UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?').run(seq, name);
         else db.prepare('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)').run(name, seq);
       }
-      const broken = db.pragma('foreign_key_check') as unknown[];
+      const checkTables = new Set(['tickets', 'ticket_reports', 'pending_reports', ...tablesReferencing(db, 'tickets')]);
+      const broken = [...checkTables].flatMap((t) => db.pragma(`foreign_key_check(${t})`) as unknown[]);
       if (broken.length > 0) throw new Error(`widenTicketIdentity: foreign_key_check failed: ${JSON.stringify(broken.slice(0, 5))}`);
     })();
   } finally {
