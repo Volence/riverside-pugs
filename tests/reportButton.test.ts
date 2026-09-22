@@ -419,6 +419,14 @@ describe('submitting the form', () => {
     expect(reports()).toEqual([{ category: 'griefing', text: 'threw the round', target_id: ALICE }]);
   });
 
+  it('names the person reported, not the moderators, as who is kept in the dark', async () => {
+    // With nobody named in the sentence, "they will not be told" reads as the
+    // moderators not being told, which is false and undercuts the actual
+    // promise. The subject has to be the person reported.
+    const r = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: '' });
+    expect(said(r)).toBe('Thanks. The moderators will look at it. The person you reported is never told who filed it.');
+  });
+
   it('files against a uniquely typed name', async () => {
     const r = await submit(ME, { who: OTHER, name: 'Alice', reason: 'toxicity', details: '' });
     expect(said(r)).toContain('Thanks');

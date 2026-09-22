@@ -305,7 +305,7 @@ function file(
     adminSteamIds: deps.adminSteamIds, now: deps.now?.(),
   });
   if (!r.ok) return { ok: false, reply: say(`Could not file the report: ${r.error}.`) };
-  return { ok: true, reply: say('Thanks. The moderators will look at it, and they will not be told who reported them.') };
+  return { ok: true, reply: say('Thanks. The moderators will look at it. The person you reported is never told who filed it.') };
 }
 
 /** Keep the words while the reporter says which of these people they meant. */
