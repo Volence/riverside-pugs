@@ -130,5 +130,9 @@ describe('drawHud delegates panels to the renderer', () => {
     drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'infected', null);
     expect(texts).toContain('100');                          // siHealth's sample HealthNumber
     expect(calls.filter((m) => m === 'drawImage').length).toBeGreaterThan(0);   // siHealth's pz_healthbar frame
+    // infectedRow only: zombieteamdisplayplayer.res's NameLabel and SpawnTimeLabel, which
+    // siHealth's file (hunterhealth.res) does not have, so these can only come from its cards.
+    for (const n of ['Francis', 'Louis', 'Zoey']) expect(texts).toContain(n);
+    expect(texts).toContain('12');
   });
 });
