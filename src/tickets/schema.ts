@@ -133,5 +133,32 @@ export function ensureTicketSchema(db: DB): void {
       removed_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_ticket_attachments_message ON ticket_attachments (message_id);
+
+    -- A report whose typed name matched several players, held while the
+    -- reporter picks which one they meant. In a table rather than in memory
+    -- so that a deploy in the middle of picking cannot lose what someone
+    -- wrote: a report can be about something distressing, and asking them to
+    -- type it again is the worst failure this feature could have.
+    CREATE TABLE IF NOT EXISTS pending_reports (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      reporter_id TEXT NOT NULL REFERENCES players(steamid),
+      category    TEXT NOT NULL,
+      text        TEXT NOT NULL DEFAULT '',
+      typed_name  TEXT NOT NULL,
+      candidates  TEXT NOT NULL,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_reports_created ON pending_reports (created_at);
+
+    -- The standing message carrying the Report button. One row, ever.
+    -- channel_id is kept beside message_id so that pointing the setting at a
+    -- different channel is handled rather than orphaning a button.
+    CREATE TABLE IF NOT EXISTS report_message (
+      id         INTEGER PRIMARY KEY CHECK (id = 1),
+      channel_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      hash       TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 }
