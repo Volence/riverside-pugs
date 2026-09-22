@@ -47,6 +47,7 @@ describe('the People routes', () => {
     ['GET', `/api/admin/people/${OTHER}`, {}],
     ['POST', `/api/admin/people/${OTHER}/notes`, { text: 'x' }],
     ['POST', `/api/admin/people/${OTHER}/looked-at`, {}],
+    ['GET', '/api/admin/people/chat/1', {}],
   ];
 
   it('are staff only, on every one of them, signed in or not', async () => {
@@ -204,5 +205,55 @@ describe('the admin-only routes the file calls', () => {
       expect((await post(MOD, url, payload)).statusCode, url).toBe(403);
     }
     expect((db.prepare('SELECT COUNT(*) AS n FROM bans').get() as { n: number }).n).toBe(0);
+  });
+});
+
+describe('the staff chat log of a match', () => {
+  const match = (state: string) => Number(
+    db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, ?, 'dead_air')").run(state).lastInsertRowid,
+  );
+  const say = (matchId: number, seq: number, map: number, half: number, tMs: number, steamid: string, team: string, message: string) =>
+    db.prepare(
+      `INSERT INTO match_chat (match_id, seq, map_ordinal, half, t_ms, steamid, team, message)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(matchId, seq, map, half, tMs, steamid, team, message);
+
+  it('gives staff every line in order, including those said outside a round', async () => {
+    const id = match('completed');
+    say(id, 3, 0, 1, 5000, PLAYER, 'a', 'nice');
+    say(id, 1, 0, -1, -1, OTHER, 'b', 'ready up');
+    say(id, 7, 0, 1, -1, PLAYER, 'a', 'gg that round');
+    for (const who of [MOD, ADMIN]) {
+      const res = await get(who, `/api/admin/people/chat/${id}`);
+      expect(res.statusCode).toBe(200);
+      const lines = res.json().lines;
+      expect(lines.map((l: { message: string }) => l.message)).toEqual(['ready up', 'nice', 'gg that round']);
+      expect(lines[0]).toMatchObject({ steamid: OTHER, team: 'b', mapOrdinal: 0, half: -1, tMs: -1 });
+      expect(lines[1].name).toBeTruthy();
+    }
+  });
+
+  // A moderator can be playing. Serving a live match's chat would hand them
+  // the other team's messages as they are typed.
+  it('refuses a match that is still being played', async () => {
+    for (const state of ['live', 'configuring']) {
+      const id = match(state);
+      say(id, 1, 0, 1, 100, PLAYER, 'a', 'rush left');
+      expect((await get(ADMIN, `/api/admin/people/chat/${id}`)).statusCode, state).toBe(404);
+    }
+    expect((await get(ADMIN, '/api/admin/people/chat/999')).statusCode).toBe(404);
+  });
+
+  it('names the merged account behind an alt\'s lines', async () => {
+    const id = match('completed');
+    addAlias(db, { steamid: ALTS[0], canonical: PLAYER, by: ADMIN });
+    say(id, 1, 0, 1, 10, ALTS[0], 'a', 'from the alt');
+    expect((await get(ADMIN, `/api/admin/people/chat/${id}`)).json().lines[0]).toMatchObject({ steamid: ALTS[0], player: PLAYER });
+  });
+
+  it('serves a cancelled match too, since that is often where the trouble was', async () => {
+    const id = match('aborted');
+    say(id, 1, 0, -1, -1, PLAYER, 'a', 'im leaving');
+    expect((await get(MOD, `/api/admin/people/chat/${id}`)).json().lines).toHaveLength(1);
   });
 });

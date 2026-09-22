@@ -61,6 +61,39 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     return { players: searchPlayers(db, q).filter((p) => canOpenFile(db, viewer, p.steamid)) };
   });
 
+  /**
+   * Every chat line of a finished or cancelled match, for staff.
+   *
+   * The public replay timeline drops lines with no round clock (t_ms -1),
+   * which is everything said in a ready-up, a pause or between rounds: about
+   * a quarter of all chat, and where most arguments happen. A report about
+   * what someone said needs all of it.
+   *
+   * Never a match in progress: a moderator can be playing in it, and
+   * match_chat does not tell team chat from all chat.
+   */
+  app.get('/api/admin/people/chat/:matchId', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const id = Number((req.params as { matchId: string }).matchId);
+    const match = db
+      .prepare("SELECT id FROM matches WHERE id = ? AND state IN ('completed', 'aborted')")
+      .get(id);
+    if (!Number.isInteger(id) || !match) return reply.code(404).send({ error: 'no such match' });
+    // `player` is the merged identity, so a Player File link highlights the
+    // lines an alt typed as well as the main account's.
+    const lines = db.prepare(
+      `SELECT c.seq, c.map_ordinal AS mapOrdinal, c.half, c.t_ms AS tMs, c.steamid,
+              COALESCE(a.canonical_id, c.steamid) AS player,
+              COALESCE(p.name, c.steamid) AS name, c.team, c.message
+       FROM match_chat c
+       LEFT JOIN players p ON p.steamid = c.steamid
+       LEFT JOIN player_aliases a ON a.steamid = c.steamid
+       WHERE c.match_id = ? ORDER BY c.seq`,
+    ).all(id);
+    return { lines };
+  });
+
   app.get('/api/admin/people/review', async (req, reply) => {
     const me = requireMod(req, reply);
     if (!me) return reply;
