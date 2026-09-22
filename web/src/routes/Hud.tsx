@@ -9,8 +9,9 @@ import {
 } from '../hud/design';
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
-import { elementRect, teamLayout, teamCardRects, packHud, type BuildAssets } from '../hud/build';
-import { drawHud, hitTest, visibleElements, type Side } from '../hud/mock';
+import { elementRect, teamLayout, teamCardRects, isFreeTeam, packHud, type BuildAssets } from '../hud/build';
+import { drawHud, hitTest, freeCardAt, visibleElements, type Side } from '../hud/mock';
+import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
@@ -62,7 +63,8 @@ function clampSpan(v: number, size: number, extent: number, min: number): number
  */
 export function nudge(design: HudDesign, id: string, dx: number, dy: number): HudDesign {
   const el = elementById(id);
-  if (!el || !el.move) return design;
+  // In Free each card places itself: the element's own position would move nothing.
+  if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
   const o = design.elements[id];
   const base = elementRect(design, id, design.aspect);
   const extentW = screenW(design.aspect);
@@ -192,6 +194,19 @@ export function placeCard(design: HudDesign, card: number, x: number, y: number)
   if (!o?.slots || !o.slots[card]) return design;
   const slots = o.slots.map((s, i) => (i === card ? { x: clampOverride('x', x), y: clampOverride('y', y) } : s));
   return { ...design, elements: { ...design.elements, teamColumn: { ...o, slots } } };
+}
+
+/**
+ * Nudge a Free card by (dx, dy) from its slot, through the same clampSpan
+ * and 8-unit floor a drag uses, so repeated arrow presses cannot walk it off
+ * screen. Its size comes from the generated file.
+ */
+export function nudgeCard(design: HudDesign, card: number, dx: number, dy: number): HudDesign {
+  const s = design.elements.teamColumn?.slots?.[card];
+  if (!s) return design;
+  const r = teamCardRects(design, design.aspect)[card];
+  const extentW = screenW(design.aspect);
+  return placeCard(design, card, clampSpan(s.x + dx, r.w, extentW, 8), clampSpan(s.y + dy, r.h, SCREEN_H, 8));
 }
 
 const BACKDROPS: [Backdrop, string][] = [
@@ -381,6 +396,26 @@ function ElementControls(
         <p class="muted hud__note">The game places this one. It can be hidden but not moved.</p>
       )}
 
+      {id === 'xhair' && (
+        <>
+          <label class="hud__check">
+            <input
+              type="checkbox" checked={design.hideGameCrosshair === true}
+              onChange={(e) => {
+                const on = (e.target as HTMLInputElement).checked;
+                setDesign((d) => {
+                  const next = { ...d };
+                  if (on) next.hideGameCrosshair = true; else delete next.hideGameCrosshair;
+                  return next;
+                });
+              }}
+            />
+            <span>Hide the game's crosshair</span>
+          </label>
+          <p class="muted hud__note">Hides the game's own crosshair so an image crosshair can replace it.</p>
+        </>
+      )}
+
       {id === 'siHealth' && (
         <p class="muted hud__note">Shown as the Hunter; the Tank uses the same file.</p>
       )}
@@ -505,6 +540,16 @@ function StyleRow(
   );
 }
 
+type Rect4 = { x: number; y: number; w: number; h: number };
+/** What a pointer-down grabbed: an element (moved or resized) or one Free teammate card. */
+type Drag =
+  | { kind: 'element'; id: string; mode: 'move' | 'resize'; startUx: number; startUy: number; startRect: Rect4 }
+  | { kind: 'card'; card: number; startUx: number; startUy: number; startRect: Rect4 };
+
+const CARD_STATES: { key: CardState; label: string }[] = [
+  { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
+];
+
 export default function Hud() {
   const [design, setDesign] = useState<HudDesign>(loadDesign);
   const [side, setSide] = useState<Side>('survivor');
@@ -513,6 +558,9 @@ export default function Hud() {
   const [selectedCard, setSelectedCard] = useState<number | null>(null);
   // Selecting an element (or nothing) always drops a picked card.
   const selectEl = (id: string | null) => { setSelected(id); setSelectedCard(null); };
+  // Which state the teammate cards are previewed in. Game code picks it in
+  // game; this only changes the picture, never the design or the file.
+  const [cardState, setCardState] = useState<CardState>('healthy');
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
   const [status, setStatus] = useState('');
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
@@ -528,11 +576,7 @@ export default function Hud() {
   // Which element a pointer-down grabbed, and whether it is moving or
   // resizing it; null between drags. A ref rather than state because it
   // changes every pointermove and must never itself trigger a re-render.
-  const drag = useRef<{
-    id: string; mode: 'move' | 'resize';
-    startUx: number; startUy: number;
-    startRect: { x: number; y: number; w: number; h: number };
-  } | null>(null);
+  const drag = useRef<Drag | null>(null);
 
   // One effect draws everything, so the canvas can never disagree with the
   // design it is supposed to be showing.
@@ -551,8 +595,8 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
-    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1));
-  }, [design, side, selected, backdrop, imgTick]);
+    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1), { state: cardState, card: selectedCard });
+  }, [design, side, selected, backdrop, imgTick, cardState, selectedCard]);
 
   // The preview draws labels in Roboto Condensed, the Modern preset's real
   // font and the closest shipped stand-in for stock's Trade Gothic. Canvas
@@ -625,13 +669,21 @@ export default function Hud() {
       return;
     }
     selectEl(hit);
+    if (hit === 'teamColumn' && isFreeTeam(design)) {
+      // In Free each card is its own target, and dragging it moves only that card.
+      const card = freeCardAt(design, ux, uy);
+      setSelectedCard(card);
+      drag.current = card === null ? null
+        : { kind: 'card', card, startUx: ux, startUy: uy, startRect: teamCardRects(design, design.aspect)[card] };
+      return;
+    }
     const el = elementById(hit)!;
     const rect = elementRect(design, hit, design.aspect);
     const nearCorner = Math.hypot(ux - (rect.x + rect.w), uy - (rect.y + rect.h)) <= 6;
     if (el.resize === 'free' && nearCorner) {
-      drag.current = { id: hit, mode: 'resize', startUx: ux, startUy: uy, startRect: rect };
+      drag.current = { kind: 'element', id: hit, mode: 'resize', startUx: ux, startUy: uy, startRect: rect };
     } else if (el.move) {
-      drag.current = { id: hit, mode: 'move', startUx: ux, startUy: uy, startRect: rect };
+      drag.current = { kind: 'element', id: hit, mode: 'move', startUx: ux, startUy: uy, startRect: rect };
     } else {
       drag.current = null;
     }
@@ -645,6 +697,13 @@ export default function Hud() {
     const duy = uy - d.startUy;
     const extentW = screenW(design.aspect);
 
+    if (d.kind === 'card') {
+      const r = d.startRect;
+      setDesign((cur) => placeCard(cur, d.card,
+        clampSpan(snap(r.x + dux, r.w, extentW), r.w, extentW, 8),
+        clampSpan(snap(r.y + duy, r.h, SCREEN_H), r.h, SCREEN_H, 8)));
+      return;
+    }
     setDesign((cur) => {
       const old = cur.elements[d.id] ?? {};
       if (d.mode === 'resize') {
@@ -667,7 +726,8 @@ export default function Hud() {
   // Arrows nudge, Escape deselects, Tab/Shift+Tab cycle the current side's
   // elements: the whole editor stays usable without a mouse.
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { selectEl(null); return; }
+    // Escape steps up one level: a picked card to the teammates, the teammates to nothing.
+    if (e.key === 'Escape') { if (selectedCard !== null) setSelectedCard(null); else selectEl(null); return; }
 
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -689,7 +749,10 @@ export default function Hud() {
     const delta = deltas[e.key];
     if (!delta) return;
     e.preventDefault();
-    if (selected) setDesign((d) => nudge(d, selected, delta[0], delta[1]));
+    if (selected === 'teamColumn' && selectedCard !== null && isFreeTeam(design)) {
+      const card = selectedCard;
+      setDesign((d) => nudgeCard(d, card, delta[0], delta[1]));
+    } else if (selected) setDesign((d) => nudge(d, selected, delta[0], delta[1]));
   };
 
   /** Switching preset keeps whatever moves the reader made, but they were
@@ -844,6 +907,14 @@ export default function Hud() {
               active={side}
               onSelect={(k) => { setSide(k as Side); selectEl(null); }}
             />
+
+            {side === 'survivor' && (
+              <Tabs
+                tabs={CARD_STATES.map((s) => ({ key: s.key, label: s.label }))}
+                active={cardState}
+                onSelect={(k) => setCardState(k as CardState)}
+              />
+            )}
 
             <label>
               Aspect{' '}

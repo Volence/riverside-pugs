@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
-import { snap, nudge, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard } from './Hud';
+import { snap, nudge, nudgeCard, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard } from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
 
@@ -79,6 +79,21 @@ describe('the teammate layout helpers', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
     expect(placeCard(free, 2, 5000, -900).elements.teamColumn!.slots![2]).toEqual({ x: 1000, y: -200 });
     expect(placeCard(DEFAULT_DESIGN, 0, 5, 5)).toBe(DEFAULT_DESIGN);           // not Free: nothing to place
+  });
+});
+
+describe('nudgeCard', () => {
+  it('moves a Free card from its slot and keeps 8 units of it on screen, like a drag', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(nudgeCard(free, 0, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 18, y: 441 });
+    let d = free;
+    for (let i = 0; i < 200; i++) d = nudgeCard(d, 0, -10, 0);
+    expect(d.elements.teamColumn!.slots![0].x).toBe(8 - 121);
+  });
+
+  it('leaves the element position alone in Free, where it moves nothing', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(nudge(free, 'teamColumn', 5, 5)).toBe(free);
   });
 });
 
@@ -310,5 +325,44 @@ describe('Hud page', () => {
       if (hadFonts) (document as unknown as { fonts: unknown }).fonts = originalFonts;
       else delete (document as unknown as { fonts?: unknown }).fonts;
     }
+  });
+
+  it('drags a Free teammate card on the canvas', () => {
+    const { container } = render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    // happy-dom lays nothing out: give the canvas a 1:1 box so client pixels are HUD units.
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    // Card 1 sits at (13, 441), 121 x 36. (133, 442) is on the card but on no
+    // child (only the splatter, which is decoration), so even with the
+    // teammates already selected this grabs the card, not a child.
+    fireEvent.pointerDown(canvas, { clientX: 133, clientY: 442, pointerId: 1 });
+    expect(screen.getByText('Teammate card 1')).toBeTruthy();
+    fireEvent.pointerMove(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
+    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
+    expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('241');
+  });
+
+  it('offers the Healthy, Down and Dead preview on the survivor side only', () => {
+    render(<Hud />);
+    expect(screen.getByRole('tab', { name: 'Healthy' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Down' }));
+    expect(screen.getByRole('tab', { name: 'Down' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(screen.queryByRole('tab', { name: 'Down' })).toBeNull();
+  });
+
+  it("hides the game's crosshair from the Custom crosshair panel", () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Custom crosshair' }));
+    const box = () => screen.getByLabelText("Hide the game's crosshair") as HTMLInputElement;
+    expect(box().checked).toBe(false);
+    expect(screen.getByText(/so an image crosshair can replace it/)).toBeTruthy();
+    fireEvent.click(box());
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Custom crosshair' }));
+    expect(box().checked).toBe(true);
   });
 });
