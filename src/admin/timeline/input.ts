@@ -6,11 +6,7 @@ interface Row {
   severity: string; at: string; hits: number; note: string;
 }
 
-/** A mouse wheel bound to +attack or +jump is legal (owner's ruling,
- *  2026-09-22), so a detection whose holds look like one is recorded but is
- *  not evidence. The note starts with the hold annotation. */
-export const WHEEL_ALLOWED = 'wheel-like';
-export const isWheel = (note: string): boolean => note.startsWith(WHEEL_ALLOWED);
+import { isWheel } from '../../inputStats.js';
 
 /** Input-timing detections. A row exists only once a signature has repeated
  *  across separate bursts in one match, so each one is already a pattern and
@@ -42,7 +38,7 @@ export const inputAdapter: TimelineAdapter = {
   evidence(db: DB) {
     return db.prepare(
       `SELECT steamid, MAX(at) AS at FROM input_detections
-       WHERE note NOT LIKE '${WHEEL_ALLOWED}%' GROUP BY steamid`,
+       WHERE note NOT LIKE 'wheel-like%' GROUP BY steamid`,
     )
       .all() as { steamid: string; at: string }[];
   },

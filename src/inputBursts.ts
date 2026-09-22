@@ -2,7 +2,7 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import {
   DEFAULT_THRESHOLDS, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
-  encodeIntervals, holdAnnotation, holdStats, matchDetections,
+  encodeIntervals, holdAnnotation, holdStats, isWheel, matchDetections,
   type HoldAnnotation, type HoldStats, type Thresholds,
 } from './inputStats.js';
 
@@ -143,11 +143,14 @@ function evaluateGroup(
     const ids = JSON.stringify(evidence.map((e) => e.id));
     const note = evidenceNote(evidence);
     const existing = db.prepare(
-      'SELECT id FROM input_detections WHERE match_id = ? AND steamid = ? AND signature = ?',
-    ).get(matchId, steamid, d.signature) as { id: number } | undefined;
+      'SELECT id, note FROM input_detections WHERE match_id = ? AND steamid = ? AND signature = ?',
+    ).get(matchId, steamid, d.signature) as { id: number; note: string } | undefined;
     if (existing) {
       db.prepare('UPDATE input_detections SET hits = ?, evidence = ?, note = ? WHERE id = ?')
         .run(evidence.length, ids, note, existing.id);
+      // Created as a scroll wheel, so nobody was told; the holds have since
+      // stopped looking like one, which makes it news for the first time.
+      if (isWheel(existing.note) && !isWheel(note)) created.push({ signature: d.signature, note });
       continue;
     }
     db.prepare(

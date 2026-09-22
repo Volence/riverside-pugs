@@ -157,6 +157,12 @@ export type HoldAnnotation = 'wheel-like' | 'fixed-hold' | 'variable-hold' | 'no
 
 export const MIN_HOLDS_TO_ANNOTATE = 4;
 
+/** Whether a detection note says scroll wheel. Wheel binds are legal (owner's
+ *  ruling, 2026-09-22): such a detection is kept on the file but is not
+ *  evidence, and the admin channel is not told. Notes start with the hold
+ *  annotation, so a suffix like ", plugin 0.1.0 capture" does not matter. */
+export const isWheel = (note: string): boolean => note.startsWith('wheel-like');
+
 export function holdAnnotation(holds: readonly number[] | null | undefined): HoldAnnotation {
   const h = holdStats(holds);
   if (!h || h.n < MIN_HOLDS_TO_ANNOTATE) return 'no-hold-data';

@@ -159,6 +159,8 @@ export function recentFlagFeed(db: DB, limit = 50): RecentFlag[] {
      SELECT d.id, d.signature AS kind, 'inputstats' AS source, d.severity, d.steamid,
             d.match_id AS matchId, d.at, COALESCE(p.name, d.steamid) AS name
      FROM input_detections d LEFT JOIN players p ON p.steamid = d.steamid
+     -- A scroll wheel bind is legal; its detection stays on the player's file.
+     WHERE d.note NOT LIKE 'wheel-like%'
      ORDER BY at DESC, id DESC LIMIT ?`,
   ).all(limit) as RecentFlag[];
   return rows;

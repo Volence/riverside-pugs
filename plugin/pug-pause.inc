@@ -157,6 +157,9 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 		PrintToChatAll("\x04[PUG]\x01 %s has used all \x05%d\x01 pauses for this campaign. Ask an admin if something has actually gone wrong.",
 			name, PauseLimit());
 		EmitPug("PAUSE_REFUSED team=%d used=%d limit=%d", team, g_iPauseUsed[team], PauseLimit());
+		// No pause is coming from this request, so nothing may be credited to
+		// it: an admin's forcepause a moment later is not this player's.
+		g_sPausePendingBy[0] = '\0';
 		return Plugin_Handled;
 	}
 

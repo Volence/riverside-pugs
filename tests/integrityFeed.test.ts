@@ -54,6 +54,18 @@ describe('recentFlagFeed', () => {
     expect(feed[1].source).toBe('lilac');
   });
 
+  it('leaves out scroll-wheel detections, which are allowed', () => {
+    for (let i = 0; i < 2; i++) {
+      recordInputBurst(db, {
+        matchId: 2, serverId: 1, steamid: A, kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0,
+        serverTick: 1, clientTick: 0, intervals: Array.from({ length: 50 }, (_, j) => (j % 3 === 0 ? 7 : 8)),
+        holds: Array.from({ length: 51 }, () => 1), wire: 2,
+      });
+    }
+    expect((db.prepare('SELECT note FROM input_detections').get() as { note: string }).note).toBe('wheel-like');
+    expect(recentFlagFeed(db)).toEqual([]);
+  });
+
   it('is empty, not broken, when nothing has been flagged', () => {
     expect(recentFlagFeed(db)).toEqual([]);
   });

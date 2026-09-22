@@ -62,7 +62,7 @@ function Pauses({ p }: { p: Conduct['pauses'] }) {
           {p.recent.map((x) => (
             <li key={`${x.matchId}-${x.startedAt}`}>
               <a href={`/match/${x.matchId}`}>#{x.matchId}</a> {where(x.mapOrdinal, x.half)}
-              {' · '}{x.seconds === null ? 'still open' : fmtClock(x.seconds)}
+              {' · '}{x.seconds === null ? 'no end recorded' : fmtClock(x.seconds)}
               <span class="muted"> · {fmtTime(x.startedAt)}</span>
             </li>
           ))}

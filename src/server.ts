@@ -24,7 +24,7 @@ import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
-import { isWheel } from './admin/timeline/input.js';
+import { isWheel } from './inputStats.js';
 import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';

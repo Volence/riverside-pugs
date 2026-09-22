@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { addAlias } from '../src/aliases.js';
 import { ADAPTERS, playerTimeline } from '../src/admin/playerTimeline.js';
-import { isWheel } from '../src/admin/timeline/input.js';
+import { isWheel } from '../src/inputStats.js';
 import { isEvidence, toIso, type TimelineAdapter, type TimelineItem } from '../src/admin/timeline/types.js';
 
 const MAIN = '76561199000000001';

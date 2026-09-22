@@ -147,6 +147,21 @@ describe('hold annotation', () => {
     expect(detectionsForPlayer(db, A)[0]).toMatchObject({ severity: 'low', note: 'wheel-like', hits: 2 });
   });
 
+  // Wheel binds are legal, so a wheel-like detection is not announced. If
+  // later bursts stop looking like a wheel, it becomes news for the first time.
+  it('reports a detection again once it stops looking like a scroll wheel', () => {
+    const wheel = Array.from({ length: 51 }, () => 1);
+    recordInputBurst(db, fire(wheel));
+    recordInputBurst(db, fire(wheel));
+    const fixed = Array.from({ length: 51 }, (_, i) => 3 + (i % 2));
+    const more = [recordInputBurst(db, fire(fixed)), recordInputBurst(db, fire(fixed)), recordInputBurst(db, fire(fixed))];
+    const note = detectionsForPlayer(db, A)[0].note;
+    expect(note).not.toMatch(/^wheel-like/);
+    expect(more.flatMap((r) => r.created)).toEqual([{ signature: 'pistol_rate', note: more.find((r) => r.created.length)!.created[0].note }]);
+    // Once only: the row is no longer wheel-like, so a further burst is quiet.
+    expect(recordInputBurst(db, fire(fixed)).created).toEqual([]);
+  });
+
   it('tells a scripted fixed hold from a hand', () => {
     recordInputBurst(db, fire(Array.from({ length: 51 }, (_, i) => 3 + (i % 2))));
     recordInputBurst(db, fire(Array.from({ length: 51 }, (_, i) => 3 + (i % 2))));

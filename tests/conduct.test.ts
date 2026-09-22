@@ -66,6 +66,18 @@ describe('conductOf: ready-ups', () => {
     expect(c.avgSeconds).toBe(30);
   });
 
+  it('counts a sub only from the map they joined on', () => {
+    const m = match([P, Q]);
+    db.prepare('UPDATE match_players SET joined_map = 1 WHERE player_id = ?').run(P);
+    readyup(m, { [Q]: 10 }, [Q]);
+    const later = Number(db.prepare(
+      `INSERT INTO match_readyups (match_id, map_ordinal, half, started_at, ended_at, last_unready)
+       VALUES (?, 1, 1, '2026-09-22 11:00:00', '2026-09-22 11:01:00', '[]')`,
+    ).run(m).lastInsertRowid);
+    db.prepare('INSERT INTO match_readyup_players (readyup_id, match_id, player_id, seconds) VALUES (?, ?, ?, 30)').run(later, m, P);
+    expect(conductOf(db, P).readyups).toMatchObject({ count: 1, avgSeconds: 30 });
+  });
+
   it('counts a merged second account as the same person', () => {
     addAlias(db, { steamid: ALT, canonical: P, by: Q });
     readyup(match([ALT]), { [ALT]: 60 }, [ALT]);
@@ -93,6 +105,8 @@ describe('conductOf: pauses', () => {
     pause(m, P, '2026-09-22 10:09:00', null);
     match([Q]);
     match([P]);
+    const voided = match([P], { voided: true });
+    pause(voided, P, '2026-09-22 12:00:00', '2026-09-22 12:30:00');
     const c = conductOf(db, P).pauses;
     expect(c.trackedSince).toBe('2026-09-22 10:00:00');
     expect(c.called).toBe(2);

@@ -47,11 +47,13 @@ const SHOWN = 5;
 /** One row per (finished ready-up, rostered player), voided matches aside.
  *  Rostered rather than "has a seconds row": a player charged nothing has no
  *  row, and leaving them out would drop exactly the fast readiers from the
- *  average. */
+ *  average. A sub counts from the map they joined on. A player who left
+ *  mid-match still counts for the maps after, as zero: nothing records when
+ *  a rostered player left for good. */
 const PARTICIPATIONS = `
   FROM match_readyups r
   JOIN matches m ON m.id = r.match_id AND m.voided_at IS NULL
-  JOIN match_players mp ON mp.match_id = r.match_id
+  JOIN match_players mp ON mp.match_id = r.match_id AND r.map_ordinal >= mp.joined_map
   LEFT JOIN match_readyup_players rp ON rp.readyup_id = r.id AND rp.player_id = mp.player_id
   WHERE r.ended_at IS NOT NULL`;
 const WAS_LAST = 'EXISTS (SELECT 1 FROM json_each(r.last_unready) WHERE value = mp.player_id)';
@@ -83,8 +85,9 @@ export function conductOf(db: DB, canonical: string): ConductSection {
   const since = (db.prepare('SELECT MIN(started_at) AS at FROM match_pauses WHERE called_by IS NOT NULL')
     .get() as { at: string | null }).at;
   const pauseRows = since === null ? [] : db.prepare(
-    `SELECT match_id AS matchId, map_ordinal AS mapOrdinal, half, started_at AS startedAt, ended_at AS endedAt
-     FROM match_pauses WHERE called_by IN (${marks(ids)}) ORDER BY id DESC`,
+    `SELECT p.match_id AS matchId, p.map_ordinal AS mapOrdinal, p.half, p.started_at AS startedAt, p.ended_at AS endedAt
+     FROM match_pauses p JOIN matches m ON m.id = p.match_id AND m.voided_at IS NULL
+     WHERE p.called_by IN (${marks(ids)}) ORDER BY p.id DESC`,
   ).all(...ids) as { matchId: number; mapOrdinal: number; half: number | null; startedAt: string; endedAt: string | null }[];
   const pauses = pauseRows.map((p) => ({
     matchId: p.matchId, mapOrdinal: p.mapOrdinal, half: p.half, startedAt: p.startedAt,
@@ -94,6 +97,7 @@ export function conductOf(db: DB, canonical: string): ConductSection {
   // match began before the first named pause, so a date cut would drop it.
   const matchesSince = since === null ? 0 : (db.prepare(
     `SELECT COUNT(DISTINCT mp.match_id) AS n FROM match_players mp
+     JOIN matches m ON m.id = mp.match_id AND m.voided_at IS NULL AND m.state IN ('completed', 'aborted')
      WHERE ${inIds}
        AND mp.match_id >= (SELECT MIN(match_id) FROM match_pauses WHERE called_by IS NOT NULL)`,
   ).get(...ids) as { n: number }).n;
