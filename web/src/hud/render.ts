@@ -35,8 +35,13 @@ export const PANEL_FILE: Record<string, string> = {
   infectedRow: 'resource/ui/hud/zombieteamdisplayplayer.res',
 };
 
-/** Game code decides when these show; the preview is the healthy, alive state. */
-const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplacement', 'duckingicon']);
+/**
+ * Game code decides when these show; the preview is the healthy, alive state.
+ * The infected card's SpawnTimeLabel is one of them: the game shows the spawn
+ * countdown only while that player is dead or a ghost, and in the stock file
+ * it sits right over the live HealthPanel.
+ */
+const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplacement', 'duckingicon', 'spawntimelabel']);
 
 /** Sample people for the cards: the three teammates, and Bill for the player's own panel. */
 const CARD_NAMES = ['Francis', 'Louis', 'Zoey'];
@@ -215,7 +220,6 @@ function sampleText(n: KvNode, opts: DrawOpts): string {
   if (t === '%HealthNumber%') return '100';
   const lname = n.key.toLowerCase();
   if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
-  if (lname === 'spawntimelabel') return '12';
   if (lname === 'healthicon') return '+';                          // the real glyph lives in a Valve icon font
   return t;
 }

@@ -97,7 +97,18 @@ describe('drawPanel', () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
     // Every fillText must be one of the sample strings; nothing for Incapacitated/Dead/Voice.
-    for (const c of calls.filter((c) => c.m === 'fillText')) expect(['Louis', '100', '+', '12', '']).toContain(c.a[0]);
+    for (const c of calls.filter((c) => c.m === 'fillText')) expect(['Louis', '100', '+', '']).toContain(c.a[0]);
+  });
+
+  it('never draws the infected spawn timer, which game code shows only while dead or ghosted', () => {
+    // Stock SpawnTimeLabel (39,40) sits right over the HealthPanel (38,41); drawing it would put a dead-state number on a live bar.
+    for (const preset of ['stock', 'modern'] as const) {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, design({ preset }), 'infectedRow', { x: 0, y: 0 }, 1, { card: 0 });
+      // The card has two labels, NameLabel and SpawnTimeLabel; only the name may be drawn.
+      expect(childRects(design({ preset }), 'infectedRow', { x: 0, y: 0 }, 1).some((c) => c.name === 'SpawnTimeLabel'), preset).toBe(true);
+      expect(calls.filter((c) => c.m === 'fillText').map((c) => c.a[0]), preset).toEqual(['Francis']);
+    }
   });
 
   it('draws a fillcolor ImagePanel as a filled rect (the Modern backgrounds)', () => {

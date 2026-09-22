@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { visibleElements, hitTest, drawHud } from './mock';
-import { DEFAULT_DESIGN } from './design';
+import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { artUrl } from './art';
 import { _setImageFactory, _resetAssetCache } from './render';
 
 /**
@@ -124,15 +125,22 @@ describe('drawHud delegates panels to the renderer', () => {
 
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
-    const texts: string[] = [];
-    const calls: string[] = [];
-    const ctx = fakeCtx(() => {}, calls, texts);
-    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'infected', null);
-    expect(texts).toContain('100');                          // siHealth's sample HealthNumber
-    expect(calls.filter((m) => m === 'drawImage').length).toBeGreaterThan(0);   // siHealth's pz_healthbar frame
-    // infectedRow only: zombieteamdisplayplayer.res's NameLabel and SpawnTimeLabel, which
-    // siHealth's file (hunterhealth.res) does not have, so these can only come from its cards.
-    for (const n of ['Francis', 'Louis', 'Zoey']) expect(texts).toContain(n);
-    expect(texts).toContain('12');
+    const green = artUrl('vgui/healthbar_green')!;
+    const draw = (design: HudDesign) => {
+      const texts: string[] = [];
+      const srcs: string[] = [];
+      const ctx = fakeCtx(() => {}, undefined, texts);
+      ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
+      drawHud(ctx, 853, 480, design, 'infected', null);
+      return { texts, bars: srcs.filter((s) => s === green).length };
+    };
+    const all = draw(DEFAULT_DESIGN);
+    expect(all.texts).toContain('100');                      // siHealth's sample HealthNumber
+    // infectedRow only: zombieteamdisplayplayer.res's NameLabel, which siHealth's
+    // file (hunterhealth.res) does not have, so these can only come from its cards.
+    for (const n of ['Francis', 'Louis', 'Zoey']) expect(all.texts).toContain(n);
+    // And one health bar per card: the same design with infectedRow hidden draws three fewer.
+    const without = draw({ ...DEFAULT_DESIGN, elements: { infectedRow: { visible: false } } });
+    expect(all.bars - without.bars).toBe(3);
   });
 });
