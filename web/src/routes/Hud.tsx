@@ -225,20 +225,23 @@ function patchNum(
   if (Number.isFinite(n)) patch(to(clampOverride(key, n)));
 }
 
-/** Row/column and per-card spacing, offered only for elements with a team layout.
- *  Column is offered only when the registry says the element supports it: the
- *  infected row is a single line and has no column mode to switch to. */
+/**
+ * Layout controls for a team element. The survivor team's cards step by the
+ * Gap between them (0 to 200, units at scale 1); the infected row, whose
+ * cards the game places itself, keeps its single spacing number. Column is
+ * offered only when the registry says the element supports it.
+ */
 function TeamControls(
-  { design, el, o, patch }: { design: HudDesign; el: HudElement; o: ElementOverride; patch: Patch },
+  { design, el, patch }: { design: HudDesign; el: HudElement; patch: Patch },
 ) {
   if (!el.team) return null;
-  const { dir, spacing } = teamLayout(design, el);
+  const t = teamLayout(design, el);
   return (
     <>
       <label class="hud__row">
         <span>Layout</span>
         <select
-          value={o.dir ?? dir}
+          value={t.dir}
           onChange={(e) => patch({ dir: (e.target as HTMLSelectElement).value as 'row' | 'column' })}
         >
           <option value="row">Row</option>
@@ -246,14 +249,21 @@ function TeamControls(
         </select>
         <span />
       </label>
-      <label class="hud__row">
-        <span>Spacing</span>
-        <input
-          type="number" value={spacing}
-          onInput={(e) => patchNum(patch, e, 'spacing', (n) => ({ spacing: n }))}
+      {el.team.file ? (
+        <Slider
+          label="Gap" value={Math.max(0, Math.round(t.gap ?? 0))} min={0} max={200} step={1}
+          onInput={(gap) => patch({ gap: clampOverride('gap', gap) })}
         />
-        <span />
-      </label>
+      ) : (
+        <label class="hud__row">
+          <span>Spacing</span>
+          <input
+            type="number" value={t.spacing}
+            onInput={(e) => patchNum(patch, e, 'spacing', (n) => ({ spacing: n }))}
+          />
+          <span />
+        </label>
+      )}
     </>
   );
 }
@@ -332,7 +342,7 @@ function ElementControls(
         <Slider label="Scale" value={o.scale ?? 1} min={0.5} max={2} step={0.05} onInput={(scale) => patch({ scale })} />
       )}
 
-      <TeamControls design={design} el={el} o={o} patch={patch} />
+      <TeamControls design={design} el={el} patch={patch} />
 
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>
     </Field>

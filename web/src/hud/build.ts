@@ -14,7 +14,7 @@ import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Asp
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
-import { baseTeam, type HudDesign, type ElementOverride, type ChildOverride } from './design';
+import { baseTeam, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir } from './design';
 import { panelChildren, TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
 
 /** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
@@ -353,30 +353,27 @@ export function baseHasChild(preset: Preset, name: string): boolean {
 }
 
 export interface TeamLayout {
-  dir: 'row' | 'column';
+  dir: TeamDir;
   /**
-   * Units between two neighbouring cards' origins, the element's own scale
-   * already applied: the exact number `teamPass` steps each card by, and the
-   * exact number the canvas steps each card by.
+   * Units from one card's origin to the next, the element's own scale
+   * already applied: one card plus the gap for the survivor team, the
+   * HorizPanelSpacing for the infected row, whose cards the game places.
    */
   spacing: number;
-  /**
-   * Survivor team: where the first card sits inside the container, scaled.
-   * Non-zero only when fitted: the fit box's top-left, so a fitted card's
-   * content lands exactly where the unfitted card had it.
-   */
+  /** Survivor team: the gap between cards at scale 1, as the Gap slider shows it. Derived values can be negative (an overlapping base file). */
+  gap?: number;
+  /** Survivor team: where the first card sits inside the container, scaled. Non-zero only when fitted. */
   offset?: { x: number; y: number };
-  /**
-   * One teammate card, and the container that has to cover four of them, both
-   * with the scale already applied. Present only when `teamWrites` is true,
-   * because these are the values `teamPass` writes; an element whose team
-   * geometry the generator is not rewriting has no such promise to keep, and
-   * the preview falls back to the registry's `mockSize`. An element with no
-   * per-player file (the infected row, whose cards the game places itself)
-   * never has them.
-   */
+  /** Survivor team: one card, scaled. */
   card?: { w: number; h: number };
+  /**
+   * The container that has to cover four cards, scaled. Present only when
+   * `teamWrites` is true, because it is a value `teamPass` writes; otherwise
+   * the preview falls back to the registry's `mockSize`.
+   */
   container?: { w: number; h: number };
+  /** Survivor team: the four TeamPlayerN positions as teamPass writes them. */
+  cards?: { xpos: string; ypos: string }[];
   /** Fit was asked for but every content child is hidden, so the card keeps its file size. */
   fitEmpty?: boolean;
 }
@@ -391,7 +388,7 @@ export interface TeamLayout {
 function teamWrites(el: HudElement, o: ElementOverride | undefined): boolean {
   if (!el.team || !o) return false;
   const scaled = el.resize === 'scale' && o.scale !== undefined && o.scale !== 1;
-  return o.dir !== undefined || o.spacing !== undefined || o.fit === true || scaled;
+  return o.dir !== undefined || o.spacing !== undefined || o.gap !== undefined || o.fit === true || scaled;
 }
 
 /**
@@ -409,63 +406,55 @@ function fixedExtent(token: string | undefined, k: number): number | undefined {
  * Everything about a team element's layout that both the generator and the
  * canvas need, in final HUD units with the element's scale already applied.
  * This is the single source of truth for team geometry: `teamPass` writes
- * exactly these numbers, `elementRect` reports exactly this container and
- * `mock.ts` draws exactly these cards, so the three cannot drift apart.
+ * exactly these numbers, `elementRect` reports exactly this container, and
+ * the canvas reads the cards back from the file teamPass wrote.
  *
- * An explicit `dir`/`spacing` in the design wins outright, and a spacing the
- * player typed is taken as final units (what they typed is what they see and
- * what the file gets), not as something to scale again. Failing that: for an
- * element with a `team.file` (the survivor team), direction comes from
- * whether the base file's TeamPlayer1 and TeamPlayer2 share a ypos, and
- * spacing is the real delta between them along whichever axis that direction
- * implies, both read straight out of that preset's real file and then scaled.
- * For an element with only a `spacingKey` and no `team.file` (the infected
- * row, whose players the game positions itself, so there is no per-player
- * panel to read), spacing comes from that key's own value on the element's
- * hudlayout.res panel, and direction is simply the element's first supported
- * direction. A hardcoded constant is a last resort for when a base file
- * yields nothing usable; it is unreachable for both team elements the HUD
- * actually ships.
+ * The survivor team is placed by gap, not pitch: card n sits at
+ * (n - 1) * (card + gap * scale) along the direction, after the fit offset.
+ * With no stored gap it is the preset file's own pitch minus its card
+ * (fitted or not) along the file's own direction, so a new design looks
+ * like its preset (stock fitted: 140 - 121 = 19) and an unfitted one keeps
+ * its exact pitch (140 - 150 = -10, which is why this one is not clamped).
+ *
+ * The infected row has no per-player file: the game places its players
+ * HorizPanelSpacing apart, so its spacing comes from that key on its
+ * hudlayout.res panel, and a hardcoded constant is only a last resort.
  */
 export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const o = design.elements[el.id];
   const k = el.resize === 'scale' ? o?.scale ?? 1 : 1;
-  // Parsed on demand: the survivor team needs it only to size its container,
-  // and this runs on every canvas repaint.
+  // Parsed on demand: it is needed only to size a container, and this runs on every canvas repaint.
   const layoutPanel = () => kvFind(parseKv(baseFile(design.preset, LAYOUT))[0].value as KvNode[], [el.key]);
-  let baseDir: 'row' | 'column' | undefined;
-  let baseSpacing: number | undefined;
-  let card: { w: number; h: number } | undefined;
-  let offset = { x: 0, y: 0 };
-  let fitEmpty = false;
-  if (el.team?.file) {
-    const base = baseTeam(design.preset);
-    baseDir = base.dir;
-    baseSpacing = base.pitch;
-    // A fitted card is its content box and sits at the box's top-left, so
-    // fitting alone moves nothing on screen.
-    const box = o?.fit ? cardFit(design) : null;
-    if (o?.fit && !box) fitEmpty = true;
-    const size = box ?? base.card;
-    card = { w: size.w * k, h: size.h * k };
-    if (box) offset = { x: Math.round(box.x * k), y: Math.round(box.y * k) };
-  } else if (el.team?.spacingKey) {
-    baseDir = el.team.dirs[0];
-    const panel = layoutPanel();
-    const v = panel ? kvGet(panel, el.team.spacingKey) : undefined;
-    if (v !== undefined) { const n = parseFloat(v); if (!Number.isNaN(n)) baseSpacing = n; }
+  if (!el.team?.file) {
+    const dir = el.team?.dirs[0] ?? 'row';
+    let baseSpacing: number | undefined;
+    if (el.team?.spacingKey) {
+      const panel = layoutPanel();
+      const v = panel ? kvGet(panel, el.team.spacingKey) : undefined;
+      if (v !== undefined) { const n = parseFloat(v); if (!Number.isNaN(n)) baseSpacing = n; }
+    }
+    return { dir, spacing: Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k) };
   }
-  // Free is the survivor team's own thing, not a row/column direction: this
-  // function's row/column geometry ignores it, the same as when dir is unset.
-  const dir = o?.dir === 'row' || o?.dir === 'column' ? o.dir : baseDir ?? 'row';
-  const spacing = Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k);
-  const out: TeamLayout = { dir, spacing };
-  if (fitEmpty) out.fitEmpty = true;
-  if (!card || !teamWrites(el, o)) return out;
+  const base = baseTeam(design.preset);
+  // A fitted card is its content box and sits at the box's top-left, so
+  // fitting alone moves nothing on screen.
+  const box = o?.fit ? cardFit(design) : null;
+  const size = box ?? base.card;
+  const card = { w: size.w * k, h: size.h * k };
+  const offset = box ? { x: Math.round(box.x * k), y: Math.round(box.y * k) } : { x: 0, y: 0 };
+  const dir: 'row' | 'column' = o?.dir === 'row' || o?.dir === 'column' ? o.dir : base.dir;
+  const along = (d: 'row' | 'column', c: { w: number; h: number }) => (d === 'row' ? c.w : c.h);
+  const gap = o?.gap ?? base.pitch - along(base.dir, size);
+  const spacing = Math.round(along(dir, card) + gap * k);
+  const cards = [0, 1, 2, 3].map((i) => ({
+    xpos: String(offset.x + (dir === 'row' ? spacing * i : 0)),
+    ypos: String(offset.y + (dir === 'column' ? spacing * i : 0)),
+  }));
+  const out: TeamLayout = { dir, spacing, gap, offset, card, cards };
+  if (o?.fit && !box) out.fitEmpty = true;
+  if (!teamWrites(el, o)) return out;
   const panel = layoutPanel();
   if (!panel) return out;
-  out.card = card;
-  out.offset = offset;
   // The container clips its children, so along the direction it has to cover
   // the offset and all four cards. Across the direction it keeps its own
   // size, scaled; a fill token has no fixed size, and teamPass replaces it
@@ -491,11 +480,11 @@ function teamPass(work: Work, design: HudDesign) {
     const t = teamLayout(design, el);
     const container = work.panel(LAYOUT, [el.key]);
     if (team.spacingKey) kvSet(container, team.spacingKey, String(t.spacing));
-    if (!team.file || !t.card || !t.container || !t.offset) continue;
+    if (!team.file || !t.card || !t.container || !t.cards) continue;
     for (let n = 1; n <= 4; n++) {
       const p = work.panel(team.file, [`TeamPlayer${n}`]);
-      kvSet(p, 'xpos', String(t.offset.x + (t.dir === 'row' ? t.spacing * (n - 1) : 0)));
-      kvSet(p, 'ypos', String(t.offset.y + (t.dir === 'row' ? 0 : t.spacing * (n - 1))));
+      kvSet(p, 'xpos', t.cards[n - 1].xpos);
+      kvSet(p, 'ypos', t.cards[n - 1].ypos);
       kvSet(p, 'wide', String(Math.round(t.card.w)));
       kvSet(p, 'tall', String(Math.round(t.card.h)));
     }

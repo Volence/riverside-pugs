@@ -253,20 +253,20 @@ describe('buildHud, team layout', () => {
     parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
 
   it('stacks the survivor team as a column', () => {
-    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'column', spacing: 34 } } })));
+    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'column', gap: 0 } } })));
     expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'ypos')]))
-      .toEqual([['0', '0'], ['0', '34'], ['0', '68'], ['0', '102']]);
+      .toEqual([['0', '0'], ['0', '150'], ['0', '300'], ['0', '450']]);
   });
 
   it('lays it out as a row', () => {
-    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'row', spacing: 140 } } })));
+    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'row' } } })));
     expect(kvGet(kvFind(t, ['TeamPlayer3'])!, 'xpos')).toBe('280');
     expect(kvGet(kvFind(t, ['TeamPlayer3'])!, 'ypos')).toBe('0');
   });
 
   it('grows the container so a column is not clipped', () => {
-    const got = layoutOf(buildHud(design({ elements: { teamColumn: { dir: 'column', spacing: 40 } } })));
-    expect(parseFloat(kvGet(kvFind(got, ['CHudTeamDisplay'])!, 'tall')!)).toBeGreaterThanOrEqual(4 * 40);
+    const got = layoutOf(buildHud(design({ elements: { teamColumn: { dir: 'column', gap: 10 } } })));
+    expect(parseFloat(kvGet(kvFind(got, ['CHudTeamDisplay'])!, 'tall')!)).toBeGreaterThanOrEqual(3 * 160 + 150);
   });
 
   it('sets infected spacing in hudlayout', () => {
@@ -286,74 +286,94 @@ describe('buildHud, team layout', () => {
 
 /**
  * The whole point of teamLayout: one function decides a team element's
- * direction, spacing, card size and container size, the generator writes
- * exactly those numbers and elementRect reports exactly that container, so
- * the canvas cannot show a layout the downloaded file contradicts. Before
- * this, the preview drew cards at their unscaled spacing inside a scaled
- * container while the file had them scaled, which is what a player would
- * have seen the moment they resized the teammate panels.
+ * direction, pitch, card, offset and container, the generator writes exactly
+ * those numbers and elementRect reports exactly that container, so the
+ * canvas cannot show a layout the downloaded file contradicts.
  */
-describe('team geometry: the canvas and the file agree for any scale, dir and spacing', () => {
+describe('team geometry: the canvas and the file agree for any scale, dir, gap and fit', () => {
   const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
   for (const preset of ['stock', 'modern'] as const) {
     for (const dir of ['row', 'column'] as const) {
-      for (const spacing of [undefined, 20, 140]) {
+      for (const gap of [undefined, 0, 20]) {
         for (const scale of [undefined, 0.75, 1.25]) {
-          const label = `${preset} ${dir} spacing=${spacing} scale=${scale}`;
-          it(label, () => {
-            const o: ElementOverride = { dir };
-            if (spacing !== undefined) o.spacing = spacing;
-            if (scale !== undefined) o.scale = scale;
-            const d = design({ preset, elements: { teamColumn: o } });
-            const files = buildHud(d, { fonts });
-            const t = teamLayout(d, elementById('teamColumn')!);
-            const rect = elementRect(d, 'teamColumn', d.aspect);
-
-            const team = parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
-            for (let n = 1; n <= 4; n++) {
-              const p = kvFind(team, [`TeamPlayer${n}`])!;
-              const along = String(t.spacing * (n - 1));
-              expect(kvGet(p, 'xpos'), `${label} TeamPlayer${n} xpos`).toBe(t.dir === 'row' ? along : '0');
-              expect(kvGet(p, 'ypos'), `${label} TeamPlayer${n} ypos`).toBe(t.dir === 'row' ? '0' : along);
-              expect(kvGet(p, 'wide'), `${label} TeamPlayer${n} wide`).toBe(String(Math.round(t.card!.w)));
-              expect(kvGet(p, 'tall'), `${label} TeamPlayer${n} tall`).toBe(String(Math.round(t.card!.h)));
-            }
-            // The container the preview draws is the container the file has.
-            const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
-            expect(kvGet(c, 'wide'), `${label} container wide`).toBe(String(Math.round(rect.w)));
-            expect(kvGet(c, 'tall'), `${label} container tall`).toBe(String(Math.round(rect.h)));
-            // And it covers all four cards, so nothing is clipped away that
-            // the canvas drew.
-            expect(rect.w, `${label} covers the last card`).toBeGreaterThanOrEqual(
-              t.dir === 'row' ? t.spacing * 3 + t.card!.w : t.card!.w);
-            expect(rect.h, `${label} covers the last card`).toBeGreaterThanOrEqual(
-              t.dir === 'column' ? t.spacing * 3 + t.card!.h : 0);
-          });
+          for (const fit of [false, true]) {
+            const label = `${preset} ${dir} gap=${gap} scale=${scale} fit=${fit}`;
+            it(label, () => {
+              const o: ElementOverride = { dir };
+              if (gap !== undefined) o.gap = gap;
+              if (scale !== undefined) o.scale = scale;
+              if (fit) o.fit = true;
+              const d = design({ preset, elements: { teamColumn: o } });
+              const files = buildHud(d, { fonts });
+              const t = teamLayout(d, elementById('teamColumn')!);
+              const rect = elementRect(d, 'teamColumn', d.aspect);
+              // The pitch is one card plus the gap, both scaled.
+              expect(t.spacing, label).toBe(Math.round((t.dir === 'row' ? t.card!.w : t.card!.h) + t.gap! * (scale ?? 1)));
+              const team = tree(files, TEAM_FILE, preset);
+              for (let n = 1; n <= 4; n++) {
+                const p = kvFind(team, [`TeamPlayer${n}`])!;
+                const along = t.spacing * (n - 1);
+                expect(kvGet(p, 'xpos'), `${label} TeamPlayer${n} xpos`).toBe(String(t.offset!.x + (t.dir === 'row' ? along : 0)));
+                expect(kvGet(p, 'ypos'), `${label} TeamPlayer${n} ypos`).toBe(String(t.offset!.y + (t.dir === 'row' ? 0 : along)));
+                expect(t.cards![n - 1], `${label} TeamPlayer${n} tokens`).toEqual({ xpos: kvGet(p, 'xpos'), ypos: kvGet(p, 'ypos') });
+                expect(kvGet(p, 'wide'), `${label} TeamPlayer${n} wide`).toBe(String(Math.round(t.card!.w)));
+                expect(kvGet(p, 'tall'), `${label} TeamPlayer${n} tall`).toBe(String(Math.round(t.card!.h)));
+              }
+              // The container the preview draws is the container the file has.
+              const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+              expect(kvGet(c, 'wide'), `${label} container wide`).toBe(String(Math.round(rect.w)));
+              expect(kvGet(c, 'tall'), `${label} container tall`).toBe(String(Math.round(rect.h)));
+              // And it covers all four cards, so nothing is clipped away that the canvas drew.
+              if (t.dir === 'row') expect(rect.w, label).toBeGreaterThanOrEqual(t.offset!.x + t.spacing * 3 + t.card!.w);
+              else expect(rect.h, label).toBeGreaterThanOrEqual(t.offset!.y + t.spacing * 3 + t.card!.h);
+            });
+          }
         }
       }
     }
   }
 
-  it('gives the owner sample (a) the same four cards on screen and in the file', () => {
-    // The exact design sample.vpkcheck.test.ts builds, and the case that
-    // used to disagree: the file had the cards 45 units apart at 188 tall in
-    // a 322-tall box while the canvas drew three 31-unit cards in a 94-unit
-    // box.
-    const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', spacing: 36 } } });
+  it('lays out a fitted, scaled column as the sample does', () => {
+    const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', fit: true, gap: 4 } } });
     expect(teamLayout(d, elementById('teamColumn')!)).toEqual({
-      dir: 'column', spacing: 36, offset: { x: 0, y: 0 }, card: { w: 187.5, h: 187.5 }, container: { w: 187.5, h: 295.5 },
+      dir: 'column', spacing: 50, gap: 4, offset: { x: 16, y: 45 }, card: { w: 151.25, h: 45 },
+      container: { w: 167.25, h: 240 },
+      cards: [{ xpos: '16', ypos: '45' }, { xpos: '16', ypos: '95' }, { xpos: '16', ypos: '145' }, { xpos: '16', ypos: '195' }],
     });
-    const t = parseKv(text(buildHud(d), 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
-    expect([1, 2, 3, 4].map((n) => kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'ypos'))).toEqual(['0', '36', '72', '108']);
-    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'tall')).toBe('188');
+    const t = tree(buildHud(d), TEAM_FILE);
+    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'tall')).toBe('45');
+    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'wide')).toBe('151');
   });
 
   it('leaves the container at its mock size while the generator writes no team geometry', () => {
-    // Nothing in the design touches the team layout, so no file says anything
-    // about it and the registry's mockSize (what the panel actually shows,
-    // not its full-width container) still stands.
     expect(elementRect(design({}), 'teamColumn', '16:9')).toMatchObject({ w: 430, h: 75 });
     expect(teamLayout(design({}), elementById('teamColumn')!).container).toBeUndefined();
+  });
+});
+
+describe('teamLayout, the gap', () => {
+  const layout = (d: HudDesign) => teamLayout(d, elementById('teamColumn')!);
+
+  it('derives the gap from the preset file when none is stored, so a new design looks like its preset', () => {
+    // Stock row pitch 140: fitted card 121 leaves 19; the unfitted 150 overlaps by 10.
+    expect(layout(design({ elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 19, spacing: 140 });
+    expect(layout(design({}))).toMatchObject({ gap: -10, spacing: 140 });
+    // Modern column pitch 34: fitted card 26 tall leaves 8.
+    expect(layout(design({ preset: 'modern', elements: { teamColumn: { fit: true } } }))).toMatchObject({ gap: 8, spacing: 34 });
+  });
+
+  it('steps a fitted stock column by the card plus the gap', () => {
+    const files = buildHud(design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4 } } }));
+    const team = tree(files, TEAM_FILE);
+    expect([1, 2, 3, 4].map((n) => kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos'))).toEqual(['36', '76', '116', '156']);
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'xpos')).toBe('13');
+    const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+    expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['134', '192']);
+  });
+
+  it('gives a migrated design the pitch it had', () => {
+    expect(layout(validateDesign({ v: 1, elements: { teamColumn: { dir: 'column', spacing: 180 } } })).spacing).toBe(180);
+    expect(layout(validateDesign({ v: 1, preset: 'modern', elements: { teamColumn: { spacing: 45, scale: 1.25 } } })).spacing).toBe(45);
   });
 });
 
@@ -417,7 +437,7 @@ describe('buildHud, bad numbers', () => {
   // before packing, which is the guard this pins.
   it('cannot write a literal NaN into a shipped file, whatever the design carries', () => {
     const bad = { ...design({}), elements: { chat: { x: NaN, y: 10, w: NaN, h: 60 },
-      teamColumn: { scale: NaN, spacing: NaN, dir: 'column' }, infectedRow: { spacing: NaN } } };
+      teamColumn: { scale: NaN, gap: NaN, dir: 'column' }, infectedRow: { spacing: NaN } } };
     const files = buildHud(validateDesign(bad));
     for (const f of files) {
       expect(new TextDecoder('latin1').decode(f.data), f.path).not.toMatch(/NaN/i);
@@ -429,12 +449,8 @@ describe('buildHud, bad numbers', () => {
 
 describe('teamLayout, real base-file defaults', () => {
   it('reads the modern preset real spacing when nothing is overridden', () => {
-    // Verified directly against the base files: modern's teamdisplayhud.res
-    // lays TeamPlayer1/TeamPlayer2 out 34 units apart in ypos (a column),
-    // and its hudlayout.res sets CHudZombieTeamDisplay's HorizPanelSpacing
-    // to 124, neither of which is the row/column fallback constant.
     const d = design({ preset: 'modern' });
-    expect(teamLayout(d, elementById('teamColumn')!)).toEqual({ dir: 'column', spacing: 34 });
+    expect(teamLayout(d, elementById('teamColumn')!)).toMatchObject({ dir: 'column', spacing: 34, gap: 0 });
     expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: 124 });
   });
 
@@ -444,9 +460,8 @@ describe('teamLayout, real base-file defaults', () => {
     const rowGap = Math.abs(parseFloat(kvGet(p2, 'xpos')!) - parseFloat(kvGet(p1, 'xpos')!));
     const layout = parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
     const zombieGap = parseFloat(kvGet(kvFind(layout, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')!);
-
     const d = design({});
-    expect(teamLayout(d, elementById('teamColumn')!)).toEqual({ dir: 'row', spacing: rowGap });
+    expect(teamLayout(d, elementById('teamColumn')!)).toMatchObject({ dir: 'row', spacing: rowGap, gap: rowGap - 150 });
     expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: zombieGap });
   });
 });
@@ -574,7 +589,7 @@ describe('buildTrees', () => {
         it(`returns every file the preview reads exactly as buildHud writes it: ${preset}${advanced ? ', advanced' : ''}${fit ? ', fitted' : ''}`, () => {
           const d = design({ preset, advanced,
             elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
-              teamColumn: { scale: 1.5, dir: 'column', spacing: 40, ...(fit ? { fit: true } : {}) } },
+              teamColumn: { scale: 1.5, dir: 'column', gap: 6, ...(fit ? { fit: true } : {}) } },
             styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } },
             children: { teamColumn: { Name: { x: 20, fontSize: 14 }, Head: { visible: false },
               ...(fit ? { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } : {}) } } });
