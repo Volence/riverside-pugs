@@ -1163,8 +1163,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         adminFeed.start();
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
-        // on each one's own chain, and a thread the reconciler makes after
-        // the mirror's pass is read on the ticket signal that follows it.
+        // on each one's own chain, and a thread the reconciler creates has
+        // no missed history; its first live message reads the thread anyway.
         const mirror = new TicketMirror({
           db: deps.db,
           transport: t,
