@@ -442,14 +442,23 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const size = box ?? base.card;
   const card = { w: size.w * k, h: size.h * k };
   const offset = box ? { x: Math.round(box.x * k), y: Math.round(box.y * k) } : { x: 0, y: 0 };
-  const dir: 'row' | 'column' = o?.dir === 'row' || o?.dir === 'column' ? o.dir : base.dir;
+  // Free needs its four card positions; without them it is the preset's own direction.
+  const free = o?.dir === 'free' && o.slots?.length === 4;
+  const flow: 'row' | 'column' = o?.dir === 'row' || o?.dir === 'column' ? o.dir : base.dir;
+  const dir: TeamDir = free ? 'free' : flow;
   const along = (d: 'row' | 'column', c: { w: number; h: number }) => (d === 'row' ? c.w : c.h);
   const gap = o?.gap ?? base.pitch - along(base.dir, size);
-  const spacing = Math.round(along(dir, card) + gap * k);
-  const cards = [0, 1, 2, 3].map((i) => ({
-    xpos: String(offset.x + (dir === 'row' ? spacing * i : 0)),
-    ypos: String(offset.y + (dir === 'column' ? spacing * i : 0)),
-  }));
+  const spacing = Math.round(along(flow, card) + gap * k);
+  // In Free each card carries its own position, written with the same anchor
+  // tokens elements use, so a card placed at the right edge stays there on
+  // another aspect ratio. The container covers the screen, so the tokens
+  // resolve against the screen.
+  const cards = free
+    ? o!.slots!.map((s) => ({ xpos: formatPos(s.x, card.w, screenW(design.aspect)), ypos: formatPos(s.y, card.h, SCREEN_H) }))
+    : [0, 1, 2, 3].map((i) => ({
+      xpos: String(offset.x + (flow === 'row' ? spacing * i : 0)),
+      ypos: String(offset.y + (flow === 'column' ? spacing * i : 0)),
+    }));
   const out: TeamLayout = { dir, spacing, gap, offset, card, cards };
   if (o?.fit && !box) out.fitEmpty = true;
   if (!teamWrites(el, o)) return out;
@@ -460,6 +469,7 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   // size, scaled; a fill token has no fixed size, and teamPass replaces it
   // with the offset plus one card rather than leave a column loose across
   // the whole screen.
+  if (free) { out.container = { w: screenW(design.aspect), h: SCREEN_H }; return out; }
   const tall = kvGet(panel, 'tall') ?? '0';
   out.container = dir === 'column'
     ? { w: fixedExtent(kvGet(panel, 'wide'), k) ?? offset.x + card.w, h: offset.y + spacing * 3 + card.h }
@@ -487,6 +497,13 @@ function teamPass(work: Work, design: HudDesign) {
       kvSet(p, 'ypos', t.cards[n - 1].ypos);
       kvSet(p, 'wide', String(Math.round(t.card.w)));
       kvSet(p, 'tall', String(Math.round(t.card.h)));
+    }
+    if (t.dir === 'free') {
+      // The probe's setting: the container covers the screen and each card
+      // carries its own anchored position.
+      kvSet(container, 'xpos', '0'); kvSet(container, 'ypos', '0');
+      kvSet(container, 'wide', 'f0'); kvSet(container, 'tall', 'f0');
+      continue;
     }
     kvSet(container, 'wide', String(Math.round(t.container.w)));
     // A row leaves a fill `tall` alone: it already covers the cards, and
@@ -751,6 +768,8 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const p = placed(o, base, el, design.aspect);
   const k = el.resize === 'scale' ? o.scale ?? 1 : 1;
   const visible = o.visible ?? (kvGet(panel, 'visible') ?? '1') !== '0';
+  // In Free the container covers the screen and each card places itself.
+  if (el.team?.file && teamLayout(design, el).dir === 'free') return { x: 0, y: 0, w: screenW(aspect), h: SCREEN_H, visible };
   const moved = el.move && (o.x !== undefined || o.y !== undefined);
   const xTok = el.mockPos?.x ?? (moved ? p.xpos : kvGet(panel, 'xpos') ?? '0');
   const yTok = el.mockPos?.y ?? (moved ? p.ypos : kvGet(panel, 'ypos') ?? '0');
@@ -760,4 +779,29 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   // and the real container is wider than anything it shows.
   const box = (el.team ? teamLayout(design, el).container : undefined) ?? { w: p.w * k, h: p.h * k };
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
+}
+
+/**
+ * The four teammate cards on screen, in HUD units at `aspect`, read from the
+ * generated teamdisplayhud.res and the container elementRect reports: where
+ * the canvas draws each card, what hit testing and a Free drag use, and
+ * what switching into Free copies into `slots`. Reading the file, not
+ * teamLayout, is what keeps the picture the file.
+ */
+export function teamCardRects(design: HudDesign, aspect: Aspect): { x: number; y: number; w: number; h: number }[] {
+  const c = elementRect(design, 'teamColumn', aspect);
+  const team = buildTrees(design)('resource/ui/hud/teamdisplayhud.res');
+  return [1, 2, 3, 4].map((n) => {
+    const p = kvFind(team, [`TeamPlayer${n}`]);
+    if (!p) throw new Error(`resource/ui/hud/teamdisplayhud.res: no panel TeamPlayer${n}`);
+    return {
+      x: c.x + parsePos(kvGet(p, 'xpos') ?? '0', c.w), y: c.y + parsePos(kvGet(p, 'ypos') ?? '0', c.h),
+      w: num(kvGet(p, 'wide')), h: num(kvGet(p, 'tall')),
+    };
+  });
+}
+
+/** Whether the survivor team is laid out Free: the element's own X, Y and drag give way to each card's. */
+export function isFreeTeam(design: HudDesign): boolean {
+  return teamLayout(design, elementById('teamColumn')!).dir === 'free';
 }

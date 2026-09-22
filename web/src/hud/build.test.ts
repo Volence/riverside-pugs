@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild } from './build';
+import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
@@ -377,6 +377,57 @@ describe('teamLayout, the gap', () => {
   });
 });
 
+const FOUR = [{ x: 8, y: 100 }, { x: 8, y: 150 }, { x: 700, y: 100 }, { x: 400, y: 440 }];
+
+describe('buildHud, Free', () => {
+  const free = (patch: Partial<ElementOverride> = {}) =>
+    design({ elements: { teamColumn: { fit: true, dir: 'free', slots: FOUR, ...patch } } });
+
+  it('writes the full-screen container and four anchored card positions', () => {
+    const files = buildHud(free());
+    const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+    expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(c, k))).toEqual(['0', '0', 'f0', 'f0']);
+    const team = tree(files, TEAM_FILE);
+    // Anchors follow each card's centre, like an element's: left third plain, middle third c, right third r.
+    expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos')]))
+      .toEqual([['8', '100'], ['8', 'c-90'], ['r153', '100'], ['c-26', 'r40']]);
+    expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('121');
+  });
+
+  it('reports the full screen as the container and each card where its slot is', () => {
+    const d = free();
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 0, w: 853, h: 480 });
+    const cards = teamCardRects(d, '16:9');
+    expect(cards.slice(0, 3)).toEqual([
+      { x: 8, y: 100, w: 121, h: 36 }, { x: 8, y: 150, w: 121, h: 36 }, { x: 700, y: 100, w: 121, h: 36 },
+    ]);
+    expect(Math.abs(cards[3].x - 400)).toBeLessThanOrEqual(0.5);          // c-26 on an odd-width screen
+    // A right-anchored card stays at the right edge on another aspect.
+    expect(teamCardRects(d, '4:3')[2].x).toBe(640 - 153);
+  });
+
+  it('keeps the slots while in Row, so switching back to Free restores the cards', () => {
+    const row = design({ elements: { teamColumn: { fit: true, dir: 'row', slots: FOUR } } });
+    expect(kvGet(kvFind(tree(buildHud(row), TEAM_FILE), ['TeamPlayer1'])!, 'xpos')).toBe('13');
+    expect(isFreeTeam(row)).toBe(false);
+    const back = validateDesign({ v: 1, elements: { teamColumn: { ...row.elements.teamColumn, dir: 'free' } } });
+    expect(isFreeTeam(back)).toBe(true);
+    expect(kvGet(kvFind(tree(buildHud(back), TEAM_FILE), ['TeamPlayer1'])!, 'xpos')).toBe('8');
+  });
+
+  it('reads a Free without four slots as the preset direction', () => {
+    const d = design({ elements: { teamColumn: { dir: 'free' } } });
+    expect(teamLayout(d, elementById('teamColumn')!).dir).toBe('row');
+  });
+
+  it('reads the row cards from the file the same way', () => {
+    expect(teamCardRects(design({ elements: { teamColumn: { fit: true } } }), '16:9')).toEqual([
+      { x: 13, y: 441, w: 121, h: 36 }, { x: 153, y: 441, w: 121, h: 36 },
+      { x: 293, y: 441, w: 121, h: 36 }, { x: 433, y: 441, w: 121, h: 36 },
+    ]);
+  });
+});
+
 describe('buildHud, fonts', () => {
   const ttf = { regular: new Uint8Array([1, 2, 3]), bold: new Uint8Array([4, 5, 6]) };
 
@@ -586,10 +637,11 @@ describe('buildTrees', () => {
   for (const preset of ['stock', 'modern'] as const) {
     for (const advanced of [false, true]) {
       for (const fit of [false, true]) {
-        it(`returns every file the preview reads exactly as buildHud writes it: ${preset}${advanced ? ', advanced' : ''}${fit ? ', fitted' : ''}`, () => {
+        for (const dir of ['row', 'column', 'free'] as const) {
+        it(`returns every file the preview reads exactly as buildHud writes it: ${preset} ${dir}${advanced ? ', advanced' : ''}${fit ? ', fitted' : ''}`, () => {
           const d = design({ preset, advanced,
             elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
-              teamColumn: { scale: 1.5, dir: 'column', gap: 6, ...(fit ? { fit: true } : {}) } },
+              teamColumn: { scale: 1.5, dir, gap: 6, slots: FOUR, ...(fit ? { fit: true } : {}) } },
             styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } },
             children: { teamColumn: { Name: { x: 20, fontSize: 14 }, Head: { visible: false },
               ...(fit ? { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } : {}) } } });
@@ -610,6 +662,7 @@ describe('buildTrees', () => {
             }
           }
         });
+        }
       }
     }
   }
