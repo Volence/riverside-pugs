@@ -154,10 +154,29 @@ In `src/db.ts`, beside the other `discord_` keys in `DEFAULT_SETTINGS`:
 Run: `npx vitest run tests/reportButton.test.ts`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 6: Confirm the settings page still agrees with the defaults**
+- [ ] **Step 6: Guard the settings parity that nothing else guards**
 
-Run: `npx vitest run tests/config.test.ts`
-Expected: PASS. This suite asserts every `DEFAULT_SETTINGS` key has a schema entry, which is why both files change in one task.
+`DEFAULT_SETTINGS` in `src/db.ts` and `SETTINGS_SCHEMA` in `src/settingsSchema.ts` have to agree: a key with no default reads back `undefined`, and a default with no schema entry cannot be edited by an admin. Nothing in the suite currently checks that, which is how a key added to one file and not the other would ship unnoticed. Add the guard here, since this task is what adds a key to both.
+
+Append to `tests/reportButton.test.ts`:
+
+```typescript
+import { DEFAULT_SETTINGS } from '../src/db.js';
+import { SETTINGS_SCHEMA } from '../src/settingsSchema.js';
+
+describe('settings parity', () => {
+  it('gives every default a schema entry and every schema entry a default', () => {
+    const defaults = Object.keys(DEFAULT_SETTINGS).sort();
+    const schema = SETTINGS_SCHEMA.map((s) => s.key).sort();
+    expect(defaults).toEqual(schema);
+  });
+});
+```
+
+If `DEFAULT_SETTINGS` or `SETTINGS_SCHEMA` is not exported under that name, export it rather than reaching into the module's internals, and say so in the report. If this test fails on keys unrelated to this task, that is a pre-existing gap: report it and leave it, rather than editing unrelated settings to make the test green.
+
+Run: `npx vitest run tests/reportButton.test.ts tests/adminSettings.test.ts`
+Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
