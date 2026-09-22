@@ -5,7 +5,7 @@ import { campaignDisplayName } from '../campaignRegistry.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
-import { fileReport, latestSharedMatch, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
+import { fileReport, latestSharedMatch, REPORT_CATEGORIES, type ReportCategory, type DiscordReporter } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
 import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
@@ -46,7 +46,7 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'link', description: 'Link your Discord to your Steam account' },
   {
     name: 'report',
-    description: 'Privately report a player, with your latest match together attached if there is one',
+    description: 'Privately report someone, in a game or in the Discord',
     options: [
       { name: 'player', description: 'Who you are reporting', type: 'user', required: true },
       {
@@ -213,27 +213,34 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
 
 /** Always private: nobody else in the channel learns who reported whom. */
 function report(deps: CommandDeps, i: Cmd): InteractionReply {
-  // The same door the buttons use: linked, active, not banned, not merged
-  // away. The web route has always required an active player; this checked
-  // only that the Discord account was linked to somebody.
-  const who = resolve(deps, i);
-  if ('reply' in who) return who.reply;
-  const reporter = who.player;
-  const target = playerByDiscordId(deps.db, i.options.player ?? '');
-  if (!target) {
-    return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report on their profile on the website instead.' });
+  // A linked presser goes through the same door as the buttons (standing,
+  // bans, merges). Someone only in the Discord files as themselves; fileReport
+  // holds them to the Discord-side rules.
+  const linked = playerByDiscordId(deps.db, i.userId);
+  let reporter: string | DiscordReporter;
+  if (linked) {
+    const who = resolve(deps, i);
+    if ('reply' in who) return who.reply;
+    reporter = who.player.steamid;
+  } else {
+    reporter = { kind: 'discord', discordId: i.userId, name: i.userName, timedOutUntil: i.presserTimedOutUntil };
   }
-  if (target.steamid === reporter.steamid) return priv({ content: 'You cannot report yourself.' });
+  const pick = i.picked.player;
+  if (!pick) return priv({ content: 'Pick the person you are reporting.' });
+  const targetPlayer = playerByDiscordId(deps.db, pick.id);
 
-  // A match is optional. With none given, attach the latest one shared with
-  // the target (see latestSharedMatch for why); otherwise file it with none.
+  // A match is optional, and only exists between two players.
   const matchId: number | null = i.options.match
     ? Number(i.options.match)
-    : latestSharedMatch(deps.db, reporter.steamid, target.steamid);
-  const r = fileReport(deps.db, reporter.steamid, {
-    targetId: target.steamid, category: i.options.reason, text: i.options.details ?? '', matchId,
-  }, { adminSteamIds: deps.adminSteamIds ?? [] });
+    : typeof reporter === 'string' && targetPlayer ? latestSharedMatch(deps.db, reporter, targetPlayer.steamid) : null;
+  const r = fileReport(deps.db, reporter, {
+    category: i.options.reason, text: i.options.details ?? '', matchId,
+  }, {
+    adminSteamIds: deps.adminSteamIds ?? [],
+    targetDiscord: { discordId: pick.id, name: pick.name, bot: pick.bot, administrator: pick.administrator },
+  });
   if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
   const about = matchId === null ? '' : ` for match #${matchId}`;
-  return priv({ content: `Reported ${plainLabelEscaped(idOf(target))}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
+  const name = targetPlayer ? plainLabelEscaped(idOf(targetPlayer)) : escapeName(pick.name);
+  return priv({ content: `Reported ${name}${about}. Thanks, the moderators will look at it. The person you reported is never told who filed it.` });
 }

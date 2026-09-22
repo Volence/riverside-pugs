@@ -5,6 +5,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { COMMAND_DEFS, handleCommand } from '../src/discord/commands.js';
 import type { Dump } from '../src/dumpParse.js';
+import type { PickedMember } from '../src/discord/transport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const URL_ = 'https://pug.test';
@@ -36,8 +37,20 @@ beforeEach(() => {
   mm = new Matchmaker(db, { broadcast: () => {}, orchestrator: { setupMatch: async () => {}, finishMatch: async () => {} } });
 });
 
-const run = (name: string, options: Record<string, string> = {}, userId = '900') =>
-  handleCommand({ db, matchmaker: mm, publicUrl: URL_ }, { kind: 'command', name, userId, userName: 'u', options, picked: {}, presserTimedOutUntil: null });
+const run = (
+  name: string, options: Record<string, string> = {}, userId = '900',
+  picked: Record<string, PickedMember> = {}, presserTimedOutUntil: string | null = null,
+) =>
+  handleCommand({ db, matchmaker: mm, publicUrl: URL_ }, {
+    kind: 'command', name, userId, userName: 'u', options,
+    // '/report''s `player` option is a Discord user picker: Discord itself
+    // supplies the PickedMember (name, bot, administrator) alongside the raw
+    // id in `options.player`. Every other command here ignores `picked`, so
+    // synthesizing it from `options.player` when a test does not pass one
+    // explicitly keeps every existing call site unchanged.
+    picked: options.player && !picked.player ? { ...picked, player: { id: options.player, name: 'target', bot: false, administrator: false } } : picked,
+    presserTimedOutUntil,
+  });
 const text = (r: Awaited<ReturnType<typeof run>>) => JSON.stringify(r.payload);
 
 describe('slash commands', () => {
@@ -167,13 +180,28 @@ describe('/report', () => {
     expect(rows()).toEqual([{ match_id: null, reporter_id: IDS[0], target_id: IDS[5], category: 'toxicity', text: 'in voice' }]);
   });
 
-  it('takes an explicit match, refuses a repeat, yourself, and unlinked targets', async () => {
+  it('takes an explicit match, and refuses a repeat and yourself', async () => {
     const first = play('a');
     play('b');
     expect(text(await run('report', { player: '905', reason: 'cheating', match: String(first) }))).toContain(`match #${first}`);
     expect(text(await run('report', { player: '905', reason: 'cheating', match: String(first) }))).toMatch(/already reported/);
     expect(text(await run('report', { player: '900', reason: 'afk' }))).toMatch(/yourself/);
-    expect(text(await run('report', { player: '999', reason: 'afk' }))).toMatch(/not linked/);
+  });
+
+  // A member who has not linked Steam used to be refused outright ("has not
+  // linked Discord"). Phase 3a lets the report name them instead: fileReport
+  // turns the pick into a Discord-only target, and the reply uses the name
+  // Discord supplied, not a player row.
+  it('reports a Discord-only member picked in the player option', async () => {
+    const r = await run('report', { player: '990', reason: 'toxicity' }, '900', { player: { id: '990', name: 'Lurky', bot: false, administrator: false } });
+    expect(r.payload.content).toMatch(/^Reported Lurky/);
+    expect(r.payload.content).toContain('The person you reported is never told who filed it.');
+    expect(r.payload.content).not.toContain('match #');
+  });
+
+  it('takes a report from someone who has not linked Steam', async () => {
+    const r = await run('report', { player: '999', reason: 'afk' }, 'd-new', { player: { id: '999', name: 'Ghosty', bot: false, administrator: false } });
+    expect(r.payload.content).toMatch(/^Reported Ghosty/);
   });
 
   it('offers the safety category and insists on details for it', async () => {
