@@ -21,6 +21,24 @@ describe('nudge', () => {
   it('does nothing to an element that cannot move', () => {
     expect(nudge(DEFAULT_DESIGN, 'killFeed', 5, 5)).toBe(DEFAULT_DESIGN);
   });
+
+  // Dragging clamps to an 8-unit floor via clampSpan; a plain x + dx nudge
+  // would not, so repeated arrow presses could walk an element arbitrarily
+  // far off screen. This pins that nudge shares the same floor, the same
+  // way repeated arrow-key presses would call it.
+  it('keeps at least 8 units of the element on screen, however far it is pushed, matching the drag clamp', () => {
+    let d = DEFAULT_DESIGN;
+    for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', -10, -10);
+    // ownHealth is 125x91 HUD units at 16:9 (853 wide): clampSpan's 8-unit
+    // floor caps x at 8 - 125 and y at 8 - 91.
+    expect(d.elements.ownHealth).toEqual({ x: 8 - 125, y: 8 - 91 });
+  });
+
+  it('also clamps on the far side', () => {
+    let d = DEFAULT_DESIGN;
+    for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', 10, 10);
+    expect(d.elements.ownHealth).toEqual({ x: 853 - 8, y: 480 - 8 });
+  });
 });
 
 describe('toUnits', () => {

@@ -46,14 +46,22 @@ function clampSpan(v: number, size: number, extent: number, min: number): number
  * exactly where the element is drawn. An element the game places itself
  * cannot move, so it is returned unchanged, `===` and all, which is what
  * lets a caller skip a re-render when nothing happened.
+ *
+ * Runs the result through the same `clampSpan` a drag uses, at the same
+ * 8-unit floor, so repeated arrow presses cannot walk an element arbitrarily
+ * far off screen the way a plain `x + dx` would; a drag and the keyboard
+ * agree on how far off screen is too far because they share this call.
+ * `design.aspect` (not a hardcoded 16:9) gives the screen width, since a
+ * design can be 16:10 or 4:3.
  */
 export function nudge(design: HudDesign, id: string, dx: number, dy: number): HudDesign {
   const el = elementById(id);
   if (!el || !el.move) return design;
   const o = design.elements[id];
   const base = elementRect(design, id, design.aspect);
-  const x = (o?.x ?? base.x) + dx;
-  const y = (o?.y ?? base.y) + dy;
+  const extentW = screenW(design.aspect);
+  const x = clampSpan((o?.x ?? base.x) + dx, base.w, extentW, 8);
+  const y = clampSpan((o?.y ?? base.y) + dy, base.h, SCREEN_H, 8);
   return { ...design, elements: { ...design.elements, [id]: { ...o, x, y } } };
 }
 
@@ -239,7 +247,16 @@ export default function Hud() {
     drawHud(ctx, w, h, design, side, selected);
   }, [design, side, selected, backdrop]);
 
-  useEffect(() => { saveDesign(design); }, [design]);
+  // Debounced rather than immediate: a drag calls setDesign on every
+  // pointermove, and an undebounced save would run a synchronous
+  // JSON.stringify plus localStorage.setItem on every one of those ticks.
+  // Resetting this timer on each change coalesces a burst (a drag, a
+  // held-down arrow key, a slider) into one write once motion settles,
+  // while a single change still lands within 300ms either way.
+  useEffect(() => {
+    const t = setTimeout(() => saveDesign(design), 300);
+    return () => clearTimeout(t);
+  }, [design]);
 
   const pointerUnits = (e: PointerEvent) => {
     const c = canvas.current!;
