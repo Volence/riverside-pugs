@@ -27,7 +27,7 @@ const caseFile: CaseFile = {
   createdAt: '2026-08-18T01:35:32.000Z', activeBan: null, bans: [], penalties: [], timeout: null,
   inputFlags: [], aliases: [], sharesAddressWith: [],
   tickets: [{
-    id: 7, targetId: '76561198000000011', targetName: NAME, status: 'closed', outcome: 'warned',
+    id: 7, targetId: '76561198000000011', targetDiscordId: null, targetName: NAME, status: 'closed', outcome: 'warned',
     restricted: false, claimedBy: null, claimedByName: null, reports: 1, reporters: 1,
     categories: ['toxicity'], createdAt: '2026-08-30T10:00:00.000Z', lastReportAt: null,
     closedAt: '2026-08-31T10:00:00.000Z',
@@ -37,7 +37,7 @@ const caseFile: CaseFile = {
 const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
   discussion: { state: 'unconfigured', surface: null, url: null },
   ticket: {
-    id: 1, targetId: '76561198000000011', targetName: NAME, status: 'open', outcome: null,
+    id: 1, targetId: '76561198000000011', targetDiscordId: null, targetName: NAME, status: 'open', outcome: null,
     restricted: false, claimedBy: null, claimedByName: null, reports: 2, reporters: 2,
     categories: ['cheating'], createdAt: '2026-09-21T18:56:13.000Z', lastReportAt: null, closedAt: null,
     outcomeNote: '', openedBy: null, openedByName: null, closedBy: null, closedByName: null,

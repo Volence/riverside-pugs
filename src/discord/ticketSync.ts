@@ -3,6 +3,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
 import { subscribeBanChanges } from '../banEvents.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
+import { targetLabel } from '../tickets/person.js';
 import { getTicketRow, type TicketRow } from '../tickets/store.js';
 import {
   forbiddenForumThreads, forumAudience, insertThread, privateThreadAudience, setThreadCard, setThreadLocked,
@@ -281,7 +282,7 @@ export class TicketSync {
       // new ticket rather than hinting at a case the feed never heard of.
       const first = t.opened_by === null
         && !db.prepare('SELECT 1 FROM ticket_reports WHERE ticket_id = ? AND id < ? AND feed_held = 0').get(t.id, r.id);
-      publishAdminEvent({ kind: 'report', ticketId: t.id, targetId: t.target_id, category: r.category, created: first });
+      publishAdminEvent({ kind: 'report', ticketId: t.id, targetId: t.target_id, targetName: targetLabel(db, t), category: r.category, created: first });
     }
   }
 

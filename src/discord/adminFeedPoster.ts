@@ -76,10 +76,11 @@ export class AdminFeedPoster {
     switch (e.kind) {
       case 'report': {
         const link = `[#${e.ticketId}](${this.ticket(e.ticketId)})`;
+        const who = e.targetId !== null ? this.name(e.targetId) : escapeName(e.targetName);
         return {
           text: e.created
-            ? `🎫 New ticket ${link} about ${this.name(e.targetId)} (${e.category}).`
-            : `🎫 Another report on ticket ${link} about ${this.name(e.targetId)} (${e.category}).`,
+            ? `🎫 New ticket ${link} about ${who} (${e.category}).`
+            : `🎫 Another report on ticket ${link} about ${who} (${e.category}).`,
           color: COLOR.report,
         };
       }

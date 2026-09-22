@@ -862,7 +862,7 @@ export interface ReportEligibility {
 }
 
 export interface MyReport {
-  id: number; targetId: string; targetName: string | null; category: string;
+  id: number; targetId: string | null; targetDiscordId: string | null; targetName: string | null; category: string;
   matchId: number | null; createdAt: string; status: 'open' | 'closed';
 }
 
@@ -955,13 +955,13 @@ export type IntegrityJobInfo =
 // ---------- tickets ----------
 
 export interface TicketSummary {
-  id: number; targetId: string; targetName: string | null; status: 'open' | 'closed'; outcome: string | null;
+  id: number; targetId: string | null; targetDiscordId: string | null; targetName: string | null; status: 'open' | 'closed'; outcome: string | null;
   restricted: boolean; claimedBy: string | null; claimedByName: string | null;
   reports: number; reporters: number; categories: string[];
   createdAt: string; lastReportAt: string | null; closedAt: string | null;
 }
 export interface TicketReport {
-  id: number; reporterId: string; reporterName: string | null; category: string; text: string;
+  id: number; reporterId: string | null; reporterDiscordId: string | null; reporterName: string | null; category: string; text: string;
   matchId: number | null; campaign: string | null; moment: { ordinal: number; half: number; tMs: number } | null; createdAt: string;
 }
 export interface TicketEvent {

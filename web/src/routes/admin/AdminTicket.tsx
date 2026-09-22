@@ -52,7 +52,9 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
     <Panel>
       <button class="chip" type="button" onClick={onBack}>Back to tickets</button>
       <h3>
-        #{t.id} <a href={`/player/${t.targetId}`}>{t.targetName ?? t.targetId}</a>
+        #{t.id} {t.targetId
+          ? <a href={`/player/${t.targetId}`}>{t.targetName ?? t.targetId}</a>
+          : <span title={`Discord member ${t.targetDiscordId}`}>{t.targetName ?? 'Discord member'} <small>(Discord only)</small></span>}
         {t.restricted && <span class="admin-tag">Restricted</span>}
         <span class="admin-tag">{open ? 'open' : `closed: ${(t.outcome ?? '').replace(/_/g, ' ')}`}</span>
       </h3>
@@ -82,7 +84,9 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
           {data.reports.map((r) => (
             <li key={r.id} class="admin-report">
               <p>
-                <strong>{r.category}</strong> from <a href={`/player/${r.reporterId}`}>{r.reporterName ?? r.reporterId}</a>
+                <strong>{r.category}</strong> from {r.reporterId
+                  ? <a href={`/player/${r.reporterId}`}>{r.reporterName ?? r.reporterId}</a>
+                  : <span title={`Discord member ${r.reporterDiscordId}`}>{r.reporterName ?? 'a Discord member'} <small>(Discord only)</small></span>}
                 <span class="muted"> · {fmtTime(r.createdAt)}</span>
                 {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}{r.campaign ? ` ${campaignName(r.campaign)}` : ''}</a></>}
                 {r.matchId !== null && r.moment && <> · <a href={`/match/${r.matchId}?ordinal=${r.moment.ordinal}&half=${r.moment.half}&t=${r.moment.tMs}`}>replay moment</a></>}
@@ -154,21 +158,23 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
             {t.restricted && (
               <p class="muted">The ban reason is shown to the player and in the ban list, so keep it general and leave the details in this ticket.</p>
             )}
-            <div class="admin-form">
-              <input value={reason} maxLength={500} placeholder="Ban reason" aria-label="Ban reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-              <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
-                {lengths.map(([m, label]) => <option key={label} value={m === null ? '' : String(m)}>{label}</option>)}
-              </select>
-              <button class="btn" type="button" disabled={busy || !reason.trim()}
-                onClick={() => run(() => modApi.ban(t.id, reason.trim(), minutes === '' ? null : Number(minutes)), {
-                  title: `Ban ${t.targetName ?? t.targetId}?`,
-                  body: 'They are removed from the queue and banned on every game server. The ban is linked to this ticket.',
-                  confirmLabel: 'Ban',
-                  danger: true,
-                }).then(() => setReason(''))}>
-                Ban
-              </button>
-            </div>
+            {t.targetId && (
+              <div class="admin-form">
+                <input value={reason} maxLength={500} placeholder="Ban reason" aria-label="Ban reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+                <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
+                  {lengths.map(([m, label]) => <option key={label} value={m === null ? '' : String(m)}>{label}</option>)}
+                </select>
+                <button class="btn" type="button" disabled={busy || !reason.trim()}
+                  onClick={() => run(() => modApi.ban(t.id, reason.trim(), minutes === '' ? null : Number(minutes)), {
+                    title: `Ban ${t.targetName ?? t.targetId ?? 'this person'}?`,
+                    body: 'They are removed from the queue and banned on every game server. The ban is linked to this ticket.',
+                    confirmLabel: 'Ban',
+                    danger: true,
+                  }).then(() => setReason(''))}>
+                  Ban
+                </button>
+              </div>
+            )}
             <div class="admin-form">
               <select value={outcome} aria-label="Outcome" onChange={(e) => setOutcome((e.target as HTMLSelectElement).value)}>
                 <option value="">Outcome...</option>

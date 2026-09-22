@@ -1,0 +1,78 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { openDb, type DB } from '../src/db.js';
+import { upsertPlayer, activatePlayer } from '../src/players.js';
+import { listTickets, ticketCounts, ticketDetail } from '../src/tickets/views.js';
+import { canSeeTicket, getTicketRow } from '../src/tickets/store.js';
+import { myReports } from '../src/tickets/filing.js';
+import { banFromTicket } from '../src/tickets/actions.js';
+import { privateThreadAudience, forbiddenForumThreads } from '../src/tickets/threads.js';
+import { ticketCard } from '../src/discord/ticketCard.js';
+
+const MOD = '76561199000000401';
+const REP = '76561199000000402';
+const LURKER = '900000000000000001';
+let db: DB;
+let ticketId: number;
+
+beforeEach(() => {
+  db = openDb(':memory:');
+  for (const id of [MOD, REP]) {
+    upsertPlayer(db, { steamid: id, name: id === MOD ? 'mod' : 'rep', avatar: null }, []);
+    activatePlayer(db, id);
+  }
+  db.prepare("UPDATE players SET is_mod = 1, discord_id = '800' WHERE steamid = ?").run(MOD);
+  ticketId = Number(db.prepare(
+    "INSERT INTO tickets (target_discord_id, target_name, created_at) VALUES (?, 'Lurky', '2026-09-22T00:00:00Z')",
+  ).run(LURKER).lastInsertRowid);
+  db.prepare(
+    "INSERT INTO ticket_reports (ticket_id, reporter_id, category, created_at) VALUES (?, ?, 'toxicity', '2026-09-22T00:00:00Z')",
+  ).run(ticketId, REP);
+  db.prepare(
+    "INSERT INTO ticket_reports (ticket_id, reporter_discord_id, reporter_name, category, created_at) VALUES (?, '901', 'Other lurker', 'toxicity', '2026-09-22T00:00:01Z')",
+  ).run(ticketId);
+});
+
+describe('a ticket about a Discord-only person', () => {
+  it('is visible to staff in the list, the counts and the detail', () => {
+    const [t] = listTickets(db, MOD, 'open');
+    expect(t).toMatchObject({ id: ticketId, targetId: null, targetDiscordId: LURKER, targetName: 'Lurky', reports: 2, reporters: 2 });
+    expect(ticketCounts(db, MOD).open).toBe(1);
+    expect(canSeeTicket(db, getTicketRow(db, ticketId)!, MOD)).toBe(true);
+    const d = ticketDetail(db, ticketId, MOD)!;
+    expect(d.reports.map((r) => [r.reporterId, r.reporterDiscordId, r.reporterName])).toEqual([
+      [REP, null, 'rep'], [null, '901', 'Other lurker'],
+    ]);
+  });
+
+  it('shows on the reporter\'s own list', () => {
+    expect(myReports(db, REP)).toMatchObject([{ targetId: null, targetDiscordId: LURKER, targetName: 'Lurky', status: 'open' }]);
+  });
+
+  it('a restricted one still lets its access list in, and offers staff to add', () => {
+    db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
+    db.prepare("INSERT INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, 'system', 'x')").run(ticketId, MOD);
+    expect(listTickets(db, MOD, 'open')).toHaveLength(1);
+    expect(privateThreadAudience(db, ticketId).map((m) => m.steamid)).toEqual([MOD]);
+  });
+
+  it('a forum thread about it is forbidden only once the ticket is restricted', () => {
+    db.prepare("INSERT INTO ticket_threads (ticket_id, kind, channel_id, thread_id, created_at, surface) VALUES (?, 'staff', 'f', 'th1', 'x', 'forum')").run(ticketId);
+    expect(forbiddenForumThreads(db)).toHaveLength(0);
+    db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
+    expect(forbiddenForumThreads(db)).toHaveLength(1);
+  });
+
+  it('cannot be server-banned from, since there is no player', () => {
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(MOD);
+    expect(banFromTicket(db, ticketId, MOD, 'spam', 60)).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it('the staff card names them without a profile link', () => {
+    const card = ticketCard(db, ticketId, 'https://x')!;
+    const fields = card.payload.embeds[0].fields!;
+    const accused = fields.find((f) => f.name === 'Accused')!.value;
+    expect(accused).toContain('Lurky');
+    expect(accused).not.toContain('/player/');
+    expect(fields.find((f) => f.name === 'Reports')!.value).toContain('2 from 2');
+  });
+});

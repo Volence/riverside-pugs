@@ -86,10 +86,12 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     // caseFile stays alongside for good: a moderator added to a restricted
     // ticket about a colleague gets summary.fileUrl null, so caseFile is the
     // only detailed record that viewer can see at all.
+    // A Discord-only accused has no player row for either builder to read:
+    // there is nothing for the case file or the glance summary to show.
     return {
       ...d,
-      caseFile: caseFile(db, d.ticket.targetId, me),
-      summary: playerFileSummary(db, d.ticket.targetId, fileViewer(db, me)),
+      caseFile: d.ticket.targetId !== null ? caseFile(db, d.ticket.targetId, me) : null,
+      summary: d.ticket.targetId !== null ? playerFileSummary(db, d.ticket.targetId, fileViewer(db, me)) : null,
     };
   });
 
@@ -193,8 +195,11 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
   app.post('/api/mod/tickets/:id/ban', act('ticket_ban', (id, me, b) => {
     const r = banFromTicket(db, id, me, b.reason, b.minutes);
     // Out of the queue AND out of any ready check or vote in progress, as the
-    // Players tab ban does. leave() only knows about the queue.
-    if (r.ok) matchmaker.remove(getTicketRow(db, id)!.target_id);
+    // Players tab ban does. leave() only knows about the queue. banFromTicket
+    // refuses a Discord-only target before ok, so target is set whenever r.ok
+    // is true; the guard is here anyway so a future change cannot pass null.
+    const target = getTicketRow(db, id)?.target_id;
+    if (r.ok && target) matchmaker.remove(target);
     return r;
   }, (b) => ({ reason: b.reason, minutes: b.minutes ?? null })));
 }

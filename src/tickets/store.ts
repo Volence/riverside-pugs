@@ -1,8 +1,11 @@
 import type { DB } from '../db.js';
+import { personKey, targetOf } from './person.js';
 
 export interface TicketRow {
   id: number;
-  target_id: string;
+  target_id: string | null;
+  target_discord_id: string | null;
+  target_name: string;
   status: 'open' | 'closed';
   outcome: string | null;
   outcome_note: string;
@@ -17,7 +20,8 @@ export interface TicketRow {
 /** Admin or moderator flag set, whatever the account's status. Used to decide
  *  that a report is ABOUT staff, where a banned moderator is still staff for
  *  the purpose of keeping their colleagues out of the case. */
-export function hasStaffFlag(db: DB, steamid: string): boolean {
+export function hasStaffFlag(db: DB, steamid: string | null): boolean {
+  if (steamid === null) return false;
   const p = db.prepare('SELECT is_admin, is_mod FROM players WHERE steamid = ?').get(steamid) as
     | { is_admin: number; is_mod: number } | undefined;
   return !!p && (p.is_admin === 1 || p.is_mod === 1);
@@ -167,12 +171,12 @@ export function reseedOrphanedTickets(
   db: DB, adminSteamIds: string[], exclude: string[] = [], now = new Date(),
 ): { seeded: number; stillEmpty: number } {
   const orphans = db.prepare(
-    `SELECT t.id, t.target_id FROM tickets t WHERE t.restricted = 1 AND t.status = 'open'
+    `SELECT t.id, t.target_id, t.target_discord_id, t.target_name FROM tickets t WHERE t.restricted = 1 AND t.status = 'open'
        AND NOT EXISTS (SELECT 1 FROM ticket_access a WHERE a.ticket_id = t.id)`,
-  ).all() as { id: number; target_id: string }[];
+  ).all() as { id: number; target_id: string | null; target_discord_id: string | null; target_name: string }[];
   let seeded = 0;
   for (const t of orphans) {
-    seedAccess(db, t.id, t.target_id, adminSteamIds, [], now, exclude);
+    seedAccess(db, t.id, personKey(targetOf(t)), adminSteamIds, [], now, exclude);
     if (db.prepare('SELECT 1 FROM ticket_access WHERE ticket_id = ?').get(t.id)) seeded++;
   }
   return { seeded, stillEmpty: orphans.length - seeded };

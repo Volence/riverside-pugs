@@ -17,7 +17,9 @@ export function MyReports() {
       <ul class="admin-list">
         {data.reports.map((r) => (
           <li key={r.id}>
-            <a href={`/player/${r.targetId}`}>{r.targetName ?? r.targetId}</a> · {r.category}
+            {r.targetId
+              ? <a href={`/player/${r.targetId}`}>{r.targetName ?? r.targetId}</a>
+              : <>{r.targetName ?? 'a Discord member'}</>} · {r.category}
             {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}</a></>}
             {' '}· {fmtDate(r.createdAt)} · <span class="muted">{r.status === 'open' ? 'open' : 'closed, thank you'}</span>
           </li>

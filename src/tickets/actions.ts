@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { insertBan } from '../admin/players.js';
 import { publishBanChange } from '../banEvents.js';
 import { getSetting } from '../settings.js';
+import { personKey, targetOf } from './person.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess, type TicketRow } from './store.js';
 import { publishTicketSignal } from './signals.js';
 
@@ -60,7 +61,7 @@ export function setRestricted(db: DB, id: number, by: string, restricted: boolea
   return told(id, guardUnique(() => db.transaction(() => {
     db.prepare('UPDATE tickets SET restricted = ? WHERE id = ?').run(restricted ? 1 : 0, id);
     if (restricted) {
-      seedAccess(db, id, t.target_id, adminSteamIds, [by]);
+      seedAccess(db, id, personKey(targetOf(t)), adminSteamIds, [by]);
       // Every report this ticket already holds is held from the feed for
       // good: un-restricting later must not un-say what happened while it
       // was restricted.
@@ -121,6 +122,9 @@ export function banFromTicket(db: DB, id: number, by: string, reason: unknown, m
   const t = visible(db, id, by);
   if (!t) return fail(404, 'no such ticket');
   if (t.status !== 'open') return fail(409, 'reopen the ticket before banning from it');
+  // Phase 3c gives these tickets a Discord timeout or ban instead.
+  if (t.target_id === null) return fail(400, 'this person has no player account, so there is nothing to ban on the servers');
+  const targetId = t.target_id;
   if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) return fail(400, 'a reason is required (up to 500 characters)');
   let mins: number | null = null;
   if (minutes !== undefined && minutes !== null && minutes !== '') {
@@ -131,17 +135,17 @@ export function banFromTicket(db: DB, id: number, by: string, reason: unknown, m
   if (actor?.is_admin !== 1) {
     // A banned admin fails requireAdmin and no moderator can lift the ban, so
     // one moderator on the access list could otherwise lock the admins out.
-    const target = db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(t.target_id) as { is_admin: number } | undefined;
+    const target = db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(targetId) as { is_admin: number } | undefined;
     if (target?.is_admin === 1) return fail(403, 'only an admin can ban an admin');
     const cap = Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080');
     if (mins === null || mins > cap) return fail(403, `moderators can ban for up to ${cap} minutes; ask an admin for longer`);
   }
   const text = reason.trim();
   db.transaction(() => {
-    insertBan(db, t.target_id, by, text, mins, now);
-    db.prepare('UPDATE bans SET ticket_id = ? WHERE id = (SELECT MAX(id) FROM bans WHERE player_id = ?)').run(id, t.target_id);
+    insertBan(db, targetId, by, text, mins, now);
+    db.prepare('UPDATE bans SET ticket_id = ? WHERE id = (SELECT MAX(id) FROM bans WHERE player_id = ?)').run(id, targetId);
     addTicketEvent(db, id, by, 'banned', { reason: text, minutes: mins }, now);
   })();
-  publishBanChange({ kind: 'ban', steamid: t.target_id, reason: text });
+  publishBanChange({ kind: 'ban', steamid: targetId, reason: text });
   return told(id, OK);
 }

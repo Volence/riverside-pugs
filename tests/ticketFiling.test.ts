@@ -197,6 +197,6 @@ describe('matchReportTargets and myReports', () => {
     const mine = myReports(db, R1);
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ targetId: ACCUSED, targetName: 'p3', category: 'cheating', matchId, status: 'closed' });
-    expect(Object.keys(mine[0]).sort()).toEqual(['category', 'createdAt', 'id', 'matchId', 'status', 'targetId', 'targetName']);
+    expect(Object.keys(mine[0]).sort()).toEqual(['category', 'createdAt', 'id', 'matchId', 'status', 'targetDiscordId', 'targetId', 'targetName']);
   });
 });

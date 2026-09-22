@@ -70,7 +70,7 @@ export function threadsInState(db: DB, state: ThreadState, ticketId?: number): T
 export function forbiddenForumThreads(db: DB, ticketId?: number): ThreadRow[] {
   const rows = db.prepare(
     `SELECT th.* FROM ticket_threads th
-       JOIN tickets t ON t.id = th.ticket_id JOIN players p ON p.steamid = t.target_id
+       JOIN tickets t ON t.id = th.ticket_id LEFT JOIN players p ON p.steamid = t.target_id
      WHERE th.surface = 'forum' AND th.state != 'deleted'
        AND (t.restricted = 1 OR p.is_admin = 1 OR p.is_mod = 1)
      ORDER BY th.id`,
@@ -84,7 +84,7 @@ export function forbiddenForumThreads(db: DB, ticketId?: number): ThreadRow[] {
  * explain, so the two cannot disagree.
  */
 export function surfaceFor(
-  db: DB, t: { restricted: number; target_id: string },
+  db: DB, t: { restricted: number; target_id: string | null },
 ): { surface: ThreadSurface | null; why: 'ok' | 'unconfigured' | 'about_staff' } {
   if (t.restricted === 1) {
     return (getSetting(db, 'discord_tickets_channel_id') ?? '') ? { surface: 'private', why: 'ok' } : { surface: null, why: 'unconfigured' };
@@ -117,7 +117,7 @@ export function privateThreadAudience(db: DB, ticketId: number): PrivateThreadMe
        JOIN players p ON p.steamid = a.steamid
        JOIN tickets t ON t.id = a.ticket_id
      WHERE a.ticket_id = ? AND p.status = 'active' AND (p.is_admin = 1 OR p.is_mod = 1)
-       AND p.discord_id IS NOT NULL AND p.steamid != t.target_id
+       AND p.discord_id IS NOT NULL AND p.steamid IS NOT t.target_id
      ORDER BY a.steamid`,
   ).all(ticketId) as PrivateThreadMember[];
 }

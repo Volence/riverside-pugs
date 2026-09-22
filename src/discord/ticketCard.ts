@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
+import { targetLabel } from '../tickets/person.js';
 import { getTicketRow } from '../tickets/store.js';
 import { TICKET_OUTCOMES } from '../tickets/actions.js';
 import { escapeName } from './presenter.js';
@@ -43,12 +44,20 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
   const reports = db.prepare(
     'SELECT id, category, match_id, map_ordinal, half, t_ms FROM ticket_reports WHERE ticket_id = ? ORDER BY id',
   ).all(ticketId) as ReportBit[];
-  const reporters = (db.prepare('SELECT COUNT(DISTINCT reporter_id) AS n FROM ticket_reports WHERE ticket_id = ?').get(ticketId) as { n: number }).n;
+  const reporters = (db.prepare(
+    "SELECT COUNT(DISTINCT COALESCE(reporter_id, 'd:' || reporter_discord_id)) AS n FROM ticket_reports WHERE ticket_id = ?",
+  ).get(ticketId) as { n: number }).n;
   const categories = [...new Set(reports.map((r) => r.category))];
-  const accused = getPlayer(db, t.target_id)?.name ?? t.target_id;
+  const accused = targetLabel(db, t);
   const url = `${publicUrl}/admin/people/tickets/${t.id}`;
   const status = t.status === 'closed' ? 'closed' : t.claimed_by ? 'claimed' : 'open';
   const claimedBy = t.claimed_by ? escapeName(getPlayer(db, t.claimed_by)?.name ?? t.claimed_by) : '';
+  // A Discord-only person has no profile page. The id is shown as code so a
+  // moderator can find them in Discord's member list; never as a mention,
+  // which would ping them from a staff post.
+  const accusedValue = t.target_id !== null
+    ? `${escapeName(accused)} ([profile](${publicUrl}/player/${t.target_id}))`
+    : `${escapeName(accused)} (Discord member \`${t.target_discord_id}\`)`;
 
   const fields: EmbedField[] = [
     // A player name is never anchor text: Steam allows [ ] ( ) in a name,
@@ -56,7 +65,7 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
     // own text could break out and point the link somewhere else. The name
     // sits as plain escaped text; the link's anchor is the fixed word
     // "profile" and its target holds nothing but publicUrl and the steamid.
-    { name: 'Accused', value: `${escapeName(accused)} ([profile](${publicUrl}/player/${t.target_id}))`, inline: true },
+    { name: 'Accused', value: accusedValue, inline: true },
     {
       name: 'Status', inline: true,
       value: status === 'closed' ? `closed: ${(t.outcome ?? '').replace(/_/g, ' ')}` : status === 'claimed' ? `claimed by ${claimedBy}` : 'open, unclaimed',

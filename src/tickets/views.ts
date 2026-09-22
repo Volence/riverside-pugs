@@ -1,17 +1,18 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
 import type { AttachmentRow, MessageRow } from './messages.js';
+import { REPORTER_KEY_SQL } from './person.js';
 import { canSeeTicket, getTicketRow } from './store.js';
 import { staffThread, surfaceFor } from './threads.js';
 
 /** The visibility rule as SQL, for lists. Must say exactly what canSeeTicket
  *  says; tests/ticketRoutes.test.ts holds the two together. */
-const VISIBLE = `t.target_id != @viewer AND (t.restricted = 0 OR EXISTS
+const VISIBLE = `t.target_id IS NOT @viewer AND (t.restricted = 0 OR EXISTS
   (SELECT 1 FROM ticket_access a WHERE a.ticket_id = t.id AND a.steamid = @viewer))`;
 
-const SUMMARY = `SELECT t.*, pt.name AS target_name, pc.name AS claimed_name, po.name AS opened_name, px.name AS closed_name,
+const SUMMARY = `SELECT t.*, COALESCE(pt.name, NULLIF(t.target_name, '')) AS target_name, pc.name AS claimed_name, po.name AS opened_name, px.name AS closed_name,
     (SELECT COUNT(*) FROM ticket_reports r WHERE r.ticket_id = t.id) AS reports,
-    (SELECT COUNT(DISTINCT r.reporter_id) FROM ticket_reports r WHERE r.ticket_id = t.id) AS reporters,
+    (SELECT COUNT(DISTINCT ${REPORTER_KEY_SQL}) FROM ticket_reports r WHERE r.ticket_id = t.id) AS reporters,
     (SELECT GROUP_CONCAT(DISTINCT r.category) FROM ticket_reports r WHERE r.ticket_id = t.id) AS categories,
     (SELECT MAX(r.created_at) FROM ticket_reports r WHERE r.ticket_id = t.id) AS last_report_at
   FROM tickets t
@@ -19,14 +20,14 @@ const SUMMARY = `SELECT t.*, pt.name AS target_name, pc.name AS claimed_name, po
   LEFT JOIN players po ON po.steamid = t.opened_by LEFT JOIN players px ON px.steamid = t.closed_by`;
 
 interface SummaryRow {
-  id: number; target_id: string; status: 'open' | 'closed'; outcome: string | null; outcome_note: string; restricted: number;
+  id: number; target_id: string | null; target_discord_id: string | null; status: 'open' | 'closed'; outcome: string | null; outcome_note: string; restricted: number;
   claimed_by: string | null; opened_by: string | null; created_at: string; closed_at: string | null; closed_by: string | null;
   target_name: string | null; claimed_name: string | null; opened_name: string | null; closed_name: string | null;
   reports: number; reporters: number; categories: string | null; last_report_at: string | null;
 }
 
 const toSummary = (r: SummaryRow) => ({
-  id: r.id, targetId: r.target_id, targetName: r.target_name, status: r.status, outcome: r.outcome,
+  id: r.id, targetId: r.target_id, targetDiscordId: r.target_discord_id, targetName: r.target_name, status: r.status, outcome: r.outcome,
   restricted: r.restricted === 1, claimedBy: r.claimed_by, claimedByName: r.claimed_name,
   reports: r.reports, reporters: r.reporters, categories: r.categories ? r.categories.split(',') : [],
   createdAt: r.created_at, lastReportAt: r.last_report_at, closedAt: r.closed_at,
@@ -64,15 +65,16 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
   if (!row || !canSeeTicket(db, row, viewer)) return null;
   const s = db.prepare(`${SUMMARY} WHERE t.id = ?`).get(id) as SummaryRow;
   const reports = (db.prepare(
-    `SELECT r.id, r.reporter_id, p.name AS reporter_name, r.category, r.text, r.match_id, m.campaign,
+    `SELECT r.id, r.reporter_id, r.reporter_discord_id, COALESCE(p.name, NULLIF(r.reporter_name, '')) AS reporter_name,
+            r.category, r.text, r.match_id, m.campaign,
             r.map_ordinal, r.half, r.t_ms, r.created_at
      FROM ticket_reports r LEFT JOIN players p ON p.steamid = r.reporter_id LEFT JOIN matches m ON m.id = r.match_id
      WHERE r.ticket_id = ? ORDER BY r.id`,
   ).all(id) as {
-    id: number; reporter_id: string; reporter_name: string | null; category: string; text: string; match_id: number | null;
+    id: number; reporter_id: string | null; reporter_discord_id: string | null; reporter_name: string | null; category: string; text: string; match_id: number | null;
     campaign: string | null; map_ordinal: number | null; half: number | null; t_ms: number | null; created_at: string;
   }[]).map((r) => ({
-    id: r.id, reporterId: r.reporter_id, reporterName: r.reporter_name, category: r.category, text: r.text,
+    id: r.id, reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id, reporterName: r.reporter_name, category: r.category, text: r.text,
     matchId: r.match_id, campaign: r.campaign,
     moment: r.map_ordinal === null || r.half === null || r.t_ms === null ? null : { ordinal: r.map_ordinal, half: r.half, tMs: r.t_ms },
     createdAt: r.created_at,
@@ -92,7 +94,7 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
      LEFT JOIN players p ON p.steamid = a.steamid WHERE a.ticket_id = ? ORDER BY name`,
   ).all(id) : [];
   const accessCandidates = row.restricted === 1 ? db.prepare(
-    `SELECT steamid, name FROM players WHERE (is_admin = 1 OR is_mod = 1) AND steamid != ?
+    `SELECT steamid, name FROM players WHERE (is_admin = 1 OR is_mod = 1) AND steamid IS NOT ?
        AND steamid NOT IN (SELECT steamid FROM ticket_access WHERE ticket_id = ?) ORDER BY name`,
   ).all(row.target_id, id) : [];
   // The mirrored discussion. Everything here is behind the canSeeTicket check

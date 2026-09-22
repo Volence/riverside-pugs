@@ -31,7 +31,7 @@ export function AdminTickets({ onOpen }: { onOpen: (id: number) => void }) {
           <li key={t.id}>
             <button type="button" class="ticket-row" onClick={() => onOpen(t.id)}>
               <span class="ticket-row__id">#{t.id}</span>
-              <strong>{t.targetName ?? t.targetId}</strong>
+              <strong>{t.targetName ?? t.targetId ?? 'Discord member'}</strong>
               {t.restricted && <span class="admin-tag">restricted</span>}
               <span class="muted">{t.categories.join(', ')}</span>
               <span class="muted">{reportLine(t)}</span>

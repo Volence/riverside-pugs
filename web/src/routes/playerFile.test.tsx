@@ -69,7 +69,7 @@ const file = (over: Partial<PlayerFileData> = {}): PlayerFileData => ({
     },
     matches: [{ id: 7, campaign: 'dead_air', state: 'completed', endedAt: '2026-09-10T00:00:00.000Z', winner: 'a', team: 'b', connectedAt: null }],
     tickets: [{
-      id: 12, targetId: P, targetName: 'griefer', status: 'open', outcome: null, restricted: false,
+      id: 12, targetId: P, targetDiscordId: null, targetName: 'griefer', status: 'open', outcome: null, restricted: false,
       claimedBy: null, claimedByName: null, reports: 2, reporters: 2, categories: ['cheating'],
       createdAt: '2026-09-20T00:00:00.000Z', lastReportAt: null, closedAt: null,
     }],

@@ -198,7 +198,7 @@ export function matchReportTargets(db: DB, matchId: number, reporter: string): M
   return { canReport: true, targets: roster.filter((r) => r.steamid !== reporter).map((r) => ({ ...r, alreadyReported: done.has(r.steamid) })) };
 }
 
-export interface MyReport { id: number; targetId: string; targetName: string | null; category: string; matchId: number | null; createdAt: string; status: 'open' | 'closed' }
+export interface MyReport { id: number; targetId: string | null; targetDiscordId: string | null; targetName: string | null; category: string; matchId: number | null; createdAt: string; status: 'open' | 'closed' }
 
 /** What a reporter may know about their own reports: that they exist, and
  *  whether the ticket is still open. Never the outcome, and never a ticket
@@ -206,9 +206,10 @@ export interface MyReport { id: number; targetId: string; targetName: string | n
  *  accused's own account. */
 export function myReports(db: DB, reporter: string): MyReport[] {
   return db.prepare(
-    `SELECT r.id, t.target_id AS targetId, p.name AS targetName, r.category, r.match_id AS matchId,
+    `SELECT r.id, t.target_id AS targetId, t.target_discord_id AS targetDiscordId,
+            COALESCE(p.name, NULLIF(t.target_name, '')) AS targetName, r.category, r.match_id AS matchId,
             r.created_at AS createdAt, t.status
      FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id LEFT JOIN players p ON p.steamid = t.target_id
-     WHERE r.reporter_id = ? AND t.target_id != r.reporter_id ORDER BY r.id DESC LIMIT 100`,
+     WHERE r.reporter_id = ? AND t.target_id IS NOT r.reporter_id ORDER BY r.id DESC LIMIT 100`,
   ).all(reporter) as MyReport[];
 }

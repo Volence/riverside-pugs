@@ -21,13 +21,13 @@ const { Admin } = await import('./Admin');
 const { LocationProvider } = await import('preact-iso');
 
 const summary: TicketSummary = {
-  id: 12, targetId: '7', targetName: 'Walls', status: 'open', outcome: null, restricted: false,
+  id: 12, targetId: '7', targetDiscordId: null, targetName: 'Walls', status: 'open', outcome: null, restricted: false,
   claimedBy: null, claimedByName: null, reports: 2, reporters: 2, categories: ['cheating', 'griefing'],
   createdAt: '2026-09-21T10:00:00.000Z', lastReportAt: '2026-09-21T11:00:00.000Z', closedAt: null,
 };
 const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
   ticket: { ...summary, outcomeNote: '', openedBy: null, openedByName: null, closedBy: null, closedByName: null },
-  reports: [{ id: 1, reporterId: '3', reporterName: 'Rep', category: 'cheating', text: 'saw me through a wall', matchId: 66, campaign: 'dead_air', moment: { ordinal: 2, half: 1, tMs: 61500 }, createdAt: '2026-09-21T10:00:00.000Z' }],
+  reports: [{ id: 1, reporterId: '3', reporterDiscordId: null, reporterName: 'Rep', category: 'cheating', text: 'saw me through a wall', matchId: 66, campaign: 'dead_air', moment: { ordinal: 2, half: 1, tMs: 61500 }, createdAt: '2026-09-21T10:00:00.000Z' }],
   events: [{ id: 1, actorId: null, actorName: null, kind: 'opened', detail: {}, createdAt: '2026-09-21T10:00:00.000Z' }],
   bans: [], access: [], accessCandidates: [],
   discussion: { state: 'unconfigured', surface: null, url: null },
