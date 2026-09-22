@@ -7,8 +7,9 @@
 //
 // HUD_SAMPLE picks which design gets built, so the same mechanism also
 // produces the owner's three hand-off samples (Task 13, step 4):
-//   a: stock preset, health panel bottom-left, team as a column at scale
-//      1.25, chat moved, rounded panel backgrounds, normal VPK.
+//   a: stock preset, health panel bottom-left, team as a fitted column at
+//      scale 1.25 with a 4-unit gap, the health number on, the item icons
+//      above a half-width bar, chat moved, rounded card backgrounds, normal VPK.
 //   b: modern preset, otherwise untouched, normal VPK. The modern preset
 //      always needs a Roboto Condensed pass, so this reads the two real ttf
 //      files off disk and hands them to packHud as assets.fonts.
@@ -30,9 +31,10 @@ const fonts = (): BuildAssets['fonts'] => ({
 
 const SAMPLE_A = { v: 1, preset: 'stock', elements: {
   ownHealth: { x: 8, y: 400 },
-  teamColumn: { scale: 1.25, dir: 'column', spacing: 36 },
+  teamColumn: { scale: 1.25, dir: 'column', gap: 4, fit: true },
   chat: { x: 8, y: 8 },
-}, styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } };
+}, children: { teamColumn: { HealthNumber: { on: true }, Items: { x: 37, y: 40 }, Health: { w: 48 } } },
+  styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } };
 
 it('writes a sample VPK or zip for the Python/unzip readers', () => {
   if (!process.env.HUD_VPK_OUT) return;
