@@ -83,13 +83,17 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
 /**
  * A font's size and whether it is bold. Stock faces are "Trade Gothic Bold"
  * at weight 0 or 400: the boldness lives in the face itself, not the weight,
- * so a face named Bold counts as bold whatever its weight says.
+ * so a face named Bold counts as bold whatever its weight says. buildTrees
+ * skips fontPass, which on the stock preset with Roboto renames both Trade
+ * Gothic faces to plain "Roboto Condensed", so that rename is applied here.
  */
 function fontFace(design: HudDesign, name: string): { tall: number; bold: boolean } {
   const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
   const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
   if (!first) return { tall: 12, bold: false };
-  const bold = num(kvGet(first, 'weight')) >= 700 || /\bbold\b/i.test(kvGet(first, 'name') ?? '');
+  let face = kvGet(first, 'name') ?? '';
+  if (design.font === 'roboto' && /^Trade Gothic( Bold)?$/i.test(face)) face = 'Roboto Condensed';
+  const bold = num(kvGet(first, 'weight')) >= 700 || /\bbold\b/i.test(face);
   return { tall: num(kvGet(first, 'tall'), 12), bold };
 }
 

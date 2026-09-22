@@ -154,6 +154,11 @@ describe('drawPanel', () => {
     const team = recCtx();
     drawPanel(team.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
     expect(team.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.font).toMatch(/^bold /);
+    // With Roboto on the stock preset, fontPass renames both Trade Gothic faces to plain "Roboto Condensed"
+    // at their own weights, so the game draws these regular, and so must the preview.
+    const roboto = recCtx();
+    drawPanel(roboto.ctx, design({ font: 'roboto' }), 'ownHealth', { x: 0, y: 0 }, 1);
+    expect(roboto.calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.font).not.toMatch(/^bold /);
   });
 
   it("draws a scaled parent's label at the scaled size", () => {
