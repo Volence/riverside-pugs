@@ -156,6 +156,31 @@ describe('closing', () => {
     expect(t.dms.length).toBe(before);
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_notices WHERE sent_at IS NULL').get()).toEqual({ n: 0 });
   });
+
+  it('reopened while the pass is still awaiting an earlier Discord call: no close DM, and the chat is not ended with the closed farewell', async () => {
+    const r = file(R1, ACCUSED);
+    await sync.idle();
+    await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    await sync.idle();
+    const [th] = reporterThreadsOf(db, r.ticketId);
+    const dmsBefore = t.dms.length;
+    // The pass reads its ticket row once at the top, then awaits several
+    // Discord calls (ejectOutsiders, the forbidden-post sweep, the forum's
+    // revoke-only sync) before it ever reaches the chat-ending and close-DM
+    // steps. Reopen the ticket from inside one of those awaited calls, the
+    // way a moderator's own request would land in that same window.
+    const realSyncAccess = t.threads.syncMemberAccess.bind(t.threads);
+    let flipped = false;
+    t.threads.syncMemberAccess = (async (...args: Parameters<typeof realSyncAccess>) => {
+      if (!flipped) { flipped = true; reopenTicket(db, r.ticketId, MOD); }
+      return realSyncAccess(...args);
+    }) as typeof t.threads.syncMemberAccess;
+    closeTicket(db, r.ticketId, MOD, 'warned', '', true);
+    await sync.idle();
+    expect(t.dms.length).toBe(dmsBefore);
+    expect(reporterThreadsOf(db, r.ticketId, 'open').map((x) => x.id)).toEqual([th.id]);
+    expect(t.threadsById.get(th.thread_id)).toMatchObject({ locked: false, archived: false });
+  });
 });
 
 describe('who stays in a chat', () => {

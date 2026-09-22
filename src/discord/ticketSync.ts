@@ -234,9 +234,18 @@ export class TicketSync {
     await this.retireFolded(id);
     await this.notifyAccess(t);
     // A closed ticket's chats end first, then its reporters are thanked: the
-    // thank-you must not arrive while the chat still looks open.
-    if (t.status === 'closed') await this.endReporterChats(t);
-    await this.sendNotices(t);
+    // thank-you must not arrive while the chat still looks open. Both steps
+    // re-read the ticket fresh (see endReporterChats and sendNotices): this
+    // pass's own `t` is several Discord round-trips old by now (ejectOutsiders,
+    // removeForbiddenPosts, revokeForumAccess, notifyAccess's DMs), and a
+    // moderator can reopen the ticket in that window. sendNotices only runs
+    // once every chat that needed ending actually did: a chat Discord refused
+    // to end must hold the thank-you back too, or "the chat has ended" and
+    // "thank you, it's closed" would both be said while the chat still shows
+    // open in Discord.
+    const stillClosed = getTicketRow(db, id)?.status === 'closed';
+    const allChatsEnded = stillClosed ? await this.endReporterChats(id) : true;
+    if (allChatsEnded) await this.sendNotices(id);
     await this.pingByDm(t);
     const where = surfaceFor(db, t);
     const { surface } = where;
@@ -600,25 +609,55 @@ export class TicketSync {
     }
   }
 
-  /** Every chat still open on a closed ticket, ended. One Discord refusal
-   *  throws out of the ticket's pass, and the timer tries again: the ids a
-   *  pass visits include closed tickets with a chat still open. */
-  private async endReporterChats(t: TicketRow): Promise<void> {
+  /**
+   * Every chat still open on a closed ticket, ended, each on its own: one
+   * Discord refusal is logged and skipped rather than stopping the others,
+   * so a single stuck chat cannot leave every other reporter waiting on a
+   * chat that has, as far as they know, already been thanked and closed.
+   *
+   * Re-reads the ticket before every chat, not just once at the top: the
+   * loop awaits, and a moderator can reopen the ticket between one chat
+   * ending and the next. The moment that is seen, ending stops (the
+   * remaining chats are left exactly as they are, open); the ones already
+   * ended in this same pass, while the ticket genuinely was closed, stand.
+   *
+   * Returns whether every chat that needed ending actually did: the caller
+   * only thanks reporters once this is true, so "the chat has ended" is
+   * never left half true while "thank you, it's closed" goes out anyway.
+   */
+  private async endReporterChats(ticketId: number): Promise<boolean> {
     const { db } = this.deps;
-    for (const th of reporterThreadsOf(db, t.id, 'open')) {
-      await endReporterThread(this.deps, th, CHAT_ENDED_ON_CLOSE);
-      addTicketEvent(db, t.id, null, 'reporter_chat_ended', { threadRowId: th.id, why: 'closed' });
+    let allEnded = true;
+    for (const th of reporterThreadsOf(db, ticketId, 'open')) {
+      if (getTicketRow(db, ticketId)?.status !== 'closed') { allEnded = false; break; }
+      try {
+        await endReporterThread(this.deps, th, CHAT_ENDED_ON_CLOSE);
+        addTicketEvent(db, ticketId, null, 'reporter_chat_ended', { threadRowId: th.id, why: 'closed' });
+      } catch (err) {
+        console.error('[discord] ending a reporter chat on a closed ticket failed:', err);
+        this.problem(`Could not end a reporter chat on a closed ticket: ${err instanceof Error ? err.message : String(err)}. It is tried again every few minutes.`);
+        allEnded = false;
+      }
     }
+    return allEnded;
   }
 
-  /** The close DMs, charged before they are sent. A ticket reopened before
-   *  this ran is not "now closed": its notices are dropped unsent. */
-  private async sendNotices(t: TicketRow): Promise<void> {
-    const due = takeNotices(this.deps.db, t.id);
-    if (t.status !== 'closed') return;
+  /**
+   * The close DMs, charged one at a time, right before each is sent, never
+   * trusting a ticket row read earlier in this pass. A ticket reopened
+   * before a notice's turn came up, whether that happened before this pass
+   * started or partway through this very loop (it awaits a DM per person),
+   * is not "now closed": that notice is dropped, unsent, like a DM Discord
+   * itself refuses, rather than resent on some later pass once "the ticket
+   * is now closed" would be a lie.
+   */
+  private async sendNotices(ticketId: number): Promise<void> {
+    const { db, transport } = this.deps;
+    const due = takeNotices(db, ticketId);
     for (const n of due) {
+      if (getTicketRow(db, ticketId)?.status !== 'closed') continue;
       try {
-        await this.deps.transport.dm(n.discord_id, closeDm());
+        await transport.dm(n.discord_id, closeDm());
       } catch { /* refused: dropped, like every other DM this bot sends */ }
     }
   }
