@@ -86,9 +86,70 @@ describe('Discord sanctions over HTTP', () => {
     const r = await post(ADMIN, `/api/mod/discord-sanctions/${row.id}/lift`);
     expect(r.statusCode).toBe(409);
     expect(r.json().error).toBe(
-      `they are no longer in the Discord server, so the bot cannot lift the timeout; it ends on its own at ${row.until}`,
+      'they are no longer in the Discord server, so the bot cannot lift the timeout; it ends on its own at ' +
+      `${new Date(row.until).toUTCString()}`,
     );
     expect(fake.moderationCalls.map((c) => c.op)).toEqual(['timeout', 'removeTimeout']);
     expect(rows()).toEqual([{ kind: 'timeout', timed: 1, lifted: 0 }]);
+  });
+
+  it('has nothing to call Discord with when the bot is not running, and answers 503', async () => {
+    const noBotApp = await buildServer({
+      config: loadConfig({ ADMIN_STEAMIDS: OWNER }), db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {},
+      // Deliberately no discordModeration, and this config starts no real
+      // bot either (no DISCORD_* env vars), so moderation() falls through to
+      // bot?.transport.moderation, and bot stays null.
+    });
+    const noBotCookie = authedCookie(noBotApp, db, ADMIN);
+    const r = await noBotApp.inject({
+      method: 'POST', url: `/api/mod/tickets/${ticketId}/discord-sanction`,
+      cookies: noBotCookie, payload: { kind: 'ban', reason: 'x' },
+    });
+    expect(r.statusCode).toBe(503);
+    expect(r.json().error).toBe('the Discord bot is not running');
+    expect(rows()).toEqual([]);
+    await noBotApp.close();
+  });
+
+  // Discord accepted the sanction, but the write that records it threw. The
+  // admin feed reaches everyone with feed access, wider than a restricted
+  // ticket's own list, so its wording must differ for a restricted ticket.
+  describe('the record write failing after Discord accepted', () => {
+    it('on a normal ticket: one problem event naming the Discord id and the ticket, 500, nothing audited', async () => {
+      db.exec('DROP TABLE discord_sanctions');
+      const seen: AdminEvent[] = [];
+      const off = subscribeAdminEvents((e) => seen.push(e));
+      const r = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });
+      off();
+      expect(r.statusCode).toBe(500);
+      expect(r.json().error).toBe('Discord applied it, but recording it failed; an admin has been told');
+      const problems = seen.filter((e) => e.kind === 'problem');
+      expect(problems).toHaveLength(1);
+      const text = (problems[0] as Extract<AdminEvent, { kind: 'problem' }>).text;
+      expect(text).toContain('990');
+      expect(text).toContain(`ticket #${ticketId}`);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'ticket_discord_sanction'").get()).toEqual({ n: 0 });
+      expect(fake.moderationCalls).toHaveLength(1);
+    });
+
+    it('on a restricted ticket: one problem event with neutral wording (no Discord id), 500, nothing audited', async () => {
+      db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
+      db.prepare("INSERT INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, 'system', 'x')").run(ticketId, ADMIN);
+      db.exec('DROP TABLE discord_sanctions');
+      const seen: AdminEvent[] = [];
+      const off = subscribeAdminEvents((e) => seen.push(e));
+      const r = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });
+      off();
+      expect(r.statusCode).toBe(500);
+      expect(r.json().error).toBe('Discord applied it, but recording it failed; an admin has been told');
+      const problems = seen.filter((e) => e.kind === 'problem');
+      expect(problems).toHaveLength(1);
+      const text = (problems[0] as Extract<AdminEvent, { kind: 'problem' }>).text;
+      expect(text).not.toContain('990');
+      expect(text).toContain(`ticket #${ticketId}`);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'ticket_discord_sanction'").get()).toEqual({ n: 0 });
+      expect(fake.moderationCalls).toHaveLength(1);
+    });
   });
 });

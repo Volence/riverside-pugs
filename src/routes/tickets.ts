@@ -219,10 +219,16 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     try {
       recordDiscordSanction(db, plan, me);
     } catch (err) {
+      // The admin feed reaches everyone with feed access, wider than a
+      // restricted ticket's own list, so a restricted ticket's problem event
+      // must not name who it is about: neutral wording, ticket number only.
       publishAdminEvent({
         kind: 'problem',
-        text: `Discord ${plan.kind === 'ban' ? 'banned' : 'timed out'} ${plan.discordId} for ticket #${id}, ` +
-          `but recording the sanction failed: ${String(err)}`,
+        text: plan.restricted
+          ? `A Discord sanction on restricted ticket #${id} was applied in Discord but could not be recorded; ` +
+            'someone on its access list should check it.'
+          : `Discord ${plan.kind === 'ban' ? 'banned' : 'timed out'} ${plan.discordId} for ticket #${id}, ` +
+            `but recording the sanction failed: ${String(err)}`,
       });
       return reply.code(500).send({ error: 'Discord applied it, but recording it failed; an admin has been told' });
     }
@@ -261,7 +267,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     if (!result.ok) {
       if (result.why === 'not_member') {
         const row = db.prepare('SELECT until FROM discord_sanctions WHERE id = ?').get(sid) as { until: string | null } | undefined;
-        const at = row?.until ? ` at ${row.until}` : '';
+        const at = row?.until ? ` at ${new Date(row.until).toUTCString()}` : '';
         return reply.code(409).send({
           error: `they are no longer in the Discord server, so the bot cannot lift the timeout; it ends on its own${at}`,
         });
