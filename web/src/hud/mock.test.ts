@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { visibleElements, hitTest, drawHud } from './mock';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
+import { buildTrees, elementRect } from './build';
+import { kvFind, kvGet } from './kv';
+import { SCREEN_H } from './units';
 import { _setImageFactory, _resetAssetCache } from './render';
 
 /**
@@ -142,5 +145,30 @@ describe('drawHud delegates panels to the renderer', () => {
     // And one health bar per card: the same design with infectedRow hidden draws three fewer.
     const without = draw({ ...DEFAULT_DESIGN, elements: { infectedRow: { visible: false } } });
     expect(all.bars - without.bars).toBe(3);
+  });
+
+  it('clips each panel to its real parent, the rect VGUI clips its children to', () => {
+    // ownHealth's children live inside LocalPlayer (localplayerdisplay.res), each teammate card's inside
+    // TeamPlayerN (teamdisplayhud.res). Both sizes are read here from the generator's own trees.
+    _setImageFactory(instant);
+    const rects: number[][] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
+    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null);
+    const k = 480 / SCREEN_H;
+    const size = (file: string, key: string) => {
+      const n = kvFind(buildTrees(DEFAULT_DESIGN)(file), [key])!;
+      return { w: parseFloat(kvGet(n, 'wide')!), h: parseFloat(kvGet(n, 'tall')!) };
+    };
+    const local = size('resource/ui/hud/localplayerdisplay.res', 'LocalPlayer');
+    expect(local).toEqual({ w: 130, h: 85 });                         // stock, as shipped
+    const own = elementRect(DEFAULT_DESIGN, 'ownHealth', DEFAULT_DESIGN.aspect);
+    expect(rects).toContainEqual([own.x * k, own.y * k, local.w * k, local.h * k]);
+    const card = size('resource/ui/hud/teamdisplayhud.res', 'TeamPlayer1');
+    expect(card).toEqual({ w: 150, h: 150 });
+    const team = elementRect(DEFAULT_DESIGN, 'teamColumn', DEFAULT_DESIGN.aspect);
+    const cardClips = rects.filter((r) => r[2] === card.w * k && r[3] === card.h * k);
+    expect(cardClips).toHaveLength(3);
+    expect(cardClips[0].slice(0, 2)).toEqual([team.x * k, team.y * k]);
   });
 });

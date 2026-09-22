@@ -11,7 +11,8 @@
  */
 import type { HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
-import { elementRect, teamLayout } from './build';
+import { buildTrees, elementRect, teamLayout } from './build';
+import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
 import { drawPanel, drawSlotStyle } from './render';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
@@ -66,8 +67,24 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, si
 
 // --- painters, one per element id ---
 
+/**
+ * The panel a file's children really live in, read from the generator's own
+ * tree: its offset inside the element and its size, in canvas pixels. VGUI
+ * clips every child to that parent, not to the hudlayout element around it,
+ * so the preview clips to the same rect or it shows what the game cuts off.
+ */
+function parentPanel(design: HudDesign, file: string, key: string, k: number): Rect {
+  const n = kvFind(buildTrees(design)(file), [key]);
+  if (!n) throw new Error(`${file}: no panel ${key}`);
+  const v = (name: string) => { const f = parseFloat(kvGet(n, name) ?? ''); return Number.isFinite(f) ? f * k : 0; };
+  return { x: v('xpos'), y: v('ypos'), w: v('wide'), h: v('tall') };
+}
+
+/** The player's own health panel lives in LocalPlayer, which localplayerdisplay.res places inside the element. */
 function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
-  clipToRect(ctx, r, () => drawPanel(ctx, design, 'ownHealth', { x: r.x, y: r.y }, k, { onAsset }));
+  const p = parentPanel(design, 'resource/ui/hud/localplayerdisplay.res', 'LocalPlayer', k);
+  const local = { x: r.x + p.x, y: r.y + p.y, w: p.w, h: p.h };
+  clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset })));
 }
 
 const TEAM_CARDS = 3;
@@ -110,14 +127,23 @@ function clipToRect(ctx: CanvasRenderingContext2D, r: Rect, draw: () => void) {
   ctx.restore();
 }
 
+/**
+ * Each teammate card's children live in TeamPlayerN (teamdisplayhud.res), so
+ * the card is clipped to that panel's own size as well as to the element.
+ */
 function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const file = elementById('teamColumn')!.team!.file!;
   clipToRect(ctx, r, () => {
     for (const [i, c] of teamCards(design, 'teamColumn', r, k).entries()) {
-      // The panelBg slot targets TeamPlayer1..4 in teamdisplayhud.res, the
-      // card's parent, not the card file drawPanel reads; the game paints
-      // that parent's background before its children, so this does too.
-      drawSlotStyle(ctx, design, 'panelbg', { name: 'TeamPlayer', kind: 'image', x: c.x, y: c.y, w: c.w, h: c.h, visible: true });
-      drawPanel(ctx, design, 'teamColumn', { x: c.x, y: c.y }, k, { card: i, onAsset });
+      const p = parentPanel(design, file, `TeamPlayer${i + 1}`, k);
+      const card = { x: c.x, y: c.y, w: p.w, h: p.h };
+      clipToRect(ctx, card, () => {
+        // The panelBg slot targets TeamPlayer1..4 in teamdisplayhud.res, the
+        // card's parent, not the card file drawPanel reads; the game paints
+        // that parent's background before its children, so this does too.
+        drawSlotStyle(ctx, design, 'panelbg', { name: 'TeamPlayer', kind: 'image', ...card, visible: true });
+        drawPanel(ctx, design, 'teamColumn', { x: c.x, y: c.y }, k, { card: i, onAsset });
+      });
     }
   });
 }
