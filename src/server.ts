@@ -47,6 +47,8 @@ import { authRoutes } from './routes/auth.js';
 import { renewSession } from './session.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
+import { ticketNudger } from './tickets/nudge.js';
+import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
@@ -435,7 +437,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     : null;
 
   const hub = deps.hub ?? new Hub();
-  await app.register(wsRoutes, { hub });
+  await app.register(wsRoutes, { hub, db: deps.db });
+
+  // Every ticket mutation and every filing publishes a ticket signal after
+  // its commit (phase 2a). Open ticket pages of people who may see that
+  // ticket refetch on it; nobody else hears a thing.
+  const nudgeTicket = ticketNudger(deps.db, hub);
+  const offTicketNudge = subscribeTicketSignals((s) => {
+    if (s.kind === 'ticket') nudgeTicket(s.ticketId);
+  });
 
   // With the bot running, the bot's own cards say everything the webhook did
   // (and more), so the webhook would only duplicate them.
@@ -1175,6 +1185,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   app.addHook('onClose', async () => {
     ticketSync?.stop();
+    offTicketNudge();
     adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { TicketDetail, TicketSummary } from '../api';
 import { ConfirmHost } from '../components/Confirm';
+import { eventName, TICKETS_EVENT } from '../hooks/useTicketNudge';
 
 const { mockMod, mockAdmin } = vi.hoisted(() => ({
   mockMod: {
@@ -179,5 +180,17 @@ describe('the Tickets section', () => {
     expect(within(section).getByText('About Walls')).toBeTruthy();
     expect(within(section).getByText(/1 Little Anti-Cheat/)).toBeTruthy();
     expect(within(section).getByRole('link', { name: 'Open full file' }).getAttribute('href')).toBe('/admin/people/7');
+  });
+
+  it('refetches the open ticket when the staff nudge arrives, and only knows a well formed frame', async () => {
+    renderAdmin('/admin/people/tickets/12', mod);
+    await screen.findByText('saw me through a wall');
+    expect(mockMod.ticket).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event(TICKETS_EVENT));
+    await waitFor(() => expect(mockMod.ticket).toHaveBeenCalledTimes(2));
+    expect(eventName('{"event":"tickets"}')).toBe('tickets');
+    expect(eventName('{"event":7}')).toBeNull();
+    expect(eventName('not json')).toBeNull();
+    expect(eventName(new ArrayBuffer(2))).toBeNull();
   });
 });

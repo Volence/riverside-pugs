@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { modApi, type TicketDetail, type TicketDiscussion, type TicketEvent } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
+import { useTicketNudge } from '../../hooks/useTicketNudge';
 import { campaignName } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
@@ -51,6 +52,7 @@ const eventText = (e: TicketEvent): string => {
 export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => void; onOpen: (id: number) => void }) {
   const { data, error, reload } = useFetch((s) => modApi.ticket(id, s), [id]);
   const { busy, error: actionError, run } = useAction(reload);
+  useTicketNudge(reload);
   const [outcome, setOutcome] = useState('');
   const [note, setNote] = useState('');
   const [reason, setReason] = useState('');

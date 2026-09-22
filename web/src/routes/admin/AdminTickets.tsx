@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { modApi, type TicketSummary } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
+import { useTicketNudge } from '../../hooks/useTicketNudge';
 import { Empty, Panel, Tabs } from '../../components/bits';
 import { fmtTime } from './useAction';
 
@@ -17,7 +18,8 @@ export const reportLine = (t: TicketSummary) =>
  *  reads, so opening one is the caller's business. */
 export function AdminTickets({ onOpen }: { onOpen: (id: number) => void }) {
   const [filter, setFilter] = useState<'open' | 'mine' | 'closed'>('open');
-  const { data } = useFetch((s) => modApi.tickets(filter, s), [filter]);
+  const { data, reload } = useFetch((s) => modApi.tickets(filter, s), [filter]);
+  useTicketNudge(reload);
 
   return (
     <Panel>
