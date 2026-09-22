@@ -12,6 +12,7 @@ import type { Aspect } from './units';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
+import { TEAM_PANEL, type ChildDef } from './children';
 
 export type TeamDir = 'row' | 'column' | 'free';
 /** One Free teammate card's top-left corner on screen, in units, like an element's x/y. */
@@ -45,6 +46,22 @@ export interface ElementOverride {
   color?: string; bg?: string;
   fontSize?: number;
 }
+/**
+ * One child of a card file (v2 spec, "The data model"). Numbers are unscaled,
+ * in the card file's own unfitted frame: fitPass shifts them and the element's
+ * scale multiplies them afterwards. Phase 1 accepts the teammate card only.
+ */
+export interface ChildOverride {
+  visible?: boolean;
+  x?: number; y?: number;
+  w?: number; h?: number;
+  /** Labels: the tall of a HudEd_<font>_t<size> copy of the label's font. */
+  fontSize?: number;
+  /** Labels: raw "r g b a", written as fgcolor_override. */
+  color?: string;
+  /** Addable children: present in the file or not. Absent means as the preset's file has it. */
+  on?: boolean;
+}
 export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; color?: string }
 export interface UploadedImage { w: number; h: number; png: string }
 export interface HudDesign {
@@ -58,6 +75,8 @@ export interface HudDesign {
   elements: Record<string, ElementOverride>;
   styles: Record<string, StyleOverride>;
   images: Record<string, UploadedImage>;
+  /** panelId -> child name -> override. Only teamColumn in this phase. */
+  children: Record<string, Record<string, ChildOverride>>;
   /** Write never_draw on HudCrosshair so an image crosshair can replace the game's own (probe T2). */
   hideGameCrosshair?: boolean;
 }
@@ -69,7 +88,7 @@ export interface HudDesign {
  */
 export const DEFAULT_DESIGN: HudDesign = {
   v: 1, name: 'my_hud', preset: 'stock', advanced: false, aspect: '16:9', font: 'preset',
-  xhair: true, elements: { teamColumn: { fit: true } }, styles: {}, images: {},
+  xhair: true, elements: { teamColumn: { fit: true } }, styles: {}, images: {}, children: {},
 };
 
 const MAX_IMAGE_SIDE = 512;
@@ -94,6 +113,51 @@ export type RangeKey = keyof typeof RANGES;
 export function clampOverride(key: RangeKey, value: number): number {
   const [lo, hi] = RANGES[key];
   return Math.min(hi, Math.max(lo, value));
+}
+
+const CHILD_RANGES = { x: [-64, 512], y: [-64, 512], w: [1, 512], h: [1, 512], fontSize: [6, 64] } as const;
+export type ChildRangeKey = keyof typeof CHILD_RANGES;
+
+/** clampOverride's twin for a child's numbers, shared by validateDesign and the child number boxes for the same reason. */
+export function clampChild(key: ChildRangeKey, value: number): number {
+  const [lo, hi] = CHILD_RANGES[key];
+  return Math.min(hi, Math.max(lo, value));
+}
+
+/**
+ * One child override, rebuilt field by field from what its registry entry
+ * offers: a colour on the health number, a size on the item icons or a move
+ * on the splatter is dropped here, so the build only ever sees edits it can
+ * write. Square art keeps both sides equal, the smaller winning when a
+ * hand-edited design disagrees.
+ */
+function childOverride(def: ChildDef, raw: unknown): ChildOverride {
+  const out: ChildOverride = {};
+  if (!isObj(raw)) return out;
+  const n = (k: ChildRangeKey) => {
+    const v = raw[k];
+    return typeof v === 'number' && Number.isFinite(v) ? clampChild(k, v) : undefined;
+  };
+  if (typeof raw.visible === 'boolean') out.visible = raw.visible;
+  if (def.move) {
+    const x = n('x'), y = n('y');
+    if (x !== undefined) out.x = x;
+    if (y !== undefined) out.y = y;
+  }
+  if (def.box === 'wh') {
+    const w = n('w'), h = n('h');
+    if (w !== undefined) out.w = w;
+    if (h !== undefined) out.h = h;
+  }
+  if (def.box === 'square') {
+    const w = n('w'), h = n('h');
+    const side = w !== undefined && h !== undefined ? Math.min(w, h) : w ?? h;
+    if (side !== undefined) { out.w = side; out.h = side; }
+  }
+  if (def.font) { const f = n('fontSize'); if (f !== undefined) out.fontSize = f; }
+  if (def.colour) { const c = colour(raw.color); if (c) out.color = c; }
+  if (def.addable && typeof raw.on === 'boolean') out.on = raw.on;
+  return out;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -226,6 +290,17 @@ export function validateDesign(raw: unknown): HudDesign {
     if (w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE || png.length > MAX_IMAGE_B64) continue;
     if (!/^[A-Za-z0-9+/=]+$/.test(png)) continue;
     d.images[id] = { w, h, png };
+  }
+  const team = isObj(raw.children) ? raw.children[TEAM_PANEL.panelId] : undefined;
+  if (isObj(team)) {
+    const kids: Record<string, ChildOverride> = {};
+    for (const [name, v] of Object.entries(team)) {
+      const def = TEAM_PANEL.children.find((c) => c.name === name);
+      if (!def) continue;
+      const o = childOverride(def, v);
+      if (Object.keys(o).length) kids[name] = o;
+    }
+    if (Object.keys(kids).length) d.children[TEAM_PANEL.panelId] = kids;
   }
   return d;
 }

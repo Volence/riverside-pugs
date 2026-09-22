@@ -1,7 +1,7 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName, clampOverride, baseTeam } from './design';
+import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
 
 describe('validateDesign', () => {
   it('returns the defaults for junk', () => {
@@ -123,6 +123,52 @@ describe('clampOverride', () => {
   });
 });
 
+describe('validateDesign, the teammate card children', () => {
+  const kids = (raw: unknown) => validateDesign({ v: 1, children: raw }).children;
+
+  it('keeps only the teammate card, only registry children, and clamps their numbers', () => {
+    expect(kids({ ownHealth: { Head: { x: 1 } } })).toEqual({});
+    expect(kids({ teamColumn: { Nope: { x: 1 }, Head: { x: 9999, y: -9999, junk: 1 } } }))
+      .toEqual({ teamColumn: { Head: { x: 512, y: -64 } } });
+  });
+
+  it('drops each field the child does not offer', () => {
+    const got = kids({ teamColumn: {
+      Name: { color: '10 20 30 255', fontSize: 99, on: true },
+      HealthNumber: { color: '10 20 30 255', on: true, fontSize: 14 },
+      Head: { fontSize: 20, color: '1 2 3 4' },
+      Items: { w: 90, h: 9, fontSize: 22, y: 20 },
+      BackgroundImage: { x: 5, visible: false },
+    } }).teamColumn;
+    expect(got).toEqual({
+      Name: { color: '10 20 30 255', fontSize: 64 },
+      HealthNumber: { on: true, fontSize: 14 },
+      Items: { fontSize: 22, y: 20 },
+      BackgroundImage: { visible: false },
+    });
+  });
+
+  it('stores square art with both sides equal, the smaller winning', () => {
+    expect(kids({ teamColumn: { Head: { w: 30, h: 20 } } }).teamColumn!.Head).toEqual({ w: 20, h: 20 });
+    expect(kids({ teamColumn: { Dead: { w: 30 } } }).teamColumn!.Dead).toEqual({ w: 30, h: 30 });
+    expect(kids({ teamColumn: { Health: { w: 30, h: 5 } } }).teamColumn!.Health).toEqual({ w: 30, h: 5 });
+  });
+
+  it('starts a new design with no children', () => {
+    expect(DEFAULT_DESIGN.children).toEqual({});
+    expect(validateDesign({ v: 1 }).children).toEqual({});
+  });
+});
+
+describe('clampChild', () => {
+  it('clamps child numbers to their own ranges', () => {
+    expect(clampChild('x', 9999)).toBe(512);
+    expect(clampChild('y', -100)).toBe(-64);
+    expect(clampChild('w', 0)).toBe(1);
+    expect(clampChild('fontSize', 99)).toBe(64);
+  });
+});
+
 describe('safeName', () => {
   it('keeps a file-safe subset and never returns empty', () => {
     expect(safeName('my "cool" hud!!')).toBe('my cool hud');
@@ -142,5 +188,10 @@ describe('share links', () => {
 
   it('returns null for a damaged link', async () => {
     expect(await decodeShare('not-a-design')).toBeNull();
+  });
+
+  it('carries the teammate card children through a share link', async () => {
+    const d = validateDesign({ v: 1, children: { teamColumn: { HealthNumber: { on: true }, Items: { y: 20 } } } });
+    expect((await decodeShare(await encodeShare(d)))!.children).toEqual(d.children);
   });
 });

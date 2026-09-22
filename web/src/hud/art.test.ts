@@ -72,7 +72,7 @@ describe('the art boundary', () => {
   });
 
   it('walks every module build.ts reaches', () => {
-    expect(modules).toEqual(['../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'design.ts', 'elements.ts',
+    expect(modules).toEqual(['../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
       'kv.ts', 'slots.ts', 'textures.ts', 'units.ts']);
   });
 
