@@ -450,6 +450,43 @@ describe('submitting the form', () => {
   });
 });
 
+const reportsWithMatch = () => db.prepare(
+  'SELECT r.category, r.match_id AS matchId, t.target_id FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id',
+).all() as { category: string; matchId: number | null; target_id: string }[];
+
+describe('attaching the shared match', () => {
+  beforeEach(() => { seedPlayers(db); linkAll(db); });
+
+  it('attaches the reporter\'s latest shared match, like /report does', async () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    const r = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: '' });
+    expect(said(r)).toContain('Thanks');
+    expect(reportsWithMatch()).toEqual([{ category: 'griefing', matchId: 1, target_id: ALICE }]);
+  });
+
+  it('attaches no match for someone the reporter has never played with', async () => {
+    const r = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: '' });
+    expect(said(r)).toContain('Thanks');
+    expect(reportsWithMatch()).toEqual([{ category: 'griefing', matchId: null, target_id: ALICE }]);
+  });
+
+  it('lets two reports about the same player on two different matches both file, instead of the second being refused as a duplicate', async () => {
+    // Before the fix every report through this button carried match_id null,
+    // which made fileReport's no-match duplicate rule ("one open report about
+    // this player, ever") fire on the second night's report. Two real,
+    // distinct matches must each get through.
+    seedMatch(db, 1, [ME, ALICE]);
+    const first = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: 'night one' });
+    expect(said(first)).toContain('Thanks');
+
+    seedMatch(db, 2, [ME, ALICE]);
+    const second = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: 'night two' });
+    expect(said(second)).toContain('Thanks');
+
+    expect(reportsWithMatch().map((r) => r.matchId)).toEqual([1, 2]);
+  });
+});
+
 const pick = (steamid: string, customId: string) => handleReportButton(hDeps(), {
   kind: 'button', customId, userId: D(steamid), userName: 'x',
 });

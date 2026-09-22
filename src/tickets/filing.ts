@@ -7,8 +7,34 @@ import { publishTicketSignal } from './signals.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other'] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
-const MAX_TEXT = 1000;
+export const MAX_TEXT = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The match two players most recently shared, for a report that was not
+ * given one explicitly. Restricted to matches that actually happened
+ * ('live', 'completed', 'aborted', never 'configuring', whose lobby filled
+ * but never reached a server) and to the last 48 hours: that is nearly
+ * always what a same-night report is about, and reaching further back
+ * guesses wrong more often than it helps.
+ *
+ * Both '/report' and the report button call this so the two surfaces cannot
+ * drift. That matters beyond cosmetics: whichever match a report lands with
+ * is also what fileReport's duplicate rule keys on, so a difference here
+ * would silently make one surface stricter or looser than the other about
+ * reporting the same player twice.
+ */
+export function latestSharedMatch(db: DB, a: string, b: string): number | null {
+  const shared = db.prepare(
+    `SELECT m.id FROM matches m
+     JOIN match_players x ON x.match_id = m.id AND x.player_id = ?
+     JOIN match_players y ON y.match_id = m.id AND y.player_id = ?
+     WHERE m.state IN ('live', 'completed', 'aborted')
+       AND (m.ended_at IS NULL OR m.ended_at > datetime('now', '-48 hours'))
+     ORDER BY m.id DESC LIMIT 1`,
+  ).get(a, b) as { id: number } | undefined;
+  return shared?.id ?? null;
+}
 
 export interface FilingDeps {
   /** config.adminSteamIds: who is let into a restricted ticket first. */

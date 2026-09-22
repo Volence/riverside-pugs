@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { fileReport, REPORT_CATEGORIES } from '../tickets/filing.js';
+import { fileReport, latestSharedMatch, REPORT_CATEGORIES } from '../tickets/filing.js';
 import { playerByDiscordId } from '../players.js';
 import { REPORT_LABELS } from './commands.js';
 import type { BotInteraction, BotTransport, InteractionReply, MessagePayload, ModalDef } from './transport.js';
@@ -294,7 +294,14 @@ export async function handleReportModal(
 function file(
   deps: ReportHandlerDeps, reporter: string, targetId: string, category: string, text: string,
 ): { ok: boolean; reply: InteractionReply } {
-  const r = fileReport(deps.db, reporter, { targetId, category, text }, {
+  // '/report' gets its match from the same lookup. Without this, every report
+  // filed through this button carried no match at all: moderators lost the
+  // link on exactly the griefing and AFK reports the button exists to catch,
+  // and fileReport's duplicate rule (keyed on the match) collapsed to "one
+  // open report about this player, ever", refusing a second night's report
+  // that '/report' would have let through.
+  const matchId = latestSharedMatch(deps.db, reporter, targetId);
+  const r = fileReport(deps.db, reporter, { targetId, category, text, matchId }, {
     adminSteamIds: deps.adminSteamIds, now: deps.now?.(),
   });
   if (!r.ok) return { ok: false, reply: say(`Could not file the report: ${r.error}.`) };
