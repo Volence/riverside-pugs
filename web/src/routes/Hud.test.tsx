@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { snap, nudge, toUnits } from './Hud';
 import Hud from './Hud';
@@ -98,6 +98,26 @@ describe('Hud page', () => {
 
     expect(screen.getByText('Health bar: healthy')).toBeTruthy();
     expect(screen.getByRole('button', { name: /download/i }).textContent).toMatch(/zip/i);
+    // The advanced install copy has to carry the same two facts the normal
+    // one does (spec's Output section): a restart is needed, and custom
+    // HUDs are allowed on the Riverside servers.
+    expect(screen.getByText(/game restart/i)).toBeTruthy();
+    expect(screen.getByText(/Riverside servers/i)).toBeTruthy();
+  });
+
+  it('names the font file in the status line when the font fetch fails, rather than shipping a corrupt file silently', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 404 } as Response);
+    render(<Hud />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
+    await waitFor(() => {
+      expect((screen.getByRole('combobox', { name: /preset/i }) as HTMLSelectElement).value).toBe('modern');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /download/i }));
+    expect(await screen.findByText(/RobotoCondensed-Regular\.ttf/)).toBeTruthy();
+
+    fetchMock.mockRestore();
   });
 
   it('shows a damaged-link message for a hash that will not decode', async () => {

@@ -86,8 +86,17 @@ export async function decodeUpload(file: Blob, w: number, h: number) {
   return { rgba: ctx.getImageData(0, 0, w, h).data, png };
 }
 
-async function fontBytes(u: string): Promise<Uint8Array> {
-  return new Uint8Array(await (await fetch(u)).arrayBuffer());
+/** `fetch` only rejects on a network error, not on a 404 or 500: an unchecked
+ *  response would let an error page's HTML sail through as if it were the
+ *  font's own bytes, ending up written into the shipped VPK as
+ *  resource/robotocondensed-regular.ttf with nothing catching it until the
+ *  game refuses to load a corrupt font. Named after the file so a failure
+ *  here tells a bug report exactly what to look at, the same as every other
+ *  fetch in this codebase (see web/src/api.ts). */
+async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
+  const res = await fetch(u);
+  if (!res.ok) throw new Error(`${filename}: failed to load (${res.status})`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 /**
@@ -125,7 +134,10 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
     assets.images = images;
   }
   if (design.font === 'roboto' || design.preset === 'modern') {
-    assets.fonts = { regular: await fontBytes(regularUrl), bold: await fontBytes(boldUrl) };
+    assets.fonts = {
+      regular: await fontBytes(regularUrl, 'RobotoCondensed-Regular.ttf'),
+      bold: await fontBytes(boldUrl, 'RobotoCondensed-Bold.ttf'),
+    };
   }
   return assets;
 }
@@ -582,7 +594,18 @@ export default function Hud() {
       shot.current = img;
       setBackdrop('shot');
       setImgTick((n) => n + 1);
+      setUploadErrors((u) => {
+        if (!('shot' in u)) return u;
+        const n2 = { ...u }; delete n2.shot; return n2;
+      });
       URL.revokeObjectURL(url);
+    };
+    // Without this, a non-image file picked here fails silently (no status,
+    // no error, the old backdrop just stays) and leaks the object URL, since
+    // revocation otherwise only ever happens inside onload.
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setUploadErrors((u) => ({ ...u, shot: 'That file is not an image the browser can read.' }));
     };
     img.src = url;
   };
@@ -701,6 +724,7 @@ export default function Hud() {
                 <input type="file" accept="image/*" aria-label="Load a screenshot for the backdrop" onChange={pickShot} />
               </label>
             )}
+            {backdrop === 'shot' && uploadErrors.shot && <span class="error">{uploadErrors.shot}</span>}
 
             <label>
               Font{' '}
@@ -798,7 +822,7 @@ export default function Hud() {
         </button>
         <p class="muted hud__note">
           {design.advanced
-            ? 'Unzip it and follow README.txt. It works alongside a crosshair addon.'
+            ? 'Unzip it and follow README.txt. It works alongside a crosshair addon. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
             : <>Put the file in <code>left4dead/addons/</code> and restart the game. It works alongside a crosshair from the Crosshair page. Custom HUDs are allowed on the Riverside servers.</>}
         </p>
 
