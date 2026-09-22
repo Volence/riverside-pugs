@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { childRects, drawPanel, drawSlotStyle, PANEL_FILE, _setImageFactory, _resetAssetCache } from './render';
 import { buildHud, buildTrees } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
@@ -180,6 +180,33 @@ describe('drawPanel', () => {
     drawPanel(c2, design({ styles }), 'ownHealth', { x: 0, y: 0 }, 1);
     expect(barImages(calls2)).toHaveLength(1);
     expect(calls2.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)')).toBe(false);
+  });
+
+  it('hatches a texture that fails to load and asks for a redraw, instead of drawing nothing for ever', () => {
+    const scratches = artUrl('vgui/hud/detail_scratches_top_1')!;
+    const failing = new Map<string, HTMLImageElement & { onerror: (() => void) | null }>();
+    _setImageFactory((url) => {
+      if (url !== scratches) return instantImage(url);
+      const img = { src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null } as unknown as HTMLImageElement & { onerror: (() => void) | null };
+      failing.set(url, img);
+      return img;
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let redraws = 0;
+      const d = design({});
+      const r = childRects(d, 'ownHealth', { x: 0, y: 0 }, 1).find((c) => c.name === 'HealthbarTextureTop')!;
+      const first = recCtx();
+      drawPanel(first.ctx, d, 'ownHealth', { x: 0, y: 0 }, 1, { onAsset: () => { redraws++; } });
+      expect(first.calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).not.toContainEqual([r.x, r.y, r.w, r.h]);   // still loading
+      const img = failing.get(scratches)!;
+      expect(typeof img.onerror).toBe('function');
+      img.onerror!();
+      expect(redraws).toBe(1);
+      const second = recCtx();
+      drawPanel(second.ctx, d, 'ownHealth', { x: 0, y: 0 }, 1, { onAsset: () => { redraws++; } });
+      expect(second.calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y, r.w, r.h]);
+    } finally { warn.mockRestore(); }
   });
 
   it('draws the infected card head as a silhouette, never a survivor portrait', () => {

@@ -114,17 +114,26 @@ export function _setImageFactory(f: ((url: string) => HTMLImageElement) | null):
 const images = new Map<string, HTMLImageElement>();
 const missing = new Set<string>();
 
-/** The art for a material, once loaded; undefined while it loads (onAsset fires then) or when the index lacks it. */
+function markMissing(material: string, why: string) {
+  if (!missing.has(material)) { missing.add(material); console.warn(`HUD preview: ${why} ${material}`); }
+}
+
+/**
+ * The art for a material, once loaded; undefined while it loads (onAsset
+ * fires then) or when it is missing. A material is missing when the index
+ * lacks it or its file failed to load: a failed image would otherwise sit in
+ * the cache incomplete and draw nothing for ever, so the error marks it
+ * missing (the child hatches instead) and asks for a redraw to show that.
+ */
 function artImage(material: string, onAsset?: () => void): HTMLImageElement | undefined {
+  if (missing.has(material)) return undefined;
   let img = images.get(material);
   if (!img) {
     const url = artUrl(material);
-    if (!url) {
-      if (!missing.has(material)) { missing.add(material); console.warn(`HUD preview: no art for ${material}`); }
-      return undefined;
-    }
+    if (!url) { markMissing(material, 'no art for'); return undefined; }
     img = imageFactory(url);
     img.onload = () => onAsset?.();
+    img.onerror = () => { markMissing(material, 'art failed to load for'); onAsset?.(); };
     images.set(material, img);
   }
   return img.complete && img.naturalWidth > 0 ? img : undefined;
@@ -200,7 +209,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     // Game code picks the portrait; the preview picks a fixed one per card.
     const material = opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length];
     const img = artImage(material, opts.onAsset);
-    if (!img) return;
+    if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
     ctx.drawImage(img, r.x, r.y, r.w, r.h);
     return;
   }
@@ -211,7 +220,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
       return;
     } else {
       const img = artImage(material, opts.onAsset);
-      if (!img) { if (!artUrl(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
+      if (!img) { if (missing.has(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
       src = img; natural = { w: img.naturalWidth, h: img.naturalHeight };
     }
     if ((kvGet(n, 'scaleImage') ?? '0') !== '0' || !natural) ctx.drawImage(src, r.x, r.y, r.w, r.h);
