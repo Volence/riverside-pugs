@@ -85,3 +85,10 @@ describe('dlc4MissionsDir', () => {
     expect(loadConfig({}).dlc4MissionsDir).toBe('');
   });
 });
+
+describe('ticketAttachmentsDir', () => {
+  it('defaults to a directory beside the database', () => {
+    expect(loadConfig({}).ticketAttachmentsDir).toBe('data/ticket-attachments');
+    expect(loadConfig({ TICKET_ATTACHMENTS_DIR: ' /mnt/files ' }).ticketAttachmentsDir).toBe('/mnt/files');
+  });
+});

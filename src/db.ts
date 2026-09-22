@@ -752,6 +752,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   admin_feed_reports: '1',
   ticket_mod_ban_max_minutes: '10080',
   ticket_reports_per_day: '5',
+  ticket_store_attachments: '1',
+  ticket_attachment_max_mb: '25',
+  ticket_attachments_ticket_mb: '200',
+  ticket_attachments_total_mb: '2048',
   admin_feed_actions: '1',
   admin_feed_penalties: '1',
   admin_feed_accounts: '1',
@@ -809,6 +813,10 @@ export function openDb(path: string): DB {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  // A removal must actually erase the removed content from the file on disk,
+  // not just from the b-tree: without this SQLite is free to leave the old
+  // bytes sitting in a freed page until something else overwrites it.
+  db.pragma('secure_delete = ON');
   db.exec(SCHEMA);
   // CREATE TABLE IF NOT EXISTS never adds a column to a table that already
   // exists, so a column introduced after a database was created needs this.

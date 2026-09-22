@@ -41,6 +41,8 @@ const PLAIN: [table: string, column: string][] = [
   ['tickets', 'opened_by'],
   ['tickets', 'closed_by'],
   ['ticket_threads', 'reporter_id'],
+  ['ticket_messages', 'author_player_id'],
+  ['ticket_messages', 'removed_by'],
   // Evidence. None of it has a foreign key, so leaving it behind never
   // failed: it just stayed on an id with no player row and no admin page.
   ['integrity_flags', 'steamid'],

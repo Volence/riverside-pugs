@@ -25,7 +25,7 @@ describe('openDb', () => {
       'penalties', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
       'player_reviews', 'player_steam_signals', 'players',
       'rating_history', 'reports', 'seasons', 'servers', 'settings', 'signon_drops', 'steam_signal_alerts',
-      'ticket_access', 'ticket_events', 'ticket_reports', 'ticket_threads', 'tickets', 'twitch_status',
+      'ticket_access', 'ticket_attachments', 'ticket_events', 'ticket_messages', 'ticket_reports', 'ticket_threads', 'tickets', 'twitch_status',
     ]);
   });
 
@@ -51,6 +51,11 @@ describe('openDb', () => {
     const db = openDb(':memory:');
     const cols = db.prepare('PRAGMA table_info(servers)').all() as { name: string }[];
     expect(cols.map((c) => c.name)).toContain('has_dlc4');
+  });
+
+  it('turns secure_delete on, so a removal actually erases the old bytes', () => {
+    const db = openDb(':memory:');
+    expect(db.pragma('secure_delete', { simple: true })).toBe(1);
   });
 });
 

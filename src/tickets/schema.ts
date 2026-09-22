@@ -18,6 +18,18 @@ import type { DB } from '../db.js';
  * means. `locked` is what the bot last did in Discord, which is how the
  * reconciler knows a closed ticket's post still needs locking. `card_hash`
  * is written only after Discord accepted the edit it stands for.
+ *
+ * ticket_messages is the mirror of a ticket's Discord threads. `thread_id` is
+ * the Discord thread's id, not a ticket_threads row id: a message belongs to
+ * the ticket, and outlives the thread row it arrived through. `deleted_at` is
+ * a Discord-side delete and keeps everything; `removed_at` is a removal and
+ * keeps only the tombstone. `discord_gone` is 1 once the Discord message is
+ * known to be gone, which is how a removal that committed while the bot was
+ * down still gets its Discord message deleted later.
+ *
+ * ticket_attachments never holds a file, only where it is: `stored_name` is a
+ * random name under TICKET_ATTACHMENTS_DIR, NULL when the file was not kept
+ * (`skip_reason` says why) or is no longer there.
  */
 export function ensureTicketSchema(db: DB): void {
   db.exec(`
@@ -85,5 +97,41 @@ export function ensureTicketSchema(db: DB): void {
       locked INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_ticket_threads_ticket ON ticket_threads (ticket_id);
+
+    CREATE TABLE IF NOT EXISTS ticket_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL REFERENCES tickets(id),
+      thread_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      discord_message_id TEXT NOT NULL UNIQUE,
+      author_discord_id TEXT NOT NULL,
+      author_player_id TEXT REFERENCES players(steamid),
+      author_name TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      history TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      edited_at TEXT,
+      deleted_at TEXT,
+      removed_at TEXT,
+      removed_by TEXT,
+      removed_reason TEXT,
+      discord_gone INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages (ticket_id);
+    CREATE INDEX IF NOT EXISTS idx_ticket_messages_thread ON ticket_messages (thread_id);
+
+    CREATE TABLE IF NOT EXISTS ticket_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL REFERENCES ticket_messages(id),
+      discord_attachment_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      content_type TEXT NOT NULL DEFAULT '',
+      size INTEGER NOT NULL DEFAULT 0,
+      sha256 TEXT,
+      stored_name TEXT,
+      skip_reason TEXT,
+      removed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_attachments_message ON ticket_attachments (message_id);
   `);
 }

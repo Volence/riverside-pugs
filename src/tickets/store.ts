@@ -95,6 +95,9 @@ export function foldTicket(db: DB, gone: number, keep: number, access: 'merge' |
   db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone);
   db.prepare("UPDATE admin_actions SET target = ? WHERE target = ? AND action LIKE 'ticket\\_%' ESCAPE '\\'")
     .run(String(keep), String(gone));
+  // The mirrored discussion is part of the case. Attachments hang off their
+  // message, so they follow without being touched.
+  db.prepare('UPDATE ticket_messages SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   // Discord threads follow the ticket. Where the survivor already has a staff
   // thread, the other is marked 'folded': TicketSync posts one line in the
   // survivor naming it, then locks and archives it. Where it has none, the
