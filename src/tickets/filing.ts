@@ -1,8 +1,10 @@
 import type { DB } from '../db.js';
-import { getPlayer } from '../players.js';
+import { getPlayer, playerByDiscordId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess } from './store.js';
+import { activeDiscordSanction } from './discordSanctions.js';
+import { type Person, personKey, TARGET_KEY_SQL, REPORTER_KEY_SQL } from './person.js';
 import { publishTicketSignal } from './signals.js';
 
 export const REPORT_CATEGORIES = ['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other'] as const;
@@ -41,7 +43,15 @@ export interface FilingDeps {
   adminSteamIds: string[];
   now?: Date;
 }
-export interface FileBody { targetId?: unknown; category?: unknown; text?: unknown; matchId?: unknown; moment?: unknown }
+
+/** How often a Discord-only reporter may file: tighter than the per-day
+ *  limit, because they have not gone through Steam auth at all. */
+export const DISCORD_REPORT_GAP_MS = 10 * 60_000;
+
+export interface DiscordReporter { kind: 'discord'; discordId: string; name: string; timedOutUntil: string | null }
+/** A member picked in Discord, with the facts Discord supplied about them. */
+export interface PickedTarget { discordId: string; name: string; bot: boolean; administrator: boolean }
+export interface FileBody { targetId?: unknown; targetDiscord?: PickedTarget; category?: unknown; text?: unknown; matchId?: unknown; moment?: unknown }
 type Fail = { ok: false; status: number; error: string };
 export type FileResult = { ok: true; reportId: number; ticketId: number; created: boolean; restricted: boolean } | Fail;
 
@@ -51,35 +61,80 @@ const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isI
 /** The open ticket about this player in this flavour, or a new one. Runs
  *  inside the caller's transaction. */
 function findOrOpen(
-  db: DB, targetId: string, restricted: boolean, openedBy: string | null, deps: FilingDeps,
+  db: DB, target: Person, restricted: boolean, openedBy: string | null, deps: FilingDeps,
 ): { id: number; created: boolean } {
   const now = deps.now ?? new Date();
-  const open = db.prepare("SELECT id FROM tickets WHERE target_id = ? AND restricted = ? AND status = 'open'")
-    .get(targetId, restricted ? 1 : 0) as { id: number } | undefined;
+  const key = personKey(target);
+  // The same expression as tickets_one_open, so SQLite uses that index.
+  const open = db.prepare(`SELECT id FROM tickets t WHERE ${TARGET_KEY_SQL} = ? AND restricted = ? AND status = 'open'`)
+    .get(key, restricted ? 1 : 0) as { id: number } | undefined;
   if (open) return { id: open.id, created: false };
-  const id = Number(db.prepare('INSERT INTO tickets (target_id, restricted, opened_by, created_at) VALUES (?, ?, ?, ?)')
-    .run(targetId, restricted ? 1 : 0, openedBy, now.toISOString()).lastInsertRowid);
-  if (restricted) seedAccess(db, id, targetId, deps.adminSteamIds, [], now);
+  const id = Number(db.prepare(
+    'INSERT INTO tickets (target_id, target_discord_id, target_name, restricted, opened_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    target.kind === 'player' ? target.steamid : null,
+    target.kind === 'discord' ? target.discordId : null,
+    target.kind === 'discord' ? target.name.slice(0, 100) : '',
+    restricted ? 1 : 0, openedBy, now.toISOString(),
+  ).lastInsertRowid);
+  if (restricted) seedAccess(db, id, key, deps.adminSteamIds, [], now);
   addTicketEvent(db, id, openedBy, 'opened', {}, now);
   return { id, created: true };
 }
 
+type Reporter = { kind: 'player'; steamid: string } | DiscordReporter;
+
+/** A Discord account that has linked Steam is that player, always: the
+ *  surfaces pass what Discord gave them, and this is the one place that
+ *  decides. */
+function asReporter(db: DB, r: string | DiscordReporter): Reporter {
+  if (typeof r === 'string') return { kind: 'player', steamid: r };
+  const linked = playerByDiscordId(db, r.discordId);
+  return linked ? { kind: 'player', steamid: linked.steamid } : r;
+}
+
 /**
- * File a report. Any active player, about any other player, at any time; a
- * match and a replay moment are optional. The accused is never told.
+ * File a report. Any active player or Discord member in good standing, about
+ * any other player or Discord member, at any time; a match and a replay
+ * moment are optional, and only ever between two players. The accused is
+ * never told.
  */
-export function fileReport(db: DB, reporter: string, body: FileBody, deps: FilingDeps): FileResult {
+export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: FileBody, deps: FilingDeps): FileResult {
   const now = deps.now ?? new Date();
-  // Here rather than in each caller, and through the one predicate every
-  // surface shares: active, no ban in force, and not a SteamID that has been
-  // merged into another account. The website's guard and the Discord command
-  // both check this before they get here, and the day a third surface forgets
-  // to, this is what stops a banned player filing reports from it.
-  if (!inGoodStanding(db, reporter, now)) return fail(403, 'not an active player');
-  if (typeof body.targetId !== 'string' || !body.targetId) return fail(400, 'pick a player');
-  if (body.targetId === reporter) return fail(400, 'you cannot report yourself');
-  const target = getPlayer(db, body.targetId);
-  if (!target) return fail(404, 'no such player');
+  const reporter = asReporter(db, reporterIn);
+  if (reporter.kind === 'player') {
+    // Here rather than in each caller, and through the one predicate every
+    // surface shares: active, no ban in force, and not a SteamID that has been
+    // merged into another account. The website's guard and the Discord command
+    // both check this before they get here, and the day a third surface forgets
+    // to, this is what stops a banned player filing reports from it.
+    if (!inGoodStanding(db, reporter.steamid, now)) return fail(403, 'not an active player');
+  } else {
+    // The Discord-side equivalent of inGoodStanding: timed out in Discord
+    // right now, or under a sanction the bot carried out (phase 3c).
+    const timedOut = reporter.timedOutUntil !== null && Date.parse(reporter.timedOutUntil) > now.getTime();
+    if (timedOut || activeDiscordSanction(db, reporter.discordId, now)) return fail(403, 'you cannot file reports right now');
+  }
+
+  let target: Person;
+  if (typeof body.targetId === 'string' && body.targetId) {
+    const p = getPlayer(db, body.targetId);
+    if (!p) return fail(404, 'no such player');
+    target = { kind: 'player', steamid: p.steamid };
+  } else if (body.targetDiscord) {
+    const d = body.targetDiscord;
+    if (d.bot) return fail(400, 'you cannot report a bot');
+    const linked = playerByDiscordId(db, d.discordId);
+    target = linked ? { kind: 'player', steamid: linked.steamid } : { kind: 'discord', discordId: d.discordId, name: d.name };
+  } else {
+    return fail(400, 'pick a player');
+  }
+
+  const reporterKey = reporter.kind === 'player' ? reporter.steamid : `d:${reporter.discordId}`;
+  const selfByDiscord = reporter.kind === 'player' && target.kind === 'discord'
+    && getPlayer(db, reporter.steamid)?.discord_id === target.discordId;
+  if (reporterKey === personKey(target) || selfByDiscord) return fail(400, 'you cannot report yourself');
+
   if (typeof body.category !== 'string' || !(REPORT_CATEGORIES as readonly string[]).includes(body.category)) {
     return fail(400, 'pick a category');
   }
@@ -88,11 +143,15 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
   if (text.length > MAX_TEXT) return fail(400, `keep it under ${MAX_TEXT} characters`);
   if (body.category === 'unsafe' && !text) return fail(400, 'say what happened, so the right people can look into it');
 
+  const bothPlayers = reporter.kind === 'player' && target.kind === 'player';
+  if (!bothPlayers && ((body.matchId !== undefined && body.matchId !== null) || (body.moment !== undefined && body.moment !== null))) {
+    return fail(400, 'a match can only be attached between two players');
+  }
   let matchId: number | null = null;
   if (body.matchId !== undefined && body.matchId !== null) {
     matchId = Number(body.matchId);
     if (!Number.isInteger(matchId) || !db.prepare('SELECT 1 FROM matches WHERE id = ?').get(matchId)) return fail(404, 'no such match');
-    if (!db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, target.steamid)) {
+    if (target.kind === 'player' && !db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, target.steamid)) {
       return fail(400, 'that player was not in that match');
     }
   }
@@ -105,37 +164,49 @@ export function fileReport(db: DB, reporter: string, body: FileBody, deps: Filin
 
   const perDay = Number(getSetting(db, 'ticket_reports_per_day') ?? '5');
   const since = new Date(now.getTime() - DAY_MS).toISOString();
-  const recent = (db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE reporter_id = ? AND created_at > ? AND legacy_report_id IS NULL')
-    .get(reporter, since) as { n: number }).n;
+  const recent = (db.prepare(`SELECT COUNT(*) AS n FROM ticket_reports r WHERE ${REPORTER_KEY_SQL} = ? AND created_at > ? AND legacy_report_id IS NULL`)
+    .get(reporterKey, since) as { n: number }).n;
   if (recent >= perDay) return fail(429, `you can file ${perDay} reports a day; try again tomorrow`);
+  if (reporter.kind === 'discord') {
+    const gapSince = new Date(now.getTime() - DISCORD_REPORT_GAP_MS).toISOString();
+    if (db.prepare(`SELECT 1 FROM ticket_reports r WHERE ${REPORTER_KEY_SQL} = ? AND created_at > ?`).get(reporterKey, gapSince)) {
+      return fail(429, 'wait a few minutes before filing another report');
+    }
+  }
 
   // Which ticket this report would land on, which is also which ticket both
   // duplicate limits are counted against: a safety report belongs to the
   // restricted sibling and is not a duplicate of a normal one, with or
   // without a match. Without this a safety report about a match you had
   // already reported would have to give up its match to get through.
-  const restricted = category === 'unsafe' || hasStaffFlag(db, target.steamid);
+  const restricted = category === 'unsafe'
+    || (target.kind === 'player' ? hasStaffFlag(db, target.steamid) : body.targetDiscord!.administrator);
+  const targetKey = personKey(target);
   const dupe = matchId !== null
     ? db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
-       WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id = ? AND t.restricted = ?`)
-      .get(reporter, target.steamid, matchId, restricted ? 1 : 0)
+       WHERE ${REPORTER_KEY_SQL} = ? AND ${TARGET_KEY_SQL} = ? AND r.match_id = ? AND t.restricted = ?`)
+      .get(reporterKey, targetKey, matchId, restricted ? 1 : 0)
     : db.prepare(
       `SELECT 1 FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id
-       WHERE r.reporter_id = ? AND t.target_id = ? AND r.match_id IS NULL AND t.status = 'open' AND t.restricted = ?`)
-      .get(reporter, target.steamid, restricted ? 1 : 0);
+       WHERE ${REPORTER_KEY_SQL} = ? AND ${TARGET_KEY_SQL} = ? AND r.match_id IS NULL AND t.status = 'open' AND t.restricted = ?`)
+      .get(reporterKey, targetKey, restricted ? 1 : 0);
   if (dupe) return fail(409, matchId !== null ? 'you already reported this player for this match' : 'you already have an open report about this player');
 
   const result = db.transaction((): FileResult => {
-    const ticket = findOrOpen(db, target.steamid, restricted, null, deps);
+    const ticket = findOrOpen(db, target, restricted, null, deps);
     // feed_held is set here, not decided later: whether this report may ever
     // reach the admin feed is fixed at the moment it lands, by whether the
     // ticket it lands on is restricted right now.
     const reportId = Number(db.prepare(
-      `INSERT INTO ticket_reports (ticket_id, reporter_id, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ticket_reports (ticket_id, reporter_id, reporter_discord_id, reporter_name, category, text, match_id, map_ordinal, half, t_ms, created_at, feed_held)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      ticket.id, reporter, category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null,
+      ticket.id,
+      reporter.kind === 'player' ? reporter.steamid : null,
+      reporter.kind === 'discord' ? reporter.discordId : null,
+      reporter.kind === 'discord' ? reporter.name.slice(0, 100) : '',
+      category, text, matchId, moment?.ordinal ?? null, moment?.half ?? null, moment?.tMs ?? null,
       now.toISOString(), restricted ? 1 : 0,
     ).lastInsertRowid);
     if (!ticket.created) addTicketEvent(db, ticket.id, null, 'report_attached', { reportId }, now);
@@ -173,7 +244,7 @@ export function openStaffTicket(
   const targetId = body.targetId;
   const restricted = body.restricted === true || hasStaffFlag(db, targetId);
   const opened = db.transaction(() => {
-    const ticket = findOrOpen(db, targetId, restricted, by, deps);
+    const ticket = findOrOpen(db, { kind: 'player', steamid: targetId }, restricted, by, deps);
     if (note) addTicketEvent(db, ticket.id, by, 'note', { text: note }, now);
     const row = getTicketRow(db, ticket.id)!;
     return { ok: true as const, ticketId: canSeeTicket(db, row, by) ? ticket.id : null, auditId: ticket.id };
@@ -194,7 +265,7 @@ export function matchReportTargets(db: DB, matchId: number, reporter: string): M
   ).all(matchId) as { steamid: string; name: string }[];
   const done = new Set((db.prepare(
     'SELECT t.target_id FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id WHERE r.match_id = ? AND r.reporter_id = ?',
-  ).all(matchId, reporter) as { target_id: string }[]).map((r) => r.target_id));
+  ).all(matchId, reporter) as { target_id: string | null }[]).map((r) => r.target_id));
   return { canReport: true, targets: roster.filter((r) => r.steamid !== reporter).map((r) => ({ ...r, alreadyReported: done.has(r.steamid) })) };
 }
 
