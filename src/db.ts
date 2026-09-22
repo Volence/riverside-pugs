@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ensureTicketSchema } from './tickets/schema.js';
 import { migrateLegacyReports } from './tickets/migrate.js';
+import { widenTicketIdentity } from './tickets/identityMigration.js';
 
 export type DB = Database.Database;
 
@@ -1066,6 +1067,10 @@ export function openDb(path: string): DB {
   // ticket's access list. Charged before the send, so a refused DM is never
   // retried.
   ensureColumn(db, 'ticket_access', 'notified_at', 'TEXT');
+  // After every ticket ensureColumn, so the rebuild copies announced_at and
+  // feed_held rather than dropping them. Before the legacy migration, which
+  // inserts into the rebuilt tables.
+  widenTicketIdentity(db);
   migrateLegacyReports(db);
   // After the migration, so reports it has just created are covered too.
   if (announcedIsNew) db.exec('UPDATE ticket_reports SET announced_at = created_at WHERE announced_at IS NULL');
