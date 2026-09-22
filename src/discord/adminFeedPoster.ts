@@ -230,7 +230,8 @@ export class AdminFeedPoster {
       }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': case 'ticket_remove':
-      case 'ticket_discord_sanction': case 'ticket_discord_sanction_lift': {
+      case 'ticket_discord_sanction': case 'ticket_discord_sanction_lift':
+      case 'ticket_contact': case 'ticket_chat_join': case 'ticket_chat_end': {
         const ticket = `ticket [#${e.target}](${this.ticket(e.target)})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
@@ -249,6 +250,9 @@ export class AdminFeedPoster {
             return `${who} ${d.kind === 'ban' ? 'banned' : 'timed out'} the Discord member on ${ticket}${d.minutes ? ` (${fmtMinutes(Number(d.minutes))})` : ''}`;
           case 'ticket_discord_sanction_lift':
             return `${who} lifted a Discord ${d.kind === 'ban' ? 'ban' : 'timeout'} on ${ticket}`;
+          case 'ticket_contact': return `${who} opened a chat with a reporter on ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
+          case 'ticket_chat_join': return `${who} joined the reporter chat on ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
+          case 'ticket_chat_end': return `${who} ended a reporter chat on ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
           default: return `${who} updated ${ticket}`;
         }
       }

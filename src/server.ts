@@ -8,6 +8,7 @@ import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { TicketSync } from './discord/ticketSync.js';
 import { TicketMirror } from './discord/ticketMirror.js';
+import { ReporterChats } from './discord/reporterChats.js';
 import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
 import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
 import { ReportButton, handleReportButton, handleReportModal, opensReportModal } from './discord/reportButton.js';
@@ -147,6 +148,9 @@ export interface ServerDeps {
    *  ticket-discord-sanction route can be tested without a real bot. When
    *  set, it wins over whatever the bot (if any) is actually running. */
   discordModeration?: ModerationOps;
+  /** Test seam: stands in for the running bot's reporter chats, so the
+   *  chat routes can be tested without a real bot. Wins when set. */
+  reporterChats?: ReporterChats;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -1150,6 +1154,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
+  let reporterChats: ReporterChats | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -1213,6 +1218,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // chains they collide. Read per call, because the reconciler is
           // built just below this.
           serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+          // A reporter's own message is fed to the reconciler's chain (pings,
+          // relay, close notices), never handled from the mirror's own chain.
+          onReporterActivity: (th, m, fresh) => ticketSync?.reporterActivity(th, m, fresh),
         });
         ticketMirror = mirror;
         // After the feed: a problem found on the first pass has somewhere to go.
@@ -1232,15 +1240,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         mirror.start();
         reportButton = new ReportButton({ db: deps.db, transport: t });
         reportButton.start();
+        reporterChats = new ReporterChats({
+          db: deps.db, transport: t, publicUrl: deps.config.publicUrl, guildId: deps.config.discord!.guildId,
+          isMember: (id) => membership.isMember(id),
+          // On the reconciler's chain, like the mirror's removals: both
+          // unarchive a thread, act in it and archive it again.
+          serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+        });
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
-        't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
-        'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds }, i),
+        't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
       },
       extraModals: {
-        't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
-        'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds }, i),
+        't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
       },
       opensModal: (id) => opensTicketModal(id) || opensReportModal(id),
       messageCommands: {

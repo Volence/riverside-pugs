@@ -8,6 +8,7 @@ import { leaderboardData, profileData } from '../playerQueries.js';
 import { fileReport, latestSharedMatch, REPORT_CATEGORIES, type ReportCategory, type DiscordReporter } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
+import { chatButton } from './ticketCard.js';
 import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
@@ -242,5 +243,8 @@ function report(deps: CommandDeps, i: Cmd): InteractionReply {
   if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
   const about = matchId === null ? '' : ` for match #${matchId}`;
   const name = targetPlayer ? plainLabelEscaped(idOf(targetPlayer)) : escapeName(pick.name);
-  return priv({ content: `Reported ${name}${about}. Thanks, the moderators will look at it. The person you reported is never told who filed it.` });
+  return priv({
+    content: `Reported ${name}${about}. Thanks, the moderators will look at it. The person you reported is never told who filed it.`,
+    components: [[chatButton(r.reportId)]],
+  });
 }

@@ -6,15 +6,17 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
-import { addAccess } from '../src/tickets/actions.js';
+import { addAccess, setRestricted } from '../src/tickets/actions.js';
+import { getTicketRow } from '../src/tickets/store.js';
 import { staffThread } from '../src/tickets/threads.js';
-import { messageByDiscordId } from '../src/tickets/messages.js';
+import { insertMessage, messageByDiscordId } from '../src/tickets/messages.js';
 import { removeMessage, removeMessages } from '../src/tickets/removal.js';
 import { reporterThreadsOf } from '../src/tickets/reporterChat.js';
 import { AttachmentStore, type AttachmentFetcher } from '../src/tickets/attachments.js';
 import { TicketSync } from '../src/discord/ticketSync.js';
 import { TicketMirror } from '../src/discord/ticketMirror.js';
 import { ReporterChats } from '../src/discord/reporterChats.js';
+import { syncRelay } from '../src/discord/reporterRelay.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000043${i}`);
@@ -161,5 +163,28 @@ describe('the relay onto the forum post', () => {
     const pings = t.dms.slice(before);
     expect(pings.map((d) => d.userId).sort()).toEqual([D(MOD), D(ADMIN)].sort());
     expect(JSON.stringify(pings)).not.toContain('messaged me');
+  });
+
+  it('re-reads the ticket before relaying, so a restrict landing mid-pass copies nothing', async () => {
+    const c = await chatAbout();
+    // The `t` the reconciler passes to syncRelay is captured near the start
+    // of its long async pass; simulate a moderator restricting the ticket in
+    // the window before this call runs by handing syncRelay that now-stale,
+    // still-unrestricted row directly. The message is inserted straight into
+    // ticket_messages (not through the mirror) so nothing but this direct
+    // call could possibly relay it: a pass through the running sync/mirror
+    // pair would re-read the ticket itself and mask a missing guard here.
+    const stale = getTicketRow(db, c.ticketId)!;
+    expect(stale.restricted).toBe(0);
+    setRestricted(db, c.ticketId, ADMIN, true, [ADMIN]);
+    insertMessage(db, {
+      ticketId: c.ticketId, threadId: c.chat, channel: 'reporter', discordMessageId: 'stale-msg-1',
+      authorDiscordId: D(R1), authorPlayerId: R1, authorName: 'Reporter Name', content: 'after the restrict landed',
+      createdAt: new Date().toISOString(),
+    });
+    const post = staffThread(db, c.ticketId)!;
+    await syncRelay({ db, transport: t, publicUrl: 'https://pug.test' }, stale, post);
+    expect(copies(c.ticketId)).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM relay_messages').get()).toEqual({ n: 0 });
   });
 });

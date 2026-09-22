@@ -3,9 +3,17 @@ import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
 import { targetLabel } from '../tickets/person.js';
 import { getTicketRow } from '../tickets/store.js';
+import { reporterThreadsOf } from '../tickets/reporterChat.js';
 import { TICKET_OUTCOMES } from '../tickets/actions.js';
 import { escapeName } from './presenter.js';
-import type { ActionRow, EmbedField, MessagePayload, ModalDef } from './transport.js';
+import type { ActionRow, Button, EmbedField, MessagePayload, ModalDef } from './transport.js';
+
+/** The Chat button a reporter sees: on the receipt, and in My reports. Keyed
+ *  by the REPORT: a ticket id would let two reporters learn they reported
+ *  the same case. */
+export function chatButton(reportId: number, label = 'Chat with the moderators'): Button {
+  return { kind: 'button', customId: `rp:chat:${reportId}`, label: label.slice(0, 80), style: 'secondary' };
+}
 
 const COLOR = { open: 0xde4e40, claimed: 0xc9a45c, closed: 0x8a7f73 };
 const OUTCOME_LABEL: Record<(typeof TICKET_OUTCOMES)[number], string> = {
@@ -75,7 +83,15 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
   const withMatch = reports.filter((r) => r.match_id !== null).slice(-5);
   if (withMatch.length > 0) fields.push({ name: 'Matches', value: withMatch.map((r) => matchLinks(r, publicUrl)).join('\n') });
 
-  // Claim, [Contact reporter: phase 3 puts it here], Close, then the link.
+  // Row one: Claim, Close, the link. Row two, while open: Contact reporter
+  // when anyone reported, and Join and End while a chat is open.
+  const openChats = reporterThreadsOf(db, t.id, 'open').length;
+  const chatRow: ActionRow = [];
+  if (t.status === 'open' && reports.length > 0) chatRow.push({ kind: 'button', customId: `t:${t.id}:contact`, label: 'Contact reporter', style: 'secondary' });
+  if (t.status === 'open' && openChats > 0) {
+    chatRow.push({ kind: 'button', customId: `t:${t.id}:join`, label: 'Join reporter chat', style: 'secondary' });
+    chatRow.push({ kind: 'button', customId: `t:${t.id}:endchat`, label: 'End reporter chat', style: 'secondary' });
+  }
   const row: ActionRow = t.status === 'open'
     ? [
       { kind: 'button', customId: `t:${t.id}:claim`, label: t.claimed_by ? 'Release' : 'Claim', style: t.claimed_by ? 'secondary' : 'primary' },
@@ -95,7 +111,7 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
         ? 'Restricted. Anyone with the Discord Administrator permission can read this thread.'
         : undefined,
     }],
-    components: [row],
+    components: chatRow.length > 0 ? [row, chatRow] : [row],
     mentionUserIds: [],
   };
   const tags = [status, ...categories.slice(0, 4)];
@@ -132,6 +148,10 @@ export function closeModal(ticketId: number): ModalDef {
     fields: [
       { kind: 'select', id: 'outcome', label: 'Outcome', options: TICKET_OUTCOMES.map((o) => ({ label: OUTCOME_LABEL[o], value: o })) },
       { kind: 'text', id: 'note', label: 'Note (staff only)', style: 'paragraph', required: false, maxLength: 1000 },
+      { kind: 'select', id: 'tell', label: 'Tell the reporters it is closed?', options: [
+        { label: 'Yes, send them a thank-you', value: 'yes', default: true },
+        { label: 'No', value: 'no' },
+      ] },
     ],
   };
 }

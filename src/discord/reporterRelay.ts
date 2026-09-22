@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
 import type { MessageRow } from '../tickets/messages.js';
 import { messageById } from '../tickets/messages.js';
-import type { TicketRow } from '../tickets/store.js';
+import { getTicketRow, type TicketRow } from '../tickets/store.js';
 import type { ThreadRow } from '../tickets/threads.js';
 import { escapeName } from './presenter.js';
 import type { BotTransport, MessagePayload } from './transport.js';
@@ -40,7 +40,12 @@ export function relayPayload(m: Pick<MessageRow, 'author_name' | 'content'>, fil
  */
 export async function syncRelay(d: RelayDeps, t: TicketRow, post: ThreadRow): Promise<void> {
   const { db, transport, publicUrl } = d;
-  if (t.restricted === 1 || post.surface !== 'forum') return;
+  // `t` was captured near the start of the reconciler's long async pass for
+  // this ticket; a moderator can restrict it while that pass is still on its
+  // way here. Read fresh rather than trust the stale flag, so nothing ever
+  // relays a reporter's words once a restrict has landed.
+  const fresh = getTicketRow(db, t.id);
+  if (!fresh || fresh.restricted === 1 || post.surface !== 'forum') return;
   const rows = db.prepare(
     `SELECT m.*, (SELECT COUNT(*) FROM ticket_attachments a WHERE a.message_id = m.id) AS files,
             rm.relay_message_id, rm.relay_thread_id, rm.hash AS relay_hash
