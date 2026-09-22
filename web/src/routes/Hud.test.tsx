@@ -178,6 +178,28 @@ describe('Hud page', () => {
     expect(screen.getByText("Edits inside a card apply to every teammate's card.")).toBeTruthy();
   });
 
+  it('steps back to the teammates when the selected child stops existing', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByLabelText('Health number'));
+    fireEvent.click(screen.getByRole('button', { name: 'Health number' }));
+    expect(screen.getByText('Reset this child')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Health number'));               // untick it while selected
+    expect(screen.getByText('Reset this element')).toBeTruthy();
+    // Ticking it again does not bring back the old selection.
+    fireEvent.click(screen.getByLabelText('Health number'));
+    expect(screen.getByText('Reset this element')).toBeTruthy();
+  });
+
+  it('drops a picked child when the preset changes', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    expect(screen.getByText('Reset this child')).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
+    await waitFor(() => expect(screen.getByText('Reset this element')).toBeTruthy());
+  });
+
   it('shows one Size box for the portrait and writes both sides', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));

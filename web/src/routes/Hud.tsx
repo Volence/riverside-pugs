@@ -772,6 +772,8 @@ export default function Hud() {
   const [selectedChild, setSelectedChild] = useState<string | null>(null);
   // Selecting an element (or nothing) always drops a picked card and child.
   const selectEl = (id: string | null) => { setSelected(id); setSelectedCard(null); setSelectedChild(null); };
+  // A whole new design (another preset, an import, a share link) drops them too.
+  const dropPicks = () => { setSelectedCard(null); setSelectedChild(null); };
   // Which state the teammate cards are previewed in. Game code picks it in
   // game; this only changes the picture, never the design or the file.
   const [cardState, setCardState] = useState<CardState>('healthy');
@@ -826,6 +828,16 @@ export default function Hud() {
     } catch { /* no FontFace here: the fallback stack stays */ }
   }, []);
 
+  // A pick the design no longer has is dropped: a child that stopped existing
+  // (the health number unticked while selected) or a card once the team
+  // left Free. The side panel falls back to the teammates meanwhile, so it
+  // is never blank for the render in between.
+  const childShown = selected === 'teamColumn' && selectedChild && cardChild(design, selectedChild) ? selectedChild : null;
+  useEffect(() => {
+    if (selectedChild && !cardChild(design, selectedChild)) setSelectedChild(null);
+    if (selectedCard !== null && !isFreeTeam(design)) setSelectedCard(null);
+  }, [design]);
+
   // Debounced rather than immediate: a drag calls setDesign on every
   // pointermove, and an undebounced save would run a synchronous
   // JSON.stringify plus localStorage.setItem on every one of those ticks.
@@ -857,7 +869,7 @@ export default function Hud() {
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
           });
         }
-        if (!cancelled && apply) setDesign(decoded);
+        if (!cancelled && apply) { setDesign(decoded); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
     })();
@@ -1034,6 +1046,7 @@ export default function Hud() {
       });
     }
     setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements), children: {} } : {}) }));
+    dropPicks();
   };
 
   const patchStyle = (id: string, p: Partial<StyleOverride>) => setDesign((d) => ({
@@ -1139,6 +1152,7 @@ export default function Hud() {
       const text = await f.text();
       const next = validateDesign(JSON.parse(text));
       setDesign(next);
+      dropPicks();
       setStatus(`Imported ${next.name}.`);
     } catch {
       setStatus('That file is not a HUD design.');
@@ -1253,8 +1267,8 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          {selected === 'teamColumn' && selectedChild
-            ? <ChildControls design={design} setDesign={setDesign} name={selectedChild} onBack={() => setSelectedChild(null)} />
+          {childShown
+            ? <ChildControls design={design} setDesign={setDesign} name={childShown} onBack={() => setSelectedChild(null)} />
             : selected
               ? <ElementControls design={design} setDesign={setDesign} id={selected} selectedCard={selectedCard} onPickCard={setSelectedCard} />
               : <p class="muted">Select an element on the canvas or in the list below it.</p>}
