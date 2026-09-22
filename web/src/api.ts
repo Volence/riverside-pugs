@@ -1096,6 +1096,8 @@ export interface PlayerFileData {
       timeout: AdminPlayerDetail['timeout'];
     };
     matches: AdminPlayerDetail['matches'];
+    /** Optional only for a browser holding new JS against an older server. */
+    conduct?: ConductSection;
     tickets: TicketSummary[];
     notes: AdminPlayerDetail['notes'];
     evidence: {
@@ -1361,3 +1363,22 @@ export const api = {
     simulateMatch: () => post('/api/dev/simulate-match'),
   },
 };
+
+/** src/admin/conduct.ts. Seconds are whole; dates are SQLite's "YYYY-MM-DD HH:MM:SS". */
+export interface ConductSection {
+  readyups: {
+    count: number;
+    avgSeconds: number | null;
+    timesLast: number;
+    leagueAvgSeconds: number | null;
+    leagueLastShare: number | null;
+    slowest: { matchId: number; mapOrdinal: number; half: number | null; seconds: number; wasLast: boolean }[];
+  };
+  pauses: {
+    trackedSince: string | null;
+    called: number;
+    matchesSince: number;
+    totalSeconds: number;
+    recent: { matchId: number; mapOrdinal: number; half: number | null; seconds: number | null; startedAt: string }[];
+  };
+}

@@ -123,6 +123,47 @@ describe('the Player File', () => {
     expect(screen.getByText(/4 connects, United States/)).toBeTruthy();
   });
 
+  it('shows ready-up and pause conduct beside the league, and links each match to its chat', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        conduct: {
+          readyups: {
+            count: 22, avgSeconds: 38, timesLast: 9, leagueAvgSeconds: 12, leagueLastShare: 0.125,
+            slowest: [{ matchId: 44, mapOrdinal: 1, half: 2, seconds: 95, wasLast: true }],
+          },
+          pauses: {
+            trackedSince: '2026-09-23 00:00:00', called: 3, matchesSince: 5, totalSeconds: 250,
+            recent: [{ matchId: 45, mapOrdinal: 0, half: 1, seconds: 120, startedAt: '2026-09-23 01:00:00' }],
+          },
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    expect(await screen.findByRole('heading', { name: 'Conduct' })).toBeTruthy();
+    expect(screen.getByText(/league 0:12/)).toBeTruthy();
+    expect(screen.getByText(/9 of 22/)).toBeTruthy();
+    expect(screen.getByText(/about 1 in 8/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '#44' }).getAttribute('href')).toBe('/match/44');
+    expect(screen.getByText(/pauses called in 5 matches/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'chat' }).getAttribute('href')).toBe(`/match/7?chat=${P}#chat`);
+  });
+
+  it('says pauses are not tracked yet rather than showing a zero', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        conduct: {
+          readyups: { count: 0, avgSeconds: null, timesLast: 0, leagueAvgSeconds: null, leagueLastShare: null, slowest: [] },
+          pauses: { trackedSince: null, called: 0, matchesSince: 0, totalSeconds: 0, recent: [] },
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    expect(await screen.findByText(/Not tracked yet/)).toBeTruthy();
+    expect(screen.getByText('No finished ready-ups on record.')).toBeTruthy();
+  });
+
   it('tells a viewer plainly when there is no such file', async () => {
     mockPeople.file.mockRejectedValue(new Error('404'));
     render(<PlayerFile steamid={P} me="76561199000000009" />);
