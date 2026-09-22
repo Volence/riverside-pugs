@@ -15,8 +15,9 @@ import { ELEMENTS, elementById, type HudElement } from './elements';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { drawPanel, type CardState } from './render';
+import { drawPanel, childRects, hiddenInState, type CardState } from './render';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
+import { teamChild } from './children';
 
 export type Side = 'survivor' | 'infected';
 
@@ -64,6 +65,61 @@ export function freeCardAt(design: HudDesign, ux: number, uy: number): number | 
   if (!isFreeTeam(design)) return null;
   const i = teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).findIndex((c) => inside(c, ux, uy));
   return i < 0 ? null : i;
+}
+
+/**
+ * The smallest teammate-card child under the point, in whichever of the
+ * three drawn cards it falls, or null. A child counts only where the card
+ * and the container both let it show (VGUI clips to both), only when the
+ * preview draws it in `state`, and only when the registry lists it:
+ * decoration (the splatter, the card background) is never a target, so a
+ * click on a card's empty space still means the card. The rects come from
+ * the generated tree through childRects, like everything the canvas draws.
+ */
+export function childAt(design: HudDesign, state: CardState, ux: number, uy: number): { name: string; card: number } | null {
+  const container = rectFor(design, 'teamColumn');
+  if (!container.visible || !inside(container, ux, uy)) return null;
+  let best: { name: string; card: number; area: number } | null = null;
+  for (const [i, c] of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).entries()) {
+    if (!inside(c, ux, uy)) continue;
+    for (const r of childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)) {
+      const def = teamChild(r.name);
+      if (!def || def.role === 'decor' || !r.visible || hiddenInState('teamColumn', r.name, state) || !inside(r, ux, uy)) continue;
+      const area = r.w * r.h;
+      if (!best || area < best.area) best = { name: r.name, card: i, area };
+    }
+  }
+  return best && { name: best.name, card: best.card };
+}
+
+/** Whether the point is on the selected child's bottom-right resize handle in any drawn card (4 units of slack). */
+export function childCornerAt(design: HudDesign, state: CardState, name: string, ux: number, uy: number): boolean {
+  const def = teamChild(name);
+  if (!def || def.box === 'none' || hiddenInState('teamColumn', name, state)) return false;
+  return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).some((c) => {
+    const r = childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1).find((x) => x.name === name);
+    return !!r && r.visible && Math.hypot(ux - (r.x + r.w), uy - (r.y + r.h)) <= 4;
+  });
+}
+
+/** One card file drives every teammate card, so the selected child is outlined in all three. */
+function drawChildSelection(ctx: CanvasRenderingContext2D, design: HudDesign, k: number, accent: string, name: string) {
+  const def = teamChild(name);
+  for (const c of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS)) {
+    const r = childRects(design, 'teamColumn', { x: c.x * k, y: c.y * k }, k).find((x) => x.name === name);
+    if (!r) continue;
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    if (def && def.box !== 'none') {
+      const s = 6;
+      ctx.fillStyle = accent;
+      ctx.fillRect(r.x + r.w - s / 2, r.y + r.h - s / 2, s, s);
+    }
+    ctx.restore();
+  }
 }
 
 /** Per-viewer convenience only, so the read is guarded like every other
@@ -339,6 +395,7 @@ export function drawHud(
     if (el.id === selectedId) {
       if (el.id === 'teamColumn' && isFreeTeam(design)) drawCardSelection(ctx, design, k, accent, view.card ?? null);
       else drawSelection(ctx, r, el, accent);
+      if (el.id === 'teamColumn' && view.child) drawChildSelection(ctx, design, k, accent, view.child);
     }
   }
 }

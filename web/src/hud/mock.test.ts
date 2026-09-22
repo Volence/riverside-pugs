@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, freeCardAt } from './mock';
+import { visibleElements, hitTest, drawHud, freeCardAt, childAt, childCornerAt } from './mock';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
 import { buildTrees, elementRect, teamCardRects } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { _setImageFactory, _resetAssetCache } from './render';
+import { _setImageFactory, _resetAssetCache, childRects } from './render';
 
 /**
  * A minimal stand-in for CanvasRenderingContext2D: happy-dom has no real
@@ -205,5 +205,50 @@ describe('drawHud passes the preview state to the teammate cards', () => {
     ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
     drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { state: 'down' });
     for (const c of ['biker', 'manager', 'teenangst']) expect(srcs).toContain(artUrl(`vgui/s_panel_${c}_incap`));
+  });
+});
+
+describe('teammate card children on the canvas', () => {
+  // DEFAULT_DESIGN: stock, fitted, card 2 at (153, 441); the fitted Head is (0, 2, 23, 23) inside it.
+  const card2 = () => teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect)[1];
+
+  it('finds the child under the pointer in whichever card it is', () => {
+    const c = card2();
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13)).toEqual({ name: 'Head', card: 1 });
+  });
+
+  it('finds what the state draws: the down picture where the portrait was', () => {
+    const c = card2();
+    expect(childAt(DEFAULT_DESIGN, 'down', c.x + 11, c.y + 13)).toEqual({ name: 'Incapacitated', card: 1 });
+  });
+
+  it('never picks decoration, a hidden child, or anything outside the cards', () => {
+    const c = card2();
+    // (120, 1) in the card is only the splatter and the Voice icon, which no state draws: decoration and an undrawn state child, so the card itself stays the target.
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 120, c.y + 1)).toBeNull();
+    const hidden = { ...DEFAULT_DESIGN, children: { teamColumn: { Head: { visible: false } } } };
+    expect(childAt(hidden, 'healthy', c.x + 11, c.y + 13)).toBeNull();
+    expect(childAt(DEFAULT_DESIGN, 'healthy', 426, 100)).toBeNull();
+  });
+
+  it("finds a resizable child's corner, and never one that has no size of its own", () => {
+    const c = card2();
+    const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
+    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Head', head.x + head.w, head.y + head.h)).toBe(true);
+    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Head', head.x, head.y)).toBe(false);
+    const items = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Items')!;
+    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Items', items.x + items.w, items.y + items.h)).toBe(false);
+  });
+
+  it('outlines the selected child in every drawn card', () => {
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const strokes: number[][] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.strokeRect = ((...a: number[]) => { strokes.push(a); }) as typeof ctx.strokeRect;
+    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', 'teamColumn', undefined, { child: 'Head' });
+    for (const c of teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect).slice(0, 3)) {
+      const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
+      expect(strokes).toContainEqual([head.x, head.y, head.w, head.h]);
+    }
   });
 });
