@@ -327,3 +327,22 @@ In-game checks this audit asks the owner for (one addon, one session): which SI 
 reads; whether `healthbar_green/orange/red` overrides change the bar; whether `never_draw` hides
 the stock crosshair; whether `_minmode` keys switch with `cl_hud_minmode 1`; whether the chat
 follows `hudlayout.res` or `basechat.res` when they disagree.
+
+## In-game probe results, 2026-09-22
+
+The owner ran `hud/probe-2026-09-22` (addon VPK plus a `gameinfo.txt` mount) on a local versus
+listen server. Results:
+
+| Test | Result |
+|---|---|
+| T1 Tank's health file | The Tank reads **`hunterhealth.res`** (showed `FILE hunterhealth` at 6000 health), the same file as the Hunter. Smoker reads `smokerhealth.res`, Boomer `boomerhealth.res`. `tankhealth.res` is dead, as the audit said. `zombiehealthleft_small/large` were not seen for any class |
+| T2 `never_draw` on `HudCrosshair` | **Works**: the engine crosshair is gone for survivors and infected |
+| T3 `_minmode` | **Impossible**: `cl_hud_minmode` is an unknown command in L4D1 |
+| T4 chat | The chat window you type into, and its history, sit where **`basechat.res`** puts them, in `basechat.res`'s background colour. `hudlayout.res`'s `HudChat` draws a separate background panel at the animation file's position all the time, so the editor must never give it a colour and must write chat position to `basechat.res` |
+| T5 per-teammate positions | **Works**: `TeamPlayer1..3` each landed where their own block said |
+| T6 fit card to content | **Works**: a 121x36 card with every child shifted shows portrait, items, bar and name uncut. **The card's own `image` is never painted** (the magenta background did not show), which is also why stock `s_panel_background` is invisible: the editor's `panelBg` slot, which repoints `TeamPlayerN` `image`, does nothing in game. Incap and dead art resized to the card do show inside it; the incap art squashed to 121x36 reads as a thin strip, so a fitted card needs a shape policy for it. The damage splatter shrunk to the card is faintly visible at full health (so it is drawn, faintly, not hidden) |
+| T7 teammate health number | **Works**: `%HealthNumber%` on the teammate card shows each teammate's health and updates; incapacitated it shows the incap health (299) in red. **Code recolours it by health** (green, orange, red) and ignores `fgcolor_override`. Half-width bar and moved Items: work |
+| T8 bar textures | `path` confirmed the mount loaded first, yet bars stayed green/orange and temp health drew white stripes: **health bar fills are code-drawn and cannot be recoloured through `healthbar_*` textures**. The Advanced bar slots should be removed |
+
+Also seen: game messages such as "Bill killed Mal" and "Mal incapacitated Louis" print into the chat
+history, not a separate kill feed, which confirms the kill feed element should go.
