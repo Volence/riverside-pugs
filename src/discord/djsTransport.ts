@@ -1,12 +1,13 @@
 import {
   ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
-  OverwriteType, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
+  OverwriteType, Partials, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
   type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type FetchedThreads, type ForumChannel, type Guild,
-  type Interaction, type TextBasedChannel,
+  type Interaction, type Message, type TextBasedChannel,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
 import type {
-  BotInteraction, BotTransport, Button, InteractionReply, MessagePayload, ModalDef, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
+  BotInteraction, BotTransport, Button, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks, MessagePayload, ModalDef,
+  RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from './transport.js';
 
 /**
@@ -78,7 +79,18 @@ const codeOf = (err: unknown): number | undefined => (err as { code?: number }).
 
 export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTransport & { destroy(): Promise<void> }> {
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates],
+    intents: [
+      GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates,
+      // Tickets mirror what staff write in ticket threads. GuildMessages is
+      // the events (discord-api-types gateway/v10.d.ts:169); MessageContent is
+      // the privileged one (:175), switched on in the developer portal, and
+      // without it every content arrives as an empty string.
+      GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent,
+    ],
+    // Without this discord.js silently drops an edit or a delete of any
+    // message it has not cached, which is every message older than this
+    // process. Partials :7735, ClientOptions.partials :6233.
+    partials: [Partials.Message],
   });
   client.on(Events.Error, (err) => console.error('[discord] client error:', err));
 
@@ -96,6 +108,59 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
 
   let handler: ((i: BotInteraction) => Promise<InteractionReply>) | null = null;
   let opensModal: ((customId: string) => boolean) | null = null;
+  let hooks: MessageHooks | null = null;
+
+  /** Message :2459. attachments :2466, author :2467, channelId :2470, content
+   *  :2473, createdTimestamp :2475, editedTimestamp :2480, member :2490,
+   *  system :2501, webhookId :2509; Attachment :2582; User.bot :4087,
+   *  globalName :4096; GuildMember.displayName :1886. */
+  // A Pick, not Message itself: it names the only parts of a message this
+  // file ever reads, so what is and is not looked at is in the type. The
+  // events hand over OmitPartialGroupDMChannel<Message> (:6085), which is an
+  // intersection with Message and satisfies this as it stands.
+  type ReadableMessage = Pick<Message,
+    'id' | 'channelId' | 'author' | 'member' | 'webhookId' | 'system' | 'content' | 'attachments' | 'createdTimestamp' | 'editedTimestamp'>;
+  const toInbound = (m: ReadableMessage): InboundMessage => ({
+    id: m.id,
+    threadId: m.channelId,
+    authorId: m.author.id,
+    authorName: m.member?.displayName ?? m.author.globalName ?? m.author.username,
+    authorIsBot: m.author.bot || m.webhookId !== null || m.system,
+    content: m.content,
+    attachments: [...m.attachments.values()].map((a) => ({ id: a.id, name: a.name, contentType: a.contentType, size: a.size, url: a.url })),
+    createdAt: new Date(m.createdTimestamp).toISOString(),
+    editedAt: m.editedTimestamp === null ? null : new Date(m.editedTimestamp).toISOString(),
+  });
+
+  // In all four listeners the FIRST thing read is the channel id, and the
+  // first thing done is to ask whether that thread is a ticket. Nothing else
+  // about a message is touched before the answer is yes.
+  client.on(Events.MessageCreate, (m) => {                                    // messageCreate :6145
+    if (!hooks || !hooks.watches(m.channelId)) return;
+    hooks.create(toInbound(m));
+  });
+  client.on(Events.MessageUpdate, async (_old, m) => {                        // messageUpdate :6168
+    if (!hooks || !hooks.watches(m.channelId)) return;
+    try {
+      // The typings promise a whole message here (partial :2493 is `false` on
+      // Message), but discord.js builds this one out of whatever the gateway
+      // sent, so an uncached edit really can arrive with no author and no
+      // content; fetch it whole. Message.fetch :2529.
+      const full = m.partial ? await m.fetch() : m;
+      hooks.update(toInbound(full));
+    } catch (err) {
+      console.error('[discord] could not read an edited ticket message:', err);
+    }
+  });
+  client.on(Events.MessageDelete, (m) => {                                    // messageDelete :6146
+    // A partial still carries both ids, which is all this needs.
+    if (!hooks || !hooks.watches(m.channelId)) return;
+    hooks.remove(m.channelId, m.id);
+  });
+  client.on(Events.MessageBulkDelete, (messages, channel) => {                // messageDeleteBulk :6154
+    if (!hooks || !hooks.watches(channel.id)) return;
+    for (const id of messages.keys()) hooks.remove(channel.id, id);
+  });
 
   client.on(Events.InteractionCreate, async (i: Interaction) => {
     if (!handler) return;
@@ -152,6 +217,18 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           content: m.content || undefined, embeds: m.embeds, components: m.components as never,
           allowedMentions: m.allowedMentions, flags: reply.ephemeral ? MessageFlags.Ephemeral : undefined,
         });
+      } else if (i.isMessageContextMenuCommand()) {
+        // isMessageContextMenuCommand :2214. Deferred and private: the handler
+        // deletes files and the answer is for the moderator alone. Only ids
+        // are passed on: targetId :1517, CommandInteraction.channelId :643.
+        // i.targetMessage, which carries the content, is never read.
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        const reply = await handler({
+          kind: 'message_command', name: i.commandName, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          channelId: i.channelId, messageId: i.targetId,
+        });
+        const m = toMessage(reply.payload);
+        await i.editReply({ content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
       } else if (i.isModalSubmit()) {
         // isModalSubmit: typings/index.d.ts:2215. Deferred like a button: the
         // handler writes to the database and the reply is always private.
@@ -416,6 +493,27 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         if (codeOf(err) !== UNKNOWN_CHANNEL) throw err;
       });
     },
+    async fetchAfter(threadId, afterId) {
+      const th = await needThread(threadId);
+      // MessageManager.fetch(FetchMessagesOptions) :5280, options :6620.
+      // `after` returns the messages that come right after that id, up to
+      // `limit`, so taking the largest id of each page walks forward through
+      // the whole thread. cache: false, a backfill must not fill the cache.
+      const page = await th.messages.fetch({ after: afterId ?? '0', limit: 100, cache: false });
+      return [...page.values()].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1)).map(toInbound);
+    },
+    async fetchMessage(threadId, messageId) {
+      const th = await threadById(threadId);
+      if (!th) return null;
+      try {
+        // MessageManager.fetch(id) :5279. force: the attachment links on a
+        // cached copy may have expired, and a fresh link is the whole point.
+        return toInbound(await th.messages.fetch({ message: messageId, force: true, cache: false }));
+      } catch (err) {
+        if (codeOf(err) === UNKNOWN_MESSAGE) return null;
+        throw err;
+      }
+    },
     async syncMemberAccess(channelId, userIds, opts) {
       const ch = await channelById(channelId);
       // A forum and nothing else, exactly as createForumPost insists: the
@@ -509,20 +607,33 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       handler = h;
       opensModal = opts?.opensModal ?? null;
     },
-    async registerCommands(defs: SlashCommandDef[]) {
-      await guild.commands.set(defs.map((d) => ({
-        type: ApplicationCommandType.ChatInput as const,
-        name: d.name,
-        description: d.description,
-        options: (d.options ?? []).map((o) => ({
-          name: o.name,
-          description: o.description,
-          required: o.required ?? false,
-          type: o.type === 'user' ? ApplicationCommandOptionType.User
-            : o.type === 'integer' ? ApplicationCommandOptionType.Integer : ApplicationCommandOptionType.String,
-          ...(o.choices ? { choices: o.choices } : {}),
-        })) as never,
-      })));
+    watchMessages(h) {
+      hooks = h;
+    },
+    async registerCommands(defs: SlashCommandDef[], messageCommands: MessageCommandDef[] = []) {
+      await guild.commands.set([
+        ...defs.map((d) => ({
+          type: ApplicationCommandType.ChatInput as const,
+          name: d.name,
+          description: d.description,
+          options: (d.options ?? []).map((o) => ({
+            name: o.name,
+            description: o.description,
+            required: o.required ?? false,
+            type: o.type === 'user' ? ApplicationCommandOptionType.User
+              : o.type === 'integer' ? ApplicationCommandOptionType.Integer : ApplicationCommandOptionType.String,
+            ...(o.choices ? { choices: o.choices } : {}),
+          })) as never,
+        })),
+        // MessageApplicationCommandData :5613: a type and a name, no
+        // description and no options. It shows under Apps on every message in
+        // the server, for everyone; the handler is what refuses non-staff.
+        //
+        // Deliberately no defaultMemberPermissions: moderators are marked on
+        // the site, not by a Discord permission, so there is no bit that means
+        // "staff". Everyone sees the entry; only staff get anything from it.
+        ...messageCommands.map((c) => ({ type: ApplicationCommandType.Message as const, name: c.name })),
+      ]);
     },
     async watchMembers(h) {
       client.on(Events.GuildMemberAdd, (m) => { if (m.guild.id === guild.id) h.add(m.id); });

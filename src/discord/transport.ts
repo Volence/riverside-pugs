@@ -56,6 +56,42 @@ export interface ModalDef {
   fields: ModalField[];
 }
 
+/** One file on a message. `url` is Discord's signed CDN link, good for about
+ *  a day: whoever wants the file downloads it now. */
+export interface InboundAttachment { id: string; name: string; contentType: string | null; size: number; url: string }
+
+/** A message somebody wrote in a thread the bot watches. */
+export interface InboundMessage {
+  id: string;
+  threadId: string;
+  authorId: string;
+  /** The name Discord shows for them in this server. */
+  authorName: string;
+  /** Bots, webhooks and Discord's own system lines ("X added Y to the thread"). */
+  authorIsBot: boolean;
+  content: string;
+  attachments: InboundAttachment[];
+  createdAt: string;
+  editedAt: string | null;
+}
+
+/**
+ * Inbound messages. `watches` is asked FIRST, with the thread id and nothing
+ * else, and a transport hands over nothing when it answers false: not the
+ * content, not the author, not the attachments. The bot sits in a server
+ * full of conversations that are none of its business.
+ */
+export interface MessageHooks {
+  watches(threadId: string): boolean;
+  create(m: InboundMessage): void;
+  update(m: InboundMessage): void;
+  remove(threadId: string, messageId: string): void;
+}
+
+/** A command in a message's right-click menu (Apps). It has a name and
+ *  nothing else: Discord supplies the message it was used on. */
+export interface MessageCommandDef { name: string }
+
 export type BotInteraction =
   | { kind: 'button'; customId: string; userId: string; userName: string }
   | {
@@ -68,7 +104,10 @@ export type BotInteraction =
     }
   /** A submitted modal. `fields` is each field's value by id; a select
    *  carries the one value picked. */
-  | { kind: 'modal'; customId: string; userId: string; userName: string; fields: Record<string, string> };
+  | { kind: 'modal'; customId: string; userId: string; userName: string; fields: Record<string, string> }
+  /** A message context menu command. Only ids: what the message SAYS is never
+   *  handed to the bot's logic through this path. */
+  | { kind: 'message_command'; name: string; userId: string; userName: string; channelId: string; messageId: string };
 
 export interface InteractionReply {
   ephemeral: boolean;
@@ -176,6 +215,13 @@ export interface ThreadOps {
   setTags(threadId: string, tags: string[]): Promise<void>;
   /** Deleting a thread that is already gone is not an error. */
   deleteThread(threadId: string): Promise<void>;
+  /** One page of a thread's history, oldest first, strictly after `afterId`
+   *  (null: from the beginning). An empty page means there is no more. Bot
+   *  messages are included; the caller drops them. */
+  fetchAfter(threadId: string, afterId: string | null): Promise<InboundMessage[]>;
+  /** One message, fetched fresh (its attachment links are newly signed). Null
+   *  when the message or the thread is gone. */
+  fetchMessage(threadId: string, messageId: string): Promise<InboundMessage | null>;
   /**
    * Make the FORUM channel's per-member permission overwrites exactly this
    * set: view, read history, talk inside threads, attach files, embed links
@@ -218,7 +264,11 @@ export interface BotTransport {
      *  quick database read. */
     opts?: { opensModal?: (customId: string) => boolean },
   ): void;
-  registerCommands(defs: SlashCommandDef[]): Promise<void>;
+  /** Replaces every command the bot has in the server, so both kinds go in
+   *  one call. */
+  registerCommands(defs: SlashCommandDef[], messageCommands?: MessageCommandDef[]): Promise<void>;
+  /** Start hearing messages. See MessageHooks for the one rule. */
+  watchMessages(h: MessageHooks): void;
   /** Load the server's member list, then report joins and leaves. */
   watchMembers(h: { all(ids: string[]): void; add(id: string): void; remove(id: string): void }): Promise<void>;
   /** Load who is in which voice channel, then report every change: the

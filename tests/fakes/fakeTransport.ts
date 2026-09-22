@@ -1,5 +1,6 @@
 import type {
-  BotInteraction, BotTransport, InteractionReply, MessagePayload, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
+  BotInteraction, BotTransport, InboundAttachment, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks,
+  MessagePayload, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from '../../src/discord/transport.js';
 
 export interface FakeMessage { channelId: string; id: string; payload: MessagePayload; deleted: boolean }
@@ -62,6 +63,72 @@ export class FakeTransport implements BotTransport {
   /** Make the next N thread operations throw. */
   failThreadOps = 0;
   opensModal: ((customId: string) => boolean) | null = null;
+
+  // Message world: what people, not the bot, wrote.
+  inbox: (InboundMessage & { deleted: boolean })[] = [];
+  hooks: MessageHooks | null = null;
+  messageCommands: MessageCommandDef[] = [];
+  /** How many messages one fetchAfter returns. Discord's is 100. */
+  fetchPageSize = 100;
+
+  watchMessages(h: MessageHooks): void {
+    this.hooks = h;
+  }
+
+  private view(m: InboundMessage & { deleted: boolean }): InboundMessage {
+    const { deleted: _deleted, ...rest } = m;
+    return { ...rest, attachments: [...m.attachments] };
+  }
+
+  /** Someone writes in a channel. `deliver: false` is a message the bot was
+   *  not online to hear: it is only there for a later fetchAfter.
+   *
+   *  Deliberately does NOT unarchive the thread, which is what Discord does
+   *  when a person writes in an archived one. The archived flag is state the
+   *  test sets, and a fake that changed it behind the test's back would hide
+   *  the archived-thread refusals every write path is checked against. A test
+   *  that wants the real behaviour calls setArchived(id, false) itself. */
+  userPost(
+    threadId: string,
+    m: { authorId: string; authorName?: string; content: string; attachments?: InboundAttachment[]; bot?: boolean },
+    deliver = true,
+  ): InboundMessage {
+    const msg = {
+      id: this.snowflake(), threadId, authorId: m.authorId, authorName: m.authorName ?? `user${m.authorId}`,
+      authorIsBot: m.bot ?? false, content: m.content, attachments: m.attachments ?? [],
+      createdAt: new Date(Date.UTC(2026, 8, 22, 10, 0, this.inbox.length)).toISOString(), editedAt: null, deleted: false,
+    };
+    this.inbox.push(msg);
+    // As the real transport does: ask first, hand over nothing on a no.
+    if (deliver && this.hooks?.watches(threadId)) this.hooks.create(this.view(msg));
+    return this.view(msg);
+  }
+
+  userEdit(messageId: string, content: string, deliver = true): void {
+    const msg = this.inbox.find((m) => m.id === messageId);
+    if (!msg) throw new Error(`no such message ${messageId}`);
+    msg.content = content;
+    msg.editedAt = new Date(Date.UTC(2026, 8, 22, 11, 0, 0)).toISOString();
+    if (deliver && this.hooks?.watches(msg.threadId)) this.hooks.update(this.view(msg));
+  }
+
+  userDelete(messageId: string, deliver = true): void {
+    const msg = this.inbox.find((m) => m.id === messageId);
+    if (!msg) throw new Error(`no such message ${messageId}`);
+    msg.deleted = true;
+    if (deliver && this.hooks?.watches(msg.threadId)) this.hooks.remove(msg.threadId, messageId);
+  }
+
+  /** A thread's whole history as Discord would list it: the bot's messages
+   *  and everyone else's, oldest first. */
+  private history(threadId: string): InboundMessage[] {
+    const bot = this.messages.filter((m) => m.channelId === threadId && !m.deleted && /^\d+$/.test(m.id)).map((m): InboundMessage => ({
+      id: m.id, threadId, authorId: 'bot', authorName: 'bot', authorIsBot: true, content: m.payload.content ?? '',
+      attachments: [], createdAt: new Date(Date.UTC(2026, 8, 22, 9, 0, 0)).toISOString(), editedAt: null,
+    }));
+    const people = this.inbox.filter((m) => m.threadId === threadId && !m.deleted).map((m) => this.view(m));
+    return [...bot, ...people].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+  }
 
   threadsIn(parentId: string): FakeThread[] {
     return [...this.threadsById.values()].filter((th) => th.parentId === parentId && !th.deleted);
@@ -159,6 +226,22 @@ export class FakeTransport implements BotTransport {
       const th = this.threadsById.get(threadId);
       if (th) th.deleted = true;
     },
+    // Reads, so liveThread and not writableThread: Discord lets anyone who
+    // can see an archived thread read its history.
+    fetchAfter: async (threadId, afterId) => {
+      this.threadOp();
+      this.liveThread(threadId);
+      const after = BigInt(afterId ?? '0');
+      return this.history(threadId).filter((m) => BigInt(m.id) > after).slice(0, this.fetchPageSize);
+    },
+    fetchMessage: async (threadId, messageId) => {
+      this.threadOp();
+      // Null rather than a throw for a thread that is gone, which is what the
+      // real transport answers: "the message or the thread is gone".
+      const th = this.threadsById.get(threadId);
+      if (!th || th.deleted) return null;
+      return this.history(threadId).find((m) => m.id === messageId) ?? null;
+    },
     syncMemberAccess: async (channelId, userIds, opts) => {
       this.threadOp();
       this.needChannelId(channelId, 'cannot hold permission overwrites');
@@ -190,7 +273,9 @@ export class FakeTransport implements BotTransport {
   async send(channelId: string, payload: MessagePayload): Promise<string> {
     if (this.failSends > 0) { this.failSends--; throw new Error('discord down'); }
     this.guardThread(channelId);
-    const id = `m${++this.seq}`;
+    // Inside a thread the id is snowflake-shaped, so history sorts. Anywhere
+    // else it stays 'm<n>', which a dozen older tests read.
+    const id = this.threadsById.has(channelId) ? this.snowflake() : `m${++this.seq}`;
     this.sends++;
     this.messages.push({ channelId, id, payload, deleted: false });
     return id;
@@ -216,9 +301,12 @@ export class FakeTransport implements BotTransport {
     this.dms.push({ userId, payload });
   }
 
-  async remove(_channelId: string, messageId: string): Promise<void> {
+  async remove(channelId: string, messageId: string): Promise<void> {
+    this.guardThread(channelId);
     const m = this.messages.find((x) => x.id === messageId);
     if (m) m.deleted = true;
+    const theirs = this.inbox.find((x) => x.id === messageId);
+    if (theirs) theirs.deleted = true;
   }
 
   onInteraction(handler: (i: BotInteraction) => Promise<InteractionReply>, opts?: { opensModal?: (customId: string) => boolean }): void {
@@ -226,8 +314,9 @@ export class FakeTransport implements BotTransport {
     this.opensModal = opts?.opensModal ?? null;
   }
 
-  async registerCommands(defs: SlashCommandDef[]): Promise<void> {
+  async registerCommands(defs: SlashCommandDef[], messageCommands: MessageCommandDef[] = []): Promise<void> {
     this.commands = defs;
+    this.messageCommands = messageCommands;
   }
 
   guildMembers: string[] = [];

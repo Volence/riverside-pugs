@@ -119,4 +119,18 @@ describe('startBot extras', () => {
     expect(stray.ephemeral).toBe(true);
     await bot!.stop();
   });
+
+  it('registers message commands beside the slash commands and routes them by name', async () => {
+    const s = setup(ENV);
+    const bot = await startBot({
+      ...s, connect: async () => s.t,
+      messageCommands: { 'Remove from ticket': async (i) => ({ ephemeral: true, payload: { content: `removed ${i.messageId} in ${i.channelId}`, embeds: [], components: [] } }) },
+    });
+    expect(s.t.messageCommands).toEqual([{ name: 'Remove from ticket' }]);
+    const r = await s.t.handler!({ kind: 'message_command', name: 'Remove from ticket', userId: '1', userName: 'x', channelId: 'th1', messageId: 'm9' });
+    expect(r.payload.content).toBe('removed m9 in th1');
+    const stray = await s.t.handler!({ kind: 'message_command', name: 'Something else', userId: '1', userName: 'x', channelId: 'th1', messageId: 'm9' });
+    expect(stray.ephemeral).toBe(true);
+    await bot!.stop();
+  });
 });
