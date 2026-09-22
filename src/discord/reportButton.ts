@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
+import { getSetting } from '../settings.js';
 import { REPORT_CATEGORIES } from '../tickets/filing.js';
 import { REPORT_LABELS } from './commands.js';
-import type { ModalDef } from './transport.js';
+import type { BotTransport, MessagePayload, ModalDef } from './transport.js';
 
 /** A player the reporter could mean. */
 export interface Candidate { steamid: string; name: string }
@@ -99,4 +101,114 @@ export function reportModal(db: DB, reporter: string): ModalDef {
  *  before it runs the handler. */
 export function opensReportModal(customId: string): boolean {
   return customId === `${REPORT_PREFIX}open`;
+}
+
+const TICK_MS = 5 * 60_000;
+/** How long a half-written report waits for its reporter to pick a name. */
+const PENDING_MS = 60 * 60_000;
+
+const BODY = [
+  '**Something happened in a game? Tell the moderators.**',
+  '',
+  'Press the button below and fill in the form. Your report is private:',
+  'the person you report is never told who reported them.',
+].join('\n');
+
+function standingPayload(): MessagePayload {
+  return {
+    content: BODY,
+    embeds: [],
+    components: [[{ kind: 'button', customId: `${REPORT_PREFIX}open`, label: 'Report a player', style: 'primary' }]],
+  };
+}
+
+const hashOf = (p: MessagePayload) => createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 16);
+
+export interface ReportButtonDeps {
+  db: DB;
+  transport: BotTransport;
+  /** 0 disables the timer, which is what every test uses. */
+  intervalMs?: number;
+  now?: () => Date;
+}
+
+/**
+ * Keeps one message with one button alive in the configured channel, and
+ * clears out drafts nobody came back for.
+ */
+export class ReportButton {
+  private timer: NodeJS.Timeout | null = null;
+
+  constructor(private deps: ReportButtonDeps) {}
+
+  start(): void {
+    void this.tick();
+    const every = this.deps.intervalMs ?? TICK_MS;
+    if (every > 0) {
+      this.timer = setInterval(() => { void this.tick(); }, every);
+      this.timer.unref();
+    }
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async tick(): Promise<void> {
+    try {
+      await this.ensureMessage();
+    } catch (err) {
+      console.error('[discord] report button:', err);
+    }
+    this.reapPending();
+  }
+
+  /** Rows nobody came back to finish. Not an error: someone opened the form,
+   *  saw the list of names and thought better of it. */
+  private reapPending(): void {
+    const cutoff = new Date((this.deps.now?.() ?? new Date()).getTime() - PENDING_MS).toISOString();
+    this.deps.db.prepare('DELETE FROM pending_reports WHERE created_at < ?').run(cutoff);
+  }
+
+  private async ensureMessage(): Promise<void> {
+    const { db, transport } = this.deps;
+    const channelId = getSetting(db, 'discord_report_channel_id') ?? '';
+    const row = db.prepare('SELECT channel_id, message_id, hash FROM report_message WHERE id = 1')
+      .get() as { channel_id: string; message_id: string; hash: string } | undefined;
+    if (!channelId) return;
+
+    const payload = standingPayload();
+    const hash = hashOf(payload);
+
+    // A changed setting moves the button. Take the old one down if we still
+    // can, but never let a failure there stop the move: a stray button in an
+    // abandoned channel still opens the form and still files a report, so it
+    // is untidy rather than harmful.
+    if (row && row.channel_id !== channelId) {
+      await transport.remove(row.channel_id, row.message_id).catch(() => {});
+    } else if (row && row.hash === hash) {
+      // Nothing to say, but prove the message is still there. An edit that
+      // returns false means Discord has lost it, and a failed edit reported
+      // as success is what froze a match card in place before (32118ab).
+      if (await transport.edit(row.channel_id, row.message_id, payload)) return;
+    } else if (row) {
+      if (await transport.edit(row.channel_id, row.message_id, payload)) {
+        this.remember(channelId, row.message_id, hash);
+        return;
+      }
+    }
+
+    const messageId = await transport.send(channelId, payload);
+    this.remember(channelId, messageId, hash);
+  }
+
+  private remember(channelId: string, messageId: string, hash: string): void {
+    this.deps.db.prepare(
+      `INSERT INTO report_message (id, channel_id, message_id, hash, updated_at)
+       VALUES (1, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET channel_id = excluded.channel_id,
+         message_id = excluded.message_id, hash = excluded.hash, updated_at = excluded.updated_at`,
+    ).run(channelId, messageId, hash, (this.deps.now?.() ?? new Date()).toISOString());
+  }
 }

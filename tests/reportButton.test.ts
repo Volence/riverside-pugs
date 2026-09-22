@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB, DEFAULT_SETTINGS } from '../src/db.js';
-import { getSetting } from '../src/settings.js';
+import { getSetting, setSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA } from '../src/settingsSchema.js';
 import { upsertPlayer, activatePlayer, currentSeasonId } from '../src/players.js';
-import { recentCoPlayers, resolveByName, reportModal, opensReportModal, OTHER } from '../src/discord/reportButton.js';
+import { recentCoPlayers, resolveByName, reportModal, opensReportModal, OTHER, ReportButton } from '../src/discord/reportButton.js';
 import { REPORT_LABELS } from '../src/discord/commands.js';
+import { FakeTransport } from './fakes/fakeTransport.js';
 
 let db: DB;
 
@@ -227,5 +228,86 @@ describe('reportModal', () => {
     expect(opensReportModal('rp:open')).toBe(true);
     expect(opensReportModal('rp:pick:1:76561199000000101')).toBe(false);
     expect(opensReportModal('t:1:claim')).toBe(false);
+  });
+});
+
+const liveIn = (d: DB, t: FakeTransport, channel: string) => {
+  setSetting(d, 'discord_report_channel_id', channel);
+  return new ReportButton({ db: d, transport: t as never, intervalMs: 0 });
+};
+const standing = (t: FakeTransport) => t.messages.filter((m) => !m.deleted);
+const stored = (d: DB) => d.prepare('SELECT channel_id, message_id FROM report_message WHERE id = 1')
+  .get() as { channel_id: string; message_id: string } | undefined;
+
+describe('the standing message', () => {
+  let t: FakeTransport;
+  beforeEach(() => { seedPlayers(db); t = new FakeTransport(); });
+
+  it('posts one message with one button', async () => {
+    await liveIn(db, t, 'c1').tick();
+    expect(standing(t)).toHaveLength(1);
+    expect(standing(t)[0].payload.components[0][0]).toMatchObject({ kind: 'button', customId: 'rp:open' });
+    expect(stored(db)).toMatchObject({ channel_id: 'c1' });
+  });
+
+  it('does not post a second one on the next tick', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    await rb.tick();
+    expect(standing(t)).toHaveLength(1);
+  });
+
+  it('posts nothing when the setting is blank', async () => {
+    const rb = new ReportButton({ db, transport: t as never, intervalMs: 0 });
+    await rb.tick();
+    expect(standing(t)).toHaveLength(0);
+    expect(stored(db)).toBeUndefined();
+  });
+
+  it('re-posts a message someone deleted', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    const first = stored(db)!.message_id;
+    t.messages.find((m) => m.id === first)!.deleted = true;
+    await rb.tick();
+    expect(stored(db)!.message_id).not.toBe(first);
+    expect(standing(t)).toHaveLength(1);
+  });
+
+  it('moves to a new channel when the setting changes, and takes the old one down', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    const old = stored(db)!.message_id;
+    setSetting(db, 'discord_report_channel_id', 'c2');
+    await rb.tick();
+    expect(stored(db)).toMatchObject({ channel_id: 'c2' });
+    expect(t.messages.find((m) => m.id === old)!.deleted).toBe(true);
+    expect(standing(t)).toHaveLength(1);
+  });
+
+  it('still moves channel when the old message cannot be removed', async () => {
+    const rb = liveIn(db, t, 'c1');
+    await rb.tick();
+    setSetting(db, 'discord_report_channel_id', 'c2');
+    t.messages.length = 0; // the old message is gone from Discord's side
+    await rb.tick();
+    expect(stored(db)).toMatchObject({ channel_id: 'c2' });
+  });
+});
+
+describe('reaping drafts', () => {
+  it('deletes a draft older than an hour and keeps a fresh one', async () => {
+    seedPlayers(db);
+    const t = new FakeTransport();
+    const ins = db.prepare(
+      'INSERT INTO pending_reports (reporter_id, category, text, typed_name, candidates, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    ins.run(ME, 'griefing', '', 'bob', '[]', '2026-09-22T09:00:00.000Z');
+    ins.run(ME, 'griefing', '', 'bob', '[]', '2026-09-22T11:59:00.000Z');
+    const rb = new ReportButton({
+      db, transport: t as never, intervalMs: 0, now: () => new Date('2026-09-22T12:00:00.000Z'),
+    });
+    await rb.tick();
+    expect((db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get() as { n: number }).n).toBe(1);
   });
 });
