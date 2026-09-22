@@ -13,6 +13,7 @@ const ROUTES = [
   ['matches', '/matches'], ['match-9001', '/match/9001'], ['campaigns', '/maps'],
   ['map-caves', '/map/l4d_vs_smalltown01_caves'],
   ['profile', '/player/76561198000000001'],
+  ['hud', '/hud'],
 ];
 const WIDTHS = [1400, 390];
 
