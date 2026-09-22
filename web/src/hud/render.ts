@@ -1,0 +1,239 @@
+/**
+ * Draws a panel's insides from the generator's own output.
+ *
+ * v1 drew each panel as a hand-made stand-in, honest about where the panel sat
+ * and silent about what was inside it. This walks the panel's .res tree as the
+ * generator left it (buildTrees), so every child is drawn where the file
+ * says, at the size the file says, and an edit to the file is an edit to the
+ * picture. Images come from the exported art, labels from the scheme's font
+ * sizes, bars from the bar art. Nothing here decides a position: that is the
+ * tree's job, which is the whole point.
+ *
+ * The preview shows the healthy, alive state, so children whose visibility
+ * game code decides at runtime are not drawn: their positions are still
+ * reported by childRects so a later editor can move them.
+ */
+import type { HudDesign } from './design';
+import { buildTrees } from './build';
+import { kvFind, kvGet, type KvNode } from './kv';
+import { artUrl, normaliseMaterial } from './art';
+import { parseColour } from './textures';
+import { SLOTS } from './slots';
+
+export type ChildKind = 'image' | 'label' | 'bar' | 'other';
+export interface ChildRect { name: string; kind: ChildKind; x: number; y: number; w: number; h: number; visible: boolean }
+export interface PanelBox { x: number; y: number }
+export interface DrawOpts { card?: number; onAsset?: () => void }
+
+const SCHEME = 'resource/clientscheme.res';
+
+/** The file each inside-editable panel draws from. siHealth is six files that are one card at six placements; the Hunter's is the one shown. */
+export const PANEL_FILE: Record<string, string> = {
+  ownHealth: 'resource/ui/hud/localplayerpanel.res',
+  teamColumn: 'resource/ui/hud/teammatepanel.res',
+  siHealth: 'resource/ui/hud/hunterhealth.res',
+  infectedRow: 'resource/ui/hud/zombieteamdisplayplayer.res',
+};
+
+/** Game code decides when these show; the preview is the healthy, alive state. */
+const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplacement', 'duckingicon']);
+
+/** Sample people for the cards: the three teammates, and Bill for the player's own panel. */
+const CARD_NAMES = ['Francis', 'Louis', 'Zoey'];
+const CARD_PORTRAITS = ['vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_teenangst'];
+const OWN_PORTRAIT = 'vgui/s_panel_namvet';
+const PREVIEW_FONT = '"Roboto Condensed", "Arial Narrow", sans-serif';
+
+function kindOf(n: KvNode): ChildKind {
+  const c = (kvGet(n, 'ControlName') ?? '').toLowerCase();
+  if (c === 'imagepanel') return 'image';
+  if (c === 'label') return 'label';
+  if (c === 'healthpanel') return 'bar';
+  return 'other';
+}
+
+const num = (v: string | undefined, d = 0) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : d; };
+
+/** Children in draw order: file order, then zpos ascending, as VGUI paints them. */
+function orderedChildren(nodes: KvNode[]): KvNode[] {
+  return nodes.filter((n) => typeof n.value !== 'string')
+    .map((n, i) => ({ n, i, z: num(kvGet(n, 'zpos')) }))
+    .sort((a, b) => a.z - b.z || a.i - b.i)
+    .map((x) => x.n);
+}
+
+export function childRects(design: HudDesign, panelId: string, origin: PanelBox, k: number): ChildRect[] {
+  const file = PANEL_FILE[panelId];
+  if (!file) throw new Error(`No inside-editable panel ${panelId}`);
+  return orderedChildren(buildTrees(design)(file)).map((n) => ({
+    name: n.key, kind: kindOf(n),
+    x: origin.x + num(kvGet(n, 'xpos')) * k, y: origin.y + num(kvGet(n, 'ypos')) * k,
+    w: num(kvGet(n, 'wide')) * k, h: num(kvGet(n, 'tall')) * k,
+    visible: (kvGet(n, 'visible') ?? '1') !== '0',
+  }));
+}
+
+// --- scheme lookups: a font's size and weight, a named colour ---
+
+function fontFace(design: HudDesign, name: string): { tall: number; bold: boolean } {
+  const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
+  const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
+  if (!first) return { tall: 12, bold: false };
+  return { tall: num(kvGet(first, 'tall'), 12), bold: num(kvGet(first, 'weight')) >= 700 };
+}
+
+/** Base files use scheme colour names; the generator never writes one, but the preview has to read them. */
+function colourOf(design: HudDesign, value: string | undefined): string {
+  if (!value) return 'rgba(255,255,255,1)';
+  let raw = value.trim();
+  if (!/^\d+ \d+ \d+ \d+$/.test(raw)) {
+    const named = kvFind(buildTrees(design)(SCHEME), ['Colors', raw]);
+    raw = named && typeof named.value === 'string' ? named.value : '255 255 255 255';
+  }
+  const [r, g, b, a] = parseColour(raw);
+  return `rgba(${r},${g},${b},${a / 255})`;
+}
+
+// --- images: the exported art, or a slot texture the design generated ---
+
+let imageFactory: (url: string) => HTMLImageElement = (url) => { const i = new Image(); i.src = url; return i; };
+export function _setImageFactory(f: ((url: string) => HTMLImageElement) | null): void {
+  imageFactory = f ?? ((url) => { const i = new Image(); i.src = url; return i; });
+}
+const images = new Map<string, HTMLImageElement>();
+const missing = new Set<string>();
+
+/** The art for a material, once loaded; undefined while it loads (onAsset fires then) or when the index lacks it. */
+function artImage(material: string, onAsset?: () => void): HTMLImageElement | undefined {
+  let img = images.get(material);
+  if (!img) {
+    const url = artUrl(material);
+    if (!url) {
+      if (!missing.has(material)) { missing.add(material); console.warn(`HUD preview: no art for ${material}`); }
+      return undefined;
+    }
+    img = imageFactory(url);
+    img.onload = () => onAsset?.();
+    images.set(material, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : undefined;
+}
+
+/**
+ * A restyled slot, drawn straight from the design's colour rather than from a
+ * generated texture. stylePass makes a flat or rounded texture in that colour
+ * and the game stretches it over the panel, so a filled (or rounded) rect in
+ * the same colour is the same picture, and it needs no offscreen canvas,
+ * which happy-dom does not have. Uploads (kind image) are not drawn until the
+ * editor for insides exists; the stock frame shows in their place.
+ * Returns false when the slot is not restyled, so the caller can fall back.
+ */
+export function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
+  const slot = SLOTS.find((s) => s.id.toLowerCase() === slotId);
+  const style = slot && design.styles[slot.id];
+  if (!slot || !style || style.kind === 'stock' || style.kind === 'image') return false;
+  const [cr, cg, cb, ca] = parseColour(style.color ?? slot.defaultColor);
+  ctx.fillStyle = `rgba(${cr},${cg},${cb},${ca / 255})`;
+  if (style.kind === 'rounded') {
+    const radius = Math.min(8, r.w / 4, r.h / 4);
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(r.x, r.y, r.w, r.h, radius); else ctx.rect(r.x, r.y, r.w, r.h);
+    ctx.fill();
+  } else {
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
+  return true;
+}
+
+/** Test seam: forget every loaded image and every warned-about material. */
+export function _resetAssetCache(): void { images.clear(); missing.clear(); }
+
+function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(128,128,128,0.35)';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.setLineDash([3, 3]);
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+}
+
+function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+  const image = kvGet(n, 'image');
+  const fill = kvGet(n, 'fillcolor');
+  const lname = n.key.toLowerCase();
+  let src: CanvasImageSource | undefined;
+  let natural: { w: number; h: number } | undefined;
+  if (lname === 'head' || lname === 'playerimage') {
+    // Game code picks the portrait; the preview picks a fixed one per card.
+    const material = opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length];
+    const img = artImage(material, opts.onAsset);
+    if (!img) return;
+    ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    return;
+  }
+  if (image) {
+    const material = normaliseMaterial(image);
+    if (material.startsWith('vgui/hud/hudeditor/')) {
+      drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r);   // false: an upload; the game shows it, we cannot yet
+      return;
+    } else {
+      const img = artImage(material, opts.onAsset);
+      if (!img) { if (!artUrl(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
+      src = img; natural = { w: img.naturalWidth, h: img.naturalHeight };
+    }
+    if ((kvGet(n, 'scaleImage') ?? '0') !== '0' || !natural) ctx.drawImage(src, r.x, r.y, r.w, r.h);
+    else ctx.drawImage(src, r.x, r.y, natural.w * k, natural.h * k);   // unscaled: texture pixels are HUD units
+    return;
+  }
+  if (fill) { ctx.fillStyle = colourOf(design, fill); ctx.fillRect(r.x, r.y, r.w, r.h); }
+}
+
+function sampleText(n: KvNode, opts: DrawOpts): string {
+  const t = kvGet(n, 'labelText') ?? '';
+  if (t === '%HealthNumber%') return '100';
+  const lname = n.key.toLowerCase();
+  if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
+  if (lname === 'spawntimelabel') return '12';
+  if (lname === 'healthicon') return '+';                          // the real glyph lives in a Valve icon font
+  return t;
+}
+
+function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+  const s = sampleText(n, opts);
+  if (!s) return;
+  const face = fontFace(design, kvGet(n, 'font') ?? '');
+  const px = face.tall * k;                                          // scheme tall is already scaled by scalePass when the parent was
+  ctx.save();
+  ctx.font = `${face.bold ? 'bold ' : ''}${px}px ${PREVIEW_FONT}`;
+  ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
+  const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
+  ctx.textBaseline = 'middle';
+  let x = r.x;
+  if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + r.w; }
+  else if (align.includes('center')) { ctx.textAlign = 'center'; x = r.x + r.w / 2; }
+  else ctx.textAlign = 'left';
+  ctx.fillText(s, x, r.y + r.h / 2);
+  ctx.restore();
+}
+
+function drawBar(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
+  const img = artImage('vgui/healthbar_green', opts.onAsset);       // 100 health: the whole rect, green
+  if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
+  else { ctx.fillStyle = 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+}
+
+export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts: DrawOpts = {}): void {
+  const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
+  const rects = childRects(design, panelId, origin, k);
+  for (const [i, n] of nodes.entries()) {
+    const r = rects[i];
+    if (!r.visible || STATE_CHILDREN.has(n.key.toLowerCase())) continue;
+    switch (r.kind) {
+      case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
+      case 'label': drawLabel(ctx, design, n, r, k, opts); break;
+      case 'bar': drawBar(ctx, r, opts); break;
+      default: break;                                                // Panel, CircularProgressBar: nothing to show
+    }
+  }
+}
