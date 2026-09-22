@@ -59,6 +59,15 @@ describe('who hears that a ticket changed', () => {
     nudge(1);
     expect(heard()).toEqual([STAFF_ACCUSED, ADMIN, OWNER]);
 
+    // And an admin whose ban is only in the bans table: the same rule every
+    // other staff check asks (inGoodStanding), not players.status on its own.
+    reset();
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', ?)")
+      .run(ADMIN, new Date().toISOString());
+    expect(db.prepare('SELECT status FROM players WHERE steamid = ?').get(ADMIN)).toEqual({ status: 'active' });
+    nudge(1);
+    expect(heard()).toEqual([STAFF_ACCUSED, OWNER]);
+
     reset();
     nudge(9999);
     expect(heard()).toEqual([]);
