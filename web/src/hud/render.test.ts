@@ -59,19 +59,22 @@ describe('childRects', () => {
 
   it('agrees with the downloaded file for every panel in both presets', () => {
     // Against what buildHud writes, parsed back, not against buildTrees: the
-    // rects must match the file a player installs.
-    for (const preset of ['stock', 'modern'] as const) {
-      const d = design({ preset, elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 }, teamColumn: { scale: 1.5 } } });
+    // rects must match the file a player installs. The fitted variant moves
+    // the item icons and turns the health number on, so the card is re-fitted.
+    for (const preset of ['stock', 'modern'] as const) for (const fit of [false, true]) {
+      const d = design({ preset,
+        elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 }, teamColumn: { scale: 1.5, ...(fit ? { fit: true } : {}) } },
+        children: fit ? { teamColumn: { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } } : {} });
       const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
       for (const panelId of Object.keys(PANEL_FILE)) {
         const written = parseKv(text(files, PANEL_FILE[panelId]))[0].value as KvNode[];
         const nodes = written.filter((n) => typeof n.value !== 'string');
         const rects = childRects(d, panelId, { x: 0, y: 0 }, 1);
-        expect(rects.length, `${preset} ${panelId}`).toBe(nodes.length);
+        expect(rects.length, `${preset} ${fit} ${panelId}`).toBe(nodes.length);
         // rects are in draw order, not file order, so pair each file child with its rect by name.
         for (const n of nodes) {
           const r = rects.find((c) => c.name === n.key);
-          const at = `${preset} ${panelId} ${n.key}`;
+          const at = `${preset} ${fit} ${panelId} ${n.key}`;
           expect(r, at).toBeDefined();
           expect([r!.x, r!.y, r!.w, r!.h], at).toEqual(['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(n, key) ?? '0') || 0));
         }

@@ -526,32 +526,37 @@ describe('buildTrees', () => {
   // labels read fonts and colours from) is compared in both presets, advanced
   // on and off, with the panels scaled and two slots restyled so every pass
   // has something to write. A file the build does not emit must still be the
-  // base file, since that is what the game will read.
+  // base file, since that is what the game will read. The fitted variant also
+  // moves the item icons and turns the health number on, so fitPass shifts,
+  // re-fits and squares the card in both trees.
   for (const preset of ['stock', 'modern'] as const) {
     for (const advanced of [false, true]) {
-      it(`returns every file the preview reads exactly as buildHud writes it: ${preset}${advanced ? ', advanced' : ''}`, () => {
-        const d = design({ preset, advanced,
-          elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
-            teamColumn: { scale: 1.5, dir: 'column', spacing: 40 } },
-          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } },
-          children: { teamColumn: { Name: { x: 20, fontSize: 14 }, Head: { visible: false } } } });
-        const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
-        const paths = [...Object.values(PANEL_FILE), 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res', 'resource/clientscheme.res'];
-        for (const path of paths) {
-          const t = text(files, path);
-          const expected = parseKv(t ?? baseFile(preset, path))[0].value as KvNode[];
-          const got = buildTrees(d)(path);
-          if (path === 'resource/clientscheme.res' && preset === 'modern') {
-            // fontPass, which buildTrees skips, registers the ttf files in
-            // CustomFontFiles on the modern preset. Nothing in the preview
-            // reads that block, so it is the one part left out.
-            const drop = (nodes: KvNode[]) => nodes.filter((n) => n.key.toLowerCase() !== 'customfontfiles');
-            expect(drop(got), `${preset} ${path}`).toEqual(drop(expected));
-          } else {
-            expect(got, `${preset} ${path}`).toEqual(expected);
+      for (const fit of [false, true]) {
+        it(`returns every file the preview reads exactly as buildHud writes it: ${preset}${advanced ? ', advanced' : ''}${fit ? ', fitted' : ''}`, () => {
+          const d = design({ preset, advanced,
+            elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
+              teamColumn: { scale: 1.5, dir: 'column', spacing: 40, ...(fit ? { fit: true } : {}) } },
+            styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } },
+            children: { teamColumn: { Name: { x: 20, fontSize: 14 }, Head: { visible: false },
+              ...(fit ? { Items: { x: 37, y: 40 }, HealthNumber: { on: true, x: 140 } } : {}) } } });
+          const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+          const paths = [...Object.values(PANEL_FILE), 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res', 'resource/clientscheme.res'];
+          for (const path of paths) {
+            const t = text(files, path);
+            const expected = parseKv(t ?? baseFile(preset, path))[0].value as KvNode[];
+            const got = buildTrees(d)(path);
+            if (path === 'resource/clientscheme.res' && preset === 'modern') {
+              // fontPass, which buildTrees skips, registers the ttf files in
+              // CustomFontFiles on the modern preset. Nothing in the preview
+              // reads that block, so it is the one part left out.
+              const drop = (nodes: KvNode[]) => nodes.filter((n) => n.key.toLowerCase() !== 'customfontfiles');
+              expect(drop(got), `${preset} ${path}`).toEqual(drop(expected));
+            } else {
+              expect(got, `${preset} ${path}`).toEqual(expected);
+            }
           }
-        }
-      });
+        });
+      }
     }
   }
 
