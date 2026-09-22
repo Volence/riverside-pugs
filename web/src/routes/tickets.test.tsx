@@ -7,7 +7,7 @@ import { eventName, TICKETS_EVENT } from '../hooks/useTicketNudge';
 const { mockMod, mockAdmin } = vi.hoisted(() => ({
   mockMod: {
     tickets: vi.fn(), ticket: vi.fn(), claim: vi.fn(), restrict: vi.fn(), access: vi.fn(),
-    ban: vi.fn(), close: vi.fn(), reopen: vi.fn(), open: vi.fn(),
+    ban: vi.fn(), close: vi.fn(), reopen: vi.fn(), open: vi.fn(), removeMessage: vi.fn(),
   },
   mockAdmin: { players: vi.fn() },
 }));
@@ -31,6 +31,7 @@ const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
   events: [{ id: 1, actorId: null, actorName: null, kind: 'opened', detail: {}, createdAt: '2026-09-21T10:00:00.000Z' }],
   bans: [], access: [], accessCandidates: [],
   discussion: { state: 'unconfigured', surface: null, url: null },
+  messages: [],
   caseFile: { steamid: '7', name: 'Walls', avatar: null, status: 'active', sr: 1500, games: 40, createdAt: '2026-08-01', activeBan: null, bans: [], penalties: [], timeout: null, inputFlags: [], aliases: [], sharesAddressWith: [], tickets: [summary] },
   summary: {
     steamid: '7', name: 'Walls', avatar: null, status: 'active', isAdmin: false, isMod: false,

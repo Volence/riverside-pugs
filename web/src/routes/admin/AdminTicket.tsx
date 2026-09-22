@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { modApi, type TicketDetail, type TicketDiscussion, type TicketEvent } from '../../api';
+import { modApi, type TicketDiscussion } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { useTicketNudge } from '../../hooks/useTicketNudge';
 import { campaignName } from '../../format';
@@ -7,6 +7,7 @@ import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
 import { reportLine } from './AdminTickets';
 import { FileSummary } from './file/FileSummary';
+import { TicketTimeline } from './TicketTimeline';
 
 const OUTCOMES = [['action_taken', 'Action taken'], ['warned', 'Warned'], ['no_action', 'No action'], ['invalid', 'Invalid report']] as const;
 const LENGTHS: [minutes: number | null, label: string][] = [
@@ -29,25 +30,6 @@ function Discussion({ d }: { d: TicketDiscussion }) {
         : 'This ticket has no Discord thread.';
   return <p class="muted">{text}</p>;
 }
-
-const eventText = (e: TicketEvent): string => {
-  const who = e.actorName ?? 'A player';
-  switch (e.kind) {
-    case 'opened': return e.actorId ? `${who} opened the ticket` : 'Opened by a report';
-    case 'report_attached': return 'Another report came in';
-    case 'note': return `${who}: ${String(e.detail.text ?? '')}`;
-    case 'claimed': return `${who} claimed it`;
-    case 'unclaimed': return `${who} released it`;
-    case 'restricted': return `${who} restricted it`;
-    case 'unrestricted': return `${who} lifted the restriction`;
-    case 'access_added': return `${who} gave someone access`;
-    case 'banned': return `${who} banned the player: ${String(e.detail.reason ?? '')}`;
-    case 'closed': return `${who} closed it: ${String(e.detail.outcome ?? '').replace(/_/g, ' ')}${e.detail.note ? ` (${String(e.detail.note)})` : ''}`;
-    case 'reopened': return `${who} reopened it`;
-    case 'folded': return `Ticket #${String(e.detail.from ?? '')} about the same player was folded into this one`;
-    default: return `${who}: ${e.kind.replace(/_/g, ' ')}`;
-  }
-};
 
 export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => void; onOpen: (id: number) => void }) {
   const { data, error, reload } = useFetch((s) => modApi.ticket(id, s), [id]);
@@ -148,9 +130,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
       <section>
         <h4>Timeline</h4>
-        <ul class="admin-list">
-          {data.events.map((e) => <li key={e.id}><span class="muted">{fmtTime(e.createdAt)}</span> {eventText(e)}</li>)}
-        </ul>
+        <TicketTimeline ticketId={t.id} events={data.events} messages={data.messages} busy={busy} run={run} />
         <Discussion d={data.discussion} />
       </section>
 

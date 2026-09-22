@@ -981,6 +981,22 @@ export interface TicketDiscussion {
   surface: 'forum' | 'private' | null;
   url: string | null;
 }
+export interface TicketAttachment {
+  id: number; filename: string; contentType: string; size: number; sha256: string | null;
+  /** On the server and not removed: it can be fetched. */
+  stored: boolean;
+  skipReason: 'too_large' | 'type' | 'quota' | 'disabled' | 'fetch_failed' | null;
+  removed: boolean;
+}
+/** One message mirrored from a ticket's Discord thread. `removed` set means a
+ *  tombstone: content and history are empty and no file can be fetched. */
+export interface TicketMessage {
+  id: number; channel: 'staff' | 'reporter'; authorName: string; authorPlayerId: string | null; authorPlayerName: string | null;
+  content: string; history: string[]; createdAt: string; editedAt: string | null; deletedAt: string | null;
+  removed: { at: string; by: string | null; byName: string | null; reason: string } | null;
+  attachments: TicketAttachment[];
+}
+
 export interface TicketDetail {
   ticket: TicketSummary & { outcomeNote: string; openedBy: string | null; openedByName: string | null; closedBy: string | null; closedByName: string | null };
   reports: TicketReport[];
@@ -989,6 +1005,7 @@ export interface TicketDetail {
   access: { steamid: string; name: string }[];
   accessCandidates: { steamid: string; name: string }[];
   discussion: TicketDiscussion;
+  messages: TicketMessage[];
   caseFile: CaseFile | null;
   /** The accused as the Player File's glance row shows them. Null only if
    *  the player row vanished under the ticket. */
@@ -1131,6 +1148,11 @@ export const peopleApi = {
     post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
 };
 
+/** Where a stored ticket file is served from. A plain function, not part of
+ *  modApi: it makes no request, it is what an <img> points at. */
+export const ticketAttachmentUrl = (ticketId: number, attachmentId: number): string =>
+  `/api/mod/tickets/${ticketId}/attachments/${attachmentId}`;
+
 export const modApi = {
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
     get<{ tickets: TicketSummary[]; counts: TicketCounts }>(`/api/mod/tickets?filter=${filter}`, signal),
@@ -1145,6 +1167,8 @@ export const modApi = {
   ban: (id: number, reason: string, minutes: number | null) => post(`/api/mod/tickets/${id}/ban`, { reason, minutes }),
   close: (id: number, outcome: string, note: string) => post(`/api/mod/tickets/${id}/close`, { outcome, note }),
   reopen: (id: number) => post(`/api/mod/tickets/${id}/reopen`),
+  removeMessage: (id: number, messageId: number, reason: string) =>
+    post(`/api/mod/tickets/${id}/messages/${messageId}/remove`, { reason }),
 };
 
 export const adminApi = {

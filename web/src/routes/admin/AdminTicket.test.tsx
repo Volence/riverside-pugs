@@ -42,7 +42,7 @@ const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
     categories: ['cheating'], createdAt: '2026-09-21T18:56:13.000Z', lastReportAt: null, closedAt: null,
     outcomeNote: '', openedBy: null, openedByName: null, closedBy: null, closedByName: null,
   },
-  reports: [], events: [], bans: [], access: [], accessCandidates: [],
+  reports: [], events: [], bans: [], access: [], accessCandidates: [], messages: [],
   caseFile, summary, viewer: { isAdmin: true, banCapMinutes: null },
   ...over,
 });
