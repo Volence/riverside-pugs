@@ -303,6 +303,16 @@ describe('stats routes', () => {
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
   });
 
+  // A player the rating never touched (unrated, or a match rated before they
+  // were rostered) has no rating_history row. "+0" would claim a result.
+  it('match detail sends a null SR change for a player the rating did not touch', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    db.prepare('DELETE FROM rating_history WHERE match_id = ? AND player_id = ?').run(matchId, ME);
+    const body = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect(body.players.find((x: any) => x.steamid === ME).srDelta).toBeNull();
+    expect(typeof body.players.find((x: any) => x.steamid === IDS[4]).srDelta).toBe('number');
+  });
+
   // 2026-09-21: match 103 was live and https://riversidepug.com/match/103 said
   // "Match not found." even though every admin-feed post about it links
   // exactly there. The link has to work while the match is still running.

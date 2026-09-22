@@ -642,6 +642,14 @@ button.ctile:hover { border-color: var(--text-muted); }
 }
 .delta--up { color: var(--win); }
 .delta--down { color: var(--loss); }
+/* Beside a name in the versus header: no column to line up with there, and
+ * the label font's letter spacing would stretch the digits. */
+.versus__names .delta {
+  min-width: 0;
+  vertical-align: middle;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+}
 
 /* W/L/D glyph. The letter is the information; the color reinforces it. */
 .result {

@@ -396,6 +396,12 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   // winner in the eyebrow.
   const voided = Boolean(match.voidedAt);
   const aborted = match.state === 'aborted' && !voided;
+  // A voided match's ratings were rebuilt without it, so whatever it once
+  // moved is no longer true; an aborted one never moved anything.
+  const showSr = match.state === 'completed' && !voided;
+  const versusName = (p: typeof players[number]) => (
+    showSr ? { name: p.name, srDelta: p.srDelta ?? null } : p.name
+  );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'
       : winnerLabel(match.winner!);
@@ -457,8 +463,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       )}
 
       <VersusHeader
-        teamA={teamPlayers('a').map((p) => p.name)}
-        teamB={teamPlayers('b').map((p) => p.name)}
+        teamA={teamPlayers('a').map(versusName)}
+        teamB={teamPlayers('b').map(versusName)}
         scoreA={match.teamAScore}
         scoreB={match.teamBScore}
         eyebrowA={eyebrowA}

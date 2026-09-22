@@ -170,7 +170,8 @@ export interface MatchPlayerStats {
   commonKills: number;
   ffDealt: number;
   revives: number;
-  srDelta: number;
+  /** Null when the rating never touched this player in this match. */
+  srDelta: number | null;
   /** Skill-detect stats, already filtered server-side for the viewer: a
    *  self-visibility stat is present only when the viewer is the subject. */
   stats: Record<string, number>;

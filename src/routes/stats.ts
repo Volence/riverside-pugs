@@ -241,7 +241,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       discordName: viewer !== null && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
       title: titles.get(p.steamid) ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
-      srDelta: p.mu_after === null ? 0
+      // Null, not 0, when the rating never touched them: "+0" claims a result.
+      srDelta: p.mu_after === null ? null
         : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
       stats: visibleStats(byPlayer.get(p.steamid) ?? {}, p.steamid, viewer),
     }));

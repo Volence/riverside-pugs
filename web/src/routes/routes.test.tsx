@@ -224,6 +224,33 @@ describe('MatchDetail', () => {
     expect(container.querySelectorAll('table').length).toBe(2);
   });
 
+  it('shows each player SR change beside their name once the match is over', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+        { steamid: '3', name: 'carol', team: 'b', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: null },
+      ],
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    const versus = container.querySelector('.versus')!;
+    expect(versus.querySelector('.delta--up')?.textContent).toBe('+12');
+    expect(versus.querySelector('.delta--down')?.textContent).toMatch(/12/);
+    // Unrated: nothing, not "+0".
+    expect(versus.querySelectorAll('.delta').length).toBe(2);
+    expect(versus.textContent).toContain('carol');
+  });
+
+  it('shows no SR changes on a voided match, whose ratings were rebuilt without it', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a', voidedAt: '2026-09-07T00:00:00' },
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    expect(container.querySelectorAll('.versus .delta').length).toBe(0);
+  });
+
   it('says so rather than faking zeros when a match has no per-map stats', async () => {
     mockApi.match.mockResolvedValue({
       match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
