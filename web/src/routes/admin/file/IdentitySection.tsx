@@ -4,6 +4,7 @@ import { Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
 import { fileUrl } from '../adminRoutes';
 import { SteamAccountPanel } from '../SteamAccountPanel';
+import { countryName } from '../../../countries';
 
 /** Aliases, Discord history, the Steam account and shared connections, then
  *  the merge tool that all of it is evidence for. Moderators see every row
@@ -22,7 +23,7 @@ export function IdentitySection(
   const [into, setInto] = useState('');
   const [plan, setPlan] = useState<MergePlan | null>(null);
   const [planError, setPlanError] = useState('');
-  const countries = [...new Set(id.networks.map((n) => n.country).filter(Boolean))];
+  const countries = [...new Set(id.networks.map((n) => n.country).filter(Boolean))].map(countryName);
 
   const preview = async () => {
     setPlan(null);
@@ -71,7 +72,7 @@ export function IdentitySection(
                 <a href={fileUrl(o.steamid)}>{o.name}</a> <code>{o.steamid}</code>{' '}
                 <span class="muted">
                   {o.seenCount} {o.seenCount === 1 ? 'connect' : 'connects'}
-                  {o.country ? `, ${o.country}` : ''}, last {fmtTime(o.lastSeen)}
+                  {o.country ? `, ${countryName(o.country)}` : ''}, last {fmtTime(o.lastSeen)}
                 </span>
               </li>
             ))}

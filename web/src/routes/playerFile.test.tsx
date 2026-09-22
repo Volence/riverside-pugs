@@ -108,6 +108,21 @@ describe('the Player File', () => {
     expect(screen.getByRole('link', { name: '#7' }).getAttribute('href')).toBe('/match/7');
   });
 
+  it('names the countries a player connects from rather than printing their codes', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        identity: {
+          ...file().sections.identity,
+          networks: [{ ipHash: 'h1', country: 'US', firstSeen: '2026-09-01', lastSeen: '2026-09-02', seenCount: 1 }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    expect(await screen.findByText(/Connects from United States/)).toBeTruthy();
+    expect(screen.getByText(/4 connects, United States/)).toBeTruthy();
+  });
+
   it('tells a viewer plainly when there is no such file', async () => {
     mockPeople.file.mockRejectedValue(new Error('404'));
     render(<PlayerFile steamid={P} me="76561199000000009" />);
