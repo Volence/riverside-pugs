@@ -29,7 +29,7 @@ const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
   ticket: { ...summary, outcomeNote: '', openedBy: null, openedByName: null, closedBy: null, closedByName: null },
   reports: [{ id: 1, reporterId: '3', reporterDiscordId: null, reporterName: 'Rep', category: 'cheating', text: 'saw me through a wall', matchId: 66, campaign: 'dead_air', moment: { ordinal: 2, half: 1, tMs: 61500 }, createdAt: '2026-09-21T10:00:00.000Z' }],
   events: [{ id: 1, actorId: null, actorName: null, kind: 'opened', detail: {}, createdAt: '2026-09-21T10:00:00.000Z' }],
-  bans: [], access: [], accessCandidates: [],
+  bans: [], discordSanctions: [], access: [], accessCandidates: [],
   discussion: { state: 'unconfigured', surface: null, url: null },
   messages: [],
   caseFile: { steamid: '7', name: 'Walls', avatar: null, status: 'active', sr: 1500, games: 40, createdAt: '2026-08-01', activeBan: null, bans: [], penalties: [], timeout: null, inputFlags: [], aliases: [], sharesAddressWith: [], tickets: [summary] },

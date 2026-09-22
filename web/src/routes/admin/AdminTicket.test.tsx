@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/preact';
-import type { CaseFile, FileSummaryData, TicketDetail } from '../../api';
+import type { CaseFile, DiscordSanction, FileSummaryData, TicketDetail } from '../../api';
 
 const { mockMod } = vi.hoisted(() => ({ mockMod: { ticket: vi.fn() } }));
 
@@ -42,10 +42,18 @@ const detail = (over: Partial<TicketDetail> = {}): TicketDetail => ({
     categories: ['cheating'], createdAt: '2026-09-21T18:56:13.000Z', lastReportAt: null, closedAt: null,
     outcomeNote: '', openedBy: null, openedByName: null, closedBy: null, closedByName: null,
   },
-  reports: [], events: [], bans: [], access: [], accessCandidates: [], messages: [],
+  reports: [], events: [], bans: [], discordSanctions: [], access: [], accessCandidates: [], messages: [],
   caseFile, summary, viewer: { isAdmin: true, banCapMinutes: null },
   ...over,
 });
+
+const DISCORD_TARGET = { targetId: null, targetDiscordId: '990000000000000001', targetName: 'Lurky' };
+
+const sanctionRow: DiscordSanction = {
+  id: 5, kind: 'timeout', until: '2026-09-23T00:00:00.000Z', reason: 'spam', ticketId: 1,
+  createdBy: '76561198000000099', createdByName: 'ModOne', createdAt: '2026-09-22T00:00:00.000Z',
+  liftedBy: null, liftedAt: null, active: true,
+};
 
 beforeEach(() => { mockMod.ticket.mockReset(); });
 afterEach(cleanup);
@@ -86,5 +94,59 @@ describe('AdminTicket', () => {
     render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
     await waitFor(() => expect(screen.getByText(`About ${NAME}`)).toBeTruthy());
     expect(screen.queryByText('Open full file')).toBeNull();
+  });
+
+  it('shows no Discord controls or sanctions list on a player ticket', async () => {
+    mockMod.ticket.mockResolvedValue(detail());
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    await screen.findByRole('button', { name: 'Ban' });
+    expect(screen.queryByRole('button', { name: 'Time out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ban from Discord' })).toBeNull();
+    expect(screen.queryByText('Discord sanctions')).toBeNull();
+  });
+
+  it('shows Time out but no server Ban control for a Discord-only ticket', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: false, banCapMinutes: 10080 },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByRole('button', { name: 'Time out' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Ban' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ban from Discord' })).toBeNull();
+  });
+
+  it('shows Ban from Discord only to an admin', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: true, banCapMinutes: null },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByRole('button', { name: 'Ban from Discord' })).toBeTruthy();
+  });
+
+  it('shows a Lift button on an active Discord sanction only to an admin', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      discordSanctions: [sanctionRow],
+      viewer: { isAdmin: false, banCapMinutes: 10080 },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    await screen.findByText('Discord sanctions');
+    expect(screen.queryByRole('button', { name: 'Lift' })).toBeNull();
+  });
+
+  it('lets an admin lift an active Discord sanction', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      discordSanctions: [sanctionRow],
+      viewer: { isAdmin: true, banCapMinutes: null },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByRole('button', { name: 'Lift' })).toBeTruthy();
   });
 });

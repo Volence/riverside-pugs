@@ -979,6 +979,15 @@ export interface CaseFile {
   inputFlags: AdminPlayerDetail['inputFlags']; aliases: AdminPlayerDetail['aliases'];
   sharesAddressWith: AdminPlayerDetail['sharesAddressWith']; tickets: TicketSummary[];
 }
+/** A Discord-side timeout or ban, on a Discord-only accused. Every row for
+ *  their Discord id across every ticket, redacted server-side to null out
+ *  `ticketId` and blank `reason` where the row belongs to a restricted
+ *  ticket this viewer cannot open. */
+export interface DiscordSanction {
+  id: number; kind: 'timeout' | 'ban'; until: string | null; reason: string; ticketId: number | null;
+  createdBy: string; createdByName: string | null; createdAt: string;
+  liftedBy: string | null; liftedAt: string | null; active: boolean;
+}
 export interface TicketDiscussion {
   state: 'ready' | 'pending' | 'unconfigured' | 'about_staff' | 'none';
   surface: 'forum' | 'private' | null;
@@ -1005,6 +1014,7 @@ export interface TicketDetail {
   reports: TicketReport[];
   events: TicketEvent[];
   bans: { id: number; reason: string; createdBy: string; createdByName: string | null; createdAt: string; expiresAt: string | null; liftedAt: string | null }[];
+  discordSanctions: DiscordSanction[];
   access: { steamid: string; name: string }[];
   accessCandidates: { steamid: string; name: string }[];
   discussion: TicketDiscussion;
@@ -1193,6 +1203,9 @@ export const modApi = {
   reopen: (id: number) => post(`/api/mod/tickets/${id}/reopen`),
   removeMessage: (id: number, messageId: number, reason: string) =>
     post(`/api/mod/tickets/${id}/messages/${messageId}/remove`, { reason }),
+  discordSanction: (id: number, kind: 'timeout' | 'ban', minutes: number | null, reason: string) =>
+    post(`/api/mod/tickets/${id}/discord-sanction`, { kind, minutes, reason }),
+  liftDiscordSanction: (sid: number) => post(`/api/mod/discord-sanctions/${sid}/lift`),
 };
 
 export const adminApi = {

@@ -90,4 +90,38 @@ describe('a ticket about a Discord-only person', () => {
     expect(accused).not.toContain('/player/');
     expect(fields.find((f) => f.name === 'Reports')!.value).toContain('2 from 2');
   });
+
+  it('carries the Discord sanctions on this member, with active computed for the viewer', () => {
+    db.prepare(
+      `INSERT INTO discord_sanctions (discord_id, kind, until, reason, ticket_id, created_by, created_at)
+       VALUES (?, 'timeout', '2099-01-01T00:00:00Z', 'spam', ?, ?, '2026-09-22T00:00:00Z')`,
+    ).run(LURKER, ticketId, MOD);
+    const d = ticketDetail(db, ticketId, MOD)!;
+    expect(d.discordSanctions).toMatchObject([
+      { kind: 'timeout', reason: 'spam', ticketId, createdBy: MOD, createdByName: 'mod', active: true },
+    ]);
+  });
+
+  it('blanks the reason and the ticket id of a sanction tied to a restricted ticket the viewer is not on', () => {
+    const MOD2 = '76561199000000404';
+    upsertPlayer(db, { steamid: MOD2, name: 'mod2', avatar: null }, []);
+    activatePlayer(db, MOD2);
+    db.prepare("UPDATE players SET is_mod = 1 WHERE steamid = ?").run(MOD2);
+    const restrictedTicketId = Number(db.prepare(
+      "INSERT INTO tickets (target_discord_id, target_name, restricted, status, created_at) VALUES (?, 'Lurky', 1, 'closed', '2026-09-22T00:00:00Z')",
+    ).run(LURKER).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO discord_sanctions (discord_id, kind, until, reason, ticket_id, created_by, created_at)
+       VALUES (?, 'ban', NULL, 'secret staff-only reason', ?, ?, '2026-09-22T00:00:00Z')`,
+    ).run(LURKER, restrictedTicketId, MOD);
+    // MOD2 opens the original, visible ticket about the same Discord member;
+    // sanctionsFor still hands back the row from the restricted ticket, so
+    // the detail must redact it rather than drop it.
+    const d = ticketDetail(db, ticketId, MOD2)!;
+    const redacted = d.discordSanctions.find((s) => s.kind === 'ban')!;
+    expect(redacted).toBeTruthy();
+    expect(redacted.ticketId).toBeNull();
+    expect(redacted.reason).not.toBe('secret staff-only reason');
+    expect(redacted.reason).not.toBe('');
+  });
 });

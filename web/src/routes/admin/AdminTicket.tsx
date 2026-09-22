@@ -46,6 +46,9 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
   const { ticket: t, caseFile: c } = data;
   const cap = data.viewer.banCapMinutes;
   const lengths = LENGTHS.filter(([m]) => cap === null || (m !== null && m <= cap));
+  // Discord has no permanent timeout (its own 28-day maximum), so the
+  // Permanent entry never applies here, and a moderator's cap still holds.
+  const timeoutLengths = LENGTHS.filter((l): l is [number, string] => l[0] !== null && l[0] <= (cap ?? 40320) && l[0] <= 40320);
   const open = t.status === 'open';
 
   return (
@@ -132,6 +135,25 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
         </section>
       )}
 
+      {data.discordSanctions.length > 0 && (
+        <section>
+          <h4>Discord sanctions</h4>
+          <ul class="admin-list">
+            {data.discordSanctions.map((s) => (
+              <li key={s.id}>
+                {s.kind === 'ban' ? 'Banned from the Discord' : `Timed out until ${fmtTime(s.until!)}`} by {s.createdByName ?? s.createdBy}: {s.reason}
+                {s.liftedAt ? ` (lifted ${fmtTime(s.liftedAt)})` : s.active ? '' : ' (ended)'}
+                {s.active && s.ticketId !== null && data.viewer.isAdmin && (
+                  <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.liftDiscordSanction(s.id), {
+                    title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
+                  })}>Lift</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h4>Timeline</h4>
         <TicketTimeline ticketId={t.id} events={data.events} messages={data.messages} busy={busy} run={run} />
@@ -174,6 +196,38 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                   Ban
                 </button>
               </div>
+            )}
+            {!t.targetId && t.targetDiscordId && (
+              <>
+                <div class="admin-form">
+                  <input value={reason} maxLength={500} placeholder="Reason (goes to Discord's audit log)" aria-label="Discord sanction reason"
+                    onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+                  <select value={minutes} aria-label="Timeout length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
+                    {timeoutLengths.map(([m, label]) => <option key={label} value={String(m)}>{label}</option>)}
+                  </select>
+                  <button class="btn" type="button" disabled={busy || !reason.trim()}
+                    onClick={() => run(() => modApi.discordSanction(t.id, 'timeout', Number(minutes), reason.trim()), {
+                      title: `Time out ${t.targetName ?? 'this person'} in Discord?`,
+                      body: 'The bot times them out in the Discord server. They cannot talk until it ends or an admin lifts it.',
+                      confirmLabel: 'Time out',
+                      danger: true,
+                    }).then(() => setReason(''))}>
+                    Time out
+                  </button>
+                  {data.viewer.isAdmin && (
+                    <button class="btn" type="button" disabled={busy || !reason.trim()}
+                      onClick={() => run(() => modApi.discordSanction(t.id, 'ban', null, reason.trim()), {
+                        title: `Ban ${t.targetName ?? 'this person'} from the Discord?`,
+                        body: 'The bot bans them from the Discord server. It lasts until an admin lifts it here.',
+                        confirmLabel: 'Ban from Discord',
+                        danger: true,
+                      }).then(() => setReason(''))}>
+                      Ban from Discord
+                    </button>
+                  )}
+                </div>
+                <p class="muted">A timeout or ban lifted by hand in Discord is not noticed here: lift it on this page too.</p>
+              </>
             )}
             <div class="admin-form">
               <select value={outcome} aria-label="Outcome" onChange={(e) => setOutcome((e.target as HTMLSelectElement).value)}>

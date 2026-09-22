@@ -1,9 +1,11 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
+import { WITHHELD_REASON } from '../admin/banRedaction.js';
 import type { AttachmentRow, MessageRow } from './messages.js';
 import { REPORTER_KEY_SQL } from './person.js';
 import { canSeeTicket, getTicketRow } from './store.js';
 import { staffThread, surfaceFor } from './threads.js';
+import { sanctionsFor, type SanctionRow } from './discordSanctions.js';
 
 /** The visibility rule as SQL, for lists. Must say exactly what canSeeTicket
  *  says; tests/ticketRoutes.test.ts holds the two together. */
@@ -60,6 +62,21 @@ export function ticketsAbout(db: DB, targetId: string, viewer: string): TicketSu
     .all({ viewer, targetId }) as SummaryRow[]).map(toSummary);
 }
 
+/**
+ * sanctionsFor returns every row for a Discord id across ALL tickets, so a
+ * viewer reading one visible ticket about them can be handed a row that
+ * belongs to a different, restricted ticket they are not on. That row keeps
+ * who is sanctioned, since it is the same Discord id this ticket is already
+ * about, but loses the free text and the ticket link, the same rule
+ * banRedaction.ts applies to a ban from a restricted ticket.
+ */
+function redactDiscordSanction(db: DB, s: SanctionRow, viewer: string): SanctionRow {
+  if (s.ticketId === null) return s;
+  const t = getTicketRow(db, s.ticketId);
+  if (t && canSeeTicket(db, t, viewer)) return s;
+  return { ...s, reason: WITHHELD_REASON, ticketId: null };
+}
+
 export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId?: string | null } = {}) {
   const row = getTicketRow(db, id);
   if (!row || !canSeeTicket(db, row, viewer)) return null;
@@ -89,6 +106,9 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
             b.expires_at AS expiresAt, b.lifted_at AS liftedAt
      FROM bans b LEFT JOIN players p ON p.steamid = b.created_by WHERE b.ticket_id = ? ORDER BY b.id DESC`,
   ).all(id);
+  const discordSanctions = row.target_discord_id !== null
+    ? sanctionsFor(db, row.target_discord_id).map((s) => redactDiscordSanction(db, s, viewer))
+    : [];
   const access = row.restricted === 1 ? db.prepare(
     `SELECT a.steamid, COALESCE(p.name, a.steamid) AS name FROM ticket_access a
      LEFT JOIN players p ON p.steamid = a.steamid WHERE a.ticket_id = ? ORDER BY name`,
@@ -137,7 +157,7 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
       ...toSummary(s), outcomeNote: s.outcome_note, openedBy: s.opened_by, openedByName: s.opened_name,
       closedBy: s.closed_by, closedByName: s.closed_name,
     },
-    reports, events, bans, access, accessCandidates, discussion, messages,
+    reports, events, bans, discordSanctions, access, accessCandidates, discussion, messages,
     viewer: { isAdmin, banCapMinutes: isAdmin ? null : Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080') },
   };
 }

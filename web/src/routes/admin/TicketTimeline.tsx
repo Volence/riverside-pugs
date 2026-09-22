@@ -3,6 +3,15 @@ import { modApi, ticketAttachmentUrl, type TicketAttachment, type TicketEvent, t
 import { fmtBytes } from '../../format';
 import { fmtTime, type Run } from './useAction';
 
+/** A friendly label for a length of minutes, matching AdminTicket.tsx's
+ *  LENGTHS labels for the values a moderator can actually pick ("1 hour",
+ *  "3 days"), with a plain fallback for anything else. */
+function fmtMinutes(m: number): string {
+  if (m >= 1440 && m % 1440 === 0) { const d = m / 1440; return `${d} day${d === 1 ? '' : 's'}`; }
+  if (m >= 60 && m % 60 === 0) { const h = m / 60; return `${h} hour${h === 1 ? '' : 's'}`; }
+  return `${m} minute${m === 1 ? '' : 's'}`;
+}
+
 export const eventText = (e: TicketEvent): string => {
   const who = e.actorName ?? 'A player';
   switch (e.kind) {
@@ -18,6 +27,10 @@ export const eventText = (e: TicketEvent): string => {
     case 'closed': return `${who} closed it: ${String(e.detail.outcome ?? '').replace(/_/g, ' ')}${e.detail.note ? ` (${String(e.detail.note)})` : ''}`;
     case 'reopened': return `${who} reopened it`;
     case 'folded': return `Ticket #${String(e.detail.from ?? '')} about the same player was folded into this one`;
+    case 'discord_sanction': return e.detail.kind === 'ban'
+      ? `${who} banned them from the Discord: ${String(e.detail.reason ?? '')}`
+      : `${who} timed them out in Discord for ${fmtMinutes(Number(e.detail.minutes))}: ${String(e.detail.reason ?? '')}`;
+    case 'discord_sanction_lifted': return `${who} lifted the Discord ${e.detail.kind === 'ban' ? 'ban' : 'timeout'}`;
     case 'removed': return e.detail.mirrored === false
       ? `${who} deleted a message in Discord that had not been copied here`
       : `${who} removed a message for good${Number(e.detail.files) > 0 ? `, with ${Number(e.detail.files)} file${Number(e.detail.files) === 1 ? '' : 's'}` : ''}`;
