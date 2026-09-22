@@ -3,12 +3,17 @@
  * plain shapes and text, never game art. `elementRect` is the only source of
  * where anything sits, so this file never computes a position on its own;
  * disagreeing with the generator here would defeat the point of a preview.
+ *
+ * Four elements (ownHealth, teamColumn, infectedRow, siHealth) are not
+ * stand-ins: their insides are drawn straight from the generated .res files
+ * by render.ts's drawPanel, so an edit to a slot or a scale is an edit to
+ * the picture. Every other element here is still a hand-made approximation.
  */
 import type { HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { elementRect, teamLayout } from './build';
 import { SCREEN_H } from './units';
-import { parseColour } from './textures';
+import { drawPanel, drawSlotStyle } from './render';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
 
 export type Side = 'survivor' | 'infected';
@@ -53,42 +58,18 @@ function loadXhairState(): CrosshairState {
   }
 }
 
-function fallbackRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  if (typeof ctx.roundRect === 'function') { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
-  ctx.beginPath(); ctx.rect(x, y, w, h);
-}
-
-/** Draws the `panelBg` slot's own colour behind an element when the player
- *  restyled it, so a restyle shows up in the preview immediately. */
-function panelBg(ctx: CanvasRenderingContext2D, design: HudDesign, x: number, y: number, w: number, h: number, fallback: string) {
-  const style = design.styles.panelBg;
-  const colourStr = style && (style.kind === 'flat' || style.kind === 'rounded') ? style.color ?? fallback : fallback;
-  const [r, g, b, a] = parseColour(colourStr);
-  ctx.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
-  if (style?.kind === 'rounded') { fallbackRoundRect(ctx, x, y, w, h, Math.min(8, w / 4, h / 4)); ctx.fill(); }
-  else ctx.fillRect(x, y, w, h);
-}
-
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, size: number, colour: string, weight = ''): void {
   ctx.fillStyle = colour;
   ctx.font = `${weight} ${size}px sans-serif`.trim();
   ctx.fillText(s, x, y);
 }
 
-// --- painters, one per element id, each drawing a believable stand-in ---
+// --- painters, one per element id ---
 
-function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign) {
-  panelBg(ctx, design, r.x, r.y, r.w, r.h, '0 0 0 140');
-  const portrait = r.h * 0.7;
-  ctx.fillStyle = '#3a3a3a';
-  ctx.fillRect(r.x + 6, r.y + (r.h - portrait) / 2, portrait, portrait);
-  const barX = r.x + portrait + 16, barW = r.w - portrait - 26, barY = r.y + r.h / 2 - 4, barH = 8;
-  ctx.fillStyle = '#2a2a2a'; ctx.fillRect(barX, barY, barW, barH);
-  ctx.fillStyle = '#4cd964'; ctx.fillRect(barX, barY, barW * 0.75, barH);
-  text(ctx, '100', r.x + r.w - 30, r.y + r.h / 2 - 8, 14, '#ffffff', 'bold');
+function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  clipToRect(ctx, r, () => drawPanel(ctx, design, 'ownHealth', { x: r.x, y: r.y }, k, { onAsset }));
 }
 
-const TEAMMATE_NAMES = ['Francis', 'Louis', 'Zoey'];
 const TEAM_CARDS = 3;
 
 interface CardRect { x: number; y: number; w: number; h: number }
@@ -129,15 +110,14 @@ function clipToRect(ctx: CanvasRenderingContext2D, r: Rect, draw: () => void) {
   ctx.restore();
 }
 
-function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
+function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
   clipToRect(ctx, r, () => {
     for (const [i, c] of teamCards(design, 'teamColumn', r, k).entries()) {
-      panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
-      ctx.fillStyle = '#3a3a3a';
-      ctx.fillRect(c.x + 4, c.y + 4, c.h * 0.5, c.h * 0.5);
-      text(ctx, TEAMMATE_NAMES[i], c.x + 4, c.y + c.h * 0.5 + 16, 11, '#ffffff');
-      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(c.x + 4, c.y + c.h - 10, c.w - 8, 5);
-      ctx.fillStyle = '#4cd964'; ctx.fillRect(c.x + 4, c.y + c.h - 10, (c.w - 8) * 0.6, 5);
+      // The panelBg slot targets TeamPlayer1..4 in teamdisplayhud.res, the
+      // card's parent, not the card file drawPanel reads; the game paints
+      // that parent's background before its children, so this does too.
+      drawSlotStyle(ctx, design, 'panelbg', { name: 'TeamPlayer', kind: 'image', x: c.x, y: c.y, w: c.w, h: c.h, visible: true });
+      drawPanel(ctx, design, 'teamColumn', { x: c.x, y: c.y }, k, { card: i, onAsset });
     }
   });
 }
@@ -190,20 +170,17 @@ function paintXhair(ctx: CanvasRenderingContext2D, r: Rect) {
   drawCrosshair(ctx, r.x + r.w / 2, r.y + r.h / 2, k, loadXhairState(), null);
 }
 
-function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
+function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
   clipToRect(ctx, r, () => {
-    for (const c of teamCards(design, 'infectedRow', r, k)) {
-      panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
+    for (const [i, c] of teamCards(design, 'infectedRow', r, k).entries()) {
+      drawPanel(ctx, design, 'infectedRow', { x: c.x, y: c.y }, k, { card: i, onAsset });
     }
   });
 }
 
-function paintSiHealth(ctx: CanvasRenderingContext2D, r: Rect) {
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  ctx.fillStyle = '#4cd964';
-  ctx.fillRect(r.x + 4, r.y + r.h - 14, r.w - 8, 8);
-  text(ctx, '250', r.x + r.w - 30, r.y + 16, 14, '#ffffff', 'bold');
+/** Six infected share one card at six placements; the preview shows the Hunter's. */
+function paintSiHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  clipToRect(ctx, r, () => drawPanel(ctx, design, 'siHealth', { x: r.x, y: r.y }, k, { onAsset }));
 }
 
 function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect) {
@@ -232,7 +209,7 @@ function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.fillRect(r.x, r.y + 18, r.w * 0.5, r.h - 18);
 }
 
-const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) => void> = {
+const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) => void> = {
   ownHealth: paintOwnHealth,
   teamColumn: paintTeamColumn,
   weaponSelection: paintWeaponSelection,
@@ -288,9 +265,16 @@ function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
  * does not clear the canvas, it draws on top of it. Every translucent mock
  * element (the weapon boxes, chat, the progress bar track, the team cards)
  * is designed to read against that backdrop, not against a blank canvas.
+ *
+ * ownHealth, teamColumn, infectedRow and siHealth are drawn from the
+ * generated .res files by render.ts, not as stand-ins here; the rest are
+ * hand-made approximations. `onAsset` is passed through to every drawPanel
+ * call so a texture that finishes loading after this call returns can
+ * trigger a redraw.
  */
 export function drawHud(
   ctx: CanvasRenderingContext2D, pxW: number, pxH: number, design: HudDesign, side: Side, selectedId: string | null,
+  onAsset?: () => void,
 ): void {
   const k = pxH / SCREEN_H;
   const accent = accentColour(ctx);
@@ -307,11 +291,11 @@ export function drawHud(
     if (hidden) {
       ctx.save();
       ctx.globalAlpha = 0.25;
-      paint(ctx, r, design, k);
+      paint(ctx, r, design, k, onAsset);
       ctx.restore();
       drawHiddenOutline(ctx, r);
     } else {
-      paint(ctx, r, design, k);
+      paint(ctx, r, design, k, onAsset);
     }
 
     if (el.id === selectedId) drawSelection(ctx, r, el, accent);
