@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { logAdmin } from '../admin/audit.js';
 import { playerByDiscordId } from '../players.js';
+import { inGoodStanding } from '../standing.js';
 import { claimTicket, closeTicket } from '../tickets/actions.js';
 import { canSeeTicket, getTicketRow, type TicketRow } from '../tickets/store.js';
 import { closeModal } from './ticketCard.js';
@@ -30,6 +31,11 @@ export const opensTicketModal = (customId: string): boolean => /^t:\d+:close$/.t
  * every press: a button sits in Discord for months, and the person pressing
  * it may have been demoted, banned or unlinked since the card was posted.
  * Being able to see the thread proves nothing here.
+ *
+ * "Active staff" is makeRequireMod's rule, to the letter: a staff flag AND
+ * inGoodStanding, which asks the bans table as well as players.status (the
+ * status of a moderator banned a minute ago still says active until the
+ * reaper writes it) and refuses a SteamID merged into another account.
  */
 function resolve(
   deps: TicketButtonDeps, userId: string, ticketId: number,
@@ -39,7 +45,7 @@ function resolve(
   // read differently, so anyone who is not staff must always get the same one,
   // whatever ticket id they press. Otherwise the pair is a probe for which
   // ticket ids exist.
-  if (!p || p.status !== 'active' || (p.is_admin !== 1 && p.is_mod !== 1)) return { reply: say(STAFF_ONLY) };
+  if (!p || (p.is_admin !== 1 && p.is_mod !== 1) || !inGoodStanding(deps.db, p.steamid)) return { reply: say(STAFF_ONLY) };
   const ticket = getTicketRow(deps.db, ticketId);
   if (!ticket || !canSeeTicket(deps.db, ticket, p.steamid)) return { reply: say(NO_TICKET) };
   return { me: p.steamid, ticket };

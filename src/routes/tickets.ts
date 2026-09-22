@@ -155,7 +155,13 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     const { id, mid } = req.params as { id: string; mid: string };
     const r = removeMessage(db, attachmentsDir, Number(id), Number(mid), me, ((req.body ?? {}) as { reason?: unknown }).reason);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, me, 'ticket_remove', Number(id), { messageId: Number(mid), files: r.files }, { quiet: getTicketRow(db, Number(id))?.restricted === 1 });
+    logAdmin(
+      db, me, 'ticket_remove', Number(id),
+      // The reason is not in here: it is on the message, where the page reads
+      // it from, and an audit detail is read by more people than that.
+      { messageId: Number(mid), files: r.files, mirrored: true, via: 'site' },
+      { quiet: getTicketRow(db, Number(id))?.restricted === 1 },
+    );
     afterRemove();
     // No broadcast('refresh'): removeMessage published the ticket signal, and
     // the staff-scoped nudge tells the pages that may see it.

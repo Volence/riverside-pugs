@@ -1,7 +1,8 @@
 import type { DB } from '../db.js';
 import { logAdmin } from '../admin/audit.js';
 import { playerByDiscordId } from '../players.js';
-import { messageByDiscordId } from '../tickets/messages.js';
+import { inGoodStanding } from '../standing.js';
+import { messageByDiscordId, messageById } from '../tickets/messages.js';
 import { removeMessage } from '../tickets/removal.js';
 import { publishTicketSignal } from '../tickets/signals.js';
 import { addTicketEvent, canSeeTicket, getTicketRow } from '../tickets/store.js';
@@ -48,8 +49,10 @@ export async function handleRemoveCommand(
   const p = playerByDiscordId(db, i.userId);
   // Staff first, as ticketButtons does it: whoever is not staff gets the same
   // answer wherever they press, so the pair of refusals is not a probe for
-  // which threads are ticket threads.
-  if (!p || p.status !== 'active' || (p.is_admin !== 1 && p.is_mod !== 1)) return say(STAFF_ONLY);
+  // which threads are ticket threads. "Active staff" is makeRequireMod's rule
+  // exactly: a staff flag AND inGoodStanding, which asks the bans table as
+  // well as players.status and refuses a merged SteamID.
+  if (!p || (p.is_admin !== 1 && p.is_mod !== 1) || !inGoodStanding(db, p.steamid)) return say(STAFF_ONLY);
   const thread = threadByDiscordId(db, i.channelId);
   const ticket = thread ? getTicketRow(db, thread.ticket_id) : undefined;
   if (!thread || !ticket || !canSeeTicket(db, ticket, p.steamid)) return say(NOT_HERE);
@@ -63,17 +66,38 @@ export async function handleRemoveCommand(
     // backfilled, or one of the bot's own lines. There is no site copy and no
     // file to destroy, but it can still be made to go from Discord, which is
     // what the moderator is asking for.
-    await deps.mirror()?.removeInDiscord(i.channelId, i.messageId);
+    //
+    // Nothing about this is written down, so there is nothing for the sweep to
+    // finish later: it happens now, and is audited only once Discord has said
+    // it did. With no mirror to ask, the answer is the same refusal as every
+    // other "there is nothing here for this command".
+    const mirror = deps.mirror();
+    if (!mirror) return say(NOT_HERE);
+    try {
+      await mirror.removeInDiscord(i.channelId, i.messageId);
+    } catch (err) {
+      console.error('[discord] deleting an unmirrored ticket message failed:', err instanceof Error ? err.message : err);
+      return say('Discord would not delete that message. Nothing was written down, so try again in a moment.');
+    }
     addTicketEvent(db, ticket.id, p.steamid, 'removed', { mirrored: false });
     logAdmin(db, p.steamid, 'ticket_remove', ticket.id, { mirrored: false, via: 'discord' }, { quiet });
     publishTicketSignal({ kind: 'ticket', ticketId: ticket.id });
     return say('Deleted. That message had not been copied to the site, so there was nothing else to remove.');
   }
 
+  // The other way round from above, and on purpose: this one committed on the
+  // site, which is the part that matters, and what Discord still owes is
+  // written on the row for the sweep to finish. So it is audited at once,
+  // whether or not the delete below works or the bot is even running.
   const r = removeMessage(db, deps.attachmentsDir, ticket.id, m.id, p.steamid, '');
   if (!r.ok) return say(capitalise(r.error));
-  logAdmin(db, p.steamid, 'ticket_remove', ticket.id, { messageId: m.id, files: r.files, via: 'discord' }, { quiet });
+  logAdmin(db, p.steamid, 'ticket_remove', ticket.id, { messageId: m.id, files: r.files, mirrored: true, via: 'discord' }, { quiet });
   await deps.mirror()?.sweepRemovals();
   const files = r.files === 0 ? '' : ` and ${r.files} file${r.files === 1 ? '' : 's'}`;
-  return say(`Removed for good: the text, its edit history${files} are deleted from the site, and the message is deleted here. This cannot be undone.`);
+  // Only if it went. Otherwise the sweep is still carrying it, and saying so
+  // beats claiming a deletion the moderator can see for themselves is not done.
+  const here = messageById(db, m.id)?.discord_gone === 1
+    ? ', and the message is deleted here'
+    : '. The message here goes as soon as Discord lets the bot delete it';
+  return say(`Removed for good: the text, its edit history${files} are deleted from the site${here}. This cannot be undone.`);
 }

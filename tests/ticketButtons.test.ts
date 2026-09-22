@@ -60,6 +60,19 @@ describe('who may press', () => {
     expect(audit()).toEqual([]);
   });
 
+  /** The site's guard is inGoodStanding, which asks the bans table and not
+   *  only players.status: the reaper writes status some seconds later, and a
+   *  merged alias never has it written at all. */
+  it('refuses a moderator whose ban is only in the bans table, as the site does', async () => {
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', ?)")
+      .run(MOD, new Date().toISOString());
+    expect(db.prepare('SELECT status FROM players WHERE steamid = ?').get(MOD)).toEqual({ status: 'active' });
+    expect(content(await press(MOD, `t:${normal}:claim`))).toBe('Staff only.');
+    expect(content(await submit(MOD, `t:${normal}:close`, { outcome: 'warned', note: '' }))).toBe('Staff only.');
+    expect(row(normal)).toMatchObject({ status: 'open', claimed_by: null });
+    expect(audit()).toEqual([]);
+  });
+
   it('answers a ticket you cannot see exactly as it answers one that does not exist', async () => {
     const missing = await press(MOD, 't:9999:claim');
     expect(content(await press(MOD, `t:${restricted}:claim`))).toBe(content(missing));

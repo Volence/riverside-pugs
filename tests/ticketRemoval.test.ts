@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -37,15 +37,20 @@ const card = (content: string) => ({ content, embeds: [], components: [] });
 const newMirror = (opts: { serialise?: (fn: () => Promise<void>) => Promise<void> } = {}) =>
   new TicketMirror({ db, transport: t, store: new AttachmentStore({ db, dir, fetcher }), ...opts });
 
+/** The cast: eight linked players, one of them a moderator and one an admin. */
+function seed(into: DB): void {
+  IDS.forEach((id, i) => {
+    upsertPlayer(into, { steamid: id, name: `player${i}`, avatar: null }, []);
+    activatePlayer(into, id);
+    linkDiscord(into, id, `90${i}`, `d${i}`);
+  });
+  into.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+  into.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+}
+
 beforeEach(() => {
   db = openDb(':memory:');
-  IDS.forEach((id, i) => {
-    upsertPlayer(db, { steamid: id, name: `player${i}`, avatar: null }, []);
-    activatePlayer(db, id);
-    linkDiscord(db, id, `90${i}`, `d${i}`);
-  });
-  db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
-  db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+  seed(db);
   root = mkdtempSync(join(tmpdir(), 'pug-remove-'));
   dir = join(root, 'ticket-attachments');
   t = new FakeTransport();
@@ -241,8 +246,9 @@ describe('the Discord half', () => {
 });
 
 describe('Remove from ticket, the Discord command', () => {
-  const run = (userId: string, channelId: string, messageId: string) =>
-    handleRemoveCommand({ db, attachmentsDir: dir, mirror: () => mirror }, { kind: 'message_command', name: REMOVE_COMMAND, userId, userName: 'x', channelId, messageId });
+  const NOT_HERE = 'This only works on a message inside a ticket thread you have access to.';
+  const run = (userId: string, channelId: string, messageId: string, m: () => TicketMirror | null = () => mirror) =>
+    handleRemoveCommand({ db, attachmentsDir: dir, mirror: m }, { kind: 'message_command', name: REMOVE_COMMAND, userId, userName: 'x', channelId, messageId });
   const said = (r: { payload: { content?: string } }) => r.payload.content ?? '';
 
   it('is for staff, inside a ticket thread they can see, and answers privately', async () => {
@@ -256,11 +262,27 @@ describe('Remove from ticket, the Discord command', () => {
     expect(player.ephemeral).toBe(true);
     expect(said(player)).toBe('Staff only.');
     const elsewhere = await run('906', 'general-chat', a.discordId);
+    expect(said(elsewhere)).toBe(NOT_HERE);
     // Off the restricted ticket's list: the same words as "not a ticket thread".
     expect(said(await run('906', restricted.thread, b.id))).toBe(said(elsewhere));
     // Someone who CAN see both tickets, naming a message from the wrong thread.
     expect(said(await run('907', restricted.thread, a.discordId))).toBe(said(elsewhere));
     expect(messageById(db, a.row.id)!.content).toBe(HORRIBLE);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get()).toEqual({ n: 0 });
+  });
+
+  /** The site's guard is inGoodStanding, which asks the bans table as well as
+   *  players.status. A moderator banned a moment ago is not staff here either. */
+  it('refuses a moderator whose ban is only in the bans table, in the same words as a player', async () => {
+    const { thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    const { discordId, row } = await horrible(thread);
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', ?)")
+      .run(MOD, new Date().toISOString());
+    expect(db.prepare('SELECT status FROM players WHERE steamid = ?').get(MOD)).toEqual({ status: 'active' });
+    expect(said(await run('906', thread, discordId))).toBe(said(await run('901', thread, discordId)));
+    expect(said(await run('906', thread, discordId))).toBe('Staff only.');
+    expect(messageById(db, row.id)!.content).toBe(HORRIBLE);
     expect(db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get()).toEqual({ n: 0 });
   });
 
@@ -276,7 +298,7 @@ describe('Remove from ticket, the Discord command', () => {
     expect(await t.threads.fetchMessage(thread, discordId)).toBeNull();
     const audit = db.prepare('SELECT admin_id, action, target, detail FROM admin_actions').all() as { admin_id: string; action: string; target: string; detail: string }[];
     expect(audit.map((a) => ({ ...a, detail: JSON.parse(a.detail) }))).toEqual([
-      { admin_id: MOD, action: 'ticket_remove', target: String(id), detail: { messageId: row.id, files: 1, via: 'discord' } },
+      { admin_id: MOD, action: 'ticket_remove', target: String(id), detail: { messageId: row.id, files: 1, mirrored: true, via: 'discord' } },
     ]);
     expect(dump()).not.toContain(HORRIBLE);
     expect(said(await run('906', thread, discordId))).toMatch(/already removed/i);
@@ -293,9 +315,92 @@ describe('Remove from ticket, the Discord command', () => {
     expect(said(await run('907', thread, missed.id))).toMatch(/had not been copied/);
     expect(t.inbox.find((m) => m.id === missed.id)!.deleted).toBe(true);
     expect(db.prepare("SELECT detail FROM ticket_events WHERE ticket_id = ? AND kind = 'removed'").get(id)).toEqual({ detail: '{"mirrored":false}' });
+    expect(db.prepare("SELECT detail FROM admin_actions WHERE action = 'ticket_remove'").get()).toEqual({ detail: '{"mirrored":false,"via":"discord"}' });
     expect(events).toEqual([]);
     expect(said(await run('907', thread, thread))).toMatch(/ticket's own card/);
     expect(t.byId(thread)!.deleted).toBe(false);
+  });
+
+  /** The two ways the unmirrored branch can say "deleted" without having
+   *  deleted anything. Nothing there is written down, so there is nothing to
+   *  retry: it either happens now or it is refused. */
+  it('with no bot running it refuses instead of claiming a deletion, and audits nothing', async () => {
+    const { thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    await mirror.idle();
+    mirror.stop();
+    const missed = t.userPost(thread, { authorId: '555', content: HORRIBLE }, false);
+
+    expect(said(await run('906', thread, missed.id, () => null))).toBe(NOT_HERE);
+
+    expect(t.inbox.find((m) => m.id === missed.id)!.deleted).toBe(false);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_events WHERE kind = 'removed'").get()).toEqual({ n: 0 });
+  });
+
+  it('a Discord deletion that fails is not audited as one that happened', async () => {
+    const { thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    await mirror.idle();
+    mirror.stop();
+    const missed = t.userPost(thread, { authorId: '555', content: HORRIBLE }, false);
+    mirror = newMirror();
+    // Archived and locked, and Discord refuses to put it back: the delete
+    // itself works, the tidying up after it does not.
+    setThreadLocked(db, threadByDiscordId(db, thread)!.id, true);
+    await t.threads.setArchived(thread, true);
+    const real = t.threads.setArchived;
+    t.threads.setArchived = async (id, archived) => {
+      if (archived) throw new Error('discord down');
+      await real(id, archived);
+    };
+
+    expect(said(await run('906', thread, missed.id))).toMatch(/would not delete/i);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_events WHERE kind = 'removed'").get()).toEqual({ n: 0 });
+  });
+});
+
+describe('what is left on the disk', () => {
+  /** The claim the owner is buying: gone for good. A real file, because the
+   *  in-memory database has no write-ahead log to leave anything in. */
+  it('leaves no trace of the text in the database file or its log', async () => {
+    const dbPath = join(root, 'pug.db');
+    db = openDb(dbPath);
+    seed(db);
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    mirror = newMirror();
+    mirror.start();
+    const { row } = await horrible(thread);
+    const onDisk = () => readFileSync(dbPath).toString('latin1') + readFileSync(`${dbPath}-wal`).toString('latin1');
+    // What the message and its earlier version look like on disk before it goes.
+    expect(onDisk()).toContain(HORRIBLE);
+    expect(onDisk()).toContain('an earlier version');
+
+    expect(removeMessage(db, dir, id, row.id, MOD, 'gore').ok).toBe(true);
+
+    expect(onDisk()).not.toContain(HORRIBLE);
+    expect(onDisk()).not.toContain('an earlier version');
+
+    // And a wall of text, the case that matters most: over about 450 bytes
+    // SQLite keeps the start of the value in the row and puts the rest on
+    // overflow pages of its own, so the two ends are looked for separately.
+    // Freeing those pages is what secure_delete is for, and without it 334
+    // characters of this survive the checkpoint (measured, 2026-09-21).
+    const HEAD = 'the-start-of-the-wall-Vx9';
+    const TAIL = 'the-end-of-the-wall-Vx9';
+    const big = t.userPost(thread, { authorId: '555', authorName: 'A Stranger', content: `${HEAD}${'q'.repeat(4000)}${TAIL}` });
+    await mirror.idle();
+    expect(onDisk()).toContain(HEAD);
+    expect(onDisk()).toContain(TAIL);
+
+    expect(removeMessage(db, dir, id, messageByDiscordId(db, big.id)!.id, MOD, '').ok).toBe(true);
+
+    expect(onDisk()).not.toContain(HEAD);
+    expect(onDisk()).not.toContain(TAIL);
+    // The tombstone is still there, so this is not an empty database.
+    expect(messageById(db, row.id)).toMatchObject({ removed_by: MOD, removed_reason: 'gore', author_name: 'A Stranger' });
   });
 });
 
@@ -325,7 +430,7 @@ describe('POST /api/mod/tickets/:id/messages/:mid/remove', () => {
     expect(d.messages[0]).toMatchObject({ content: '', history: [], removed: { by: MOD, reason: 'gore' } });
     expect(d.messages[0].attachments[0]).toMatchObject({ filename: 'picture.png', size: 50, stored: false, removed: true });
     const audit = db.prepare("SELECT detail FROM admin_actions WHERE action = 'ticket_remove'").get() as { detail: string };
-    expect(JSON.parse(audit.detail)).toEqual({ messageId: row.id, files: 1 });
+    expect(JSON.parse(audit.detail)).toEqual({ messageId: row.id, files: 1, mirrored: true, via: 'site' });
     expect(dump()).not.toContain(HORRIBLE);
     expect(JSON.stringify(d)).not.toContain(HORRIBLE);
   });

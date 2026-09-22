@@ -23,8 +23,16 @@ export function purgeRemovedFiles(db: DB, dir: string): number {
   let left = 0;
   for (const r of rows) {
     const path = attachmentPath(dir, r.stored_name);
+    if (!path) {
+      // A stored name this module did not make. There is nothing safe to
+      // unlink, and the name is the only handle anything has on those bytes,
+      // so it stays: forgetting it would strand the file for good.
+      console.error('[tickets] a removed attachment has a stored name that is not one of ours; it was left on disk');
+      left++;
+      continue;
+    }
     try {
-      if (path) unlinkSync(path);
+      unlinkSync(path);
     } catch (err) {
       if ((err as { code?: string }).code !== 'ENOENT') {
         console.error('[tickets] a removed attachment could not be deleted from disk:', err instanceof Error ? err.message : err);
@@ -74,14 +82,25 @@ export function removeMessage(
     addTicketEvent(db, ticketId, by, 'removed', { messageId, files: n }, now);
     return n;
   })();
-  if (purgeRemovedFiles(db, dir) > 0) {
-    publishAdminEvent({ kind: 'problem', text: 'A file attached to a removed ticket message could not be deleted from disk. It is no longer served and is tried again at the next restart. Check the permissions on the ticket attachments directory.' });
+  // Everything from here on is after the commit, so none of it can undo the
+  // removal and none of it may fail the caller: the tombstone is already what
+  // the page shows and what the serving route answers 404 for. A disk that
+  // refuses is logged and swept up at the next start; the nudge goes out
+  // either way, in a finally, because an open page that never hears is a page
+  // still showing what was just removed.
+  try {
+    if (purgeRemovedFiles(db, dir) > 0) {
+      publishAdminEvent({ kind: 'problem', text: 'A file attached to a removed ticket message could not be deleted from disk. It is no longer served and is tried again at the next restart. Check the permissions on the ticket attachments directory.' });
+    }
+    // The words are out of the table, but until the write-ahead log is folded
+    // back into the database file they are still sitting in it. secure_delete
+    // (src/db.ts) then overwrites the pages the removal freed, so after this
+    // the removed text is nowhere on disk.
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (err) {
+    console.error('[tickets] tidying up after a removal failed; the removal itself stands:', err instanceof Error ? err.message : err);
+  } finally {
+    publishTicketSignal({ kind: 'ticket', ticketId });
   }
-  // The words are out of the table, but until the write-ahead log is folded
-  // back into the database file they are still sitting in it. secure_delete
-  // (src/db.ts) then overwrites the pages the removal freed, so after this
-  // the removed text is nowhere on disk.
-  db.pragma('wal_checkpoint(TRUNCATE)');
-  publishTicketSignal({ kind: 'ticket', ticketId });
   return { ok: true, files };
 }
