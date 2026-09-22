@@ -24,6 +24,16 @@ export interface TicketSyncDeps {
   publicUrl: string;
   /** Milliseconds between full passes. 0 means no timer (tests). */
   intervalMs?: number;
+  /**
+   * A last chance to copy a forum post's messages onto the site before it is
+   * deleted for good (the mirror's backfill). Awaited, because the post is
+   * gone the moment after.
+   *
+   * The deletion happens whether or not this works: a post the whole
+   * moderation team can read about a restricted ticket, or about somebody who
+   * now holds a staff flag, must never stand because a copy failed.
+   */
+  saveBeforeDelete?: (threadId: string) => Promise<void>;
 }
 
 /**
@@ -386,8 +396,21 @@ export class TicketSync {
   /** Rule 2. Marked 'deleted' only after Discord deleted it, so a failure is
    *  retried, and Task 6 keeps the accused out of the forum until it works. */
   private async removeForbiddenPosts(ticketId?: number): Promise<void> {
-    const { db, transport } = this.deps;
+    const { db, transport, saveBeforeDelete } = this.deps;
     for (const th of forbiddenForumThreads(db, ticketId)) {
+      // What people wrote in it while the bot was down is only in Discord,
+      // and in a moment it will be nowhere. Copied first, and deleted anyway
+      // if that fails: see saveBeforeDelete.
+      if (saveBeforeDelete) {
+        try {
+          await saveBeforeDelete(th.thread_id);
+        } catch (err) {
+          console.error('[discord] could not copy a ticket thread before deleting it:', err);
+          // Names no ticket and no player: every admin reads the feed, and
+          // this post is about someone who must not be named to them.
+          this.problem(`Could not copy a ticket thread's messages onto the site before deleting the Discord post that must not exist: ${err instanceof Error ? err.message : String(err)}. The post was deleted anyway, so anything written in it that the site had not already copied is lost.`);
+        }
+      }
       await transport.threads.deleteThread(th.thread_id);
       setThreadState(db, th.id, 'deleted');
     }

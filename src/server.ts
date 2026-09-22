@@ -7,6 +7,8 @@ import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { TicketSync } from './discord/ticketSync.js';
+import { TicketMirror } from './discord/ticketMirror.js';
+import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
 import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
@@ -1109,6 +1111,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let bot: RunningBot | null = null;
   let adminFeed: AdminFeedPoster | null = null;
   let ticketSync: TicketSync | null = null;
+  let ticketMirror: TicketMirror | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -1158,9 +1161,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
+        // Built before the reconciler so its hook can reach it, and started
+        // after, so a thread the reconciler's first pass makes is there for
+        // the mirror's own first look.
+        const mirror = new TicketMirror({
+          db: deps.db,
+          transport: t,
+          store: new AttachmentStore({ db: deps.db, dir: deps.config.ticketAttachmentsDir, fetcher: httpFetcher }),
+          onChange: nudgeTicket,
+        });
+        ticketMirror = mirror;
         // After the feed: a problem found on the first pass has somewhere to go.
-        ticketSync = new TicketSync({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        ticketSync = new TicketSync({
+          db: deps.db,
+          transport: t,
+          publicUrl: deps.config.publicUrl,
+          // The reconciler's first pass deletes forum posts that must not
+          // exist. Whatever was written in one while the bot was down is
+          // copied onto the site first, or it goes with the post.
+          saveBeforeDelete: (threadId) => mirror.catchUp(threadId),
+        });
         ticketSync.start();
+        mirror.start();
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
@@ -1184,6 +1206,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
 
   app.addHook('onClose', async () => {
+    ticketMirror?.stop();
     ticketSync?.stop();
     offTicketNudge();
     adminFeed?.stop();
