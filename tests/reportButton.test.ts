@@ -2,12 +2,39 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB, DEFAULT_SETTINGS } from '../src/db.js';
 import { getSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA } from '../src/settingsSchema.js';
+import { upsertPlayer, activatePlayer, currentSeasonId } from '../src/players.js';
+import { recentCoPlayers, resolveByName } from '../src/discord/reportButton.js';
 
 let db: DB;
 
 beforeEach(() => {
   db = openDb(':memory:');
 });
+
+const IDS = Array.from({ length: 6 }, (_, i) => `7656119900000010${i}`);
+const [ME, ALICE, BOB1, BOB2, CARL, DEE] = IDS;
+
+const seedPlayers = (d: DB) => {
+  const names: Record<string, string> = {
+    [ME]: 'me', [ALICE]: 'Alice', [BOB1]: 'Bob', [BOB2]: 'bob',
+    [CARL]: 'Carl_99', [DEE]: 'Dee%Dee',
+  };
+  for (const id of IDS) {
+    upsertPlayer(d, { steamid: id, name: names[id], avatar: null }, []);
+    activatePlayer(d, id);
+  }
+};
+
+// `matches` requires season_id and campaign, both NOT NULL. A fresh database
+// seeds "Season 1", so currentSeasonId always has something to return.
+const seedMatch = (d: DB, matchId: number, players: string[]) => {
+  d.prepare(
+    `INSERT INTO matches (id, season_id, state, campaign, created_at)
+     VALUES (?, ?, 'completed', 'l4d_vs_smalltown', '2026-09-22T00:00:00.000Z')`,
+  ).run(matchId, currentSeasonId(d));
+  const ins = d.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')");
+  for (const p of players) ins.run(matchId, p);
+};
 
 describe('report button schema', () => {
   it('creates the pending_reports and report_message tables', () => {
@@ -64,5 +91,67 @@ describe('details wording', () => {
 
   it('exports the category labels so the form can share them', () => {
     expect(REPORT_LABELS.unsafe).toBe('Safety concern (handled privately)');
+  });
+});
+
+describe('recentCoPlayers', () => {
+  beforeEach(() => { seedPlayers(db); });
+
+  it('lists people from my matches, most recent first, never me', () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    seedMatch(db, 2, [ME, CARL]);
+    expect(recentCoPlayers(db, ME).map((c) => c.name)).toEqual(['Carl_99', 'Alice']);
+  });
+
+  it('lists someone once however many matches we shared', () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    seedMatch(db, 2, [ME, ALICE]);
+    expect(recentCoPlayers(db, ME)).toHaveLength(1);
+  });
+
+  it('is empty for someone who has never played', () => {
+    expect(recentCoPlayers(db, ME)).toEqual([]);
+  });
+
+  it('honours the limit', () => {
+    seedMatch(db, 1, [ME, ALICE, BOB1, CARL]);
+    expect(recentCoPlayers(db, ME, 2)).toHaveLength(2);
+  });
+});
+
+describe('resolveByName', () => {
+  beforeEach(() => { seedPlayers(db); });
+
+  it('finds one exact name regardless of case', () => {
+    expect(resolveByName(db, 'ALICE').map((c) => c.steamid)).toEqual([ALICE]);
+  });
+
+  it('prefers exact matches over substrings', () => {
+    // 'Bob' and 'bob' both match exactly; 'Bobby' would only match as a
+    // substring and must not dilute an exact hit.
+    upsertPlayer(db, { steamid: '76561199000000199', name: 'Bobby', avatar: null }, []);
+    expect(resolveByName(db, 'bob').map((c) => c.steamid).sort()).toEqual([BOB1, BOB2].sort());
+  });
+
+  it('falls back to a substring when nothing matches exactly', () => {
+    expect(resolveByName(db, 'arl').map((c) => c.steamid)).toEqual([CARL]);
+  });
+
+  it('returns nothing for a name nobody has', () => {
+    expect(resolveByName(db, 'nobody')).toEqual([]);
+  });
+
+  it('treats LIKE wildcards as ordinary characters', () => {
+    // '%' must not match everything, and '_' must not match any character.
+    expect(resolveByName(db, '%').map((c) => c.steamid)).toEqual([DEE]);
+    expect(resolveByName(db, 'Carl_').map((c) => c.steamid)).toEqual([CARL]);
+  });
+
+  it('ignores surrounding whitespace', () => {
+    expect(resolveByName(db, '  Alice  ').map((c) => c.steamid)).toEqual([ALICE]);
+  });
+
+  it('returns at most the limit', () => {
+    expect(resolveByName(db, 'e', 2).length).toBeLessThanOrEqual(2);
   });
 });
