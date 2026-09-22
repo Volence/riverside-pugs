@@ -495,4 +495,19 @@ describe('choosing between same-named players', () => {
     const r = await pick(ME, `rp:pick:1:${BOB2}`);
     expect(said(r)).toContain('expired');
   });
+
+  it('never costs the reporter their words when fileReport genuinely refuses', async () => {
+    // A real refusal, not a short-circuit before file() is ever reached: the
+    // daily limit is the easiest lever. Use it up with an ordinary report so
+    // the pick press below is the one that gets turned away by fileReport
+    // itself, proving the delete really is gated on its ok flag.
+    setSetting(db, 'ticket_reports_per_day', '1');
+    const used = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: 'used the allowance' });
+    expect(said(used)).toContain('Thanks');
+
+    const r = await pick(ME, `rp:pick:1:${BOB2}`);
+    expect(said(r)).toContain('Could not file the report');
+    expect(reports()).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 1 });
+  });
 });

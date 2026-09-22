@@ -246,13 +246,16 @@ export async function handleReportButton(
     if (!(JSON.parse(row.candidates) as string[]).includes(steamid)) {
       return say('That player was not one of the choices.');
     }
-    const reply = file(deps, row.reporter_id, steamid, row.category, row.text);
+    const outcome = file(deps, row.reporter_id, steamid, row.category, row.text);
     // Only on success: a refusal (the daily limit, say) leaves the draft in
-    // place so the reporter is not made to type it again.
-    if (reply.payload.content?.startsWith('Thanks')) {
+    // place so the reporter is not made to type it again. This has to come
+    // from fileReport's own ok flag, never be guessed from the reply text:
+    // reworded copy that happens to drift onto or off of some magic phrase
+    // must not silently flip which side of this branch a report lands on.
+    if (outcome.ok) {
       deps.db.prepare('DELETE FROM pending_reports WHERE id = ?').run(row.id);
     }
-    return reply;
+    return outcome.reply;
   }
   return say('That button no longer does anything.');
 }
@@ -266,7 +269,7 @@ export async function handleReportModal(
   const text = (i.fields.details ?? '').trim();
   const picked = i.fields.who ?? OTHER;
 
-  if (picked !== OTHER) return file(deps, me.steamid, picked, category, text);
+  if (picked !== OTHER) return file(deps, me.steamid, picked, category, text).reply;
 
   const typed = (i.fields.name ?? '').trim();
   if (!typed) return say('Pick someone from the list or type their name.');
@@ -275,7 +278,7 @@ export async function handleReportModal(
   if (found.length === 0) {
     return say('No player here by that name. They may never have played on these servers.');
   }
-  if (found.length === 1) return file(deps, me.steamid, found[0].steamid, category, text);
+  if (found.length === 1) return file(deps, me.steamid, found[0].steamid, category, text).reply;
   if (found.length > MAX_CHOICES) {
     return say('Several players share that name. Type more of it, or pick them from the list if you played together recently.');
   }
@@ -283,13 +286,19 @@ export async function handleReportModal(
 }
 
 /** The one place a report is actually filed, so every path shares the same
- *  refusals and the same wording. */
-function file(deps: ReportHandlerDeps, reporter: string, targetId: string, category: string, text: string): InteractionReply {
+ *  refusals and the same wording. Returns fileReport's own ok flag alongside
+ *  the reply, so a caller that must act differently on success (the pick
+ *  branch, deciding whether to delete a draft) branches on that flag rather
+ *  than on the reply's user-facing copy, which can be reworded without
+ *  warning and must never double as control flow. */
+function file(
+  deps: ReportHandlerDeps, reporter: string, targetId: string, category: string, text: string,
+): { ok: boolean; reply: InteractionReply } {
   const r = fileReport(deps.db, reporter, { targetId, category, text }, {
     adminSteamIds: deps.adminSteamIds, now: deps.now?.(),
   });
-  if (!r.ok) return say(`Could not file the report: ${r.error}.`);
-  return say('Thanks. The moderators will look at it, and they will not be told who reported them.');
+  if (!r.ok) return { ok: false, reply: say(`Could not file the report: ${r.error}.`) };
+  return { ok: true, reply: say('Thanks. The moderators will look at it, and they will not be told who reported them.') };
 }
 
 /** Keep the words while the reporter says which of these people they meant. */
