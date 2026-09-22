@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { upsertPlayer, activatePlayer } from '../src/players.js';
+import { upsertPlayer, activatePlayer, unlinkDiscord } from '../src/players.js';
 import { fileReport, DISCORD_REPORT_GAP_MS, type DiscordReporter, type PickedTarget } from '../src/tickets/filing.js';
 
 const P1 = '76561199000000501';
@@ -51,6 +51,23 @@ describe('fileReport with Discord people', () => {
     expect(fileReport(db, P1, { category: 'afk', text: '' }, withTarget({ bot: true }))).toMatchObject({ ok: false, status: 400 });
     expect(fileReport(db, dReporter({ discordId: '901' }), { category: 'afk', text: '' }, withTarget())).toMatchObject({ ok: false, status: 400 });
     expect(fileReport(db, LINKED, { category: 'afk', text: '' }, withTarget({ discordId: '700' }))).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it('refuses a Discord id whose most recently linked account is banned, even after it was unlinked', () => {
+    // LINKED was linked to discord id '700' in beforeEach. Unlink it (an
+    // admin unlink, or the player unlinking before the ban), ban the
+    // account, and file as the now Discord-only '700': linkDiscord already
+    // refuses the opposite direction (a banned account's Discord cannot
+    // attach to a NEW steamid) via discord_link_history; this is the same
+    // rule read the other way.
+    unlinkDiscord(db, LINKED);
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', datetime('now'))").run(LINKED);
+    expect(fileReport(db, dReporter({ discordId: '700' }), { targetId: P1, category: 'afk', text: '' }, deps)).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('does not block a Discord id whose previous owner was unlinked but never banned', () => {
+    unlinkDiscord(db, LINKED);
+    expect(fileReport(db, dReporter({ discordId: '700' }), { targetId: P1, category: 'afk', text: '' }, deps)).toMatchObject({ ok: true });
   });
 
   it('refuses a timed-out or sanctioned Discord reporter', () => {

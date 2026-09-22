@@ -95,6 +95,10 @@ export function foldTicket(db: DB, gone: number, keep: number, access: 'merge' |
   }
   db.prepare('UPDATE ticket_events SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   db.prepare('UPDATE bans SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
+  // discord_sanctions.ticket_id is a foreign key to tickets, same as bans: a
+  // sanction recorded against the emptied ticket must follow it, or deleting
+  // `gone` below would throw a foreign key violation.
+  db.prepare('UPDATE discord_sanctions SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   if (access === 'merge') db.prepare('UPDATE OR IGNORE ticket_access SET ticket_id = ? WHERE ticket_id = ?').run(keep, gone);
   db.prepare('DELETE FROM ticket_access WHERE ticket_id = ?').run(gone);
   db.prepare("UPDATE admin_actions SET target = ? WHERE target = ? AND action LIKE 'ticket\\_%' ESCAPE '\\'")

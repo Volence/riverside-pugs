@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { hasActiveBan } from '../banState.js';
 import { getPlayer, playerByDiscordId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
@@ -119,6 +120,17 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
     // right now, or under a sanction the bot carried out (phase 3c).
     const timedOut = reporter.timedOutUntil !== null && Date.parse(reporter.timedOutUntil) > now.getTime();
     if (timedOut || activeDiscordSanction(db, reporter.discordId, now)) return fail(403, 'you cannot file reports right now');
+    // A Discord-only reporter has no player row of their own, which is
+    // exactly the gap a banned player can walk through: unlink (or never
+    // link at all before the ban), then file through Discord with nothing
+    // above to catch it. linkDiscord already refuses the opposite direction
+    // (a banned account's Discord cannot attach to a new one) by checking
+    // discord_link_history for this Discord id's most recent owner; the same
+    // lookup, the same rule, applied here.
+    const lastOwner = db.prepare(
+      'SELECT steamid FROM discord_link_history WHERE discord_id = ? ORDER BY id DESC LIMIT 1',
+    ).get(reporter.discordId) as { steamid: string } | undefined;
+    if (lastOwner && hasActiveBan(db, lastOwner.steamid, now)) return fail(403, 'you cannot file reports right now');
   }
 
   let target: Person;

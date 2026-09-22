@@ -140,6 +140,20 @@ describe('threads follow a fold', () => {
     expect(staffThread(db, keep)?.thread_id).toBe('9002');
     expect(threadsInState(db, 'folded')).toEqual([]);
   });
+
+  it('a sanction on the emptied ticket moves to the survivor, and the fold does not throw', () => {
+    // discord_sanctions.ticket_id is a foreign key to tickets, same as bans:
+    // left unmoved, deleting the emptied ticket would throw a foreign key
+    // violation, and a sanction's evidence trail would simply vanish.
+    const keep = file(R1, ACCUSED);
+    const gone = file(R2, ALT);
+    const sanctionId = Number(db.prepare(
+      "INSERT INTO discord_sanctions (discord_id, kind, reason, ticket_id, created_by, created_at) VALUES ('999', 'ban', 'x', ?, ?, 'x')",
+    ).run(gone, OWNER).lastInsertRowid);
+    expect(() => db.transaction(() => foldTicket(db, gone, keep, 'merge'))()).not.toThrow();
+    expect((db.prepare('SELECT ticket_id FROM discord_sanctions WHERE id = ?').get(sanctionId) as { ticket_id: number }).ticket_id).toBe(keep);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+  });
 });
 
 describe('who may be in a restricted ticket\'s private thread', () => {

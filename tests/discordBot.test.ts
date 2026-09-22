@@ -43,7 +43,7 @@ describe('startBot', () => {
     const bot = await startBot({ ...s, connect: async () => s.t });
     expect(bot).not.toBeNull();
     expect(s.t.live()).toHaveLength(1);
-    const reply = await s.t.handler!({ kind: 'button', customId: 'q:join', userId: '901', userName: 'alice' });
+    const reply = await s.t.handler!({ kind: 'button', customId: 'q:join', userId: '901', userName: 'alice', presserTimedOutUntil: null });
     expect(reply.ephemeral).toBe(true);
     expect(s.matchmaker.publicQueue().count).toBe(1);
     await bot!.stop();
@@ -79,7 +79,7 @@ describe('startBot extras', () => {
     });
     expect(connected).toBe(true);
     expect(membership.isMember('2')).toBe(true);
-    const r = await s.t.handler!({ kind: 'button', customId: 'r:1:resolve', userId: '1', userName: 'x' });
+    const r = await s.t.handler!({ kind: 'button', customId: 'r:1:resolve', userId: '1', userName: 'x', presserTimedOutUntil: null });
     expect(r.payload.content).toBe('report button');
     await bot!.stop();
     expect(membership.isMember('2')).toBeNull();

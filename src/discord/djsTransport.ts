@@ -65,7 +65,10 @@ function toModal(m: ModalDef): APIModalInteractionResponseCallbackData {
       component: f.kind === 'select'
         ? {
             type: ComponentType.StringSelect, custom_id: f.id, required: true,
-            options: f.options.map((o) => ({ label: o.label, value: o.value })),
+            // APISelectMenuOption.default :1440 ("Whether this option should
+            // be already-selected by default"), discord-api-types
+            // payloads/v10/message.d.ts.
+            options: f.options.map((o) => ({ label: o.label, value: o.value, default: o.default })),
           }
         : f.kind === 'user'
           ? {
@@ -82,15 +85,23 @@ function toModal(m: ModalDef): APIModalInteractionResponseCallbackData {
 }
 
 /** Administrator, from either a cached GuildMember or the raw resolved member
- *  an interaction carries (whose permissions are a bitfield string).
+ *  an interaction carries (whose permissions are a bitfield string). Member
+ *  facts can be missing (null or undefined) even for a real, non-bot user,
+ *  such as when Discord resolves a picked member from a partial payload; for
+ *  anyone but a bot that is treated as administrator rather than not, fail
+ *  closed. The only cost of a false positive is a report that lands
+ *  restricted when it need not have; the cost of a false negative is a
+ *  Discord admin reading a case filed about themselves, which must never
+ *  happen. A bot has no ticket of its own to protect (reporting one is
+ *  refused before this is asked), so it is left at the ordinary default.
  *  GuildMember.permissions :1900 (Readonly<PermissionsBitField>);
  *  APIInteractionGuildMember.permissions / APIInteractionDataResolvedGuildMember.permissions
  *  are `Permissions` (a string), discord-api-types payloads/v10/_interactions/base.d.ts. */
-function isAdministrator(m: unknown): boolean {
+function isAdministrator(m: unknown, bot: boolean): boolean {
   const perms = (m as { permissions?: unknown } | null)?.permissions;
   if (perms instanceof PermissionsBitField) return perms.has(PermissionFlagsBits.Administrator);
   if (typeof perms === 'string') return (BigInt(perms) & PermissionFlagsBits.Administrator) !== 0n;
-  return false;
+  return !bot;
 }
 
 /** When a member's timeout ends, from either shape, or null.
@@ -112,7 +123,7 @@ function picked(user: User, member: unknown): PickedMember {
     id: user.id,
     name: nick?.displayName ?? nick?.nick ?? user.globalName ?? user.username,
     bot: user.bot,
-    administrator: isAdministrator(member),
+    administrator: isAdministrator(member, user.bot),
   };
 }
 
@@ -250,6 +261,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           // handler is a database read and answers well inside three seconds.
           const reply = await handler({
             kind: 'button', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+            presserTimedOutUntil: timedOutUntil(i.member),
           });
           if (reply.modal) {
             await i.showModal(toModal(reply.modal));
@@ -274,6 +286,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         else await i.deferReply({ flags: MessageFlags.Ephemeral });
         const reply = await handler({
           kind: 'button', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          presserTimedOutUntil: timedOutUntil(i.member),
         });
         const m = toMessage(reply.payload);
         // In place, an absent content must CLEAR the old text, and undefined

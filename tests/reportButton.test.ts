@@ -196,6 +196,23 @@ describe('reportModal', () => {
     expect(who.options).toHaveLength(1);
   });
 
+  it('marks the sentinel pre-selected when it is the dropdown\'s only option, so the form can submit without it being touched by hand', () => {
+    const soleOption = reportModal(db, null).fields[0]; // a Discord-only reporter: no match history at all
+    if (soleOption.kind !== 'select') throw new Error('who must be a select');
+    expect(soleOption.options).toEqual([{ label: 'Someone else (pick or type them below)', value: OTHER, default: true }]);
+
+    const stillSole = reportModal(db, ME).fields[0]; // a player with no recent opponents either
+    if (stillSole.kind !== 'select') throw new Error('who must be a select');
+    expect(stillSole.options[0].default).toBe(true);
+  });
+
+  it('leaves the sentinel un-marked once real choices join it', () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    const who = reportModal(db, ME).fields[0];
+    if (who.kind !== 'select') throw new Error('who must be a select');
+    expect(who.options[0].default).toBeUndefined();
+  });
+
   it('never offers the reporter themselves', () => {
     seedMatch(db, 1, [ME, ALICE]);
     const who = reportModal(db, ME).fields[0];
@@ -382,7 +399,7 @@ describe('reaping drafts', () => {
 const D = (steamid: string) => `90${IDS.indexOf(steamid)}`;
 const hDeps = () => ({ db, adminSteamIds: [] as string[] });
 const open = (steamid: string) => handleReportButton(hDeps(), {
-  kind: 'button', customId: 'rp:open', userId: D(steamid), userName: 'x',
+  kind: 'button', customId: 'rp:open', userId: D(steamid), userName: 'x', presserTimedOutUntil: null,
 });
 const submit = (steamid: string, fields: Record<string, string>) => handleReportModal(hDeps(), {
   kind: 'modal', customId: 'rp:new', userId: D(steamid), userName: 'x', fields, picked: {}, presserTimedOutUntil: null,
@@ -403,7 +420,7 @@ describe('opening the form', () => {
 
   it('opens the form for an unlinked presser too, instead of telling them to link first', async () => {
     const r = await handleReportButton(hDeps(), {
-      kind: 'button', customId: 'rp:open', userId: 'nobody', userName: 'x',
+      kind: 'button', customId: 'rp:open', userId: 'nobody', userName: 'x', presserTimedOutUntil: null,
     });
     expect(r.modal?.customId).toBe('rp:new');
   });
@@ -514,7 +531,7 @@ describe('Discord members on the form', () => {
   });
 
   it('a Discord-only reporter can open the form and file', async () => {
-    const open = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: 'rp:open', userId: 'd-new', userName: 'new' });
+    const open = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: 'rp:open', userId: 'd-new', userName: 'new', presserTimedOutUntil: null });
     expect(open.modal?.fields.find((f) => f.id === 'who')).toMatchObject({ options: [{ value: OTHER }] });
     const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: '990', name: '', reason: 'toxicity', details: '' }, { member: lurkerPick }, 'd-new'));
     expect(r.payload.content).toMatch(/^Thanks/);
@@ -546,10 +563,24 @@ describe('Discord members on the form', () => {
     expect(db.prepare('SELECT reporter_id, reporter_discord_id FROM pending_reports').get()).toEqual({ reporter_id: null, reporter_discord_id: 'd-new' });
     const pick = r.payload.components[0][0] as { customId: string };
     // Someone else pressing it gets the expired answer.
-    const other = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: pick.customId, userId: 'd-else', userName: 'x' });
+    const other = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: pick.customId, userId: 'd-else', userName: 'x', presserTimedOutUntil: null });
     expect(other.payload.content).toMatch(/expired/);
-    const mine = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: pick.customId, userId: 'd-new', userName: 'new' });
+    const mine = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: pick.customId, userId: 'd-new', userName: 'new', presserTimedOutUntil: null });
     expect(mine.payload.content).toMatch(/^Thanks/);
+  });
+
+  it('refuses a timed-out Discord-only presser at the candidate button, even though the draft is theirs', async () => {
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: '', name: 'bob', reason: 'afk', details: '' }, {}, 'd-new'));
+    const pick = r.payload.components[0][0] as { customId: string };
+    const later = new Date(Date.now() + 60_000).toISOString();
+    const timedOut = await handleReportButton({ db, adminSteamIds: [] }, {
+      kind: 'button', customId: pick.customId, userId: 'd-new', userName: 'new', presserTimedOutUntil: later,
+    });
+    expect(timedOut.payload.content).toContain('Could not file the report');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get()).toEqual({ n: 0 });
+    // The draft survives: fileReport's own ok flag is what gates the delete,
+    // never the reply text, so a refusal here must not burn the draft.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 1 });
   });
 });
 
@@ -591,7 +622,7 @@ describe('attaching the shared match', () => {
 });
 
 const pick = (steamid: string, customId: string) => handleReportButton(hDeps(), {
-  kind: 'button', customId, userId: D(steamid), userName: 'x',
+  kind: 'button', customId, userId: D(steamid), userName: 'x', presserTimedOutUntil: null,
 });
 
 describe('choosing between same-named players', () => {

@@ -21,7 +21,7 @@ let off: () => void;
 const deps = () => ({ db, publicUrl: 'https://pug.test' });
 
 const press = (steamid: string, customId: string, userId = D(steamid)) =>
-  handleTicketButton(deps(), { kind: 'button', customId, userId, userName: 'x' });
+  handleTicketButton(deps(), { kind: 'button', customId, userId, userName: 'x', presserTimedOutUntil: null });
 const submit = (steamid: string, customId: string, fields: Record<string, string>) =>
   handleTicketModal(deps(), { kind: 'modal', customId, userId: D(steamid), userName: 'x', fields, picked: {}, presserTimedOutUntil: null });
 const row = (id: number) => db.prepare('SELECT status, outcome, outcome_note, claimed_by FROM tickets WHERE id = ?').get(id);

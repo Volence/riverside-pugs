@@ -77,6 +77,7 @@ const clip = (s: string) => (s.length <= LABEL_MAX ? s : `${s.slice(0, LABEL_MAX
  *  for a Discord-only reporter, who has no match history to draw the
  *  dropdown from: the sentinel is all it holds. */
 export function reportModal(db: DB, reporter: string | null): ModalDef {
+  const others = reporter ? recentCoPlayers(db, reporter) : [];
   return {
     customId: `${REPORT_PREFIX}new`,
     title: 'Report a player',
@@ -86,8 +87,15 @@ export function reportModal(db: DB, reporter: string | null): ModalDef {
         id: 'who',
         label: 'Someone you played with?',
         options: [
-          { label: 'Someone else (pick or type them below)', value: OTHER },
-          ...(reporter ? recentCoPlayers(db, reporter) : []).map((c) => ({ label: clip(c.name), value: c.steamid })),
+          // Discord requires a select to have something chosen before a
+          // modal can submit. When the dropdown holds only the sentinel (a
+          // Discord-only reporter has no match history, so this is all
+          // recentCoPlayers ever leaves them), nothing else can be picked
+          // instead, so it is marked default: the reporter would otherwise
+          // have to open the dropdown and choose the one option by hand
+          // before the rest of the form would let them submit.
+          { label: 'Someone else (pick or type them below)', value: OTHER, ...(others.length === 0 ? { default: true } : {}) },
+          ...others.map((c) => ({ label: clip(c.name), value: c.steamid })),
         ],
       },
       { kind: 'user', id: 'member', label: 'Or pick them from the Discord', required: false },

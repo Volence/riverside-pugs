@@ -32,6 +32,21 @@ beforeEach(() => {
   ).run(ticketId);
 });
 
+describe('the summary\'s target name is never shadowed by the raw stored column', () => {
+  it('resolves through the joined player, even when the ticket\'s own target_name column disagrees', () => {
+    // SUMMARY selects t.* (which includes the raw target_name column) beside
+    // a COALESCE aliased as display_target_name; before the fix both were
+    // named target_name and only worked because the COALESCE happened to be
+    // listed last. A deliberately wrong stored value here proves the live
+    // player's name wins regardless of column order, not by accident of it.
+    const tid = Number(db.prepare(
+      "INSERT INTO tickets (target_id, target_name, created_at) VALUES (?, 'Stale Name', '2026-09-22T00:00:00Z')",
+    ).run(MOD).lastInsertRowid);
+    const t = listTickets(db, REP, 'open').find((x) => x.id === tid)!;
+    expect(t.targetName).toBe('mod');
+  });
+});
+
 describe('a ticket about a Discord-only person', () => {
   it('is visible to staff in the list, the counts and the detail', () => {
     const [t] = listTickets(db, MOD, 'open');

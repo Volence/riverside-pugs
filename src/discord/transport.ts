@@ -48,7 +48,7 @@ export interface MessagePayload {
 /** One field of a modal. Discord allows five per modal. */
 export type ModalField =
   | { kind: 'text'; id: string; label: string; style: 'short' | 'paragraph'; required?: boolean; maxLength?: number }
-  | { kind: 'select'; id: string; label: string; options: { label: string; value: string }[] }
+  | { kind: 'select'; id: string; label: string; options: { label: string; value: string; default?: boolean }[] }
   | { kind: 'user'; id: string; label: string; required?: boolean };
 
 export interface ModalDef {
@@ -112,7 +112,14 @@ export interface MessageCommandDef { name: string }
 export interface PickedMember { id: string; name: string; bot: boolean; administrator: boolean }
 
 export type BotInteraction =
-  | { kind: 'button'; customId: string; userId: string; userName: string }
+  | {
+      kind: 'button';
+      customId: string;
+      userId: string;
+      userName: string;
+      /** When the presser's Discord timeout ends, or null. */
+      presserTimedOutUntil: string | null;
+    }
   | {
       kind: 'command';
       name: string;

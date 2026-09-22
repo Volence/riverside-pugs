@@ -10,7 +10,7 @@ import { staffThread, surfaceFor } from './threads.js';
 const VISIBLE = `t.target_id IS NOT @viewer AND (t.restricted = 0 OR EXISTS
   (SELECT 1 FROM ticket_access a WHERE a.ticket_id = t.id AND a.steamid = @viewer))`;
 
-const SUMMARY = `SELECT t.*, COALESCE(pt.name, NULLIF(t.target_name, '')) AS target_name, pc.name AS claimed_name, po.name AS opened_name, px.name AS closed_name,
+const SUMMARY = `SELECT t.*, COALESCE(pt.name, NULLIF(t.target_name, '')) AS display_target_name, pc.name AS claimed_name, po.name AS opened_name, px.name AS closed_name,
     (SELECT COUNT(*) FROM ticket_reports r WHERE r.ticket_id = t.id) AS reports,
     (SELECT COUNT(DISTINCT ${REPORTER_KEY_SQL}) FROM ticket_reports r WHERE r.ticket_id = t.id) AS reporters,
     (SELECT GROUP_CONCAT(DISTINCT r.category) FROM ticket_reports r WHERE r.ticket_id = t.id) AS categories,
@@ -22,12 +22,12 @@ const SUMMARY = `SELECT t.*, COALESCE(pt.name, NULLIF(t.target_name, '')) AS tar
 interface SummaryRow {
   id: number; target_id: string | null; target_discord_id: string | null; status: 'open' | 'closed'; outcome: string | null; outcome_note: string; restricted: number;
   claimed_by: string | null; opened_by: string | null; created_at: string; closed_at: string | null; closed_by: string | null;
-  target_name: string | null; claimed_name: string | null; opened_name: string | null; closed_name: string | null;
+  display_target_name: string | null; claimed_name: string | null; opened_name: string | null; closed_name: string | null;
   reports: number; reporters: number; categories: string | null; last_report_at: string | null;
 }
 
 const toSummary = (r: SummaryRow) => ({
-  id: r.id, targetId: r.target_id, targetDiscordId: r.target_discord_id, targetName: r.target_name, status: r.status, outcome: r.outcome,
+  id: r.id, targetId: r.target_id, targetDiscordId: r.target_discord_id, targetName: r.display_target_name, status: r.status, outcome: r.outcome,
   restricted: r.restricted === 1, claimedBy: r.claimed_by, claimedByName: r.claimed_name,
   reports: r.reports, reporters: r.reporters, categories: r.categories ? r.categories.split(',') : [],
   createdAt: r.created_at, lastReportAt: r.last_report_at, closedAt: r.closed_at,

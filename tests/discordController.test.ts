@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 const press = (i: number, customId: string, userName = `d${i}`) =>
-  handleButton({ db, matchmaker: mm, publicUrl: URL_ }, { kind: 'button', customId, userId: did(i), userName });
+  handleButton({ db, matchmaker: mm, publicUrl: URL_ }, { kind: 'button', customId, userId: did(i), userName, presserTimedOutUntil: null });
 const body = (r: InteractionReply) => JSON.stringify(r.payload);
 
 describe('discord buttons', () => {
@@ -51,7 +51,7 @@ describe('discord buttons', () => {
   it('an unlinked user gets a one-time link to connect Steam', async () => {
     const r = await handleButton(
       { db, matchmaker: mm, publicUrl: URL_ },
-      { kind: 'button', customId: 'q:join', userId: 'stranger', userName: 'Stranger' },
+      { kind: 'button', customId: 'q:join', userId: 'stranger', userName: 'Stranger', presserTimedOutUntil: null },
     );
     const btn = r.payload.components.flat().find((b) => b.kind === 'link');
     expect(btn && btn.kind === 'link' && btn.url.startsWith(`${URL_}/link/discord?code=`)).toBe(true);
@@ -147,7 +147,7 @@ describe('discord queue timeout', () => {
     recordPenalty(db, IDS[0], 'no_show', null);
     const r = await handleButton(
       { db, matchmaker: mm, publicUrl: URL_, queueBlock: (s) => activeTimeout(db, s) ? 'timeout <t:1:R>' : null },
-      { kind: 'button', customId: 'q:join', userId: did(0), userName: 'd0' },
+      { kind: 'button', customId: 'q:join', userId: did(0), userName: 'd0', presserTimedOutUntil: null },
     );
     expect(JSON.stringify(r.payload)).toContain('timeout');
     expect(mm.publicQueue().count).toBe(0);
@@ -177,7 +177,7 @@ describe('queue alert opt-in toggle', () => {
 
   const toggle = (userId: string) => handleButton(
     { db, matchmaker: mm, publicUrl: URL_, roles },
-    { kind: 'button', customId: 'q:notify', userId, userName: 'someone' },
+    { kind: 'button', customId: 'q:notify', userId, userName: 'someone', presserTimedOutUntil: null },
   );
 
   beforeEach(() => {
@@ -228,7 +228,7 @@ describe('queue alert opt-in toggle', () => {
     };
     const r = await handleButton(
       { db, matchmaker: mm, publicUrl: URL_, roles: failing },
-      { kind: 'button', customId: 'q:notify', userId: did(2), userName: 'x' },
+      { kind: 'button', customId: 'q:notify', userId: did(2), userName: 'x', presserTimedOutUntil: null },
     );
     // Nearly always the bot's role sitting below the target role, which no
     // amount of retrying fixes.
@@ -276,7 +276,7 @@ describe('endorse buttons', () => {
     activatePlayer(db, STRANGER_SID);
     linkDiscord(db, STRANGER_SID, 'd-stranger', 'stranger');
     const hit = (customId: string) => handleButton(
-      { db, matchmaker: mm, publicUrl: URL_ }, { kind: 'button', customId, userId: 'd-stranger', userName: 'stranger' },
+      { db, matchmaker: mm, publicUrl: URL_ }, { kind: 'button', customId, userId: 'd-stranger', userName: 'stranger', presserTimedOutUntil: null },
     );
     expect(body(await hit('m:5:endorse'))).toMatch(/not in this match/i);
     expect(body(await hit(`e:5:k:${IDS[5]}:clutch`))).toMatch(/not in this match/i);
@@ -287,7 +287,7 @@ describe('endorse buttons', () => {
     seedCompleted(5);
     const r = await handleButton(
       { db, matchmaker: mm, publicUrl: URL_ },
-      { kind: 'button', customId: `e:5:k:${IDS[5]}:clutch`, userId: 'nobody', userName: 'Nobody' },
+      { kind: 'button', customId: `e:5:k:${IDS[5]}:clutch`, userId: 'nobody', userName: 'Nobody', presserTimedOutUntil: null },
     );
     expect(r.payload.components.flat().some((b) => b.kind === 'link' && b.url.includes('/link/discord'))).toBe(true);
     expect(given()).toEqual([]);

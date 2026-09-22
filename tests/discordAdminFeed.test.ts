@@ -119,7 +119,7 @@ describe('admin feed', () => {
   });
 
   it('a button on an old report card answers instead of failing', async () => {
-    const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7' });
+    const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7', presserTimedOutUntil: null });
     expect(r.ephemeral).toBe(true);
     expect(JSON.stringify(r.payload)).toMatch(/tickets/i);
   });
