@@ -24,6 +24,7 @@ import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { isWheel } from './admin/timeline/input.js';
 import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
@@ -686,6 +687,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // its repeat count, so this posts once per player, match and
             // signature however many bursts qualify afterwards.
             for (const { signature, note } of stored.created) {
+              // A scroll wheel bind is allowed; the file keeps the row, the
+              // admin channel does not need telling.
+              if (isWheel(note)) continue;
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
                 detail: `repeated across separate ${ev.burstKind} bursts this match; holds: ${note}`,

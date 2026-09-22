@@ -6,6 +6,12 @@ interface Row {
   severity: string; at: string; hits: number; note: string;
 }
 
+/** A mouse wheel bound to +attack or +jump is legal (owner's ruling,
+ *  2026-09-22), so a detection whose holds look like one is recorded but is
+ *  not evidence. The note starts with the hold annotation. */
+export const WHEEL_ALLOWED = 'wheel-like';
+export const isWheel = (note: string): boolean => note.startsWith(WHEEL_ALLOWED);
+
 /** Input-timing detections. A row exists only once a signature has repeated
  *  across separate bursts in one match, so each one is already a pattern and
  *  not a single fast burst. It is still evidence to read beside the replay,
@@ -22,15 +28,22 @@ export const inputAdapter: TimelineAdapter = {
       at: toIso(r.at),
       source: 'input' as const,
       kind: r.signature,
-      summary: `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}`
-        + `${r.note ? `, holds look ${r.note}` : ''}. Button timing, to be read beside the replay.`,
+      summary: isWheel(r.note)
+        ? `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}, one-tick presses of a `
+          + 'scroll wheel bind, which is allowed. Kept for the record, not a flag.'
+        : `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}`
+          + `${r.note ? `, holds look ${r.note}` : ''}. Button timing, to be read beside the replay.`,
       matchId: r.match_id,
       replay: null,
       ref: { type: 'input_detection', id: r.id },
+      ...(isWheel(r.note) ? { allowed: true as const } : {}),
     }));
   },
   evidence(db: DB) {
-    return db.prepare('SELECT steamid, MAX(at) AS at FROM input_detections GROUP BY steamid')
+    return db.prepare(
+      `SELECT steamid, MAX(at) AS at FROM input_detections
+       WHERE note NOT LIKE '${WHEEL_ALLOWED}%' GROUP BY steamid`,
+    )
       .all() as { steamid: string; at: string }[];
   },
 };
