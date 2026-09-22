@@ -1,3 +1,4 @@
+import { NotInGuildError } from '../../src/discord/transport.js';
 import type {
   BotInteraction, BotTransport, InboundAttachment, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks,
   MessagePayload, ModerationOps, ModerationResult, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
@@ -242,7 +243,7 @@ export class FakeTransport implements BotTransport {
     addMember: async (threadId, userId) => {
       this.threadOp();
       const th = this.writableThread(threadId);
-      if (this.notInGuild.has(userId)) throw new Error('Unknown Member');
+      if (this.notInGuild.has(userId)) throw new NotInGuildError('Unknown Member');
       th.members.add(userId);
     },
     removeMember: async (threadId, userId) => {

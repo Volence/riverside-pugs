@@ -7,6 +7,7 @@ import {
   reporterThreadFor, reporterThreadsOf, requestPing, type ChatPlan, type ReporterAsker,
 } from '../tickets/reporterChat.js';
 import { insertThread, setThreadLocked, setThreadState, type ThreadRow } from '../tickets/threads.js';
+import { NotInGuildError } from './transport.js';
 import type { BotTransport } from './transport.js';
 
 /** The spec's opening line, word for word. */
@@ -44,6 +45,18 @@ const fail = (status: number, error: string) => ({ ok: false as const, status, e
  *  archived thread refuses every write there is. */
 async function writable(transport: BotTransport, threadId: string): Promise<void> {
   if (await transport.threads.isArchived(threadId)) await transport.threads.setArchived(threadId, false);
+}
+
+/** Whether a previous press already finished opening this specific thread
+ *  row: the send, the staff add and the event all happened. Written only
+ *  once that whole sequence completes (see openNow's addTicketEvent), so a
+ *  press that made the thread and then had Discord refuse the opening
+ *  message leaves nothing here, and the very next press is treated as if it
+ *  were the original create and finishes the rest. */
+function openingDone(db: DB, threadRowId: number): boolean {
+  return !!db.prepare(
+    "SELECT 1 FROM ticket_events WHERE kind = 'reporter_chat' AND json_extract(detail, '$.threadRowId') = ? LIMIT 1",
+  ).get(threadRowId);
 }
 
 /**
@@ -85,13 +98,28 @@ export async function endReporterThread(d: { db: DB; transport: BotTransport }, 
 export class ReporterChats {
   constructor(private deps: ReporterChatsDeps) {}
 
+  /** Used only when deps.serialise is not given (every real caller supplies
+   *  TicketSync's chain). A fallback of "just run it" would let two presses
+   *  for the same ticket and reporter race each other's reporterThreadFor
+   *  lookup and each create its own thread; queued on this instead, the
+   *  second press always sees the first one's finished row. */
+  private chain: Promise<unknown> = Promise.resolve();
+
   private now(): Date {
     return this.deps.now?.() ?? new Date();
   }
 
+  private defaultSerialise = (f: () => Promise<void>): Promise<void> => {
+    const started = this.chain.then(f, f);
+    // The queue itself must never stall: a step that rejected still frees
+    // the next one, whose own result is read from `started`, not from here.
+    this.chain = started.then(() => undefined, () => undefined);
+    return started;
+  };
+
   /** On the chain, waited for, with any throw turned into DISCORD_FAILED. */
   private async onChain<T extends { ok: boolean }>(fn: () => Promise<T>): Promise<T | { ok: false; status: number; error: string }> {
-    const serialise = this.deps.serialise ?? ((f: () => Promise<void>) => f());
+    const serialise = this.deps.serialise ?? this.defaultSerialise;
     let out: T | undefined;
     try {
       await serialise(async () => { out = await fn(); });
@@ -127,14 +155,26 @@ export class ReporterChats {
       if (me === null) return fail(400, 'link your Discord account first');
       const open = reporterThreadsOf(db, ticketId, 'open');
       if (open.length === 0) return fail(409, 'there is no open reporter chat on this ticket');
+      // Threads still worth pointing at, in order: everyone the presser was
+      // actually put into, plus anyone skipped only because reporterThreadAudience
+      // says so (unchanged from before). What Discord itself has already
+      // deleted is dropped here, exactly as openNow drops it, so one gone
+      // thread does not fail the whole call or leave the URL pointing at it.
+      const alive: ThreadRow[] = [];
       for (const th of open) {
-        if (!reporterThreadAudience(db, th).includes(me)) continue;
+        if (!reporterThreadAudience(db, th).includes(me)) { alive.push(th); continue; }
+        if (!(await transport.threads.exists(th.thread_id))) {
+          setThreadState(db, th.id, 'deleted');
+          continue;
+        }
         await writable(transport, th.thread_id);
         await transport.threads.addMember(th.thread_id, me);
+        alive.push(th);
       }
+      if (alive.length === 0) return fail(409, 'there is no open reporter chat on this ticket');
       addTicketEvent(db, ticketId, staff, 'reporter_chat_joined', {}, this.now());
       publishTicketSignal({ kind: 'ticket', ticketId });
-      return { ok: true, url: threadUrl(guildId, open[0].thread_id), created: false, reopened: false };
+      return { ok: true, url: threadUrl(guildId, alive[0].thread_id), created: false, reopened: false };
     });
   }
 
@@ -188,8 +228,15 @@ export class ReporterChats {
         }, now);
       } catch (err) {
         // The ticket went (a fold) while the thread was being made: nothing
-        // may be left standing that no row knows about.
-        await transport.threads.deleteThread(made.threadId).catch(() => {});
+        // may be left standing that no row knows about. There is no row to
+        // mark either way (insertThread never wrote one), so a failed delete
+        // here can only be logged: the thread has to be found and cleaned up
+        // by hand, since nothing in the database still points at it.
+        try {
+          await transport.threads.deleteThread(made.threadId);
+        } catch (delErr) {
+          console.error(`[discord] could not delete orphaned reporter chat thread ${made.threadId} (its row was never written):`, delErr instanceof Error ? delErr.message : delErr);
+        }
         throw err;
       }
       created = true;
@@ -204,16 +251,37 @@ export class ReporterChats {
     }
     try {
       await transport.threads.addMember(th.thread_id, plan.reporterDiscordId);
-    } catch {
-      // Discord's answer for somebody who is not in the server. A thread made
-      // for them just now goes again; an old one stays for the record.
+    } catch (err) {
+      // NotInGuildError is Discord's answer for somebody who is not in the
+      // server, the one rejection expected here; anything else (a rate
+      // limit, a missing permission, Discord being down for a moment) is not
+      // the reporter's fault and must not be blamed on them or deleted over.
+      if (!(err instanceof NotInGuildError)) throw err;
+      console.warn(`[discord] the reporter is not in the Discord server, so chat thread ${th.thread_id} could not be given to them:`, err.message);
+      // A thread made for them just now goes again; an old one stays, for
+      // the record, either way. Marked deleted only once Discord confirms
+      // it: a delete Discord refuses leaves the row exactly as it was, open,
+      // so the same orphaned thread is found and retried on the next press
+      // rather than losing track of it (there is no dedicated sweep for this
+      // yet; the row staying 'open' is what makes it findable later).
       if (created) {
-        await transport.threads.deleteThread(th.thread_id).catch(() => {});
-        setThreadState(db, th.id, 'deleted');
+        try {
+          await transport.threads.deleteThread(th.thread_id);
+          setThreadState(db, th.id, 'deleted');
+        } catch (delErr) {
+          console.error(`[discord] could not delete orphaned reporter chat thread ${th.thread_id}:`, delErr instanceof Error ? delErr.message : delErr);
+        }
       }
       return fail(409, by.kind === 'reporter' ? NOT_IN_SERVER_SELF : NOT_IN_SERVER_STAFF);
     }
-    if (created) await transport.send(th.thread_id, { content: CHAT_OPENING, embeds: [], components: [], mentionUserIds: [] });
+    // "Just opened" covers a fresh thread, and also one made by an earlier
+    // press whose completion (the message below, the staff add, the event
+    // and the ping) never finished because Discord refused something after
+    // the row was already written: openingDone is false until that whole
+    // sequence has gone through once, so this press does the rest of it
+    // rather than silently linking to a chat that never actually opened.
+    const justOpened = created || (!reopened && !openingDone(db, th.id));
+    if (justOpened) await transport.send(th.thread_id, { content: CHAT_OPENING, embeds: [], components: [], mentionUserIds: [] });
     const allowed = reporterThreadAudience(db, th);
     const staff = by.kind === 'staff' ? this.discordIdOf(by.steamid) : plan.claimedBy ? this.discordIdOf(plan.claimedBy) : null;
     if (staff !== null && allowed.includes(staff)) {
@@ -223,8 +291,8 @@ export class ReporterChats {
         console.warn('[discord] could not add a moderator to a reporter chat:', err instanceof Error ? err.message : err);
       }
     }
-    addTicketEvent(db, plan.ticketId, by.kind === 'staff' ? by.steamid : null, 'reporter_chat', { by: by.kind, created, reopened }, now);
-    if (by.kind === 'reporter' && (created || reopened)) requestPing(db, th.thread_id, now);
+    addTicketEvent(db, plan.ticketId, by.kind === 'staff' ? by.steamid : null, 'reporter_chat', { by: by.kind, created, reopened, threadRowId: th.id }, now);
+    if (by.kind === 'reporter' && (justOpened || reopened)) requestPing(db, th.thread_id, now);
     publishTicketSignal({ kind: 'ticket', ticketId: plan.ticketId });
     return { ok: true, url: threadUrl(guildId, th.thread_id), created, reopened };
   }

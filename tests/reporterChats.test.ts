@@ -162,4 +162,75 @@ describe('staff', () => {
     expect(await chats.contact(r.ticketId, r.reportId, MOD)).toMatchObject({ ok: false, status: 409 });
     expect(await chats.join(r.ticketId, MOD)).toMatchObject({ ok: false, status: 409 });
   });
+
+  it('Join skips a chat Discord already deleted and still joins the rest', async () => {
+    const a = file(R1, ACCUSED);
+    file(R2, ACCUSED, 'afk');
+    const reports = db.prepare('SELECT id FROM ticket_reports WHERE ticket_id = ? ORDER BY id').all(a.ticketId) as { id: number }[];
+    await chats.openForReporter(reports[0].id, { kind: 'player', steamid: R1 });
+    await chats.openForReporter(reports[1].id, { kind: 'player', steamid: R2 });
+    const before = reporterThreadsOf(db, a.ticketId, 'open');
+    const [gone, stays] = before;
+    await t.threads.deleteThread(gone.thread_id);
+    const res = await chats.join(a.ticketId, MOD2);
+    expect(res).toMatchObject({ ok: true });
+    expect(memberIds(stays.thread_id)).toContain(D(MOD2));
+    expect(reporterThreadsOf(db, a.ticketId, 'open').map((x) => x.id)).toEqual([stays.id]);
+  });
+});
+
+describe('fix round 1', () => {
+  it('two concurrent opens for the same report make exactly one thread when nothing else serialises', async () => {
+    const r = file(R1, ACCUSED);
+    const [a, b] = await Promise.all([
+      chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 }),
+      chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 }),
+    ]);
+    expect(t.threadsIn('chan1')).toHaveLength(1);
+    expect(a.ok && b.ok).toBe(true);
+    expect([a.ok && a.created, b.ok && b.created].filter(Boolean)).toHaveLength(1);
+    expect(a.ok && b.ok && a.url === b.url).toBe(true);
+  });
+
+  it('a transient Discord failure adding the reporter is a 502, not a 409, and neither deletes nor blames the reporter', async () => {
+    const r = file(R1, ACCUSED);
+    const first = await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(first).toMatchObject({ ok: true, created: true });
+    const [th] = reporterThreadsOf(db, r.ticketId);
+    // failThreadOps fires on the very next thread operation, which by now is
+    // the reporter's addMember call inside the reused-thread branch: not a
+    // NotInGuildError, so it must not be read as "they are not in the server".
+    t.failThreadOps = 1;
+    const res = await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(res).toMatchObject({ ok: false, status: 502 });
+    expect(t.threadsById.get(th.thread_id)).toMatchObject({ deleted: false });
+    expect(reporterThreadsOf(db, r.ticketId, 'open').map((x) => x.id)).toEqual([th.id]);
+  });
+
+  it('a delete that fails after the reporter turns out not to be in the server leaves the row open for a retry', async () => {
+    const r = file(R1, ACCUSED);
+    t.notInGuild.add(D(R1));
+    t.threads.deleteThread = async () => { throw new Error('discord down'); };
+    const res = await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(res).toMatchObject({ ok: false, status: 409 });
+    // Still there in Discord (the delete failed) and not marked deleted in
+    // the database either, so the same orphan is found again next time.
+    expect(t.threadsById.size).toBe(1);
+    const rows = db.prepare('SELECT state FROM ticket_threads WHERE ticket_id = ?').all(r.ticketId) as { state: string }[];
+    expect(rows.map((x) => x.state)).toEqual(['open']);
+  });
+
+  it('a failed opening message is sent, and pinged for, on the next press instead of being lost', async () => {
+    const r = file(R1, ACCUSED);
+    t.failSends = 1;
+    const first = await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(first).toMatchObject({ ok: false, status: 502 });
+    const [th] = reporterThreadsOf(db, r.ticketId);
+    expect(said(th.thread_id)).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM reporter_chat_pings').get()).toEqual({ n: 0 });
+    const second = await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(second).toMatchObject({ ok: true, created: false, reopened: false });
+    expect(said(th.thread_id)).toEqual([CHAT_OPENING]);
+    expect(db.prepare('SELECT wanted_at IS NOT NULL AS w FROM reporter_chat_pings WHERE thread_id = ?').get(th.thread_id)).toEqual({ w: 1 });
+  });
 });
