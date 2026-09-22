@@ -1,5 +1,6 @@
 import { rmSync } from 'node:fs';
 import type { DB } from '../db.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import { playerByDiscordId } from '../players.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
 import { setThreadLocked, threadByDiscordId, type ThreadRow } from '../tickets/threads.js';
@@ -80,6 +81,10 @@ export class TicketMirror {
    *  because a read hands every page back through onMessage and that must not
    *  start another one. */
   private caughtUp = new Set<string>();
+  /** Problems already told to the admin feed by this process, as TicketSync
+   *  keeps them: a bot without Manage Messages fails every sweep, and the feed
+   *  must hear that once, not every few minutes. */
+  private reported = new Set<string>();
 
   constructor(private deps: TicketMirrorDeps) {}
 
@@ -162,6 +167,15 @@ export class TicketMirror {
     return this.removals;
   }
 
+  /** Told to the admin feed once per process, as TicketSync.problem does it.
+   *  The text names no thread, no message, no ticket and no player: every
+   *  admin reads the feed, and the ticket may be one they may not see. */
+  private problem(text: string): void {
+    if (this.reported.has(text)) return;
+    this.reported.add(text);
+    publishAdminEvent({ kind: 'problem', text });
+  }
+
   private async sweepOwed(): Promise<void> {
     const { db } = this.deps;
     const owed = db.prepare('SELECT id, thread_id, discord_message_id FROM ticket_messages WHERE removed_at IS NOT NULL AND discord_gone = 0 ORDER BY id')
@@ -171,7 +185,11 @@ export class TicketMirror {
         await this.removeInDiscord(m.thread_id, m.discord_message_id);
         db.prepare('UPDATE ticket_messages SET discord_gone = 1 WHERE id = ?').run(m.id);
       } catch (err) {
-        console.error('[discord] could not delete a removed ticket message; the next start tries again:', err instanceof Error ? err.message : err);
+        console.error('[discord] could not delete a removed ticket message; the next sweep tries again:', err instanceof Error ? err.message : err);
+        // Nobody reads the console, and a missing permission fails every
+        // delete for ever: a message a moderator was told is gone stands in
+        // Discord until somebody is told about it.
+        this.problem('A message removed on the site is still standing in Discord, because the bot could not delete it. It is retried every few minutes. The usual cause is the bot missing Manage Messages in the tickets forum or the tickets channel.');
       }
     }
   }

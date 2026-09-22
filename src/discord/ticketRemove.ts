@@ -90,7 +90,17 @@ export async function handleRemoveCommand(
   // written on the row for the sweep to finish. So it is audited at once,
   // whether or not the delete below works or the bot is even running.
   const r = removeMessage(db, deps.attachmentsDir, ticket.id, m.id, p.steamid, '');
-  if (!r.ok) return say(capitalise(r.error));
+  if (!r.ok) {
+    // Removed on the site already, and the moderator is looking at it in
+    // Discord: what is left is the delete the sweep still owes, so this is the
+    // retry they are asking for. Asked and not waited for, as the removals
+    // chain is everywhere else.
+    if (r.status === 409) {
+      void deps.mirror()?.sweepRemovals();
+      return say('That message was already removed on the site. The bot has been asked again to delete it here.');
+    }
+    return say(capitalise(r.error));
+  }
   logAdmin(db, p.steamid, 'ticket_remove', ticket.id, { messageId: m.id, files: r.files, mirrored: true, via: 'discord' }, { quiet });
   await deps.mirror()?.sweepRemovals();
   const files = r.files === 0 ? '' : ` and ${r.files} file${r.files === 1 ? '' : 's'}`;

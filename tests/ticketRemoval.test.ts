@@ -252,6 +252,56 @@ describe('the Discord half', () => {
     sync.stop();
   });
 
+  /** A Discord that refuses every delete, as a bot without Manage Messages
+   *  does. Returns the way back. */
+  function refusesDeletes(): () => void {
+    const real = t.remove.bind(t);
+    t.remove = async () => { throw new Error('Missing Permissions'); };
+    return () => { t.remove = real; };
+  }
+
+  it('tells the admins once that a removed message is still standing in Discord, and names nothing', async () => {
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    const { discordId, row } = await horrible(thread);
+    refusesDeletes();
+    events.length = 0;
+
+    expect(removeMessage(db, dir, id, row.id, MOD, '').ok).toBe(true);
+    await mirror.sweepRemovals();
+    await mirror.sweepRemovals();
+
+    // Still owed, and still standing: the sweep tries again every time.
+    expect(messageById(db, row.id)!.discord_gone).toBe(0);
+    expect(t.inbox.find((m) => m.id === discordId)!.deleted).toBe(false);
+    const problems = events.filter((e) => e.kind === 'problem');
+    // Once per process, however many sweeps fail.
+    expect(problems).toHaveLength(1);
+    const text = problems[0].kind === 'problem' ? problems[0].text : '';
+    expect(text).toMatch(/Manage Messages/);
+    for (const secret of [thread, discordId, `#${id}`, ACCUSED, 'A Stranger', '555']) expect(text).not.toContain(secret);
+  });
+
+  it('is asked again by the reconciler\'s timer, so a delete that failed is retried without a restart', async () => {
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    const { discordId, row } = await horrible(thread);
+    const recover = refusesDeletes();
+
+    expect(removeMessage(db, dir, id, row.id, MOD, '').ok).toBe(true);
+    await mirror.sweepRemovals();
+    expect(messageById(db, row.id)!.discord_gone).toBe(0);
+
+    recover();
+    const sync = new TicketSync({
+      db, transport: t, publicUrl: 'http://x', intervalMs: 5, sweepRemovals: () => { void mirror.sweepRemovals(); },
+    });
+    sync.start();
+    await vi.waitFor(() => expect(messageById(db, row.id)!.discord_gone).toBe(1));
+    sync.stop();
+    expect(t.inbox.find((m) => m.id === discordId)!.deleted).toBe(true);
+  });
+
   it('destroys a file whose download finishes after its message was removed', async () => {
     const { id, thread } = await ticketWithThread(ACCUSED);
     let arrive = () => {};
@@ -335,6 +385,37 @@ describe('Remove from ticket, the Discord command', () => {
     ]);
     expect(dump()).not.toContain(HORRIBLE);
     expect(said(await run('906', thread, discordId))).toMatch(/already removed/i);
+  });
+
+  /** Right-clicking Remove again on a message that is still standing is the
+   *  only retry a moderator has, and it used to be a bare refusal. */
+  it('asks the bot to try the Discord delete again when the message was already removed on the site', async () => {
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    const { discordId, row } = await horrible(thread);
+    let attempts = 0;
+    const real = t.remove.bind(t);
+    t.remove = async (channelId, messageId) => {
+      attempts++;
+      if (attempts === 1) throw new Error('Missing Permissions');
+      await real(channelId, messageId);
+    };
+    expect(removeMessage(db, dir, id, row.id, MOD, '').ok).toBe(true);
+    await mirror.sweepRemovals();
+    expect(attempts).toBe(1);
+    expect(messageById(db, row.id)!.discord_gone).toBe(0);
+
+    expect(said(await run('906', thread, discordId)))
+      .toBe('That message was already removed on the site. The bot has been asked again to delete it here.');
+
+    // Asked, not waited for: the command answers at once and the sweep runs
+    // on its own chain.
+    await mirror.idle();
+    expect(attempts).toBe(2);
+    expect(messageById(db, row.id)!.discord_gone).toBe(1);
+    expect(t.inbox.find((m) => m.id === discordId)!.deleted).toBe(true);
+    // Nothing removed twice: the second command wrote no second audit row.
+    expect(auditRows()).toHaveLength(0);
   });
 
   it('deletes a message the mirror never copied, leaves the card alone, and is quiet on a restricted ticket', async () => {

@@ -1191,6 +1191,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // exist. Whatever was written in one while the bot was down is
           // copied onto the site first, or it goes with the post.
           saveBeforeDelete: (threadId) => mirror.catchUp(threadId),
+          // And its timer is what retries a removal's Discord delete: a
+          // refused one would otherwise wait for the next restart.
+          sweepRemovals: () => { void mirror.sweepRemovals(); },
         });
         ticketSync.start();
         mirror.start();

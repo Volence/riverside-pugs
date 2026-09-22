@@ -39,6 +39,17 @@ export interface TicketSyncDeps {
    * now holds a staff flag, must never stand because a copy failed.
    */
   saveBeforeDelete?: (threadId: string) => Promise<void>;
+  /**
+   * The mirror's sweep of removals whose Discord delete is still owed
+   * (TicketMirror.sweepRemovals), asked for on every timer pass: a delete
+   * Discord refused is otherwise retried only at the next restart, and a
+   * missing permission refuses it every time.
+   *
+   * Called and not awaited, and deliberately not on this chain: the sweep's
+   * own chain waits on this one (a removal's delete goes through serialise),
+   * so waiting back would deadlock the pair.
+   */
+  sweepRemovals?: () => void;
 }
 
 /**
@@ -74,8 +85,12 @@ export class TicketSync {
     const every = this.deps.intervalMs ?? RECONCILE_MS;
     if (every > 0) {
       // The timer pass leaves the threads of settled tickets alone: see
-      // reconcile's `scope`.
-      this.timer = setInterval(() => this.enqueue(() => this.reconcile('open')), every);
+      // reconcile's `scope`. The sweep is asked for beside it rather than
+      // inside it: see the dep.
+      this.timer = setInterval(() => {
+        this.enqueue(() => this.reconcile('open'));
+        this.deps.sweepRemovals?.();
+      }, every);
       this.timer.unref();
     }
     // A banned moderator stops being active staff at once, not in five
