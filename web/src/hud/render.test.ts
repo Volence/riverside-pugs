@@ -3,6 +3,7 @@ import { childRects, drawPanel, drawSlotStyle, PANEL_FILE, _setImageFactory, _re
 import { buildHud, buildTrees } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
+import { artUrl } from './art';
 
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), ...patch });
 const text = (files: { path: string; data: Uint8Array }[], path: string) =>
@@ -10,9 +11,9 @@ const text = (files: { path: string; data: Uint8Array }[], path: string) =>
 
 /** A recording 2D context: every method the renderer calls is a no-op that logs its name. */
 function recCtx() {
-  const calls: { m: string; a: unknown[]; font: string }[] = [];
-  // Each call snapshots ctx.font at the moment it was made, so a test can pin the size a label was drawn at.
-  const noop = (m: string) => (...a: unknown[]) => { calls.push({ m, a, font: ctx.font }); };
+  const calls: { m: string; a: unknown[]; font: string; fill: string }[] = [];
+  // Each call snapshots ctx.font and ctx.fillStyle at the moment it was made, so a test can pin how a child was drawn.
+  const noop = (m: string) => (...a: unknown[]) => { calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle }); };
   const ctx = {
     canvas: { width: 853, height: 480 },
     fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1, lineWidth: 1,
@@ -137,9 +138,38 @@ describe('drawPanel', () => {
     expect(numberCall.font).toMatch(/^(bold )?27px /);
   });
 
-  it('survives a material the index lacks', () => {
-    const { ctx } = recCtx();
-    const d = design({ preset: 'modern' });                     // modern's DuckingIcon points at hud/crouch_survivor, not exported
-    expect(() => drawPanel(ctx, d, 'ownHealth', { x: 0, y: 0 }, 1)).not.toThrow();
+  // The missing-art path (hatch and one warning) lives in render.missing.test.ts, which mocks ./art.
+
+  it('draws an advanced-mode restyled bar in the design colour, as the overwritten healthbar_green does', () => {
+    const green = artUrl('vgui/healthbar_green')!;
+    const barImages = (calls: { m: string; a: unknown[] }[]) =>
+      calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === green);
+    const styles = { barGreen: { kind: 'flat' as const, color: '255 0 0 255' } };
+
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({ advanced: true, styles }), 'ownHealth', { x: 0, y: 0 }, 1);
+    const health = childRects(design({ advanced: true, styles }), 'ownHealth', { x: 0, y: 0 }, 1).find((c) => c.name === 'Health')!;
+    expect(calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)'
+      && c.a[0] === health.x && c.a[1] === health.y && c.a[2] === health.w && c.a[3] === health.h)).toBe(true);
+    expect(barImages(calls)).toHaveLength(0);
+
+    // Without advanced mode stylePass leaves healthbar_green alone, so the stock art is what the game shows.
+    const { ctx: c2, calls: calls2 } = recCtx();
+    drawPanel(c2, design({ styles }), 'ownHealth', { x: 0, y: 0 }, 1);
+    expect(barImages(calls2)).toHaveLength(1);
+    expect(calls2.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)')).toBe(false);
+  });
+
+  it('draws the infected card head as a silhouette, never a survivor portrait', () => {
+    const portraits = ['biker', 'manager', 'namvet', 'teenangst'].map((c) => artUrl(`vgui/s_panel_${c}`)!);
+    for (const preset of ['stock', 'modern'] as const) {
+      for (const card of [undefined, 0, 1, 2]) {
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, design({ preset }), 'infectedRow', { x: 0, y: 0 }, 1, { card });
+        const srcs = calls.filter((c) => c.m === 'drawImage').map((c) => (c.a[0] as HTMLImageElement).src);
+        for (const p of portraits) expect(srcs, `${preset} card ${card}`).not.toContain(p);
+        expect(calls.some((c) => c.m === 'arc'), `${preset} card ${card}`).toBe(true);
+      }
+    }
   });
 });

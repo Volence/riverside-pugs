@@ -158,13 +158,34 @@ function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.restore();
 }
 
+/**
+ * The infected card's head. Game code shows the class icon of whichever
+ * special infected the player is, which the preview does not know, so it
+ * draws a plain head-and-shoulders shape inside the file's rect instead.
+ */
+function silhouette(ctx: CanvasRenderingContext2D, r: ChildRect) {
+  const cx = r.x + r.w / 2;
+  const unit = Math.min(r.w, r.h);
+  ctx.save();
+  ctx.fillStyle = 'rgba(150,150,150,0.55)';
+  ctx.beginPath();
+  ctx.arc(cx, r.y + r.h * 0.38, unit * 0.22, 0, Math.PI * 2);          // head
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, r.y + r.h, unit * 0.4, Math.PI, 0);                      // shoulders, cut by the rect's bottom edge
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   const image = kvGet(n, 'image');
   const fill = kvGet(n, 'fillcolor');
   const lname = n.key.toLowerCase();
   let src: CanvasImageSource | undefined;
   let natural: { w: number; h: number } | undefined;
-  if (lname === 'head' || lname === 'playerimage') {
+  if (lname === 'playerimage') { silhouette(ctx, r); return; }      // the special infected's own head: no survivor portrait
+  if (lname === 'head') {
     // Game code picks the portrait; the preview picks a fixed one per card.
     const material = opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length];
     const img = artImage(material, opts.onAsset);
@@ -217,8 +238,15 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, 
   ctx.restore();
 }
 
-function drawBar(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
-  const img = artImage('vgui/healthbar_green', opts.onAsset);       // 100 health: the whole rect, green
+/**
+ * The health bar at 100 health: the whole rect, green. In advanced mode a
+ * restyled barGreen slot overwrites vgui/healthbar_green itself (stylePass
+ * writes the stock name too), so the game fills the bar with the design's
+ * colour and the preview must as well. Otherwise it is the stock art.
+ */
+function drawBar(ctx: CanvasRenderingContext2D, design: HudDesign, r: ChildRect, opts: DrawOpts) {
+  if (design.advanced && drawSlotStyle(ctx, design, 'bargreen', r)) return;
+  const img = artImage('vgui/healthbar_green', opts.onAsset);
   if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
   else { ctx.fillStyle = 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
 }
@@ -232,7 +260,7 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
       case 'label': drawLabel(ctx, design, n, r, k, opts); break;
-      case 'bar': drawBar(ctx, r, opts); break;
+      case 'bar': drawBar(ctx, design, r, opts); break;
       default: break;                                                // Panel, CircularProgressBar: nothing to show
     }
   }
