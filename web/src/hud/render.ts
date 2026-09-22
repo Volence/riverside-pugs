@@ -80,11 +80,17 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
 
 // --- scheme lookups: a font's size and weight, a named colour ---
 
+/**
+ * A font's size and whether it is bold. Stock faces are "Trade Gothic Bold"
+ * at weight 0 or 400: the boldness lives in the face itself, not the weight,
+ * so a face named Bold counts as bold whatever its weight says.
+ */
 function fontFace(design: HudDesign, name: string): { tall: number; bold: boolean } {
   const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
   const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
   if (!first) return { tall: 12, bold: false };
-  return { tall: num(kvGet(first, 'tall'), 12), bold: num(kvGet(first, 'weight')) >= 700 };
+  const bold = num(kvGet(first, 'weight')) >= 700 || /\bbold\b/i.test(kvGet(first, 'name') ?? '');
+  return { tall: num(kvGet(first, 'tall'), 12), bold };
 }
 
 /** Base files use scheme colour names; the generator never writes one, but the preview has to read them. */

@@ -141,6 +141,17 @@ describe('drawPanel', () => {
     expect(numberCall.font).toMatch(/^(bold )?36px /);
   });
 
+  it('draws a face named Bold in bold, whatever its weight says', () => {
+    // Stock HUDHealth is "Trade Gothic Bold" at weight 0 and PlayerDisplayName is the same face at 400:
+    // the boldness is in the face, not the weight, so the canvas has to read the name.
+    const own = recCtx();
+    drawPanel(own.ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
+    expect(own.calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.font).toMatch(/^bold /);
+    const team = recCtx();
+    drawPanel(team.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
+    expect(team.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.font).toMatch(/^bold /);
+  });
+
   it("draws a scaled parent's label at the scaled size", () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, design({ elements: { ownHealth: { scale: 1.5 } } }), 'ownHealth', { x: 0, y: 0 }, 1);
