@@ -519,8 +519,12 @@ td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
   pointer-events: none;
 }
 .ctile > * { position: relative; z-index: 1; }
-button.ctile { cursor: pointer; }
-button.ctile:hover { border-color: var(--text-muted); }
+button.ctile, a.ctile { cursor: pointer; }
+button.ctile:hover, a.ctile:hover { border-color: var(--text-muted); }
+a.ctile { text-decoration: none; }
+/* A campaign's table, landed on from its tile: a little room above it. */
+.campaign-table { scroll-margin-top: var(--sp-6); }
+.campaigns-more { margin: var(--sp-4) 0; }
 .ctile.is-active { border-color: var(--rule); box-shadow: 0 0 0 1px var(--rule); }
 .ctile.is-muted { opacity: 0.55; }
 .ctile__name {

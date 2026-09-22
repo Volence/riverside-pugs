@@ -11,6 +11,9 @@ export interface CampaignTileItem {
   /** Short marker shown beside the name, e.g. that it is in the vote
    *  rotation. Absent means no marker, not a blank one. */
   badge?: string;
+  /** Makes the tile a link, e.g. to the campaign's table further down the
+   *  same page. Ignored when the tiles are buttons. */
+  href?: string;
 }
 
 /**
@@ -22,7 +25,12 @@ export interface CampaignTileItem {
  * are plain tiles (the Campaigns page).
  */
 export function CampaignTiles(
-  { items, onPick }: { items: CampaignTileItem[]; onPick?: (slug: string) => void },
+  { items, onPick, onFollow }: {
+    items: CampaignTileItem[];
+    onPick?: (slug: string) => void;
+    /** Called when a linked tile is clicked, instead of following the link. */
+    onFollow?: (slug: string, e: MouseEvent) => void;
+  },
 ) {
   return (
     <div class="ctiles">
@@ -36,9 +44,16 @@ export function CampaignTiles(
             {it.badge && <span class="ctile__badge">{it.badge}</span>}
           </>
         );
-        return onPick
-          ? <button type="button" class={cls} style={style} key={it.slug} onClick={() => onPick(it.slug)}>{body}</button>
-          : <div class={cls} style={style} key={it.slug}>{body}</div>;
+        if (onPick) {
+          return <button type="button" class={cls} style={style} key={it.slug} onClick={() => onPick(it.slug)}>{body}</button>;
+        }
+        if (it.href) {
+          return (
+            <a class={cls} style={style} key={it.slug} href={it.href}
+              onClick={onFollow ? (e) => onFollow(it.slug, e) : undefined}>{body}</a>
+          );
+        }
+        return <div class={cls} style={style} key={it.slug}>{body}</div>;
       })}
     </div>
   );

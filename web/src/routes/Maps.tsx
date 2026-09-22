@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'preact/hooks';
 import { api, type MapIndexRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, chapterName, fmtClock, mapName, survivalLabel } from '../format';
@@ -5,8 +6,20 @@ import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { CampaignTiles } from '../components/CampaignTiles';
 
+/** The id of a campaign's table, which its tile links to. */
+export const campaignAnchor = (slug: string): string => `campaign-${slug}`;
+
 export function Maps() {
   const { data, error } = useFetch((s) => api.maps(s), []);
+  const [showRest, setShowRest] = useState(false);
+  // Scroll only once the table is on the page: a tile for a hidden campaign
+  // opens the rest first, and the table appears on the next render.
+  const [scrollTo, setScrollTo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!scrollTo) return;
+    document.getElementById(campaignAnchor(scrollTo))?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    setScrollTo(null);
+  }, [scrollTo, showRest]);
 
   if (error) {
     return (
@@ -30,12 +43,10 @@ export function Maps() {
   }
 
   // In the current vote rotation first, then everything else by how much it has
-  // been played, then the never-played. Sorted rather than split under a "not
-  // in rotation" heading: pool four campaigns out of twenty and such a heading
-  // turns sixteen of them into a reject pile, when the honest reading is only
-  // that they are not up tonight. Out of rotation keeps every stat and stays
-  // one click from its map pages, because losing a favourite map's history to
-  // a rotation change is a worse outcome than a longer page.
+  // been played, then the never-played. With 27 campaigns the page became a
+  // wall, so (owner, 2026-09-22) the ones not in the vote fold away behind one
+  // button, tiles and tables alike, and open exactly as before. Folded, not
+  // dropped: a favourite campaign's history is one click away, never gone.
   // Defaulted, not assumed: a page that throws because one field is absent
   // is a worse failure than one that shows nothing in rotation.
   const pool = new Set(data.pool ?? []);
@@ -48,6 +59,32 @@ export function Maps() {
     if ((aSlug === 'other') !== (bSlug === 'other')) return aSlug === 'other' ? 1 : -1;
     return playedIn(bRows) - playedIn(aRows);
   });
+
+  // With nothing in the vote there is nothing to fold behind.
+  const inVote = ordered.filter(([slug]) => pool.has(slug));
+  const rest = ordered.filter(([slug]) => !pool.has(slug));
+  const folding = inVote.length > 0 && rest.length > 0;
+  const shown = folding && !showRest ? inVote : ordered;
+  const restCampaigns = rest.filter(([slug]) => slug !== 'other').length;
+
+  const tile = ([slug, rows]: [string, MapIndexRow[]]) => {
+    const played = playedIn(rows);
+    return {
+      slug,
+      sub: played === 0 ? 'Unplayed' : `${rows.length} map${rows.length === 1 ? '' : 's'} · ${played} played`,
+      muted: played === 0,
+      badge: pool.has(slug) ? 'In the vote' : undefined,
+      href: `#${campaignAnchor(slug)}`,
+    };
+  };
+  const follow = (slug: string, e: MouseEvent) => {
+    // Handled here rather than left to the browser: the router treats a link
+    // click as navigation, and a smooth scroll reads better than a jump.
+    e.preventDefault();
+    if (!pool.has(slug)) setShowRest(true);
+    setScrollTo(slug);
+    try { history.replaceState(null, '', `#${campaignAnchor(slug)}`); } catch { /* cosmetic */ }
+  };
 
   return (
     <div class="page page--list">
@@ -72,25 +109,22 @@ export function Maps() {
         <Panel><Empty>No maps played yet.</Empty></Panel>
       ) : (
         <>
-          {maps.length > 0 && (
-            <CampaignTiles
-              items={ordered
-                .filter(([slug]) => slug !== 'other')
-                .map(([slug, rows]) => {
-                  const played = playedIn(rows);
-                  return {
-                    slug,
-                    sub: played === 0 ? 'Unplayed' : `${rows.length} map${rows.length === 1 ? '' : 's'} · ${played} played`,
-                    muted: played === 0,
-                    badge: pool.has(slug) ? 'In the vote' : undefined,
-                  };
-                })}
-            />
+          <CampaignTiles items={shown.filter(([slug]) => slug !== 'other').map(tile)} onFollow={follow} />
+          {folding && (
+            <p class="campaigns-more">
+              <button class="chip" type="button" aria-expanded={showRest} onClick={() => setShowRest(!showRest)}>
+                {showRest
+                  ? 'Hide the campaigns not in the vote'
+                  : restCampaigns === 0
+                    ? 'Show the other maps'
+                    : `Show ${restCampaigns} more campaign${restCampaigns === 1 ? '' : 's'} not in the vote`}
+              </button>
+            </p>
           )}
 
           <div class="stack">
-            {ordered.map(([campaign, rows]) => (
-              <Panel class="panel--table" key={campaign}>
+            {shown.map(([campaign, rows]) => (
+              <Panel class="panel--table campaign-table" key={campaign} id={campaignAnchor(campaign)}>
                 <h3>
                   {campaign === 'other' ? 'Other' : campaignName(campaign)}
                   {pool.has(campaign) && <span class="ccamp__pool">In the vote</span>}
