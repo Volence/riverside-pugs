@@ -448,3 +448,51 @@ describe('submitting the form', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 0 });
   });
 });
+
+const pick = (steamid: string, customId: string) => handleReportButton(hDeps(), {
+  kind: 'button', customId, userId: D(steamid), userName: 'x',
+});
+
+describe('choosing between same-named players', () => {
+  beforeEach(async () => {
+    seedPlayers(db); linkAll(db);
+    await submit(ME, { who: OTHER, name: 'bob', reason: 'cheating', details: 'walls' });
+  });
+
+  it('files against the one chosen, with the words kept', async () => {
+    const r = await pick(ME, `rp:pick:1:${BOB2}`);
+    expect(said(r)).toContain('Thanks');
+    expect(reports()).toEqual([{ category: 'cheating', text: 'walls', target_id: BOB2 }]);
+  });
+
+  it('clears the draft once it is filed', async () => {
+    await pick(ME, `rp:pick:1:${BOB2}`);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 0 });
+  });
+
+  it('cannot be pressed twice', async () => {
+    await pick(ME, `rp:pick:1:${BOB2}`);
+    const again = await pick(ME, `rp:pick:1:${BOB2}`);
+    expect(said(again)).toContain('expired');
+    expect(reports()).toHaveLength(1);
+  });
+
+  it('refuses someone else pressing it, and files nothing', async () => {
+    const r = await pick(ALICE, `rp:pick:1:${BOB2}`);
+    expect(said(r)).toContain('not yours');
+    expect(reports()).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 1 });
+  });
+
+  it('refuses a steamid that was never offered', async () => {
+    const r = await pick(ME, `rp:pick:1:${CARL}`);
+    expect(said(r)).toContain('not one of the choices');
+    expect(reports()).toHaveLength(0);
+  });
+
+  it('says a reaped draft expired', async () => {
+    db.prepare('DELETE FROM pending_reports').run();
+    const r = await pick(ME, `rp:pick:1:${BOB2}`);
+    expect(said(r)).toContain('expired');
+  });
+});

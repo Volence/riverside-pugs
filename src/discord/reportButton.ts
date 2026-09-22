@@ -233,6 +233,27 @@ export async function handleReportButton(
   if (i.customId === `${REPORT_PREFIX}open`) {
     return { ephemeral: true, payload: { content: 'Opening the form...', embeds: [], components: [] }, modal: reportModal(deps.db, me.steamid) };
   }
+  if (i.customId.startsWith(`${REPORT_PREFIX}pick:`)) {
+    const [, , rawId, steamid] = i.customId.split(':');
+    const row = deps.db.prepare('SELECT id, reporter_id, category, text, candidates FROM pending_reports WHERE id = ?')
+      .get(Number(rawId)) as { id: number; reporter_id: string; category: string; text: string; candidates: string } | undefined;
+    // Reaped after an hour, or already used: either way the words are gone
+    // and the honest answer is to start again.
+    if (!row) return say('That draft has expired, please file it again.');
+    // The custom id travels through Discord, so the presser is checked
+    // against the row rather than trusted.
+    if (row.reporter_id !== me.steamid) return say('That choice is not yours to make.');
+    if (!(JSON.parse(row.candidates) as string[]).includes(steamid)) {
+      return say('That player was not one of the choices.');
+    }
+    const reply = file(deps, row.reporter_id, steamid, row.category, row.text);
+    // Only on success: a refusal (the daily limit, say) leaves the draft in
+    // place so the reporter is not made to type it again.
+    if (reply.payload.content?.startsWith('Thanks')) {
+      deps.db.prepare('DELETE FROM pending_reports WHERE id = ?').run(row.id);
+    }
+    return reply;
+  }
   return say('That button no longer does anything.');
 }
 
