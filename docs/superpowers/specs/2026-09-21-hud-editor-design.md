@@ -293,3 +293,31 @@ weapon boxes into normal mode; failing keeps them Advanced only.
 Accounts, server-side saved designs, a gallery; weapon and item icon packs; a vertical
 infected row (the engine cannot); new data readouts (the engine provides none); editing the
 Tab scoreboard and versus score panel beyond what the preset gives; L4D2.
+
+## Phase 0 results
+
+As of 2026-09-22, all five questions in "Phase 0: the in-game test" above are UNANSWERED.
+The in-game test has not been run: it requires the project owner's own machine and copy of
+the game, and they were asleep when Task 9 (the generator's style pass, advanced mode and
+packaging) needed to proceed. Nothing below is an observed result; it is not to be read as
+one.
+
+The throwaway addon VPK described in Phase 0 is already built and waiting, untouched, at
+`/home/volence/l4d/hud/tools/phase0/hudeditor_phase0.vpk`.
+
+Per controller ruling R1, Task 9 proceeded on these assumptions rather than waiting:
+
+- Questions 1 to 3 (panel internals, a bundled font, a restyled teammate panel texture) are
+  treated as not failed. `scalePass`, `fontPass` and `stylePass` (this task) all run in
+  normal mode exactly as the rest of this spec assumes, not gated behind Advanced mode.
+- Question 4 (the `xHair` element with no crosshair addon installed) is treated the same as
+  "drew nothing or only the stock crosshair": `design.xhair` stays `true` and the page shows
+  no "I use a custom crosshair addon" checkbox. Nothing about `xhair` changed for Task 9.
+- Question 5 (`scripts/mod_textures.txt` for the weapon slot boxes) is treated the same as
+  "failed or unanswered": `weaponBoxActive` and `weaponBoxInactive` stay `advancedOnly: true`
+  in `slots.ts`, and no `mod_textures.txt` route was added to `stylePass`. The game's
+  `scripts/mod_textures.txt` was not copied into the repo.
+
+These are assumptions to keep the plan moving, not answers. When the owner runs the Phase 0
+VPK, this section should be replaced with what was actually observed, and any of the three
+assumptions above that turn out wrong should be unwound in the affected pass.

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout } from './build';
+import { buildHud, elementRect, teamLayout, packHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
+import { encodeVPK } from '../vpk';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
@@ -202,5 +203,62 @@ describe('teamLayout, real base-file defaults', () => {
     const d = design({});
     expect(teamLayout(d, elementById('teamColumn')!)).toEqual({ dir: 'row', spacing: rowGap });
     expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: zombieGap });
+  });
+});
+
+describe('buildHud, styles', () => {
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+
+  it('writes a new texture and points the panels at it', () => {
+    const files = buildHud(design({ styles: { panelBg: { kind: 'flat', color: '0 0 0 140' } } }));
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain('materials/vgui/hud/hudeditor/panelbg.vtf');
+    expect(paths).toContain('materials/vgui/hud/hudeditor/panelbg.vmt');
+    const t = parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
+    expect(kvGet(kvFind(t, ['TeamPlayer2'])!, 'image')).toBe('hud/hudeditor/panelbg');
+  });
+
+  it('uses an uploaded image when the slot asks for one', () => {
+    const rgba = new Uint8ClampedArray(32 * 32 * 4).fill(7);
+    const files = buildHud(design({ styles: { panelBg: { kind: 'image' } } }), { images: { panelBg: rgba } });
+    const vtf = files.find((f) => f.path.endsWith('panelbg.vtf'))!;
+    expect(vtf.data.length).toBe(80 + 32 * 32 * 4);
+    expect(vtf.data[80]).toBe(7);
+  });
+
+  it('never writes a stock texture name in normal mode', () => {
+    const files = buildHud(design({ styles: { barGreen: { kind: 'flat', color: '0 255 0 255' } } }));
+    expect(files.some((f) => f.path.startsWith('materials/') && !f.path.startsWith('materials/vgui/hud/hudeditor/'))).toBe(false);
+  });
+
+  it('writes stock names in advanced mode', () => {
+    const files = buildHud(design({ advanced: true, styles: { barGreen: { kind: 'flat', color: '0 255 0 255' } } }));
+    expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(
+      ['materials/vgui/healthbar_green.vtf', 'materials/vgui/healthbar_green.vmt']));
+  });
+
+  it('keeps every path lower case', () => {
+    const files = buildHud(design({ preset: 'modern', advanced: true,
+      styles: { incapPanel: { kind: 'flat' }, panelBg: { kind: 'rounded' } } }), { fonts });
+    for (const f of files) expect(f.path).toBe(f.path.toLowerCase());
+  });
+});
+
+describe('packHud', () => {
+  it('gives normal mode a VPK v1 named after the design', () => {
+    const p = packHud(design({ name: 'night hud' }));
+    expect(p.filename).toBe('night hud.vpk');
+    const dv = new DataView(p.bytes.buffer);
+    expect(dv.getUint32(0, true)).toBe(0x55AA1234);
+    expect(dv.getUint32(4, true)).toBe(1);
+  });
+
+  it('gives advanced mode a zip holding the mount folder and a README', () => {
+    const p = packHud(design({ name: 'night hud', advanced: true }));
+    expect(p.filename).toBe('night hud.zip');
+    const s = new TextDecoder('latin1').decode(p.bytes);
+    expect(s).toContain('riversidehud/pak01_dir.vpk');
+    expect(s).toContain('README.txt');
+    expect(s).toContain('Game\triversidehud');
   });
 });

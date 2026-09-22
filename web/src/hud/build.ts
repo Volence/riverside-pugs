@@ -7,11 +7,13 @@
  * are written. An untouched stock file is never shipped, because the game
  * already has it and shipping it would only widen what this addon can break.
  */
-import type { VpkFile } from '../vpk';
+import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
 import { baseFile, presetOverrides, BASE_PATHS, type Preset } from './base';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
+import { SLOTS } from './slots';
+import { flatTexture, roundedTexture, vmtFor } from './textures';
 import type { HudDesign, ElementOverride } from './design';
 
 /** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
@@ -261,6 +263,34 @@ function fontPass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFi
            { path: 'resource/robotocondensed-bold.ttf', data: assets.fonts.bold });
 }
 
+/**
+ * Restyle textures. An addon cannot replace a file that ships in pak01, so in
+ * normal mode every restyled slot gets a new name under
+ * `materials/vgui/hud/hudeditor/` and the .res `image` keys that show it are
+ * repointed there. In advanced mode the VPK mounts ahead of pak01, so the
+ * stock names are written too and nothing needs repointing for a slot with
+ * no `targets` (the health bar fills, which the game code names directly).
+ */
+function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFile[]) {
+  for (const slot of SLOTS) {
+    const s = design.styles[slot.id];
+    if (!s || s.kind === 'stock') continue;
+    if (slot.advancedOnly && !design.advanced) continue;
+    const { w, h } = slot.size;
+    const colour = s.color ?? slot.defaultColor;
+    const rgba = s.kind === 'image' ? assets.images?.[slot.id]
+      : s.kind === 'rounded' ? roundedTexture(w, h, colour, Math.round(Math.min(w, h) / 4))
+      : flatTexture(w, h, colour);
+    if (!rgba) continue;                             // an image slot whose upload is missing falls back to stock
+    const vtf = encodeVTF(w, h, rgba);
+    const names = [`vgui/hud/hudeditor/${slot.id.toLowerCase()}`, ...(design.advanced ? slot.stockNames : [])];
+    for (const name of names) {
+      out.push({ path: `materials/${name}.vtf`, data: vtf }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
+    }
+    for (const t of slot.targets) kvSet(work.panel(t.file, t.path), t.key, `hud/hudeditor/${slot.id.toLowerCase()}`);
+  }
+}
+
 function addonInfo(name: string): string {
   return `"AddonInfo"\n{\n\taddonSteamAppID\t\t500\n\taddontitle\t\t"${name.replace(/"/g, '')}"\n\taddonversion\t\t1.0\n\taddontagline\t\t"Custom HUD (riversidepug.com)"\n\taddonauthor\t\t"HUD editor"\n\taddonDescription\t\t"Custom HUD layout."\n}\n`;
 }
@@ -272,7 +302,37 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   teamPass(work, design);
   scalePass(work, design);
   fontPass(work, design, assets, extra);
+  stylePass(work, design, assets, extra);
   return [...work.files(), ...extra, { path: 'addoninfo.txt', data: enc(addonInfo(design.name)) }];
+}
+
+const README = (name: string) => `${name}: advanced install\r\n\r\n`
+  + `1. Close the game.\r\n`
+  + `2. Copy the "riversidehud" folder from this zip into your game folder, next to "left4dead":\r\n`
+  + `   ...\\steamapps\\common\\left 4 dead\\riversidehud\\pak01_dir.vpk\r\n`
+  + `3. Open ...\\left 4 dead\\left4dead\\gameinfo.txt in Notepad. Find the line "SearchPaths" and the "{" under it.\r\n`
+  + `   Add this as the first line inside the braces:\r\n\r\n`
+  + `\t\t\tGame\triversidehud\r\n\r\n`
+  + `4. Save and start the game.\r\n\r\n`
+  + `A rebuilt HUD only shows after a game restart.\r\n`
+  + `To uninstall, remove that line and the folder. Steam's "verify integrity of game files" also undoes the edit.\r\n`
+  + `Custom HUDs are allowed on the Riverside servers.\r\n`;
+
+/**
+ * Normal mode ships a VPK straight into left4dead/addons. Advanced mode
+ * needs its own mount point ahead of pak01, which an addon VPK cannot give
+ * it, so it ships as a zip holding a mod folder (README included) for the
+ * player to drop next to left4dead and wire into gameinfo.txt by hand.
+ * `addoninfo.txt` is harmless inside a gameinfo.txt mount and is left in.
+ */
+export function packHud(design: HudDesign, assets: BuildAssets = {}) {
+  const vpk = encodeVPK(buildHud(design, assets));
+  if (!design.advanced) return { filename: `${design.name}.vpk`, mime: 'application/octet-stream', bytes: vpk };
+  const zip = encodeZip([
+    { path: 'riversidehud/pak01_dir.vpk', data: vpk },
+    { path: 'README.txt', data: enc(README(design.name)) },
+  ]);
+  return { filename: `${design.name}.zip`, mime: 'application/zip', bytes: zip };
 }
 
 export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
