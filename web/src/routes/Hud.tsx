@@ -142,17 +142,33 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   return assets;
 }
 
+/** Whether the elements differ from a fresh design's. Not the same as having
+ *  none: a fresh design already fits the teammate card. */
+export function elementsTouched(d: HudDesign): boolean {
+  return JSON.stringify(d.elements) !== JSON.stringify(DEFAULT_DESIGN.elements);
+}
+
 /** Whether a design holds anything beyond the untouched defaults: decides
  *  whether loading a share link needs to ask first rather than silently
  *  overwriting whatever a reader already had going. */
-function hasOverrides(d: HudDesign): boolean {
-  return Object.keys(d.elements).length > 0
+export function hasOverrides(d: HudDesign): boolean {
+  return elementsTouched(d)
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
+    || d.hideGameCrosshair === true
     || d.preset !== DEFAULT_DESIGN.preset
     || d.aspect !== DEFAULT_DESIGN.aspect
     || d.font !== DEFAULT_DESIGN.font
     || d.advanced !== DEFAULT_DESIGN.advanced;
+}
+
+/** "Reset this element": back to what a fresh design has for it, which for
+ *  the teammates is a fitted card, not nothing. */
+export function resetElement(d: HudDesign, id: string): HudDesign {
+  const elements = { ...d.elements };
+  const fresh = DEFAULT_DESIGN.elements[id];
+  if (fresh) elements[id] = structuredClone(fresh); else delete elements[id];
+  return { ...d, elements };
 }
 
 const BACKDROPS: [Backdrop, string][] = [
@@ -258,11 +274,7 @@ function ElementControls(
   const patch: Patch = (p) => setDesign((d) => (
     { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), ...p } } }
   ));
-  const reset = () => setDesign((d) => {
-    const elements = { ...d.elements };
-    delete elements[id];
-    return { ...d, elements };
-  });
+  const reset = () => setDesign((d) => resetElement(d, id));
 
   return (
     <Field legend={el.label}>
@@ -594,13 +606,13 @@ export default function Hud() {
   const changePreset = async (preset: Preset) => {
     if (preset === design.preset) return;
     let resetElements = false;
-    if (Object.keys(design.elements).length > 0) {
+    if (elementsTouched(design)) {
       resetElements = await confirm({
         title: 'Switching preset keeps your moves but they were placed for the other layout. Reset them as well?',
         confirmLabel: 'Reset', cancelLabel: 'Keep',
       });
     }
-    setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: {} } : {}) }));
+    setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements) } : {}) }));
   };
 
   const patchStyle = (id: string, p: Partial<StyleOverride>) => setDesign((d) => ({

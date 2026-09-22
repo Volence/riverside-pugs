@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
-import { snap, nudge, toUnits } from './Hud';
+import { snap, nudge, toUnits, hasOverrides, elementsTouched, resetElement } from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
 
@@ -45,6 +45,24 @@ describe('toUnits', () => {
   it('converts a pointer position to HUD units', () => {
     const rect = { left: 100, top: 50, width: 1706, height: 960 } as DOMRect;
     expect(toUnits({ clientX: 100 + 853, clientY: 50 + 480 }, rect)).toEqual({ ux: 426.5, uy: 240 });
+  });
+});
+
+describe('what counts as an edit', () => {
+  // A fresh design already fits the teammate card, so "has elements" is not
+  // "has edits": a share link must not ask to replace an untouched design.
+  it('treats a fresh design as untouched and a moved element as an edit', () => {
+    expect(elementsTouched(DEFAULT_DESIGN)).toBe(false);
+    expect(hasOverrides(DEFAULT_DESIGN)).toBe(false);
+    const moved = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { x: 5 } } };
+    expect(elementsTouched(moved)).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, hideGameCrosshair: true })).toBe(true);
+  });
+
+  it('resets an element to what a fresh design has for it', () => {
+    const d = { ...DEFAULT_DESIGN, elements: { teamColumn: { gap: 40 }, chat: { x: 5 } } };
+    expect(resetElement(d, 'teamColumn').elements.teamColumn).toEqual({ fit: true });
+    expect(resetElement(d, 'chat').elements.chat).toBeUndefined();
   });
 });
 

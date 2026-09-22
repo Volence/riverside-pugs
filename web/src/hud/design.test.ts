@@ -1,7 +1,7 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName, clampOverride } from './design';
+import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName, clampOverride, baseTeam } from './design';
 
 describe('validateDesign', () => {
   it('returns the defaults for junk', () => {
@@ -17,7 +17,9 @@ describe('validateDesign', () => {
     });
     expect(d.preset).toBe('modern');
     expect((d as unknown as Record<string, unknown>).evil).toBeUndefined();
-    expect(d.elements.teamColumn).toEqual({ x: 1000, y: -200, scale: 2, dir: 'column', spacing: 400 });
+    // spacing 9999 is first held to its old cap (400), then becomes the gap that keeps that pitch:
+    // 400 / scale 2 - Modern's 34-unit column card = 166.
+    expect(d.elements.teamColumn).toEqual({ x: 1000, y: -200, scale: 2, dir: 'column', gap: 166 });
   });
 
   it('rejects colours that are not four bytes', () => {
@@ -51,6 +53,62 @@ describe('validateDesign', () => {
     expect(validateDesign({ v: 1, hideGameCrosshair: true }).hideGameCrosshair).toBe(true);
     expect('hideGameCrosshair' in validateDesign({ v: 1, hideGameCrosshair: 'yes' })).toBe(false);
     expect('hideGameCrosshair' in validateDesign({ v: 1 })).toBe(false);
+  });
+});
+
+describe('baseTeam', () => {
+  it('reads each preset card, direction and pitch from its own teamdisplayhud.res', () => {
+    expect(baseTeam('stock')).toEqual({ dir: 'row', pitch: 140, card: { w: 150, h: 150 } });
+    expect(baseTeam('modern')).toEqual({ dir: 'column', pitch: 34, card: { w: 120, h: 34 } });
+  });
+});
+
+describe('validateDesign, the teammate layout', () => {
+  const team = (preset: 'stock' | 'modern', o: Record<string, unknown>) =>
+    validateDesign({ v: 1, preset, elements: { teamColumn: o } }).elements.teamColumn;
+
+  it('migrates a saved spacing to the gap that keeps the same pitch', () => {
+    // gap = spacing / scale - the unfitted card along the direction, clamped at 0.
+    expect(team('stock', { dir: 'row', spacing: 140 })).toEqual({ dir: 'row', gap: 0 });   // 140 - 150, overlapping: clamped
+    expect(team('stock', { dir: 'column', spacing: 180 })).toEqual({ dir: 'column', gap: 30 });
+    expect(team('modern', { spacing: 40 })).toEqual({ gap: 6 });                            // Modern's own column, card 34 tall
+    expect(team('modern', { dir: 'row', spacing: 130 })).toEqual({ dir: 'row', gap: 10 });  // card 120 wide
+    expect(team('modern', { dir: 'column', spacing: 45, scale: 1.25 })).toEqual({ dir: 'column', scale: 1.25, gap: 2 });
+  });
+
+  it('keeps a stored gap over a stale spacing, and clamps it to 0..200', () => {
+    expect(team('stock', { gap: 12, spacing: 400 })).toEqual({ gap: 12 });
+    expect(team('stock', { gap: 500 })).toEqual({ gap: 200 });
+    expect(team('stock', { gap: -5 })).toEqual({ gap: 0 });
+  });
+
+  it('keeps the infected row spacing as it is, and never gives it a gap, fit or slots', () => {
+    const d = validateDesign({ v: 1, elements: { infectedRow: { spacing: 124, gap: 5, fit: true, slots: [] } } });
+    expect(d.elements.infectedRow).toEqual({ spacing: 124 });
+  });
+
+  it('leaves fit off when a saved design has none, while a new design starts fitted', () => {
+    expect(validateDesign({ v: 1 }).elements).toEqual({});
+    expect(validateDesign({ v: 1, elements: { chat: { x: 5 } } }).elements.teamColumn).toBeUndefined();
+    expect(DEFAULT_DESIGN.elements.teamColumn).toEqual({ fit: true });
+    expect(validateDesign(null).elements.teamColumn).toEqual({ fit: true });
+    expect(team('stock', { fit: false })).toEqual({ fit: false });
+    expect(team('stock', { fit: 'yes' })).toBeUndefined();
+  });
+
+  it('clamps slots like element positions, and drops any set that is not four finite points', () => {
+    const four = [{ x: 5000, y: -900 }, { x: 8, y: 100 }, { x: 8, y: 150 }, { x: 700, y: 100 }];
+    expect(team('stock', { dir: 'free', slots: four })).toEqual({
+      dir: 'free', slots: [{ x: 1000, y: -200 }, { x: 8, y: 100 }, { x: 8, y: 150 }, { x: 700, y: 100 }],
+    });
+    expect(team('stock', { dir: 'free', slots: four.slice(0, 3) })).toBeUndefined();
+    expect(team('stock', { slots: [...four.slice(0, 3), { x: NaN, y: 1 }] })).toBeUndefined();
+    // Row with slots stored keeps them, so switching back to Free restores the cards.
+    expect(team('stock', { dir: 'row', slots: four })!.slots).toHaveLength(4);
+  });
+
+  it('keeps Free only on the survivor team', () => {
+    expect(validateDesign({ v: 1, elements: { chat: { dir: 'free' } } }).elements.chat).toBeUndefined();
   });
 });
 

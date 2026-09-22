@@ -204,7 +204,9 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
     const v = panel ? kvGet(panel, el.team.spacingKey) : undefined;
     if (v !== undefined) { const n = parseFloat(v); if (!Number.isNaN(n)) baseSpacing = n; }
   }
-  const dir = o?.dir ?? baseDir ?? 'row';
+  // Free is the survivor team's own thing, not a row/column direction: this
+  // function's row/column geometry ignores it, the same as when dir is unset.
+  const dir = (o?.dir === 'row' || o?.dir === 'column' ? o.dir : undefined) ?? baseDir ?? 'row';
   const spacing = Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k);
   const out: TeamLayout = { dir, spacing };
   if (!card || !teamWrites(el, o)) return out;
