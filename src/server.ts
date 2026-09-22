@@ -10,6 +10,7 @@ import { TicketSync } from './discord/ticketSync.js';
 import { TicketMirror } from './discord/ticketMirror.js';
 import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
 import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
+import { ReportButton, handleReportButton, handleReportModal, opensReportModal } from './discord/reportButton.js';
 import { handleRemoveCommand, REMOVE_COMMAND } from './discord/ticketRemove.js';
 import { purgeRemovedFiles } from './tickets/removal.js';
 import { playerByDiscordId } from './players.js';
@@ -1117,6 +1118,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let adminFeed: AdminFeedPoster | null = null;
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
+  let reportButton: ReportButton | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -1197,15 +1199,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         });
         ticketSync.start();
         mirror.start();
+        reportButton = new ReportButton({ db: deps.db, transport: t });
+        reportButton.start();
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
         't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
+        'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds }, i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
+        'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds }, i),
       },
-      opensModal: opensTicketModal,
+      opensModal: (id) => opensTicketModal(id) || opensReportModal(id),
       messageCommands: {
         [REMOVE_COMMAND]: (i) => handleRemoveCommand({
           db: deps.db, attachmentsDir: deps.config.ticketAttachmentsDir, mirror: () => ticketMirror,
@@ -1225,6 +1231,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
 
   app.addHook('onClose', async () => {
+    reportButton?.stop();
     ticketMirror?.stop();
     ticketSync?.stop();
     offTicketNudge();

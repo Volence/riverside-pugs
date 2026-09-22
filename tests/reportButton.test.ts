@@ -9,6 +9,7 @@ import {
 } from '../src/discord/reportButton.js';
 import { REPORT_LABELS } from '../src/discord/commands.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
+import { opensTicketModal } from '../src/discord/ticketButtons.js';
 
 let db: DB;
 
@@ -509,5 +510,27 @@ describe('choosing between same-named players', () => {
     expect(said(r)).toContain('Could not file the report');
     expect(reports()).toHaveLength(1);
     expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 1 });
+  });
+});
+
+describe('wiring', () => {
+  it('routes rp: without colliding with r: or t:', () => {
+    // src/discord/index.ts picks a handler with customId.startsWith(prefix).
+    const prefixes = ['r:', 't:', 'rp:'];
+    const routeOf = (id: string) => prefixes.find((p) => id.startsWith(p));
+    expect(routeOf('rp:open')).toBe('rp:');
+    expect(routeOf('rp:pick:1:76561199000000101')).toBe('rp:');
+    expect(routeOf('r:1:ack')).toBe('r:');
+    expect(routeOf('t:1:claim')).toBe('t:');
+  });
+
+  it('keeps every custom id inside Discord\'s 100 characters', () => {
+    expect(`rp:pick:999999:76561199000000101`.length).toBeLessThanOrEqual(100);
+  });
+
+  it('composes the two modal predicates without either swallowing the other', () => {
+    const opens = (id: string) => opensTicketModal(id) || opensReportModal(id);
+    expect(opens('rp:open')).toBe(true);
+    expect(opens('rp:pick:1:76561199000000101')).toBe(false);
   });
 });
