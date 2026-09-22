@@ -96,4 +96,13 @@ describe('recording and lifting', () => {
     const id = recordDiscordSanction(db, c.plan, MOD, now);
     expect(checkLift(db, id, ADMIN, new Date('2026-09-23T12:02:00Z'))).toMatchObject({ ok: false, status: 409 });
   });
+
+  it('answers 404 for a restricted ticket\'s sanction to a moderator or an admin off its access list, same as missing', () => {
+    const c = ask(ADMIN, { kind: 'ban', reason: 'x' });
+    if (!c.ok) throw new Error('check failed');
+    const id = recordDiscordSanction(db, c.plan, ADMIN, now);
+    db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
+    expect(checkLift(db, id, MOD, now)).toEqual({ ok: false, status: 404, error: 'no such sanction' });
+    expect(checkLift(db, id, ADMIN, now)).toEqual({ ok: false, status: 404, error: 'no such sanction' });
+  });
 });

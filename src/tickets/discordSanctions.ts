@@ -79,24 +79,26 @@ export function recordDiscordSanction(db: DB, plan: SanctionPlan, by: string, no
 
 export interface LiftPlan { sanctionId: number; discordId: string; kind: SanctionKind; ticketId: number | null; restricted: boolean }
 
-/** Whether `by` may lift this sanction: it must exist and still be in force,
- *  `by` must be an admin, and if it is tied to a ticket that ticket must be
- *  visible to `by` (else the same 404 a missing sanction would give, so a
- *  restricted ticket's sanctions are not detectable either). */
+/** Whether `by` may lift this sanction. Visibility first: the row must
+ *  exist and, if it is tied to a ticket, that ticket must be visible to
+ *  `by`, else the same 404 a missing sanction would give, so a restricted
+ *  ticket's sanctions are not detectable by someone off its access list,
+ *  whatever their role. Only once that holds do admin-ness and whether the
+ *  sanction is still active get checked. */
 export function checkLift(db: DB, sanctionId: number, by: string, now = new Date()): Checked<LiftPlan> {
   const row = db.prepare('SELECT id, discord_id, kind, until, ticket_id, lifted_at FROM discord_sanctions WHERE id = ?').get(sanctionId) as
     | { id: number; discord_id: string; kind: SanctionKind; until: string | null; ticket_id: number | null; lifted_at: string | null }
     | undefined;
   if (!row) return no(404, 'no such sanction');
-  const active = row.lifted_at === null && (row.kind !== 'timeout' || row.until === null || row.until > now.toISOString());
-  if (!active) return no(409, 'that sanction is no longer in force');
-  if (!isAdmin(db, by)) return no(403, 'only an admin can lift a Discord sanction');
   let restricted = false;
   if (row.ticket_id !== null) {
     const t = getTicketRow(db, row.ticket_id);
     if (!t || !canSeeTicket(db, t, by)) return no(404, 'no such sanction');
     restricted = t.restricted === 1;
   }
+  if (!isAdmin(db, by)) return no(403, 'only an admin can lift a Discord sanction');
+  const active = row.lifted_at === null && (row.kind !== 'timeout' || row.until === null || row.until > now.toISOString());
+  if (!active) return no(409, 'that sanction is no longer in force');
   return { ok: true, plan: { sanctionId: row.id, discordId: row.discord_id, kind: row.kind, ticketId: row.ticket_id, restricted } };
 }
 
