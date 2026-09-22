@@ -7,6 +7,11 @@ export interface Candidate { steamid: string; name: string }
  * Everyone the reporter has shared a match with, most recent match first,
  * one row each. Feeds the form's dropdown, which Discord caps at 25 options:
  * the default of 24 leaves room for the sentinel option.
+ *
+ * Filters to 'live', 'completed', and 'aborted' matches. This includes aborted
+ * matches because that is when someone is most likely to be reported for going
+ * AFK or abandoning mid-match. We exclude only 'configuring' matches, which had
+ * lobbies that filled but never started a server.
  */
 export function recentCoPlayers(db: DB, steamid: string, limit = 24): Candidate[] {
   return db.prepare(
@@ -15,7 +20,8 @@ export function recentCoPlayers(db: DB, steamid: string, limit = 24): Candidate[
        JOIN match_players theirs
          ON theirs.match_id = mine.match_id AND theirs.player_id != mine.player_id
        JOIN players p ON p.steamid = theirs.player_id
-      WHERE mine.player_id = ?
+       JOIN matches m ON m.id = mine.match_id
+      WHERE mine.player_id = ? AND m.state IN ('live', 'completed', 'aborted')
       GROUP BY p.steamid
       ORDER BY last_match DESC
       LIMIT ?`,

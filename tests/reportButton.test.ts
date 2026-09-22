@@ -27,11 +27,11 @@ const seedPlayers = (d: DB) => {
 
 // `matches` requires season_id and campaign, both NOT NULL. A fresh database
 // seeds "Season 1", so currentSeasonId always has something to return.
-const seedMatch = (d: DB, matchId: number, players: string[]) => {
+const seedMatch = (d: DB, matchId: number, players: string[], state = 'completed') => {
   d.prepare(
     `INSERT INTO matches (id, season_id, state, campaign, created_at)
-     VALUES (?, ?, 'completed', 'l4d_vs_smalltown', '2026-09-22T00:00:00.000Z')`,
-  ).run(matchId, currentSeasonId(d));
+     VALUES (?, ?, ?, 'l4d_vs_smalltown', '2026-09-22T00:00:00.000Z')`,
+  ).run(matchId, currentSeasonId(d), state);
   const ins = d.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')");
   for (const p of players) ins.run(matchId, p);
 };
@@ -116,6 +116,16 @@ describe('recentCoPlayers', () => {
   it('honours the limit', () => {
     seedMatch(db, 1, [ME, ALICE, BOB1, CARL]);
     expect(recentCoPlayers(db, ME, 2)).toHaveLength(2);
+  });
+
+  it('does not list someone from a configuring match', () => {
+    seedMatch(db, 1, [ME, ALICE], 'configuring');
+    expect(recentCoPlayers(db, ME)).toEqual([]);
+  });
+
+  it('lists someone from a match that fell apart, because that is when you report them', () => {
+    seedMatch(db, 1, [ME, ALICE], 'aborted');
+    expect(recentCoPlayers(db, ME).map((c) => c.name)).toEqual(['Alice']);
   });
 });
 
