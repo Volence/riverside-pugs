@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect } from './build';
+import { buildHud, elementRect, teamLayout } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
+import { elementById } from './elements';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
@@ -177,5 +178,29 @@ describe('buildHud, fonts', () => {
 
   it('fails clearly when Roboto is needed and was not loaded', () => {
     expect(() => buildHud(design({ font: 'roboto' }))).toThrow(/font/i);
+  });
+});
+
+describe('teamLayout, real base-file defaults', () => {
+  it('reads the modern preset real spacing when nothing is overridden', () => {
+    // Verified directly against the base files: modern's teamdisplayhud.res
+    // lays TeamPlayer1/TeamPlayer2 out 34 units apart in ypos (a column),
+    // and its hudlayout.res sets CHudZombieTeamDisplay's HorizPanelSpacing
+    // to 124, neither of which is the row/column fallback constant.
+    const d = design({ preset: 'modern' });
+    expect(teamLayout(d, elementById('teamColumn')!)).toEqual({ dir: 'column', spacing: 34 });
+    expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: 124 });
+  });
+
+  it('reads the stock preset real spacing, not a hardcoded constant', () => {
+    const teamFile = parseKv(baseFile('stock', 'resource/ui/hud/teamdisplayhud.res'))[0].value as KvNode[];
+    const p1 = kvFind(teamFile, ['TeamPlayer1'])!, p2 = kvFind(teamFile, ['TeamPlayer2'])!;
+    const rowGap = Math.abs(parseFloat(kvGet(p2, 'xpos')!) - parseFloat(kvGet(p1, 'xpos')!));
+    const layout = parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
+    const zombieGap = parseFloat(kvGet(kvFind(layout, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')!);
+
+    const d = design({});
+    expect(teamLayout(d, elementById('teamColumn')!)).toEqual({ dir: 'row', spacing: rowGap });
+    expect(teamLayout(d, elementById('infectedRow')!)).toEqual({ dir: 'row', spacing: zombieGap });
   });
 });

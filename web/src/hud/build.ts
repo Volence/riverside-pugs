@@ -105,24 +105,44 @@ function layoutPass(work: Work, design: HudDesign) {
 export interface TeamLayout { dir: 'row' | 'column'; spacing: number }
 
 /**
- * The direction and per-card spacing a team element will actually use: the
- * design's own override where it set one, otherwise whatever the base file's
- * real TeamPlayer1/TeamPlayer2 panels already lay out (row for the stock
- * team files, column for the modern preset's). Both the generator's team
- * pass and the canvas preview call this, so the preview can never disagree
- * with the file the generator writes.
+ * The direction and per-card spacing a team element will actually use. An
+ * explicit `dir`/`spacing` in the design wins outright. Failing that: for an
+ * element with a `team.file` (the survivor team), direction comes from
+ * whether the base file's TeamPlayer1 and TeamPlayer2 share a ypos, and
+ * spacing is the real delta between them along whichever axis that
+ * direction implies, both read straight out of that preset's real file. For
+ * an element with only a `spacingKey` and no `team.file` (the infected row,
+ * whose players the game positions itself, so there is no per-player panel
+ * to read), spacing comes from that key's own value on the element's
+ * hudlayout.res panel, and direction is simply the element's first
+ * supported direction. A hardcoded constant is a last resort for when a
+ * base file yields nothing usable; it is unreachable for both team elements
+ * the HUD actually ships. Both the generator's team pass and the canvas
+ * preview call this, so the preview can never disagree with the file the
+ * generator writes.
  */
 export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const o = design.elements[el.id];
-  let wasRow = true;
+  let baseDir: 'row' | 'column' | undefined;
+  let baseSpacing: number | undefined;
   if (el.team?.file) {
     const tree = parseKv(baseFile(design.preset, el.team.file))[0].value as KvNode[];
     const first = kvFind(tree, ['TeamPlayer1']);
     const second = kvFind(tree, ['TeamPlayer2']);
-    if (first && second) wasRow = (kvGet(second, 'ypos') ?? '0') === (kvGet(first, 'ypos') ?? '0');
+    if (first && second) {
+      baseDir = (kvGet(second, 'ypos') ?? '0') === (kvGet(first, 'ypos') ?? '0') ? 'row' : 'column';
+      const axis = baseDir === 'row' ? 'xpos' : 'ypos';
+      const a = parseFloat(kvGet(first, axis) ?? ''), b = parseFloat(kvGet(second, axis) ?? '');
+      if (!Number.isNaN(a) && !Number.isNaN(b)) baseSpacing = Math.abs(b - a);
+    }
+  } else if (el.team?.spacingKey) {
+    baseDir = el.team.dirs[0];
+    const layout = kvFind(parseKv(baseFile(design.preset, LAYOUT))[0].value as KvNode[], [el.key]);
+    const v = layout ? kvGet(layout, el.team.spacingKey) : undefined;
+    if (v !== undefined) { const n = parseFloat(v); if (!Number.isNaN(n)) baseSpacing = n; }
   }
-  const dir = o?.dir ?? (wasRow ? 'row' : 'column');
-  const spacing = Math.round(o?.spacing ?? (dir === 'row' ? 140 : 45));
+  const dir = o?.dir ?? baseDir ?? 'row';
+  const spacing = Math.round(o?.spacing ?? baseSpacing ?? (dir === 'row' ? 140 : 45));
   return { dir, spacing };
 }
 
@@ -184,6 +204,11 @@ function scalePass(work: Work, design: HudDesign) {
       const v = kvGet(container, el.team.spacingKey);
       if (v !== undefined) kvSet(container, el.team.spacingKey, scaleToken(v, k));
     }
+    // The generator never writes a file the design did not change: an
+    // element whose children reference no font at all must leave
+    // clientscheme.res completely alone rather than pull it into the
+    // working set only to re-serialise it unchanged (dropping its comments).
+    if (fontLeaves.length === 0) continue;
     // Second walk: for every font leaf collected above, look it up in the
     // scheme once per distinct name (a font can be used by more than one
     // leaf, in more than one file) and rename the leaf only once that
