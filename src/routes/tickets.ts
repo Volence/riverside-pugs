@@ -7,6 +7,7 @@ import { logAdmin } from '../admin/audit.js';
 import { allowedType, attachmentPath } from '../tickets/attachments.js';
 import type { AttachmentRow } from '../tickets/messages.js';
 import { canSeeTicket, getTicketRow } from '../tickets/store.js';
+import { removeMessage } from '../tickets/removal.js';
 import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
 import { listTickets, ticketCounts, ticketDetail, type TicketFilter } from '../tickets/views.js';
@@ -23,13 +24,16 @@ export interface TicketRouteOpts {
   guildId: string | null;
   /** config.ticketAttachmentsDir. */
   attachmentsDir: string;
+  /** Called after a removal committed: pokes the bot, if it is running, to
+   *  delete the message in Discord. Never awaited by the route. */
+  afterRemove: () => void;
 }
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
  *  ticket is restricted. */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
-  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir } = opts;
+  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
@@ -135,6 +139,27 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       .header('Content-Length', bytes)
       .type(type.mime)
       .send(createReadStream(path));
+  });
+
+  /**
+   * Remove a mirrored message for good: text, history and files. The Discord
+   * message follows through the bot; this does not wait for it.
+   *
+   * Not through act(): this one takes a message id as well as a ticket id,
+   * and its refusals are removeMessage's own (404 for a ticket this viewer
+   * cannot see, 409 for a message already removed).
+   */
+  app.post('/api/mod/tickets/:id/messages/:mid/remove', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { id, mid } = req.params as { id: string; mid: string };
+    const r = removeMessage(db, attachmentsDir, Number(id), Number(mid), me, ((req.body ?? {}) as { reason?: unknown }).reason);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, me, 'ticket_remove', Number(id), { messageId: Number(mid), files: r.files }, { quiet: getTicketRow(db, Number(id))?.restricted === 1 });
+    afterRemove();
+    // No broadcast('refresh'): removeMessage published the ticket signal, and
+    // the staff-scoped nudge tells the pages that may see it.
+    return { ok: true };
   });
 
   /** Shared tail of every mutation: run it, answer, audit, nudge open pages. */

@@ -10,6 +10,8 @@ import { TicketSync } from './discord/ticketSync.js';
 import { TicketMirror } from './discord/ticketMirror.js';
 import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
 import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
+import { handleRemoveCommand, REMOVE_COMMAND } from './discord/ticketRemove.js';
+import { purgeRemovedFiles } from './tickets/removal.js';
 import { playerByDiscordId } from './players.js';
 import { applyGate } from './discord/gate.js';
 import { GuildMembership } from './discord/membership.js';
@@ -448,6 +450,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const offTicketNudge = subscribeTicketSignals((s) => {
     if (s.kind === 'ticket') nudgeTicket(s.ticketId);
   });
+  // Files of removed messages that could not be unlinked last time (a full
+  // disk, a permissions fault). Rows only: with none owed this touches nothing.
+  purgeRemovedFiles(deps.db, deps.config.ticketAttachmentsDir);
 
   // With the bot running, the bot's own cards say everything the webhook did
   // (and more), so the webhook would only duplicate them.
@@ -1170,6 +1175,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           transport: t,
           store: new AttachmentStore({ db: deps.db, dir: deps.config.ticketAttachmentsDir, fetcher: httpFetcher }),
           onChange: nudgeTicket,
+          // A removal's Discord delete runs on the reconciler's chain: both
+          // unarchive a thread, act in it and archive it again, and on two
+          // chains they collide. Read per call, because the reconciler is
+          // built just below this.
+          serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
         });
         ticketMirror = mirror;
         // After the feed: a problem found on the first pass has somewhere to go.
@@ -1193,6 +1203,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
       },
       opensModal: opensTicketModal,
+      messageCommands: {
+        [REMOVE_COMMAND]: (i) => handleRemoveCommand({
+          db: deps.db, attachmentsDir: deps.config.ticketAttachmentsDir, mirror: () => ticketMirror,
+        }, i),
+      },
       commands: {
         defs: COMMAND_DEFS,
         handle: (i) => handleCommand({
@@ -1233,6 +1248,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
     guildId: deps.config.discord?.guildId ?? null,
     attachmentsDir: deps.config.ticketAttachmentsDir,
+    afterRemove: () => { void ticketMirror?.sweepRemovals(); },
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,

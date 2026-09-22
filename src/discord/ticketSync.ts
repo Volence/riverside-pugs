@@ -100,6 +100,22 @@ export class TicketSync {
     this.chain = this.chain.then(fn).catch((err) => console.error('[discord] ticket sync failed:', err));
   }
 
+  /**
+   * Run somebody else's Discord work on this chain, and wait for it: the
+   * promise rejects with whatever the work threw, and the chain carries on
+   * regardless. Whoever waits is the one that reports.
+   *
+   * For work that must not interleave with a pass because it does the same
+   * thing to a thread: unarchive it, act in it, archive it again. The mirror's
+   * removals are the one caller (Task 7). Nothing passed here may wait on the
+   * mirror's own chain, which this chain waits on through saveBeforeDelete.
+   */
+  serialise(fn: () => Promise<void>): Promise<void> {
+    const link = this.chain.then(fn);
+    this.chain = link.catch(() => {});
+    return link;
+  }
+
   private problem(text: string): void {
     if (this.reported.has(text)) return;
     this.reported.add(text);

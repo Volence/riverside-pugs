@@ -221,7 +221,7 @@ export class AdminFeedPoster {
         }
       }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
-      case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': {
+      case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': case 'ticket_remove': {
         const ticket = `ticket [#${e.target}](${this.ticket(e.target)})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
@@ -229,6 +229,9 @@ export class AdminFeedPoster {
           case 'ticket_close': return `${who} closed ${ticket}: ${String(d.outcome ?? '').replace(/_/g, ' ')}${d.via === 'discord' ? ' from Discord' : ''}`;
           case 'ticket_reopen': return `${who} reopened ${ticket}`;
           case 'ticket_ban': return `${who} banned from ${ticket}: ${escapeName(String(d.reason ?? ''))} (${d.minutes ? fmtMinutes(Number(d.minutes)) : 'permanent'})`;
+          // Never what was removed, and never for a restricted ticket: that
+          // removal is logged quiet and never reaches here.
+          case 'ticket_remove': return `${who} removed a message from ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
           default: return `${who} updated ${ticket}`;
         }
       }

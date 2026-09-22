@@ -4,9 +4,11 @@ import { playerByDiscordId } from '../players.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
 import { threadByDiscordId, type ThreadRow } from '../tickets/threads.js';
 import {
-  attachmentsOf, insertAttachment, insertMessage, lastMessageId, markDeleted, messageByDiscordId, recordEdit, updateAttachment,
+  attachmentsOf, insertAttachment, insertMessage, lastMessageId, markDeleted, messageByDiscordId, messageById, recordEdit,
+  updateAttachment,
 } from '../tickets/messages.js';
 import { attachmentPath, type AttachmentStore } from '../tickets/attachments.js';
+import { purgeRemovedFiles } from '../tickets/removal.js';
 import type { BotTransport, InboundAttachment, InboundMessage } from './transport.js';
 
 export interface TicketMirrorDeps {
@@ -16,6 +18,11 @@ export interface TicketMirrorDeps {
   /** "This ticket's page should refetch." Wired to the staff-scoped nudge,
    *  never to hub.broadcast: see src/tickets/nudge.ts. */
   onChange?: (ticketId: number) => void;
+  /** Run something on the reconciler's chain: TicketSync.serialise. The one
+   *  thing here that writes to Discord is a removal's delete, and both it and
+   *  a reconcile pass unarchive a thread, act in it and archive it again.
+   *  Left out (tests, and before the reconciler exists) the work simply runs. */
+  serialise?: (fn: () => Promise<void>) => Promise<void>;
 }
 
 /** Threads whose history is still worth reading: every state but 'deleted'.
@@ -32,10 +39,10 @@ const READABLE = "state != 'deleted'";
  * in the transport nor a stale event can turn somebody's conversation into
  * ticket content.
  *
- * Everything runs on one chain, so a message, its edit and its deletion land
- * in order, and a backfill never interleaves with a live event. Live events
- * are latency; the backfill on every start is what makes the copy complete,
- * because deploys restart the bot often.
+ * All the copying runs on one chain, so a message, its edit and its deletion
+ * land in order, and a backfill never interleaves with a live event. Live
+ * events are latency; the backfill on every start is what makes the copy
+ * complete, because deploys restart the bot often.
  *
  * No live message from a thread whose history this process has not read to
  * the end is ever stored before that history is: the backfill starts after
@@ -43,10 +50,12 @@ const READABLE = "state != 'deleted'";
  * would move that point past everything written while the bot was down and
  * lose it for good.
  *
- * It only ever READS from Discord, which is why it never unarchives anything:
- * an archived thread refuses every write there is but answers a history read,
- * and unarchiving is a write that would fight the two chains that lock and
- * archive threads on purpose.
+ * Copying only ever READS from Discord, which is why it never unarchives
+ * anything: an archived thread refuses every write there is but answers a
+ * history read, and unarchiving is a write that would fight the chain that
+ * locks and archives threads on purpose. The one thing here that does write
+ * is a removal's delete, and it goes on THAT chain rather than this one
+ * (deps.serialise): see sweepRemovals.
  *
  * What a backfill cannot see: an EDIT or a DELETE made while the bot was down
  * to a message that was already stored. Discord has no "changes since" call,
@@ -56,6 +65,14 @@ const READABLE = "state != 'deleted'";
  */
 export class TicketMirror {
   private chain: Promise<void> = Promise.resolve();
+  /**
+   * The Discord half of removals, on a chain of its own.
+   *
+   * It waits on the reconciler's chain (deps.serialise), and the chain above
+   * must never do that: the reconciler waits on the mirror (catchUp), so
+   * waiting back would deadlock the pair.
+   */
+  private removals: Promise<void> = Promise.resolve();
   private offs: (() => void)[] = [];
   private stopped = false;
   /** Discord threads whose history this process has read to the end, and is
@@ -84,6 +101,9 @@ export class TicketMirror {
       if (s.kind === 'ticket') this.enqueue(() => this.backfillTicket(s.ticketId));
     }));
     void this.backfill();
+    // A removal that committed while the bot was down still owes Discord a
+    // deletion. Nothing else finishes it, so every start does.
+    void this.sweepRemovals();
   }
 
   stop(): void {
@@ -94,7 +114,7 @@ export class TicketMirror {
 
   /** Resolves once everything asked for so far has been done (tests). */
   idle(): Promise<void> {
-    return this.chain;
+    return Promise.all([this.chain, this.removals]).then(() => undefined);
   }
 
   /** Every thread that can still be written in, caught up. Never throws, and
@@ -125,6 +145,63 @@ export class TicketMirror {
       // Not backfillSafely: the failure has to travel back to the caller.
       if (th) await this.backfillThread(th);
     });
+  }
+
+  /**
+   * The Discord half of every removal that still owes one: removed on the
+   * site, its Discord copy not yet known gone. Queued behind any removal
+   * already in flight, and resolves when it has run. Called on every start,
+   * by the site after a removal, and by the Discord command.
+   *
+   * Never rejects: a removal is finished on the site whatever Discord says,
+   * and what is still owed is owed in the database, for the next start.
+   */
+  sweepRemovals(): Promise<void> {
+    this.removals = this.removals.then(() => this.sweepOwed())
+      .catch((err) => console.error('[discord] sweeping removed ticket messages failed:', err));
+    return this.removals;
+  }
+
+  private async sweepOwed(): Promise<void> {
+    const { db } = this.deps;
+    const owed = db.prepare('SELECT id, thread_id, discord_message_id FROM ticket_messages WHERE removed_at IS NOT NULL AND discord_gone = 0 ORDER BY id')
+      .all() as { id: number; thread_id: string; discord_message_id: string }[];
+    for (const m of owed) {
+      try {
+        await this.removeInDiscord(m.thread_id, m.discord_message_id);
+        db.prepare('UPDATE ticket_messages SET discord_gone = 1 WHERE id = ?').run(m.id);
+      } catch (err) {
+        console.error('[discord] could not delete a removed ticket message; the next start tries again:', err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  /**
+   * Delete one message in Discord, on the reconciler's chain so that it
+   * cannot interleave with a pass working on the same thread. Throws what
+   * Discord throws, except for what is not a failure: the thread or the
+   * message already being gone.
+   */
+  removeInDiscord(threadId: string, discordMessageId: string): Promise<void> {
+    const serialise = this.deps.serialise ?? ((fn: () => Promise<void>) => fn());
+    return serialise(() => this.deleteOne(threadId, discordMessageId));
+  }
+
+  private async deleteOne(threadId: string, discordMessageId: string): Promise<void> {
+    const { db, transport } = this.deps;
+    if (!(await transport.threads.exists(threadId))) return;
+    // TicketSync.makeWritable, for the same reason: an archived thread
+    // refuses a delete, and Discord archives a quiet one with nothing in the
+    // database to say it did.
+    if (await transport.threads.isArchived(threadId)) await transport.threads.setArchived(threadId, false);
+    try {
+      await transport.remove(threadId, discordMessageId);
+    } finally {
+      // In a finally, as the reconciler does it: a closed ticket's thread must
+      // not be left open because the delete failed. The row says what it goes
+      // back to; it was never unlocked, so only the archiving is undone.
+      if (threadByDiscordId(db, threadId)?.locked === 1) await transport.threads.setArchived(threadId, true);
+    }
   }
 
   /** Queue work and wait for it: the promise rejects with whatever the work
@@ -220,13 +297,14 @@ export class TicketMirror {
   }
 
   /** A delete in Discord is soft here: the content and the files are kept.
-   *  Heard twice (the bot's own delete is announced to the bot, and Task 7's
-   *  Remove deletes the Discord message itself) it counts once. */
+   *  Heard twice (the bot's own delete is announced to the bot) it counts
+   *  once, and for a REMOVED message it counts not at all: the delete it is
+   *  hearing about is its own, and a removal is past being deleted. */
   private async onRemove(threadId: string, messageId: string): Promise<void> {
     const thread = this.watched(threadId);
     if (!thread) return;
     const before = messageByDiscordId(this.deps.db, messageId);
-    if (!before || before.deleted_at !== null) return;
+    if (!before || before.deleted_at !== null || before.removed_at !== null) return;
     markDeleted(this.deps.db, messageId);
     this.deps.onChange?.(thread.ticket_id);
   }
@@ -234,8 +312,9 @@ export class TicketMirror {
   private async saveOne(ticketId: number, messageId: number, a: InboundAttachment): Promise<void> {
     const { db, store } = this.deps;
     const r = await store.save(ticketId, a);
+    let id: number;
     try {
-      insertAttachment(db, {
+      id = insertAttachment(db, {
         messageId, discordAttachmentId: a.id, filename: a.name, contentType: a.contentType ?? '',
         size: r.size, sha256: r.sha256, storedName: r.storedName, skipReason: r.skipReason,
       });
@@ -243,6 +322,26 @@ export class TicketMirror {
       this.discard(r.storedName);
       throw err;
     }
+    this.removedMeanwhile(messageId, id);
+  }
+
+  /**
+   * A big file can still be arriving when its message is removed. The removal
+   * marked the rows it could see, and this one was not there yet, so it is
+   * marked now and its bytes go the way of the rest. The row stays, as every
+   * removed file's row does: its name, size and sha256 are the record that
+   * something was there.
+   *
+   * Whether that happened, for a caller deciding whether the page has
+   * anything new to show.
+   */
+  private removedMeanwhile(messageId: number, attachmentId: number): boolean {
+    const { db, store } = this.deps;
+    const m = messageById(db, messageId);
+    if (!m || m.removed_at === null) return false;
+    db.prepare('UPDATE ticket_attachments SET removed_at = ? WHERE id = ?').run(m.removed_at, attachmentId);
+    purgeRemovedFiles(db, store.dir);
+    return true;
   }
 
   /** A file the database does not point at is a file nothing will ever serve,
@@ -306,12 +405,12 @@ export class TicketMirror {
   private async retryFailed(th: ThreadRow): Promise<void> {
     const { db, transport, store } = this.deps;
     const failed = db.prepare(
-      `SELECT a.id, a.discord_attachment_id, m.discord_message_id, m.ticket_id FROM ticket_attachments a
+      `SELECT a.id, a.message_id, a.discord_attachment_id, m.discord_message_id, m.ticket_id FROM ticket_attachments a
          JOIN ticket_messages m ON m.id = a.message_id
        WHERE m.thread_id = ? AND a.skip_reason = 'fetch_failed' AND a.removed_at IS NULL
          AND m.removed_at IS NULL AND m.deleted_at IS NULL
        ORDER BY a.id`,
-    ).all(th.thread_id) as { id: number; discord_attachment_id: string; discord_message_id: string; ticket_id: number }[];
+    ).all(th.thread_id) as { id: number; message_id: number; discord_attachment_id: string; discord_message_id: string; ticket_id: number }[];
     const fresh = new Map<string, InboundMessage | null>();
     let changed = false;
     for (const f of failed) {
@@ -326,7 +425,8 @@ export class TicketMirror {
         this.discard(r.storedName);
         throw err;
       }
-      changed = true;
+      // Removed while this retry was in flight: nothing new to show.
+      if (!this.removedMeanwhile(f.message_id, f.id)) changed = true;
     }
     if (changed) this.deps.onChange?.(th.ticket_id);
   }
