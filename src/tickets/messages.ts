@@ -40,6 +40,10 @@ export interface AttachmentRow {
 export interface NewMessage {
   ticketId: number; threadId: string; channel: MessageChannel; discordMessageId: string;
   authorDiscordId: string; authorPlayerId: string | null; authorName: string; content: string; createdAt: string;
+  /** When the first sight of a message is an edit of it: Discord says it has
+   *  been edited, and `content` is what it says now. There is nothing to put
+   *  in history, because the version before the edit was never seen. */
+  editedAt?: string | null;
 }
 
 export interface NewAttachment {
@@ -63,9 +67,9 @@ export function messageByDiscordId(db: DB, discordMessageId: string): MessageRow
 export function insertMessage(db: DB, m: NewMessage): MessageRow | null {
   const r = db.prepare(
     `INSERT OR IGNORE INTO ticket_messages
-       (ticket_id, thread_id, channel, discord_message_id, author_discord_id, author_player_id, author_name, content, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(m.ticketId, m.threadId, m.channel, m.discordMessageId, m.authorDiscordId, m.authorPlayerId, m.authorName.slice(0, 100), m.content, m.createdAt);
+       (ticket_id, thread_id, channel, discord_message_id, author_discord_id, author_player_id, author_name, content, created_at, edited_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(m.ticketId, m.threadId, m.channel, m.discordMessageId, m.authorDiscordId, m.authorPlayerId, m.authorName.slice(0, 100), m.content, m.createdAt, m.editedAt ?? null);
   return r.changes === 0 ? null : messageByDiscordId(db, m.discordMessageId)!;
 }
 
