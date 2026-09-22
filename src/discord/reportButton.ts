@@ -159,10 +159,14 @@ export class ReportButton {
   async tick(): Promise<void> {
     try {
       await this.ensureMessage();
+      // Inside the same try as ensureMessage: start() and the interval both
+      // call this as `void this.tick()`, so a throwing DELETE out here would
+      // become an unhandled rejection, which ends the process on this Node
+      // version rather than just skipping a reap until the next tick.
+      this.reapPending();
     } catch (err) {
       console.error('[discord] report button:', err);
     }
-    this.reapPending();
   }
 
   /** Rows nobody came back to finish. Not an error: someone opened the form,
