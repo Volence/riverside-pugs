@@ -49,6 +49,17 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
   // Discord has no permanent timeout (its own 28-day maximum), so the
   // Permanent entry never applies here, and a moderator's cap still holds.
   const timeoutLengths = LENGTHS.filter((l): l is [number, string] => l[0] !== null && l[0] <= (cap ?? 40320) && l[0] <= 40320);
+  // The shared `minutes` state defaults to '1440' for the ban form, which is
+  // not always one of timeoutLengths (a moderator capped under a day, say).
+  // Fall back to the largest allowed length at or under a day, or failing
+  // that the first (smallest) option, so the select never shows a value it
+  // would not actually submit.
+  const timeoutDefault = (() => {
+    const notOverADay = timeoutLengths.filter(([m]) => m <= 1440);
+    const pick = notOverADay.length > 0 ? notOverADay[notOverADay.length - 1] : timeoutLengths[0];
+    return pick ? String(pick[0]) : '';
+  })();
+  const timeoutMinutes = timeoutLengths.some(([m]) => String(m) === minutes) ? minutes : timeoutDefault;
   const open = t.status === 'open';
 
   return (
@@ -139,17 +150,23 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
         <section>
           <h4>Discord sanctions</h4>
           <ul class="admin-list">
-            {data.discordSanctions.map((s) => (
-              <li key={s.id}>
-                {s.kind === 'ban' ? 'Banned from the Discord' : `Timed out until ${fmtTime(s.until!)}`} by {s.createdByName ?? s.createdBy}: {s.reason}
-                {s.liftedAt ? ` (lifted ${fmtTime(s.liftedAt)})` : s.active ? '' : ' (ended)'}
-                {s.active && s.ticketId !== null && data.viewer.isAdmin && (
-                  <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.liftDiscordSanction(s.id), {
-                    title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
-                  })}>Lift</button>
-                )}
-              </li>
-            ))}
+            {data.discordSanctions.map((s) => {
+              // A redacted row (ticketId null) has createdBy '' and
+              // createdByName null: show no "by" clause rather than a
+              // dangling "by ".
+              const by = s.createdByName || s.createdBy || '';
+              return (
+                <li key={s.id}>
+                  {s.kind === 'ban' ? 'Banned from the Discord' : `Timed out until ${fmtTime(s.until!)}`}{by ? ` by ${by}` : ''}: {s.reason}
+                  {s.liftedAt ? ` (lifted ${fmtTime(s.liftedAt)})` : s.active ? '' : ' (ended)'}
+                  {s.active && s.ticketId !== null && data.viewer.isAdmin && (
+                    <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.liftDiscordSanction(s.id), {
+                      title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
+                    })}>Lift</button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -202,11 +219,11 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                 <div class="admin-form">
                   <input value={reason} maxLength={500} placeholder="Reason (goes to Discord's audit log)" aria-label="Discord sanction reason"
                     onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-                  <select value={minutes} aria-label="Timeout length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
+                  <select value={timeoutMinutes} aria-label="Timeout length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
                     {timeoutLengths.map(([m, label]) => <option key={label} value={String(m)}>{label}</option>)}
                   </select>
                   <button class="btn" type="button" disabled={busy || !reason.trim()}
-                    onClick={() => run(() => modApi.discordSanction(t.id, 'timeout', Number(minutes), reason.trim()), {
+                    onClick={() => run(() => modApi.discordSanction(t.id, 'timeout', Number(timeoutMinutes), reason.trim()), {
                       title: `Time out ${t.targetName ?? 'this person'} in Discord?`,
                       body: 'The bot times them out in the Discord server. They cannot talk until it ends or an admin lifts it.',
                       confirmLabel: 'Time out',

@@ -980,9 +980,10 @@ export interface CaseFile {
   sharesAddressWith: AdminPlayerDetail['sharesAddressWith']; tickets: TicketSummary[];
 }
 /** A Discord-side timeout or ban, on a Discord-only accused. Every row for
- *  their Discord id across every ticket, redacted server-side to null out
- *  `ticketId` and blank `reason` where the row belongs to a restricted
- *  ticket this viewer cannot open. */
+ *  their Discord id across every ticket, redacted server-side where the row
+ *  belongs to a restricted ticket this viewer cannot open: `ticketId` is
+ *  nulled, `reason` is replaced by a fixed withheld message, and the issuer
+ *  (`createdBy`, `createdByName`) and `liftedBy` are blanked. */
 export interface DiscordSanction {
   id: number; kind: 'timeout' | 'ban'; until: string | null; reason: string; ticketId: number | null;
   createdBy: string; createdByName: string | null; createdAt: string;

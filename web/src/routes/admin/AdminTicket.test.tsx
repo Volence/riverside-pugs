@@ -55,6 +55,14 @@ const sanctionRow: DiscordSanction = {
   liftedBy: null, liftedAt: null, active: true,
 };
 
+/** What the server hands back for a sanction tied to a restricted ticket
+ *  the viewer is not on: ticketId null, no issuer, the fixed withheld text. */
+const redactedSanctionRow: DiscordSanction = {
+  id: 6, kind: 'ban', until: null, reason: 'Withheld (restricted ticket)', ticketId: null,
+  createdBy: '', createdByName: null, createdAt: '2026-09-22T00:00:00.000Z',
+  liftedBy: null, liftedAt: null, active: true,
+};
+
 beforeEach(() => { mockMod.ticket.mockReset(); });
 afterEach(cleanup);
 
@@ -149,4 +157,31 @@ describe('AdminTicket', () => {
     render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
     expect(await screen.findByRole('button', { name: 'Lift' })).toBeTruthy();
   });
+
+  it('shows a redacted sanction with no dangling "by" and offers no Lift, even to an admin', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      discordSanctions: [redactedSanctionRow],
+      viewer: { isAdmin: true, banCapMinutes: null },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByText('Banned from the Discord: Withheld (restricted ticket)')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Lift' })).toBeNull();
+  });
+
+  it('caps the Time out select at a day for a moderator capped there, and offers no Permanent', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: false, banCapMinutes: 1440 },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    const select = await screen.findByRole('combobox', { name: 'Timeout length' });
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['1 hour', '1 day']);
+    expect(options).not.toContain('Permanent');
+    expect((select as HTMLSelectElement).value).toBe('1440');
+  });
+
 });

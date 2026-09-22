@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { WITHHELD_REASON } from '../admin/banRedaction.js';
+import { banIsWithheld, WITHHELD_REASON } from '../admin/banRedaction.js';
 import type { AttachmentRow, MessageRow } from './messages.js';
 import { REPORTER_KEY_SQL } from './person.js';
 import { canSeeTicket, getTicketRow } from './store.js';
@@ -68,14 +68,12 @@ export function ticketsAbout(db: DB, targetId: string, viewer: string): TicketSu
  * belongs to a different, restricted ticket they are not on. That row keeps
  * who is sanctioned, since it is the same Discord id this ticket is already
  * about, but loses the free text, the ticket link and the issuer, the same
- * rule banRedaction.ts applies to a ban from a restricted ticket: '' stands
- * in for createdBy because SanctionRow types it as string, not string | null,
- * matching redactBan's own reasoning for BanRow.
+ * rule banIsWithheld/redactBan apply to a ban from a restricted ticket: ''
+ * stands in for createdBy because SanctionRow types it as string, not
+ * string | null, matching redactBan's own reasoning for BanRow.
  */
 function redactDiscordSanction(db: DB, s: SanctionRow, viewer: string): SanctionRow {
-  if (s.ticketId === null) return s;
-  const t = getTicketRow(db, s.ticketId);
-  if (t && canSeeTicket(db, t, viewer)) return s;
+  if (!banIsWithheld(db, s.ticketId, viewer)) return s;
   return { ...s, reason: WITHHELD_REASON, ticketId: null, createdBy: '', createdByName: null, liftedBy: null };
 }
 
