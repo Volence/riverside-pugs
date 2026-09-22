@@ -108,8 +108,17 @@ const TICK_MS = 5 * 60_000;
 /** How long a half-written report waits for its reporter to pick a name. */
 const PENDING_MS = 60 * 60_000;
 
+// Deliberately not "something happened in a game". The first wording said
+// that and the owner's first piece of feedback was that it reads as though
+// only in-game incidents count. Someone can be creepy in a channel, in a
+// thread or in a DM, and those are the reports this community most needs to
+// hear about, so the opening line has to say so before anyone decides they
+// are in the wrong place.
 const BODY = [
-  '**Something happened in a game? Tell the moderators.**',
+  '**Something happened? Tell the moderators.**',
+  '',
+  'In a game, here in Discord, or in a DM. If someone has made you or',
+  'anyone else uncomfortable, we want to know.',
   '',
   'Press the button below and fill in the form. Your report is private:',
   'the person you report is never told who reported them.',
