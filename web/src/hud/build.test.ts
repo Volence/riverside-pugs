@@ -371,6 +371,22 @@ describe('teamLayout, the gap', () => {
     expect([kvGet(c, 'wide'), kvGet(c, 'tall')]).toEqual(['134', '192']);
   });
 
+  it('leaves the content of an overlapping old column where it was, inside the container', () => {
+    // Before the migration: the unfitted 150-tall card stepped 40 (a gap of -110).
+    const before = design({ elements: { teamColumn: { dir: 'column', gap: -110 } } });
+    const after = validateDesign({ v: 1, elements: { teamColumn: { dir: 'column', spacing: 40 } } });
+    expect(after.elements.teamColumn).toMatchObject({ fit: true, gap: 4 });
+    const content = (d: HudDesign) => {
+      const files = buildHud(d);
+      const team = tree(files, TEAM_FILE), card = tree(files, CARD_FILE);
+      return [1, 2, 3, 4].flatMap((n) => ['Head', 'Health', 'Name', 'Items', 'Status'].map((name) => {
+        const p = kvFind(team, [`TeamPlayer${n}`])!, c = kvFind(card, [name])!;
+        return [parseFloat(kvGet(p, 'xpos')!) + parseFloat(kvGet(c, 'xpos')!), parseFloat(kvGet(p, 'ypos')!) + parseFloat(kvGet(c, 'ypos')!)];
+      }));
+    };
+    expect(content(after)).toEqual(content(before));
+  });
+
   it('gives a migrated design the pitch it had', () => {
     expect(layout(validateDesign({ v: 1, elements: { teamColumn: { dir: 'column', spacing: 180 } } })).spacing).toBe(180);
     expect(layout(validateDesign({ v: 1, preset: 'modern', elements: { teamColumn: { spacing: 45, scale: 1.25 } } })).spacing).toBe(45);

@@ -68,12 +68,25 @@ describe('validateDesign, the teammate layout', () => {
     validateDesign({ v: 1, preset, elements: { teamColumn: o } }).elements.teamColumn;
 
   it('migrates a saved spacing to the gap that keeps the same pitch', () => {
-    // gap = spacing / scale - the unfitted card along the direction, clamped at 0.
-    expect(team('stock', { dir: 'row', spacing: 140 })).toEqual({ dir: 'row', gap: 0 });   // 140 - 150, overlapping: clamped
+    // gap = spacing / scale - the unfitted card along the direction.
     expect(team('stock', { dir: 'column', spacing: 180 })).toEqual({ dir: 'column', gap: 30 });
     expect(team('modern', { spacing: 40 })).toEqual({ gap: 6 });                            // Modern's own column, card 34 tall
     expect(team('modern', { dir: 'row', spacing: 130 })).toEqual({ dir: 'row', gap: 10 });  // card 120 wide
     expect(team('modern', { dir: 'column', spacing: 45, scale: 1.25 })).toEqual({ dir: 'column', scale: 1.25, gap: 2 });
+  });
+
+  it('fits an old design whose unfitted cards overlapped, and keeps its pitch with the fitted card', () => {
+    // Stock column at 40: the 150-tall card overlapped, the 36-tall fitted one leaves 4.
+    expect(team('stock', { dir: 'column', spacing: 40 })).toEqual({ dir: 'column', fit: true, gap: 4 });
+    // Stock's own row at 140: 150 wide overlapped, 121 fitted leaves 19.
+    expect(team('stock', { dir: 'row', spacing: 140 })).toEqual({ dir: 'row', fit: true, gap: 19 });
+    // Tighter than even the fitted card: fitted, then clamped at 0.
+    expect(team('stock', { dir: 'column', spacing: 20 })).toEqual({ dir: 'column', fit: true, gap: 0 });
+  });
+
+  it('keeps the pitch of a saved spacing that was already fitted, and never overrides fit off', () => {
+    expect(team('stock', { dir: 'column', fit: true, spacing: 60 })).toEqual({ dir: 'column', fit: true, gap: 24 });
+    expect(team('stock', { dir: 'column', fit: false, spacing: 40 })).toEqual({ dir: 'column', fit: false, gap: 0 });
   });
 
   it('keeps a stored gap over a stale spacing, and clamps it to 0..200', () => {

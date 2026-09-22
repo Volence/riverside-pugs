@@ -14,8 +14,8 @@ import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Asp
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
-import { baseTeam, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir } from './design';
-import { panelChildren, TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
+import { baseTeam, contentBox, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir } from './design';
+import { panelChildren, TEAM_PANEL, type ChildDef } from './children';
 
 /** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
 export interface BuildAssets { fonts?: { regular: Uint8Array; bold: Uint8Array }; images?: Record<string, Uint8ClampedArray> }
@@ -178,28 +178,6 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
     // fitted card grows with them.
     if (def.box === 'none') kvSet(block, 'tall', String(size));
   }
-}
-
-interface Box { x: number; y: number; w: number; h: number }
-
-/**
- * The teammate card's content: the union of the visible steady-state
- * children (Head, Health, Name, Items, and HealthNumber and Status when
- * present). State art and decoration never count. Null when every one is
- * hidden, which fitPass treats as "keep the file's card" rather than write a
- * 0 x 0 card. On stock this is x 13..134, y 36..72: 121 x 36.
- */
-function contentBox(nodes: KvNode[]): Box | null {
-  const content = new Set(CONTENT_CHILDREN.map((n) => n.toLowerCase()));
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const n of nodes) {
-    if (typeof n.value === 'string' || !content.has(n.key.toLowerCase())) continue;
-    if ((kvGet(n, 'visible') ?? '1') === '0') continue;
-    const x = num(kvGet(n, 'xpos')), y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
-    if (w <= 0 || h <= 0) continue;
-    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h);
-  }
-  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
 }
 
 /**

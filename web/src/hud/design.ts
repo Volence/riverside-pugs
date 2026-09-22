@@ -12,7 +12,7 @@ import type { Aspect } from './units';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
-import { TEAM_PANEL, type ChildDef } from './children';
+import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
 
 export type TeamDir = 'row' | 'column' | 'free';
 /**
@@ -208,6 +208,40 @@ export function baseTeam(preset: Preset): BaseTeam {
   return out;
 }
 
+export interface Box { x: number; y: number; w: number; h: number }
+
+/**
+ * The teammate card's content: the union of the visible steady-state
+ * children (Head, Health, Name, Items, and HealthNumber and Status when
+ * present). State art and decoration never count. Null when every one is
+ * hidden, which fitPass treats as "keep the file's card" rather than write a
+ * 0 x 0 card. On stock this is x 13..134, y 36..72: 121 x 36. It lives here,
+ * not in build.ts, because the spacing migration below needs the preset's
+ * own fitted card too.
+ */
+export function contentBox(nodes: KvNode[]): Box | null {
+  const content = new Set(CONTENT_CHILDREN.map((n) => n.toLowerCase()));
+  const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of nodes) {
+    if (typeof n.value === 'string' || !content.has(n.key.toLowerCase())) continue;
+    if ((kvGet(n, 'visible') ?? '1') === '0') continue;
+    const x = num(kvGet(n, 'xpos')), y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
+    if (w <= 0 || h <= 0) continue;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h);
+  }
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+
+const BASE_CONTENT = new Map<Preset, Box | null>();
+/** The preset's own card, fitted with no inside edits: stock 121 x 36, Modern 113 x 26. */
+export function baseContent(preset: Preset): Box | null {
+  if (!BASE_CONTENT.has(preset)) {
+    BASE_CONTENT.set(preset, contentBox(parseKv(baseFile(preset, TEAM_PANEL.file))[0].value as KvNode[]));
+  }
+  return BASE_CONTENT.get(preset)!;
+}
+
 /** Four finite points, each clamped like an element's x/y, or nothing: a Free layout is all four cards or none. */
 function cardSlots(v: unknown): CardSlot[] | undefined {
   if (!Array.isArray(v) || v.length !== 4) return undefined;
@@ -222,11 +256,19 @@ function cardSlots(v: unknown): CardSlot[] | undefined {
 /**
  * The survivor team's own fields. `fit` is kept only as a real boolean, so a
  * design saved before fit existed stays unfitted. Free needs its four card
- * positions, so it survives only with them. A saved `spacing` (the old
- * origin-to-origin pitch, final units) becomes the `gap` that gives the same
- * pitch: held to its old 0..400 first, divided by the scale, minus the
- * unfitted card along the direction, clamped at 0. An old design therefore
- * loads where it was unless its cards overlapped.
+ * positions, so it survives only with them.
+ *
+ * A saved `spacing` (the old origin-to-origin pitch, final units) becomes the
+ * `gap` that gives the same pitch: held to its old 0..400 first, divided by
+ * the scale, minus the card along the direction. A gap cannot be negative,
+ * so a design whose unfitted cards overlapped (stock's own row at 140, or a
+ * column at 40 with 150-tall cards) is fitted instead and measured against
+ * the fitted card: the fitted card sits the content box's offset in, so the
+ * same pitch leaves every piece of content where it was (a column at 40
+ * becomes gap 4 over a 36-tall card). A design already fitted is measured
+ * against the fitted card the same way. Only a pitch tighter than even the
+ * fitted card, or an overlap with fit explicitly off, is clamped at 0 and
+ * moves.
  */
 function teamFields(raw: Record<string, unknown>, out: ElementOverride, preset: Preset) {
   if (typeof raw.fit === 'boolean') out.fit = raw.fit;
@@ -236,8 +278,15 @@ function teamFields(raw: Record<string, unknown>, out: ElementOverride, preset: 
   if (out.gap === undefined && typeof raw.spacing === 'number' && Number.isFinite(raw.spacing)) {
     const base = baseTeam(preset);
     const dir = out.dir === 'row' || out.dir === 'column' ? out.dir : base.dir;
-    const extent = dir === 'row' ? base.card.w : base.card.h;
-    out.gap = clampOverride('gap', clampOverride('spacing', raw.spacing) / (out.scale ?? 1) - extent);
+    const along = (c: { w: number; h: number }) => (dir === 'row' ? c.w : c.h);
+    const pitch = clampOverride('spacing', raw.spacing) / (out.scale ?? 1);
+    const fitted = baseContent(preset);
+    let gap = pitch - along(base.card);
+    if (fitted && (out.fit === true || (out.fit === undefined && gap < 0))) {
+      out.fit = true;
+      gap = pitch - along(fitted);
+    }
+    out.gap = clampOverride('gap', gap);
   }
 }
 
