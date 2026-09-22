@@ -318,8 +318,10 @@ export interface CardChild { x: number; y: number; w: number; h: number; visible
  * One teammate-card child as the side panel shows it and a drag starts
  * from: after the player's edits and the fit rule, before scale, in the card
  * file's own unfitted frame, which is the frame a ChildOverride is stored
- * in. Fit only shifts content children, so for them this is the edited
- * block; for the state art it is where the fit rule put it, shifted back.
+ * in. Fit shifts every top-level child of the card by the content box's
+ * top-left, and this adds it back: for a child the fit rule leaves alone
+ * (the content, a state picture the player placed) that is the edited
+ * block, and for the state art it places, where it put it.
  * Null when the block is not in the file (an addable child that is off).
  */
 export function cardChild(design: HudDesign, name: string): CardChild | null {
