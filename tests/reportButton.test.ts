@@ -549,10 +549,11 @@ describe('choosing between same-named players', () => {
     expect(reports()).toHaveLength(1);
   });
 
-  it('refuses someone else pressing it, and files nothing', async () => {
+  it('refuses someone else pressing it, answering the same "expired" as a draft that genuinely is gone, and files nothing', async () => {
     const r = await pick(ALICE, `rp:pick:1:${BOB2}`);
-    expect(said(r)).toContain('not yours');
+    expect(said(r)).toContain('expired');
     expect(reports()).toHaveLength(0);
+    // The draft itself is untouched: only the wrong presser was turned away.
     expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 1 });
   });
 

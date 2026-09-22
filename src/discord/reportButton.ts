@@ -235,14 +235,18 @@ export async function handleReportButton(
   }
   if (i.customId.startsWith(`${REPORT_PREFIX}pick:`)) {
     const [, , rawId, steamid] = i.customId.split(':');
-    const row = deps.db.prepare('SELECT id, reporter_id, category, text, candidates FROM pending_reports WHERE id = ?')
-      .get(Number(rawId)) as { id: number; reporter_id: string; category: string; text: string; candidates: string } | undefined;
-    // Reaped after an hour, or already used: either way the words are gone
-    // and the honest answer is to start again.
-    if (!row) return say('That draft has expired, please file it again.');
     // The custom id travels through Discord, so the presser is checked
-    // against the row rather than trusted.
-    if (row.reporter_id !== me.steamid) return say('That choice is not yours to make.');
+    // against the row rather than trusted: scoped into the query itself,
+    // so "no such draft" and "that draft is not yours" come back as the
+    // same answer on purpose. A distinct "not yours" reply would let
+    // someone probe whether a given draft id exists at all; a missing row
+    // and someone else's row must be indistinguishable from the outside.
+    const row = deps.db.prepare(
+      'SELECT id, reporter_id, category, text, candidates FROM pending_reports WHERE id = ? AND reporter_id = ?',
+    ).get(Number(rawId), me.steamid) as { id: number; reporter_id: string; category: string; text: string; candidates: string } | undefined;
+    // Reaped after an hour, already used, or somebody else's: either way the
+    // honest answer is the same, to start again.
+    if (!row) return say('That draft has expired, please file it again.');
     if (!(JSON.parse(row.candidates) as string[]).includes(steamid)) {
       return say('That player was not one of the choices.');
     }
