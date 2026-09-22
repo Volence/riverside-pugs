@@ -178,39 +178,55 @@ export function resetElement(d: HudDesign, id: string): HudDesign {
 }
 
 /**
+ * Where a Free card is drawn relative to its slot: the fit offset, scaled,
+ * straight from teamLayout. A slot stores the card's unfitted origin, so every
+ * control that thinks in drawn positions (the drag, the arrows, the X and Y
+ * boxes) adds this to show a slot and takes it off to store one.
+ */
+export function cardOffset(design: HudDesign): { x: number; y: number } {
+  return teamLayout(design, elementById('teamColumn')!).offset ?? { x: 0, y: 0 };
+}
+
+/**
  * Switch the survivor team's layout. Going into Free for the first time
  * copies where each card sits now into `slots`, read from the generated file
- * like everything the canvas draws, so nothing jumps; leaving Free keeps
- * them, so coming back restores the cards where the player left them.
+ * like everything the canvas draws, less the fit offset, so nothing jumps;
+ * leaving Free keeps them, so coming back restores the cards where the
+ * player left them.
  */
 export function withTeamDir(d: HudDesign, dir: TeamDir): HudDesign {
   const cur = d.elements.teamColumn ?? {};
   const next: ElementOverride = { ...cur, dir };
   if (dir === 'free' && !cur.slots) {
-    next.slots = teamCardRects(d, d.aspect).map((r) => ({ x: Math.round(r.x), y: Math.round(r.y) }));
+    const off = cardOffset({ ...d, elements: { ...d.elements, teamColumn: next } });
+    next.slots = teamCardRects(d, d.aspect).map((r) => ({ x: Math.round(r.x - off.x), y: Math.round(r.y - off.y) }));
   }
   return { ...d, elements: { ...d.elements, teamColumn: next } };
 }
 
-/** Put one Free card's top-left at (x, y), clamped through the same table as an element's position. */
+/**
+ * Draw one Free card's top-left at (x, y): its slot becomes that less the fit
+ * offset, clamped through the same table as an element's position.
+ */
 export function placeCard(design: HudDesign, card: number, x: number, y: number): HudDesign {
   const o = design.elements.teamColumn;
   if (!o?.slots || !o.slots[card]) return design;
-  const slots = o.slots.map((s, i) => (i === card ? { x: clampOverride('x', x), y: clampOverride('y', y) } : s));
+  const off = cardOffset(design);
+  const at = { x: clampOverride('x', x - off.x), y: clampOverride('y', y - off.y) };
+  const slots = o.slots.map((s, i) => (i === card ? at : s));
   return { ...design, elements: { ...design.elements, teamColumn: { ...o, slots } } };
 }
 
 /**
- * Nudge a Free card by (dx, dy) from its slot, through the same clampSpan
- * and 8-unit floor a drag uses, so repeated arrow presses cannot walk it off
- * screen. Its size comes from the generated file.
+ * Nudge a Free card by (dx, dy) from where it is drawn, through the same
+ * clampSpan and 8-unit floor a drag uses, so repeated arrow presses cannot
+ * walk it off screen. Its place and size come from the generated file.
  */
 export function nudgeCard(design: HudDesign, card: number, dx: number, dy: number): HudDesign {
-  const s = design.elements.teamColumn?.slots?.[card];
-  if (!s) return design;
+  if (!design.elements.teamColumn?.slots?.[card]) return design;
   const r = teamCardRects(design, design.aspect)[card];
   const extentW = screenW(design.aspect);
-  return placeCard(design, card, clampSpan(s.x + dx, r.w, extentW, 8), clampSpan(s.y + dy, r.h, SCREEN_H, 8));
+  return placeCard(design, card, clampSpan(r.x + dx, r.w, extentW, 8), clampSpan(r.y + dy, r.h, SCREEN_H, 8));
 }
 
 /** Merge into one teammate-card child's override. */
@@ -340,12 +356,16 @@ function TeamControls(
     if (team.file) { onPickCard(null); setDesign((d) => withTeamDir(d, dir)); }
     else patch({ dir: dir as 'row' | 'column' });
   };
+  // The boxes show and take where the card is drawn, the slot plus the fit offset.
+  const off = cardOffset(design);
   const setSlot = (i: number, key: 'x' | 'y', e: Event) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
     if (!Number.isFinite(n)) return;
     setDesign((d) => {
       const cur = d.elements.teamColumn?.slots?.[i];
-      return cur ? placeCard(d, i, key === 'x' ? n : cur.x, key === 'y' ? n : cur.y) : d;
+      if (!cur) return d;
+      const o2 = cardOffset(d);
+      return placeCard(d, i, key === 'x' ? n : cur.x + o2.x, key === 'y' ? n : cur.y + o2.y);
     });
   };
   return (
@@ -382,11 +402,11 @@ function TeamControls(
                 <div class="hud__row2" key={i}>
                   <label class="hud__field">
                     <span>{`Card ${i + 1} X`}</span>
-                    <input type="number" value={Math.round(s.x)} onFocus={() => onPickCard(i)} onInput={(e) => setSlot(i, 'x', e)} />
+                    <input type="number" value={Math.round(s.x + off.x)} onFocus={() => onPickCard(i)} onInput={(e) => setSlot(i, 'x', e)} />
                   </label>
                   <label class="hud__field">
                     <span>{`Card ${i + 1} Y`}</span>
-                    <input type="number" value={Math.round(s.y)} onFocus={() => onPickCard(i)} onInput={(e) => setSlot(i, 'y', e)} />
+                    <input type="number" value={Math.round(s.y + off.y)} onFocus={() => onPickCard(i)} onInput={(e) => setSlot(i, 'y', e)} />
                   </label>
                 </div>
               ))}

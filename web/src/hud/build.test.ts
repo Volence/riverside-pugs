@@ -4,7 +4,7 @@ import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } 
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
-import { PANEL_FILE } from './render';
+import { PANEL_FILE, childRects } from './render';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
@@ -388,22 +388,23 @@ describe('buildHud, Free', () => {
     const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
     expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => kvGet(c, k))).toEqual(['0', '0', 'f0', 'f0']);
     const team = tree(files, TEAM_FILE);
-    // Anchors follow each card's centre, like an element's: left third plain, middle third c, right third r.
+    // Each fitted card is drawn the fit offset (13, 36) in from its slot. Anchors
+    // follow the card's centre, like an element's: left third plain, middle third c, right third r.
     expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'ypos')]))
-      .toEqual([['8', '100'], ['8', 'c-90'], ['r153', '100'], ['c-26', 'r40']]);
+      .toEqual([['21', '136'], ['21', 'c-54'], ['r140', '136'], ['c-13', 'r4']]);
     expect(kvGet(kvFind(team, ['TeamPlayer1'])!, 'wide')).toBe('121');
   });
 
-  it('reports the full screen as the container and each card where its slot is', () => {
+  it('reports the full screen as the container and each card the fit offset in from its slot', () => {
     const d = free();
     expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 0, w: 853, h: 480 });
     const cards = teamCardRects(d, '16:9');
     expect(cards.slice(0, 3)).toEqual([
-      { x: 8, y: 100, w: 121, h: 36 }, { x: 8, y: 150, w: 121, h: 36 }, { x: 700, y: 100, w: 121, h: 36 },
+      { x: 21, y: 136, w: 121, h: 36 }, { x: 21, y: 186, w: 121, h: 36 }, { x: 713, y: 136, w: 121, h: 36 },
     ]);
-    expect(Math.abs(cards[3].x - 400)).toBeLessThanOrEqual(0.5);          // c-26 on an odd-width screen
+    expect(Math.abs(cards[3].x - 413)).toBeLessThanOrEqual(0.5);          // c-13 on an odd-width screen
     // A right-anchored card stays at the right edge on another aspect.
-    expect(teamCardRects(d, '4:3')[2].x).toBe(640 - 153);
+    expect(teamCardRects(d, '4:3')[2].x).toBe(640 - 140);
   });
 
   it('keeps the slots while in Row, so switching back to Free restores the cards', () => {
@@ -412,8 +413,23 @@ describe('buildHud, Free', () => {
     expect(isFreeTeam(row)).toBe(false);
     const back = validateDesign({ v: 1, elements: { teamColumn: { ...row.elements.teamColumn, dir: 'free' } } });
     expect(isFreeTeam(back)).toBe(true);
-    expect(kvGet(kvFind(tree(buildHud(back), TEAM_FILE), ['TeamPlayer1'])!, 'xpos')).toBe('8');
+    expect(kvGet(kvFind(tree(buildHud(back), TEAM_FILE), ['TeamPlayer1'])!, 'xpos')).toBe('21');
   });
+
+  // Spec rule 4: a slot is the card's unfitted origin, so fitting alone moves
+  // nothing in Free either; the drawn card moves by the fit offset instead.
+  for (const scale of [undefined, 1.25]) {
+    it(`leaves the portrait where it was when fit is toggled in Free${scale ? ` at scale ${scale}` : ''}`, () => {
+      const head = (fit: boolean) => {
+        const d = design({ elements: { teamColumn: { dir: 'free', slots: FOUR, ...(scale ? { scale } : {}), ...(fit ? { fit: true } : {}) } } });
+        return teamCardRects(d, '16:9').slice(0, 3).map((c) => {
+          const r = childRects(d, 'teamColumn', { x: c.x, y: c.y }, 1).find((x) => x.name === 'Head')!;
+          return [r.x, r.y, r.w, r.h];
+        });
+      };
+      expect(head(true)).toEqual(head(false));
+    });
+  }
 
   it('reads a Free without four slots as the preset direction', () => {
     const d = design({ elements: { teamColumn: { dir: 'free' } } });

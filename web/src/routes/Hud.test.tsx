@@ -6,6 +6,7 @@ import {
 } from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
+import { teamCardRects } from '../hud/build';
 
 describe('snap', () => {
   it('snaps edges and centre, and otherwise leaves the value alone', () => {
@@ -70,12 +71,22 @@ describe('what counts as an edit', () => {
 });
 
 describe('the teammate layout helpers', () => {
+  // A slot is the card's unfitted origin: the fitted stock card is drawn
+  // (13, 36) in from it, so the card drawn at (13, 441) has its slot at (0, 405).
   it('fills the four Free positions from where the cards sit, only the first time', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
     expect(free.elements.teamColumn).toEqual({ fit: true, dir: 'free',
-      slots: [{ x: 13, y: 441 }, { x: 153, y: 441 }, { x: 293, y: 441 }, { x: 433, y: 441 }] });
+      slots: [{ x: 0, y: 405 }, { x: 140, y: 405 }, { x: 280, y: 405 }, { x: 420, y: 405 }] });
+    expect(teamCardRects(free, free.aspect)[0]).toMatchObject({ x: 13, y: 441 });
     const moved = placeCard(free, 0, 50, 60);
-    expect(withTeamDir(withTeamDir(moved, 'row'), 'free').elements.teamColumn!.slots![0]).toEqual({ x: 50, y: 60 });
+    expect(withTeamDir(withTeamDir(moved, 'row'), 'free').elements.teamColumn!.slots![0]).toEqual({ x: 37, y: 24 });
+  });
+
+  it('places a card by where it is drawn, so the card lands under the pointer fitted or not', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(teamCardRects(placeCard(free, 1, 200, 100), free.aspect)[1]).toMatchObject({ x: 200, y: 100 });
+    const unfitted = { ...free, elements: { teamColumn: { ...free.elements.teamColumn!, fit: false } } };
+    expect(teamCardRects(placeCard(unfitted, 1, 200, 100), free.aspect)[1]).toMatchObject({ x: 200, y: 100 });
   });
 
   it('clamps a placed card like an element position', () => {
@@ -119,10 +130,11 @@ describe('moving a teammate card child', () => {
 describe('nudgeCard', () => {
   it('moves a Free card from its slot and keeps 8 units of it on screen, like a drag', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
-    expect(nudgeCard(free, 0, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 18, y: 441 });
+    // The slot is the unfitted origin, 13 left of the drawn card.
+    expect(nudgeCard(free, 0, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
     let d = free;
     for (let i = 0; i < 200; i++) d = nudgeCard(d, 0, -10, 0);
-    expect(d.elements.teamColumn!.slots![0].x).toBe(8 - 121);
+    expect(teamCardRects(d, d.aspect)[0].x).toBe(8 - 121);
   });
 
   it('leaves the element position alone in Free, where it moves nothing', () => {

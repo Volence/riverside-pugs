@@ -175,13 +175,14 @@ const FREE: HudDesign = { ...DEFAULT_DESIGN, elements: { teamColumn: { fit: true
 
 describe('Free teammate cards', () => {
   it('hits each drawn card as the teammates, and not the screen-sized container around them', () => {
-    expect(hitTest(FREE, 'survivor', 68, 118)).toBe('teamColumn');
-    expect(freeCardAt(FREE, 68, 118)).toBe(0);
-    expect(freeCardAt(FREE, 68, 168)).toBe(1);
+    // The fitted cards are drawn (13, 36) in from their slots: card 1 at (21, 136), card 2 at (21, 186).
+    expect(hitTest(FREE, 'survivor', 68, 154)).toBe('teamColumn');
+    expect(freeCardAt(FREE, 68, 154)).toBe(0);
+    expect(freeCardAt(FREE, 68, 204)).toBe(1);
     expect(hitTest(FREE, 'survivor', 426, 100)).toBeNull();
     // Card 4 shows only while spectating a full team: not drawn, not a target.
-    expect(hitTest(FREE, 'survivor', 460, 458)).toBeNull();
-    expect(freeCardAt(FREE, 460, 458)).toBeNull();
+    expect(hitTest(FREE, 'survivor', 460, 478)).toBeNull();
+    expect(freeCardAt(FREE, 460, 478)).toBeNull();
     expect(freeCardAt(DEFAULT_DESIGN, 73, 459)).toBeNull();           // not Free
   });
 

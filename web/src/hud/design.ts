@@ -15,7 +15,12 @@ import { SLOTS } from './slots';
 import { TEAM_PANEL, type ChildDef } from './children';
 
 export type TeamDir = 'row' | 'column' | 'free';
-/** One Free teammate card's top-left corner on screen, in units, like an element's x/y. */
+/**
+ * One Free teammate card's unfitted origin on screen, in units, like an
+ * element's x/y: where the top-left of the file's full-size card sits. A
+ * fitted card is drawn the fit offset in from it, so toggling fit leaves the
+ * content where it was.
+ */
 export interface CardSlot { x: number; y: number }
 
 export interface ElementOverride {

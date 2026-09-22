@@ -452,9 +452,14 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   // In Free each card carries its own position, written with the same anchor
   // tokens elements use, so a card placed at the right edge stays there on
   // another aspect ratio. The container covers the screen, so the tokens
-  // resolve against the screen.
+  // resolve against the screen. A slot is the card's unfitted origin, and the
+  // fitted card is written the fit offset in from it, as in Row and Column:
+  // that is what keeps fitting alone from moving anything in Free too.
   const cards = free
-    ? o!.slots!.map((s) => ({ xpos: formatPos(s.x, card.w, screenW(design.aspect)), ypos: formatPos(s.y, card.h, SCREEN_H) }))
+    ? o!.slots!.map((s) => ({
+      xpos: formatPos(s.x + offset.x, card.w, screenW(design.aspect)),
+      ypos: formatPos(s.y + offset.y, card.h, SCREEN_H),
+    }))
     : [0, 1, 2, 3].map((i) => ({
       xpos: String(offset.x + (flow === 'row' ? spacing * i : 0)),
       ypos: String(offset.y + (flow === 'column' ? spacing * i : 0)),
