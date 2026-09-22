@@ -1327,3 +1327,60 @@ The manual checks that stand in for the tests the discord.js layer cannot have. 
 6. File one report from the dropdown and check it appears in the mod forum as a normal ticket.
 7. Delete the standing message by hand. Within five minutes a new one is posted.
 8. Blank the setting. The message stops being maintained. Put it back.
+
+## Verification (2026-09-22)
+
+Task 8 is the smallest task in this plan: everything it touches (`ReportButton`, `handleReportButton`,
+`handleReportModal`, `opensReportModal`) was built and unit-tested in Tasks 1-7. This task only wires
+already-tested pieces into `src/server.ts`, so the verification is proportionally small: reading the
+wiring back against the brief, the new routing-contract tests, and the four required commands. Nothing
+here ran against a real Discord bot or a real gateway connection; no bot token is configured in this
+worktree and none was started.
+
+**The wiring itself.** `src/server.ts`: a `let reportButton: ReportButton | null = null;` declaration
+beside `ticketSync`/`ticketMirror`; inside the same `onConnected` callback, after `ticketSync.start()` and
+`mirror.start()`, `reportButton = new ReportButton({ db: deps.db, transport: t }); reportButton.start();`;
+`'rp:'` added to both `extraButtons` and `extraModals` with the handler deps (`db`, `adminSteamIds`)
+mirroring what `handleCommand` already receives; `opensModal` changed from the bare `opensTicketModal`
+reference to `(id) => opensTicketModal(id) || opensReportModal(id)`; and `reportButton?.stop()` added to
+the `onClose` hook, ahead of the existing `ticketMirror?.stop()`/`ticketSync?.stop()` pair, so a torn-down
+test server or a restart never leaves the button's five-minute timer running. This matched the brief's
+Steps 3 and 4 exactly; no deviation was needed.
+
+**Test file.** `tests/reportButton.test.ts` gained one import (`opensTicketModal` from
+`../src/discord/ticketButtons.js`; `opensReportModal` was already imported from a prior task) and the
+`describe('wiring', ...)` block from the brief, verbatim, appended after the existing 57 tests. It asserts
+the routing contract that makes `'rp:'` safe to add alongside `'r:'` and `'t:'` (their second characters
+differ, so `Array.prototype.find`'s `startsWith` scan never picks the wrong handler), the 100-character
+Discord custom-id ceiling for the longest real id shape, and that composing `opensTicketModal` with
+`opensReportModal` with `||` never has one swallow the other's `true`.
+
+**Commands, all four required.**
+
+- `npx vitest run tests/reportButton.test.ts`: 1 file, 60 tests passed (57 from Tasks 1-7 plus the 3 new
+  wiring tests).
+- `npm test`: 269 files, 3758 tests, all passing (baseline was 269 files / 3755 tests; the 3 new tests
+  account for the difference exactly). The ECONNREFUSED/AggregateError lines in the output are the known
+  pre-existing noise from network-mocked tests, not failures, as the brief said to expect.
+- `npm run typecheck`: clean (`tsc --noEmit` for the server, then again for `web/tsconfig.json`), no
+  output beyond the command echo.
+- `npm run build`: succeeded; `dist/public/index.html`, its css and its js bundle were produced.
+
+**Other checks from "Verification before handing back."** `git status --short data/` printed nothing,
+both before this task's commit and after. `git diff --stat origin/main..HEAD` lists exactly the files this
+plan's tasks touch (`src/db.ts`, `src/discord/commands.ts`, `src/discord/reportButton.ts`,
+`src/mergePlayers.ts`, `src/server.ts`, `src/settingsSchema.ts`, `src/tickets/schema.ts`, the two test
+files, the plan and spec docs, and one line in `web/src/components/ReportPlayer.tsx`) plus this
+verification doc; `src/discord/djsTransport.ts` does not appear anywhere in that diff.
+
+**What this did not prove.** Nothing here started a real Discord bot, so nothing here proves the button
+actually renders in a channel, that a real press reaches `handleReportButton` through discord.js's own
+event plumbing, that the five-minute upkeep timer behaves correctly against real message edit limits, or
+that `'rp:'` really cannot collide with a real button discord.js hands back (only the string-prefix
+contract in isolation was checked, which is what the brief's own Step 2 note says the test is for: locking
+the prefix choice, not exercising discord.js). Those are exactly the owner checklist items above, and they
+still need a real bot, a real channel, and a real press to close out.
+
+No functional defect was found while doing this task; the two-file commit for Steps 3/4 is the whole
+functional diff, and this verification section is a separate commit on top of it, as the checklist above
+asks for.
