@@ -12,6 +12,13 @@
  * The preview shows the healthy, alive state, so children whose visibility
  * game code decides at runtime are not drawn: their positions are still
  * reported by childRects so a later editor can move them.
+ *
+ * The owner's in-game screenshot of the stock HUD at full health caught two
+ * more things game code decides that the .res files alone do not say: the
+ * teammate card's black splatter background is not shown at full health
+ * (isTeamColumnHealthbarBg, below), and the own-health panel's scratch
+ * overlays are tinted with the health colour, not drawn raw (the drawColor
+ * branch in drawImageChild, below).
  */
 import type { HudDesign } from './design';
 import { buildTrees } from './build';
@@ -42,6 +49,36 @@ export const PANEL_FILE: Record<string, string> = {
  * it sits right over the live HealthPanel.
  */
 const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplacement', 'duckingicon', 'spawntimelabel']);
+
+/**
+ * The stock teammate card's BackgroundImage is a black splatter texture
+ * (hud/healthbar_bg_N, one file per team colour) sitting at zpos -1 behind
+ * the whole card. The owner's in-game screenshot at full health shows no
+ * splatter behind a healthy teammate card at all, so like the other
+ * STATE_CHILDREN this is a visibility game code decides at runtime, not one
+ * the .res file states. Scoped to the teamColumn panel and to images
+ * actually named healthbar_bg_*, so it never touches the infected card's own
+ * infected_healthbar_bg_1 background, the Hunter card's pz_healthbar frame,
+ * or the Modern preset (whose teammate card paints its backgrounds with
+ * fillcolor, not this image, and already ships BackgroundImage as
+ * visible 0).
+ */
+function isTeamColumnHealthbarBg(panelId: string, n: KvNode): boolean {
+  if (panelId !== 'teamColumn') return false;
+  const image = kvGet(n, 'image');
+  if (!image) return false;
+  return /\/healthbar_bg_\d+$/.test(normaliseMaterial(image));
+}
+
+/**
+ * The own-health panel's scratch overlays (HealthbarTextureTop/Bottom, the
+ * detail_scratches_top_1/bottom_1 art) have no drawColor in the .res file,
+ * but the owner's in-game screenshot at full health shows them tinted the
+ * same bright green as the health number and bar, not drawn raw grey/black.
+ * Unique to localplayerpanel.res in both presets (Modern ships them
+ * visible 0, so this never fires there).
+ */
+const HEALTH_TINT_CHILDREN = new Set(['healthbartexturetop', 'healthbartexturebottom']);
 
 /** Sample people for the cards: the three teammates, and Bill for the player's own panel. */
 const CARD_NAMES = ['Francis', 'Louis', 'Zoey'];
@@ -107,6 +144,23 @@ function colourOf(design: HudDesign, value: string | undefined): string {
   }
   const [r, g, b, a] = parseColour(raw);
   return `rgba(${r},${g},${b},${a / 255})`;
+}
+
+/**
+ * The health colour for the own-health panel's scratch overlays
+ * (HEALTH_TINT_CHILDREN, above). clientscheme.res names it explicitly under
+ * its TERROR (the game's internal name for this HUD) colours block, right
+ * alongside HealthHurtRed: "HealthGreen" "0 200 0 255". Nothing in the .res
+ * files points a child at it directly (the game applies it at runtime by
+ * health percentage, the same way it colours the health number), but it is
+ * the one named green in that block and it matches the bright green in the
+ * owner's screenshot, so it is used here rather than a guessed colour.
+ */
+function healthGreenRgb(design: HudDesign): [number, number, number] {
+  const named = kvFind(buildTrees(design)(SCHEME), ['Colors', 'HealthGreen']);
+  const raw = named && typeof named.value === 'string' ? named.value : '0 200 0 255';
+  const [r, g, b] = parseColour(raw);
+  return [r, g, b];
 }
 
 // --- images: the exported art, or a slot texture the design generated ---
@@ -262,7 +316,9 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     }
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
-    const [tr, tg, tb, ta] = parseColour(kvGet(n, 'drawColor') ?? '255 255 255 255');
+    const rawDrawColor = kvGet(n, 'drawColor');
+    let [tr, tg, tb, ta] = parseColour(rawDrawColor ?? '255 255 255 255');
+    if (!rawDrawColor && HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = healthGreenRgb(design);
     const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
     ctx.save();
     ctx.globalAlpha *= ta / 255;
@@ -319,7 +375,7 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
   const rects = childRects(design, panelId, origin, k);
   for (const [i, n] of nodes.entries()) {
     const r = rects[i];
-    if (!r.visible || STATE_CHILDREN.has(n.key.toLowerCase())) continue;
+    if (!r.visible || STATE_CHILDREN.has(n.key.toLowerCase()) || isTeamColumnHealthbarBg(panelId, n)) continue;
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
       case 'label': drawLabel(ctx, design, n, r, k, opts); break;

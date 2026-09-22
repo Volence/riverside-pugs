@@ -239,9 +239,53 @@ describe('drawPanel', () => {
       expect(scratch.calls.some((c) => c.m === 'drawImage' && c.op === 'destination-in')).toBe(true);
       expect(calls.some((c) => c.m === 'drawImage' && c.a[0] === made[0]
         && c.a[1] === bg.x && c.a[2] === bg.y && c.a[3] === bg.w && c.a[4] === bg.h)).toBe(true);
-      // A child with no drawColor (the bar frames on the survivor card) draws its art untinted.
+      // A child with no drawColor of its own draws its art untinted (e.g. Head, drawn via its own
+      // portrait branch, never reaches this tint code at all). The own-health panel's scratch overlays
+      // are the deliberate exception (see "tints the own-health scratch overlays" below): they add two
+      // more canvases here, one each for HealthbarTextureTop and HealthbarTextureBottom.
       drawPanel(recCtx().ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
-      expect(made).toHaveLength(1);
+      expect(made).toHaveLength(3);
+    } finally { _setCanvasFactory(null); }
+  });
+
+  it('does not draw the teammate card splatter background at full health, and leaves Modern alone', () => {
+    // The owner's in-game screenshot of the stock HUD at full health shows no splatter behind a healthy
+    // teammate card: game code decides when BackgroundImage (hud/healthbar_bg_1) shows, the same as the
+    // other state children, so the preview must not draw it. Modern paints its card backgrounds with
+    // fillcolor, not this image (and already ships BackgroundImage as visible 0), so it is untouched.
+    const bgUrls = [1, 2, 3, 4].map((n) => artUrl(`vgui/hud/healthbar_bg_${n}`)!);
+
+    const stock = recCtx();
+    drawPanel(stock.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+    const stockImageSrcs = stock.calls.filter((c) => c.m === 'drawImage').map((c) => (c.a[0] as HTMLImageElement).src);
+    expect(stockImageSrcs.some((src) => bgUrls.includes(src))).toBe(false);
+
+    const modern = recCtx();
+    drawPanel(modern.ctx, design({ preset: 'modern' }), 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+    // Modern's ModBg still paints its fillcolor background: the rule scopes on the image field, so it never fires here.
+    expect(modern.calls.some((c) => c.m === 'fillRect')).toBe(true);
+  });
+
+  it('tints the own-health scratch overlays with the health colour, matching the in-game screenshot at full health', () => {
+    // Stock localplayerpanel.res's HealthbarTextureTop/Bottom (detail_scratches_top_1/bottom_1) carry no
+    // drawColor of their own, but the owner's screenshot at full health shows them the same bright green
+    // as the health number and bar: "HealthGreen" "0 200 0 255" in clientscheme.res's Colors block. This
+    // reuses the same scratch-canvas tint path as the infected card's drawColor above.
+    const scratch = recCtx();
+    const made: { width: number; height: number }[] = [];
+    _setCanvasFactory((w, h) => {
+      const c = { width: w, height: h, getContext: () => scratch.ctx } as unknown as HTMLCanvasElement;
+      made.push(c);
+      return c;
+    });
+    try {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
+      expect(made).toHaveLength(2);   // top and bottom scratches are different materials, each tinted once
+      const multiplies = scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply');
+      expect(multiplies.length).toBeGreaterThanOrEqual(2);
+      for (const m of multiplies) expect(m.fill).toBe('rgb(0,200,0)');
+      expect(calls.some((c) => c.m === 'drawImage' && made.includes(c.a[0] as HTMLCanvasElement))).toBe(true);
     } finally { _setCanvasFactory(null); }
   });
 
