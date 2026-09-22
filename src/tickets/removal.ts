@@ -96,7 +96,16 @@ export function removeMessage(
     // back into the database file they are still sitting in it. secure_delete
     // (src/db.ts) then overwrites the pages the removal freed, so after this
     // the removed text is nowhere on disk.
-    db.pragma('wal_checkpoint(TRUNCATE)');
+    //
+    // A checkpoint gives up rather than waits when another connection is
+    // reading, and says so instead of throwing, so the answer is read: the
+    // removal stands either way, and the log is folded back by a later
+    // checkpoint. Said without ids, because the console is not the place to
+    // name a restricted ticket.
+    const [checkpoint] = db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[];
+    if (checkpoint?.busy) {
+      console.error('[tickets] the write-ahead log could not be emptied after a removal because the database was in use; the removed text stays in the log until a later checkpoint folds it back in. The removal itself stands.');
+    }
   } catch (err) {
     console.error('[tickets] tidying up after a removal failed; the removal itself stands:', err instanceof Error ? err.message : err);
   } finally {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -150,6 +150,31 @@ describe('removeMessage', () => {
     expect(messageById(db, row.id)!.removed_reason).toBe('x'.repeat(200));
     expect(pragmas).toContain('wal_checkpoint(TRUNCATE)');
     expect(JSON.stringify(db.prepare('SELECT * FROM ticket_messages').all())).not.toContain(HORRIBLE);
+  });
+
+  it('says so, without naming anything, when the database was too busy to empty the log', async () => {
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    const { row } = await horrible(thread);
+    // As SQLite answers when another connection is reading: no throw, and
+    // nothing folded back.
+    const real = db.pragma.bind(db);
+    db.pragma = ((source: string, options?: object) => (source === 'wal_checkpoint(TRUNCATE)'
+      ? [{ busy: 1, log: 4, checkpointed: 0 }]
+      : real(source, options as never))) as typeof db.pragma;
+    const said: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { said.push(args.map(String).join(' ')); });
+
+    expect(removeMessage(db, dir, id, row.id, MOD, 'gore').ok).toBe(true);
+
+    spy.mockRestore();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/could not be emptied/);
+    // Not a ticket id, a message id or a SteamID: the console is read by
+    // whoever runs the box, and the ticket may be one they may not see.
+    expect(said[0]).not.toMatch(/\d/);
+    // And the removal itself stands.
+    expect(messageById(db, row.id)).toMatchObject({ content: '', history: '[]', removed_by: MOD, removed_reason: 'gore' });
   });
 });
 
