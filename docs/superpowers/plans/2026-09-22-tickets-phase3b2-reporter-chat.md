@@ -15,7 +15,7 @@
 - **Run the FULL suite (`npx vitest run`) and `npm run typecheck` at the end of every task.** `tests/db.test.ts` has an exhaustive table list (Task 1 adds three tables); `tests/mergePlayers.test.ts` sweeps every foreign key to `players` (no new column here points at `players`).
 - **Known test noise:** ECONNREFUSED lines are pre-existing and harmless. `tests/logAuthWiring.test.ts` is a known flake. A fresh worktree has no `dist/`, and `tests/server.test.ts`'s malformed-URL case fails until `npm run build` has run once. None of these are yours; do not stash, reset or "check" them.
 - **Never use `git stash`.** Never reset, never touch master. **No em dashes** anywhere: code, comments, copy, commit messages.
-- **NULL safety.** A reporter is `reporter_id` (a player) or `reporter_discord_id` (a Discord-only member); a target is `target_id` or `target_discord_id`. `x = y` is NULL when either side is NULL, and `NULL IS NOT NULL` is false, so "the reporter is not the accused" must be written per identity kind: `NOT ((r.reporter_id IS NOT NULL AND r.reporter_id = t.target_id) OR (r.reporter_discord_id IS NOT NULL AND r.reporter_discord_id = t.target_discord_id))`, never `r.reporter_id IS NOT t.target_id` alone (that is false for a Discord-only reporter about a Discord-only target). Look a reporter's thread up with `reporter_id IS ? AND reporter_discord_id IS ?`.
+- **NULL safety.** A reporter is `reporter_id` (a player) or `reporter_discord_id` (a Discord-only member); a target is `target_id` or `target_discord_id`. `x = y` is NULL when either side is NULL, and `NULL IS NOT NULL` is false, so "the reporter is not the accused" must be written per identity kind: `NOT ((r.reporter_id IS NOT NULL AND r.reporter_id = t.target_id) OR (r.reporter_discord_id IS NOT NULL AND r.reporter_discord_id IS t.target_discord_id))`, never `r.reporter_id IS NOT t.target_id` alone (that is false for a Discord-only reporter about a Discord-only target). Look a reporter's thread up with `reporter_id IS ? AND reporter_discord_id IS ?`.
 - **Chains.** `TicketSync`'s chain waits on the mirror's (`saveBeforeDelete` calls `mirror.catchUp`), and the mirror's removals wait on `TicketSync`'s (`serialise`). Nothing called from the mirror's own chain may wait on `TicketSync`'s: the mirror's new hook writes one row and queues, and returns. Nothing called from INSIDE `TicketSync`'s chain may call `serialise` (it would wait on itself): the reconciler calls the free functions `endReporterThread` and `syncRelay` directly, and only `ReporterChats`' public methods go through `serialise`.
 - **Discord first, then the record.** A chat row, a relay row, an "ended" state is written only after Discord accepted the call it stands for, except where a charge-before-send is the point (pings and notices are marked sent before the send, as `notifyAccess` does, so a refused DM is never retried).
 - **Privacy.**
@@ -580,7 +580,7 @@ export function queueCloseNotices(db: DB, ticketId: number, now = new Date()): n
        FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id LEFT JOIN players p ON p.steamid = r.reporter_id
        WHERE r.ticket_id = @ticket
          AND NOT ((r.reporter_id IS NOT NULL AND r.reporter_id = t.target_id)
-               OR (r.reporter_discord_id IS NOT NULL AND r.reporter_discord_id = t.target_discord_id))
+               OR (r.reporter_discord_id IS NOT NULL AND r.reporter_discord_id IS t.target_discord_id))
      ) WHERE d IS NOT NULL`,
   ).run({ ticket: ticketId, now: now.toISOString() }).changes;
 }
