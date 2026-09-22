@@ -3,7 +3,8 @@ import { openDb, type DB, DEFAULT_SETTINGS } from '../src/db.js';
 import { getSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA } from '../src/settingsSchema.js';
 import { upsertPlayer, activatePlayer, currentSeasonId } from '../src/players.js';
-import { recentCoPlayers, resolveByName } from '../src/discord/reportButton.js';
+import { recentCoPlayers, resolveByName, reportModal, opensReportModal, OTHER } from '../src/discord/reportButton.js';
+import { REPORT_LABELS } from '../src/discord/commands.js';
 
 let db: DB;
 
@@ -71,7 +72,7 @@ describe('settings parity', () => {
   });
 });
 
-import { COMMAND_DEFS, REPORT_LABELS } from '../src/discord/commands.js';
+import { COMMAND_DEFS } from '../src/discord/commands.js';
 
 describe('details wording', () => {
   const report = () => COMMAND_DEFS.find((c) => c.name === 'report')!;
@@ -163,5 +164,68 @@ describe('resolveByName', () => {
 
   it('returns at most the limit', () => {
     expect(resolveByName(db, 'e', 2).length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('reportModal', () => {
+  beforeEach(() => { seedPlayers(db); });
+
+  it('has four fields in a fixed order', () => {
+    const m = reportModal(db, ME);
+    expect(m.fields.map((f) => f.id)).toEqual(['who', 'name', 'reason', 'details']);
+  });
+
+  it('leads the who dropdown with the sentinel, then recent opponents', () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    const who = reportModal(db, ME).fields[0];
+    if (who.kind !== 'select') throw new Error('who must be a select');
+    expect(who.options[0].value).toBe(OTHER);
+    expect(who.options.slice(1).map((o) => o.value)).toEqual([ALICE]);
+  });
+
+  it('still offers the sentinel when there are no recent opponents', () => {
+    const who = reportModal(db, ME).fields[0];
+    if (who.kind !== 'select') throw new Error('who must be a select');
+    // A select with zero options is not a valid modal, so the sentinel is
+    // what keeps the form openable for someone who has never played.
+    expect(who.options).toHaveLength(1);
+  });
+
+  it('never offers the reporter themselves', () => {
+    seedMatch(db, 1, [ME, ALICE]);
+    const who = reportModal(db, ME).fields[0];
+    if (who.kind !== 'select') throw new Error('who must be a select');
+    expect(who.options.map((o) => o.value)).not.toContain(ME);
+  });
+
+  it('offers every report category, with the shared labels', () => {
+    const reason = reportModal(db, ME).fields[2];
+    if (reason.kind !== 'select') throw new Error('reason must be a select');
+    expect(reason.options.map((o) => o.value)).toEqual(['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other']);
+    expect(reason.options.find((o) => o.value === 'unsafe')!.label).toBe('Safety concern (handled privately)');
+  });
+
+  it('keeps the name and details boxes optional and caps details at 1000', () => {
+    const [, name, , details] = reportModal(db, ME).fields;
+    if (name.kind !== 'text' || details.kind !== 'text') throw new Error('expected text fields');
+    expect(name.required).toBe(false);
+    expect(details.required).toBe(false);
+    expect(details.maxLength).toBe(1000);
+    expect(details.style).toBe('paragraph');
+  });
+
+  it('keeps every select option label inside Discord\'s 100 characters', () => {
+    upsertPlayer(db, { steamid: '76561199000000198', name: 'x'.repeat(200), avatar: null }, []);
+    activatePlayer(db, '76561199000000198');
+    seedMatch(db, 1, [ME, '76561199000000198']);
+    const who = reportModal(db, ME).fields[0];
+    if (who.kind !== 'select') throw new Error('who must be a select');
+    for (const o of who.options) expect(o.label.length).toBeLessThanOrEqual(100);
+  });
+
+  it('knows which button opens a form', () => {
+    expect(opensReportModal('rp:open')).toBe(true);
+    expect(opensReportModal('rp:pick:1:76561199000000101')).toBe(false);
+    expect(opensReportModal('t:1:claim')).toBe(false);
   });
 });

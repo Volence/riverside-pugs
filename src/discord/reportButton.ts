@@ -1,4 +1,7 @@
 import type { DB } from '../db.js';
+import { REPORT_CATEGORIES } from '../tickets/filing.js';
+import { REPORT_LABELS } from './commands.js';
+import type { ModalDef } from './transport.js';
 
 /** A player the reporter could mean. */
 export interface Candidate { steamid: string; name: string }
@@ -50,4 +53,50 @@ export function resolveByName(db: DB, typed: string, limit = 6): Candidate[] {
       WHERE lower(name) LIKE '%' || lower(?) || '%' ESCAPE '\\'
       ORDER BY name LIMIT ?`,
   ).all(escaped, limit) as Candidate[];
+}
+
+/** Custom id prefix. 'r:' is the admin feed and 't:' is tickets. */
+export const REPORT_PREFIX = 'rp:';
+/** The dropdown entry meaning "I will type the name instead". A modal select
+ *  has no optional flag, so this sentinel is what lets the dropdown be
+ *  skipped without the form refusing to submit. */
+export const OTHER = '__other';
+/** Discord's ceiling on a select option label. */
+const LABEL_MAX = 100;
+
+const clip = (s: string) => (s.length <= LABEL_MAX ? s : `${s.slice(0, LABEL_MAX - 1)}…`);
+
+/** The form, built for this reporter: the dropdown is their own recent
+ *  opponents, so the common case is one pick rather than any typing. */
+export function reportModal(db: DB, reporter: string): ModalDef {
+  return {
+    customId: `${REPORT_PREFIX}new`,
+    title: 'Report a player',
+    fields: [
+      {
+        kind: 'select',
+        id: 'who',
+        label: 'Who are you reporting?',
+        options: [
+          { label: 'Someone else (I will type the name below)', value: OTHER },
+          ...recentCoPlayers(db, reporter).map((c) => ({ label: clip(c.name), value: c.steamid })),
+        ],
+      },
+      { kind: 'text', id: 'name', label: 'Or type their name', style: 'short', required: false, maxLength: 100 },
+      {
+        kind: 'select',
+        id: 'reason',
+        label: 'What happened?',
+        options: REPORT_CATEGORIES.map((c) => ({ label: REPORT_LABELS[c], value: c })),
+      },
+      { kind: 'text', id: 'details', label: 'Details, in your own words', style: 'paragraph', required: false, maxLength: 1000 },
+    ],
+  };
+}
+
+/** Only the standing message's button answers with a form. The candidate
+ *  buttons reply with a message, and the transport has to know the difference
+ *  before it runs the handler. */
+export function opensReportModal(customId: string): boolean {
+  return customId === `${REPORT_PREFIX}open`;
 }
