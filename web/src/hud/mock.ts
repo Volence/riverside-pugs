@@ -281,10 +281,17 @@ function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.restore();
 }
 
+/**
+ * Draws the HUD mock over whatever is already on the canvas.
+ *
+ * The caller is responsible for painting the backdrop first: this function
+ * does not clear the canvas, it draws on top of it. Every translucent mock
+ * element (the weapon boxes, chat, the progress bar track, the team cards)
+ * is designed to read against that backdrop, not against a blank canvas.
+ */
 export function drawHud(
   ctx: CanvasRenderingContext2D, pxW: number, pxH: number, design: HudDesign, side: Side, selectedId: string | null,
 ): void {
-  ctx.clearRect(0, 0, pxW, pxH);
   const k = pxH / SCREEN_H;
   const accent = accentColour(ctx);
 

@@ -1,6 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { visibleElements, hitTest } from './mock';
+import { visibleElements, hitTest, drawHud } from './mock';
 import { DEFAULT_DESIGN } from './design';
+
+/**
+ * A minimal stand-in for CanvasRenderingContext2D: happy-dom has no real
+ * canvas, so this is the only way to assert what drawHud calls on it. Every
+ * method drawHud or a painter (mock.ts) or drawCrosshair (crosshair/draw.ts)
+ * touches gets a no-op; clearRect is tracked instead of no-op'd so the test
+ * can assert it is never called.
+ */
+function fakeCtx(onClearRect: () => void): CanvasRenderingContext2D {
+  return {
+    fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', globalAlpha: 1, lineWidth: 1, lineCap: 'butt', lineJoin: 'round',
+    canvas: { getContext: () => null },
+    clearRect: onClearRect,
+    fillRect: () => {}, strokeRect: () => {}, fillText: () => {},
+    beginPath: () => {}, rect: () => {}, clip: () => {}, arc: () => {},
+    stroke: () => {}, fill: () => {}, save: () => {}, restore: () => {},
+    setLineDash: () => {}, moveTo: () => {}, lineTo: () => {}, closePath: () => {},
+    roundRect: () => {},
+  } as unknown as CanvasRenderingContext2D;
+}
 
 describe('visibleElements', () => {
   it('splits by side and shares the "both" elements', () => {
@@ -25,5 +45,21 @@ describe('hitTest', () => {
   it('skips hidden elements', () => {
     const d = { ...DEFAULT_DESIGN, elements: { ownHealth: { visible: false } } };
     expect(hitTest(d, 'survivor', 780, 430)).toBeNull();
+  });
+});
+
+describe('drawHud', () => {
+  it('never clears the canvas: the caller paints the backdrop first, and drawHud draws over it', () => {
+    let cleared = false;
+    const ctx = fakeCtx(() => { cleared = true; });
+
+    // Survivor and infected sides exercise every painter; a hidden + selected
+    // element exercises the dimmed/outline and selection-handle branches too.
+    drawHud(ctx, 960, 540, DEFAULT_DESIGN, 'survivor', 'ownHealth');
+    drawHud(ctx, 960, 540, DEFAULT_DESIGN, 'infected', 'abilityRing');
+    const hiddenDesign = { ...DEFAULT_DESIGN, elements: { ownHealth: { visible: false } } };
+    drawHud(ctx, 960, 540, hiddenDesign, 'survivor', 'ownHealth');
+
+    expect(cleared).toBe(false);
   });
 });

@@ -210,7 +210,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
  * doubles as a visibility summary at a glance. */
 .hud__pill--hidden { text-decoration: line-through; }
 
-.hud__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; }
+.hud__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; min-inline-size: 0; max-width: 100%; }
 .hud__group legend { padding: 0 var(--sp-2); }
 
 .hud__row { display: grid; grid-template-columns: 5.5rem 1fr 2.5rem; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); }
@@ -228,7 +228,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 }
 
 .hud__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-top: var(--sp-3); }
-.hud__field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+.hud__field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); min-width: 0; }
 .hud__field input {
   background: var(--surface-2);
   color: var(--text);
@@ -236,6 +236,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   padding: var(--sp-2);
   font: inherit;
   font-size: var(--fs-dense);
+  min-width: 0;
 }
 
 .hud__check { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); }
