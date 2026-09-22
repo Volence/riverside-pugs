@@ -9,16 +9,21 @@ const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(D
 const text = (files: { path: string; data: Uint8Array }[], path: string) =>
   new TextDecoder('latin1').decode(files.find((f) => f.path === path)!.data);
 
-/** A recording 2D context: every method the renderer calls is a no-op that logs its name. */
+/** A recording 2D context: every method the renderer calls logs its name, and save/restore keep a real alpha stack. */
 function recCtx() {
-  const calls: { m: string; a: unknown[]; font: string; fill: string; op: string }[] = [];
-  // Each call snapshots ctx.font, ctx.fillStyle and the composite op at the moment it was made, so a test can pin how a child was drawn.
-  const noop = (m: string) => (...a: unknown[]) => { calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, op: ctx.globalCompositeOperation }); };
+  const calls: { m: string; a: unknown[]; font: string; fill: string; op: string; alpha: number }[] = [];
+  const stack: number[] = [];
+  // Each call snapshots ctx.font, ctx.fillStyle, the composite op and the alpha at the moment it was made, so a test can pin how a child was drawn.
+  const noop = (m: string) => (...a: unknown[]) => {
+    calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, op: ctx.globalCompositeOperation, alpha: ctx.globalAlpha });
+  };
   const ctx = {
     canvas: { width: 853, height: 480 },
     fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1, lineWidth: 1,
     globalCompositeOperation: 'source-over',
-    save: noop('save'), restore: noop('restore'), beginPath: noop('beginPath'), rect: noop('rect'), clip: noop('clip'),
+    save: (...a: unknown[]) => { stack.push(ctx.globalAlpha); noop('save')(...a); },
+    restore: (...a: unknown[]) => { ctx.globalAlpha = stack.pop() ?? 1; noop('restore')(...a); },
+    beginPath: noop('beginPath'), rect: noop('rect'), clip: noop('clip'),
     fillRect: noop('fillRect'), strokeRect: noop('strokeRect'), fillText: noop('fillText'), drawImage: noop('drawImage'),
     setLineDash: noop('setLineDash'), moveTo: noop('moveTo'), lineTo: noop('lineTo'), stroke: noop('stroke'), fill: noop('fill'),
     arc: noop('arc'), closePath: noop('closePath'), measureText: () => ({ width: 10 }),
@@ -171,24 +176,14 @@ describe('drawPanel', () => {
 
   // The missing-art path (hatch and one warning) lives in render.missing.test.ts, which mocks ./art.
 
-  it('draws an advanced-mode restyled bar in the design colour, as the overwritten healthbar_green does', () => {
+  it('draws the stock bar art whatever the styles say, since the game draws bar fills in code (probe T8)', () => {
     const green = artUrl('vgui/healthbar_green')!;
-    const barImages = (calls: { m: string; a: unknown[] }[]) =>
-      calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === green);
+    // barGreen is a slot the editor no longer has; a raw design that still carries it changes nothing.
     const styles = { barGreen: { kind: 'flat' as const, color: '255 0 0 255' } };
-
     const { ctx, calls } = recCtx();
     drawPanel(ctx, design({ advanced: true, styles }), 'ownHealth', { x: 0, y: 0 }, 1);
-    const health = childRects(design({ advanced: true, styles }), 'ownHealth', { x: 0, y: 0 }, 1).find((c) => c.name === 'Health')!;
-    expect(calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)'
-      && c.a[0] === health.x && c.a[1] === health.y && c.a[2] === health.w && c.a[3] === health.h)).toBe(true);
-    expect(barImages(calls)).toHaveLength(0);
-
-    // Without advanced mode stylePass leaves healthbar_green alone, so the stock art is what the game shows.
-    const { ctx: c2, calls: calls2 } = recCtx();
-    drawPanel(c2, design({ styles }), 'ownHealth', { x: 0, y: 0 }, 1);
-    expect(barImages(calls2)).toHaveLength(1);
-    expect(calls2.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)')).toBe(false);
+    expect(calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === green)).toHaveLength(1);
+    expect(calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)')).toBe(false);
   });
 
   it('hatches a texture that fails to load and asks for a redraw, instead of drawing nothing for ever', () => {
@@ -248,21 +243,20 @@ describe('drawPanel', () => {
     } finally { _setCanvasFactory(null); }
   });
 
-  it('does not draw the teammate card splatter background at full health, and leaves Modern alone', () => {
-    // The owner's in-game screenshot of the stock HUD at full health shows no splatter behind a healthy
-    // teammate card: game code decides when BackgroundImage (hud/healthbar_bg_1) shows, the same as the
-    // other state children, so the preview must not draw it. Modern paints its card backgrounds with
-    // fillcolor, not this image (and already ships BackgroundImage as visible 0), so it is untouched.
-    const bgUrls = [1, 2, 3, 4].map((n) => artUrl(`vgui/hud/healthbar_bg_${n}`)!);
-
+  it('draws the stock teammate splatter faintly, as the game does at full health, and leaves Modern alone', () => {
+    // Probe T6: the splatter shrunk to the card was faintly visible at full health. It is drawn, not hidden.
+    const bg = artUrl('vgui/hud/healthbar_bg_1')!;
     const stock = recCtx();
     drawPanel(stock.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
-    const stockImageSrcs = stock.calls.filter((c) => c.m === 'drawImage').map((c) => (c.a[0] as HTMLImageElement).src);
-    expect(stockImageSrcs.some((src) => bgUrls.includes(src))).toBe(false);
+    const splatter = stock.calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === bg);
+    expect(splatter).toHaveLength(1);
+    expect(splatter[0].alpha).toBeCloseTo(0.35);
+    // Nothing drawn after it inherits the reduced opacity.
+    expect(stock.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Francis')!.alpha).toBe(1);
 
     const modern = recCtx();
     drawPanel(modern.ctx, design({ preset: 'modern' }), 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
-    // Modern's ModBg still paints its fillcolor background: the rule scopes on the image field, so it never fires here.
+    // Modern's ModBg paints its fillcolor background; its BackgroundImage ships visible 0.
     expect(modern.calls.some((c) => c.m === 'fillRect')).toBe(true);
   });
 

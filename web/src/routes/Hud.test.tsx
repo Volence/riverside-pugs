@@ -102,12 +102,13 @@ describe('Hud page', () => {
 
   it('reveals the advanced-only style rows and switches the download button to a zip', () => {
     render(<Hud />);
-    expect(screen.queryByText('Health bar: healthy')).toBeNull();
+    expect(screen.queryByText('Incapacitated panel')).toBeNull();
     expect(screen.getByRole('button', { name: /download/i }).textContent).toMatch(/vpk/i);
 
     fireEvent.click(screen.getByRole('button', { name: /advanced mode/i }));
 
-    expect(screen.getByText('Health bar: healthy')).toBeTruthy();
+    expect(screen.getByText('Incapacitated panel')).toBeTruthy();
+    expect(screen.queryByText('Health bar: healthy')).toBeNull();
     expect(screen.getByRole('button', { name: /download/i }).textContent).toMatch(/zip/i);
     // The advanced install copy has to carry the same two facts the normal
     // one does (spec's Output section): a restart is needed, and custom

@@ -356,7 +356,7 @@ function fontPass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFi
  * `materials/vgui/hud/hudeditor/` and the .res `image` keys that show it are
  * repointed there. In advanced mode the VPK mounts ahead of pak01, so the
  * stock names are written too and nothing needs repointing for a slot with
- * no `targets` (the health bar fills, which the game code names directly).
+ * no `targets` (the weapon boxes and the state panels, which game code names directly).
  */
 function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFile[]) {
   for (const slot of SLOTS) {

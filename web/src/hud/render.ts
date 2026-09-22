@@ -13,12 +13,12 @@
  * game code decides at runtime are not drawn: their positions are still
  * reported by childRects so a later editor can move them.
  *
- * The owner's in-game screenshot of the stock HUD at full health caught two
- * more things game code decides that the .res files alone do not say: the
- * teammate card's black splatter background is not shown at full health
- * (isTeamColumnHealthbarBg, below), and the own-health panel's scratch
- * overlays are tinted with the health colour, not drawn raw (the drawColor
- * branch in drawImageChild, below).
+ * The owner's in-game screenshot of the stock HUD at full health and the
+ * probe caught two things game code decides that the .res files alone do not
+ * say: the teammate card's splatter background is drawn only faintly at full
+ * health (isTeamColumnHealthbarBg, drawn at SPLATTER_ALPHA), and the
+ * own-health panel's scratch overlays are tinted with the health colour, not
+ * drawn raw (the drawColor branch in drawImageChild, below).
  */
 import type { HudDesign } from './design';
 import { buildTrees } from './build';
@@ -53,16 +53,15 @@ const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplac
 /**
  * The stock teammate card's BackgroundImage is a black splatter texture
  * (hud/healthbar_bg_N, one file per team colour) sitting at zpos -1 behind
- * the whole card. The owner's in-game screenshot at full health shows no
- * splatter behind a healthy teammate card at all, so like the other
- * STATE_CHILDREN this is a visibility game code decides at runtime, not one
- * the .res file states. Scoped to the teamColumn panel and to images
- * actually named healthbar_bg_*, so it never touches the infected card's own
- * infected_healthbar_bg_1 background, the Hunter card's pz_healthbar frame,
- * or the Modern preset (whose teammate card paints its backgrounds with
- * fillcolor, not this image, and already ships BackgroundImage as
- * visible 0).
+ * the whole card. Probe T6 showed it faintly at full health, so it is drawn
+ * at SPLATTER_ALPHA rather than hidden. Scoped to the teamColumn panel and to
+ * images actually named healthbar_bg_*, so it never touches the infected
+ * card's own infected_healthbar_bg_1 background, the Hunter card's
+ * pz_healthbar frame, or the Modern preset (whose teammate card paints its
+ * backgrounds with fillcolor and ships BackgroundImage as visible 0).
  */
+const SPLATTER_ALPHA = 0.35;
+
 function isTeamColumnHealthbarBg(panelId: string, n: KvNode): boolean {
   if (panelId !== 'teamColumn') return false;
   const image = kvGet(n, 'image');
@@ -204,8 +203,7 @@ function artImage(material: string, onAsset?: () => void): HTMLImageElement | un
  * the same colour is the same picture, and it needs no offscreen canvas,
  * which happy-dom does not have. Uploads (kind image) are not drawn yet: this
  * returns false for them, as it does for a slot that is not restyled, and the
- * caller decides what shows instead. The health bar falls back to its stock
- * art; an image the generator repointed at the upload draws nothing.
+ * caller decides what shows instead.
  */
 export function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
   const slot = SLOTS.find((s) => s.id.toLowerCase() === slotId);
@@ -358,13 +356,11 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, 
 }
 
 /**
- * The health bar at 100 health: the whole rect, green. In advanced mode a
- * restyled barGreen slot overwrites vgui/healthbar_green itself (stylePass
- * writes the stock name too), so the game fills the bar with the design's
- * colour and the preview must as well. Otherwise it is the stock art.
+ * The health bar at 100 health: the whole rect, stock green. The game draws
+ * bar fills in code and never reads the healthbar_* textures (probe T8), so
+ * there is nothing a design can restyle here.
  */
-function drawBar(ctx: CanvasRenderingContext2D, design: HudDesign, r: ChildRect, opts: DrawOpts) {
-  if (design.advanced && drawSlotStyle(ctx, design, 'bargreen', r)) return;
+function drawBar(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
   const img = artImage('vgui/healthbar_green', opts.onAsset);
   if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
   else { ctx.fillStyle = 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
@@ -375,12 +371,15 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
   const rects = childRects(design, panelId, origin, k);
   for (const [i, n] of nodes.entries()) {
     const r = rects[i];
-    if (!r.visible || STATE_CHILDREN.has(n.key.toLowerCase()) || isTeamColumnHealthbarBg(panelId, n)) continue;
+    if (!r.visible || STATE_CHILDREN.has(n.key.toLowerCase())) continue;
+    const alpha = isTeamColumnHealthbarBg(panelId, n) ? SPLATTER_ALPHA : 1;
+    if (alpha !== 1) { ctx.save(); ctx.globalAlpha *= alpha; }
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
       case 'label': drawLabel(ctx, design, n, r, k, opts); break;
-      case 'bar': drawBar(ctx, design, r, opts); break;
+      case 'bar': drawBar(ctx, r, opts); break;
       default: break;                                                // Panel, CircularProgressBar: nothing to show
     }
+    if (alpha !== 1) ctx.restore();
   }
 }

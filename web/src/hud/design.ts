@@ -10,6 +10,7 @@
 import type { Preset } from './base';
 import type { Aspect } from './units';
 import { elementById } from './elements';
+import { SLOTS } from './slots';
 
 export interface ElementOverride {
   visible?: boolean;
@@ -114,14 +115,16 @@ export function validateDesign(raw: unknown): HudDesign {
     const e = element(v);
     if (Object.keys(e).length) d.elements[id] = e;
   }
+  // A slot the editor no longer has (the removed health bar slots) has nothing to restyle.
+  const isSlot = (id: string) => SLOTS.some((s) => s.id === id);
   if (isObj(raw.styles)) for (const [id, v] of Object.entries(raw.styles)) {
-    if (!ID.test(id) || !isObj(v)) continue;
+    if (!ID.test(id) || !isSlot(id) || !isObj(v)) continue;
     const s: StyleOverride = { kind: oneOf(v.kind, ['stock', 'flat', 'rounded', 'image'] as const, 'stock') };
     const c = colour(v.color); if (c) s.color = c;
     d.styles[id] = s;
   }
   if (isObj(raw.images)) for (const [id, v] of Object.entries(raw.images)) {
-    if (!ID.test(id) || !isObj(v)) continue;
+    if (!ID.test(id) || !isSlot(id) || !isObj(v)) continue;
     const { w, h, png } = v;
     if (typeof w !== 'number' || typeof h !== 'number' || typeof png !== 'string') continue;
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) continue;

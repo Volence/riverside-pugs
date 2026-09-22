@@ -12,7 +12,7 @@
 //   b: modern preset, otherwise untouched, normal VPK. The modern preset
 //      always needs a Roboto Condensed pass, so this reads the two real ttf
 //      files off disk and hands them to packHud as assets.fonts.
-//   c: sample (a) again, but in advanced mode with a recoloured health bar,
+//   c: sample (a) again, but in advanced mode with a recoloured incapacitated panel,
 //      which comes out as a zip instead of a VPK.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
@@ -44,7 +44,7 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
   }
   if (sample === 'c') {
     const d = validateDesign({ ...SAMPLE_A, advanced: true,
-      styles: { ...SAMPLE_A.styles, barGreen: { kind: 'flat', color: '120 60 200 255' } } });
+      styles: { ...SAMPLE_A.styles, incapPanel: { kind: 'flat', color: '120 60 200 255' } } });
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
     return;
   }

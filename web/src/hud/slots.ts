@@ -5,8 +5,10 @@
  * `targets` are pointed at it, because an addon cannot replace a texture that
  * ships in pak01. `stockNames` are the pak01 names themselves; they are only
  * written in advanced mode, where the VPK mounts ahead of pak01. A slot with
- * no targets (the health bar fills, which game code names directly) has no
- * normal-mode route at all, so it must be advancedOnly.
+ * no targets (the weapon boxes and the incapacitated and dead panels, which
+ * game code names directly) has no normal-mode route at all, so it must be
+ * advancedOnly. There are no health bar slots: the game draws bar fills in
+ * code and never reads the healthbar_* textures (probe T8).
  */
 export interface StyleSlot {
   id: string; label: string;
@@ -28,14 +30,6 @@ export const SLOTS: StyleSlot[] = [
     targets: [], stockNames: ['vgui/hud/scalablepanel_bgmidgrey_glow'], defaultColor: '40 40 40 215' },
   { id: 'weaponBoxInactive', label: 'Other weapon boxes', advancedOnly: true, size: { w: 32, h: 32 },
     targets: [], stockNames: ['vgui/hud/scalablepanel_bgmidgrey'], defaultColor: '0 0 0 130' },
-  { id: 'barGreen', label: 'Health bar: healthy', advancedOnly: true, size: { w: 256, h: 16 },
-    targets: [], stockNames: ['vgui/healthbar_green'], defaultColor: '80 200 80 255' },
-  { id: 'barOrange', label: 'Health bar: hurt', advancedOnly: true, size: { w: 256, h: 16 },
-    targets: [], stockNames: ['vgui/healthbar_orange'], defaultColor: '230 150 40 255' },
-  { id: 'barRed', label: 'Health bar: critical', advancedOnly: true, size: { w: 256, h: 16 },
-    targets: [], stockNames: ['vgui/healthbar_red'], defaultColor: '210 40 40 255' },
-  { id: 'barWhite', label: 'Health bar: temporary', advancedOnly: true, size: { w: 256, h: 16 },
-    targets: [], stockNames: ['vgui/healthbar_white'], defaultColor: '235 235 235 255' },
   { id: 'incapPanel', label: 'Incapacitated panel', advancedOnly: true, size: { w: 256, h: 256 },
     targets: [], stockNames: ['biker', 'manager', 'namvet', 'teenangst'].map((c) => `vgui/s_panel_${c}_incap`),
     defaultColor: '95 22 22 205' },

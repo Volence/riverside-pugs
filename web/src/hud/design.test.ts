@@ -27,11 +27,19 @@ describe('validateDesign', () => {
 
   it('drops oversize images', () => {
     const d = validateDesign({ v: 1, images: {
-      ok: { w: 64, h: 64, png: 'AAAA' },
-      wide: { w: 4096, h: 64, png: 'AAAA' },
-      heavy: { w: 64, h: 64, png: 'A'.repeat(1_500_000) },
+      panelBg: { w: 64, h: 64, png: 'AAAA' },
+      incapPanel: { w: 4096, h: 64, png: 'AAAA' },
+      deadPanel: { w: 64, h: 64, png: 'A'.repeat(1_500_000) },
     } });
-    expect(Object.keys(d.images)).toEqual(['ok']);
+    expect(Object.keys(d.images)).toEqual(['panelBg']);
+  });
+
+  it('drops styles and images for slots the editor no longer has', () => {
+    const d = validateDesign({ v: 1,
+      styles: { barGreen: { kind: 'flat' }, barWhite: { kind: 'flat' }, panelBg: { kind: 'flat' } },
+      images: { barRed: { w: 8, h: 8, png: 'AAAA' } } });
+    expect(Object.keys(d.styles)).toEqual(['panelBg']);
+    expect(d.images).toEqual({});
   });
 
   it('drops overrides for elements the editor no longer has', () => {

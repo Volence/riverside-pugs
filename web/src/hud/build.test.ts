@@ -368,9 +368,14 @@ describe('buildHud, styles', () => {
   });
 
   it('writes stock names in advanced mode', () => {
-    const files = buildHud(design({ advanced: true, styles: { barGreen: { kind: 'flat', color: '0 255 0 255' } } }));
+    const files = buildHud(design({ advanced: true, styles: { incapPanel: { kind: 'flat', color: '95 22 22 205' } } }));
     expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(
-      ['materials/vgui/healthbar_green.vtf', 'materials/vgui/healthbar_green.vmt']));
+      ['materials/vgui/s_panel_biker_incap.vtf', 'materials/vgui/s_panel_biker_incap.vmt']));
+  });
+
+  it('never writes a health bar texture, since the game draws bar fills in code (probe T8)', () => {
+    const files = buildHud(design({ advanced: true, styles: { barGreen: { kind: 'flat', color: '0 255 0 255' } } }));
+    expect(files.some((f) => f.path.includes('healthbar_'))).toBe(false);
   });
 
   it('keeps every path lower case', () => {
@@ -413,7 +418,7 @@ describe('buildTrees', () => {
         const d = design({ preset, advanced,
           elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
             teamColumn: { scale: 1.5, dir: 'column', spacing: 40 } },
-          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, barGreen: { kind: 'flat', color: '255 0 0 255' } } });
+          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, incapPanel: { kind: 'flat', color: '255 0 0 255' } } });
         const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
         const paths = [...Object.values(PANEL_FILE), 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res', 'resource/clientscheme.res'];
         for (const path of paths) {
