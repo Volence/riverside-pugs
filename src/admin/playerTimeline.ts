@@ -1,3 +1,4 @@
+import { cvarAdapter } from './timeline/cvar.js';
 import type { DB } from '../db.js';
 import { aliasesOf, resolveAlias } from '../aliases.js';
 import { inputAdapter } from './timeline/input.js';
@@ -17,6 +18,7 @@ import type { TimelineAdapter, TimelineItem } from './timeline/types.js';
 export const ADAPTERS: TimelineAdapter[] = [
   inputAdapter,
   lilacAdapter,
+  cvarAdapter,
   analyzerAdapter,
   dropsAdapter,
   steamAdapter,

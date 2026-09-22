@@ -3,6 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { addAlias } from '../src/aliases.js';
 import { ADAPTERS, playerTimeline } from '../src/admin/playerTimeline.js';
+import { isWheel } from '../src/inputStats.js';
 import { isEvidence, toIso, type TimelineAdapter, type TimelineItem } from '../src/admin/timeline/types.js';
 
 const MAIN = '76561199000000001';
@@ -15,11 +16,11 @@ beforeEach(() => {
   for (const id of [MAIN, ALT, STAFF]) upsertPlayer(db, { steamid: id, name: `p${id.slice(-3)}`, avatar: null }, []);
 });
 
-const detection = (steamid: string, at: string, burstId: number, signature = 'pistol_rate') =>
+const detection = (steamid: string, at: string, burstId: number, signature = 'pistol_rate', note = 'variable-hold') =>
   db.prepare(
     `INSERT INTO input_detections (burst_id, match_id, steamid, kind, signature, severity, at, hits, evidence, note)
-     VALUES (?, 7, ?, 'attack', ?, 'low', ?, 3, '[]', 'wheel-like')`,
-  ).run(burstId, steamid, signature, at);
+     VALUES (?, 7, ?, 'attack', ?, 'low', ?, 3, '[]', ?)`,
+  ).run(burstId, steamid, signature, at, note);
 
 const lilac = (steamid: string, at: string, kind = 'aimbot', severity = 'suspected') =>
   db.prepare(
@@ -46,6 +47,22 @@ describe('the timeline', () => {
     expect(items[1].ref).toEqual({ type: 'input_detection', id: 1 });
     // Asking under the alt's own id answers about the person, not the id.
     expect(playerTimeline(db, ALT, STAFF)).toHaveLength(2);
+  });
+
+  // Owner's ruling, 2026-09-22: a scroll wheel bound to +attack or +jump is
+  // legal. Its flag stays on the file, labelled, but is nobody's evidence.
+  it('keeps a scroll-wheel input flag on the file but does not count it as evidence', () => {
+    detection(MAIN, '2026-09-21T10:00:00.000Z', 1, 'pounce_spam', 'wheel-like');
+    detection(ALT, '2026-09-21T11:00:00.000Z', 2, 'pounce_spam', 'no-hold-data, plugin 0.1.0 capture');
+    const [wheel] = playerTimeline(db, MAIN, STAFF);
+    expect(wheel.summary).toMatch(/scroll wheel/i);
+    expect(isEvidence(wheel)).toBe(false);
+    const inputs = ADAPTERS.find((a) => a.source === 'input')!;
+    expect(inputs.evidence!(db).map((r) => r.steamid)).toEqual([ALT]);
+    expect(isEvidence(playerTimeline(db, ALT, STAFF)[0])).toBe(true);
+    // The same test decides whether the admin channel hears about it.
+    expect(isWheel('wheel-like')).toBe(true);
+    expect(isWheel('no-hold-data, plugin 0.1.0 capture')).toBe(false);
   });
 
   it('a banned flag reads differently from a suspicion, and neither is a verdict', () => {

@@ -11,12 +11,12 @@ import type { DB } from '../../db.js';
  */
 export type TimelineSource =
   | 'input' | 'lilac' | 'analyzer' | 'drop' | 'ticket' | 'penalty' | 'ban'
-  | 'note' | 'steam' | 'discord_link';
+  | 'note' | 'steam' | 'discord_link' | 'cvar';
 
 /** The sources that mean somebody should take a look. Needs a look is built
  *  from these and nothing else: a ban or a note is a record of a decision
  *  already taken, not something waiting for one. */
-export type EvidenceSource = 'input' | 'lilac' | 'analyzer' | 'drop' | 'steam';
+export type EvidenceSource = 'input' | 'lilac' | 'analyzer' | 'drop' | 'steam' | 'cvar';
 
 export interface TimelineItem {
   at: string;
@@ -29,6 +29,9 @@ export interface TimelineItem {
   replay: { ordinal: number; half: number; tMs: number } | null;
   /** What to open, when there is something. */
   ref: { type: string; id: number | string } | null;
+  /** On the file for the record, but settled by a league ruling rather than
+   *  waiting on anyone: never evidence, whatever its source. */
+  allowed?: true;
 }
 
 export interface TimelineCtx {
@@ -73,7 +76,8 @@ export function marks(ids: string[]): string {
  *  retry noise and a cancelled loading screen looks identical, so only the
  *  repeat rule counts; drops.ts marks those with kind 'repeat'. */
 export function isEvidence(item: TimelineItem): boolean {
+  if (item.allowed) return false;
   if (item.source === 'drop') return item.kind === 'repeat';
   return item.source === 'input' || item.source === 'lilac'
-    || item.source === 'analyzer' || item.source === 'steam';
+    || item.source === 'analyzer' || item.source === 'steam' || item.source === 'cvar';
 }

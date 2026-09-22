@@ -64,6 +64,9 @@ export function AppRoutes(
   { session, state, refresh }: { session: Session; state: StateSnapshot | null; refresh: () => void },
 ) {
   const me = session.kind === 'active' ? session.me.steamid : null;
+  // Only decides whether staff screens are offered; every one of them is
+  // guarded again by the server.
+  const staff = session.kind === 'active' && (session.me.isAdmin || session.me.isMod === true);
   return (
     <Router>
       <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
@@ -71,7 +74,7 @@ export function AppRoutes(
       <Route path="/matches" component={Matches} />
       <Route path="/live" component={Live} me={me} />
       <Route path="/streams" component={Streams} />
-      <Route path="/match/:id" component={MatchDetail} me={me} />
+      <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />
       <Route path="/custom-campaigns" component={CustomCampaigns} />
       <Route path="/crosshair" component={Crosshair} />

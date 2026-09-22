@@ -6,6 +6,7 @@ import { clearLatencyByPlayer } from '../clearLatency';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
+import { StaffChatLog } from './StaffChatLog';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { ReportPlayer } from '../components/ReportPlayer';
 import { EndorsePanel } from '../components/EndorsePanel';
@@ -248,7 +249,7 @@ function OngoingMatch({ data }: { data: MatchOngoing }) {
   );
 }
 
-export function MatchDetail({ id, me }: { id: string; me: string | null }) {
+export function MatchDetail({ id, me, staff = false }: { id: string; me: string | null; staff?: boolean }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
   if (error) {
@@ -396,6 +397,12 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
   // winner in the eyebrow.
   const voided = Boolean(match.voidedAt);
   const aborted = match.state === 'aborted' && !voided;
+  // A voided match's ratings were rebuilt without it, so whatever it once
+  // moved is no longer true; an aborted one never moved anything.
+  const showSr = match.state === 'completed' && !voided;
+  const versusName = (p: typeof players[number]) => (
+    showSr ? { name: p.name, srDelta: p.srDelta ?? null } : p.name
+  );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'
       : winnerLabel(match.winner!);
@@ -457,8 +464,8 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
       )}
 
       <VersusHeader
-        teamA={teamPlayers('a').map((p) => p.name)}
-        teamB={teamPlayers('b').map((p) => p.name)}
+        teamA={teamPlayers('a').map(versusName)}
+        teamB={teamPlayers('b').map(versusName)}
         scoreA={match.teamAScore}
         scoreB={match.teamBScore}
         eyebrowA={eyebrowA}
@@ -584,6 +591,13 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
               ))}
             </ul>
           </Panel>
+        )}
+
+        {staff && (match.state === 'completed' || match.state === 'aborted') && (
+          <StaffChatLog
+            matchId={match.id}
+            highlight={typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('chat')}
+          />
         )}
 
         {me && (

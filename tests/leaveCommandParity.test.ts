@@ -42,8 +42,11 @@ describe('sm_pug_leave registration', () => {
     );
   });
 
-  it('ships in 0.3.4', () => {
-    expect(matchSrc).toContain('#define PLUGIN_VERSION "0.3.4"');
+  // Introduced in 0.3.4; any later version still carries it.
+  it('ships in 0.3.4 or later', () => {
+    const v = /#define PLUGIN_VERSION "0\.3\.(\d+)"/.exec(matchSrc);
+    expect(v).not.toBeNull();
+    expect(Number(v![1])).toBeGreaterThanOrEqual(4);
   });
 });
 

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { ICY_WHEEL, BELLINGHAM_TAPS } from './fixtures/wheelSamples.js';
+import { isSteadyBurst, mostlySteady } from '../src/inputStats.js';
 import {
   BURST_MAX_TICKS, DEFAULT_THRESHOLDS, MAX_INTERVALS, PISTOL_REPEATS, POUNCE_REPEATS, burstStats, decodeIntervals,
   encodeIntervals, holdAnnotation, holdStats, matchDetections, pistolRate, pounceSpam,
@@ -248,5 +250,20 @@ describe('decodeIntervals as the hold decoder', () => {
   it('allows one more hold than the interval cap, since holds are per press', () => {
     expect(decodeIntervals('0'.repeat(MAX_INTERVALS + 1), MAX_INTERVALS + 1)).toHaveLength(MAX_INTERVALS + 1);
     expect(decodeIntervals('0'.repeat(MAX_INTERVALS + 2), MAX_INTERVALS + 1)).toBeNull();
+  });
+});
+
+describe('steady taps', () => {
+  it('finds a fixed-rate tapper steady and a spun wheel not', () => {
+    expect(isSteadyBurst(BELLINGHAM_TAPS)).toBe(true);
+    expect(isSteadyBurst(ICY_WHEEL)).toBe(false);
+    expect(isSteadyBurst([6, 6, 6, 6, 6])).toBe(false); // too short to say
+  });
+
+  it('needs strictly more than half of a detection\'s bursts steady', () => {
+    expect(mostlySteady([BELLINGHAM_TAPS, BELLINGHAM_TAPS])).toBe(true);
+    expect(mostlySteady([BELLINGHAM_TAPS, ICY_WHEEL])).toBe(false);
+    expect(mostlySteady([BELLINGHAM_TAPS, BELLINGHAM_TAPS, ICY_WHEEL])).toBe(true);
+    expect(mostlySteady([])).toBe(false);
   });
 });

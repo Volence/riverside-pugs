@@ -519,8 +519,12 @@ td.campaign-cell { box-shadow: inset 4px 0 0 var(--campaign, transparent); }
   pointer-events: none;
 }
 .ctile > * { position: relative; z-index: 1; }
-button.ctile { cursor: pointer; }
-button.ctile:hover { border-color: var(--text-muted); }
+button.ctile, a.ctile { cursor: pointer; }
+button.ctile:hover, a.ctile:hover { border-color: var(--text-muted); }
+a.ctile { text-decoration: none; }
+/* A campaign's table, landed on from its tile: a little room above it. */
+.campaign-table { scroll-margin-top: var(--sp-6); }
+.campaigns-more { margin: var(--sp-4) 0; }
 .ctile.is-active { border-color: var(--rule); box-shadow: 0 0 0 1px var(--rule); }
 .ctile.is-muted { opacity: 0.55; }
 .ctile__name {
@@ -642,6 +646,14 @@ button.ctile:hover { border-color: var(--text-muted); }
 }
 .delta--up { color: var(--win); }
 .delta--down { color: var(--loss); }
+/* Beside a name in the versus header: no column to line up with there, and
+ * the label font's letter spacing would stretch the digits. */
+.versus__names .delta {
+  min-width: 0;
+  vertical-align: middle;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+}
 
 /* W/L/D glyph. The letter is the information; the color reinforces it. */
 .result {
@@ -2133,3 +2145,26 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .ticket-file { overflow-wrap: anywhere; }
 .ticket-file--gone { opacity: 0.7; }
 .ticket-thumb { display: block; max-width: min(240px, 100%); max-height: 180px; border: 1px solid var(--border); border-radius: 4px; }
+
+/* Staff chat log on a finished match. Team colors are the versus header's:
+ * Team A in the survivor teal, Team B in the infected red. */
+.chatlog__lines { list-style: none; margin: 0; padding: 0; max-height: 32rem; overflow-y: auto; }
+.chatlog__line {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(6rem, 10rem) 1fr;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-1);
+}
+.chatlog__where { margin-top: var(--sp-2); padding: 0 var(--sp-1); font-size: var(--fs-dense); }
+.chatlog__who { overflow-wrap: anywhere; }
+.chatlog__who--a { color: var(--win); }
+.chatlog__who--b { color: var(--accent); }
+.chatlog__msg { overflow-wrap: anywhere; }
+.chatlog__line.is-mine {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+@media (max-width: 480px) {
+  .chatlog__line { grid-template-columns: 3rem 1fr; }
+  .chatlog__msg { grid-column: 2; }
+}

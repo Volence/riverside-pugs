@@ -15,6 +15,7 @@ export const SOURCE_LABEL: Record<TimelineSource, string> = {
   note: 'Note',
   steam: 'Steam',
   discord_link: 'Discord',
+  cvar: 'Client setting',
 };
 
 export function SourceBadge({ source }: { source: TimelineSource }) {

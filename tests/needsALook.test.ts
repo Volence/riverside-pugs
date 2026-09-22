@@ -43,6 +43,7 @@ describe('Needs a look', () => {
     flag(P, '2026-09-20T10:00:00.000Z');
     expect(needsALook(db, admin).map((r) => r.steamid)).toEqual([P]);
     expect(needsALook(db, admin)[0].sources).toEqual(['lilac']);
+    expect(needsALook(db, admin)[0].arrived).toMatch(/^Little Anti-Cheat: /);
 
     markLookedAt(db, P, ADMIN, '', new Date('2026-09-20T11:00:00.000Z'));
     expect(needsALook(db, admin)).toEqual([]);

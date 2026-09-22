@@ -826,6 +826,7 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'match_live_events', 'map_ordinal', 'INTEGER NOT NULL DEFAULT 0');
   // What the game is doing right now, as last reported by the plugin, and
   // since when. NULL until a plugin that emits PHASE has spoken.
+  ensureColumn(db, 'match_pauses', 'called_by', 'TEXT');
   ensureColumn(db, 'match_live', 'phase', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_team', 'TEXT');

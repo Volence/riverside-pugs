@@ -256,6 +256,21 @@ describe('LogListener: the sender port rides along', () => {
   });
 });
 
+describe('LogListener: client settings', () => {
+  it('admits an L4DV line only from a game server address, like every token-less line', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    await send(port, 'L4DV id=76561198030413993 cvar=cpu_level value=0');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(got).toEqual([]);
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, 'L4DV id=76561198030413993 cvar=cpu_level value=0');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(got).toMatchObject([{ kind: 'cvar_flag', cvar: 'cpu_level', value: 0 }]);
+  });
+});
+
 describe('LogListener: the authenticator', () => {
   const settle = () => new Promise((r) => setTimeout(r, 60));
   const LILAC = 'L4DL id=76561198030413993 cheat=3 banned=1';

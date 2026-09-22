@@ -76,7 +76,8 @@ export class LogListener {
         // sender's address is the ONLY gate. Checked first and returned from
         // unconditionally: nothing below may ever see an event without a token.
         if (ev.kind === 'signon_drop' || ev.kind === 'entered' || ev.kind === 'player_net'
-            || ev.kind === 'input_burst' || ev.kind === 'input_cap' || ev.kind === 'lilac_flag') {
+            || ev.kind === 'input_burst' || ev.kind === 'input_cap' || ev.kind === 'lilac_flag'
+            || ev.kind === 'cvar_flag') {
           if (fromGameServer()) this.onEvent(ev, rinfo.address, meta);
           return;
         }

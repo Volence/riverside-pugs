@@ -19,6 +19,7 @@ import { lastReviewOf, type FileReview } from './reviews.js';
 import { playerFileSummary, type PlayerFileSummary } from './playerFileSummary.js';
 import { playerTimeline } from './playerTimeline.js';
 import type { TimelineItem } from './timeline/types.js';
+import { conductOf, type ConductSection } from './conduct.js';
 
 export interface PlayerFile {
   steamid: string;
@@ -45,6 +46,7 @@ export interface PlayerFile {
       timeout: { until: string; offenses: number } | null;
     };
     matches: RecentMatchRow[];
+    conduct: ConductSection;
     tickets: ReturnType<typeof ticketsAbout>;
     notes: PlayerNoteRow[];
     evidence: ReturnType<typeof evidence>;
@@ -143,6 +145,7 @@ export function playerFile(
         timeout: timeout ? { until: timeout.until.toISOString(), offenses: timeout.offenses } : null,
       },
       matches,
+      conduct: conductOf(db, canonical),
       tickets: ticketsAbout(db, canonical, viewer.steamid),
       notes,
       evidence: ev,

@@ -81,7 +81,7 @@ export function AdminLive() {
               and the cards above it can never disagree about a match. */}
           <OpenMatchesPanel open={overview.data.open} busy={panels.busy} run={panels.run} />
           <div class="admin-split admin-split--even">
-            <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run} />
+            <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run} health={overview.data.captureHealth} />
             <AdminQueuePanel queue={overview.data.queue} busy={panels.busy} run={panels.run} />
           </div>
           <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} />

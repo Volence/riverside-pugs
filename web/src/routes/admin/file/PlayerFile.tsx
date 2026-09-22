@@ -8,6 +8,7 @@ import { FileHeader } from './FileHeader';
 import { GlanceRow } from './GlanceRow';
 import { IdentitySection } from './IdentitySection';
 import { StandingSection } from './StandingSection';
+import { ConductSection } from './ConductSection';
 import { NotesSection } from './NotesSection';
 import { Timeline } from './Timeline';
 import { EvidenceDetail } from './EvidenceDetail';
@@ -53,6 +54,7 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
 
       <IdentitySection d={d} busy={busy} run={run} can={can} />
       <StandingSection d={d} busy={busy} run={run} can={can} />
+      <ConductSection d={d} />
       <EvidenceDetail d={d} busy={busy} run={run} canReview={canReview} />
 
       <Panel class="file-section">
@@ -79,6 +81,9 @@ export function PlayerFile({ steamid, me }: { steamid: string; me: string }) {
             {d.sections.matches.map((m) => (
               <li key={m.id}>
                 <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} · {m.state} · team {m.team.toUpperCase()}
+                {(m.state === 'completed' || m.state === 'aborted') && (
+                  <> · <a href={`/match/${m.id}?chat=${d.steamid}#chat`}>chat</a></>
+                )}
                 {m.state === 'aborted' && !m.connectedAt && <span class="admin-warn"> · never connected</span>}
               </li>
             ))}

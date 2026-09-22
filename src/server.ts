@@ -24,6 +24,7 @@ import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { isWheel } from './inputStats.js';
 import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
@@ -66,7 +67,7 @@ import { RconClient as RealRcon } from './rcon.js';
 import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
-import { rconRestarter, type ServerRestarter } from './serverRestart.js';
+import { kickThenQuit, rconRestarter, type ServerRestarter } from './serverRestart.js';
 import { LogListener, type LogMeta } from './logListener.js';
 import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
@@ -470,7 +471,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
       try {
         await rcon.connect();
-        await rcon.exec('quit');
+        await kickThenQuit(rcon, server.name);
       } finally {
         rcon.close();
       }
@@ -648,6 +649,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
+        if (ev.kind === 'cvar_flag') {
+          // Evidence only, never on the critical path. Stored in or out of a
+          // match, like a LilAC flag; the admin channel hears about it once per
+          // player per live match, since the plugin reports every connection.
+          try {
+            const serverId = serverOf(source, meta);
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            const seenThisMatch = matchId !== null && deps.db.prepare(
+              "SELECT 1 FROM integrity_flags WHERE source = 'cvar' AND kind = ? AND steamid = ? AND match_id = ? LIMIT 1",
+            ).get(ev.cvar, ev.steamid, matchId) !== undefined;
+            const stored = recordIntegrityFlag(deps.db, {
+              matchId, serverId, steamid: ev.steamid, source: 'cvar',
+              kind: ev.cvar, severity: 'suspected', detail: `value=${ev.value}`,
+            });
+            if (stored && matchId !== null && !seenThisMatch) {
+              publishAdminEvent({ kind: 'cvar_flag', steamid: ev.steamid, matchId, cvar: ev.cvar, value: ev.value });
+            }
+          } catch (err) {
+            console.error('[cvarwatch] failed to record a client setting:', err);
+          }
+          return;
+        }
         if (ev.kind === 'input_cap') {
           // Same rules as a burst: evidence only, live matches only, and never
           // allowed to take the listener down.
@@ -686,6 +709,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // its repeat count, so this posts once per player, match and
             // signature however many bursts qualify afterwards.
             for (const { signature, note } of stored.created) {
+              // A scroll wheel bind is allowed; the file keeps the row, the
+              // admin channel does not need telling.
+              if (isWheel(note)) continue;
               publishAdminEvent({
                 kind: 'input_flag', steamid: ev.steamid, matchId, signature,
                 detail: `repeated across separate ${ev.burstKind} bursts this match; holds: ${note}`,

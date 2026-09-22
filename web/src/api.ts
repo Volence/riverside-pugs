@@ -170,7 +170,8 @@ export interface MatchPlayerStats {
   commonKills: number;
   ffDealt: number;
   revives: number;
-  srDelta: number;
+  /** Null when the rating never touched this player in this match. */
+  srDelta: number | null;
   /** Skill-detect stats, already filtered server-side for the viewer: a
    *  self-visibility stat is present only when the viewer is the subject. */
   stats: Record<string, number>;
@@ -766,6 +767,8 @@ export interface AdminOverview {
   queue: NamedPlayer[];
   /** Across every counted match: who is habitually the one holding up the ready-up. */
   slowToReady: SlowToReady[];
+  /** Optional only for a browser holding new JS against an older server. */
+  captureHealth?: CaptureHealth;
 }
 
 /** The admin live board. Mirrors src/admin/liveBoard.ts field for field.
@@ -1020,7 +1023,7 @@ export interface TicketCounts { open: number; mine: number; closed: number }
 
 export type TimelineSource =
   | 'input' | 'lilac' | 'analyzer' | 'drop' | 'ticket' | 'penalty' | 'ban'
-  | 'note' | 'steam' | 'discord_link';
+  | 'note' | 'steam' | 'discord_link' | 'cvar';
 
 /** One row of a player's merged history. The summary is written on the
  *  server so every surface says the same sentence about the same evidence. */
@@ -1095,6 +1098,8 @@ export interface PlayerFileData {
       timeout: AdminPlayerDetail['timeout'];
     };
     matches: AdminPlayerDetail['matches'];
+    /** Optional only for a browser holding new JS against an older server. */
+    conduct?: ConductSection;
     tickets: TicketSummary[];
     notes: AdminPlayerDetail['notes'];
     evidence: {
@@ -1114,6 +1119,8 @@ export interface PlayerFileData {
 export interface NeedsALookRow {
   steamid: string; name: string; avatar: string | null; status: string;
   newestEvidenceAt: string; sources: TimelineSource[];
+  /** What is new since the last look, in one sentence. Optional for an older server. */
+  arrived?: string;
   lastReviewAt: string | null; lastReviewBy: string | null;
   openTickets: number; analyzer: AnalyzerRank | null;
 }
@@ -1146,7 +1153,24 @@ export const peopleApi = {
     post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/notes`, { text }),
   lookedAt: (steamid: string, note: string) =>
     post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
+  chat: (matchId: number, signal?: AbortSignal) =>
+    get<{ lines: StaffChatLine[] }>(`/api/admin/people/chat/${matchId}`, signal),
 };
+
+/** One chat line of a finished match, as staff see it. `half` is -1 before
+ *  the first round of a map; `tMs` is -1 when no round clock was running
+ *  (ready-up, a pause, between rounds). `player` is the merged account. */
+export interface StaffChatLine {
+  seq: number;
+  mapOrdinal: number;
+  half: number;
+  tMs: number;
+  steamid: string;
+  player: string;
+  name: string;
+  team: 'a' | 'b' | null;
+  message: string;
+}
 
 /** Where a stored ticket file is served from. A plain function, not part of
  *  modApi: it makes no request, it is what an <img> points at. */
@@ -1343,3 +1367,22 @@ export const api = {
     simulateMatch: () => post('/api/dev/simulate-match'),
   },
 };
+
+/** src/admin/conduct.ts. Seconds are whole; dates are SQLite's "YYYY-MM-DD HH:MM:SS". */
+export interface ConductSection {
+  readyups: {
+    count: number;
+    avgSeconds: number | null;
+    timesLast: number;
+    leagueAvgSeconds: number | null;
+    leagueLastShare: number | null;
+    slowest: { matchId: number; mapOrdinal: number; half: number | null; seconds: number; wasLast: boolean }[];
+  };
+  pauses: {
+    trackedSince: string | null;
+    called: number;
+    matchesSince: number;
+    totalSeconds: number;
+    recent: { matchId: number; mapOrdinal: number; half: number | null; seconds: number | null; startedAt: string }[];
+  };
+}

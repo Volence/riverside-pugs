@@ -31,9 +31,10 @@ const { mockApi } = vi.hoisted(() => ({
   },
 }));
 
+const mockChat = vi.hoisted(() => vi.fn());
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, api: { ...actual.api, ...mockApi } };
+  return { ...actual, api: { ...actual.api, ...mockApi }, peopleApi: { ...actual.peopleApi, chat: mockChat } };
 });
 
 const { Leaderboard } = await import('./Leaderboard');
@@ -222,6 +223,45 @@ describe('MatchDetail', () => {
     expect(screen.getAllByText('Team A').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Team B').length).toBeGreaterThan(0);
     expect(container.querySelectorAll('table').length).toBe(2);
+  });
+
+  it('shows each player SR change beside their name once the match is over', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 10, siKills: 1, commonKills: 2, ffDealt: 3, revives: 4, srDelta: 12 },
+        { steamid: '2', name: 'bob', team: 'b', siDamage: 20, siKills: 2, commonKills: 3, ffDealt: 4, revives: 5, srDelta: -12 },
+        { steamid: '3', name: 'carol', team: 'b', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: null },
+      ],
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    const versus = container.querySelector('.versus')!;
+    expect(versus.querySelector('.delta--up')?.textContent).toBe('+12');
+    expect(versus.querySelector('.delta--down')?.textContent).toMatch(/12/);
+    // Unrated: nothing, not "+0".
+    expect(versus.querySelectorAll('.delta').length).toBe(2);
+    expect(versus.textContent).toContain('carol');
+  });
+
+  it('offers the chat log to staff on a finished match, and to nobody else', async () => {
+    mockChat.mockResolvedValue({ lines: [] });
+    mockApi.match.mockResolvedValue(matchWith({}));
+    const { unmount } = render(<MatchDetail id="7" me="1" staff />);
+    expect(await screen.findByText('Chat log')).toBeTruthy();
+    unmount();
+    mockApi.match.mockResolvedValue(matchWith({}));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    expect(screen.queryByText('Chat log')).toBeNull();
+  });
+
+  it('shows no SR changes on a voided match, whose ratings were rebuilt without it', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      match: { id: 7, campaign: 'no_mercy', state: 'completed', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a', voidedAt: '2026-09-07T00:00:00' },
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    expect(container.querySelectorAll('.versus .delta').length).toBe(0);
   });
 
   it('says so rather than faking zeros when a match has no per-map stats', async () => {
@@ -1410,39 +1450,65 @@ describe('Maps', () => {
     expect(screen.queryByText(/null/)).toBeNull();
   });
 
-  // A player whose favourite campaign rotates out should still find its
-  // history, just not at the top. Sorted rather than hidden, and rather than
-  // filed under a heading that reads as a reject pile.
-  it('puts campaigns in the vote first and keeps the rest listed', async () => {
-    mockApi.maps.mockResolvedValue({
-      pool: ['dead_air'],
-      maps: [
-        // Blood Harvest is played far more, so only the rotation can put Dead
-        // Air above it. That is what makes this test about the pool and not
-        // about play counts.
-        { map: 'l4d_vs_farm01_hilltop', campaign: 'blood_harvest', played: 40, avgScore: 300,
-          rounds: { attempts: 40, fastestSec: 100, avgSec: 200, slowestSec: 300, survivalPct: 50, measured: 40 } },
-        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgScore: 200,
-          rounds: { attempts: 4, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50, measured: 4 } },
-      ],
-    });
-    render(<Maps />);
-    // Each campaign appears twice, as a tile and as a table heading, so scope
-    // the assertions to headings rather than matching the name anywhere.
-    await waitFor(() => expect(screen.getAllByRole('heading', { level: 3 }).length).toBeGreaterThan(1));
+  // 27 campaigns made the page a wall. The ones in the vote come first and the
+  // rest fold behind one button, tiles and tables alike (owner, 2026-09-22),
+  // and open exactly as before: out of rotation is folded, never gone.
+  const poolFixture = {
+    pool: ['dead_air'],
+    maps: [
+      // Blood Harvest is played far more, so only the rotation can put Dead
+      // Air above it. That is what makes this test about the pool and not
+      // about play counts.
+      { map: 'l4d_vs_farm01_hilltop', campaign: 'blood_harvest', played: 40, avgScore: 300,
+        rounds: { attempts: 40, fastestSec: 100, avgSec: 200, slowestSec: 300, survivalPct: 50, measured: 40 } },
+      { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 2, avgScore: 200,
+        rounds: { attempts: 4, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50, measured: 4 } },
+    ],
+  };
+  const headingTexts = () => screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent ?? '');
 
-    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent ?? '');
+  it('shows the campaigns in the vote and folds the rest behind one button', async () => {
+    mockApi.maps.mockResolvedValue(poolFixture);
+    const { container } = render(<Maps />);
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 3 }).length).toBe(1));
+    expect(headingTexts()[0]).toContain('Dead Air');
+    expect(headingTexts()[0]).toContain('In the vote');
+    expect(container.querySelectorAll('.ctile')).toHaveLength(1);
 
-    // Both still on the page: out of rotation is not out of sight.
-    expect(headings.some((t) => t.includes('Blood Harvest'))).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 more campaign not in the vote' }));
+    const headings = headingTexts();
     const air = headings.findIndex((t) => t.includes('Dead Air'));
     const harvest = headings.findIndex((t) => t.includes('Blood Harvest'));
     expect(air).toBeGreaterThanOrEqual(0);
     expect(air).toBeLessThan(harvest);
-
-    // And the one in rotation says so, using the same words as the Custom page.
-    expect(headings[air]).toContain('In the vote');
     expect(headings[harvest]).not.toContain('In the vote');
+    expect(container.querySelectorAll('.ctile')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Hide the campaigns not in the vote' })).toBeTruthy();
+  });
+
+  it('links each tile to its campaign\'s table, and scrolls there', async () => {
+    mockApi.maps.mockResolvedValue(poolFixture);
+    const scrolled: string[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.id); };
+    try {
+      const { container } = render(<Maps />);
+      await waitFor(() => expect(container.querySelector('a.ctile')).toBeTruthy());
+      const tile = container.querySelector('a.ctile')!;
+      expect(tile.getAttribute('href')).toBe('#campaign-dead_air');
+      expect(container.querySelector('#campaign-dead_air')).toBeTruthy();
+      fireEvent.click(tile);
+      await waitFor(() => expect(scrolled).toEqual(['campaign-dead_air']));
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+
+  it('keeps everything listed when nothing is in the vote', async () => {
+    mockApi.maps.mockResolvedValue({ ...poolFixture, pool: [] });
+    render(<Maps />);
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 3 }).length).toBe(2));
+    expect(screen.queryByRole('button', { name: /not in the vote/ })).toBeNull();
   });
 
   // mapName turns airport01_greenhouse into Greenhouse by stripping a

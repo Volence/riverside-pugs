@@ -57,7 +57,7 @@ describe('the Player File', () => {
     expect(file.glance.fileUrl).toBe(`/admin/people/${P}`);
     expect(file.timeline.length).toBeGreaterThan(0);
     expect(Object.keys(file.sections).sort())
-      .toEqual(['evidence', 'identity', 'matches', 'notes', 'standing', 'tickets']);
+      .toEqual(['conduct', 'evidence', 'identity', 'matches', 'notes', 'standing', 'tickets']);
     expect(file.sections.notes[0].text).toBe('spoke to them');
     expect(file.sections.standing.penalties).toHaveLength(1);
     expect(file.lastReview).toBeNull();

@@ -30,8 +30,8 @@ export function ResultChip({ result }: { result: MatchResult }) {
   );
 }
 
-export function Panel({ children, class: cls = '' }: { children: ComponentChildren; class?: string }) {
-  return <section class={`panel ${cls}`}>{children}</section>;
+export function Panel({ children, class: cls = '', id }: { children: ComponentChildren; class?: string; id?: string }) {
+  return <section class={`panel ${cls}`} id={id}>{children}</section>;
 }
 
 export function Empty({ children }: { children: ComponentChildren }) {

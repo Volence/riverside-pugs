@@ -61,6 +61,9 @@ export interface MatchPause {
   endedAt: string | null;
   /** Whole seconds, or null while the pause is still open. */
   seconds: number | null;
+  /** Who typed !pause, from pug-match 0.3.5 on. Null for every older pause,
+   *  a disconnect pause and an admin's: never inferred from the team. */
+  calledBy: string | null;
 }
 export interface MatchReadyup {
   mapOrdinal: number;
@@ -258,6 +261,13 @@ export function recordPhase(db: DB, token: string, phase: Phase): void {
     && (prev.phase_team ?? null) === phase.team && Boolean(prev.phase_leave) === phase.leave;
 
   if (sameState && sameIds(prevUnready, unready)) {
+    // A repeat can name the caller the opening line did not carry (that line
+    // was lost, and this is the heartbeat). Only ever fills a blank.
+    if (phase.state === 'paused' && phase.by) {
+      db.prepare(
+        'UPDATE match_pauses SET called_by = ? WHERE match_id = ? AND ended_at IS NULL AND called_by IS NULL',
+      ).run(phase.by, id);
+    }
     touch(db, id);
     return;
   }
@@ -306,9 +316,9 @@ export function recordPhase(db: DB, token: string, phase: Phase): void {
       .get(id, ordinal) as { half: number | null };
     if (phase.state === 'paused') {
       db.prepare(
-        `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-      ).run(id, ordinal, round.half, phase.team, phase.leave ? 1 : 0);
+        `INSERT INTO match_pauses (match_id, map_ordinal, half, team, leave_pause, started_at, called_by)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`,
+      ).run(id, ordinal, round.half, phase.team, phase.leave ? 1 : 0, phase.by ?? null);
     } else {
       db.prepare(
         `INSERT INTO match_readyups (match_id, map_ordinal, half, started_at, last_unready)
@@ -401,15 +411,16 @@ export function phaseFor(db: DB, matchId: number): LivePhase | null {
 export function pausesFor(db: DB, matchId: number): MatchPause[] {
   const rows = db
     .prepare(
-      `SELECT map_ordinal, half, team, leave_pause, started_at, ended_at
+      `SELECT map_ordinal, half, team, leave_pause, started_at, ended_at, called_by
        FROM match_pauses WHERE match_id = ? ORDER BY id`,
     )
     .all(matchId) as {
       map_ordinal: number; half: number | null; team: 'a' | 'b' | null;
-      leave_pause: number; started_at: string; ended_at: string | null;
+      leave_pause: number; started_at: string; ended_at: string | null; called_by: string | null;
     }[];
   return rows.map((r) => ({
     team: r.team ?? null,
+    calledBy: r.called_by,
     leave: Boolean(r.leave_pause),
     mapOrdinal: r.map_ordinal,
     half: r.half,
