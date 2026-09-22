@@ -198,7 +198,7 @@ export function withTeamDir(d: HudDesign, dir: TeamDir): HudDesign {
   const cur = d.elements.teamColumn ?? {};
   const next: ElementOverride = { ...cur, dir };
   if (dir === 'free' && !cur.slots) {
-    const off = cardOffset({ ...d, elements: { ...d.elements, teamColumn: next } });
+    const off = cardOffset(d);
     next.slots = teamCardRects(d, d.aspect).map((r) => ({ x: Math.round(r.x - off.x), y: Math.round(r.y - off.y) }));
   }
   return { ...d, elements: { ...d.elements, teamColumn: next } };
