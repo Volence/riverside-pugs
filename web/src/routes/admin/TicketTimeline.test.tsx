@@ -89,6 +89,18 @@ describe('TicketTimeline', () => {
     await waitFor(() => expect(reloads).toBe(1));
   });
 
+  it('still asks before showing a removed reporter file\'s name, which the reporter chose', () => {
+    render(<Harness events={[]} messages={[message(7, '2026-09-22T10:02:00.000Z', {
+      channel: 'reporter', content: '', history: [], removed: { at: '2026-09-22T12:00:00.000Z', by: '1', byName: 'Mod', reason: 'gore' },
+      attachments: [{ ...png, stored: false, removed: true }],
+    })]} />);
+    expect(screen.queryByText(/shot\.png/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 file from the reporter' }));
+    const shown = screen.getByText(/shot\.png/).textContent ?? '';
+    expect(shown).toContain('2.0 KB');
+    expect(shown).toContain('abababababababab');
+  });
+
   it('a removed message is a tombstone: who, when, why, the file\'s name, size and hash, and nothing to click', () => {
     render(<Harness events={[]} messages={[message(7, '2026-09-22T10:02:00.000Z', {
       content: '', history: [], removed: { at: '2026-09-22T12:00:00.000Z', by: '1', byName: 'Mod', reason: 'gore' },

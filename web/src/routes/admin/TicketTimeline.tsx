@@ -75,9 +75,13 @@ function File({ ticketId, a }: { ticketId: number; a: TicketAttachment }) {
  * reporter channel NOTHING is rendered, so nothing is fetched, until a
  * moderator asks: a reporter is a stranger, and what a stranger attaches is
  * not put in front of someone who only opened the ticket to read it.
+ *
+ * A removed file is no exception. Its bytes are gone, but its name is still
+ * the reporter's own words, and the click it needed a moment before Remove is
+ * the click it needs after.
  */
 function Files({ ticketId, m }: { ticketId: number; m: TicketMessage }) {
-  const [shown, setShown] = useState(m.channel === 'staff' || m.removed !== null);
+  const [shown, setShown] = useState(m.channel === 'staff');
   if (m.attachments.length === 0) return null;
   if (!shown) {
     const n = m.attachments.length;
