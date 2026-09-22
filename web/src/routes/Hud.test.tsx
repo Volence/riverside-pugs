@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/preact';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
 import { snap, nudge, toUnits } from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
@@ -48,7 +48,17 @@ describe('toUnits', () => {
   });
 });
 
-afterEach(cleanup);
+beforeEach(() => {
+  // Each test starts from a clean slate: a saved design or a leftover hash
+  // from one test must not change what the next one sees.
+  localStorage.clear();
+  location.hash = '';
+});
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  location.hash = '';
+});
 
 /* Shallow on purpose, like routes.test.tsx: happy-dom's canvas 2D context is
  * a stub (getContext returns null), so the draw effect is a no-op here and
@@ -71,5 +81,38 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByText('Your health'));
     expect(screen.queryByText(/select an element/i)).toBeNull();
     expect(screen.getByText('Reset this element')).toBeTruthy();
+  });
+
+  it('shows the preset select and the download button', () => {
+    render(<Hud />);
+    expect(screen.getByRole('combobox', { name: /preset/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /download/i })).toBeTruthy();
+  });
+
+  it('reveals the advanced-only style rows and switches the download button to a zip', () => {
+    render(<Hud />);
+    expect(screen.queryByText('Health bar: healthy')).toBeNull();
+    expect(screen.getByRole('button', { name: /download/i }).textContent).toMatch(/vpk/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced mode/i }));
+
+    expect(screen.getByText('Health bar: healthy')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /download/i }).textContent).toMatch(/zip/i);
+  });
+
+  it('shows a damaged-link message for a hash that will not decode', async () => {
+    location.hash = '#d=garbage';
+    render(<Hud />);
+    expect(await screen.findByText('That link is damaged.')).toBeTruthy();
+  });
+
+  it('imports a design and selects its preset', async () => {
+    render(<Hud />);
+    const file = new File(['{"v":1,"preset":"modern"}'], 'my.hud.json', { type: 'application/json' });
+    fireEvent.change(screen.getByLabelText('Import a HUD design file'), { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect((screen.getByRole('combobox', { name: /preset/i }) as HTMLSelectElement).value).toBe('modern');
+    });
   });
 });

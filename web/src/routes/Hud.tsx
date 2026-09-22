@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel, Tabs } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import {
-  loadDesign, saveDesign, type HudDesign, type ElementOverride,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN,
+  type HudDesign, type ElementOverride, type StyleOverride,
 } from '../hud/design';
-import { screenW, SCREEN_H } from '../hud/units';
+import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
-import { elementRect, teamLayout } from '../hud/build';
+import { elementRect, teamLayout, packHud, type BuildAssets } from '../hud/build';
 import { drawHud, hitTest, visibleElements, type Side } from '../hud/mock';
+import { SLOTS, type StyleSlot } from '../hud/slots';
+import type { Preset } from '../hud/base';
+import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
+import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
 
 /**
  * Convert a pointer position (client coordinates, as PointerEvent carries
@@ -65,8 +71,80 @@ export function nudge(design: HudDesign, id: string, dx: number, dy: number): Hu
   return { ...design, elements: { ...design.elements, [id]: { ...o, x, y } } };
 }
 
+/**
+ * Decode any image the browser can read, fit it to the slot, and keep a PNG
+ * copy for the saved design.
+ */
+export async function decodeUpload(file: Blob, w: number, h: number) {
+  if (file.size > 4_000_000) throw new Error('That image is over 4 MB.');
+  const bmp = await createImageBitmap(file).catch(() => { throw new Error('That file is not an image the browser can read.'); });
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(bmp, 0, 0, w, h);
+  const png = c.toDataURL('image/png').split(',')[1];
+  if (png.length > 1_400_000) throw new Error('That image is too detailed to store. Try a smaller one.');
+  return { rgba: ctx.getImageData(0, 0, w, h).data, png };
+}
+
+async function fontBytes(u: string): Promise<Uint8Array> {
+  return new Uint8Array(await (await fetch(u)).arrayBuffer());
+}
+
+/**
+ * Rebuild `BuildAssets` from a design: decoded pixels for every uploaded
+ * style image, plus the Roboto Condensed files when the design needs them.
+ *
+ * A design's `images[id].w/h` are untrusted metadata: nothing has ever
+ * cross-checked them against the PNG they came with, and a share link or an
+ * imported .json file could claim anything. So every image is redrawn at its
+ * SLOT's real size, never the stored one; that size is what the generator
+ * actually encodes, and it is the only thing here that comes from the
+ * registry rather than from the design itself.
+ */
+export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
+  const assets: BuildAssets = {};
+  const entries = Object.entries(design.images);
+  if (entries.length) {
+    const images: Record<string, Uint8ClampedArray> = {};
+    for (const [id, stored] of entries) {
+      const slot = SLOTS.find((s) => s.id === id);
+      if (!slot) continue;
+      const { w, h } = slot.size;
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error(`${slot.label}: the stored image will not decode`));
+        img.src = `data:image/png;base64,${stored.png}`;
+      });
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, w, h);
+      images[id] = ctx.getImageData(0, 0, w, h).data;
+    }
+    assets.images = images;
+  }
+  if (design.font === 'roboto' || design.preset === 'modern') {
+    assets.fonts = { regular: await fontBytes(regularUrl), bold: await fontBytes(boldUrl) };
+  }
+  return assets;
+}
+
+/** Whether a design holds anything beyond the untouched defaults: decides
+ *  whether loading a share link needs to ask first rather than silently
+ *  overwriting whatever a reader already had going. */
+function hasOverrides(d: HudDesign): boolean {
+  return Object.keys(d.elements).length > 0
+    || Object.keys(d.styles).length > 0
+    || Object.keys(d.images).length > 0
+    || d.preset !== DEFAULT_DESIGN.preset
+    || d.aspect !== DEFAULT_DESIGN.aspect
+    || d.font !== DEFAULT_DESIGN.font
+    || d.advanced !== DEFAULT_DESIGN.advanced;
+}
+
 const BACKDROPS: [Backdrop, string][] = [
-  ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'],
+  ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'], ['shot', 'My screenshot'],
 ];
 
 /** One labelled slider with a live readout, matching Crosshair.tsx's. */
@@ -212,13 +290,99 @@ function ElementControls(
   );
 }
 
+/** design.ts's colours are always the raw four-byte "r g b a" string; these
+ *  just pull enough out of that to drive a colour input and an opacity
+ *  slider, without ever changing the stored representation itself. */
+function hexOf(rgba: string): string {
+  const [r, g, b] = rgba.split(' ').map(Number);
+  return `#${[r, g, b].map((n) => (Number.isFinite(n) ? n : 0).toString(16).padStart(2, '0')).join('')}`;
+}
+function alphaPct(rgba: string): number {
+  const a = Number(rgba.split(' ')[3]);
+  return Math.round(((Number.isFinite(a) ? a : 255) / 255) * 100);
+}
+function withHex(rgba: string, hex: string): string {
+  const a = rgba.split(' ')[3] ?? '255';
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return `${r} ${g} ${b} ${a}`;
+}
+function withAlphaPct(rgba: string, pct: number): string {
+  const [r, g, b] = rgba.split(' ');
+  return `${r} ${g} ${b} ${Math.round((pct / 100) * 255)}`;
+}
+
+/**
+ * One row of the styles panel: a kind, a colour and an opacity slider that
+ * together edit `design.styles[slot.id]`, and for the Image kind a file
+ * input that runs the upload through `decodeUpload`. `slot.defaultColor` is
+ * only ever shown, never written back, until the reader actually touches
+ * something.
+ */
+function StyleRow(
+  { slot, style, error, onChange, onUpload }: {
+    slot: StyleSlot; style: StyleOverride | undefined; error: string | undefined;
+    onChange: (p: Partial<StyleOverride>) => void;
+    onUpload: (file: File) => void;
+  },
+) {
+  const kind = style?.kind ?? 'stock';
+  const color = style?.color ?? slot.defaultColor;
+
+  return (
+    <div class="hud__stylerow">
+      <span class="hud__stylerow-label">{slot.label}</span>
+      <select
+        aria-label={`${slot.label} style`} value={kind}
+        onChange={(e) => onChange({ kind: (e.target as HTMLSelectElement).value as StyleOverride['kind'] })}
+      >
+        <option value="stock">Stock</option>
+        <option value="flat">Flat</option>
+        <option value="rounded">Rounded</option>
+        <option value="image">Image</option>
+      </select>
+      <input
+        type="color" aria-label={`${slot.label} colour`} value={hexOf(color)}
+        onInput={(e) => onChange({ color: withHex(color, (e.target as HTMLInputElement).value) })}
+      />
+      <input
+        type="range" min={0} max={100} step={1} aria-label={`${slot.label} opacity`} value={alphaPct(color)}
+        onInput={(e) => onChange({ color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) })}
+      />
+      {kind === 'image' && (
+        <label class="hud__file hud__file--inline">
+          <span class="btn btn--ghost btn--sm">Choose image</span>
+          <input
+            type="file" accept="image/*" aria-label={`${slot.label} image`}
+            onChange={(e) => {
+              const input = e.target as HTMLInputElement;
+              const f = input.files?.[0];
+              if (f) onUpload(f);
+              input.value = '';
+            }}
+          />
+        </label>
+      )}
+      {error && <p class="error">{error}</p>}
+    </div>
+  );
+}
+
 export default function Hud() {
   const [design, setDesign] = useState<HudDesign>(loadDesign);
   const [side, setSide] = useState<Side>('survivor');
   const [selected, setSelected] = useState<string | null>(null);
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
+  const [status, setStatus] = useState('');
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
 
   const canvas = useRef<HTMLCanvasElement>(null);
+  // The reader's own screenshot for the "My screenshot" backdrop. A ref
+  // rather than state, like Crosshair.tsx's `shot`: it is never rendered
+  // directly, only drawn into the canvas, so a re-render is driven by the
+  // tick counter below instead of by the image itself.
+  const shot = useRef<HTMLImageElement | null>(null);
+  const [imgTick, setImgTick] = useState(0);
+
   // Which element a pointer-down grabbed, and whether it is moving or
   // resizing it; null between drags. A ref rather than state because it
   // changes every pointermove and must never itself trigger a re-render.
@@ -243,9 +407,10 @@ export default function Hud() {
     const h = Math.max(1, Math.round(rect.height));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
 
-    drawBackdrop(ctx, w, h, backdrop, null, null);
+    const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
+    drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
     drawHud(ctx, w, h, design, side, selected);
-  }, [design, side, selected, backdrop]);
+  }, [design, side, selected, backdrop, imgTick]);
 
   // Debounced rather than immediate: a drag calls setDesign on every
   // pointermove, and an undebounced save would run a synchronous
@@ -257,6 +422,35 @@ export default function Hud() {
     const t = setTimeout(() => saveDesign(design), 300);
     return () => clearTimeout(t);
   }, [design]);
+
+  // Mount only: a share link is meant to be consumed once. Re-running this
+  // whenever `design` changes would try to re-import the same link every
+  // time the reader so much as drags an element.
+  useEffect(() => {
+    if (!location.hash.startsWith('#d=')) return;
+    const raw = location.hash.slice(3);
+    let cancelled = false;
+    (async () => {
+      const decoded = await decodeShare(raw);
+      if (cancelled) return;
+      if (!decoded) {
+        setStatus('That link is damaged.');
+      } else {
+        let apply = true;
+        if (hasOverrides(design)) {
+          apply = await confirm({
+            title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
+            confirmLabel: 'Load link', cancelLabel: 'Keep mine',
+          });
+        }
+        if (!cancelled && apply) setDesign(decoded);
+      }
+      if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
+    })();
+    return () => { cancelled = true; };
+    // `design` is deliberately read only from the closure captured at mount:
+    // this effect must run exactly once, not on every subsequent edit.
+  }, []);
 
   const pointerUnits = (e: PointerEvent) => {
     const c = canvas.current!;
@@ -342,7 +536,119 @@ export default function Hud() {
     if (selected) setDesign((d) => nudge(d, selected, delta[0], delta[1]));
   };
 
+  /** Switching preset keeps whatever moves the reader made, but they were
+   *  placed for the other layout's own panel sizes, so a design with any
+   *  moved elements asks first whether to drop them. Either answer switches
+   *  the preset; only whether the moves survive it differs. */
+  const changePreset = async (preset: Preset) => {
+    if (preset === design.preset) return;
+    let resetElements = false;
+    if (Object.keys(design.elements).length > 0) {
+      resetElements = await confirm({
+        title: 'Switching preset keeps your moves but they were placed for the other layout. Reset them as well?',
+        confirmLabel: 'Reset', cancelLabel: 'Keep',
+      });
+    }
+    setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: {} } : {}) }));
+  };
+
+  const patchStyle = (id: string, p: Partial<StyleOverride>) => setDesign((d) => ({
+    ...d, styles: { ...d.styles, [id]: { ...(d.styles[id] ?? { kind: 'stock' }), ...p } },
+  }));
+
+  const onSlotUpload = async (slot: StyleSlot, file: File) => {
+    try {
+      const { png } = await decodeUpload(file, slot.size.w, slot.size.h);
+      setUploadErrors((u) => {
+        if (!(slot.id in u)) return u;
+        const n = { ...u }; delete n[slot.id]; return n;
+      });
+      setDesign((d) => ({
+        ...d,
+        images: { ...d.images, [slot.id]: { w: slot.size.w, h: slot.size.h, png } },
+        styles: { ...d.styles, [slot.id]: { ...(d.styles[slot.id] ?? { kind: 'stock' }), kind: 'image' } },
+      }));
+    } catch (err) {
+      setUploadErrors((u) => ({ ...u, [slot.id]: (err as Error).message }));
+    }
+  };
+
+  const pickShot = (e: Event) => {
+    const f = (e.target as HTMLInputElement).files?.[0];
+    if (!f) return;
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onload = () => {
+      shot.current = img;
+      setBackdrop('shot');
+      setImgTick((n) => n + 1);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
+  const download = async () => {
+    try {
+      const assets = await assetsFor(design);
+      const p = packHud({ ...design, name: safeName(design.name) }, assets);
+      const blob = new Blob([p.bytes], { type: p.mime });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = p.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      setStatus(`Saved ${p.filename}.`);
+    } catch (err) {
+      // The generator's own errors name the file and panel that broke, which
+      // is exactly what is needed to file a useful bug report.
+      setStatus((err as Error).message);
+    }
+  };
+
+  const copyShareLink = async () => {
+    const link = `${location.origin}/hud#d=${await encodeShare(design)}`;
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      setStatus(`Could not copy automatically. Here is the link: ${link}`);
+      return;
+    }
+    setStatus(Object.keys(design.images).length
+      ? 'Copied. Uploaded images are not in a link; use Export to share those.'
+      : 'Copied.');
+  };
+
+  const exportDesign = () => {
+    const blob = new Blob([JSON.stringify(design)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${safeName(design.name)}.hud.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+
+  const importDesign = async (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0];
+    input.value = '';
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const next = validateDesign(JSON.parse(text));
+      setDesign(next);
+      setStatus(`Imported ${next.name}.`);
+    } catch {
+      setStatus('That file is not a HUD design.');
+    }
+  };
+
   const sideElements = visibleElements(side);
+  const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
+  const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
   return (
     <div class="page page--wide">
@@ -351,11 +657,35 @@ export default function Hud() {
       <div class="hud">
         <Panel class="hud__stage">
           <div class="hud__toolbar">
+            <label>
+              Preset{' '}
+              <select
+                value={design.preset}
+                onChange={(e) => { void changePreset((e.target as HTMLSelectElement).value as Preset); }}
+              >
+                <option value="stock">Stock</option>
+                <option value="modern">Modern</option>
+              </select>
+            </label>
+
             <Tabs
               tabs={[{ key: 'survivor', label: 'Survivor' }, { key: 'infected', label: 'Infected' }]}
               active={side}
               onSelect={(k) => { setSide(k as Side); setSelected(null); }}
             />
+
+            <label>
+              Aspect{' '}
+              <select
+                value={design.aspect}
+                onChange={(e) => setDesign((d) => ({ ...d, aspect: (e.target as HTMLSelectElement).value as Aspect }))}
+              >
+                <option value="16:9">16:9</option>
+                <option value="16:10">16:10</option>
+                <option value="4:3">4:3</option>
+              </select>
+            </label>
+
             <label>
               Backdrop{' '}
               <select
@@ -365,6 +695,24 @@ export default function Hud() {
                 {BACKDROPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </label>
+            {backdrop === 'shot' && (
+              <label class="hud__file hud__file--inline">
+                <span class="btn btn--ghost btn--sm">Load screenshot</span>
+                <input type="file" accept="image/*" aria-label="Load a screenshot for the backdrop" onChange={pickShot} />
+              </label>
+            )}
+
+            <label>
+              Font{' '}
+              <select
+                value={design.font} disabled={design.preset === 'modern'}
+                onChange={(e) => setDesign((d) => ({ ...d, font: (e.target as HTMLSelectElement).value as 'preset' | 'roboto' }))}
+              >
+                <option value="preset">Preset default</option>
+                <option value="roboto">Roboto Condensed</option>
+              </select>
+            </label>
+            {design.preset === 'modern' && <span class="muted hud__note">Modern already uses Roboto Condensed.</span>}
           </div>
 
           <canvas
@@ -402,6 +750,72 @@ export default function Hud() {
             : <p class="muted">Select an element on the canvas or in the list below it.</p>}
         </Panel>
       </div>
+
+      <Panel>
+        <h3>Styles</h3>
+        {basicSlots.map((slot) => (
+          <StyleRow
+            key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
+            onChange={(p) => patchStyle(slot.id, p)}
+            onUpload={(f) => { void onSlotUpload(slot, f); }}
+          />
+        ))}
+
+        <button
+          type="button" class="btn btn--ghost btn--sm hud__advtoggle"
+          onClick={() => setDesign((d) => ({ ...d, advanced: !d.advanced }))}
+        >
+          {design.advanced ? 'Turn off advanced mode' : 'Turn on advanced mode'}
+        </button>
+        <p class="muted hud__note">
+          Advanced mode also restyles the health bar colours, the incapacitated and dead panels and the weapon
+          boxes. The game only allows that from a folder you add to gameinfo.txt, so the download becomes a zip
+          with instructions.
+        </p>
+
+        {design.advanced && advancedSlots.map((slot) => (
+          <StyleRow
+            key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
+            onChange={(p) => patchStyle(slot.id, p)}
+            onUpload={(f) => { void onSlotUpload(slot, f); }}
+          />
+        ))}
+      </Panel>
+
+      <Panel>
+        <h3>Save your HUD</h3>
+        <label class="hud__row">
+          <span>Name</span>
+          <input
+            type="text" value={design.name}
+            onInput={(e) => setDesign((d) => ({ ...d, name: (e.target as HTMLInputElement).value }))}
+          />
+          <span />
+        </label>
+
+        <button type="button" class="btn btn--block" onClick={() => { void download(); }}>
+          {design.advanced ? 'Download .zip' : 'Download .vpk'}
+        </button>
+        <p class="muted hud__note">
+          {design.advanced
+            ? 'Unzip it and follow README.txt. It works alongside a crosshair addon.'
+            : <>Put the file in <code>left4dead/addons/</code> and restart the game. It works alongside a crosshair from the Crosshair page. Custom HUDs are allowed on the Riverside servers.</>}
+        </p>
+
+        <div class="hud__sharebar">
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => { void copyShareLink(); }}>Copy share link</button>
+          <button type="button" class="btn btn--ghost btn--sm" onClick={exportDesign}>Export</button>
+          <label class="hud__file hud__file--inline">
+            <span class="btn btn--ghost btn--sm">Import</span>
+            <input
+              type="file" accept="application/json,.json" aria-label="Import a HUD design file"
+              onChange={(e) => { void importDesign(e); }}
+            />
+          </label>
+        </div>
+
+        {status && <p class="muted hud__status">{status}</p>}
+      </Panel>
     </div>
   );
 }

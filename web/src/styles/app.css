@@ -244,6 +244,45 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__note { margin-top: var(--sp-2); }
 .hud__reset { margin-top: var(--sp-4); }
 
+/* The native file input is unstylable across browsers, so it is hidden and
+ * the label around it does the work, same as the crosshair page's xh__file. */
+.hud__file { display: block; margin-top: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
+.hud__file input[type='file'] { display: block; margin-top: var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); }
+.hud__file--inline { margin: 0; }
+.hud__file--inline input[type='file'] { display: none; }
+
+/* One row per style slot: a label, then whichever controls apply, wrapping
+ * on narrow screens rather than forcing a rigid grid that would clip a long
+ * slot label like "Health bar: healthy". */
+.hud__stylerow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-dense);
+}
+.hud__stylerow:last-of-type { border-bottom: none; }
+.hud__stylerow-label { flex: 1 1 12rem; color: var(--text-muted); }
+.hud__stylerow select {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--sp-1) var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-dense);
+}
+.hud__stylerow input[type='color'] { width: 40px; height: 28px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); }
+.hud__stylerow input[type='range'] { width: 100px; accent-color: var(--accent); }
+.hud__stylerow .hud__file { margin: 0; }
+
+.hud__advtoggle { margin-top: var(--sp-3); }
+
+.hud__sharebar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+
+.hud__status { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+
 @media (max-width: 900px) {
   .hud { grid-template-columns: 1fr; }
 }
