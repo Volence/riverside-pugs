@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout, packHud } from './build';
+import { buildHud, elementRect, teamLayout, packHud, buildTrees } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
@@ -394,5 +394,37 @@ describe('packHud', () => {
     expect(s).toContain('riversidehud/pak01_dir.vpk');
     expect(s).toContain('README.txt');
     expect(s).toContain('Game\triversidehud');
+  });
+});
+
+describe('buildTrees', () => {
+  it('returns the same panel file buildHud writes, after every pass but fontPass', () => {
+    const d = design({ elements: { teamColumn: { scale: 1.5, dir: 'column', spacing: 40 } },
+      styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } });
+    const files = buildHud(d);
+    for (const path of ['resource/ui/hud/teammatepanel.res', 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res']) {
+      const written = parseKv(text(files, path)!)[0].value as KvNode[];
+      expect(buildTrees(d)(path), path).toEqual(written);
+    }
+  });
+
+  it('does not need the font files even when the design wants Roboto', () => {
+    const d = design({ font: 'roboto' });
+    expect(() => buildTrees(d)('resource/ui/hud/localplayerpanel.res')).not.toThrow();
+    expect(() => buildHud(d)).toThrow(/font/i);        // buildHud is unchanged
+  });
+
+  it('is memoised per design object and rebuilt for a new one', () => {
+    const d = design({});
+    const a = buildTrees(d)('scripts/hudlayout.res');
+    expect(buildTrees(d)('scripts/hudlayout.res')).toBe(a);
+    const d2 = { ...d, elements: { chat: { x: 5, y: 5 } } };
+    expect(buildTrees(d2)('scripts/hudlayout.res')).not.toBe(a);
+  });
+
+  it('parses a file it has not been asked for before from the same design', () => {
+    const d = design({});
+    const t = buildTrees(d)('resource/ui/hud/hunterhealth.res');
+    expect(kvFind(t, ['HealthNumber'])).toBeDefined();
   });
 });

@@ -442,6 +442,36 @@ export function packHud(design: HudDesign, assets: BuildAssets = {}) {
   return { filename: `${design.name}.zip`, mime: 'application/zip', bytes: zip };
 }
 
+/**
+ * The generator's own view of every file, for the preview.
+ *
+ * The canvas draws a panel's insides by walking the file the download would
+ * contain, so it can never disagree with it. Running the passes per frame
+ * would be wasteful, and designs are replaced rather than mutated on every
+ * edit, so one Work per design object is enough: a WeakMap keyed on the
+ * design gives exactly that, and lets an abandoned design be collected.
+ *
+ * fontPass is skipped. It only renames faces and demands the ttf bytes, and
+ * the preview draws every label in Roboto Condensed regardless. buildHud is
+ * unchanged and still runs all six passes.
+ */
+const BUILD_TREES = new WeakMap<HudDesign, Work>();
+
+export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
+  let work = BUILD_TREES.get(design);
+  if (!work) {
+    work = new Work(design.preset);
+    const discard: VpkFile[] = [];
+    layoutPass(work, design);
+    teamPass(work, design);
+    scalePass(work, design);
+    stylePass(work, design, {}, discard);
+    BUILD_TREES.set(design, work);
+  }
+  const w = work;
+  return (path) => w.tree(path);
+}
+
 export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const el = elementById(id);
   if (!el) throw new Error(`No HUD element ${id}`);
