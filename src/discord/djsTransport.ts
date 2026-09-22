@@ -20,6 +20,7 @@ const STYLE = { primary: 1, secondary: 2, success: 3, danger: 4 } as const;
 const UNKNOWN_MESSAGE = 10008;
 const UNKNOWN_CHANNEL = 10003;
 const UNKNOWN_MEMBER = 10007;
+const UNKNOWN_BAN = 10026;
 
 function toButton(b: Button) {
   return b.kind === 'link'
@@ -127,7 +128,7 @@ function picked(user: User, member: unknown): PickedMember {
   };
 }
 
-const codeOf = (err: unknown): number | undefined => (err as { code?: number }).code;
+const codeOf = (err: unknown): number | undefined => (err as { code?: unknown } | null)?.code as number | undefined;
 
 export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTransport & { destroy(): Promise<void> }> {
   const client = new Client({
@@ -491,10 +492,12 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     async timeout(userId, minutes, reason) {
       try {
         const member = await guild.members.fetch(userId);
-        // discord.js checks moderatable before calling Discord and throws its
-        // own error, not a DiscordAPIError, for an Administrator or a member
-        // above the bot. Ask first so that reads as the hierarchy refusal.
-        // GuildMember.moderatable :1897 (getter).
+        // Ask first so an obvious hierarchy refusal (an Administrator, the
+        // owner, or a member whose top role outranks the bot's) needs no API
+        // call: without this check Discord would still refuse with 50013,
+        // which refusal() maps to the same 'hierarchy' answer. moderatable is
+        // also false when the bot itself lacks the Moderate Members
+        // permission. GuildMember.moderatable :1897 (getter).
         if (!member.moderatable) return { ok: false, why: 'hierarchy', detail: 'not moderatable' };
         await member.timeout(minutes * 60_000, reason);                       // GuildMember.timeout :1912
         return { ok: true };
@@ -505,11 +508,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         const member = await guild.members.fetch(userId);
         await member.timeout(null, reason);                                   // GuildMember.timeout :1912
         return { ok: true };
-      } catch (err) {
-        // Someone who left the server has no timeout to remove.
-        if (codeOf(err) === UNKNOWN_MEMBER) return { ok: true };
-        return refusal(err);
-      }
+      } catch (err) { return refusal(err); }
     },
     async ban(userId, reason) {
       try {
@@ -523,7 +522,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         await guild.members.unban(userId, reason);                            // GuildMemberManager.unban :5136
         return { ok: true };
       } catch (err) {
-        if (codeOf(err) === 10026) return { ok: true };
+        if (codeOf(err) === UNKNOWN_BAN) return { ok: true };
         return refusal(err);
       }
     },
