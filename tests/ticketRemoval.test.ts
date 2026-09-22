@@ -250,6 +250,9 @@ describe('Remove from ticket, the Discord command', () => {
   const run = (userId: string, channelId: string, messageId: string, m: () => TicketMirror | null = () => mirror) =>
     handleRemoveCommand({ db, attachmentsDir: dir, mirror: m }, { kind: 'message_command', name: REMOVE_COMMAND, userId, userName: 'x', channelId, messageId });
   const said = (r: { payload: { content?: string } }) => r.payload.content ?? '';
+  const auditRows = () => (db.prepare('SELECT admin_id, action, target, detail FROM admin_actions ORDER BY id')
+    .all() as { admin_id: string; action: string; target: string; detail: string }[])
+    .map((a) => ({ ...a, detail: JSON.parse(a.detail) as object }));
 
   it('is for staff, inside a ticket thread they can see, and answers privately', async () => {
     const open = await ticketWithThread(ACCUSED);
@@ -338,27 +341,76 @@ describe('Remove from ticket, the Discord command', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_events WHERE kind = 'removed'").get()).toEqual({ n: 0 });
   });
 
-  it('a Discord deletion that fails is not audited as one that happened', async () => {
-    const { thread } = await ticketWithThread(ACCUSED);
+  /** A message written while the bot was away, which the site never copied. */
+  async function unmirrored(thread: string) {
     mirror.start();
     await mirror.idle();
     mirror.stop();
     const missed = t.userPost(thread, { authorId: '555', content: HORRIBLE }, false);
     mirror = newMirror();
-    // Archived and locked, and Discord refuses to put it back: the delete
-    // itself works, the tidying up after it does not.
+    return missed;
+  }
+  /** A closed ticket's thread, archived with the row saying locked, and a
+   *  Discord that refuses to archive it again. Everything up to and including
+   *  the delete works; only the tidying up after it fails. */
+  async function refusesReArchiving(thread: string) {
     setThreadLocked(db, threadByDiscordId(db, thread)!.id, true);
+    await t.threads.setLocked(thread, true);
     await t.threads.setArchived(thread, true);
     const real = t.threads.setArchived;
     t.threads.setArchived = async (id, archived) => {
       if (archived) throw new Error('discord down');
       await real(id, archived);
     };
+  }
+
+  it('a delete Discord refuses is not audited as one that happened', async () => {
+    const { thread } = await ticketWithThread(ACCUSED);
+    const missed = await unmirrored(thread);
+    // The delete itself, refused. Stubbed rather than driven through
+    // failThreadOps, which the fake's remove() does not consume.
+    const real = t.remove.bind(t);
+    t.remove = async (channelId, messageId) => {
+      if (messageId === missed.id) throw new Error('discord down');
+      await real(channelId, messageId);
+    };
 
     expect(said(await run('906', thread, missed.id))).toMatch(/would not delete/i);
 
+    expect(t.inbox.find((m) => m.id === missed.id)!.deleted).toBe(false);
     expect(db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get()).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM ticket_events WHERE kind = 'removed'").get()).toEqual({ n: 0 });
+  });
+
+  /** The audit records what happened to the MESSAGE. A thread left unarchived
+   *  is a tidiness problem the reconciler's next pass repairs. */
+  it('records the deletion when only the tidying up afterwards failed', async () => {
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    const missed = await unmirrored(thread);
+    await refusesReArchiving(thread);
+
+    expect(said(await run('906', thread, missed.id))).toMatch(/^Deleted\./);
+
+    expect(t.inbox.find((m) => m.id === missed.id)!.deleted).toBe(true);
+    expect(auditRows()).toEqual([{ admin_id: MOD, action: 'ticket_remove', target: String(id), detail: { mirrored: false, via: 'discord' } }]);
+    expect(db.prepare("SELECT detail FROM ticket_events WHERE ticket_id = ? AND kind = 'removed'").get(id)).toEqual({ detail: '{"mirrored":false}' });
+    // Left open, for the reconciler to close again.
+    expect(t.threadsById.get(thread)).toMatchObject({ archived: false, locked: true });
+  });
+
+  it('counts the Discord half as done for a mirrored message when only the tidying up failed', async () => {
+    const { id, thread } = await ticketWithThread(ACCUSED);
+    mirror.start();
+    const { discordId, row } = await horrible(thread);
+    await refusesReArchiving(thread);
+
+    expect(said(await run('906', thread, discordId))).toMatch(/the message is deleted here/);
+
+    expect(t.inbox.find((m) => m.id === discordId)!.deleted).toBe(true);
+    expect(messageById(db, row.id)!.discord_gone).toBe(1);
+    expect(auditRows()).toEqual([
+      { admin_id: MOD, action: 'ticket_remove', target: String(id), detail: { messageId: row.id, files: 1, mirrored: true, via: 'discord' } },
+    ]);
   });
 });
 

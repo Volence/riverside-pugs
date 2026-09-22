@@ -178,9 +178,15 @@ export class TicketMirror {
 
   /**
    * Delete one message in Discord, on the reconciler's chain so that it
-   * cannot interleave with a pass working on the same thread. Throws what
-   * Discord throws, except for what is not a failure: the thread or the
-   * message already being gone.
+   * cannot interleave with a pass working on the same thread.
+   *
+   * It rejects when, and only when, the message is still there: the delete
+   * itself failed, or the thread could not be opened to do it in. The thread
+   * or the message already being gone is not a failure, and neither is
+   * failing to archive the thread again afterwards, because by then the
+   * message is irreversibly gone and what is left is untidy rather than
+   * wrong. Whoever waits on this decides whether a deletion happened, so
+   * that distinction is the whole contract.
    */
   removeInDiscord(threadId: string, discordMessageId: string): Promise<void> {
     const serialise = this.deps.serialise ?? ((fn: () => Promise<void>) => fn());
@@ -200,7 +206,16 @@ export class TicketMirror {
       // In a finally, as the reconciler does it: a closed ticket's thread must
       // not be left open because the delete failed. The row says what it goes
       // back to; it was never unlocked, so only the archiving is undone.
-      if (threadByDiscordId(db, threadId)?.locked === 1) await transport.threads.setArchived(threadId, true);
+      //
+      // Swallowed on purpose. The message is already gone by here, and a
+      // thread left unarchived is repaired by the reconciler's next pass
+      // (syncLock locks and archives a closed ticket's thread). Letting this
+      // out would report an irreversible deletion as one that never happened.
+      try {
+        if (threadByDiscordId(db, threadId)?.locked === 1) await transport.threads.setArchived(threadId, true);
+      } catch (err) {
+        console.error('[discord] could not archive a ticket thread again after deleting a message in it; the next reconcile pass puts it back:', err instanceof Error ? err.message : err);
+      }
     }
   }
 
