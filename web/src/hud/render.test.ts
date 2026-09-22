@@ -376,6 +376,39 @@ describe('the teammate card states', () => {
     expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
   });
 
+  // The game draws the icon glyphs inside the Items label and nowhere else. A
+  // stand-in taller than its label (Modern: a 16-tall icon in a 13-tall label
+  // at y 10, right under the Name at y 2..13) would otherwise spill up over
+  // the name text, so the stand-ins are clipped to the label rect.
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`draws the item stand-ins only inside the Items label: ${preset}`, () => {
+      // Stock at icon size 36, whose label grows to 100 x 36 so both icons still fit; Modern as it ships.
+      const d = design({ preset, children: preset === 'stock' ? { teamColumn: { Items: { fontSize: 36 } } } : {} });
+      const rects = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1);
+      const r = rects.find((c) => c.name === 'Items')!;
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+      const first = calls.findIndex((c) => c.m === 'strokeRect' && c.a[0] === r.x);
+      expect(first, preset).toBeGreaterThan(0);
+      const clip = calls.slice(0, first).map((c) => c.m).lastIndexOf('clip');
+      expect(clip, preset).toBeGreaterThan(0);
+      expect(calls[clip - 1].m).toBe('rect');
+      expect(calls[clip - 1].a).toEqual([r.x, r.y, r.w, r.h]);
+      // The clip is dropped again before the next child draws.
+      expect(calls.slice(first).findIndex((c) => c.m === 'restore')).toBeGreaterThan(0);
+      if (preset === 'stock') {
+        // Both stand-ins, the medkit and the pill bottle beside it, fit inside the widened label.
+        const pill = calls.slice(first).find((c) => c.m === 'strokeRect' && c.a[0] !== r.x)!;
+        expect((pill.a[0] as number) + (pill.a[2] as number)).toBeLessThanOrEqual(r.x + r.w);
+      } else {
+        // Unclipped, the icon row would start above the label, over the Name text.
+        const name = rects.find((c) => c.name === 'Name')!;
+        expect(calls[first].a[1] as number).toBeLessThan(r.y);
+        expect(r.y).toBeGreaterThan(name.y + name.h / 2);
+      }
+    });
+  }
+
   it('keeps drawing the card background child in Down and Dead, since the spec says it is visible in every state', () => {
     const flat = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat', color: '255 0 0 255' } } });
     for (const state of ['down', 'dead'] as const) {

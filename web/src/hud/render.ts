@@ -383,12 +383,18 @@ function sampleText(n: KvNode, opts: DrawOpts): string {
  * The teammate's item icons are glyphs in a Valve icon font the page cannot
  * ship, so the preview draws two neutral outlines in their place, a medkit
  * and a pill bottle, each one icon tall at the label's font size: enough to
- * see where the row sits and how big it is.
+ * see where the row sits and how big it is. The game draws the glyphs inside
+ * the label and nowhere else, so the stand-ins are clipped to the label's
+ * rect: an icon taller than its label (Modern's 16-tall icons in a 13-tall
+ * label just under the name) would otherwise spill over the text beside it.
  */
 function drawItemStandIns(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number) {
   const s = fontFace(design, kvGet(n, 'font') ?? '').tall * k;
   const y = r.y + (r.h - s) / 2;
   ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
   ctx.strokeStyle = 'rgba(255,255,255,0.8)';
   ctx.lineWidth = Math.max(1, s / 12);
   ctx.strokeRect(r.x, y, s, s);                                     // medkit
