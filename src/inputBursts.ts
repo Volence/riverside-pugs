@@ -2,7 +2,7 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import {
   DEFAULT_THRESHOLDS, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
-  encodeIntervals, holdAnnotation, holdStats, isWheel, matchDetections,
+  encodeIntervals, holdAnnotation, holdStats, isWheel, matchDetections, mostlySteady, STEADY_TAPS,
   type HoldAnnotation, type HoldStats, type Thresholds,
 } from './inputStats.js';
 
@@ -111,10 +111,14 @@ interface GroupRow {
  * server tick, and were captured before ghosts were excluded, so a pounce
  * burst among them may be spawn mashing.
  */
-function evidenceNote(evidence: readonly { wire: number; holds: string | null }[]): string {
+function evidenceNote(
+  evidence: readonly { wire: number; holds: string | null; intervals: readonly number[] }[],
+): string {
   const all: number[] = [];
   for (const e of evidence) all.push(...(e.holds ? decodeIntervals(e.holds, MAX_HOLDS) ?? [] : []));
-  const note: string = holdAnnotation(all);
+  let note: string = holdAnnotation(all);
+  // Wheel binds are legal, a fixed-rate tapper is not: see STEADY_TAPS.
+  if (note === 'wheel-like' && mostlySteady(evidence.map((e) => e.intervals))) note = STEADY_TAPS;
   return evidence.some((e) => e.wire === 1) ? `${note}, plugin 0.1.0 capture` : note;
 }
 

@@ -6,7 +6,7 @@ interface Row {
   severity: string; at: string; hits: number; note: string;
 }
 
-import { isWheel } from '../../inputStats.js';
+import { STEADY_TAPS, isWheel } from '../../inputStats.js';
 
 /** Input-timing detections. A row exists only once a signature has repeated
  *  across separate bursts in one match, so each one is already a pattern and
@@ -28,7 +28,9 @@ export const inputAdapter: TimelineAdapter = {
         ? `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}, one-tick presses of a `
           + 'scroll wheel bind, which is allowed. Kept for the record, not a flag.'
         : `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}`
-          + `${r.note ? `, holds look ${r.note}` : ''}. Button timing, to be read beside the replay.`,
+          + `${r.note.startsWith(STEADY_TAPS)
+            ? ', one-tick presses at a fixed rate no hand-spun scroll wheel holds (a rapid-fire bind or mouse auto-fire)'
+            : r.note ? `, holds look ${r.note}` : ''}. Button timing, to be read beside the replay.`,
       matchId: r.match_id,
       replay: null,
       ref: { type: 'input_detection', id: r.id },

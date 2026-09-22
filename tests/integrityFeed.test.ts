@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { ICY_WHEEL } from './fixtures/wheelSamples.js';
 import { openDb, type DB } from '../src/db.js';
 import { captureHealth, recentFlagFeed, recordIntegrityFlag } from '../src/integrityFlags.js';
 import { recordInputBurst } from '../src/inputBursts.js';
@@ -58,8 +59,8 @@ describe('recentFlagFeed', () => {
     for (let i = 0; i < 2; i++) {
       recordInputBurst(db, {
         matchId: 2, serverId: 1, steamid: A, kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0,
-        serverTick: 1, clientTick: 0, intervals: Array.from({ length: 50 }, (_, j) => (j % 3 === 0 ? 7 : 8)),
-        holds: Array.from({ length: 51 }, () => 1), wire: 2,
+        serverTick: 1, clientTick: 0, intervals: ICY_WHEEL,
+        holds: Array.from({ length: ICY_WHEEL.length + 1 }, () => 1), wire: 2,
       });
     }
     expect((db.prepare('SELECT note FROM input_detections').get() as { note: string }).note).toBe('wheel-like');

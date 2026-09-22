@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { ICY_WHEEL, BELLINGHAM_TAPS } from './fixtures/wheelSamples.js';
 import { openDb, type DB } from '../src/db.js';
 import {
   detectionsForPlayer, inputThresholds, recordInputBurst, rerunSignatures,
 } from '../src/inputBursts.js';
-import { DEFAULT_THRESHOLDS, POUNCE_REPEATS, decodeIntervals } from '../src/inputStats.js';
+import { DEFAULT_THRESHOLDS, POUNCE_REPEATS, decodeIntervals, isWheel } from '../src/inputStats.js';
 import { setSetting } from '../src/settings.js';
 
 const A = '76561198030413993';
@@ -121,8 +122,10 @@ describe('pistol_rate', () => {
 
 describe('hold annotation', () => {
   const held = Array.from({ length: 50 }, (_, i) => (i % 3 === 0 ? 7 : 8));
-  const fire = (holds: number[] | null) =>
-    burst({ kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0, intervals: held, holds, wire: 2 });
+  const fire = (holds: number[] | null, intervals: number[] = held) =>
+    burst({ kind: 'fire', weapon: 'weapon_pistol', airPresses: 0, groundTicks: 0, intervals, holds, wire: 2 });
+  /** One-tick holds on a real wheel spin: what a legal wheel bind sends. */
+  const wheelSpin = () => fire(Array.from({ length: ICY_WHEEL.length + 1 }, () => 1), ICY_WHEEL);
 
   it('stores the holds and gives them back decoded, with their stats', () => {
     const holds = Array.from({ length: 51 }, () => 1);
@@ -139,9 +142,8 @@ describe('hold annotation', () => {
   // and changes neither whether one exists nor its severity: whether a wheel
   // bind is legal is a league ruling, not something a threshold decides.
   it('annotates the detection without changing it', () => {
-    const wheel = Array.from({ length: 51 }, () => 1);
-    recordInputBurst(db, fire(wheel));
-    const second = recordInputBurst(db, fire(wheel));
+    recordInputBurst(db, wheelSpin());
+    const second = recordInputBurst(db, wheelSpin());
     expect(second.detections).toEqual(['pistol_rate']);
     expect(second.created).toEqual([{ signature: 'pistol_rate', note: 'wheel-like' }]);
     expect(detectionsForPlayer(db, A)[0]).toMatchObject({ severity: 'low', note: 'wheel-like', hits: 2 });
@@ -150,9 +152,8 @@ describe('hold annotation', () => {
   // Wheel binds are legal, so a wheel-like detection is not announced. If
   // later bursts stop looking like a wheel, it becomes news for the first time.
   it('reports a detection again once it stops looking like a scroll wheel', () => {
-    const wheel = Array.from({ length: 51 }, () => 1);
-    recordInputBurst(db, fire(wheel));
-    recordInputBurst(db, fire(wheel));
+    recordInputBurst(db, wheelSpin());
+    recordInputBurst(db, wheelSpin());
     const fixed = Array.from({ length: 51 }, (_, i) => 3 + (i % 2));
     const more = [recordInputBurst(db, fire(fixed)), recordInputBurst(db, fire(fixed)), recordInputBurst(db, fire(fixed))];
     const note = detectionsForPlayer(db, A)[0].note;
@@ -160,6 +161,16 @@ describe('hold annotation', () => {
     expect(more.flatMap((r) => r.created)).toEqual([{ signature: 'pistol_rate', note: more.find((r) => r.created.length)!.created[0].note }]);
     // Once only: the row is no longer wheel-like, so a further burst is quiet.
     expect(recordInputBurst(db, fire(fixed)).created).toEqual([]);
+  });
+
+  // A wheel bind is legal; one-tick taps at a rate no hand-spun wheel holds
+  // are not. Same holds, different rhythm, opposite answers.
+  it('calls one-tick taps at a fixed rate steady-taps, which stays a flag', () => {
+    const taps = fire(Array.from({ length: BELLINGHAM_TAPS.length + 1 }, () => 1), BELLINGHAM_TAPS);
+    recordInputBurst(db, taps);
+    const second = recordInputBurst(db, taps);
+    expect(second.created).toEqual([{ signature: 'pistol_rate', note: 'steady-taps' }]);
+    expect(isWheel(detectionsForPlayer(db, A)[0].note)).toBe(false);
   });
 
   it('tells a scripted fixed hold from a hand', () => {
