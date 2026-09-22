@@ -102,7 +102,7 @@ describe('a ticket about a Discord-only person', () => {
     ]);
   });
 
-  it('blanks the reason and the ticket id of a sanction tied to a restricted ticket the viewer is not on', () => {
+  it('blanks the reason, the ticket id and the issuer of a sanction tied to a restricted ticket the viewer is not on', () => {
     const MOD2 = '76561199000000404';
     upsertPlayer(db, { steamid: MOD2, name: 'mod2', avatar: null }, []);
     activatePlayer(db, MOD2);
@@ -110,10 +110,12 @@ describe('a ticket about a Discord-only person', () => {
     const restrictedTicketId = Number(db.prepare(
       "INSERT INTO tickets (target_discord_id, target_name, restricted, status, created_at) VALUES (?, 'Lurky', 1, 'closed', '2026-09-22T00:00:00Z')",
     ).run(LURKER).lastInsertRowid);
+    // Also lifted, by MOD, so the test proves liftedBy is really blanked
+    // rather than merely already null.
     db.prepare(
-      `INSERT INTO discord_sanctions (discord_id, kind, until, reason, ticket_id, created_by, created_at)
-       VALUES (?, 'ban', NULL, 'secret staff-only reason', ?, ?, '2026-09-22T00:00:00Z')`,
-    ).run(LURKER, restrictedTicketId, MOD);
+      `INSERT INTO discord_sanctions (discord_id, kind, until, reason, ticket_id, created_by, created_at, lifted_by, lifted_at)
+       VALUES (?, 'ban', NULL, 'secret staff-only reason', ?, ?, '2026-09-22T00:00:00Z', ?, '2026-09-22T01:00:00Z')`,
+    ).run(LURKER, restrictedTicketId, MOD, MOD);
     // MOD2 opens the original, visible ticket about the same Discord member;
     // sanctionsFor still hands back the row from the restricted ticket, so
     // the detail must redact it rather than drop it.
@@ -123,5 +125,8 @@ describe('a ticket about a Discord-only person', () => {
     expect(redacted.ticketId).toBeNull();
     expect(redacted.reason).not.toBe('secret staff-only reason');
     expect(redacted.reason).not.toBe('');
+    expect(redacted.createdBy).toBe('');
+    expect(redacted.createdByName).toBeNull();
+    expect(redacted.liftedBy).toBeNull();
   });
 });

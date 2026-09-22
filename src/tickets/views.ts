@@ -67,14 +67,16 @@ export function ticketsAbout(db: DB, targetId: string, viewer: string): TicketSu
  * viewer reading one visible ticket about them can be handed a row that
  * belongs to a different, restricted ticket they are not on. That row keeps
  * who is sanctioned, since it is the same Discord id this ticket is already
- * about, but loses the free text and the ticket link, the same rule
- * banRedaction.ts applies to a ban from a restricted ticket.
+ * about, but loses the free text, the ticket link and the issuer, the same
+ * rule banRedaction.ts applies to a ban from a restricted ticket: '' stands
+ * in for createdBy because SanctionRow types it as string, not string | null,
+ * matching redactBan's own reasoning for BanRow.
  */
 function redactDiscordSanction(db: DB, s: SanctionRow, viewer: string): SanctionRow {
   if (s.ticketId === null) return s;
   const t = getTicketRow(db, s.ticketId);
   if (t && canSeeTicket(db, t, viewer)) return s;
-  return { ...s, reason: WITHHELD_REASON, ticketId: null };
+  return { ...s, reason: WITHHELD_REASON, ticketId: null, createdBy: '', createdByName: null, liftedBy: null };
 }
 
 export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId?: string | null } = {}) {
