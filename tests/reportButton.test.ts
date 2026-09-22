@@ -620,8 +620,16 @@ describe('wiring', () => {
     expect(routeOf('t:1:claim')).toBe('t:');
   });
 
-  it('keeps every custom id inside Discord\'s 100 characters', () => {
-    expect(`rp:pick:999999:76561199000000101`.length).toBeLessThanOrEqual(100);
+  it('keeps a real candidate button custom id inside Discord\'s 100 characters', async () => {
+    // Built through hold()'s own template via the real modal flow, rather
+    // than a hand-typed literal: a hardcoded id here is a fixed, short
+    // string that can never fail, so it would never catch the template
+    // itself growing (a longer prefix, an extra field) past the limit.
+    seedPlayers(db); linkAll(db);
+    const r = await submit(ME, { who: OTHER, name: 'bob', reason: 'cheating', details: 'walls' });
+    const buttons = r.payload.components[0] as { customId: string }[];
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const b of buttons) expect(b.customId.length).toBeLessThanOrEqual(100);
   });
 
   it('composes the two modal predicates without either swallowing the other', () => {
