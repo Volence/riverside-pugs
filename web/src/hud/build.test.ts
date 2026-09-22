@@ -75,6 +75,16 @@ describe('buildHud, childPass', () => {
     expect(kvGet(items, 'tall')).toBe('22');
   });
 
+  it('widens the item icon row with the icon size, so the icons are not cut off on the right', () => {
+    // Stock Items is 50 wide at an 18-tall font: at 36 it is 50 * 36 / 18 = 100 wide.
+    const items = kvFind(tree(buildHud(design({ children: kids({ Items: { fontSize: 36 } }) })), CARD_FILE), ['Items'])!;
+    expect([kvGet(items, 'wide'), kvGet(items, 'tall')]).toEqual(['100', '36']);
+    // Modern: 50 wide at a 16-tall font, 20 gives 63 (62.5 rounded).
+    const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+    const modern = kvFind(tree(buildHud(design({ preset: 'modern', children: kids({ Items: { fontSize: 20 } }) }), { fonts }), CARD_FILE, 'modern'), ['Items'])!;
+    expect([kvGet(modern, 'wide'), kvGet(modern, 'tall')]).toEqual(['63', '20']);
+  });
+
   // childPass writes unscaled numbers before scalePass, which multiplies them with the rest of the file.
   it('lets the element scale multiply the edited values', () => {
     const files = buildHud(design({ elements: { teamColumn: { scale: 1.5 } }, children: kids({ Name: { x: 20, fontSize: 14 } }) }));

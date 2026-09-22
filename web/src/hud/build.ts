@@ -172,11 +172,18 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
       : block.value.find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
     if (!leaf) throw new Error(`${file}: ${def.name} has no font`);
     const size = Math.round(o.fontSize);
+    // Read before the leaf is repointed: the size the file's own font draws at.
+    const baseSize = kvFind(work.tree(SCHEME), ['Fonts', leaf.value as string, '1']);
+    const baseTall = baseSize ? num(kvGet(baseSize, 'tall')) : 0;
     useFontCopy(work, leaf, `t${size}`, () => size);
     // The item icons are glyphs in their font with no size of their own: the
-    // label's tall follows the font so the icons are not cut off and the
-    // fitted card grows with them.
-    if (def.box === 'none') kvSet(block, 'tall', String(size));
+    // label's tall follows the font, and its wide grows in step (stock's 50 at
+    // an 18-tall font is 100 at 36), so the icons are not cut off on either
+    // side and the fitted card grows with them.
+    if (def.box === 'none') {
+      kvSet(block, 'tall', String(size));
+      if (baseTall > 0) kvSet(block, 'wide', String(Math.round(num(kvGet(block, 'wide')) * size / baseTall)));
+    }
   }
 }
 
