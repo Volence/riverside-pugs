@@ -105,15 +105,31 @@ function teamCards(design: HudDesign, id: string, r: Rect, k: number): CardRect[
   }));
 }
 
+/** The real container clips its children (teamPass has to grow it to cover
+ *  the last panel for exactly this reason), so a spacing wide enough to run
+ *  a card past the element's own rect must be truncated the same way here,
+ *  or a player could see a card the real HUD would never show and click
+ *  right through it. */
+function clipToRect(ctx: CanvasRenderingContext2D, r: Rect, draw: () => void) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+  draw();
+  ctx.restore();
+}
+
 function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
-  for (const [i, c] of teamCards(design, 'teamColumn', r, k).entries()) {
-    panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
-    ctx.fillStyle = '#3a3a3a';
-    ctx.fillRect(c.x + 4, c.y + 4, c.h * 0.5, c.h * 0.5);
-    text(ctx, TEAMMATE_NAMES[i], c.x + 4, c.y + c.h * 0.5 + 16, 11, '#ffffff');
-    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(c.x + 4, c.y + c.h - 10, c.w - 8, 5);
-    ctx.fillStyle = '#4cd964'; ctx.fillRect(c.x + 4, c.y + c.h - 10, (c.w - 8) * 0.6, 5);
-  }
+  clipToRect(ctx, r, () => {
+    for (const [i, c] of teamCards(design, 'teamColumn', r, k).entries()) {
+      panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(c.x + 4, c.y + 4, c.h * 0.5, c.h * 0.5);
+      text(ctx, TEAMMATE_NAMES[i], c.x + 4, c.y + c.h * 0.5 + 16, 11, '#ffffff');
+      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(c.x + 4, c.y + c.h - 10, c.w - 8, 5);
+      ctx.fillStyle = '#4cd964'; ctx.fillRect(c.x + 4, c.y + c.h - 10, (c.w - 8) * 0.6, 5);
+    }
+  });
 }
 
 function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect) {
@@ -165,9 +181,11 @@ function paintXhair(ctx: CanvasRenderingContext2D, r: Rect) {
 }
 
 function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
-  for (const c of teamCards(design, 'infectedRow', r, k)) {
-    panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
-  }
+  clipToRect(ctx, r, () => {
+    for (const c of teamCards(design, 'infectedRow', r, k)) {
+      panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
+    }
+  });
 }
 
 function paintSiHealth(ctx: CanvasRenderingContext2D, r: Rect) {
