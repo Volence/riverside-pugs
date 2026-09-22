@@ -58,19 +58,22 @@ describe('forum access', () => {
     expect(access()).toEqual(['904', '907']);
   });
 
-  it('keeps a new member of staff out until every post about them is really gone', async () => {
+  it('keeps a member of staff out while a ticket about them is open, and until its post is really gone', async () => {
     sync.start();
     const id = (fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: '' }, { adminSteamIds: [ADMIN] }) as { ticketId: number }).ticketId;
     await sync.idle();
     const post = staffThread(db, id)!.thread_id;
-    // Two promotions in one signal: the accused of a forum post that is still
-    // standing, and somebody with no post about them. The exact set is then
-    // the proof, since it only holds if the access sync really ran.
+    // Two promotions in one signal: the accused of an open ticket, and
+    // somebody with no ticket about them.
     db.prepare('UPDATE players SET is_mod = 1 WHERE steamid IN (?, ?)').run(IDS[5], IDS[1]);
-    // Discord refuses the deletion twice: once in the sweep, once for the ticket.
-    t.failThreadOps = 2;
     publishTicketSignal({ kind: 'staff' });
     await sync.idle();
+    expect(t.threadsById.get(post)!.deleted).toBe(false);
+    expect(access()).toEqual(['901', '906', '907']);
+    db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(id);
+    // Discord refuses the deletion twice: once in the sweep, once for the ticket.
+    t.failThreadOps = 2;
+    await sync.reconcile();
     expect(t.threadsById.get(post)!.deleted).toBe(false);
     expect(access()).toEqual(['901', '906', '907']);
     await sync.reconcile();

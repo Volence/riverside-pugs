@@ -169,43 +169,25 @@ describe('forum posts that must not exist', () => {
     expect(t.live().filter((m) => m.channelId === post)).toHaveLength(1);
   });
 
-  it('making the accused staff deletes every forum post about them, closed tickets included', async () => {
+  it('making the accused staff deletes the post of their closed ticket and keeps the open one', async () => {
     const closed = file(IDS[0], IDS[5]);
     await sync.idle();
     closeTicket(db, closed, MOD, 'no_action', '');
     await sync.idle();
     const open = file(IDS[0], IDS[5], 'cheating');
     await sync.idle();
-    const posts = [staffThread(db, closed)!.thread_id, staffThread(db, open)!.thread_id];
-    // What POST /api/admin/players/:id/mod does.
+    const closedPost = staffThread(db, closed)!.thread_id;
+    const openPost = staffThread(db, open)!.thread_id;
     db.transaction(() => {
       db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[5]);
       holdFeedAbout(db, IDS[5]);
     })();
     publishTicketSignal({ kind: 'staff' });
     await sync.idle();
-    expect(posts.map((p) => t.threadsById.get(p)!.deleted)).toEqual([true, true]);
-    expect(t.threadsIn('forum1')).toEqual([]);
-    expect(staffThread(db, open)).toBeUndefined();
-    expect(staffThread(db, closed)).toBeUndefined();
-  });
-
-  it('a normal ticket about staff has no Discord thread yet', async () => {
-    // Nobody to give it to: the only admin is the accused.
-    const id = file(IDS[0], IDS[5]);
-    await sync.idle();
-    const post = staffThread(db, id)!.thread_id;
-    db.prepare('UPDATE players SET is_admin = 0 WHERE steamid = ?').run(ADMIN);
-    db.transaction(() => {
-      db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(IDS[5]);
-      holdFeedAbout(db, IDS[5]);
-    })();
-    publishTicketSignal({ kind: 'staff' });
-    await sync.idle();
-    expect(t.threadsById.get(post)!.deleted).toBe(true);
-    expect(staffThread(db, id)).toBeUndefined();
-    expect(t.threadsIn('forum1')).toEqual([]);
-    expect(t.threadsIn('chan1')).toEqual([]);
+    expect(t.threadsById.get(closedPost)!.deleted).toBe(true);
+    expect(t.threadsById.get(openPost)!.deleted).toBe(false);
+    expect(staffThread(db, open)!.surface).toBe('forum');
+    expect([...(t.channelAccess.get('forum1') ?? [])].sort()).toEqual(['906', '907']);
   });
 });
 

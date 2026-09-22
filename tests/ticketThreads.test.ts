@@ -180,19 +180,19 @@ describe('who may be in a restricted ticket\'s private thread', () => {
 });
 
 describe('forum posts that must not exist', () => {
-  it('lists the forum thread of a restricted ticket and of a ticket about staff, open or closed, and nothing else', () => {
+  it('lists the forum thread of a restricted ticket, and of a closed ticket about staff, and nothing else', () => {
     const normal = file(R1, ACCUSED);
     const aboutStaff = file(R1, ALT);
-    // About someone else: tickets_one_open would refuse a second open
-    // restricted ticket about ACCUSED once the normal one is restricted below.
     const restricted = file(R2, R1, 'unsafe');
     thread(normal, '9001');
     thread(aboutStaff, '9002');
     thread(restricted, '9003', 'private');
     expect(forbiddenForumThreads(db)).toEqual([]);
-    // ALT is promoted after the post went up, and the ticket was closed.
-    db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(aboutStaff);
+    // ALT is promoted while the ticket is open: its post may stand.
     db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(ALT);
+    expect(forbiddenForumThreads(db)).toEqual([]);
+    // Closed, it may not.
+    db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(aboutStaff);
     // The normal ticket is restricted by hand.
     db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(normal);
     expect(forbiddenForumThreads(db).map((t) => t.thread_id).sort()).toEqual(['9001', '9002']);

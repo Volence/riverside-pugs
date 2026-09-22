@@ -257,14 +257,14 @@ export class TicketSync {
    * because no forum is set. Once a forum is set the post is the
    * announcement and this says nothing.
    *
-   * Never for a restricted ticket and never for a ticket about staff
-   * (`why` is then 'about_staff'): every admin reads the feed, and one of
-   * them may be who the ticket is about. The event carries no reporter.
+   * Never for a restricted ticket, and never about somebody with a staff flag
+   * (held above): every admin reads the feed, and one of them may be who the
+   * ticket is about. The event carries no reporter.
    *
    * Marked before it is published: publishing cannot fail, and a report must
    * never be said twice.
    */
-  private announceInFeed(t: TicketRow, why: 'ok' | 'unconfigured' | 'about_staff'): void {
+  private announceInFeed(t: TicketRow, why: 'ok' | 'unconfigured'): void {
     if (t.restricted === 1 || why !== 'unconfigured' || t.status !== 'open') return;
     const { db } = this.deps;
     // Promoted by some path that did not hold the feed (a flag set by hand in
@@ -297,6 +297,7 @@ export class TicketSync {
     let row: ThreadRow;
     if (surface === 'forum') {
       const forumId = getSetting(db, 'discord_tickets_forum_id') ?? '';
+      await this.keepSubjectOut(t, forumId);
       const made = await transport.threads.createForumPost(forumId, { name: card.name, message: card.payload, tags: card.tags });
       row = await this.rememberThread(made.threadId, () => insertThread(db, {
         ticketId: t.id, kind: 'staff', surface, channelId: forumId, threadId: made.threadId,
@@ -608,6 +609,31 @@ export class TicketSync {
     }
     setThreadLocked(db, thread.id, want);
     thread.locked = want ? 1 : 0;
+  }
+
+  /**
+   * Before a forum post about a player is made: the forum's overwrites,
+   * revoke-only, so that whoever forumAudience now leaves out (the subject of
+   * this open ticket among them) is out BEFORE the post exists. If Discord
+   * will not take the subject out, no post is made: this throws, the ticket's
+   * problem line says so without naming anyone, and the next pass tries
+   * again. A post that went up regardless would be the accused reading their
+   * own case.
+   *
+   * Only a player can hold the forum overwrite. A Discord-only subject has
+   * none; if they hold the Discord Administrator permission they can read
+   * every channel whatever this does, which is the known limit the ticket
+   * page states.
+   */
+  private async keepSubjectOut(t: TicketRow, forumId: string): Promise<void> {
+    const { db, transport } = this.deps;
+    if (t.target_id === null) return;
+    const subject = (db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(t.target_id) as { discord_id: string | null } | undefined)?.discord_id ?? null;
+    if (subject === null) return;
+    const r = await transport.threads.syncMemberAccess(forumId, forumAudience(db), { revokeOnly: true });
+    if (r.failed.includes(subject)) {
+      throw new Error('Discord would not take the person this ticket is about out of the tickets forum, so its post was not made');
+    }
   }
 
   /** The forum's member overwrites are exactly forumAudience, or, while the

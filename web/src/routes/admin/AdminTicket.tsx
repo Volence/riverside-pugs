@@ -33,8 +33,7 @@ function Discussion({ d }: { d: TicketDiscussion }) {
   }
   const text = d.state === 'unconfigured' ? 'Discord discussion is not configured. An admin can set the tickets forum and the tickets channel in Settings; until then this ticket is worked here.'
     : d.state === 'pending' ? 'The Discord thread for this ticket has not been made yet. The bot makes it within a few minutes of being online.'
-      : d.state === 'about_staff' ? 'This ticket is about a member of staff and is not restricted, so it has no Discord thread. Work it here.'
-        : 'This ticket has no Discord thread.';
+      : 'This ticket has no Discord thread.';
   return <p class="muted">{text}</p>;
 }
 

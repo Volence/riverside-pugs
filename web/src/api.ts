@@ -990,7 +990,7 @@ export interface DiscordSanction {
   liftedBy: string | null; liftedAt: string | null; active: boolean;
 }
 export interface TicketDiscussion {
-  state: 'ready' | 'pending' | 'unconfigured' | 'about_staff' | 'none';
+  state: 'ready' | 'pending' | 'unconfigured' | 'none';
   surface: 'forum' | 'private' | null;
   url: string | null;
 }

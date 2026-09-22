@@ -1,6 +1,5 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { hasStaffFlag } from './store.js';
 
 export type ThreadSurface = 'forum' | 'private';
 export type ThreadState = 'open' | 'ended' | 'folded' | 'deleted';
@@ -61,18 +60,26 @@ export function threadsInState(db: DB, state: ThreadState, ticketId?: number): T
 }
 
 /**
- * Forum threads that must not exist: the forum is readable by every
- * moderator and admin, so a thread there about a restricted ticket, or about
- * someone who now holds a staff flag, is readable by people who must not see
- * it, in the worst case by the accused. Open or closed makes no difference:
- * an archived post is still a post anyone in the forum can open.
+ * Forum threads that must not exist, and are deleted (after the mirror has
+ * copied them onto the site).
+ *
+ * A restricted ticket's post, whatever its state: the forum is readable by
+ * every moderator and admin, and an archived post is still a post anyone in
+ * the forum can open.
+ *
+ * A CLOSED ticket's post about somebody with a staff flag. While it stands,
+ * forumAudience keeps that person out of the whole forum, and an archived
+ * post stands for ever. Deleted, it lets them back in; the discussion is on
+ * the site, and a reopen makes a new post. An OPEN ticket's post about staff
+ * is allowed (owner, 2026-09-22): the whole team works it, and its subject
+ * is kept out of the forum until it closes.
  */
 export function forbiddenForumThreads(db: DB, ticketId?: number): ThreadRow[] {
   const rows = db.prepare(
     `SELECT th.* FROM ticket_threads th
        JOIN tickets t ON t.id = th.ticket_id LEFT JOIN players p ON p.steamid = t.target_id
      WHERE th.surface = 'forum' AND th.state != 'deleted'
-       AND (t.restricted = 1 OR p.is_admin = 1 OR p.is_mod = 1)
+       AND (t.restricted = 1 OR (t.status = 'closed' AND (p.is_admin = 1 OR p.is_mod = 1)))
      ORDER BY th.id`,
   ).all() as ThreadRow[];
   return ticketId === undefined ? rows : rows.filter((r) => r.ticket_id === ticketId);
@@ -81,18 +88,15 @@ export function forbiddenForumThreads(db: DB, ticketId?: number): ThreadRow[] {
 /**
  * Where a ticket's staff thread belongs, and why nowhere when it is nowhere.
  * One function, used by the reconciler to act and by the ticket page to
- * explain, so the two cannot disagree.
+ * explain, so the two cannot disagree. A ticket about staff goes to the forum
+ * like any other: forumAudience keeps its subject out of it.
  */
 export function surfaceFor(
   db: DB, t: { restricted: number; target_id: string | null },
-): { surface: ThreadSurface | null; why: 'ok' | 'unconfigured' | 'about_staff' } {
+): { surface: ThreadSurface | null; why: 'ok' | 'unconfigured' } {
   if (t.restricted === 1) {
     return (getSetting(db, 'discord_tickets_channel_id') ?? '') ? { surface: 'private', why: 'ok' } : { surface: null, why: 'unconfigured' };
   }
-  // A normal ticket about staff has no Discord thread at all: the forum is
-  // readable by the accused, and with no access list there is nobody to put
-  // in a private one. It is worked on the site.
-  if (hasStaffFlag(db, t.target_id)) return { surface: null, why: 'about_staff' };
   return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? { surface: 'forum', why: 'ok' } : { surface: null, why: 'unconfigured' };
 }
 
@@ -123,10 +127,15 @@ export function privateThreadAudience(db: DB, ticketId: number): PrivateThreadMe
 
 /**
  * The Discord ids that may read the staff forum: linked, active moderators
- * and admins. Minus anyone a forum post is still about: forbiddenForumThreads
- * lists such posts for deletion, and until Discord has confirmed it (state
- * 'deleted') that person is kept out, so a failed deletion can never become
- * the accused reading their own case.
+ * and admins, minus anyone a forum post is, or is about to be, about.
+ *
+ * "Is": a forum thread about them not yet confirmed deleted by Discord (state
+ * 'deleted'), so a failed deletion can never become the accused reading their
+ * own case. "About to be": an open ordinary ticket about them, whether or not
+ * its post exists yet. The post is made after this list has been applied
+ * (TicketSync.keepSubjectOut), so there is no moment when the post exists
+ * and its subject can open it. A restricted ticket keeps nobody out: it never
+ * has a forum post.
  */
 export function forumAudience(db: DB): string[] {
   return (db.prepare(
@@ -135,6 +144,8 @@ export function forumAudience(db: DB): string[] {
        AND NOT EXISTS (
          SELECT 1 FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
          WHERE t.target_id = p.steamid AND th.surface = 'forum' AND th.state != 'deleted')
+       AND NOT EXISTS (
+         SELECT 1 FROM tickets t WHERE t.target_id = p.steamid AND t.status = 'open' AND t.restricted = 0)
      ORDER BY p.discord_id`,
   ).all() as { discord_id: string }[]).map((r) => r.discord_id);
 }
