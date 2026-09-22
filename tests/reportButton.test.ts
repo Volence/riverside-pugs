@@ -2,8 +2,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB, DEFAULT_SETTINGS } from '../src/db.js';
 import { getSetting, setSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA } from '../src/settingsSchema.js';
-import { upsertPlayer, activatePlayer, currentSeasonId } from '../src/players.js';
-import { recentCoPlayers, resolveByName, reportModal, opensReportModal, OTHER, ReportButton } from '../src/discord/reportButton.js';
+import { upsertPlayer, activatePlayer, currentSeasonId, linkDiscord } from '../src/players.js';
+import {
+  recentCoPlayers, resolveByName, reportModal, opensReportModal, OTHER, ReportButton,
+  handleReportButton, handleReportModal,
+} from '../src/discord/reportButton.js';
 import { REPORT_LABELS } from '../src/discord/commands.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -346,5 +349,102 @@ describe('reaping drafts', () => {
     });
     await rb.tick();
     expect((db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get() as { n: number }).n).toBe(1);
+  });
+});
+
+const D = (steamid: string) => `90${IDS.indexOf(steamid)}`;
+const hDeps = () => ({ db, adminSteamIds: [] as string[] });
+const open = (steamid: string) => handleReportButton(hDeps(), {
+  kind: 'button', customId: 'rp:open', userId: D(steamid), userName: 'x',
+});
+const submit = (steamid: string, fields: Record<string, string>) => handleReportModal(hDeps(), {
+  kind: 'modal', customId: 'rp:new', userId: D(steamid), userName: 'x', fields,
+});
+const said = (r: { payload: { content?: string } }) => r.payload.content ?? '';
+const reports = () => db.prepare('SELECT r.category, r.text, t.target_id FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id').all();
+
+const linkAll = (d: DB) => { for (const id of IDS) linkDiscord(d, id, D(id), `d${id}`); };
+
+describe('opening the form', () => {
+  beforeEach(() => { seedPlayers(db); linkAll(db); });
+
+  it('answers with the form', async () => {
+    const r = await open(ME);
+    expect(r.ephemeral).toBe(true);
+    expect(r.modal?.customId).toBe('rp:new');
+  });
+
+  it('tells an unlinked presser to link first, and opens no form', async () => {
+    const r = await handleReportButton(hDeps(), {
+      kind: 'button', customId: 'rp:open', userId: 'nobody', userName: 'x',
+    });
+    expect(r.modal).toBeUndefined();
+    expect(said(r)).toContain('/link');
+  });
+});
+
+describe('submitting the form', () => {
+  beforeEach(() => { seedPlayers(db); linkAll(db); });
+
+  it('files against the dropdown pick', async () => {
+    const r = await submit(ME, { who: ALICE, name: '', reason: 'griefing', details: 'threw the round' });
+    expect(said(r)).toContain('Thanks');
+    expect(reports()).toEqual([{ category: 'griefing', text: 'threw the round', target_id: ALICE }]);
+  });
+
+  it('files against a uniquely typed name', async () => {
+    const r = await submit(ME, { who: OTHER, name: 'Alice', reason: 'toxicity', details: '' });
+    expect(said(r)).toContain('Thanks');
+    expect(reports()).toHaveLength(1);
+  });
+
+  it('asks for someone when neither field is filled', async () => {
+    const r = await submit(ME, { who: OTHER, name: '   ', reason: 'griefing', details: '' });
+    expect(said(r)).toContain('Pick someone from the list');
+    expect(reports()).toHaveLength(0);
+  });
+
+  it('says so when nobody has that name', async () => {
+    const r = await submit(ME, { who: OTHER, name: 'ghost', reason: 'griefing', details: '' });
+    expect(said(r)).toContain('No player here by that name');
+    expect(reports()).toHaveLength(0);
+  });
+
+  it('refuses a self report', async () => {
+    const r = await submit(ME, { who: OTHER, name: 'me', reason: 'griefing', details: '' });
+    expect(said(r).toLowerCase()).toContain('yourself');
+    expect(reports()).toHaveLength(0);
+  });
+
+  it('surfaces a refusal from fileReport, such as a safety report with no words', async () => {
+    const r = await submit(ME, { who: ALICE, name: '', reason: 'unsafe', details: '' });
+    expect(said(r)).toContain('say what happened');
+    expect(reports()).toHaveLength(0);
+  });
+
+  it('rejects a reason that is not a category', async () => {
+    const r = await submit(ME, { who: ALICE, name: '', reason: 'nonsense', details: '' });
+    expect(reports()).toHaveLength(0);
+    expect(said(r)).toContain('pick a category');
+  });
+
+  it('offers the choices when a name is shared, and files nothing yet', async () => {
+    const r = await submit(ME, { who: OTHER, name: 'bob', reason: 'cheating', details: 'walls' });
+    expect(reports()).toHaveLength(0);
+    expect(r.payload.components[0].map((b) => (b as { customId: string }).customId))
+      .toEqual([`rp:pick:1:${BOB1}`, `rp:pick:1:${BOB2}`]);
+    const held = db.prepare('SELECT reporter_id, category, text FROM pending_reports').all();
+    expect(held).toEqual([{ reporter_id: ME, category: 'cheating', text: 'walls' }]);
+  });
+
+  it('asks for a more specific name when too many share it', async () => {
+    for (let n = 0; n < 6; n++) {
+      const id = `7656119900000030${n}`;
+      upsertPlayer(db, { steamid: id, name: `same${n}`, avatar: null }, []);
+      activatePlayer(db, id);
+    }
+    const r = await submit(ME, { who: OTHER, name: 'same', reason: 'griefing', details: '' });
+    expect(said(r)).toContain('Type more of it');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 0 });
   });
 });

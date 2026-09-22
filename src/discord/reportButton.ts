@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { REPORT_CATEGORIES } from '../tickets/filing.js';
+import { fileReport, REPORT_CATEGORIES } from '../tickets/filing.js';
+import { playerByDiscordId } from '../players.js';
 import { REPORT_LABELS } from './commands.js';
-import type { BotTransport, MessagePayload, ModalDef } from './transport.js';
+import type { BotInteraction, BotTransport, InteractionReply, MessagePayload, ModalDef } from './transport.js';
 
 /** A player the reporter could mean. */
 export interface Candidate { steamid: string; name: string }
@@ -211,4 +212,75 @@ export class ReportButton {
          message_id = excluded.message_id, hash = excluded.hash, updated_at = excluded.updated_at`,
     ).run(channelId, messageId, hash, (this.deps.now?.() ?? new Date()).toISOString());
   }
+}
+
+/** How many same-named players are worth offering as buttons. Beyond this,
+ *  asking for a better name beats a wall of buttons. */
+const MAX_CHOICES = 5;
+
+export interface ReportHandlerDeps { db: DB; adminSteamIds: string[]; now?: () => Date }
+
+const say = (content: string, components: InteractionReply['payload']['components'] = []): InteractionReply =>
+  ({ ephemeral: true, payload: { content, embeds: [], components } });
+
+const LINK_FIRST = 'Link your Steam account first with `/link`, then you can file a report.';
+
+export async function handleReportButton(
+  deps: ReportHandlerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
+): Promise<InteractionReply> {
+  const me = playerByDiscordId(deps.db, i.userId);
+  if (!me) return say(LINK_FIRST);
+  if (i.customId === `${REPORT_PREFIX}open`) {
+    return { ephemeral: true, payload: { content: 'Opening the form...', embeds: [], components: [] }, modal: reportModal(deps.db, me.steamid) };
+  }
+  return say('That button no longer does anything.');
+}
+
+export async function handleReportModal(
+  deps: ReportHandlerDeps, i: Extract<BotInteraction, { kind: 'modal' }>,
+): Promise<InteractionReply> {
+  const me = playerByDiscordId(deps.db, i.userId);
+  if (!me) return say(LINK_FIRST);
+  const category = i.fields.reason ?? '';
+  const text = (i.fields.details ?? '').trim();
+  const picked = i.fields.who ?? OTHER;
+
+  if (picked !== OTHER) return file(deps, me.steamid, picked, category, text);
+
+  const typed = (i.fields.name ?? '').trim();
+  if (!typed) return say('Pick someone from the list or type their name.');
+
+  const found = resolveByName(deps.db, typed, MAX_CHOICES + 1);
+  if (found.length === 0) {
+    return say('No player here by that name. They may never have played on these servers.');
+  }
+  if (found.length === 1) return file(deps, me.steamid, found[0].steamid, category, text);
+  if (found.length > MAX_CHOICES) {
+    return say('Several players share that name. Type more of it, or pick them from the list if you played together recently.');
+  }
+  return hold(deps, me.steamid, typed, category, text, found);
+}
+
+/** The one place a report is actually filed, so every path shares the same
+ *  refusals and the same wording. */
+function file(deps: ReportHandlerDeps, reporter: string, targetId: string, category: string, text: string): InteractionReply {
+  const r = fileReport(deps.db, reporter, { targetId, category, text }, {
+    adminSteamIds: deps.adminSteamIds, now: deps.now?.(),
+  });
+  if (!r.ok) return say(`Could not file the report: ${r.error}.`);
+  return say('Thanks. The moderators will look at it, and they will not be told who reported them.');
+}
+
+/** Keep the words while the reporter says which of these people they meant. */
+function hold(
+  deps: ReportHandlerDeps, reporter: string, typed: string, category: string, text: string, found: Candidate[],
+): InteractionReply {
+  const id = Number(deps.db.prepare(
+    'INSERT INTO pending_reports (reporter_id, category, text, typed_name, candidates, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(reporter, category, text, typed, JSON.stringify(found.map((c) => c.steamid)),
+    (deps.now?.() ?? new Date()).toISOString()).lastInsertRowid);
+  return say(
+    `More than one player is called "${typed}". Which one do you mean? Nothing is filed until you choose.`,
+    [found.map((c) => ({ kind: 'button' as const, customId: `${REPORT_PREFIX}pick:${id}:${c.steamid}`, label: clip(c.name), style: 'secondary' as const }))],
+  );
 }
