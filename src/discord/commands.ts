@@ -21,7 +21,7 @@ export interface CommandDeps {
 }
 
 /** Labels for the report categories, in the order they should list. */
-const REPORT_LABELS: Record<ReportCategory, string> = {
+export const REPORT_LABELS: Record<ReportCategory, string> = {
   griefing: 'Griefing / throwing',
   cheating: 'Cheating',
   toxicity: 'Toxicity / harassment',
@@ -53,7 +53,7 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
         name: 'reason', description: 'What happened', type: 'string', required: true,
         choices: REPORT_CATEGORIES.map((c) => ({ name: REPORT_LABELS[c], value: c })),
       },
-      { name: 'details', description: 'When, which map, what they did', type: 'string' },
+      { name: 'details', description: 'What happened, in your own words', type: 'string' },
       { name: 'match', description: 'Match number (default: your latest match together)', type: 'integer' },
     ],
   },

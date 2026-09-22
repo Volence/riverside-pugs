@@ -43,3 +43,26 @@ describe('settings parity', () => {
     expect(defaults).toEqual(schema);
   });
 });
+
+import { COMMAND_DEFS, REPORT_LABELS } from '../src/discord/commands.js';
+
+describe('details wording', () => {
+  const report = () => COMMAND_DEFS.find((c) => c.name === 'report')!;
+  const details = () => report().options!.find((o) => o.name === 'details')!;
+
+  it('does not lead with the map', () => {
+    expect(details().description.toLowerCase()).not.toContain('map');
+  });
+
+  it('asks for what happened, in the reporter\'s own words', () => {
+    expect(details().description).toBe('What happened, in your own words');
+  });
+
+  it('stays inside Discord\'s 100 character limit', () => {
+    expect(details().description.length).toBeLessThanOrEqual(100);
+  });
+
+  it('exports the category labels so the form can share them', () => {
+    expect(REPORT_LABELS.unsafe).toBe('Safety concern (handled privately)');
+  });
+});

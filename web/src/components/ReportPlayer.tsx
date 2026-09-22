@@ -115,7 +115,7 @@ export function ReportPlayer(
             </p>
           )}
           <textarea value={text} maxLength={1000} aria-label="Details"
-            placeholder={needsText ? 'What happened (required)' : 'Details (optional): when, which map, what they did'}
+            placeholder={needsText ? 'What happened (required)' : 'Details (optional): what happened, in your own words'}
             onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
           <div class="admin-form">
             <button class="btn" type="submit" disabled={busy || (!fixed && !target) || !category || (needsText && !text.trim())}>Send report</button>
