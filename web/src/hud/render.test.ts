@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { childRects, drawPanel, drawSlotStyle, PANEL_FILE, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
-import { buildHud, buildTrees } from './build';
+import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
@@ -51,20 +51,23 @@ describe('childRects', () => {
     expect(rects.map((c) => c.name)).toEqual(drawOrder);
   });
 
-  it('agrees with the file for every panel in both presets', () => {
+  it('agrees with the downloaded file for every panel in both presets', () => {
+    // Against what buildHud writes, parsed back, not against buildTrees: the
+    // rects must match the file a player installs.
     for (const preset of ['stock', 'modern'] as const) {
-      const d = design({ preset, elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 } } });
-      const trees = buildTrees(d);
+      const d = design({ preset, elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 }, teamColumn: { scale: 1.5 } } });
+      const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
       for (const panelId of Object.keys(PANEL_FILE)) {
-        const nodes = trees(PANEL_FILE[panelId]).filter((n) => typeof n.value !== 'string');
+        const written = parseKv(text(files, PANEL_FILE[panelId]))[0].value as KvNode[];
+        const nodes = written.filter((n) => typeof n.value !== 'string');
         const rects = childRects(d, panelId, { x: 0, y: 0 }, 1);
         expect(rects.length, `${preset} ${panelId}`).toBe(nodes.length);
         // rects are in draw order, not file order, so pair each file child with its rect by name.
         for (const n of nodes) {
           const r = rects.find((c) => c.name === n.key);
-          expect(r, `${preset} ${panelId} ${n.key}`).toBeDefined();
-          expect(r!.x, `${preset} ${panelId} ${n.key}`).toBe(parseFloat(kvGet(n, 'xpos') ?? '0'));
-          expect(r!.w, `${preset} ${panelId} ${n.key}`).toBe(parseFloat(kvGet(n, 'wide') ?? '0'));
+          const at = `${preset} ${panelId} ${n.key}`;
+          expect(r, at).toBeDefined();
+          expect([r!.x, r!.y, r!.w, r!.h], at).toEqual(['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(n, key) ?? '0') || 0));
         }
       }
     }

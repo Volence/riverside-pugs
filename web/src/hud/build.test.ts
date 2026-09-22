@@ -4,6 +4,7 @@ import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } 
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
+import { PANEL_FILE } from './render';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
@@ -398,15 +399,39 @@ describe('packHud', () => {
 });
 
 describe('buildTrees', () => {
-  it('returns the same panel file buildHud writes, after every pass but fontPass', () => {
-    const d = design({ elements: { teamColumn: { scale: 1.5, dir: 'column', spacing: 40 } },
-      styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } });
-    const files = buildHud(d);
-    for (const path of ['resource/ui/hud/teammatepanel.res', 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res']) {
-      const written = parseKv(text(files, path)!)[0].value as KvNode[];
-      expect(buildTrees(d)(path), path).toEqual(written);
+  // The preview draws from buildTrees, the download is buildHud: this is what
+  // makes the picture the file. Every file the preview reads (each panel's
+  // file, the team and layout files that place them, and the scheme its
+  // labels read fonts and colours from) is compared in both presets, advanced
+  // on and off, with the panels scaled and two slots restyled so every pass
+  // has something to write. A file the build does not emit must still be the
+  // base file, since that is what the game will read.
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const advanced of [false, true]) {
+      it(`returns every file the preview reads exactly as buildHud writes it: ${preset}${advanced ? ', advanced' : ''}`, () => {
+        const d = design({ preset, advanced,
+          elements: { ownHealth: { scale: 1.25 }, siHealth: { scale: 0.8 }, infectedRow: { scale: 1.3 },
+            teamColumn: { scale: 1.5, dir: 'column', spacing: 40 } },
+          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' }, barGreen: { kind: 'flat', color: '255 0 0 255' } } });
+        const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+        const paths = [...Object.values(PANEL_FILE), 'resource/ui/hud/teamdisplayhud.res', 'scripts/hudlayout.res', 'resource/clientscheme.res'];
+        for (const path of paths) {
+          const t = text(files, path);
+          const expected = parseKv(t ?? baseFile(preset, path))[0].value as KvNode[];
+          const got = buildTrees(d)(path);
+          if (path === 'resource/clientscheme.res' && preset === 'modern') {
+            // fontPass, which buildTrees skips, registers the ttf files in
+            // CustomFontFiles on the modern preset. Nothing in the preview
+            // reads that block, so it is the one part left out.
+            const drop = (nodes: KvNode[]) => nodes.filter((n) => n.key.toLowerCase() !== 'customfontfiles');
+            expect(drop(got), `${preset} ${path}`).toEqual(drop(expected));
+          } else {
+            expect(got, `${preset} ${path}`).toEqual(expected);
+          }
+        }
+      });
     }
-  });
+  }
 
   it('does not need the font files even when the design wants Roboto', () => {
     const d = design({ font: 'roboto' });
