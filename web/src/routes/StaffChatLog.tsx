@@ -1,3 +1,4 @@
+import { Fragment } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { peopleApi, type StaffChatLine } from '../api';
 import { useFetch } from '../hooks/useFetch';
@@ -61,12 +62,14 @@ export function StaffChatLog({ matchId, highlight }: { matchId: number; highligh
             lastWhere = where;
             const mine = highlight !== null && (l.player === highlight || l.steamid === highlight);
             return (
-              <li key={l.seq} class={`chatlog__line${mine ? ' is-mine' : ''}`}>
-                {heading && <div class="chatlog__where muted">{heading}</div>}
-                <span class="chatlog__time muted num">{l.tMs >= 0 ? fmtClock(l.tMs / 1000) : ''}</span>
-                <span class={`chatlog__who chatlog__who--${l.team ?? 'none'}`}>{l.name}</span>
-                <span class="chatlog__msg">{l.message}</span>
-              </li>
+              <Fragment key={l.seq}>
+                {heading && <li class="chatlog__where muted">{heading}</li>}
+                <li class={`chatlog__line${mine ? ' is-mine' : ''}`}>
+                  <span class="chatlog__time muted num">{l.tMs >= 0 ? fmtClock(l.tMs / 1000) : ''}</span>
+                  <span class={`chatlog__who chatlog__who--${l.team ?? 'none'}`}>{l.name}</span>
+                  <span class="chatlog__msg">{l.message}</span>
+                </li>
+              </Fragment>
             );
           })}
         </ol>

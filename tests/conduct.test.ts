@@ -85,13 +85,20 @@ describe('conductOf: pauses', () => {
 
   it('counts only the pauses they called, never their team\'s, and totals the time', () => {
     const m = match([P, Q]);
+    // It began before its first pause, as every match does.
+    db.prepare("UPDATE matches SET created_at = '2026-09-22 09:30:00' WHERE id = ?").run(m);
     pause(m, P, '2026-09-22 10:00:00', '2026-09-22 10:01:30');
     pause(m, Q, '2026-09-22 10:05:00', '2026-09-22 10:06:00');
     pause(m, null, '2026-09-22 10:07:00', '2026-09-22 10:08:00');
     pause(m, P, '2026-09-22 10:09:00', null);
+    match([Q]);
+    match([P]);
     const c = conductOf(db, P).pauses;
     expect(c.trackedSince).toBe('2026-09-22 10:00:00');
     expect(c.called).toBe(2);
+    // The match holding the first named pause counts, however early it began,
+    // and so does a later one; a match they were not in does not.
+    expect(c.matchesSince).toBe(2);
     expect(c.totalSeconds).toBe(90);
     expect(c.recent.map((p) => p.seconds)).toEqual([null, 90]);
   });

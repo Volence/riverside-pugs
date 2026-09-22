@@ -90,10 +90,13 @@ export function conductOf(db: DB, canonical: string): ConductSection {
     matchId: p.matchId, mapOrdinal: p.mapOrdinal, half: p.half, startedAt: p.startedAt,
     seconds: p.endedAt === null ? null : sqliteSeconds(p.startedAt, p.endedAt),
   }));
+  // From the first match that named a caller, by id rather than by date: that
+  // match began before the first named pause, so a date cut would drop it.
   const matchesSince = since === null ? 0 : (db.prepare(
-    `SELECT COUNT(DISTINCT m.id) AS n FROM matches m JOIN match_players mp ON mp.match_id = m.id
-     WHERE ${inIds} AND m.created_at >= ?`,
-  ).get(...ids, since) as { n: number }).n;
+    `SELECT COUNT(DISTINCT mp.match_id) AS n FROM match_players mp
+     WHERE ${inIds}
+       AND mp.match_id >= (SELECT MIN(match_id) FROM match_pauses WHERE called_by IS NOT NULL)`,
+  ).get(...ids) as { n: number }).n;
 
   const round = (v: number | null) => (v === null ? null : Math.round(v));
   return {

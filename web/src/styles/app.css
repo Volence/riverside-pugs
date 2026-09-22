@@ -2151,12 +2151,15 @@ tbody tr.is-lifted td { opacity: 0.55; }
   gap: var(--sp-2);
   padding: 2px var(--sp-1);
 }
-.chatlog__where { grid-column: 1 / -1; margin-top: var(--sp-2); font-size: var(--fs-dense); }
+.chatlog__where { margin-top: var(--sp-2); padding: 0 var(--sp-1); font-size: var(--fs-dense); }
 .chatlog__who { overflow-wrap: anywhere; }
 .chatlog__who--a { color: var(--win); }
 .chatlog__who--b { color: var(--accent); }
 .chatlog__msg { overflow-wrap: anywhere; }
-.chatlog__line.is-mine { background: var(--surface-2); }
+.chatlog__line.is-mine {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 @media (max-width: 480px) {
   .chatlog__line { grid-template-columns: 3rem 1fr; }
   .chatlog__msg { grid-column: 2; }
