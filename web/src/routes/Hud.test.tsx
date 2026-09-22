@@ -200,6 +200,19 @@ describe('Hud page', () => {
     await waitFor(() => expect(screen.getByText('Reset this element')).toBeTruthy());
   });
 
+  it('keeps an added health number added when its child is reset', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByLabelText('Health number'));
+    fireEvent.click(screen.getByRole('button', { name: 'Health number' }));
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '90' } });
+    fireEvent.click(screen.getByText('Reset this child'));
+    // The move is gone and the number is still there: back at the template's x 103.
+    expect((screen.getByLabelText('Health number') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole('button', { name: 'Health number' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('103');
+  });
+
   it('shows one Size box for the portrait and writes both sides', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
