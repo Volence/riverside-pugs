@@ -105,10 +105,13 @@ interface ChildOverride {
 - Positions are stored unscaled. The parent's existing `scale` multiplies them afterwards,
   so scaling a panel keeps edited insides in proportion, and a child's X and Y boxes show
   the unscaled number.
-- `siHealth` spans six files (one per special infected). A child override on `siHealth`
-  applies to every one of those files that has a child of that name, so "hide the bar" hides
-  it on every infected. Children that exist in only some of the six are still editable; the
-  registry lists the union and the pass skips files that lack the block.
+- `siHealth` spans six files (one per special infected), and they are the same four children
+  (`BackgroundImage`, `Health`, `HealthNumber`, `DuckingIcon`) at six different placements
+  and sizes: the Boomer's bar is 64 wide at x 322, the Tank's 278 wide at x 112. An absolute
+  position or size would be right for one infected and wrong for five. So on `siHealth`
+  only, `x` and `y` are **offsets** added to each file's own base value, and `w` and `h` are
+  not offered. `visible`, `color` and `fontSize` apply as they are, and "hide the ducking
+  icon" hides it for every infected. The preview draws the Hunter's card and says so.
 - Toggles are children: `HealthNumber` on `teamColumn` is a registry entry flagged
   `addable`, its template taken from the Modern card. `on: true` injects it and it then
   accepts every other override like any child. Absent means "as the base file has it": on
@@ -146,9 +149,11 @@ First version, per panel (names are the real block names):
   `Health` (bar), `Name` (label), `Status` (label), `Items` (label, icon font),
   `HealthNumber` (label, addable on stock; present on Modern). `Incapacitated`, `Dead`,
   `Voice` as `other`.
-- **siHealth** (the six `*health.res` files): `HealthBar` and `HealthNumber`-shaped children
-  by their real names, taken from the files at registry-writing time and pinned by test;
-  every listed child is `other` unless it is an image, label or bar the files agree on.
+- **siHealth** (`boomerhealth`, `hunterhealth`, `smokerhealth`, `tankhealth`,
+  `zombiehealthleft_large`, `zombiehealthleft_small`): `BackgroundImage` (image, the
+  `pz_healthbar_50/250/3000` frames), `Health` (bar), `HealthNumber` (label, font
+  `MenuTitle`), `DuckingIcon` (image). All six files carry exactly these four, verified
+  2026-09-22, and the registry test pins that they keep doing so.
 - **infectedRow** (`zombieteamdisplayplayer.res`): `BackgroundImage` (image), `PlayerImage`
   (image), `HealthPanel` (bar), `NameLabel` (label), `SpawnTimeLabel` (label),
   `AbilityProgress` (other: drawn as the ring stand-in), `Dead`, `Voice`, `SkullIconPlacement`
@@ -172,7 +177,8 @@ through `Work`, so a file ships only if touched), for each override:
   after its `after` sibling. `on: false`: remove the block if present. Then continue with
   the other fields as for any child.
 - `visible`, `x`, `y`, `w`, `h`: `kvSet` the corresponding keys as plain numbers. Children
-  never carry anchor letters.
+  never carry anchor letters. On `siHealth`, `x` and `y` are added to the file's own base
+  value (the offset rule above) and `w`, `h` are rejected by validation.
 - `color` on a label: `kvSet('fgcolor_override', colour)`.
 - `fontSize` on a label: reuse `scalePass`'s font mechanism rather than a second one. A
   `HudEd_<font>_<tall>` copy of the label's scheme font with `tall` set to the size, the label
