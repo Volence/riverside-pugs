@@ -447,6 +447,31 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('241');
   });
 
+  it('in Free, drags an unselected card even over its children, and reaches children only in the selected card', () => {
+    const { container } = render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    // Card 2 sits at (153, 441); (160, 450) is on its portrait. The card is
+    // not the selected one, so the press picks and drags the card.
+    fireEvent.pointerDown(canvas, { clientX: 160, clientY: 450, pointerId: 1 });
+    expect(screen.getByText('Teammate card 2')).toBeTruthy();
+    fireEvent.pointerMove(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
+    expect((screen.getByLabelText('Card 2 X') as HTMLInputElement).value).toBe('253');
+    expect((screen.getByLabelText('Card 2 Y') as HTMLInputElement).value).toBe('241');
+    // Inside the selected card, the same spot is its portrait.
+    fireEvent.pointerDown(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    // A press on another card's portrait picks that card instead.
+    fireEvent.pointerDown(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
+    expect(screen.getByText('Teammate card 1')).toBeTruthy();
+    expect(screen.queryByText('Portrait', { selector: 'legend' })).toBeNull();
+  });
+
   it('picks a child inside the selected teammates on the canvas, drags it, and steps back up with Escape', () => {
     const { container } = render(<Hud />);
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;

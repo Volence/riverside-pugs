@@ -878,12 +878,28 @@ export default function Hud() {
     const { ux, uy } = pointerUnits(e);
     // Second level: inside the selected teammates, a child under the pointer
     // is picked before the panel, and the picked child's corner resizes it.
+    // Free has three levels: the teammates, then one card, then its children.
+    // A fitted card is almost all children, so a press on any card but the
+    // picked one picks and drags that card, and only the picked card's
+    // children are reachable. Row and Column reach children in every card.
     if (selected === 'teamColumn') {
-      if (selectedChild && childCornerAt(design, cardState, selectedChild, ux, uy)) {
+      const free = isFreeTeam(design);
+      if (free) {
+        const card = freeCardAt(design, ux, uy);
+        if (card !== null && card !== selectedCard) {
+          setSelectedCard(card);
+          setSelectedChild(null);
+          drag.current = { kind: 'card', card, startUx: ux, startUy: uy, startRect: teamCardRects(design, design.aspect)[card] };
+          return;
+        }
+      }
+      const only = free ? selectedCard ?? undefined : undefined;
+      const reach = !free || selectedCard !== null;
+      if (reach && selectedChild && childCornerAt(design, cardState, selectedChild, ux, uy, only)) {
         const start = cardChild(design, selectedChild);
         if (start) { drag.current = { kind: 'child', name: selectedChild, mode: 'resize', startUx: ux, startUy: uy, start }; return; }
       }
-      const child = childAt(design, cardState, ux, uy);
+      const child = reach ? childAt(design, cardState, ux, uy, only) : null;
       if (child) {
         setSelectedChild(child.name);
         const start = cardChild(design, child.name);

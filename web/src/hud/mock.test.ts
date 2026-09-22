@@ -223,6 +223,14 @@ describe('teammate card children on the canvas', () => {
     expect(childAt(DEFAULT_DESIGN, 'down', c.x + 11, c.y + 13)).toEqual({ name: 'Incapacitated', card: 1 });
   });
 
+  it('searches only one card when asked, as the page does in Free', () => {
+    const c = card2();
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13, 1)).toEqual({ name: 'Head', card: 1 });
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13, 0)).toBeNull();
+    const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
+    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Head', head.x + head.w, head.y + head.h, 0)).toBe(false);
+  });
+
   it('never picks decoration, a hidden child, or anything outside the cards', () => {
     const c = card2();
     // (120, 1) in the card is only the splatter and the Voice icon, which no state draws: decoration and an undrawn state child, so the card itself stays the target.
