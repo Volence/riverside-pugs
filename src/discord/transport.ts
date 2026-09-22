@@ -289,6 +289,23 @@ export interface ThreadOps {
   ): Promise<{ added: string[]; removed: string[]; failed: string[] }>;
 }
 
+/** Why Discord said no, in the words the site shows. 'hierarchy': the
+ *  member's top role is above the bot's, or they are an Administrator or the
+ *  owner (a timeout cannot touch them). 'not_member': they are not in the
+ *  server, so there is nothing to time out (a ban still works by id).
+ *  'unknown_user': no such Discord account. 'other': anything else. */
+export type ModerationResult = { ok: true } | { ok: false; why: 'hierarchy' | 'not_member' | 'unknown_user' | 'other'; detail: string };
+
+/** Discord-side sanctions on one member, for tickets about people with no
+ *  player account. Narrow on purpose, like RoleOps. `reason` goes to
+ *  Discord's audit log. Never throws: a refusal is an answer, not an error. */
+export interface ModerationOps {
+  timeout(userId: string, minutes: number, reason: string): Promise<ModerationResult>;
+  removeTimeout(userId: string, reason: string): Promise<ModerationResult>;
+  ban(userId: string, reason: string): Promise<ModerationResult>;
+  unban(userId: string, reason: string): Promise<ModerationResult>;
+}
+
 export interface BotTransport {
   send(channelId: string, payload: MessagePayload): Promise<string>;
   /** False when the message no longer exists (deleted by hand). */
@@ -318,4 +335,5 @@ export interface BotTransport {
   voice: VoiceOps;
   roles: RoleOps;
   threads: ThreadOps;
+  moderation: ModerationOps;
 }

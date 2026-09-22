@@ -7,7 +7,7 @@ import {
 import type { DiscordConfig } from '../config.js';
 import type {
   BotInteraction, BotTransport, Button, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks, MessagePayload, ModalDef,
-  PickedMember, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
+  ModerationOps, ModerationResult, PickedMember, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from './transport.js';
 
 /**
@@ -473,6 +473,62 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     },
   };
 
+  /** Discord's refusals, in the words the site shows. See ModerationResult.
+   *  Error codes from DiscordAPIError.code, RESTJSONErrorCodes,
+   *  discord-api-types rest/common.d.ts: MissingPermissions 50013 :148,
+   *  MissingAccess 50001 :133, UnknownMember 10007 :12, UnknownUser 10013 :18,
+   *  UnknownBan 10026 :24. */
+  const refusal = (err: unknown): ModerationResult => {
+    const code = codeOf(err);
+    const detail = err instanceof Error ? err.message : String(err);
+    if (code === 50013 || code === 50001) return { ok: false, why: 'hierarchy', detail };
+    if (code === 10007) return { ok: false, why: 'not_member', detail };
+    if (code === 10013) return { ok: false, why: 'unknown_user', detail };
+    console.error('[discord] moderation call failed:', err);
+    return { ok: false, why: 'other', detail };
+  };
+  const moderation: ModerationOps = {
+    async timeout(userId, minutes, reason) {
+      try {
+        const member = await guild.members.fetch(userId);
+        // discord.js checks moderatable before calling Discord and throws its
+        // own error, not a DiscordAPIError, for an Administrator or a member
+        // above the bot. Ask first so that reads as the hierarchy refusal.
+        // GuildMember.moderatable :1897 (getter).
+        if (!member.moderatable) return { ok: false, why: 'hierarchy', detail: 'not moderatable' };
+        await member.timeout(minutes * 60_000, reason);                       // GuildMember.timeout :1912
+        return { ok: true };
+      } catch (err) { return refusal(err); }
+    },
+    async removeTimeout(userId, reason) {
+      try {
+        const member = await guild.members.fetch(userId);
+        await member.timeout(null, reason);                                   // GuildMember.timeout :1912
+        return { ok: true };
+      } catch (err) {
+        // Someone who left the server has no timeout to remove.
+        if (codeOf(err) === UNKNOWN_MEMBER) return { ok: true };
+        return refusal(err);
+      }
+    },
+    async ban(userId, reason) {
+      try {
+        // GuildMemberManager.ban :5119, BanOptions.reason :5931.
+        await guild.members.ban(userId, { reason });
+        return { ok: true };
+      } catch (err) { return refusal(err); }
+    },
+    async unban(userId, reason) {
+      try {
+        await guild.members.unban(userId, reason);                            // GuildMemberManager.unban :5136
+        return { ok: true };
+      } catch (err) {
+        if (codeOf(err) === 10026) return { ok: true };
+        return refusal(err);
+      }
+    },
+  };
+
   const threadById = async (id: string): Promise<AnyThreadChannel | null> => {
     // guild.channels holds threads too (GuildBasedChannel :7965, fetch :5040).
     // An archived thread is not cached, so this falls through to a fetch.
@@ -674,6 +730,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
 
   return {
     roles,
+    moderation,
     async send(channelId, payload) {
       const ch = await textChannel(channelId);
       const msg = await ch.send(toMessage(payload));

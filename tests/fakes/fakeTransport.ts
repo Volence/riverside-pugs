@@ -1,6 +1,6 @@
 import type {
   BotInteraction, BotTransport, InboundAttachment, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks,
-  MessagePayload, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
+  MessagePayload, ModerationOps, ModerationResult, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from '../../src/discord/transport.js';
 
 export interface FakeMessage { channelId: string; id: string; payload: MessagePayload; deleted: boolean }
@@ -192,6 +192,21 @@ export class FakeTransport implements BotTransport {
   /** Snowflake-shaped on purpose: phase 2b orders messages by id. */
   private snowflake(): string {
     return String(100000 + ++this.seq);
+  }
+
+  /** Every moderation call, in order. */
+  moderationCalls: { op: 'timeout' | 'removeTimeout' | 'ban' | 'unban'; userId: string; minutes?: number; reason: string }[] = [];
+  /** userId -> the refusal Discord would give. */
+  moderationRefusals = new Map<string, Extract<ModerationResult, { ok: false }>>();
+  moderation: ModerationOps = {
+    timeout: async (userId, minutes, reason) => this.moderate({ op: 'timeout', userId, minutes, reason }),
+    removeTimeout: async (userId, reason) => this.moderate({ op: 'removeTimeout', userId, reason }),
+    ban: async (userId, reason) => this.moderate({ op: 'ban', userId, reason }),
+    unban: async (userId, reason) => this.moderate({ op: 'unban', userId, reason }),
+  };
+  private moderate(call: FakeTransport['moderationCalls'][number]): ModerationResult {
+    this.moderationCalls.push(call);
+    return this.moderationRefusals.get(call.userId) ?? { ok: true };
   }
 
   threads: ThreadOps = {
