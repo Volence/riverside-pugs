@@ -550,6 +550,32 @@ describe('choosing between same-named players', () => {
   });
 });
 
+describe('holding a draft', () => {
+  beforeEach(async () => {
+    seedPlayers(db); linkAll(db);
+    // The first ambiguous form: this becomes the stale draft, id 1.
+    await submit(ME, { who: OTHER, name: 'bob', reason: 'cheating', details: 'first attempt' });
+  });
+
+  it('replaces an earlier draft rather than piling up rows, so a banned member cannot fill the table with unread text', async () => {
+    const r = await submit(ME, { who: OTHER, name: 'bob', reason: 'griefing', details: 'second attempt' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 1 });
+    expect(db.prepare('SELECT category, text FROM pending_reports').get())
+      .toEqual({ category: 'griefing', text: 'second attempt' });
+    // The new draft still works normally.
+    expect(r.payload.components[0].map((b) => (b as { customId: string }).customId))
+      .toEqual([`rp:pick:2:${BOB1}`, `rp:pick:2:${BOB2}`]);
+  });
+
+  it('answers expired for the candidate button of a draft that was replaced', async () => {
+    await submit(ME, { who: OTHER, name: 'bob', reason: 'griefing', details: 'second attempt' });
+    // id 1 was the first draft, deleted the moment the second was held.
+    const r = await pick(ME, `rp:pick:1:${BOB1}`);
+    expect(said(r)).toContain('expired');
+    expect(reports()).toHaveLength(0);
+  });
+});
+
 describe('wiring', () => {
   it('routes rp: without colliding with r: or t:', () => {
     // src/discord/index.ts picks a handler with customId.startsWith(prefix).

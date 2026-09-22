@@ -312,6 +312,14 @@ function file(
 function hold(
   deps: ReportHandlerDeps, reporter: string, typed: string, category: string, text: string, found: Candidate[],
 ): InteractionReply {
+  // Only the newest draft is ever useful: opening the form again means the
+  // reporter is trying once more, and a stale draft's candidate buttons
+  // already answer "expired" once it is gone, so nothing is lost by clearing
+  // it early. This bounds the table at one row per reporter, which is a
+  // resource bound, not a policy check: it must stay that, so nobody later
+  // "upgrades" it into a banned/good-standing gate. That check belongs to
+  // fileReport alone, which this path never reaches.
+  deps.db.prepare('DELETE FROM pending_reports WHERE reporter_id = ?').run(reporter);
   const id = Number(deps.db.prepare(
     'INSERT INTO pending_reports (reporter_id, category, text, typed_name, candidates, created_at) VALUES (?, ?, ?, ?, ?, ?)',
   ).run(reporter, category, text, typed, JSON.stringify(found.map((c) => c.steamid)),
