@@ -8,15 +8,18 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { allowedType, attachmentPath } from '../tickets/attachments.js';
 import type { AttachmentRow } from '../tickets/messages.js';
 import { canSeeTicket, getTicketRow, ticketIsQuiet } from '../tickets/store.js';
-import { removeMessage } from '../tickets/removal.js';
+import { removeMessage, removeMessages } from '../tickets/removal.js';
 import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
 import { listTickets, ticketCounts, ticketDetail, type TicketFilter } from '../tickets/views.js';
 import { checkDiscordSanction, checkLift, recordDiscordSanction, recordLift } from '../tickets/discordSanctions.js';
+import { checkChatStaff, checkContactReporter, checkReporterChat, reporterDiscordIdOf } from '../tickets/reporterChat.js';
 import { caseFile } from '../tickets/caseFile.js';
 import { fileViewer } from '../admin/fileAccess.js';
 import { playerFileSummary } from '../admin/playerFileSummary.js';
 import type { ModerationOps } from '../discord/transport.js';
+import type { ReporterChats } from '../discord/reporterChats.js';
+import type { ThreadRow } from '../tickets/threads.js';
 
 /** Why Discord said no, in the words the site shows, for APPLYING a
  *  sanction. Lifting a timeout has its own wording for not_member (see the
@@ -47,13 +50,16 @@ export interface TicketRouteOpts {
    *  the bot finishes logging in, or after it drops, must see null rather
    *  than a stale reference. */
   moderation: () => ModerationOps | null;
+  /** The running bot's reporter chats, or null when Discord is not
+   *  connected. Read per call, like moderation. */
+  chats: () => ReporterChats | null;
 }
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
  *  ticket is restricted or about staff (ticketIsQuiet). */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
-  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove, moderation } = opts;
+  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir, afterRemove, moderation, chats } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
@@ -80,6 +86,22 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     const steamid = requireActive(req, reply);
     if (!steamid) return reply;
     return { reports: myReports(db, steamid) };
+  });
+
+  /** A reporter opens (or reopens) their chat about one of their reports.
+   *  The rules first, so a player with no Discord linked is told that
+   *  whether or not the bot is up. */
+  app.post('/api/reports/:rid/chat', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return reply;
+    const rid = Number((req.params as { rid: string }).rid);
+    const pre = checkReporterChat(db, rid, { kind: 'player', steamid });
+    if (!pre.ok) return reply.code(pre.status).send({ error: pre.error });
+    const c = chats();
+    if (!c) return reply.code(503).send({ error: 'Chats with the moderators are not available right now. Try again in a few minutes.' });
+    const r = await c.openForReporter(rid, { kind: 'player', steamid });
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    return { ok: true, url: r.url };
   });
 
   app.get('/api/mod/tickets', async (req, reply) => {
@@ -195,6 +217,76 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     // No broadcast('refresh'): removeMessage published the ticket signal, and
     // the staff-scoped nudge tells the pages that may see it.
     return { ok: true };
+  });
+
+  app.post('/api/mod/tickets/:id/reports/:rid/contact', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { id, rid } = req.params as { id: string; rid: string };
+    const pre = checkContactReporter(db, Number(id), Number(rid), me);
+    if (!pre.ok) return reply.code(pre.status).send({ error: pre.error });
+    const c = chats();
+    if (!c) return reply.code(503).send({ error: 'the Discord bot is not running' });
+    const r = await c.contact(Number(id), Number(rid), me);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, me, 'ticket_contact', Number(id), { reportId: Number(rid), via: 'site' }, { quiet: quiet(Number(id)) });
+    return { ok: true, url: r.url };
+  });
+
+  app.post('/api/mod/tickets/:id/chats/join', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const pre = checkChatStaff(db, id, me);
+    if (!pre.ok) return reply.code(pre.status).send({ error: pre.error });
+    const c = chats();
+    if (!c) return reply.code(503).send({ error: 'the Discord bot is not running' });
+    const r = await c.join(id, me);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, me, 'ticket_chat_join', id, { via: 'site' }, { quiet: quiet(id) });
+    return { ok: true, url: r.url };
+  });
+
+  app.post('/api/mod/tickets/:id/chats/:tid/end', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { id, tid } = req.params as { id: string; tid: string };
+    const c = chats();
+    if (!c) return reply.code(503).send({ error: 'the Discord bot is not running' });
+    const r = await c.end(Number(id), Number(tid), me);
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, me, 'ticket_chat_end', Number(id), { threadRowId: Number(tid), via: 'site' }, { quiet: quiet(Number(id)) });
+    return { ok: true };
+  });
+
+  /**
+   * Remove everything from this person: every message they wrote anywhere in
+   * this ticket, removed for good (text, history, files, the Discord message
+   * and its forum copy), then their chat ended. The removal never waits on
+   * Discord; ending the chat does, and without a bot `ended` is false.
+   */
+  app.post('/api/mod/tickets/:id/chats/:tid/remove-all', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const tid = Number((req.params as { tid: string }).tid);
+    const t = getTicketRow(db, id);
+    if (!t || !canSeeTicket(db, t, me)) return reply.code(404).send({ error: 'no such ticket' });
+    const th = db.prepare("SELECT * FROM ticket_threads WHERE id = ? AND ticket_id = ? AND kind = 'reporter'").get(tid, id) as ThreadRow | undefined;
+    if (!th) return reply.code(404).send({ error: 'no such chat' });
+    const discordId = reporterDiscordIdOf(db, { reporterId: th.reporter_id, reporterDiscordId: th.reporter_discord_id });
+    const ids = (db.prepare(
+      `SELECT id FROM ticket_messages WHERE ticket_id = @ticket AND removed_at IS NULL
+         AND ((@discord IS NOT NULL AND author_discord_id = @discord) OR (@player IS NOT NULL AND author_player_id = @player))`,
+    ).all({ ticket: id, discord: discordId, player: th.reporter_id }) as { id: number }[]).map((r) => r.id);
+    const r = removeMessages(db, attachmentsDir, id, ids, me, 'everything from this person');
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, me, 'ticket_remove', id, { count: r.removed, files: r.files, mirrored: true, everything: true, via: 'site' }, { quiet: quiet(id) });
+    afterRemove();
+    let ended = false;
+    const c = chats();
+    if (c && th.state === 'open') ended = (await c.end(id, tid, me)).ok;
+    return { ok: true, removed: r.removed, ended };
   });
 
   /**
@@ -334,7 +426,7 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
   app.post('/api/mod/tickets/:id/claim', act('ticket_claim', (id, me, b) => claimTicket(db, id, me, b.claim !== false), (b) => ({ claim: b.claim !== false })));
   app.post('/api/mod/tickets/:id/restrict', act('ticket_restrict', (id, me, b) => setRestricted(db, id, me, b.restricted === true, adminSteamIds), (b) => ({ restricted: b.restricted === true })));
   app.post('/api/mod/tickets/:id/access', act('ticket_access', (id, me, b) => addAccess(db, id, me, String(b.steamid ?? '')), (b) => ({ steamid: String(b.steamid ?? '') })));
-  app.post('/api/mod/tickets/:id/close', act('ticket_close', (id, me, b) => closeTicket(db, id, me, b.outcome, b.note), (b) => ({ outcome: b.outcome })));
+  app.post('/api/mod/tickets/:id/close', act('ticket_close', (id, me, b) => closeTicket(db, id, me, b.outcome, b.note, b.tellReporters !== false), (b) => ({ outcome: b.outcome })));
   app.post('/api/mod/tickets/:id/reopen', act('ticket_reopen', (id, me) => reopenTicket(db, id, me)));
   app.post('/api/mod/tickets/:id/ban', act('ticket_ban', (id, me, b) => {
     const r = banFromTicket(db, id, me, b.reason, b.minutes);

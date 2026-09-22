@@ -1306,6 +1306,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     attachmentsDir: deps.config.ticketAttachmentsDir,
     afterRemove: () => { void ticketMirror?.sweepRemovals(); },
     moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
+    chats: () => deps.reporterChats ?? reporterChats,
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,

@@ -996,6 +996,8 @@ export interface TicketDiscussion {
   surface: 'forum' | 'private' | null;
   url: string | null;
 }
+export interface ReporterChat { id: number; reporterName: string; state: 'open' | 'ended'; url: string | null }
+
 export interface TicketAttachment {
   id: number; filename: string; contentType: string; size: number; sha256: string | null;
   /** On the server and not removed: it can be fetched. */
@@ -1022,6 +1024,8 @@ export interface TicketDetail {
   accessCandidates: { steamid: string; name: string }[];
   discussion: TicketDiscussion;
   messages: TicketMessage[];
+  /** Optional only for a browser holding new JS against an older server. */
+  reporterChats?: ReporterChat[];
   caseFile: CaseFile | null;
   /** The accused as the Player File's glance row shows them. Null only if
    *  the player row vanished under the ticket. */
@@ -1204,13 +1208,18 @@ export const modApi = {
   restrict: (id: number, restricted: boolean) => post(`/api/mod/tickets/${id}/restrict`, { restricted }),
   access: (id: number, steamid: string) => post(`/api/mod/tickets/${id}/access`, { steamid }),
   ban: (id: number, reason: string, minutes: number | null) => post(`/api/mod/tickets/${id}/ban`, { reason, minutes }),
-  close: (id: number, outcome: string, note: string) => post(`/api/mod/tickets/${id}/close`, { outcome, note }),
+  close: (id: number, outcome: string, note: string, tellReporters = true) => post(`/api/mod/tickets/${id}/close`, { outcome, note, tellReporters }),
   reopen: (id: number) => post(`/api/mod/tickets/${id}/reopen`),
   removeMessage: (id: number, messageId: number, reason: string) =>
     post(`/api/mod/tickets/${id}/messages/${messageId}/remove`, { reason }),
   discordSanction: (id: number, kind: 'timeout' | 'ban', minutes: number | null, reason: string) =>
     post(`/api/mod/tickets/${id}/discord-sanction`, { kind, minutes, reason }),
   liftDiscordSanction: (sid: number) => post(`/api/mod/discord-sanctions/${sid}/lift`),
+  contactReporter: (id: number, reportId: number) => post<{ ok: true; url: string }>(`/api/mod/tickets/${id}/reports/${reportId}/contact`),
+  joinChats: (id: number) => post<{ ok: true; url: string }>(`/api/mod/tickets/${id}/chats/join`),
+  endChat: (id: number, chatId: number) => post(`/api/mod/tickets/${id}/chats/${chatId}/end`),
+  removeEverything: (id: number, chatId: number) =>
+    post<{ ok: true; removed: number; ended: boolean }>(`/api/mod/tickets/${id}/chats/${chatId}/remove-all`),
 };
 
 export const adminApi = {
@@ -1369,6 +1378,7 @@ export const api = {
   fileReport: (body: { targetId: string; category: string; text: string; matchId?: number; moment?: ReportMoment }) =>
     post('/api/reports', body),
   myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
+  reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   ready: () => post('/api/lobby/ready'),
