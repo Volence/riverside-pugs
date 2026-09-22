@@ -10,6 +10,8 @@ const deps = { adminSteamIds: [OWNER] };
 let db: DB;
 const lurker = (over: Partial<PickedTarget> = {}): PickedTarget => ({ discordId: '901', name: 'Lurky', bot: false, administrator: false, ...over });
 const dReporter = (over: Partial<DiscordReporter> = {}): DiscordReporter => ({ kind: 'discord', discordId: '902', name: 'Newbie', timedOutUntil: null, ...over });
+// deps with a picked Discord target set, the way a Discord surface builds them: never from the request body.
+const withTarget = (over: Partial<PickedTarget> = {}) => ({ ...deps, targetDiscord: lurker(over) });
 
 beforeEach(() => {
   db = openDb(':memory:');
@@ -25,12 +27,12 @@ const ticket = () => db.prepare('SELECT target_id, target_discord_id, target_nam
 
 describe('fileReport with Discord people', () => {
   it('a player reports a Discord-only member', () => {
-    expect(fileReport(db, P1, { targetDiscord: lurker(), category: 'toxicity', text: 'dms' }, deps)).toMatchObject({ ok: true, created: true, restricted: false });
+    expect(fileReport(db, P1, { category: 'toxicity', text: 'dms' }, withTarget())).toMatchObject({ ok: true, created: true, restricted: false });
     expect(ticket()).toEqual({ target_id: null, target_discord_id: '901', target_name: 'Lurky', restricted: 0 });
   });
 
   it('a picked member who has linked Steam is reported as the player', () => {
-    fileReport(db, P1, { targetDiscord: lurker({ discordId: '700', name: 'whatever' }), category: 'afk', text: '' }, deps);
+    fileReport(db, P1, { category: 'afk', text: '' }, withTarget({ discordId: '700', name: 'whatever' }));
     expect(ticket()).toMatchObject({ target_id: LINKED, target_discord_id: null });
   });
 
@@ -46,9 +48,9 @@ describe('fileReport with Discord people', () => {
   });
 
   it('refuses bots, yourself, and yourself through your own Discord account', () => {
-    expect(fileReport(db, P1, { targetDiscord: lurker({ bot: true }), category: 'afk', text: '' }, deps)).toMatchObject({ ok: false, status: 400 });
-    expect(fileReport(db, dReporter({ discordId: '901' }), { targetDiscord: lurker(), category: 'afk', text: '' }, deps)).toMatchObject({ ok: false, status: 400 });
-    expect(fileReport(db, LINKED, { targetDiscord: lurker({ discordId: '700' }), category: 'afk', text: '' }, deps)).toMatchObject({ ok: false, status: 400 });
+    expect(fileReport(db, P1, { category: 'afk', text: '' }, withTarget({ bot: true }))).toMatchObject({ ok: false, status: 400 });
+    expect(fileReport(db, dReporter({ discordId: '901' }), { category: 'afk', text: '' }, withTarget())).toMatchObject({ ok: false, status: 400 });
+    expect(fileReport(db, LINKED, { category: 'afk', text: '' }, withTarget({ discordId: '700' }))).toMatchObject({ ok: false, status: 400 });
   });
 
   it('refuses a timed-out or sanctioned Discord reporter', () => {
@@ -66,18 +68,25 @@ describe('fileReport with Discord people', () => {
   });
 
   it('refuses a match when either side is Discord-only', () => {
-    expect(fileReport(db, P1, { targetDiscord: lurker(), category: 'afk', text: '', matchId: 1 }, deps)).toMatchObject({ ok: false, status: 400 });
+    expect(fileReport(db, P1, { category: 'afk', text: '', matchId: 1 }, withTarget())).toMatchObject({ ok: false, status: 400 });
   });
 
   it('restricts a report about a Discord administrator, and an unsafe one', () => {
-    expect(fileReport(db, P1, { targetDiscord: lurker({ administrator: true }), category: 'toxicity', text: '' }, deps)).toMatchObject({ ok: true, restricted: true });
-    expect(fileReport(db, P1, { targetDiscord: lurker({ discordId: '903' }), category: 'unsafe', text: 'x' }, deps)).toMatchObject({ ok: true, restricted: true });
+    expect(fileReport(db, P1, { category: 'toxicity', text: '' }, withTarget({ administrator: true }))).toMatchObject({ ok: true, restricted: true });
+    expect(fileReport(db, P1, { category: 'unsafe', text: 'x' }, withTarget({ discordId: '903' }))).toMatchObject({ ok: true, restricted: true });
   });
 
   it('keeps one open case per Discord person, and the duplicate rule', () => {
-    const a = fileReport(db, P1, { targetDiscord: lurker(), category: 'afk', text: '' }, deps);
-    const b = fileReport(db, LINKED, { targetDiscord: lurker({ name: 'Renamed' }), category: 'afk', text: '' }, deps);
+    const a = fileReport(db, P1, { category: 'afk', text: '' }, withTarget());
+    const b = fileReport(db, LINKED, { category: 'afk', text: '' }, withTarget({ name: 'Renamed' }));
     expect((a as { ticketId: number }).ticketId).toBe((b as { ticketId: number }).ticketId);
-    expect(fileReport(db, P1, { targetDiscord: lurker(), category: 'afk', text: '' }, deps)).toMatchObject({ ok: false, status: 409 });
+    expect(fileReport(db, P1, { category: 'afk', text: '' }, withTarget())).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it('ignores a targetDiscord smuggled in the request body: a site surface cannot pick a Discord target this way', () => {
+    const forged = { targetDiscord: lurker({ administrator: true, name: 'Forged' }) } as unknown as { targetId?: unknown };
+    expect(fileReport(db, P1, { ...forged, category: 'toxicity', text: '' }, deps)).toMatchObject({ ok: false, status: 400, error: 'pick a player' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tickets').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get()).toEqual({ n: 0 });
   });
 });

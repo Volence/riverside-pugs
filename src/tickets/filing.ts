@@ -42,6 +42,11 @@ export interface FilingDeps {
   /** config.adminSteamIds: who is let into a restricted ticket first. */
   adminSteamIds: string[];
   now?: Date;
+  /** A member picked in a Discord surface, with the facts Discord supplied
+   *  about them. Only a Discord surface sets this, per call, never from a
+   *  request body: the body is untrusted, and `bot`/`administrator` decide
+   *  whether the report is even allowed and whether it is restricted. */
+  targetDiscord?: PickedTarget;
 }
 
 /** How often a Discord-only reporter may file: tighter than the per-day
@@ -51,7 +56,7 @@ export const DISCORD_REPORT_GAP_MS = 10 * 60_000;
 export interface DiscordReporter { kind: 'discord'; discordId: string; name: string; timedOutUntil: string | null }
 /** A member picked in Discord, with the facts Discord supplied about them. */
 export interface PickedTarget { discordId: string; name: string; bot: boolean; administrator: boolean }
-export interface FileBody { targetId?: unknown; targetDiscord?: PickedTarget; category?: unknown; text?: unknown; matchId?: unknown; moment?: unknown }
+export interface FileBody { targetId?: unknown; category?: unknown; text?: unknown; matchId?: unknown; moment?: unknown }
 type Fail = { ok: false; status: number; error: string };
 export type FileResult = { ok: true; reportId: number; ticketId: number; created: boolean; restricted: boolean } | Fail;
 
@@ -121,8 +126,8 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
     const p = getPlayer(db, body.targetId);
     if (!p) return fail(404, 'no such player');
     target = { kind: 'player', steamid: p.steamid };
-  } else if (body.targetDiscord) {
-    const d = body.targetDiscord;
+  } else if (deps.targetDiscord) {
+    const d = deps.targetDiscord;
     if (d.bot) return fail(400, 'you cannot report a bot');
     const linked = playerByDiscordId(db, d.discordId);
     target = linked ? { kind: 'player', steamid: linked.steamid } : { kind: 'discord', discordId: d.discordId, name: d.name };
@@ -180,7 +185,7 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
   // without a match. Without this a safety report about a match you had
   // already reported would have to give up its match to get through.
   const restricted = category === 'unsafe'
-    || (target.kind === 'player' ? hasStaffFlag(db, target.steamid) : body.targetDiscord!.administrator);
+    || (target.kind === 'player' ? hasStaffFlag(db, target.steamid) : deps.targetDiscord!.administrator);
   const targetKey = personKey(target);
   const dupe = matchId !== null
     ? db.prepare(
