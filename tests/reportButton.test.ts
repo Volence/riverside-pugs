@@ -7,7 +7,7 @@ import {
   recentCoPlayers, resolveByName, reportModal, opensReportModal, OTHER, ReportButton,
   handleReportButton, handleReportModal,
 } from '../src/discord/reportButton.js';
-import { REPORT_LABELS } from '../src/discord/commands.js';
+import { COMMAND_DEFS, REPORT_LABELS } from '../src/discord/commands.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import { opensTicketModal } from '../src/discord/ticketButtons.js';
 
@@ -76,8 +76,6 @@ describe('settings parity', () => {
     expect(defaults).toEqual(schema);
   });
 });
-
-import { COMMAND_DEFS } from '../src/discord/commands.js';
 
 describe('details wording', () => {
   const report = () => COMMAND_DEFS.find((c) => c.name === 'report')!;
