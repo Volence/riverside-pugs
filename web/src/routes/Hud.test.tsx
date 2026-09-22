@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
-import { snap, nudge, toUnits, hasOverrides, elementsTouched, resetElement } from './Hud';
+import { snap, nudge, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard } from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
 
@@ -63,6 +63,22 @@ describe('what counts as an edit', () => {
     const d = { ...DEFAULT_DESIGN, elements: { teamColumn: { gap: 40 }, chat: { x: 5 } } };
     expect(resetElement(d, 'teamColumn').elements.teamColumn).toEqual({ fit: true });
     expect(resetElement(d, 'chat').elements.chat).toBeUndefined();
+  });
+});
+
+describe('the teammate layout helpers', () => {
+  it('fills the four Free positions from where the cards sit, only the first time', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(free.elements.teamColumn).toEqual({ fit: true, dir: 'free',
+      slots: [{ x: 13, y: 441 }, { x: 153, y: 441 }, { x: 293, y: 441 }, { x: 433, y: 441 }] });
+    const moved = placeCard(free, 0, 50, 60);
+    expect(withTeamDir(withTeamDir(moved, 'row'), 'free').elements.teamColumn!.slots![0]).toEqual({ x: 50, y: 60 });
+  });
+
+  it('clamps a placed card like an element position', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(placeCard(free, 2, 5000, -900).elements.teamColumn!.slots![2]).toEqual({ x: 1000, y: -200 });
+    expect(placeCard(DEFAULT_DESIGN, 0, 5, 5)).toBe(DEFAULT_DESIGN);           // not Free: nothing to place
   });
 });
 
@@ -199,6 +215,50 @@ describe('Hud page', () => {
     expect(gap.value).toBe('19');
     fireEvent.input(gap, { target: { value: '30' } });
     expect((screen.getByRole('slider', { name: /^Gap/ }) as HTMLInputElement).value).toBe('30');
+  });
+
+  it('offers Row, Column and Free for the teammates, and Free lists the four cards where they sit', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect(screen.getByLabelText('X')).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    expect(screen.getByText(/Drag each card/)).toBeTruthy();
+    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('13');
+    expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('441');
+    expect((screen.getByLabelText('Card 4 X') as HTMLInputElement).value).toBe('433');
+    // The element's own X and Y give way to the cards'.
+    expect(screen.queryByLabelText('X')).toBeNull();
+    expect(screen.queryByRole('slider', { name: /^Gap/ })).toBeNull();
+  });
+
+  it('keeps the card positions when switching out of Free and back', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    const layout = () => screen.getByRole('combobox', { name: /^Layout/ });
+    fireEvent.change(layout(), { target: { value: 'free' } });
+    fireEvent.input(screen.getByLabelText('Card 1 X'), { target: { value: '50' } });
+    fireEvent.change(layout(), { target: { value: 'column' } });
+    expect(screen.queryByLabelText('Card 1 X')).toBeNull();
+    fireEvent.change(layout(), { target: { value: 'free' } });
+    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('50');
+  });
+
+  it('starts a new design fitted and lets the player untick it', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    const fit = () => screen.getByLabelText('Fit the card to its contents') as HTMLInputElement;
+    expect(fit().checked).toBe(true);
+    fireEvent.click(fit());
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect(fit().checked).toBe(false);
+  });
+
+  it('says on the status line when fit finds nothing to fit', () => {
+    const hidden = Object.fromEntries(['Head', 'Health', 'Name', 'Items', 'Status'].map((n) => [n, { visible: false }]));
+    localStorage.setItem('hud', JSON.stringify({ v: 1, elements: { teamColumn: { fit: true } }, children: { teamColumn: hidden } }));
+    render(<Hud />);
+    expect(screen.getByText(/keeps its full size/)).toBeTruthy();
   });
 
   it('shows a damaged-link message for a hash that will not decode', async () => {

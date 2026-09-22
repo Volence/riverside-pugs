@@ -5,11 +5,11 @@ import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import {
   loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, clampOverride, DEFAULT_DESIGN,
-  type HudDesign, type ElementOverride, type StyleOverride, type RangeKey,
+  type HudDesign, type ElementOverride, type StyleOverride, type RangeKey, type TeamDir,
 } from '../hud/design';
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
-import { elementRect, teamLayout, packHud, type BuildAssets } from '../hud/build';
+import { elementRect, teamLayout, teamCardRects, packHud, type BuildAssets } from '../hud/build';
 import { drawHud, hitTest, visibleElements, type Side } from '../hud/mock';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
@@ -171,6 +171,29 @@ export function resetElement(d: HudDesign, id: string): HudDesign {
   return { ...d, elements };
 }
 
+/**
+ * Switch the survivor team's layout. Going into Free for the first time
+ * copies where each card sits now into `slots`, read from the generated file
+ * like everything the canvas draws, so nothing jumps; leaving Free keeps
+ * them, so coming back restores the cards where the player left them.
+ */
+export function withTeamDir(d: HudDesign, dir: TeamDir): HudDesign {
+  const cur = d.elements.teamColumn ?? {};
+  const next: ElementOverride = { ...cur, dir };
+  if (dir === 'free' && !cur.slots) {
+    next.slots = teamCardRects(d, d.aspect).map((r) => ({ x: Math.round(r.x), y: Math.round(r.y) }));
+  }
+  return { ...d, elements: { ...d.elements, teamColumn: next } };
+}
+
+/** Put one Free card's top-left at (x, y), clamped through the same table as an element's position. */
+export function placeCard(design: HudDesign, card: number, x: number, y: number): HudDesign {
+  const o = design.elements.teamColumn;
+  if (!o?.slots || !o.slots[card]) return design;
+  const slots = o.slots.map((s, i) => (i === card ? { x: clampOverride('x', x), y: clampOverride('y', y) } : s));
+  return { ...design, elements: { ...design.elements, teamColumn: { ...o, slots } } };
+}
+
 const BACKDROPS: [Backdrop, string][] = [
   ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'], ['shot', 'My screenshot'],
 ];
@@ -225,35 +248,86 @@ function patchNum(
   if (Number.isFinite(n)) patch(to(clampOverride(key, n)));
 }
 
+const LAYOUT_LABELS: Record<TeamDir, string> = { row: 'Row', column: 'Column', free: 'Free' };
+
 /**
- * Layout controls for a team element. The survivor team's cards step by the
- * Gap between them (0 to 200, units at scale 1); the infected row, whose
- * cards the game places itself, keeps its single spacing number. Column is
- * offered only when the registry says the element supports it.
+ * Layout controls for a team element. One Layout select serves both: the
+ * survivor team offers Row, Column and Free, the infected row (whose cards
+ * the game places itself) only what its registry entry lists, and only the
+ * onChange branches, not the select itself. The survivor team's cards step
+ * by the Gap between them (0 to 200, units at scale 1) outside Free, plus
+ * Fit, and in Free one X and Y per card, card 4 included, since it shows
+ * only while spectating a full team and is otherwise unreachable. The
+ * infected row keeps its single spacing number.
  */
 function TeamControls(
-  { design, el, patch }: { design: HudDesign; el: HudElement; patch: Patch },
+  { design, setDesign, el, o, patch, selectedCard, onPickCard }: {
+    design: HudDesign; setDesign: (fn: (d: HudDesign) => HudDesign) => void; el: HudElement; o: ElementOverride;
+    patch: Patch; selectedCard: number | null; onPickCard: (card: number | null) => void;
+  },
 ) {
   if (!el.team) return null;
+  const team = el.team;
   const t = teamLayout(design, el);
+  const options = team.file ? (['row', 'column', 'free'] as const) : team.dirs;
+  const onLayoutChange = (e: Event) => {
+    const dir = (e.target as HTMLSelectElement).value as TeamDir;
+    if (team.file) { onPickCard(null); setDesign((d) => withTeamDir(d, dir)); }
+    else patch({ dir: dir as 'row' | 'column' });
+  };
+  const setSlot = (i: number, key: 'x' | 'y', e: Event) => {
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(n)) return;
+    setDesign((d) => {
+      const cur = d.elements.teamColumn?.slots?.[i];
+      return cur ? placeCard(d, i, key === 'x' ? n : cur.x, key === 'y' ? n : cur.y) : d;
+    });
+  };
   return (
     <>
       <label class="hud__row">
         <span>Layout</span>
-        <select
-          value={t.dir}
-          onChange={(e) => patch({ dir: (e.target as HTMLSelectElement).value as 'row' | 'column' })}
-        >
-          <option value="row">Row</option>
-          {el.team.dirs.includes('column') && <option value="column">Column</option>}
+        <select value={t.dir} onChange={onLayoutChange}>
+          {options.map((d) => <option key={d} value={d}>{LAYOUT_LABELS[d]}</option>)}
         </select>
         <span />
       </label>
-      {el.team.file ? (
-        <Slider
-          label="Gap" value={Math.max(0, Math.round(t.gap ?? 0))} min={0} max={200} step={1}
-          onInput={(gap) => patch({ gap: clampOverride('gap', gap) })}
-        />
+      {team.file ? (
+        <>
+          {t.dir !== 'free' && (
+            <Slider
+              label="Gap" value={Math.max(0, Math.round(t.gap ?? 0))} min={0} max={200} step={1}
+              onInput={(gap) => patch({ gap: clampOverride('gap', gap) })}
+            />
+          )}
+          <label class="hud__check">
+            <input
+              type="checkbox" checked={o.fit === true}
+              onChange={(e) => patch({ fit: (e.target as HTMLInputElement).checked })}
+            />
+            <span>Fit the card to its contents</span>
+          </label>
+          {t.dir === 'free' && o.slots && (
+            <>
+              <p class="muted hud__note">
+                Drag each card on the canvas, or type its position. Card 4 shows only while you spectate a full team.
+              </p>
+              {selectedCard !== null && <p class="hud__note">{`Teammate card ${selectedCard + 1}`}</p>}
+              {o.slots.map((s, i) => (
+                <div class="hud__row2" key={i}>
+                  <label class="hud__field">
+                    <span>{`Card ${i + 1} X`}</span>
+                    <input type="number" value={Math.round(s.x)} onFocus={() => onPickCard(i)} onInput={(e) => setSlot(i, 'x', e)} />
+                  </label>
+                  <label class="hud__field">
+                    <span>{`Card ${i + 1} Y`}</span>
+                    <input type="number" value={Math.round(s.y)} onFocus={() => onPickCard(i)} onInput={(e) => setSlot(i, 'y', e)} />
+                  </label>
+                </div>
+              ))}
+            </>
+          )}
+        </>
       ) : (
         <label class="hud__row">
           <span>Spacing</span>
@@ -275,12 +349,17 @@ function TeamControls(
  * rather than blanks.
  */
 function ElementControls(
-  { design, setDesign, id }: { design: HudDesign; setDesign: (fn: (d: HudDesign) => HudDesign) => void; id: string },
+  { design, setDesign, id, selectedCard, onPickCard }: {
+    design: HudDesign; setDesign: (fn: (d: HudDesign) => HudDesign) => void; id: string;
+    selectedCard: number | null; onPickCard: (card: number | null) => void;
+  },
 ) {
   const el = elementById(id);
   if (!el) return null;
   const o = design.elements[id] ?? {};
   const rect = elementRect(design, id, design.aspect);
+  // In Free each card places itself, so the element's own X and Y would move nothing.
+  const free = !!el.team?.file && teamLayout(design, el).dir === 'free';
   const patch: Patch = (p) => setDesign((d) => (
     { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), ...p } } }
   ));
@@ -306,7 +385,7 @@ function ElementControls(
         <p class="muted hud__note">Shown as the Hunter; the Tank uses the same file.</p>
       )}
 
-      {el.move && (
+      {el.move && !free && (
         <div class="hud__row2">
           <label class="hud__field">
             <span>X</span>
@@ -342,7 +421,7 @@ function ElementControls(
         <Slider label="Scale" value={o.scale ?? 1} min={0.5} max={2} step={0.05} onInput={(scale) => patch({ scale })} />
       )}
 
-      <TeamControls design={design} el={el} patch={patch} />
+      <TeamControls design={design} setDesign={setDesign} el={el} o={o} patch={patch} selectedCard={selectedCard} onPickCard={onPickCard} />
 
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>
     </Field>
@@ -430,6 +509,10 @@ export default function Hud() {
   const [design, setDesign] = useState<HudDesign>(loadDesign);
   const [side, setSide] = useState<Side>('survivor');
   const [selected, setSelected] = useState<string | null>(null);
+  // In Free, the teammate card the canvas or the card list picked.
+  const [selectedCard, setSelectedCard] = useState<number | null>(null);
+  // Selecting an element (or nothing) always drops a picked card.
+  const selectEl = (id: string | null) => { setSelected(id); setSelectedCard(null); };
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
   const [status, setStatus] = useState('');
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
@@ -537,11 +620,11 @@ export default function Hud() {
     const { ux, uy } = pointerUnits(e);
     const hit = hitTest(design, side, ux, uy);
     if (!hit) {
-      setSelected(null);
+      selectEl(null);
       drag.current = null;
       return;
     }
-    setSelected(hit);
+    selectEl(hit);
     const el = elementById(hit)!;
     const rect = elementRect(design, hit, design.aspect);
     const nearCorner = Math.hypot(ux - (rect.x + rect.w), uy - (rect.y + rect.h)) <= 6;
@@ -584,18 +667,18 @@ export default function Hud() {
   // Arrows nudge, Escape deselects, Tab/Shift+Tab cycle the current side's
   // elements: the whole editor stays usable without a mouse.
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { setSelected(null); return; }
+    if (e.key === 'Escape') { selectEl(null); return; }
 
     if (e.key === 'Tab') {
       e.preventDefault();
       const list = visibleElements(side).map((el) => el.id);
       if (list.length === 0) return;
       const forward = !e.shiftKey;
-      if (!selected) { setSelected(forward ? list[0] : list[list.length - 1]); return; }
+      if (!selected) { selectEl(forward ? list[0] : list[list.length - 1]); return; }
       const idx = list.indexOf(selected);
       const base = idx === -1 ? (forward ? -1 : 0) : idx;
       const next = (base + (forward ? 1 : -1) + list.length) % list.length;
-      setSelected(list[next]);
+      selectEl(list[next]);
       return;
     }
 
@@ -759,7 +842,7 @@ export default function Hud() {
             <Tabs
               tabs={[{ key: 'survivor', label: 'Survivor' }, { key: 'infected', label: 'Infected' }]}
               active={side}
-              onSelect={(k) => { setSide(k as Side); setSelected(null); }}
+              onSelect={(k) => { setSide(k as Side); selectEl(null); }}
             />
 
             <label>
@@ -824,7 +907,7 @@ export default function Hud() {
                   key={el.id}
                   type="button"
                   class={`hud__pill${el.id === selected ? ' is-active' : ''}${visible ? '' : ' hud__pill--hidden'}`}
-                  onClick={() => setSelected(el.id)}
+                  onClick={() => selectEl(el.id)}
                 >
                   {el.label}
                 </button>
@@ -835,7 +918,12 @@ export default function Hud() {
 
         <Panel class="hud__side">
           {selected
-            ? <ElementControls design={design} setDesign={setDesign} id={selected} />
+            ? (
+              <ElementControls
+                design={design} setDesign={setDesign} id={selected}
+                selectedCard={selectedCard} onPickCard={setSelectedCard}
+              />
+            )
             : <p class="muted">Select an element on the canvas or in the list below it.</p>}
         </Panel>
       </div>
@@ -910,6 +998,9 @@ export default function Hud() {
         </div>
 
         {status && <p class="muted hud__status">{status}</p>}
+        {teamLayout(design, elementById('teamColumn')!).fitEmpty && (
+          <p class="muted hud__status">Every part of the teammate card is hidden, so it keeps its full size instead of fitting.</p>
+        )}
       </Panel>
     </div>
   );
