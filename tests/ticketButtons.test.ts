@@ -23,7 +23,7 @@ const deps = () => ({ db, publicUrl: 'https://pug.test' });
 const press = (steamid: string, customId: string, userId = D(steamid)) =>
   handleTicketButton(deps(), { kind: 'button', customId, userId, userName: 'x' });
 const submit = (steamid: string, customId: string, fields: Record<string, string>) =>
-  handleTicketModal(deps(), { kind: 'modal', customId, userId: D(steamid), userName: 'x', fields });
+  handleTicketModal(deps(), { kind: 'modal', customId, userId: D(steamid), userName: 'x', fields, picked: {}, presserTimedOutUntil: null });
 const row = (id: number) => db.prepare('SELECT status, outcome, outcome_note, claimed_by FROM tickets WHERE id = ?').get(id);
 const audit = () => (db.prepare('SELECT admin_id, action, target, detail FROM admin_actions ORDER BY id').all() as { admin_id: string; action: string; target: string; detail: string }[])
   .map((a) => ({ ...a, detail: JSON.parse(a.detail) }));

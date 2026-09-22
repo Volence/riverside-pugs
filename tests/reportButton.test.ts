@@ -384,7 +384,7 @@ const open = (steamid: string) => handleReportButton(hDeps(), {
   kind: 'button', customId: 'rp:open', userId: D(steamid), userName: 'x',
 });
 const submit = (steamid: string, fields: Record<string, string>) => handleReportModal(hDeps(), {
-  kind: 'modal', customId: 'rp:new', userId: D(steamid), userName: 'x', fields,
+  kind: 'modal', customId: 'rp:new', userId: D(steamid), userName: 'x', fields, picked: {}, presserTimedOutUntil: null,
 });
 const said = (r: { payload: { content?: string } }) => r.payload.content ?? '';
 const reports = () => db.prepare('SELECT r.category, r.text, t.target_id FROM ticket_reports r JOIN tickets t ON t.id = r.ticket_id').all();

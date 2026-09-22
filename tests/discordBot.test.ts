@@ -59,7 +59,7 @@ describe('startBot', () => {
       },
     });
     expect(s.t.commands.map((c) => c.name)).toEqual(['queue']);
-    const r = await s.t.handler!({ kind: 'command', name: 'queue', userId: '1', userName: 'x', options: {} });
+    const r = await s.t.handler!({ kind: 'command', name: 'queue', userId: '1', userName: 'x', options: {}, picked: {}, presserTimedOutUntil: null });
     expect(r.payload.content).toBe('cmd queue');
     await bot!.stop();
   });
@@ -113,9 +113,9 @@ describe('startBot extras', () => {
     });
     expect(s.t.opensModal?.('t:1:close')).toBe(true);
     expect(s.t.opensModal?.('t:1:claim')).toBe(false);
-    const r = await s.t.handler!({ kind: 'modal', customId: 't:1:close', userId: '1', userName: 'x', fields: { outcome: 'warned' } });
+    const r = await s.t.handler!({ kind: 'modal', customId: 't:1:close', userId: '1', userName: 'x', fields: { outcome: 'warned' }, picked: {}, presserTimedOutUntil: null });
     expect(r.payload.content).toBe('closed with warned');
-    const stray = await s.t.handler!({ kind: 'modal', customId: 'zz:1', userId: '1', userName: 'x', fields: {} });
+    const stray = await s.t.handler!({ kind: 'modal', customId: 'zz:1', userId: '1', userName: 'x', fields: {}, picked: {}, presserTimedOutUntil: null });
     expect(stray.ephemeral).toBe(true);
     await bot!.stop();
   });

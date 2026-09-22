@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 const run = (name: string, options: Record<string, string> = {}, userId = '900') =>
-  handleCommand({ db, matchmaker: mm, publicUrl: URL_ }, { kind: 'command', name, userId, userName: 'u', options });
+  handleCommand({ db, matchmaker: mm, publicUrl: URL_ }, { kind: 'command', name, userId, userName: 'u', options, picked: {}, presserTimedOutUntil: null });
 const text = (r: Awaited<ReturnType<typeof run>>) => JSON.stringify(r.payload);
 
 describe('slash commands', () => {

@@ -48,7 +48,8 @@ export interface MessagePayload {
 /** One field of a modal. Discord allows five per modal. */
 export type ModalField =
   | { kind: 'text'; id: string; label: string; style: 'short' | 'paragraph'; required?: boolean; maxLength?: number }
-  | { kind: 'select'; id: string; label: string; options: { label: string; value: string }[] };
+  | { kind: 'select'; id: string; label: string; options: { label: string; value: string }[] }
+  | { kind: 'user'; id: string; label: string; required?: boolean };
 
 export interface ModalDef {
   customId: string;
@@ -106,6 +107,10 @@ export interface MessageHooks {
  *  nothing else: Discord supplies the message it was used on. */
 export interface MessageCommandDef { name: string }
 
+/** A member as Discord's interaction payload described them. Read from the
+ *  interaction itself, never fetched, so handlers stay synchronous. */
+export interface PickedMember { id: string; name: string; bot: boolean; administrator: boolean }
+
 export type BotInteraction =
   | { kind: 'button'; customId: string; userId: string; userName: string }
   | {
@@ -115,10 +120,25 @@ export type BotInteraction =
       userName: string;
       /** String options by name. A user option carries the user id. */
       options: Record<string, string>;
+      /** Each user option's member, by option name. */
+      picked: Record<string, PickedMember>;
+      /** When the presser's Discord timeout ends, or null. */
+      presserTimedOutUntil: string | null;
     }
   /** A submitted modal. `fields` is each field's value by id; a select
-   *  carries the one value picked. */
-  | { kind: 'modal'; customId: string; userId: string; userName: string; fields: Record<string, string> }
+   *  carries the one value picked. A `user` field's value is the picked id,
+   *  or '' when nothing was picked. */
+  | {
+      kind: 'modal';
+      customId: string;
+      userId: string;
+      userName: string;
+      fields: Record<string, string>;
+      /** Each `user` field's member, by field id. */
+      picked: Record<string, PickedMember>;
+      /** When the presser's Discord timeout ends, or null. */
+      presserTimedOutUntil: string | null;
+    }
   /** A message context menu command. Only ids: what the message SAYS is never
    *  handed to the bot's logic through this path. */
   | { kind: 'message_command'; name: string; userId: string; userName: string; channelId: string; messageId: string };

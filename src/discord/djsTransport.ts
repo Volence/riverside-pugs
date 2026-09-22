@@ -1,13 +1,13 @@
 import {
   ApplicationCommandOptionType, ApplicationCommandType, ChannelType, Client, ComponentType, Events, GatewayIntentBits, MessageFlags,
-  Options, OverwriteType, Partials, PermissionFlagsBits, TextInputStyle, ThreadAutoArchiveDuration,
+  Options, OverwriteType, Partials, PermissionFlagsBits, PermissionsBitField, TextInputStyle, ThreadAutoArchiveDuration,
   type AnyThreadChannel, type APIModalInteractionResponseCallbackData, type FetchedThreads, type ForumChannel, type Guild,
-  type Interaction, type Message, type TextBasedChannel,
+  type Interaction, type Message, type TextBasedChannel, type User,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
 import type {
   BotInteraction, BotTransport, Button, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks, MessagePayload, ModalDef,
-  RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
+  PickedMember, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
 } from './transport.js';
 
 /**
@@ -52,7 +52,8 @@ function toMessage(p: MessagePayload) {
  * its own `label`: discord-api-types says so at payloads/v10/message.d.ts:1463
  * ("Cannot be used in a label component"). Verified: LabelComponentData
  * typings/index.d.ts:401, ModalComponentData :2846,
- * StringSelectMenuComponentData :7483, TextInputComponentData :7532.
+ * StringSelectMenuComponentData :7483, UserSelectMenuComponentData :7488,
+ * TextInputComponentData :7532.
  */
 function toModal(m: ModalDef): APIModalInteractionResponseCallbackData {
   return {
@@ -66,12 +67,52 @@ function toModal(m: ModalDef): APIModalInteractionResponseCallbackData {
             type: ComponentType.StringSelect, custom_id: f.id, required: true,
             options: f.options.map((o) => ({ label: o.label, value: o.value })),
           }
-        : {
-            type: ComponentType.TextInput, custom_id: f.id,
-            style: f.style === 'paragraph' ? TextInputStyle.Paragraph : TextInputStyle.Short,
-            required: f.required ?? false, max_length: f.maxLength,
-          },
+        : f.kind === 'user'
+          ? {
+              type: ComponentType.UserSelect, custom_id: f.id, required: f.required ?? false,
+              min_values: f.required ? 1 : 0, max_values: 1,
+            }
+          : {
+              type: ComponentType.TextInput, custom_id: f.id,
+              style: f.style === 'paragraph' ? TextInputStyle.Paragraph : TextInputStyle.Short,
+              required: f.required ?? false, max_length: f.maxLength,
+            },
     })),
+  };
+}
+
+/** Administrator, from either a cached GuildMember or the raw resolved member
+ *  an interaction carries (whose permissions are a bitfield string).
+ *  GuildMember.permissions :1900 (Readonly<PermissionsBitField>);
+ *  APIInteractionGuildMember.permissions / APIInteractionDataResolvedGuildMember.permissions
+ *  are `Permissions` (a string), discord-api-types payloads/v10/_interactions/base.d.ts. */
+function isAdministrator(m: unknown): boolean {
+  const perms = (m as { permissions?: unknown } | null)?.permissions;
+  if (perms instanceof PermissionsBitField) return perms.has(PermissionFlagsBits.Administrator);
+  if (typeof perms === 'string') return (BigInt(perms) & PermissionFlagsBits.Administrator) !== 0n;
+  return false;
+}
+
+/** When a member's timeout ends, from either shape, or null.
+ *  GuildMember.communicationDisabledUntil :1890 (Date | null);
+ *  the raw member's communication_disabled_until (string | null | undefined),
+ *  discord-api-types payloads/v10/guild.d.ts APIBaseGuildMember. */
+function timedOutUntil(m: unknown): string | null {
+  const g = m as { communicationDisabledUntil?: Date | null; communication_disabled_until?: string | null } | null;
+  const v = g?.communicationDisabledUntil ?? g?.communication_disabled_until ?? null;
+  return v === null ? null : new Date(v).toISOString();
+}
+
+/** User.bot :4087, User.globalName :4096, User.username :4103;
+ *  GuildMember.displayName :1886 (getter), raw member's `nick` (APIBaseGuildMember,
+ *  discord-api-types payloads/v10/guild.d.ts). */
+function picked(user: User, member: unknown): PickedMember {
+  const nick = (member as { displayName?: string; nick?: string | null } | null);
+  return {
+    id: user.id,
+    name: nick?.displayName ?? nick?.nick ?? user.globalName ?? user.username,
+    bot: user.bot,
+    administrator: isAdministrator(member),
   };
 }
 
@@ -240,11 +281,15 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         await i.editReply({ content: inPlace ? (m.content ?? '') : (m.content || undefined), embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
       } else if (i.isChatInputCommand()) {
         const options: Record<string, string> = {};
+        const pickedMembers: Record<string, PickedMember> = {};
         for (const o of i.options.data) {
           if (o.value !== undefined) options[o.name] = String(o.value);
+          // CommandInteractionOption.user :6291, .member :6292.
+          if (o.user) pickedMembers[o.name] = picked(o.user, o.member ?? null);
         }
         const interaction: BotInteraction = {
-          kind: 'command', name: i.commandName, userId: i.user.id, userName: i.user.globalName ?? i.user.username, options,
+          kind: 'command', name: i.commandName, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          options, picked: pickedMembers, presserTimedOutUntil: timedOutUntil(i.member),
         };
         // Whether the reply is private is only known after the handler ran,
         // and a deferral fixes it. Commands are fast DB reads, so reply directly.
@@ -271,13 +316,22 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         // handler writes to the database and the reply is always private.
         await i.deferReply({ flags: MessageFlags.Ephemeral });
         const fields: Record<string, string> = {};
-        // ModalSubmitFields.fields :2936, getStringSelectValues :2946.
+        const pickedMembers: Record<string, PickedMember> = {};
+        // ModalSubmitFields.fields :2936, getStringSelectValues :2946,
+        // getSelectedUsers :2947, getSelectedMembers :2949.
         for (const [id, f] of i.fields.fields) {
+          if (f.type === ComponentType.UserSelect) {
+            const user = i.fields.getSelectedUsers(id)?.first();
+            fields[id] = user?.id ?? '';
+            if (user) pickedMembers[id] = picked(user, i.fields.getSelectedMembers(id)?.get(user.id) ?? null);
+            continue;
+          }
           fields[id] = f.type === ComponentType.TextInput ? f.value
             : f.type === ComponentType.StringSelect ? (i.fields.getStringSelectValues(id)[0] ?? '') : '';
         }
         const reply = await handler({
-          kind: 'modal', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username, fields,
+          kind: 'modal', customId: i.customId, userId: i.user.id, userName: i.user.globalName ?? i.user.username,
+          fields, picked: pickedMembers, presserTimedOutUntil: timedOutUntil(i.member),
         });
         const m = toMessage(reply.payload);
         await i.editReply({ content: m.content || undefined, embeds: m.embeds, components: m.components as never, allowedMentions: m.allowedMentions });
