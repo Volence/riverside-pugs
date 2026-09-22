@@ -427,7 +427,9 @@ describe('a forum post that must not exist', () => {
     // Discord refuses the read, so the mirror cannot copy the thread: the real
     // mirror, not a stub, because the only thing that reports this is the
     // failure travelling back out of catchUp.
-    t.threads.fetchAfter = async () => { throw new Error('rate limited'); };
+    // Discord puts ids in some of what it says, and this line goes to every
+    // admin: it says what went wrong without repeating them.
+    t.threads.fetchAfter = async () => { throw new Error('rate limited reading 1234567890123456789'); };
     const sync = syncWith((threadId) => mirror.catchUp(threadId));
     await sync.reconcile();
     sync.stop();
@@ -439,6 +441,7 @@ describe('a forum post that must not exist', () => {
     // Every admin reads the feed, and one of them may be who this is about.
     const text = problems[0].kind === 'problem' ? problems[0].text : '';
     expect(text).toContain('rate limited');
-    for (const secret of [thread, `#${id}`, 'player5', IDS[5], '906']) expect(text).not.toContain(secret);
+    expect(text).toContain('<id>');
+    for (const secret of [thread, `#${id}`, 'player5', IDS[5], '906', '1234567890123456789']) expect(text).not.toContain(secret);
   });
 });

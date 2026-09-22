@@ -14,6 +14,11 @@ import type { BotTransport } from './transport.js';
 /** The spec's figure: "A reconciler on bot ready and every five minutes". */
 const RECONCILE_MS = 5 * 60_000;
 
+/** Discord quotes ids back in some of what it refuses with, and a line for the
+ *  admin feed must name nothing: every admin reads it, and one of them may be
+ *  who the ticket is about. Anything as long as a snowflake goes. */
+const withoutIds = (s: string) => s.replace(/\d{17,}/g, '<id>');
+
 /** Every private staff thread that still stands, for the ejection sweep. */
 const PRIVATE_THREADS = `SELECT th.* FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
    WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'`;
@@ -424,7 +429,7 @@ export class TicketSync {
           console.error('[discord] could not copy a ticket thread before deleting it:', err);
           // Names no ticket and no player: every admin reads the feed, and
           // this post is about someone who must not be named to them.
-          this.problem(`Could not copy a ticket thread's messages onto the site before deleting the Discord post that must not exist: ${err instanceof Error ? err.message : String(err)}. The post was deleted anyway, so anything written in it that the site had not already copied is lost.`);
+          this.problem(`Could not copy a ticket thread's messages onto the site before deleting the Discord post that must not exist: ${withoutIds(err instanceof Error ? err.message : String(err))}. The post was deleted anyway, so anything written in it that the site had not already copied is lost.`);
         }
       }
       await transport.threads.deleteThread(th.thread_id);
