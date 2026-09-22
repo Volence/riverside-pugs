@@ -33,9 +33,18 @@ const isAdmin = (db: DB, steamid: string) =>
  * Whether `by` may do this to the Discord-only person a ticket is about, and
  * exactly what. The one place the caps live: the route calls Discord only
  * with a plan this returned.
+ *
+ * Discord's own member.timeout REPLACES a running timeout rather than
+ * stacking on it, so after the checks above pass on their own terms, this
+ * also looks at what is already active on that discord_id: an active ban
+ * blocks any new sanction outright (Discord has nothing further to do and a
+ * ban already lasts until lifted), and an active timeout blocks a moderator
+ * (who could otherwise silently overwrite an admin's longer one) while
+ * letting an admin proceed, since an admin lifting-and-replacing is exactly
+ * what recordDiscordSanction then records.
  */
 export function checkDiscordSanction(
-  db: DB, ticketId: number, by: string, body: { kind?: unknown; minutes?: unknown; reason?: unknown },
+  db: DB, ticketId: number, by: string, body: { kind?: unknown; minutes?: unknown; reason?: unknown }, now = new Date(),
 ): Checked<SanctionPlan> {
   const t = getTicketRow(db, ticketId);
   if (!t || !canSeeTicket(db, t, by)) return no(404, 'no such ticket');
@@ -45,32 +54,64 @@ export function checkDiscordSanction(
   if (!reason || reason.length > 500) return no(400, 'a reason is required (up to 500 characters)');
   if (body.kind !== 'timeout' && body.kind !== 'ban') return no(400, 'pick a timeout or a ban');
   const admin = isAdmin(db, by);
+  let plan: SanctionPlan;
   if (body.kind === 'ban') {
     if (!admin) return no(403, 'only an admin can ban from the Discord');
-    return { ok: true, plan: { ticketId, discordId: t.target_discord_id, kind: 'ban', minutes: null, reason, restricted: t.restricted === 1 } };
+    plan = { ticketId, discordId: t.target_discord_id, kind: 'ban', minutes: null, reason, restricted: t.restricted === 1 };
+  } else {
+    const minutes = Number(body.minutes);
+    if (!Number.isInteger(minutes) || minutes <= 0) return no(400, 'a timeout needs a length in minutes');
+    if (minutes > DISCORD_TIMEOUT_MAX_MINUTES) return no(400, `Discord allows at most ${DISCORD_TIMEOUT_MAX_MINUTES} minutes`);
+    if (!admin) {
+      const cap = Math.min(Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080'), DISCORD_TIMEOUT_MAX_MINUTES);
+      if (minutes > cap) return no(403, `moderators can time out for up to ${cap} minutes; ask an admin for longer`);
+    }
+    plan = { ticketId, discordId: t.target_discord_id, kind: 'timeout', minutes, reason, restricted: t.restricted === 1 };
   }
-  const minutes = Number(body.minutes);
-  if (!Number.isInteger(minutes) || minutes <= 0) return no(400, 'a timeout needs a length in minutes');
-  if (minutes > DISCORD_TIMEOUT_MAX_MINUTES) return no(400, `Discord allows at most ${DISCORD_TIMEOUT_MAX_MINUTES} minutes`);
-  if (!admin) {
-    const cap = Math.min(Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080'), DISCORD_TIMEOUT_MAX_MINUTES);
-    if (minutes > cap) return no(403, `moderators can time out for up to ${cap} minutes; ask an admin for longer`);
+  const active = activeDiscordSanction(db, t.target_discord_id, now);
+  if (active) {
+    if (active.kind === 'ban') return no(409, 'they are already banned from the Discord');
+    if (!admin) {
+      const until = active.until ? new Date(active.until).toUTCString() : 'no end date';
+      return no(409, `already timed out until ${until}; an admin can lift or change it`);
+    }
   }
-  return { ok: true, plan: { ticketId, discordId: t.target_discord_id, kind: 'timeout', minutes, reason, restricted: t.restricted === 1 } };
+  return { ok: true, plan };
 }
 
 /** Insert the row, log it on the ticket, and tell Discord-sync after the
- *  commit. Returns the new row's id. */
+ *  commit. Returns the new row's id.
+ *
+ *  Also, in the same transaction, marks every other still-active row for
+ *  this discord_id lifted (by this actor, now), with a
+ *  'discord_sanction_lifted' event on each one's own ticket if it has one:
+ *  Discord's timeout replaces a running one rather than stacking on it, so
+ *  the record has to follow what Discord now actually holds, not leave a
+ *  superseded row reading "active". */
 export function recordDiscordSanction(db: DB, plan: SanctionPlan, by: string, now = new Date()): number {
   const until = plan.kind === 'timeout' && plan.minutes !== null
     ? new Date(now.getTime() + plan.minutes * 60_000).toISOString()
     : null;
+  const nowIso = now.toISOString();
   const id = db.transaction(() => {
     const insertedId = Number(db.prepare(
       `INSERT INTO discord_sanctions (discord_id, kind, until, reason, ticket_id, created_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(plan.discordId, plan.kind, until, plan.reason, plan.ticketId, by, now.toISOString()).lastInsertRowid);
+    ).run(plan.discordId, plan.kind, until, plan.reason, plan.ticketId, by, nowIso).lastInsertRowid);
     addTicketEvent(db, plan.ticketId, by, 'discord_sanction', { kind: plan.kind, minutes: plan.minutes, reason: plan.reason }, now);
+    const superseded = db.prepare(
+      `SELECT id, kind, ticket_id FROM discord_sanctions
+       WHERE discord_id = ? AND id != ? AND lifted_at IS NULL AND (until IS NULL OR until > ?)`,
+    ).all(plan.discordId, insertedId, nowIso) as { id: number; kind: SanctionKind; ticket_id: number | null }[];
+    if (superseded.length > 0) {
+      const lift = db.prepare('UPDATE discord_sanctions SET lifted_by = ?, lifted_at = ? WHERE id = ?');
+      for (const row of superseded) {
+        lift.run(by, nowIso, row.id);
+        if (row.ticket_id !== null) {
+          addTicketEvent(db, row.ticket_id, by, 'discord_sanction_lifted', { kind: row.kind, superseded: true }, now);
+        }
+      }
+    }
     return insertedId;
   })();
   publishTicketSignal({ kind: 'ticket', ticketId: plan.ticketId });

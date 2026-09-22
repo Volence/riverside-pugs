@@ -184,4 +184,65 @@ describe('AdminTicket', () => {
     expect((select as HTMLSelectElement).value).toBe('1440');
   });
 
+  // The Time out select must have its own list, not the server ban's LENGTHS
+  // (whose longest is 30 days but which caps out well short of Discord's own
+  // 28-day maximum on the way there): an admin, with no ban cap at all,
+  // should still see the full run up to 28 days.
+  it('lets an admin see the full run of timeout lengths up to 28 days', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: true, banCapMinutes: null },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    const select = await screen.findByRole('combobox', { name: 'Timeout length' });
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['1 hour', '1 day', '3 days', '7 days', '14 days', '28 days']);
+  });
+
+  // A moderator capped at 10080 (7 days, LENGTHS' longest short of
+  // Permanent) must not see 28 days: the cap is real, only the list grew.
+  it('does not offer 28 days to a moderator capped at 10080', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: false, banCapMinutes: 10080 },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    const select = await screen.findByRole('combobox', { name: 'Timeout length' });
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['1 hour', '1 day', '3 days', '7 days']);
+    expect(options).not.toContain('28 days');
+  });
+
+  it('disables Time out when a cap of 0 leaves no timeout length to offer', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: false, banCapMinutes: 0 },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    const button = await screen.findByRole('button', { name: 'Time out' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('combobox', { name: 'Timeout length' })?.querySelectorAll('option')).toHaveLength(0);
+  });
+
+  it('tells a restricted Discord-only ticket the reason goes to Discord\'s audit log, not the server-ban wording', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, ...DISCORD_TARGET, restricted: true },
+      caseFile: null, summary: null,
+      viewer: { isAdmin: true, banCapMinutes: null },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByText(/goes to Discord's audit log/)).toBeTruthy();
+    expect(screen.queryByText(/shown to the player and in the ban list/)).toBeNull();
+  });
+
+  it('keeps the server-ban restricted wording for a player ticket', async () => {
+    mockMod.ticket.mockResolvedValue(detail({ ticket: { ...detail().ticket, restricted: true } }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByText(/shown to the player and in the ban list/)).toBeTruthy();
+    expect(screen.queryByText(/goes to Discord's audit log/)).toBeNull();
+  });
+
 });

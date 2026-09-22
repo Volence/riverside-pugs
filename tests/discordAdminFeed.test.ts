@@ -134,6 +134,22 @@ describe('admin feed', () => {
     expect(text(1)).toContain('1 day');
   });
 
+  /** No reason and no Discord id, same as ticket_ban leaves the ban reason
+   *  out and ticket_remove leaves out what was removed: only the ticket link
+   *  and the kind/length, which is all the audit detail carries. */
+  it('a Discord sanction from a ticket reads as a sentence, with no reason and no Discord id', async () => {
+    logAdmin(db, ADMIN, 'ticket_discord_sanction', 12, { kind: 'timeout', minutes: 1440 });
+    logAdmin(db, ADMIN, 'ticket_discord_sanction', 13, { kind: 'ban', minutes: null });
+    logAdmin(db, ADMIN, 'ticket_discord_sanction_lift', 12, { kind: 'timeout', sanctionId: 1 });
+    await feed.idle();
+    expect(text(0)).toContain('timed out the Discord member on ticket [#12](https://pug.test/admin/people/tickets/12)');
+    expect(text(0)).toContain('1 day');
+    expect(text(1)).toContain('banned the Discord member on ticket [#13]');
+    expect(text(1)).not.toContain('1 day');
+    expect(text(2)).toContain('lifted a Discord timeout on ticket [#12]');
+    expect(text(0) + text(1) + text(2)).not.toContain('990');
+  });
+
   it('admin actions, penalties, accounts and problems post one line each, with names', async () => {
     logAdmin(db, ADMIN, 'ban', IDS[3], { reason: 'throwing', minutes: 1440 });
     recordPenalty(db, IDS[2], 'ready_fail', null);

@@ -117,3 +117,55 @@ describe('recording and lifting', () => {
     expect(checkLift(db, id, ADMIN, now)).toEqual({ ok: false, status: 404, error: 'no such sanction' });
   });
 });
+
+// Discord's own member.timeout REPLACES a running timeout rather than
+// stacking on it, so a moderator's short one would otherwise silently wipe
+// an admin's longer one and leave the admin's row reading "active" when
+// Discord no longer holds it.
+describe('checkDiscordSanction against an already-active sanction', () => {
+  it('blocks a moderator over an admin\'s active timeout, with the readable end time, and lets an admin proceed, lifting the earlier row', () => {
+    const c = ask(ADMIN, { kind: 'timeout', minutes: 40320, reason: 'long one' });
+    if (!c.ok) throw new Error('check failed');
+    const firstId = recordDiscordSanction(db, c.plan, ADMIN, now);
+    const firstUntil = (db.prepare('SELECT until FROM discord_sanctions WHERE id = ?').get(firstId) as { until: string }).until;
+    const later = new Date(now.getTime() + 60_000);
+
+    expect(checkDiscordSanction(db, ticketId, MOD, { kind: 'timeout', minutes: 60, reason: 'spam' }, later)).toEqual({
+      ok: false, status: 409, error: `already timed out until ${new Date(firstUntil).toUTCString()}; an admin can lift or change it`,
+    });
+
+    const c2 = checkDiscordSanction(db, ticketId, ADMIN, { kind: 'timeout', minutes: 60, reason: 'shorter now' }, later);
+    expect(c2).toMatchObject({ ok: true, plan: { kind: 'timeout', minutes: 60 } });
+    if (!c2.ok) throw new Error('admin check failed');
+    recordDiscordSanction(db, c2.plan, ADMIN, later);
+
+    const rows = sanctionsFor(db, LURKER, later);
+    const first = rows.find((r) => r.id === firstId);
+    expect(first).toMatchObject({ active: false, liftedBy: ADMIN });
+    expect(db.prepare(
+      "SELECT detail FROM ticket_events WHERE kind = 'discord_sanction_lifted'",
+    ).get()).toMatchObject({ detail: JSON.stringify({ kind: 'timeout', superseded: true }) });
+  });
+
+  it('refuses anything, from anyone, over an active ban', () => {
+    const c = ask(ADMIN, { kind: 'ban', reason: 'x' });
+    if (!c.ok) throw new Error('check failed');
+    recordDiscordSanction(db, c.plan, ADMIN, now);
+    const later = new Date(now.getTime() + 60_000);
+
+    expect(checkDiscordSanction(db, ticketId, MOD, { kind: 'timeout', minutes: 60, reason: 'x' }, later))
+      .toEqual({ ok: false, status: 409, error: 'they are already banned from the Discord' });
+    expect(checkDiscordSanction(db, ticketId, ADMIN, { kind: 'ban', reason: 'x' }, later))
+      .toEqual({ ok: false, status: 409, error: 'they are already banned from the Discord' });
+    expect(checkDiscordSanction(db, ticketId, ADMIN, { kind: 'timeout', minutes: 60, reason: 'x' }, later))
+      .toEqual({ ok: false, status: 409, error: 'they are already banned from the Discord' });
+  });
+
+  it('does not block a fresh sanction once the earlier timeout has lapsed', () => {
+    const c = ask(MOD, { kind: 'timeout', minutes: 1, reason: 'x' });
+    if (!c.ok) throw new Error('check failed');
+    recordDiscordSanction(db, c.plan, MOD, now);
+    const afterLapse = new Date(now.getTime() + 120_000);
+    expect(checkDiscordSanction(db, ticketId, MOD, { kind: 'timeout', minutes: 60, reason: 'y' }, afterLapse)).toMatchObject({ ok: true });
+  });
+});

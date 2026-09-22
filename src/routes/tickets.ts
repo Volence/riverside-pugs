@@ -277,7 +277,24 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     // Guards against two admins racing to lift the same sanction: the loser's
     // UPDATE changes nothing, recordLift reports that, and this answers 409
     // rather than writing a second event for a lift that already happened.
-    if (!recordLift(db, plan, me)) return reply.code(409).send({ error: 'that sanction is no longer in force' });
+    let lifted: boolean;
+    try {
+      lifted = recordLift(db, plan, me);
+    } catch (err) {
+      // Same shape as the apply route above: Discord already did it, so an
+      // admin problem event says the write failed, with the same restricted
+      // wording (no Discord id, ticket number only) for a restricted ticket.
+      publishAdminEvent({
+        kind: 'problem',
+        text: plan.restricted
+          ? `A Discord sanction lift on restricted ticket #${plan.ticketId} was applied in Discord but could not be recorded; ` +
+            'someone on its access list should check it.'
+          : `Discord ${plan.kind === 'ban' ? 'unbanned' : 'ended the timeout for'} ${plan.discordId}` +
+            `${plan.ticketId !== null ? ` for ticket #${plan.ticketId}` : ''}, but recording the lift failed: ${String(err)}`,
+      });
+      return reply.code(500).send({ error: 'Discord applied it, but recording it failed; an admin has been told' });
+    }
+    if (!lifted) return reply.code(409).send({ error: 'that sanction is no longer in force' });
     logAdmin(db, me, 'ticket_discord_sanction_lift', plan.ticketId ?? 0, { kind: plan.kind, sanctionId: plan.sanctionId }, { quiet: plan.restricted });
     broadcast('refresh');
     return { ok: true };

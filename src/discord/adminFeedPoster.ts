@@ -229,7 +229,8 @@ export class AdminFeedPoster {
         }
       }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
-      case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': case 'ticket_remove': {
+      case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': case 'ticket_remove':
+      case 'ticket_discord_sanction': case 'ticket_discord_sanction_lift': {
         const ticket = `ticket [#${e.target}](${this.ticket(e.target)})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
@@ -240,6 +241,14 @@ export class AdminFeedPoster {
           // Never what was removed, and never for a restricted ticket: that
           // removal is logged quiet and never reaches here.
           case 'ticket_remove': return `${who} removed a message from ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
+          // Neither the reason nor the Discord id: those go with the ticket
+          // itself (and a restricted one logs this quiet anyway), same as
+          // ticket_ban leaves the reason out for a player, ticket_remove for
+          // a message.
+          case 'ticket_discord_sanction':
+            return `${who} ${d.kind === 'ban' ? 'banned' : 'timed out'} the Discord member on ${ticket}${d.minutes ? ` (${fmtMinutes(Number(d.minutes))})` : ''}`;
+          case 'ticket_discord_sanction_lift':
+            return `${who} lifted a Discord ${d.kind === 'ban' ? 'ban' : 'timeout'} on ${ticket}`;
           default: return `${who} updated ${ticket}`;
         }
       }

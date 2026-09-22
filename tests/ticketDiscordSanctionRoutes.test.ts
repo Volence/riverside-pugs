@@ -64,6 +64,62 @@ describe('Discord sanctions over HTTP', () => {
     expect(rows()).toEqual([{ kind: 'ban', timed: 0, lifted: 1 }]);
   });
 
+  // Mirrors the apply route's own "record write failing after Discord
+  // accepted" case: Discord already lifted it, so recordLift throwing must
+  // still tell an admin, not vanish as a bare 500.
+  it('lift: Discord accepts, but recording the lift fails, an admin problem event says so, and nothing is audited', async () => {
+    await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });
+    const sid = (db.prepare('SELECT id FROM discord_sanctions').get() as { id: number }).id;
+    // Not discord_sanctions: checkLift reads it too, so dropping it would
+    // fail the check before Discord is ever called for the lift.
+    db.exec('DROP TABLE ticket_events');
+    const seen: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => seen.push(e));
+    const r = await post(ADMIN, `/api/mod/discord-sanctions/${sid}/lift`);
+    off();
+    expect(r.statusCode).toBe(500);
+    expect(r.json().error).toBe('Discord applied it, but recording it failed; an admin has been told');
+    expect(fake.moderationCalls.map((c) => c.op)).toEqual(['ban', 'unban']);
+    const problems = seen.filter((e) => e.kind === 'problem');
+    expect(problems).toHaveLength(1);
+    const text = (problems[0] as Extract<AdminEvent, { kind: 'problem' }>).text;
+    expect(text).toContain('990');
+    expect(text).toContain(`ticket #${ticketId}`);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'ticket_discord_sanction_lift'").get()).toEqual({ n: 0 });
+  });
+
+  // Discord's own timeout replaces a running one rather than stacking; the
+  // record has to follow that, and a moderator must not be able to silently
+  // wipe an admin's longer timeout by issuing a shorter one of their own.
+  it('a moderator over an admin\'s active timeout is refused before Discord is ever called; an admin may proceed and the earlier row is lifted', async () => {
+    await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'timeout', minutes: 40320, reason: 'long one' });
+    expect(fake.moderationCalls).toHaveLength(1);
+    const firstId = (db.prepare('SELECT id FROM discord_sanctions').get() as { id: number }).id;
+
+    const r = await post(MOD, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'timeout', minutes: 60, reason: 'spam' });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toMatch(/already timed out until .*; an admin can lift or change it/);
+    // Still just the one call from the admin's sanction above: the mod's
+    // attempt never reached Discord.
+    expect(fake.moderationCalls).toHaveLength(1);
+
+    const r2 = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'timeout', minutes: 60, reason: 'shorter now' });
+    expect(r2.statusCode).toBe(200);
+    expect(fake.moderationCalls).toHaveLength(2);
+    expect(db.prepare('SELECT lifted_at IS NOT NULL AS lifted FROM discord_sanctions WHERE id = ?').get(firstId)).toEqual({ lifted: 1 });
+  });
+
+  it('anything over an active ban is refused with a 409, and Discord is not called again', async () => {
+    await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });
+    expect(fake.moderationCalls).toHaveLength(1);
+    const r = await post(MOD, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'timeout', minutes: 60, reason: 'y' });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('they are already banned from the Discord');
+    const r2 = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'z' });
+    expect(r2.statusCode).toBe(409);
+    expect(fake.moderationCalls).toHaveLength(1);
+  });
+
   it('a restricted ticket audits quietly and hides from a moderator not on its list', async () => {
     db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
     expect((await post(MOD, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'timeout', minutes: 5, reason: 'x' })).statusCode).toBe(404);
@@ -117,7 +173,11 @@ describe('Discord sanctions over HTTP', () => {
   // ticket's own list, so its wording must differ for a restricted ticket.
   describe('the record write failing after Discord accepted', () => {
     it('on a normal ticket: one problem event naming the Discord id and the ticket, 500, nothing audited', async () => {
-      db.exec('DROP TABLE discord_sanctions');
+      // Not discord_sanctions itself: checkDiscordSanction now reads it too
+      // (activeDiscordSanction), so dropping it would fail the check before
+      // Discord is ever called. ticket_events fails only the write this test
+      // means to break, inside recordDiscordSanction's own transaction.
+      db.exec('DROP TABLE ticket_events');
       const seen: AdminEvent[] = [];
       const off = subscribeAdminEvents((e) => seen.push(e));
       const r = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });
@@ -136,7 +196,8 @@ describe('Discord sanctions over HTTP', () => {
     it('on a restricted ticket: one problem event with neutral wording (no Discord id), 500, nothing audited', async () => {
       db.prepare('UPDATE tickets SET restricted = 1 WHERE id = ?').run(ticketId);
       db.prepare("INSERT INTO ticket_access (ticket_id, steamid, added_by, created_at) VALUES (?, ?, 'system', 'x')").run(ticketId, ADMIN);
-      db.exec('DROP TABLE discord_sanctions');
+      // See the sibling test above for why ticket_events, not discord_sanctions.
+      db.exec('DROP TABLE ticket_events');
       const seen: AdminEvent[] = [];
       const off = subscribeAdminEvents((e) => seen.push(e));
       const r = await post(ADMIN, `/api/mod/tickets/${ticketId}/discord-sanction`, { kind: 'ban', reason: 'x' });

@@ -13,6 +13,13 @@ const OUTCOMES = [['action_taken', 'Action taken'], ['warned', 'Warned'], ['no_a
 const LENGTHS: [minutes: number | null, label: string][] = [
   [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [43200, '30 days'], [null, 'Permanent'],
 ];
+// Discord's own timeout ceiling, unrelated to the server ban's 30-day option
+// above: a Discord timeout can run up to 28 days, and unlike a ban has no
+// Permanent choice at all.
+const DISCORD_TIMEOUT_MAX_MINUTES = 40320;
+const TIMEOUT_LENGTHS: [minutes: number, label: string][] = [
+  [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [20160, '14 days'], [40320, '28 days'],
+];
 
 /** What to say about Discord, in plain words, for each state. */
 function Discussion({ d }: { d: TicketDiscussion }) {
@@ -46,9 +53,12 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
   const { ticket: t, caseFile: c } = data;
   const cap = data.viewer.banCapMinutes;
   const lengths = LENGTHS.filter(([m]) => cap === null || (m !== null && m <= cap));
-  // Discord has no permanent timeout (its own 28-day maximum), so the
-  // Permanent entry never applies here, and a moderator's cap still holds.
-  const timeoutLengths = LENGTHS.filter((l): l is [number, string] => l[0] !== null && l[0] <= (cap ?? 40320) && l[0] <= 40320);
+  // Its own list, not LENGTHS: the server ban's 30-day option is not one of
+  // Discord's choices, and Discord's own 28-day maximum IS a choice here,
+  // above the 7-day ceiling LENGTHS happens to have. A moderator's cap still
+  // holds, never above Discord's own ceiling.
+  const timeoutCap = Math.min(cap ?? DISCORD_TIMEOUT_MAX_MINUTES, DISCORD_TIMEOUT_MAX_MINUTES);
+  const timeoutLengths = TIMEOUT_LENGTHS.filter(([m]) => m <= timeoutCap);
   // The shared `minutes` state defaults to '1440' for the ban form, which is
   // not always one of timeoutLengths (a moderator capped under a day, say).
   // Fall back to the largest allowed length at or under a day, or failing
@@ -194,8 +204,11 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
         {open && (
           <>
-            {t.restricted && (
+            {t.restricted && t.targetId && (
               <p class="muted">The ban reason is shown to the player and in the ban list, so keep it general and leave the details in this ticket.</p>
+            )}
+            {t.restricted && !t.targetId && t.targetDiscordId && (
+              <p class="muted">The reason goes to Discord's audit log, which more people can read than this ticket, so keep it general and leave the details here.</p>
             )}
             {t.targetId && (
               <div class="admin-form">
@@ -222,7 +235,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                   <select value={timeoutMinutes} aria-label="Timeout length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
                     {timeoutLengths.map(([m, label]) => <option key={label} value={String(m)}>{label}</option>)}
                   </select>
-                  <button class="btn" type="button" disabled={busy || !reason.trim()}
+                  <button class="btn" type="button" disabled={busy || !reason.trim() || timeoutLengths.length === 0}
                     onClick={() => run(() => modApi.discordSanction(t.id, 'timeout', Number(timeoutMinutes), reason.trim()), {
                       title: `Time out ${t.targetName ?? 'this person'} in Discord?`,
                       body: 'The bot times them out in the Discord server. They cannot talk until it ends or an admin lifts it.',
