@@ -152,6 +152,13 @@ describe('what goes wrong while downloading', () => {
     expect((await store.save(id, b)).skipReason).toBe('fetch_failed');
     expect(onDisk()).toEqual([]);
   });
+
+  it('a body that ends cleanly short of the size Discord declared is fetch_failed, and nothing is left on disk', async () => {
+    const a = att('short.png', 1000);
+    const store = new AttachmentStore({ db, dir, fetcher: fetcherOf({ [a.url]: bytes(400) }) });
+    expect(await store.save(ticket(IDS[1]), a)).toEqual({ size: 1000, sha256: null, storedName: null, skipReason: 'fetch_failed' });
+    expect(onDisk()).toEqual([]);
+  });
 });
 
 describe('the two guards around the file system and the network', () => {

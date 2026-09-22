@@ -111,6 +111,13 @@ export class AttachmentStore {
         }
       };
       await pipeline(Readable.from(capped()), createWriteStream(part, { mode: 0o600 }));
+      // Discord's declared size is authoritative: a body that ends short (or
+      // ends long without ever crossing the cap) is not the file it claimed
+      // to be, and is refused exactly like any other failed download.
+      if (size !== a.size) {
+        rmSync(part, { force: true });
+        return skip('fetch_failed');
+      }
       renameSync(part, final);
       return { size, sha256: hash.digest('hex'), storedName, skipReason: null };
     } catch (err) {
