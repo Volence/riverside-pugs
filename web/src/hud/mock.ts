@@ -12,10 +12,10 @@
  */
 import type { HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
-import { buildTrees, elementRect, teamLayout } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { drawPanel } from './render';
+import { drawPanel, type CardState } from './render';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
 
 export type Side = 'survivor' | 'infected';
@@ -29,23 +29,41 @@ export function visibleElements(side: Side): HudElement[] {
  *  this; `rectFor` carries it because hit-testing and drawHud both need it. */
 interface Rect { x: number; y: number; w: number; h: number }
 
+/** What the page asks the canvas to show beyond the design: the teammate card state, a selected child, a selected Free card. */
+export interface HudView { state?: CardState; child?: string | null; card?: number | null }
+
+const inside = (r: Rect, ux: number, uy: number) => ux >= r.x && ux <= r.x + r.w && uy >= r.y && uy <= r.y + r.h;
+
 function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
   return elementRect(design, id, design.aspect);
 }
 
+const TEAM_CARDS = 3;
+
 /** Smallest-area element under the point wins, so a small element sitting
  *  inside a larger container (the crosshair inside the whole screen, say)
- *  stays selectable. */
+ *  stays selectable. In Free the teammates' container covers the screen, so
+ *  there the three drawn cards are the targets instead of the container. */
 export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): string | null {
   let best: { id: string; area: number } | null = null;
   for (const el of visibleElements(side)) {
     const r = rectFor(design, el.id);
     if (!r.visible) continue;
-    if (ux < r.x || ux > r.x + r.w || uy < r.y || uy > r.y + r.h) continue;
-    const area = r.w * r.h;
-    if (!best || area < best.area) best = { id: el.id, area };
+    const targets = el.id === 'teamColumn' && isFreeTeam(design) ? teamCardRects(design, design.aspect).slice(0, TEAM_CARDS) : [r];
+    for (const t of targets) {
+      if (!inside(t, ux, uy)) continue;
+      const area = t.w * t.h;
+      if (!best || area < best.area) best = { id: el.id, area };
+    }
   }
   return best ? best.id : null;
+}
+
+/** Which of the three drawn Free teammate cards is under the point, or null (not Free, or no card there). */
+export function freeCardAt(design: HudDesign, ux: number, uy: number): number | null {
+  if (!isFreeTeam(design)) return null;
+  const i = teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).findIndex((c) => inside(c, ux, uy));
+  return i < 0 ? null : i;
 }
 
 /** Per-viewer convenience only, so the read is guarded like every other
@@ -88,32 +106,23 @@ function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
   clipToRect(ctx, r, () => clipToRect(ctx, local, () => drawPanel(ctx, design, 'ownHealth', { x: local.x, y: local.y }, k, { onAsset })));
 }
 
-const TEAM_CARDS = 3;
-
 interface CardRect { x: number; y: number; w: number; h: number }
 
 /**
- * Card rects for a team-style element, in canvas pixels.
- *
- * `teamLayout` is the one place that decides team geometry, and everything
- * here is its numbers times `k` (pixels per HUD unit). Where it gives a card
- * size, that is the size the generator writes into the file, so the canvas
- * draws exactly that. Where it does not (an element whose team geometry the
- * generator is not rewriting, or the infected row, whose cards the game
- * places itself), there is no file to agree with and the card is fitted to
- * the element's own rect instead.
+ * Card rects for the infected row, in canvas pixels. Now that
+ * `paintTeamColumn` draws the survivor cards from `teamCardRects`, this
+ * serves the infected row only: its cards have no fit offset (the game
+ * places them itself), so there is no file to agree with and each card is
+ * fitted to the element's own rect instead.
  */
 function teamCards(design: HudDesign, id: string, r: Rect, k: number): CardRect[] {
   const t = teamLayout(design, elementById(id)!);
   const spacing = t.spacing * k;
   const w = t.card ? t.card.w * k : (t.dir === 'row' ? Math.min(spacing, r.w / TEAM_CARDS) : r.w);
   const h = t.card ? t.card.h * k : (t.dir === 'row' ? r.h : Math.min(spacing, r.h / TEAM_CARDS));
-  // A fitted card sits at the fit box's top-left inside the container.
-  // (Interim: Task 12 moves these cards to teamCardRects and drops the offset here.)
-  const off = t.offset ?? { x: 0, y: 0 };
   return Array.from({ length: TEAM_CARDS }, (_, i) => ({
-    x: r.x + off.x * k + (t.dir === 'row' ? spacing * i : 0),
-    y: r.y + off.y * k + (t.dir === 'column' ? spacing * i : 0),
+    x: r.x + (t.dir === 'row' ? spacing * i : 0),
+    y: r.y + (t.dir === 'column' ? spacing * i : 0),
     w, h,
   }));
 }
@@ -132,18 +141,15 @@ function clipToRect(ctx: CanvasRenderingContext2D, r: Rect, draw: () => void) {
 }
 
 /**
- * Each teammate card's children live in TeamPlayerN (teamdisplayhud.res), so
- * the card is clipped to that panel's own size as well as to the element.
+ * Each teammate card is drawn where the generated teamdisplayhud.res puts
+ * it, at its own size, clipped to that card (VGUI clips a card's children to
+ * the card) and to the container. All three draw from the one card file.
  */
-function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
-  const file = elementById('teamColumn')!.team!.file!;
+function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
   clipToRect(ctx, r, () => {
-    for (const [i, c] of teamCards(design, 'teamColumn', r, k).entries()) {
-      const p = parentPanel(design, file, `TeamPlayer${i + 1}`, k);
-      const card = { x: c.x, y: c.y, w: p.w, h: p.h };
-      clipToRect(ctx, card, () => {
-        drawPanel(ctx, design, 'teamColumn', { x: c.x, y: c.y }, k, { card: i, onAsset });
-      });
+    for (const [i, c] of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).entries()) {
+      const card = { x: c.x * k, y: c.y * k, w: c.w * k, h: c.h * k };
+      clipToRect(ctx, card, () => drawPanel(ctx, design, 'teamColumn', { x: card.x, y: card.y }, k, { card: i, onAsset, state: view.state }));
     }
   });
 }
@@ -228,7 +234,7 @@ function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.fillRect(r.x, r.y + 18, r.w * 0.5, r.h - 18);
 }
 
-const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) => void> = {
+const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view?: HudView) => void> = {
   ownHealth: paintOwnHealth,
   teamColumn: paintTeamColumn,
   weaponSelection: paintWeaponSelection,
@@ -276,6 +282,18 @@ function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.restore();
 }
 
+/** Free: the selection is the cards, not the screen-sized container. The picked card is solid, the others dashed. */
+function drawCardSelection(ctx: CanvasRenderingContext2D, design: HudDesign, k: number, accent: string, card: number | null) {
+  for (const [i, c] of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).entries()) {
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = i === card ? 2 : 1;
+    ctx.setLineDash(i === card ? [] : [4, 3]);
+    ctx.strokeRect(c.x * k, c.y * k, c.w * k, c.h * k);
+    ctx.restore();
+  }
+}
+
 /**
  * Draws the HUD mock over whatever is already on the canvas.
  *
@@ -288,11 +306,13 @@ function drawHiddenOutline(ctx: CanvasRenderingContext2D, r: Rect) {
  * generated .res files by render.ts, not as stand-ins here; the rest are
  * hand-made approximations. `onAsset` is passed through to every drawPanel
  * call so a texture that finishes loading after this call returns can
- * trigger a redraw.
+ * trigger a redraw. `view` carries what the page shows beyond the design:
+ * the teammate card state and the selected Free card (and, from the child
+ * selection, the selected child).
  */
 export function drawHud(
   ctx: CanvasRenderingContext2D, pxW: number, pxH: number, design: HudDesign, side: Side, selectedId: string | null,
-  onAsset?: () => void,
+  onAsset?: () => void, view: HudView = {},
 ): void {
   const k = pxH / SCREEN_H;
   const accent = accentColour(ctx);
@@ -309,13 +329,16 @@ export function drawHud(
     if (hidden) {
       ctx.save();
       ctx.globalAlpha = 0.25;
-      paint(ctx, r, design, k, onAsset);
+      paint(ctx, r, design, k, onAsset, view);
       ctx.restore();
       drawHiddenOutline(ctx, r);
     } else {
-      paint(ctx, r, design, k, onAsset);
+      paint(ctx, r, design, k, onAsset, view);
     }
 
-    if (el.id === selectedId) drawSelection(ctx, r, el, accent);
+    if (el.id === selectedId) {
+      if (el.id === 'teamColumn' && isFreeTeam(design)) drawCardSelection(ctx, design, k, accent, view.card ?? null);
+      else drawSelection(ctx, r, el, accent);
+    }
   }
 }

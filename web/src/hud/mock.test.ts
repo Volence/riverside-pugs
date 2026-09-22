@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud } from './mock';
+import { visibleElements, hitTest, drawHud, freeCardAt } from './mock';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
-import { buildTrees, elementRect } from './build';
+import { buildTrees, elementRect, teamCardRects } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
 import { _setImageFactory, _resetAssetCache } from './render';
@@ -163,12 +163,47 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(local).toEqual({ w: 130, h: 85 });                         // stock, as shipped
     const own = elementRect(DEFAULT_DESIGN, 'ownHealth', DEFAULT_DESIGN.aspect);
     expect(rects).toContainEqual([own.x * k, own.y * k, local.w * k, local.h * k]);
-    const card = size('resource/ui/hud/teamdisplayhud.res', 'TeamPlayer1');
-    expect(card).toEqual({ w: 121, h: 36 });                          // DEFAULT_DESIGN fits the stock card
-    const team = elementRect(DEFAULT_DESIGN, 'teamColumn', DEFAULT_DESIGN.aspect);
-    const cardClips = rects.filter((r) => r[2] === card.w * k && r[3] === card.h * k);
-    expect(cardClips).toHaveLength(3);
-    // Fitting keeps the content where it was, so the first card starts at the content's old top-left.
-    expect(cardClips[0].slice(0, 2)).toEqual([(team.x + 13) * k, (team.y + 36) * k]);
+    // Each teammate card is clipped where the generated file puts it, at its own size.
+    const cards = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect).slice(0, 3);
+    expect(cards[0]).toEqual({ x: 13, y: 441, w: 121, h: 36 });       // DEFAULT_DESIGN fits the stock card
+    for (const c of cards) expect(rects).toContainEqual([c.x * k, c.y * k, c.w * k, c.h * k]);
+  });
+});
+
+const FREE: HudDesign = { ...DEFAULT_DESIGN, elements: { teamColumn: { fit: true, dir: 'free',
+  slots: [{ x: 8, y: 100 }, { x: 8, y: 150 }, { x: 700, y: 100 }, { x: 400, y: 440 }] } } };
+
+describe('Free teammate cards', () => {
+  it('hits each drawn card as the teammates, and not the screen-sized container around them', () => {
+    expect(hitTest(FREE, 'survivor', 68, 118)).toBe('teamColumn');
+    expect(freeCardAt(FREE, 68, 118)).toBe(0);
+    expect(freeCardAt(FREE, 68, 168)).toBe(1);
+    expect(hitTest(FREE, 'survivor', 426, 100)).toBeNull();
+    // Card 4 shows only while spectating a full team: not drawn, not a target.
+    expect(hitTest(FREE, 'survivor', 460, 458)).toBeNull();
+    expect(freeCardAt(FREE, 460, 458)).toBeNull();
+    expect(freeCardAt(DEFAULT_DESIGN, 73, 459)).toBeNull();           // not Free
+  });
+
+  it('outlines each card instead of the whole screen, the selected one solid', () => {
+    const strokes: number[][] = [];
+    const dashes: number[][] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.strokeRect = ((...a: number[]) => { strokes.push(a); }) as typeof ctx.strokeRect;
+    ctx.setLineDash = ((d: number[]) => { dashes.push(d); }) as typeof ctx.setLineDash;
+    drawHud(ctx, 853, 480, FREE, 'survivor', 'teamColumn', undefined, { card: 1 });
+    for (const c of teamCardRects(FREE, FREE.aspect).slice(0, 3)) expect(strokes).toContainEqual([c.x, c.y, c.w, c.h]);
+    expect(strokes).not.toContainEqual([0, 0, 853, 480]);
+  });
+});
+
+describe('drawHud passes the preview state to the teammate cards', () => {
+  it('draws every card down when asked', () => {
+    _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const srcs: string[] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
+    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { state: 'down' });
+    for (const c of ['biker', 'manager', 'teenangst']) expect(srcs).toContain(artUrl(`vgui/s_panel_${c}_incap`));
   });
 });
