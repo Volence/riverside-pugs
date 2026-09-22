@@ -1232,6 +1232,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(ticketRoutes, {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
     guildId: deps.config.discord?.guildId ?? null,
+    attachmentsDir: deps.config.ticketAttachmentsDir,
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,

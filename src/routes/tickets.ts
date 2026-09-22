@@ -1,9 +1,12 @@
+import { createReadStream, statSync } from 'node:fs';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireActive, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
-import { getTicketRow } from '../tickets/store.js';
+import { allowedType, attachmentPath } from '../tickets/attachments.js';
+import type { AttachmentRow } from '../tickets/messages.js';
+import { canSeeTicket, getTicketRow } from '../tickets/store.js';
 import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
 import { listTickets, ticketCounts, ticketDetail, type TicketFilter } from '../tickets/views.js';
@@ -18,13 +21,15 @@ export interface TicketRouteOpts {
   adminSteamIds: string[];
   /** The Discord server, for links to threads. Null when Discord is not configured. */
   guildId: string | null;
+  /** config.ticketAttachmentsDir. */
+  attachmentsDir: string;
 }
 
 /** Filing under /api/reports for any active player; everything under
  *  /api/mod for staff. Each mutation ends with logAdmin, quiet when the
  *  ticket is restricted. */
 export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts): Promise<void> {
-  const { db, matchmaker, broadcast, adminSteamIds, guildId } = opts;
+  const { db, matchmaker, broadcast, adminSteamIds, guildId, attachmentsDir } = opts;
   const requireActive = makeRequireActive(db);
   const requireMod = makeRequireMod(db);
   const filing = { adminSteamIds };
@@ -82,6 +87,54 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
       caseFile: caseFile(db, d.ticket.targetId, me),
       summary: playerFileSummary(db, d.ticket.targetId, fileViewer(db, me)),
     };
+  });
+
+  /**
+   * The only way a stored file leaves the box.
+   *
+   * After requireMod, every refusal is the same 404 with the same body: no
+   * such ticket, a ticket this viewer may not see, a file that belongs to a
+   * different ticket, one that was never stored, one that was removed. The
+   * route cannot be used to ask whether any of those exist.
+   *
+   * The headers assume the file is hostile, because a stranger chose it. The
+   * content type is OURS for the extension, never what Discord or the
+   * uploader claimed; nosniff stops a browser second-guessing it; the
+   * sandboxing policy means that even opened in a tab of its own it runs
+   * nothing and loads nothing. Only images and video may show in place.
+   */
+  app.get('/api/mod/tickets/:id/attachments/:aid', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { id, aid } = req.params as { id: string; aid: string };
+    const gone = () => reply.code(404).send({ error: 'no such file' });
+    const t = getTicketRow(db, Number(id));
+    if (!t || !canSeeTicket(db, t, me)) return gone();
+    const a = db.prepare(
+      `SELECT a.* FROM ticket_attachments a JOIN ticket_messages m ON m.id = a.message_id
+       WHERE a.id = ? AND m.ticket_id = ? AND m.removed_at IS NULL`,
+    ).get(Number(aid), t.id) as AttachmentRow | undefined;
+    if (!a || a.removed_at !== null || a.stored_name === null) return gone();
+    const type = allowedType(a.filename);
+    const path = attachmentPath(attachmentsDir, a.stored_name);
+    if (!type || !path) return gone();
+    let bytes: number;
+    try {
+      bytes = statSync(path).size;
+    } catch {
+      return gone();
+    }
+    // Nothing but these survives into the header: a name is user input.
+    const safeName = a.filename.replace(/[^A-Za-z0-9._-]/g, '_').slice(-100);
+    return reply
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', "sandbox; default-src 'none'")
+      .header('Content-Disposition', `${type.inline ? 'inline' : 'attachment'}; filename="${safeName}"`)
+      // A removed file must not live on in a browser cache.
+      .header('Cache-Control', 'private, no-store')
+      .header('Content-Length', bytes)
+      .type(type.mime)
+      .send(createReadStream(path));
   });
 
   /** Shared tail of every mutation: run it, answer, audit, nudge open pages. */

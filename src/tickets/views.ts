@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
+import type { AttachmentRow, MessageRow } from './messages.js';
 import { canSeeTicket, getTicketRow } from './store.js';
 import { staffThread, surfaceFor } from './threads.js';
 
@@ -94,6 +95,26 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
     `SELECT steamid, name FROM players WHERE (is_admin = 1 OR is_mod = 1) AND steamid != ?
        AND steamid NOT IN (SELECT steamid FROM ticket_access WHERE ticket_id = ?) ORDER BY name`,
   ).all(row.target_id, id) : [];
+  // The mirrored discussion. Everything here is behind the canSeeTicket check
+  // at the top of this function, like the rest of the detail. `stored_name`
+  // stays on the server: the page asks for a file by attachment id.
+  const files = db.prepare(
+    `SELECT a.* FROM ticket_attachments a JOIN ticket_messages m ON m.id = a.message_id WHERE m.ticket_id = ? ORDER BY a.id`,
+  ).all(id) as AttachmentRow[];
+  const messages = (db.prepare(
+    `SELECT m.*, pa.name AS author_player_name, pr.name AS removed_by_name FROM ticket_messages m
+       LEFT JOIN players pa ON pa.steamid = m.author_player_id LEFT JOIN players pr ON pr.steamid = m.removed_by
+     WHERE m.ticket_id = ? ORDER BY m.created_at, m.id`,
+  ).all(id) as (MessageRow & { author_player_name: string | null; removed_by_name: string | null })[]).map((m) => ({
+    id: m.id, channel: m.channel, authorName: m.author_name, authorPlayerId: m.author_player_id, authorPlayerName: m.author_player_name,
+    content: m.content, history: JSON.parse(m.history) as string[],
+    createdAt: m.created_at, editedAt: m.edited_at, deletedAt: m.deleted_at,
+    removed: m.removed_at === null ? null : { at: m.removed_at, by: m.removed_by, byName: m.removed_by_name, reason: m.removed_reason ?? '' },
+    attachments: files.filter((f) => f.message_id === m.id).map((f) => ({
+      id: f.id, filename: f.filename, contentType: f.content_type, size: f.size, sha256: f.sha256,
+      stored: f.stored_name !== null && f.removed_at === null, skipReason: f.skip_reason, removed: f.removed_at !== null,
+    })),
+  }));
   const me = db.prepare('SELECT is_admin FROM players WHERE steamid = ?').get(viewer) as { is_admin: number } | undefined;
   const isAdmin = me?.is_admin === 1;
   // What the page says about Discord. 'pending' is an open ticket whose
@@ -114,7 +135,7 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
       ...toSummary(s), outcomeNote: s.outcome_note, openedBy: s.opened_by, openedByName: s.opened_name,
       closedBy: s.closed_by, closedByName: s.closed_name,
     },
-    reports, events, bans, access, accessCandidates, discussion,
+    reports, events, bans, access, accessCandidates, discussion, messages,
     viewer: { isAdmin, banCapMinutes: isAdmin ? null : Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080') },
   };
 }
