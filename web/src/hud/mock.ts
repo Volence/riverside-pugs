@@ -108,9 +108,12 @@ function teamCards(design: HudDesign, id: string, r: Rect, k: number): CardRect[
   const spacing = t.spacing * k;
   const w = t.card ? t.card.w * k : (t.dir === 'row' ? Math.min(spacing, r.w / TEAM_CARDS) : r.w);
   const h = t.card ? t.card.h * k : (t.dir === 'row' ? r.h : Math.min(spacing, r.h / TEAM_CARDS));
+  // A fitted card sits at the fit box's top-left inside the container.
+  // (Interim: Task 12 moves these cards to teamCardRects and drops the offset here.)
+  const off = t.offset ?? { x: 0, y: 0 };
   return Array.from({ length: TEAM_CARDS }, (_, i) => ({
-    x: r.x + (t.dir === 'row' ? spacing * i : 0),
-    y: r.y + (t.dir === 'column' ? spacing * i : 0),
+    x: r.x + off.x * k + (t.dir === 'row' ? spacing * i : 0),
+    y: r.y + off.y * k + (t.dir === 'column' ? spacing * i : 0),
     w, h,
   }));
 }

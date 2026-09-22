@@ -14,8 +14,8 @@ import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Asp
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
-import type { HudDesign, ElementOverride, ChildOverride } from './design';
-import { panelChildren, type ChildDef } from './children';
+import { baseTeam, type HudDesign, type ElementOverride, type ChildOverride } from './design';
+import { panelChildren, TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
 
 /** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
 export interface BuildAssets { fonts?: { regular: Uint8Array; bold: Uint8Array }; images?: Record<string, Uint8ClampedArray> }
@@ -25,7 +25,9 @@ const LAYOUT = 'scripts/hudlayout.res';
 const ANIMS = 'scripts/hudanimations.txt';
 const SCHEME = 'resource/clientscheme.res';
 const CHATSCHEME = 'resource/chatscheme.res';
+const CARD = TEAM_PANEL.file;
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
+const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
 
 class Work {
   private trees = new Map<string, KvNode[]>();
@@ -178,14 +180,155 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
   }
 }
 
+interface Box { x: number; y: number; w: number; h: number }
+
+/**
+ * The teammate card's content: the union of the visible steady-state
+ * children (Head, Health, Name, Items, and HealthNumber and Status when
+ * present). State art and decoration never count. Null when every one is
+ * hidden, which fitPass treats as "keep the file's card" rather than write a
+ * 0 x 0 card. On stock this is x 13..134, y 36..72: 121 x 36.
+ */
+function contentBox(nodes: KvNode[]): Box | null {
+  const content = new Set(CONTENT_CHILDREN.map((n) => n.toLowerCase()));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of nodes) {
+    if (typeof n.value === 'string' || !content.has(n.key.toLowerCase())) continue;
+    if ((kvGet(n, 'visible') ?? '1') === '0') continue;
+    const x = num(kvGet(n, 'xpos')), y = num(kvGet(n, 'ypos')), w = num(kvGet(n, 'wide')), h = num(kvGet(n, 'tall'));
+    if (w <= 0 || h <= 0) continue;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h);
+  }
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
+
+/**
+ * Square the state art and fit the splatter, after the shift (the spec's
+ * aspect rule). Incapacitated and Dead become squares of the card height at
+ * the Head's x and y 0; Voice a square of min(height, 16) at the right edge;
+ * the splatter keeps its 2:1 shape at the card width, clipped by the card.
+ * A state picture the player moved or sized keeps those fields, which
+ * childPass already wrote and the shift already moved into the fitted frame.
+ */
+function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card: { w: number; h: number }) {
+  const at = (name: string) => kvFind(nodes, [name]);
+  const head = at('Head');
+  const headX = head ? num(kvGet(head, 'xpos')) : 0;
+  const place = (name: string, side: number, x: number) => {
+    const n = at(name);
+    if (!n) return;
+    const e = edits[name] ?? {};
+    const s = String(Math.round(e.w ?? side));
+    kvSet(n, 'wide', s); kvSet(n, 'tall', s);
+    if (e.x === undefined) kvSet(n, 'xpos', String(x));
+    if (e.y === undefined) kvSet(n, 'ypos', '0');
+  };
+  place('Incapacitated', card.h, headX);
+  place('Dead', card.h, headX);
+  const voice = Math.min(card.h, 16);
+  place('Voice', voice, card.w - (edits.Voice?.w ?? voice));
+  const splatter = at('BackgroundImage');
+  if (splatter) {
+    kvSet(splatter, 'xpos', '0'); kvSet(splatter, 'ypos', '0');
+    kvSet(splatter, 'wide', String(card.w)); kvSet(splatter, 'tall', String(Math.round(card.w / 2)));
+  }
+}
+
+/**
+ * Shrink the teammate card to its content (probe T6: nothing is lost).
+ * Every child is shifted so the content starts at the card's top-left, and
+ * teamPass adds the same offset back to every card, so fitting alone moves
+ * nothing on screen; only empty space goes. The card size itself is
+ * teamPass's to write, from the same box through cardFit. Recomputed from
+ * the tree on every build, so moving a child re-fits the card.
+ */
+function fitPass(work: Work, design: HudDesign) {
+  if (!design.elements.teamColumn?.fit) return;
+  const nodes = work.tree(CARD);
+  const box = contentBox(nodes);
+  if (!box) return;
+  for (const n of nodes) {
+    if (typeof n.value === 'string') continue;
+    for (const [key, d] of [['xpos', box.x], ['ypos', box.y]] as const) {
+      const v = parseFloat(kvGet(n, key) ?? '');
+      if (Number.isFinite(v)) kvSet(n, key, String(v - d));
+    }
+  }
+  fitStateArt(nodes, design.children.teamColumn ?? {}, { w: box.w, h: box.h });
+}
+
+/**
+ * childPass then fitPass on a scratch Work, once per design object, with the
+ * content box taken between the two. teamLayout asks for the fitted size on
+ * every repaint and the side panel for a child's numbers, and both must be
+ * the build's own numbers.
+ */
+const CARD_WORK = new WeakMap<HudDesign, { work: Work; box: Box | null }>();
+function cardWork(design: HudDesign) {
+  let w = CARD_WORK.get(design);
+  if (!w) {
+    const work = new Work(design.preset);
+    childPass(work, design);
+    const box = contentBox(work.tree(CARD));
+    fitPass(work, design);
+    w = { work, box };
+    CARD_WORK.set(design, w);
+  }
+  return w;
+}
+
+/** The teammate card's content box after the design's child edits, fit on or off. */
+function cardFit(design: HudDesign): Box | null {
+  return cardWork(design).box;
+}
+
+export interface CardChild { x: number; y: number; w: number; h: number; visible: boolean; fontTall?: number; color?: string }
+
+/**
+ * One teammate-card child as the side panel shows it and a drag starts
+ * from: after the player's edits and the fit rule, before scale, in the card
+ * file's own unfitted frame, which is the frame a ChildOverride is stored
+ * in. Fit only shifts content children, so for them this is the edited
+ * block; for the state art it is where the fit rule put it, shifted back.
+ * Null when the block is not in the file (an addable child that is off).
+ */
+export function cardChild(design: HudDesign, name: string): CardChild | null {
+  const { work, box } = cardWork(design);
+  const n = kvFind(work.tree(CARD), [name]);
+  if (!n) return null;
+  const shift = design.elements.teamColumn?.fit && box ? box : { x: 0, y: 0 };
+  const font = kvGet(n, 'font');
+  const size = font ? kvFind(work.tree(SCHEME), ['Fonts', font, '1']) : undefined;
+  const tall = size ? parseFloat(kvGet(size, 'tall') ?? '') : NaN;
+  const raw = kvGet(n, 'fgcolor_override');
+  return {
+    x: num(kvGet(n, 'xpos')) + shift.x, y: num(kvGet(n, 'ypos')) + shift.y,
+    w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')),
+    visible: (kvGet(n, 'visible') ?? '1') !== '0',
+    ...(Number.isFinite(tall) ? { fontTall: tall } : {}),
+    ...(raw && /^\d+ \d+ \d+ \d+$/.test(raw) ? { color: raw } : {}),
+  };
+}
+
+/** Whether the preset's own card file has this child: an addable child it lacks shows as a checkbox. */
+export function baseHasChild(preset: Preset, name: string): boolean {
+  return kvFind(parseKv(baseFile(preset, CARD))[0].value as KvNode[], [name]) !== undefined;
+}
+
 export interface TeamLayout {
   dir: 'row' | 'column';
   /**
-   * Units between two neighbouring cards, the element's own scale already
-   * applied: the exact number `teamPass` writes into the file, and the exact
-   * number the canvas steps each card by.
+   * Units between two neighbouring cards' origins, the element's own scale
+   * already applied: the exact number `teamPass` steps each card by, and the
+   * exact number the canvas steps each card by.
    */
   spacing: number;
+  /**
+   * Survivor team: where the first card sits inside the container, scaled.
+   * Non-zero only when fitted: the fit box's top-left, so a fitted card's
+   * content lands exactly where the unfitted card had it.
+   */
+  offset?: { x: number; y: number };
   /**
    * One teammate card, and the container that has to cover four of them, both
    * with the scale already applied. Present only when `teamWrites` is true,
@@ -197,18 +340,21 @@ export interface TeamLayout {
    */
   card?: { w: number; h: number };
   container?: { w: number; h: number };
+  /** Fit was asked for but every content child is hidden, so the card keeps its file size. */
+  fitEmpty?: boolean;
 }
 
 /**
  * Does the generator's team pass rewrite this element's team geometry? A
- * direction, a spacing or a scale all make it do so, and nothing else does.
+ * direction, a spacing or a scale all make it do so. Fitting the card does
+ * too: it changes the card's size and position. Nothing else does.
  * `teamPass` and `elementRect` both ask, which is what stops the canvas
  * reporting a container size the file contradicts.
  */
 function teamWrites(el: HudElement, o: ElementOverride | undefined): boolean {
   if (!el.team || !o) return false;
   const scaled = el.resize === 'scale' && o.scale !== undefined && o.scale !== 1;
-  return o.dir !== undefined || o.spacing !== undefined || scaled;
+  return o.dir !== undefined || o.spacing !== undefined || o.fit === true || scaled;
 }
 
 /**
@@ -253,20 +399,19 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   let baseDir: 'row' | 'column' | undefined;
   let baseSpacing: number | undefined;
   let card: { w: number; h: number } | undefined;
+  let offset = { x: 0, y: 0 };
+  let fitEmpty = false;
   if (el.team?.file) {
-    const tree = parseKv(baseFile(design.preset, el.team.file))[0].value as KvNode[];
-    const first = kvFind(tree, ['TeamPlayer1']);
-    const second = kvFind(tree, ['TeamPlayer2']);
-    if (first) {
-      const cw = parseFloat(kvGet(first, 'wide') ?? ''), ch = parseFloat(kvGet(first, 'tall') ?? '');
-      card = { w: (Number.isFinite(cw) ? cw : 150) * k, h: (Number.isFinite(ch) ? ch : 150) * k };
-    }
-    if (first && second) {
-      baseDir = (kvGet(second, 'ypos') ?? '0') === (kvGet(first, 'ypos') ?? '0') ? 'row' : 'column';
-      const axis = baseDir === 'row' ? 'xpos' : 'ypos';
-      const a = parseFloat(kvGet(first, axis) ?? ''), b = parseFloat(kvGet(second, axis) ?? '');
-      if (!Number.isNaN(a) && !Number.isNaN(b)) baseSpacing = Math.abs(b - a);
-    }
+    const base = baseTeam(design.preset);
+    baseDir = base.dir;
+    baseSpacing = base.pitch;
+    // A fitted card is its content box and sits at the box's top-left, so
+    // fitting alone moves nothing on screen.
+    const box = o?.fit ? cardFit(design) : null;
+    if (o?.fit && !box) fitEmpty = true;
+    const size = box ?? base.card;
+    card = { w: size.w * k, h: size.h * k };
+    if (box) offset = { x: Math.round(box.x * k), y: Math.round(box.y * k) };
   } else if (el.team?.spacingKey) {
     baseDir = el.team.dirs[0];
     const panel = layoutPanel();
@@ -275,21 +420,24 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   }
   // Free is the survivor team's own thing, not a row/column direction: this
   // function's row/column geometry ignores it, the same as when dir is unset.
-  const dir = (o?.dir === 'row' || o?.dir === 'column' ? o.dir : undefined) ?? baseDir ?? 'row';
+  const dir = o?.dir === 'row' || o?.dir === 'column' ? o.dir : baseDir ?? 'row';
   const spacing = Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k);
   const out: TeamLayout = { dir, spacing };
+  if (fitEmpty) out.fitEmpty = true;
   if (!card || !teamWrites(el, o)) return out;
   const panel = layoutPanel();
   if (!panel) return out;
   out.card = card;
+  out.offset = offset;
   // The container clips its children, so along the direction it has to cover
-  // all four cards. Across the direction it keeps its own size, scaled; a
-  // fill token has no fixed size, and teamPass replaces it with one card's
-  // width rather than leave a column loose across the whole screen.
+  // the offset and all four cards. Across the direction it keeps its own
+  // size, scaled; a fill token has no fixed size, and teamPass replaces it
+  // with the offset plus one card rather than leave a column loose across
+  // the whole screen.
   const tall = kvGet(panel, 'tall') ?? '0';
   out.container = dir === 'column'
-    ? { w: fixedExtent(kvGet(panel, 'wide'), k) ?? card.w, h: spacing * 3 + card.h }
-    : { w: spacing * 3 + card.w, h: fixedExtent(tall, k) ?? parseSize(tall, SCREEN_H) };
+    ? { w: fixedExtent(kvGet(panel, 'wide'), k) ?? offset.x + card.w, h: offset.y + spacing * 3 + card.h }
+    : { w: offset.x + spacing * 3 + card.w, h: fixedExtent(tall, k) ?? parseSize(tall, SCREEN_H) };
   return out;
 }
 
@@ -306,11 +454,11 @@ function teamPass(work: Work, design: HudDesign) {
     const t = teamLayout(design, el);
     const container = work.panel(LAYOUT, [el.key]);
     if (team.spacingKey) kvSet(container, team.spacingKey, String(t.spacing));
-    if (!team.file || !t.card || !t.container) continue;
+    if (!team.file || !t.card || !t.container || !t.offset) continue;
     for (let n = 1; n <= 4; n++) {
       const p = work.panel(team.file, [`TeamPlayer${n}`]);
-      kvSet(p, 'xpos', String(t.dir === 'row' ? t.spacing * (n - 1) : 0));
-      kvSet(p, 'ypos', String(t.dir === 'row' ? 0 : t.spacing * (n - 1)));
+      kvSet(p, 'xpos', String(t.offset.x + (t.dir === 'row' ? t.spacing * (n - 1) : 0)));
+      kvSet(p, 'ypos', String(t.offset.y + (t.dir === 'row' ? 0 : t.spacing * (n - 1))));
       kvSet(p, 'wide', String(Math.round(t.card.w)));
       kvSet(p, 'tall', String(Math.round(t.card.h)));
     }
@@ -465,6 +613,10 @@ function addonInfo(name: string): string {
  *   stored unscaled numbers and scalePass multiplies them with the rest of
  *   the card file. A HudEd_<font>_t<size> copy it makes is a font leaf that
  *   scalePass then clones again as HudEd_HudEd_<font>_t<size>_<pct>.
+ * - `fitPass` runs after `childPass` (it fits the card around what the edits
+ *   left), before `teamPass` (which places and sizes the fitted card, reading
+ *   the same box through cardFit) and before `scalePass` (which multiplies
+ *   the shifted, still unscaled values).
  * - `childPass` and `fontPass` are order independent, for the same reason as
  *   scalePass below: both edit the one memoised scheme tree.
  * - `scalePass` and `fontPass` can run in either order. scalePass pushes
@@ -489,6 +641,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   childPass(work, design);
+  fitPass(work, design);
   teamPass(work, design);
   scalePass(work, design);
   fontPass(work, design, assets, extra);
@@ -547,6 +700,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     const discard: VpkFile[] = [];
     layoutPass(work, design);
     childPass(work, design);
+    fitPass(work, design);
     teamPass(work, design);
     scalePass(work, design);
     stylePass(work, design, {}, discard);

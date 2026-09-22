@@ -5,7 +5,8 @@ import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
 
-const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), ...patch });
+/** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card. */
+const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
 const text = (files: { path: string; data: Uint8Array }[], path: string) =>
   new TextDecoder('latin1').decode(files.find((f) => f.path === path)!.data);
 

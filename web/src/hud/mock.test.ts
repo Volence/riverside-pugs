@@ -165,10 +165,11 @@ describe('drawHud delegates panels to the renderer', () => {
     const own = elementRect(DEFAULT_DESIGN, 'ownHealth', DEFAULT_DESIGN.aspect);
     expect(rects).toContainEqual([own.x * k, own.y * k, local.w * k, local.h * k]);
     const card = size('resource/ui/hud/teamdisplayhud.res', 'TeamPlayer1');
-    expect(card).toEqual({ w: 150, h: 150 });
+    expect(card).toEqual({ w: 121, h: 36 });                          // DEFAULT_DESIGN fits the stock card
     const team = elementRect(DEFAULT_DESIGN, 'teamColumn', DEFAULT_DESIGN.aspect);
     const cardClips = rects.filter((r) => r[2] === card.w * k && r[3] === card.h * k);
     expect(cardClips).toHaveLength(3);
-    expect(cardClips[0].slice(0, 2)).toEqual([team.x * k, team.y * k]);
+    // Fitting keeps the content where it was, so the first card starts at the content's old top-left.
+    expect(cardClips[0].slice(0, 2)).toEqual([(team.x + 13) * k, (team.y + 36) * k]);
   });
 });

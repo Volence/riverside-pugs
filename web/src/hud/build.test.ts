@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout, packHud, buildTrees } from './build';
+import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild } from './build';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
@@ -12,7 +12,8 @@ const text = (files: { path: string; data: Uint8Array }[], path: string) => {
 };
 const layoutOf = (files: { path: string; data: Uint8Array }[]) =>
   parseKv(text(files, 'scripts/hudlayout.res')!)[0].value as KvNode[];
-const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), ...patch });
+/** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card, which has its own tests. */
+const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
 const CARD_FILE = 'resource/ui/hud/teammatepanel.res';
 const TEAM_FILE = 'resource/ui/hud/teamdisplayhud.res';
 const SCHEME_FILE = 'resource/clientscheme.res';
@@ -340,7 +341,7 @@ describe('team geometry: the canvas and the file agree for any scale, dir and sp
     // box.
     const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', spacing: 36 } } });
     expect(teamLayout(d, elementById('teamColumn')!)).toEqual({
-      dir: 'column', spacing: 36, card: { w: 187.5, h: 187.5 }, container: { w: 187.5, h: 295.5 },
+      dir: 'column', spacing: 36, offset: { x: 0, y: 0 }, card: { w: 187.5, h: 187.5 }, container: { w: 187.5, h: 295.5 },
     });
     const t = parseKv(text(buildHud(d), 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
     expect([1, 2, 3, 4].map((n) => kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'ypos'))).toEqual(['0', '36', '72', '108']);
@@ -572,5 +573,135 @@ describe('buildTrees', () => {
     const d = design({});
     const t = buildTrees(d)('resource/ui/hud/hunterhealth.res');
     expect(kvFind(t, ['HealthNumber'])).toBeDefined();
+  });
+});
+
+describe('buildHud, fit', () => {
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  const fitted = (preset: 'stock' | 'modern' = 'stock', children: HudDesign['children'] = {}) =>
+    design({ preset, elements: { teamColumn: { fit: true } }, children });
+
+  it('fits the stock card to 121 x 36 and shifts its content by (13, 36)', () => {
+    const files = buildHud(fitted());
+    const card = tree(files, CARD_FILE);
+    expect(cardAt(card, 'Head')).toEqual(['0', '2', '23', '23']);
+    expect(cardAt(card, 'Health')).toEqual(['24', '16', '96', '7']);
+    expect(cardAt(card, 'Name')).toEqual(['0', '24', '120', '12']);
+    expect(cardAt(card, 'Status')).toEqual(['51', '2', '70', '12']);
+    expect(cardAt(card, 'Items')).toEqual(['26', '0', '50', '14']);
+    const team = tree(files, TEAM_FILE);
+    for (let n = 1; n <= 4; n++) {
+      expect([kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'wide'), kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'tall')]).toEqual(['121', '36']);
+    }
+  });
+
+  it('fits the Modern card to 113 x 26 from (3, 2)', () => {
+    const files = buildHud(fitted('modern'), { fonts });
+    expect(cardAt(tree(files, CARD_FILE, 'modern'), 'Head')).toEqual(['0', '1', '25', '25']);
+    expect(kvGet(kvFind(tree(files, TEAM_FILE, 'modern'), ['TeamPlayer1'])!, 'wide')).toBe('113');
+    expect(kvGet(kvFind(tree(files, TEAM_FILE, 'modern'), ['TeamPlayer1'])!, 'tall')).toBe('26');
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`fitting alone moves nothing on screen: ${preset}`, () => {
+      const dir = preset === 'stock' ? 'row' as const : 'column' as const;
+      const onScreen = (d: HudDesign) => {
+        const files = buildHud(d, { fonts });
+        const team = tree(files, TEAM_FILE, preset);
+        const card = tree(files, CARD_FILE, preset);
+        const container = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+        const out: Record<string, number[]> = { container: [kvGet(container, 'xpos'), kvGet(container, 'ypos')].map((v) => parseFloat(v!.replace(/^r/, '-'))) };
+        for (let n = 1; n <= 4; n++) {
+          const p = kvFind(team, [`TeamPlayer${n}`])!;
+          for (const name of ['Head', 'Health', 'Name', 'Items', 'Status', 'HealthNumber']) {
+            const c = kvFind(card, [name]);
+            if (!c) continue;
+            out[`${n} ${name}`] = [parseFloat(kvGet(p, 'xpos')!) + parseFloat(kvGet(c, 'xpos')!),
+              parseFloat(kvGet(p, 'ypos')!) + parseFloat(kvGet(c, 'ypos')!)];
+          }
+        }
+        return out;
+      };
+      expect(onScreen(design({ preset, elements: { teamColumn: { dir, fit: true } } })))
+        .toEqual(onScreen(design({ preset, elements: { teamColumn: { dir } } })));
+    });
+  }
+
+  it('re-fits when the icons move above a shorter bar', () => {
+    // Head 13..36, Health now 37..85, Name 13..133 at y 60..72, Status 64..134, Items 37..87 at y 40..54: box y 38..72.
+    const files = buildHud(fitted('stock', { teamColumn: { Items: { x: 37, y: 40 }, Health: { w: 48 } } }));
+    expect(kvGet(kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!, 'tall')).toBe('34');
+    expect(cardAt(tree(files, CARD_FILE), 'Items').slice(0, 2)).toEqual(['24', '2']);
+  });
+
+  it('re-fits when the health number is turned on and moved past the card', () => {
+    const files = buildHud(fitted('stock', { teamColumn: { HealthNumber: { on: true, x: 140 } } }));
+    expect(kvGet(kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('157');
+    expect(cardAt(tree(files, CARD_FILE), 'HealthNumber').slice(0, 2)).toEqual(['127', '24']);
+  });
+
+  it('squares the state art at the card height and fits the splatter to the card width', () => {
+    const stock = tree(buildHud(fitted()), CARD_FILE);
+    expect(cardAt(stock, 'Incapacitated')).toEqual(['0', '0', '36', '36']);
+    expect(cardAt(stock, 'Dead')).toEqual(['0', '0', '36', '36']);
+    expect(cardAt(stock, 'Voice')).toEqual(['105', '0', '16', '16']);
+    expect(cardAt(stock, 'BackgroundImage')).toEqual(['0', '0', '121', '61']);
+    const modern = tree(buildHud(fitted('modern'), { fonts }), CARD_FILE, 'modern');
+    // Modern's own Incapacitated is 88 x 31 and Dead 120 x 31: the fit rule is what makes them square.
+    expect(cardAt(modern, 'Incapacitated')).toEqual(['0', '0', '26', '26']);
+    expect(cardAt(modern, 'Dead')).toEqual(['0', '0', '26', '26']);
+    expect(cardAt(modern, 'Voice')).toEqual(['97', '0', '16', '16']);
+    expect(cardAt(modern, 'BackgroundImage')).toEqual(['0', '0', '113', '57']);
+    // Decoration the registry does not list is shifted like everything else; the card clips it.
+    expect(cardAt(modern, 'ModBg')).toEqual(['-3', '-2', '120', '31']);
+  });
+
+  it('keeps a moved or sized state picture where the player put it, still square', () => {
+    const files = buildHud(fitted('stock', { teamColumn: { Incapacitated: { x: 50, y: 40, w: 30, h: 30 } } }));
+    expect(cardAt(tree(files, CARD_FILE), 'Incapacitated')).toEqual(['37', '4', '30', '30']);
+  });
+
+  it('keeps the full card and says so when every content child is hidden', () => {
+    const hidden = Object.fromEntries(['Head', 'Health', 'Name', 'Items', 'Status'].map((n) => [n, { visible: false }]));
+    const d = fitted('stock', { teamColumn: hidden });
+    const files = buildHud(d);
+    expect(kvGet(kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('150');
+    expect(cardAt(tree(files, CARD_FILE), 'Head').slice(0, 2)).toEqual(['13', '38']);
+    expect(teamLayout(d, elementById('teamColumn')!).fitEmpty).toBe(true);
+  });
+
+  it('leaves the card file alone when fit is off', () => {
+    expect(text(buildHud(design({ elements: { teamColumn: { dir: 'row' } } })), CARD_FILE)).toBeUndefined();
+  });
+
+  it('fits DEFAULT_DESIGN, which every new design starts from', () => {
+    expect(kvGet(kvFind(tree(buildHud(structuredClone(DEFAULT_DESIGN)), TEAM_FILE), ['TeamPlayer1'])!, 'wide')).toBe('121');
+  });
+});
+
+describe('cardChild', () => {
+  const fitted = (children: HudDesign['children'] = {}) => design({ elements: { teamColumn: { fit: true } }, children });
+
+  it('reports a child in the unfitted frame its override is stored in', () => {
+    expect(cardChild(fitted(), 'Head')).toMatchObject({ x: 13, y: 38, w: 23, h: 23, visible: true });
+    expect(cardChild(design({}), 'Head')).toMatchObject({ x: 13, y: 38, w: 23, h: 23 });
+  });
+
+  it('reports the state art where the fit rule put it, so a drag starts where the preview draws it', () => {
+    expect(cardChild(fitted(), 'Incapacitated')).toMatchObject({ x: 13, y: 36, w: 36, h: 36 });
+    expect(cardChild(design({}), 'Incapacitated')).toMatchObject({ x: 10, y: 4, w: 96, h: 96 });
+  });
+
+  it('reports the font size, a raw colour, and nothing for an addable child that is off', () => {
+    expect(cardChild(fitted(), 'HealthNumber')).toBeNull();
+    expect(cardChild(fitted({ teamColumn: { HealthNumber: { on: true } } }), 'HealthNumber'))
+      .toMatchObject({ x: 103, y: 60, w: 30, h: 12, fontTall: 12, color: '255 255 255 255' });
+    expect(cardChild(fitted({ teamColumn: { Name: { fontSize: 14 } } }), 'Name')!.fontTall).toBe(14);
+    expect(cardChild(fitted(), 'Name')!.color).toBeUndefined();                  // "White" is a scheme name, not raw
+  });
+
+  it('knows which children a preset file has', () => {
+    expect(baseHasChild('stock', 'HealthNumber')).toBe(false);
+    expect(baseHasChild('modern', 'HealthNumber')).toBe(true);
   });
 });
