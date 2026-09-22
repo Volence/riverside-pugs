@@ -5,7 +5,7 @@ import { campaignDisplayName } from '../campaignRegistry.js';
 import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
-import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
+import { fileReport, latestSharedMatch, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
 import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
@@ -21,7 +21,7 @@ export interface CommandDeps {
 }
 
 /** Labels for the report categories, in the order they should list. */
-const REPORT_LABELS: Record<ReportCategory, string> = {
+export const REPORT_LABELS: Record<ReportCategory, string> = {
   griefing: 'Griefing / throwing',
   cheating: 'Cheating',
   toxicity: 'Toxicity / harassment',
@@ -53,7 +53,7 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
         name: 'reason', description: 'What happened', type: 'string', required: true,
         choices: REPORT_CATEGORIES.map((c) => ({ name: REPORT_LABELS[c], value: c })),
       },
-      { name: 'details', description: 'When, which map, what they did', type: 'string' },
+      { name: 'details', description: 'What happened, in your own words', type: 'string' },
       { name: 'match', description: 'Match number (default: your latest match together)', type: 'integer' },
     ],
   },
@@ -225,21 +225,11 @@ function report(deps: CommandDeps, i: Cmd): InteractionReply {
   }
   if (target.steamid === reporter.steamid) return priv({ content: 'You cannot report yourself.' });
 
-  // A match is optional. With none given, attach the latest one you shared in
-  // the last 48 hours if there is one, because that is nearly always what the
-  // report is about; otherwise file it with no match.
-  let matchId: number | null = i.options.match ? Number(i.options.match) : null;
-  if (matchId === null) {
-    const shared = deps.db.prepare(
-      `SELECT m.id FROM matches m
-       JOIN match_players a ON a.match_id = m.id AND a.player_id = ?
-       JOIN match_players b ON b.match_id = m.id AND b.player_id = ?
-       WHERE m.state IN ('live', 'completed', 'aborted')
-         AND (m.ended_at IS NULL OR m.ended_at > datetime('now', '-48 hours'))
-       ORDER BY m.id DESC LIMIT 1`,
-    ).get(reporter.steamid, target.steamid) as { id: number } | undefined;
-    matchId = shared?.id ?? null;
-  }
+  // A match is optional. With none given, attach the latest one shared with
+  // the target (see latestSharedMatch for why); otherwise file it with none.
+  const matchId: number | null = i.options.match
+    ? Number(i.options.match)
+    : latestSharedMatch(deps.db, reporter.steamid, target.steamid);
   const r = fileReport(deps.db, reporter.steamid, {
     targetId: target.steamid, category: i.options.reason, text: i.options.details ?? '', matchId,
   }, { adminSteamIds: deps.adminSteamIds ?? [] });

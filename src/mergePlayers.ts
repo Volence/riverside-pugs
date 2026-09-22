@@ -56,6 +56,12 @@ const PLAIN: [table: string, column: string][] = [
   // case where a member of staff was themselves merged.
   ['player_reviews', 'steamid'],
   ['player_reviews', 'reviewed_by'],
+  // A half-written report follows the surviving account rather than staying
+  // on the one merged away: the candidate button's handler checks the
+  // pending row's reporter_id against whoever pressed it, and a draft left
+  // pointing at the losing account would tell the survivor the pick is not
+  // theirs to make.
+  ['pending_reports', 'reporter_id'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`

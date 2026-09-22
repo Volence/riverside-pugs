@@ -705,7 +705,7 @@ CREATE TABLE IF NOT EXISTS steam_signal_alerts (
 );
 `;
 
-const DEFAULT_SETTINGS: Record<string, string> = {
+export const DEFAULT_SETTINGS: Record<string, string> = {
   invite_code: 'change-me',
   ready_seconds: '120',
   vote_seconds: '30',
@@ -743,6 +743,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   discord_results_channel_id: '',
   discord_tickets_forum_id: '',
   discord_tickets_channel_id: '',
+  discord_report_channel_id: '',
   // Games before a player's per-match figures are ranked for the profile
   // badges. Deliberately higher than RANKED_MIN_GAMES: three games is enough
   // for a rating to be worth showing and nowhere near enough for a per-match
