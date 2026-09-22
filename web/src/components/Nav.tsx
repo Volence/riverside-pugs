@@ -61,14 +61,12 @@ export function Nav(
              rel={target ? 'noopener' : undefined}
              aria-current={path === href ? 'page' : undefined}>{label}</a>
         ))}
-        {/* The ban list is a People screen now, and mods read it there. */}
+        {/* The ban list is a People screen inside the panel, reached through the
+            link below. It had a nav entry of its own for a while, which only
+            duplicated a screen the panel already owns, so the panel link is
+            current for the whole panel including that screen. */}
         {(me?.isAdmin || me?.isMod) && (
-          <a href="/admin/people/bans" aria-current={path === '/admin/people/bans' ? 'page' : undefined}>Bans</a>
-        )}
-        {/* /admin sends you on to a desk, so the link is current for the whole
-            panel except the screen the Bans link owns. */}
-        {(me?.isAdmin || me?.isMod) && (
-          <a href="/admin" aria-current={path.startsWith('/admin') && path !== '/admin/people/bans' ? 'page' : undefined}>
+          <a href="/admin" aria-current={path.startsWith('/admin') ? 'page' : undefined}>
             {me?.isAdmin ? 'Admin' : 'Moderation'}
           </a>
         )}
