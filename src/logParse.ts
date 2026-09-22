@@ -17,6 +17,9 @@ export interface Phase {
   /** Rostered players who have not readied, during a ready-up. Empty
    *  otherwise, and empty once everyone has and the countdown is running. */
   unready: string[];
+  /** Who typed !pause, when the plugin knows (pug-match 0.3.5 on). Absent,
+   *  never guessed, for older plugins, disconnect pauses and admins. */
+  by?: string;
 }
 
 export type LogEvent =
@@ -146,7 +149,9 @@ function phaseOf(state: string | undefined, rest: Record<string, string>): Phase
   const team = rest.team === '1' ? 'a' : rest.team === '2' ? 'b' : null;
   const limit = intOf(rest.limit) ?? 0;
   const unready = (rest.unready ?? '').split(',').filter((id) => /^\d{17}$/.test(id));
-  return { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
+  const phase: Phase = { state: state as PhaseState, team, limit: limit < 0 ? 0 : limit, leave: rest.leave === '1', unready };
+  if (state === 'paused' && /^\d{17}$/.test(rest.by ?? '')) phase.by = rest.by;
+  return phase;
 }
 
 function kv(parts: string[]): Record<string, string> {

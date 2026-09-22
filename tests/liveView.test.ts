@@ -863,6 +863,25 @@ describe('liveView: match phase', () => {
     expect(pausesFor(db, id)).toHaveLength(1);
   });
 
+  it('records who called a pause when the plugin says, and nobody when it does not', () => {
+    const id = seedLive();
+    const CALLER = '76561198000000042';
+    recordPhase(db, TOKEN, { ...paused, by: CALLER });
+    recordPhase(db, TOKEN, live);
+    recordPhase(db, TOKEN, paused);
+    expect(pausesFor(db, id).map((p) => p.calledBy)).toEqual([CALLER, null]);
+  });
+
+  // The PHASE line that opened the pause can be lost; the heartbeat repeats
+  // the same fields thirty seconds later and must be able to fill the caller.
+  it('fills in the caller from a repeat when the line that opened the pause lacked it', () => {
+    const id = seedLive();
+    recordPhase(db, TOKEN, paused);
+    recordPhase(db, TOKEN, { ...paused, by: '76561198000000042' });
+    recordPhase(db, TOKEN, { ...paused, by: '76561198000000099' });
+    expect(pausesFor(db, id).map((p) => p.calledBy)).toEqual(['76561198000000042']);
+  });
+
   it('records a disconnect pause as nobody\'s', () => {
     const id = seedLive();
     recordPhase(db, TOKEN, { state: 'paused', team: null, limit: 0, leave: true, unready: [] });

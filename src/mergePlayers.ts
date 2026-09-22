@@ -49,6 +49,7 @@ const PLAIN: [table: string, column: string][] = [
   ['input_bursts', 'steamid'],
   ['input_detections', 'steamid'],
   ['signon_drops', 'steamid'],
+  ['match_pauses', 'called_by'],
   // The losing account's open link is closed first, below: the survivor
   // inherits the record of it, not the link.
   ['discord_link_history', 'steamid'],

@@ -37,6 +37,13 @@ describe('parseLogDatagram', () => {
     });
   });
 
+  it('parses who called a pause, and drops a caller that is not a SteamID64', () => {
+    const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=1 limit=120 leave=0 by=76561198000000042`));
+    expect(ev).toMatchObject({ kind: 'phase', phase: { state: 'paused', team: 'a', by: '76561198000000042' } });
+    const bad = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=paused team=1 limit=120 leave=0 by=BOT`));
+    expect(bad && bad.kind === 'phase' ? bad.phase.by : 'x').toBeUndefined();
+  });
+
   it('parses a PHASE with no team or limit as an unattributed, uncapped state', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} PHASE state=readyup`));
     expect(ev).toEqual({
