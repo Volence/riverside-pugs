@@ -111,6 +111,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'people' && r.section === 'tickets' && <AdminTickets onOpen={(id) => route(ticketUrl(id))} />}
         {r.desk === 'people' && r.section === 'ticket' && (
           <AdminTicket
+            key={r.param}
             id={Number(r.param)}
             onBack={() => route('/admin/people/tickets')}
             onOpen={(id) => route(ticketUrl(id))}

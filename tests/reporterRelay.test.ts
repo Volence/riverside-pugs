@@ -7,7 +7,7 @@ import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { addAccess, setRestricted } from '../src/tickets/actions.js';
-import { getTicketRow } from '../src/tickets/store.js';
+import { foldTicket, getTicketRow } from '../src/tickets/store.js';
 import { staffThread } from '../src/tickets/threads.js';
 import { insertMessage, messageByDiscordId } from '../src/tickets/messages.js';
 import { removeMessage, removeMessages } from '../src/tickets/removal.js';
@@ -20,7 +20,7 @@ import { syncRelay } from '../src/discord/reporterRelay.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000043${i}`);
-const [R1, , ACCUSED, , , , MOD, ADMIN] = IDS;
+const [R1, , ACCUSED, ACCUSED2, , , MOD, ADMIN] = IDS;
 const D = (id: string) => `97${IDS.indexOf(id)}`;
 let db: DB;
 let t: FakeTransport;
@@ -186,5 +186,53 @@ describe('the relay onto the forum post', () => {
     await syncRelay({ db, transport: t, publicUrl: 'https://pug.test' }, stale, post);
     expect(copies(c.ticketId)).toEqual([]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM relay_messages').get()).toEqual({ n: 0 });
+  });
+
+  // A fold moves the reporter's messages onto the survivor ticket, but a
+  // relay row still names the old post they were copied to. When the
+  // survivor already had its own open post before the fold, that old one is
+  // marked 'folded' and later retired (locked, archived) rather than simply
+  // becoming the survivor's: its stray copy must be taken off it, or a later
+  // Remove, which only ever looks at the row's current thread, would never
+  // find it.
+  it('a fold that retires the old post deletes the stray copy there before making a new one on the survivor\'s', async () => {
+    const a = await chatAbout();
+    const said = t.userPost(a.chat, { authorId: D(R1), content: 'evidence here' });
+    await settle();
+    const [oldCopy] = copies(a.ticketId);
+    expect(oldCopy).toBeTruthy();
+    const oldPostId = staffThread(db, a.ticketId)!.thread_id;
+
+    // A second ticket, about someone else, that already has its own open
+    // forum post before the fold: this is what makes the fold mark A's post
+    // 'folded' and retire it, rather than just relabel it as B's.
+    const b = fileReport(db, R1, { targetId: ACCUSED2, category: 'afk', text: 'y' }, { adminSteamIds: [ADMIN] }) as { reportId: number; ticketId: number };
+    await settle();
+    expect(staffThread(db, b.ticketId)).toBeTruthy();
+
+    db.transaction(() => foldTicket(db, a.ticketId, b.ticketId, 'merge'))();
+    // Neither mergePlayers nor adopt.ts signals the survivor after a fold:
+    // retireFolded and syncRelay only run as part of a full sweep, same as
+    // the "unclaimed" ping test above needs one for its own throttled ping.
+    await sync.reconcile();
+    await settle();
+
+    // The old post is retired: locked and archived, its stray copy gone.
+    expect(t.threadsById.get(oldPostId)).toMatchObject({ locked: true, archived: true });
+    expect(t.messages.find((m) => m.channelId === oldPostId && m.id === oldCopy.id)?.deleted).toBe(true);
+
+    // The survivor's own post gets its own copy instead.
+    const newCopies = copies(b.ticketId);
+    expect(newCopies).toHaveLength(1);
+    expect(newCopies[0].payload.embeds[0].description).toBe('evidence here');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM relay_messages').get()).toEqual({ n: 1 });
+
+    // And a later Remove finds it there, on the row's current thread, not
+    // stranded on the old, now-inaccessible one.
+    const row = messageByDiscordId(db, said.id)!;
+    expect(removeMessage(db, join(root, 'files'), b.ticketId, row.id, MOD, '').ok).toBe(true);
+    await mirror.sweepRemovals();
+    await settle();
+    expect(copies(b.ticketId)).toEqual([]);
   });
 });

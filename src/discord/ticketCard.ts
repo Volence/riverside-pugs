@@ -177,12 +177,15 @@ export function closeDm(): MessagePayload {
   return { content: 'Thank you for your report. The ticket is now closed.', embeds: [], components: [], mentionUserIds: [] };
 }
 
-/** To the access list of a restricted ticket whose reporter wrote in their
- *  chat. No words of theirs and no name: the link does the telling, behind
- *  the site's access check. */
+/** To the access list of a restricted ticket, once for whatever the reporter
+ *  did in their chat since the last one: opened it, wrote in it, or both.
+ *  The wording has to hold for either, so it says "activity", not "wrote":
+ *  a DM sent because the reporter only opened the chat must not claim they
+ *  said something. No words of theirs and no name either way: the link does
+ *  the telling, behind the site's own access check. */
 export function reporterWroteDm(ticketId: number, publicUrl: string): MessagePayload {
   return {
-    content: `The reporter wrote on ticket #${ticketId}. Read it on the site.`,
+    content: `There is new activity from the reporter on ticket #${ticketId}. Read it on the site.`,
     embeds: [],
     components: [[{ kind: 'link', url: `${publicUrl}/admin/people/tickets/${ticketId}`, label: `Open ticket #${ticketId}` }]],
     mentionUserIds: [],

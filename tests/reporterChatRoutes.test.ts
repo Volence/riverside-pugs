@@ -7,6 +7,7 @@ import { linkDiscord } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { insertMessage } from '../src/tickets/messages.js';
+import { setRestricted } from '../src/tickets/actions.js';
 import { reporterThreadsOf } from '../src/tickets/reporterChat.js';
 import { ReporterChats } from '../src/discord/reporterChats.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
@@ -92,6 +93,27 @@ describe('with the bot running', () => {
     const left = (db.prepare('SELECT content FROM ticket_messages ORDER BY id').all() as { content: string }[]).map((m) => m.content);
     expect(left).toEqual(['', '', 'staff reply']);
     expect(reporterThreadsOf(db, r.ticketId, 'ended')).toHaveLength(1);
+  });
+
+  // A restricted ticket's chat routes must answer the same 404 a viewer off
+  // the access list gets everywhere else on it (canSeeTicket), never a 403:
+  // a 403 would tell a mod who is not on the list that the ticket exists,
+  // and it must change nothing either.
+  it('a mod off the access list of a restricted ticket gets 404, not 403, from every chat route, and changes nothing', async () => {
+    const r = file(R1);
+    expect(setRestricted(db, r.ticketId, OWNER, true, [OWNER])).toEqual({ ok: true });
+    const opened = await post(OWNER, `/api/mod/tickets/${r.ticketId}/reports/${r.reportId}/contact`);
+    expect(opened.statusCode).toBe(200);
+    const [th] = reporterThreadsOf(db, r.ticketId);
+    const actionsBefore = db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get();
+
+    expect((await post(MOD, `/api/mod/tickets/${r.ticketId}/reports/${r.reportId}/contact`)).statusCode).toBe(404);
+    expect((await post(MOD, `/api/mod/tickets/${r.ticketId}/chats/join`)).statusCode).toBe(404);
+    expect((await post(MOD, `/api/mod/tickets/${r.ticketId}/chats/${th.id}/end`)).statusCode).toBe(404);
+    expect((await post(MOD, `/api/mod/tickets/${r.ticketId}/chats/${th.id}/remove-all`)).statusCode).toBe(404);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM admin_actions').get()).toEqual(actionsBefore);
+    expect(reporterThreadsOf(db, r.ticketId, 'open').map((x) => x.id)).toEqual([th.id]);
   });
 
   it('closing without the tick queues no thank-you', async () => {

@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { addAccess, claimTicket, closeTicket } from '../src/tickets/actions.js';
 import { reporterThreadsOf, CHAT_CLOSED } from '../src/tickets/reporterChat.js';
-import { ReporterChats, CHAT_OPENING, CHAT_ENDED_BY_STAFF } from '../src/discord/reporterChats.js';
+import { ReporterChats, CHAT_OPENING, CHAT_ENDED_BY_STAFF, CHAT_ENDED_ON_CLOSE } from '../src/discord/reporterChats.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000041${i}`);
@@ -232,5 +232,42 @@ describe('fix round 1', () => {
     expect(second).toMatchObject({ ok: true, created: false, reopened: false });
     expect(said(th.thread_id)).toEqual([CHAT_OPENING]);
     expect(db.prepare('SELECT wanted_at IS NOT NULL AS w FROM reporter_chat_pings WHERE thread_id = ?').get(th.thread_id)).toEqual({ w: 1 });
+  });
+});
+
+describe('fix round 2', () => {
+  // openNow used to write a 'reporter_chat' event on every press, including a
+  // re-press on an already-open chat: the timeline and the audit filled up
+  // with one row per click on a chat that never actually changed.
+  it('two presses on an open chat produce exactly one reporter_chat event', async () => {
+    const r = file(R1, ACCUSED);
+    await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(kinds(r.ticketId).filter((k) => k === 'reporter_chat')).toHaveLength(1);
+  });
+
+  it('reopening a chat, and completing a press whose opening never finished, still write the event', async () => {
+    const r = file(R1, ACCUSED);
+    await chats.contact(r.ticketId, r.reportId, MOD);
+    const [th] = reporterThreadsOf(db, r.ticketId);
+    await chats.end(r.ticketId, th.id, MOD);
+    expect(kinds(r.ticketId).filter((k) => k === 'reporter_chat')).toHaveLength(1);
+    // Reopened by the reporter's own press: a second, distinct event.
+    await chats.openForReporter(r.reportId, { kind: 'player', steamid: R1 });
+    expect(kinds(r.ticketId).filter((k) => k === 'reporter_chat')).toHaveLength(2);
+  });
+
+  // CHAT_ENDED_BY_STAFF tells the reporter they can start the chat again
+  // while the report is open. Ending a chat on an already-closed ticket
+  // (staff are allowed to, same as the reconciler itself does on close) must
+  // not make that same false promise.
+  it('ending a chat on an already-closed ticket uses the true, closed wording', async () => {
+    const r = file(R1, ACCUSED);
+    await chats.contact(r.ticketId, r.reportId, MOD);
+    const [th] = reporterThreadsOf(db, r.ticketId);
+    closeTicket(db, r.ticketId, MOD, 'no_action', '', false);
+    expect(await chats.end(r.ticketId, th.id, MOD)).toEqual({ ok: true });
+    expect(said(th.thread_id)).toContain(CHAT_ENDED_ON_CLOSE);
+    expect(said(th.thread_id)).not.toContain(CHAT_ENDED_BY_STAFF);
   });
 });

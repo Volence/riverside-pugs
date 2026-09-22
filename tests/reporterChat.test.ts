@@ -174,3 +174,14 @@ describe('pings and notices', () => {
     expect(openReportsOf(db, { kind: 'discord', discordId: '9990', timedOutUntil: null })).toEqual([{ reportId: c.reportId, targetName: 'player2', category: 'toxicity' }]);
   });
 });
+
+describe('reporterLabel', () => {
+  // A blank name is not the same as a missing one to `??`: it is a real,
+  // non-null empty string, so it slipped past the old fallback and produced
+  // an empty Discord button label, which gets the whole reply rejected.
+  it('falls back to "a reporter" for a player whose name is the empty string', () => {
+    db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('', R1);
+    const a = file(R1, ACCUSED);
+    expect(reporterLabel(db, a.ticketId, { reporterId: R1, reporterDiscordId: null })).toBe('a reporter');
+  });
+});

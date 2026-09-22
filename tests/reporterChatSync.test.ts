@@ -93,6 +93,10 @@ describe('telling staff about a chat', () => {
     expect(pingLines(r.ticketId)).toHaveLength(1);
   });
 
+  // The ping this DM answers is asked for both when the reporter opens the
+  // chat (no words yet) and when they actually write in it, so the wording
+  // must hold for either: it must not claim they wrote something when all
+  // they did was open the chat.
   it('a restricted ticket: its access list is DMed a link and nothing else, and nothing goes in any post', async () => {
     const r = file(R1, ACCUSED, 'unsafe', 'he threatened me');
     addAccess(db, r.ticketId, ADMIN, MOD);
@@ -104,7 +108,8 @@ describe('telling staff about a chat', () => {
     expect(pings.map((d) => d.userId).sort()).toEqual([D(MOD), D(ADMIN)].sort());
     for (const d of pings) {
       const said = JSON.stringify(d.payload);
-      expect(said).toContain(`The reporter wrote on ticket #${r.ticketId}`);
+      expect(said).toContain(`There is new activity from the reporter on ticket #${r.ticketId}`);
+      expect(said).not.toContain('wrote');
       expect(said).toContain(`https://pug.test/admin/people/tickets/${r.ticketId}`);
       expect(said).not.toContain('threatened');
       expect(said).not.toContain('player0');

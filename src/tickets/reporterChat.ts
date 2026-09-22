@@ -46,14 +46,18 @@ export function isReporterMessage(
 }
 
 /** A reporter's name as staff see it: the player's name, or the snapshot
- *  taken when a Discord-only member filed. */
+ *  taken when a Discord-only member filed. A blank name (a player whose name
+ *  is the empty string, not merely unset) falls back the same as a missing
+ *  one: an empty button label is not just ugly, Discord rejects the whole
+ *  reply over it. */
 export function reporterLabel(db: DB, ticketId: number, ref: ReporterRef): string {
   if (ref.reporterId !== null) {
-    return (db.prepare('SELECT name FROM players WHERE steamid = ?').get(ref.reporterId) as { name: string } | undefined)?.name ?? 'a reporter';
+    const name = (db.prepare('SELECT name FROM players WHERE steamid = ?').get(ref.reporterId) as { name: string } | undefined)?.name;
+    return name || 'a reporter';
   }
   const r = db.prepare("SELECT NULLIF(reporter_name, '') AS name FROM ticket_reports WHERE ticket_id = ? AND reporter_discord_id = ? ORDER BY id DESC LIMIT 1")
     .get(ticketId, ref.reporterDiscordId) as { name: string | null } | undefined;
-  return r?.name ?? 'a Discord member';
+  return r?.name || 'a Discord member';
 }
 
 interface ReportJoin {

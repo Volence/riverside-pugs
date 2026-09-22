@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import type { MessageRow } from '../tickets/messages.js';
 import { messageById } from '../tickets/messages.js';
 import { getTicketRow, type TicketRow } from '../tickets/store.js';
-import type { ThreadRow } from '../tickets/threads.js';
+import { threadByDiscordId, type ThreadRow } from '../tickets/threads.js';
 import { escapeName } from './presenter.js';
 import type { BotTransport, MessagePayload } from './transport.js';
 
@@ -29,6 +29,34 @@ export function relayPayload(m: Pick<MessageRow, 'author_name' | 'content'>, fil
     components: [],
     mentionUserIds: [],
   };
+}
+
+/**
+ * Take out a relay copy left on a post this row no longer points at (a fold
+ * retired it, locked and archived, per TicketSync.endThread). Unarchived
+ * first, the same as every other write to an old thread: an archived thread
+ * refuses a delete same as it refuses anything else. Put back archived
+ * afterwards when the row says the thread is meant to stay locked, so a post
+ * that was quiet and archived before this is quiet and archived again after;
+ * a failure to re-archive is logged, not thrown, since the copy is gone
+ * either way and there is nothing here to undo it for.
+ */
+async function deleteOldCopy(d: RelayDeps, threadId: string, messageId: string): Promise<void> {
+  const { db, transport } = d;
+  if (!(await transport.threads.exists(threadId))) return;
+  if (await transport.threads.isArchived(threadId)) await transport.threads.setArchived(threadId, false);
+  try {
+    await transport.remove(threadId, messageId);
+  } finally {
+    const th = threadByDiscordId(db, threadId);
+    if (th?.locked === 1) {
+      try {
+        await transport.threads.setArchived(threadId, true);
+      } catch (err) {
+        console.error('[discord] could not archive an old ticket thread again after removing a stale relay copy from it:', err instanceof Error ? err.message : err);
+      }
+    }
+  }
 }
 
 /**
@@ -74,7 +102,14 @@ export async function syncRelay(d: RelayDeps, t: TicketRow, post: ThreadRow): Pr
       // False: the copy was deleted by hand. Sent again below.
     }
     // A row for another thread is a copy on a post that has since gone (a
-    // reopen made a new one): this post gets its own.
+    // reopen made a new one, or a fold retired it): this post gets its own,
+    // but the old copy left behind on the old post would otherwise sit there
+    // forever, unreachable by a later Remove, which only ever looks at the
+    // row's current thread. Deleted first, before the new copy is sent, so a
+    // Remove race sees at most one copy either way.
+    if (m.relay_thread_id !== null && m.relay_thread_id !== post.thread_id && m.relay_message_id !== null) {
+      await deleteOldCopy(d, m.relay_thread_id, m.relay_message_id);
+    }
     const copyId = await transport.send(post.thread_id, payload);
     upsert.run(m.discord_message_id, copyId, post.thread_id, hash);
     // Removed while the copy was on its way: take it back now rather than

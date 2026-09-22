@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
-import type { AdminOverview } from '../api';
+import type { AdminOverview, TicketDetail } from '../api';
 import { ConfirmHost } from '../components/Confirm';
 
 /** Click the affirmative button of the app's confirm dialog.
@@ -14,7 +14,7 @@ async function confirmDialog(name?: string | RegExp) {
   fireEvent.click(within(dialog).getByRole('button', { name: name ?? 'Confirm' }));
 }
 
-const { mockAdmin, mockApi, mockPeople } = vi.hoisted(() => ({
+const { mockAdmin, mockApi, mockPeople, mockMod } = vi.hoisted(() => ({
   mockAdmin: {
     overview: vi.fn(), live: vi.fn(), leaveClock: vi.fn(), settings: vi.fn(), saveSetting: vi.fn(),
     audit: vi.fn(), serverLogSecret: vi.fn(), serverLogAuth: vi.fn(),
@@ -26,6 +26,7 @@ const { mockAdmin, mockApi, mockPeople } = vi.hoisted(() => ({
   // The People desk is where a moderator lands, so a shell test reaches its
   // search screen even when it is testing the redirect and nothing else.
   mockPeople: { people: vi.fn(), review: vi.fn() },
+  mockMod: { ticket: vi.fn(), contactReporter: vi.fn() },
 }));
 
 vi.mock('../api', async (importOriginal) => {
@@ -35,6 +36,7 @@ vi.mock('../api', async (importOriginal) => {
     adminApi: { ...actual.adminApi, ...mockAdmin },
     api: { ...actual.api, ...mockApi },
     peopleApi: { ...actual.peopleApi, ...mockPeople },
+    modApi: { ...actual.modApi, ...mockMod },
   };
 });
 
@@ -47,7 +49,7 @@ const { Redirect } = await import('../components/Redirect');
 
 afterEach(() => { cleanup(); history.replaceState(null, '', '/'); });
 beforeEach(() => {
-  for (const fn of [...Object.values(mockAdmin), ...Object.values(mockApi), ...Object.values(mockPeople)]) fn.mockReset();
+  for (const fn of [...Object.values(mockAdmin), ...Object.values(mockApi), ...Object.values(mockPeople), ...Object.values(mockMod)]) fn.mockReset();
   mockPeople.people.mockResolvedValue({ players: [] });
   mockPeople.review.mockResolvedValue({ players: [], health: null });
   // The Integrity tab always asks for the analysis job's state, so every test
@@ -674,5 +676,60 @@ describe('the panel shell', () => {
     const { container } = render(<LocationProvider><Redirect to="/admin/people/bans" /></LocationProvider>);
     await waitFor(() => expect(location.pathname).toBe('/admin/people/bans'));
     expect(container.textContent).toBe('');
+  });
+});
+
+describe('AdminTicket, reached by routing', () => {
+  const caseFile = {
+    steamid: '76561198000000011', name: 'Bone Breaker', avatar: null, status: 'active' as const, sr: null, games: 2,
+    createdAt: '2026-08-18T01:35:32.000Z', activeBan: null, bans: [], penalties: [],
+    timeout: null, inputFlags: [], aliases: [], sharesAddressWith: [],
+    tickets: [
+      { id: 1, targetId: '76561198000000011', targetDiscordId: null, targetName: 'Bone Breaker', status: 'open' as const, outcome: null,
+        restricted: false, claimedBy: null, claimedByName: null, reports: 1, reporters: 1,
+        categories: ['cheating'], createdAt: '2026-09-21T18:56:13.000Z', lastReportAt: null, closedAt: null },
+      { id: 2, targetId: '76561198000000011', targetDiscordId: null, targetName: 'Bone Breaker', status: 'open' as const, outcome: null,
+        restricted: false, claimedBy: null, claimedByName: null, reports: 1, reporters: 1,
+        categories: ['toxicity'], createdAt: '2026-08-30T10:00:00.000Z', lastReportAt: null, closedAt: null },
+    ],
+  };
+
+  const ticketDetail = (id: 1 | 2): TicketDetail => ({
+    discussion: { state: 'unconfigured', surface: null, url: null },
+    ticket: {
+      id, targetId: '76561198000000011', targetDiscordId: null, targetName: 'Bone Breaker', status: 'open',
+      outcome: null, restricted: false, claimedBy: null, claimedByName: null,
+      reports: 1, reporters: 1, categories: id === 1 ? ['cheating'] : ['toxicity'],
+      createdAt: '2026-09-21T18:56:13.000Z', lastReportAt: null, closedAt: null,
+      outcomeNote: '', openedBy: null, openedByName: null, closedBy: null, closedByName: null,
+    },
+    reports: id === 1 ? [{
+      id: 10, category: 'cheating', text: 'aimbot', reporterId: '76561198000000022', reporterDiscordId: null,
+      reporterName: 'Reporter One', matchId: null, campaign: null, moment: null, createdAt: '2026-09-21T18:56:13.000Z',
+    }] : [],
+    events: [], bans: [], discordSanctions: [], access: [], accessCandidates: [], messages: [],
+    caseFile, summary: null, viewer: { isAdmin: true, banCapMinutes: null },
+  });
+
+  // Pins the bug: AdminTicket rendered without a key kept its component state
+  // (the chat link, the closing note) across an onOpen navigation to a
+  // different ticket, so ticket B showed ticket A's "Open the chat with the
+  // reporter in Discord" link and leftover note text.
+  it('clears chat link and closing note when moving to a different ticket via Earlier tickets', async () => {
+    mockMod.ticket.mockImplementation((id: number) => Promise.resolve(ticketDetail(id === 1 ? 1 : 2)));
+    mockMod.contactReporter.mockResolvedValue({ ok: true, url: 'https://discord.com/channels/1/2/3' });
+
+    renderAdmin('/admin/people/tickets/1');
+    await waitFor(() => expect(screen.getByText('#1')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contact reporter' }));
+    await waitFor(() => expect(screen.getByText('Open the chat with the reporter in Discord')).toBeTruthy());
+    fireEvent.input(screen.getByLabelText('Closing note'), { target: { value: 'leftover note' } });
+    expect((screen.getByLabelText('Closing note') as HTMLInputElement).value).toBe('leftover note');
+
+    fireEvent.click(screen.getByRole('button', { name: '#2' }));
+    await waitFor(() => expect(screen.getByText('#2')).toBeTruthy());
+    expect(screen.queryByText('Open the chat with the reporter in Discord')).toBeNull();
+    expect((screen.getByLabelText('Closing note') as HTMLInputElement).value).toBe('');
   });
 });

@@ -188,7 +188,12 @@ export class ReporterChats {
       const th = db.prepare("SELECT * FROM ticket_threads WHERE id = ? AND ticket_id = ? AND kind = 'reporter'").get(threadRowId, ticketId) as ThreadRow | undefined;
       if (!th || th.state === 'deleted') return fail(404, 'no such chat');
       if (th.state !== 'open') return fail(409, 'that chat has already ended');
-      await endReporterThread(this.deps, th, CHAT_ENDED_BY_STAFF);
+      // checkChatStaff's only 409 is a closed ticket (end is allowed there
+      // too, above), so t.ok tells the two cases apart: open, where the
+      // reporter really can start it again, and closed, where CHAT_ENDED_BY_STAFF's
+      // promise of that would be false.
+      const farewell = t.ok ? CHAT_ENDED_BY_STAFF : CHAT_ENDED_ON_CLOSE;
+      await endReporterThread(this.deps, th, farewell);
       addTicketEvent(db, ticketId, staff, 'reporter_chat_ended', { threadRowId }, this.now());
       publishTicketSignal({ kind: 'ticket', ticketId });
       return { ok: true };
@@ -291,7 +296,13 @@ export class ReporterChats {
         console.warn('[discord] could not add a moderator to a reporter chat:', err instanceof Error ? err.message : err);
       }
     }
-    addTicketEvent(db, plan.ticketId, by.kind === 'staff' ? by.steamid : null, 'reporter_chat', { by: by.kind, created, reopened, threadRowId: th.id }, now);
+    // Only when something actually happened to the thread this press: it was
+    // made, reopened, or an earlier press's opening never finished and this
+    // one completed it. A re-press on an already-open chat does none of
+    // those, and must not add another row to the timeline and audit.
+    if (justOpened || reopened) {
+      addTicketEvent(db, plan.ticketId, by.kind === 'staff' ? by.steamid : null, 'reporter_chat', { by: by.kind, created, reopened, threadRowId: th.id }, now);
+    }
     if (by.kind === 'reporter' && (justOpened || reopened)) requestPing(db, th.thread_id, now);
     publishTicketSignal({ kind: 'ticket', ticketId: plan.ticketId });
     return { ok: true, url: threadUrl(guildId, th.thread_id), created, reopened };
