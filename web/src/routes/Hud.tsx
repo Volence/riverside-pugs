@@ -4,12 +4,13 @@ import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, clampOverride, DEFAULT_DESIGN,
-  type HudDesign, type ElementOverride, type StyleOverride, type RangeKey, type TeamDir,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, clampOverride, clampChild, DEFAULT_DESIGN,
+  type HudDesign, type ElementOverride, type StyleOverride, type RangeKey, type TeamDir, type ChildOverride, type ChildRangeKey,
 } from '../hud/design';
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
-import { elementRect, teamLayout, teamCardRects, isFreeTeam, packHud, type BuildAssets } from '../hud/build';
+import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, baseHasChild, packHud, type BuildAssets } from '../hud/build';
+import { TEAM_PANEL, teamChild } from '../hud/children';
 import { drawHud, hitTest, freeCardAt, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
@@ -155,6 +156,7 @@ export function elementsTouched(d: HudDesign): boolean {
  *  overwriting whatever a reader already had going. */
 export function hasOverrides(d: HudDesign): boolean {
   return elementsTouched(d)
+    || Object.keys(d.children).length > 0
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
     || d.hideGameCrosshair === true
@@ -165,12 +167,14 @@ export function hasOverrides(d: HudDesign): boolean {
 }
 
 /** "Reset this element": back to what a fresh design has for it, which for
- *  the teammates is a fitted card, not nothing. */
+ *  the teammates is a fitted card with no inside edits, not nothing. */
 export function resetElement(d: HudDesign, id: string): HudDesign {
   const elements = { ...d.elements };
   const fresh = DEFAULT_DESIGN.elements[id];
   if (fresh) elements[id] = structuredClone(fresh); else delete elements[id];
-  return { ...d, elements };
+  const children = { ...d.children };
+  delete children[id];
+  return { ...d, elements, children };
 }
 
 /**
@@ -207,6 +211,12 @@ export function nudgeCard(design: HudDesign, card: number, dx: number, dy: numbe
   const r = teamCardRects(design, design.aspect)[card];
   const extentW = screenW(design.aspect);
   return placeCard(design, card, clampSpan(s.x + dx, r.w, extentW, 8), clampSpan(s.y + dy, r.h, SCREEN_H, 8));
+}
+
+/** Merge into one teammate-card child's override. */
+export function patchChild(design: HudDesign, name: string, p: Partial<ChildOverride>): HudDesign {
+  const kids = design.children.teamColumn ?? {};
+  return { ...design, children: { ...design.children, teamColumn: { ...kids, [name]: { ...(kids[name] ?? {}), ...p } } } };
 }
 
 const BACKDROPS: [Backdrop, string][] = [
@@ -540,6 +550,147 @@ function StyleRow(
   );
 }
 
+/**
+ * The teammate card's insides: one pill per registry child, struck through
+ * when hidden, and the only way to reach a hidden or tiny one, as the
+ * element list is for elements. A child the preset's file lacks (the stock
+ * health number) is a checkbox that adds it; once added it gets a pill too.
+ */
+function ChildList(
+  { design, setDesign, selectedChild, onPick }: {
+    design: HudDesign; setDesign: (fn: (d: HudDesign) => HudDesign) => void;
+    selectedChild: string | null; onPick: (name: string) => void;
+  },
+) {
+  return (
+    <Field legend="Inside the card">
+      <div class="hud__list">
+        {TEAM_PANEL.children.map((def) => {
+          const info = cardChild(design, def.name);
+          if (!info) return null;                              // an addable child that is off: its checkbox is below
+          return (
+            <button
+              key={def.name} type="button"
+              class={`hud__pill${def.name === selectedChild ? ' is-active' : ''}${info.visible ? '' : ' hud__pill--hidden'}`}
+              onClick={() => onPick(def.name)}
+            >
+              {def.label}
+            </button>
+          );
+        })}
+      </div>
+      {TEAM_PANEL.children.filter((def) => def.addable && !baseHasChild(design.preset, def.name)).map((def) => (
+        <label key={def.name} class="hud__check">
+          <input
+            type="checkbox" checked={design.children.teamColumn?.[def.name]?.on === true}
+            onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setDesign((d) => patchChild(d, def.name, { on })); }}
+          />
+          <span>{def.label}</span>
+        </label>
+      ))}
+      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
+    </Field>
+  );
+}
+
+/**
+ * The controls for one child of the teammate card, built only from its
+ * registry entry. Numbers are unscaled units in the card file's own frame
+ * (what a ChildOverride stores), read back through cardChild so a child
+ * with no edits shows real numbers. Square art gets one Size; labels a text
+ * size and, where the game honours it, a colour.
+ */
+function ChildControls(
+  { design, setDesign, name, onBack }: {
+    design: HudDesign; setDesign: (fn: (d: HudDesign) => HudDesign) => void; name: string; onBack: () => void;
+  },
+) {
+  const def = teamChild(name);
+  const info = cardChild(design, name);
+  if (!def || !info) return null;
+  const o = design.children.teamColumn?.[name] ?? {};
+  const patch = (p: Partial<ChildOverride>) => setDesign((d) => patchChild(d, name, p));
+  // The same guard and clamp as patchNum, through the child table.
+  const num = (e: Event, key: ChildRangeKey, to: (n: number) => Partial<ChildOverride>) => {
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (Number.isFinite(n)) patch(to(clampChild(key, n)));
+  };
+  const colour = o.color ?? info.color ?? '255 255 255 255';
+  const reset = () => setDesign((d) => {
+    const kids = { ...(d.children.teamColumn ?? {}) };
+    const on = kids[name]?.on;
+    delete kids[name];
+    // Resetting an added child keeps it added: the checkbox, not this button, takes it away.
+    if (def.addable && on !== undefined) kids[name] = { on };
+    const children: HudDesign['children'] = { ...d.children, teamColumn: kids };
+    if (Object.keys(kids).length === 0) delete children.teamColumn;
+    return { ...d, children };
+  });
+
+  return (
+    <Field legend={def.label}>
+      <label class="hud__check">
+        <input type="checkbox" checked={o.visible ?? info.visible} onChange={(e) => patch({ visible: (e.target as HTMLInputElement).checked })} />
+        <span>Visible</span>
+      </label>
+      {def.move && (
+        <div class="hud__row2">
+          <label class="hud__field">
+            <span>X</span>
+            <input type="number" value={Math.round(info.x)} onInput={(e) => num(e, 'x', (x) => ({ x }))} />
+          </label>
+          <label class="hud__field">
+            <span>Y</span>
+            <input type="number" value={Math.round(info.y)} onInput={(e) => num(e, 'y', (y) => ({ y }))} />
+          </label>
+        </div>
+      )}
+      {def.box === 'wh' && (
+        <div class="hud__row2">
+          <label class="hud__field">
+            <span>W</span>
+            <input type="number" value={Math.round(info.w)} onInput={(e) => num(e, 'w', (w) => ({ w }))} />
+          </label>
+          <label class="hud__field">
+            <span>H</span>
+            <input type="number" value={Math.round(info.h)} onInput={(e) => num(e, 'h', (h) => ({ h }))} />
+          </label>
+        </div>
+      )}
+      {def.box === 'square' && (
+        <label class="hud__row">
+          <span>Size</span>
+          <input type="number" value={Math.round(info.w)} onInput={(e) => num(e, 'w', (s) => ({ w: s, h: s }))} />
+          <span />
+        </label>
+      )}
+      {def.font && (
+        <label class="hud__row">
+          <span>{def.box === 'none' ? 'Icon size' : 'Text size'}</span>
+          <input type="number" min={6} max={64} value={o.fontSize ?? info.fontTall ?? 12} onInput={(e) => num(e, 'fontSize', (fontSize) => ({ fontSize }))} />
+          <span />
+        </label>
+      )}
+      {def.colour && (
+        <div class="hud__stylerow">
+          <span class="hud__stylerow-label">Colour</span>
+          <input
+            type="color" aria-label={`${def.label} colour`} value={hexOf(colour)}
+            onInput={(e) => patch({ color: withHex(colour, (e.target as HTMLInputElement).value) })}
+          />
+          <input
+            type="range" min={0} max={100} step={1} aria-label={`${def.label} opacity`} value={alphaPct(colour)}
+            onInput={(e) => patch({ color: withAlphaPct(colour, parseFloat((e.target as HTMLInputElement).value)) })}
+          />
+        </div>
+      )}
+      {def.note && <p class="muted hud__note">{def.note}</p>}
+      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this child</button>
+      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>Back to Teammates</button>
+    </Field>
+  );
+}
+
 type Rect4 = { x: number; y: number; w: number; h: number };
 /** What a pointer-down grabbed: an element (moved or resized) or one Free teammate card. */
 type Drag =
@@ -556,8 +707,10 @@ export default function Hud() {
   const [selected, setSelected] = useState<string | null>(null);
   // In Free, the teammate card the canvas or the card list picked.
   const [selectedCard, setSelectedCard] = useState<number | null>(null);
-  // Selecting an element (or nothing) always drops a picked card.
-  const selectEl = (id: string | null) => { setSelected(id); setSelectedCard(null); };
+  // The teammate card child picked in the list or on the canvas: the second selection level.
+  const [selectedChild, setSelectedChild] = useState<string | null>(null);
+  // Selecting an element (or nothing) always drops a picked card and child.
+  const selectEl = (id: string | null) => { setSelected(id); setSelectedCard(null); setSelectedChild(null); };
   // Which state the teammate cards are previewed in. Game code picks it in
   // game; this only changes the picture, never the design or the file.
   const [cardState, setCardState] = useState<CardState>('healthy');
@@ -595,8 +748,8 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
-    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1), { state: cardState, card: selectedCard });
-  }, [design, side, selected, backdrop, imgTick, cardState, selectedCard]);
+    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1), { state: cardState, card: selectedCard, child: selectedChild });
+  }, [design, side, selected, backdrop, imgTick, cardState, selectedCard, selectedChild]);
 
   // The preview draws labels in Roboto Condensed, the Modern preset's real
   // font and the closest shipped stand-in for stock's Trade Gothic. Canvas
@@ -762,13 +915,13 @@ export default function Hud() {
   const changePreset = async (preset: Preset) => {
     if (preset === design.preset) return;
     let resetElements = false;
-    if (elementsTouched(design)) {
+    if (elementsTouched(design) || Object.keys(design.children).length > 0) {
       resetElements = await confirm({
-        title: 'Switching preset keeps your moves but they were placed for the other layout. Reset them as well?',
+        title: 'Switching preset keeps your moves and inside edits, but they were placed for the other layout. Reset them as well?',
         confirmLabel: 'Reset', cancelLabel: 'Keep',
       });
     }
-    setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements) } : {}) }));
+    setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements), children: {} } : {}) }));
   };
 
   const patchStyle = (id: string, p: Partial<StyleOverride>) => setDesign((d) => ({
@@ -988,14 +1141,14 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          {selected
-            ? (
-              <ElementControls
-                design={design} setDesign={setDesign} id={selected}
-                selectedCard={selectedCard} onPickCard={setSelectedCard}
-              />
-            )
-            : <p class="muted">Select an element on the canvas or in the list below it.</p>}
+          {selected === 'teamColumn' && selectedChild
+            ? <ChildControls design={design} setDesign={setDesign} name={selectedChild} onBack={() => setSelectedChild(null)} />
+            : selected
+              ? <ElementControls design={design} setDesign={setDesign} id={selected} selectedCard={selectedCard} onPickCard={setSelectedCard} />
+              : <p class="muted">Select an element on the canvas or in the list below it.</p>}
+          {selected === 'teamColumn' && (
+            <ChildList design={design} setDesign={setDesign} selectedChild={selectedChild} onPick={setSelectedChild} />
+          )}
         </Panel>
       </div>
 

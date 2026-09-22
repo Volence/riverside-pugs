@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
-import { snap, nudge, nudgeCard, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard } from './Hud';
+import { snap, nudge, nudgeCard, toUnits, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild } from './Hud';
 import Hud from './Hud';
 import { DEFAULT_DESIGN } from '../hud/design';
 
@@ -82,6 +82,16 @@ describe('the teammate layout helpers', () => {
   });
 });
 
+describe('patchChild', () => {
+  it('merges into one child of the teammate card and leaves the rest alone', () => {
+    const a = patchChild(DEFAULT_DESIGN, 'Head', { w: 30, h: 30 });
+    const b = patchChild(a, 'Head', { x: 5 });
+    expect(b.children.teamColumn).toEqual({ Head: { w: 30, h: 30, x: 5 } });
+    expect(resetElement(b, 'teamColumn').children.teamColumn).toBeUndefined();
+    expect(hasOverrides(b)).toBe(true);
+  });
+});
+
 describe('nudgeCard', () => {
   it('moves a Free card from its slot and keeps 8 units of it on screen, like a drag', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
@@ -118,6 +128,62 @@ afterEach(() => {
  * there is nothing to assert about pixels. This just pins that the shell
  * renders and that picking a side changes which elements are offered. */
 describe('Hud page', () => {
+  it('lists the teammate card children and adds the health number on stock', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    for (const label of ['Portrait', 'Health bar', 'Name', 'Item icons', 'Status text', 'Damage splatter', 'Down picture', 'Dead picture', 'Voice icon']) {
+      expect(screen.getByRole('button', { name: label }), label).toBeTruthy();
+    }
+    expect(screen.queryByRole('button', { name: 'Health number' })).toBeNull();
+    const add = screen.getByLabelText('Health number') as HTMLInputElement;
+    expect(add.checked).toBe(false);
+    fireEvent.click(add);
+    expect(screen.getByRole('button', { name: 'Health number' })).toBeTruthy();
+    expect(screen.getByText("Edits inside a card apply to every teammate's card.")).toBeTruthy();
+  });
+
+  it('shows one Size box for the portrait and writes both sides', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    expect(screen.queryByLabelText('W')).toBeNull();
+    fireEvent.input(screen.getByLabelText('Size'), { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('30');
+  });
+
+  it('offers no colour for the health number and says why, and a colour for the name', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByLabelText('Health number'));
+    fireEvent.click(screen.getByRole('button', { name: 'Health number' }));
+    expect(screen.getByText('The game colours this by health.')).toBeTruthy();
+    expect(screen.queryByLabelText('Health number colour')).toBeNull();
+    expect(screen.getByLabelText('Text size')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }));
+    expect(screen.getByLabelText('Name colour')).toBeTruthy();
+  });
+
+  it("snaps a child's X box to its cap, and goes back to the teammates", () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }));
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '9999' } });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('512');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Teammates' }));
+    expect(screen.getByText('Reset this element')).toBeTruthy();
+  });
+
+  it('gives the item icons an Icon size and no W or H', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Item icons' }));
+    expect((screen.getByLabelText('Icon size') as HTMLInputElement).value).toBe('18');
+    expect(screen.queryByLabelText('W')).toBeNull();
+    expect(screen.getByText(/stand-in icons/)).toBeTruthy();
+  });
+
   it('lists the current side elements and swaps them when the side toggle changes', () => {
     render(<Hud />);
     expect(screen.getByText('Your health')).toBeTruthy();
