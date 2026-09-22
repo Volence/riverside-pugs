@@ -9,6 +9,7 @@ import {
 } from '../src/discord/reportButton.js';
 import { COMMAND_DEFS, REPORT_LABELS } from '../src/discord/commands.js';
 import { MAX_TEXT } from '../src/tickets/filing.js';
+import type { PickedMember } from '../src/discord/transport.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import { opensTicketModal } from '../src/discord/ticketButtons.js';
 
@@ -174,9 +175,9 @@ describe('resolveByName', () => {
 describe('reportModal', () => {
   beforeEach(() => { seedPlayers(db); });
 
-  it('has four fields in a fixed order', () => {
+  it('has five fields in a fixed order', () => {
     const m = reportModal(db, ME);
-    expect(m.fields.map((f) => f.id)).toEqual(['who', 'name', 'reason', 'details']);
+    expect(m.fields.map((f) => f.id)).toEqual(['who', 'member', 'name', 'reason', 'details']);
   });
 
   it('leads the who dropdown with the sentinel, then recent opponents', () => {
@@ -203,14 +204,14 @@ describe('reportModal', () => {
   });
 
   it('offers every report category, with the shared labels', () => {
-    const reason = reportModal(db, ME).fields[2];
+    const reason = reportModal(db, ME).fields[3];
     if (reason.kind !== 'select') throw new Error('reason must be a select');
     expect(reason.options.map((o) => o.value)).toEqual(['griefing', 'cheating', 'toxicity', 'afk', 'unsafe', 'other']);
     expect(reason.options.find((o) => o.value === 'unsafe')!.label).toBe('Safety concern (handled privately)');
   });
 
   it('keeps the name and details boxes optional and caps details at 1000', () => {
-    const [, name, , details] = reportModal(db, ME).fields;
+    const [, , name, , details] = reportModal(db, ME).fields;
     if (name.kind !== 'text' || details.kind !== 'text') throw new Error('expected text fields');
     expect(name.required).toBe(false);
     expect(details.required).toBe(false);
@@ -400,12 +401,11 @@ describe('opening the form', () => {
     expect(r.modal?.customId).toBe('rp:new');
   });
 
-  it('tells an unlinked presser to link first, and opens no form', async () => {
+  it('opens the form for an unlinked presser too, instead of telling them to link first', async () => {
     const r = await handleReportButton(hDeps(), {
       kind: 'button', customId: 'rp:open', userId: 'nobody', userName: 'x',
     });
-    expect(r.modal).toBeUndefined();
-    expect(said(r)).toContain('/link');
+    expect(r.modal?.customId).toBe('rp:new');
   });
 });
 
@@ -480,6 +480,57 @@ describe('submitting the form', () => {
     const r = await submit(ME, { who: OTHER, name: 'same', reason: 'griefing', details: '' });
     expect(said(r)).toContain('Type more of it');
     expect(db.prepare('SELECT COUNT(*) AS n FROM pending_reports').get()).toEqual({ n: 0 });
+  });
+});
+
+const modal = (fields: Record<string, string>, picked: Record<string, PickedMember> = {}, userId = 'd-me') => ({
+  kind: 'modal' as const, customId: 'rp:new', userId, userName: 'someone', fields, picked, presserTimedOutUntil: null,
+});
+const lurkerPick: PickedMember = { id: '990', name: 'Lurky', bot: false, administrator: false };
+
+describe('Discord members on the form', () => {
+  beforeEach(() => {
+    seedPlayers(db);
+    db.prepare("UPDATE players SET discord_id = 'd-me' WHERE steamid = ?").run(ME);
+  });
+
+  it('the form has a member picker between the dropdown and the name box', () => {
+    expect(reportModal(db, ME).fields.map((f) => [f.id, f.kind])).toEqual([
+      ['who', 'select'], ['member', 'user'], ['name', 'text'], ['reason', 'select'], ['details', 'text'],
+    ]);
+  });
+
+  it('a picked Discord-only member is reported by Discord id', async () => {
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: '990', name: '', reason: 'toxicity', details: 'dms' }, { member: lurkerPick }));
+    expect(r.payload.content).toMatch(/^Thanks/);
+    expect(db.prepare('SELECT target_discord_id, target_name FROM tickets').get()).toEqual({ target_discord_id: '990', target_name: 'Lurky' });
+  });
+
+  it('the dropdown wins over an empty picker, and two different people are refused with the details kept', async () => {
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: ALICE, member: '990', name: '', reason: 'toxicity', details: 'my words' }, { member: lurkerPick }));
+    expect(r.payload.content).toMatch(/two different people/);
+    expect(r.payload.content).toContain('my words');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tickets').get()).toEqual({ n: 0 });
+  });
+
+  it('a Discord-only reporter can open the form and file', async () => {
+    const open = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: 'rp:open', userId: 'd-new', userName: 'new' });
+    expect(open.modal?.fields.find((f) => f.id === 'who')).toMatchObject({ options: [{ value: OTHER }] });
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: '990', name: '', reason: 'toxicity', details: '' }, { member: lurkerPick }, 'd-new'));
+    expect(r.payload.content).toMatch(/^Thanks/);
+    expect(db.prepare('SELECT reporter_discord_id FROM ticket_reports').get()).toEqual({ reporter_discord_id: 'd-new' });
+  });
+
+  it('a Discord-only reporter who types an ambiguous name gets a draft of their own', async () => {
+    const r = await handleReportModal({ db, adminSteamIds: [] }, modal({ who: OTHER, member: '', name: 'bob', reason: 'afk', details: '' }, {}, 'd-new'));
+    expect(r.payload.content).toMatch(/More than one player/);
+    expect(db.prepare('SELECT reporter_id, reporter_discord_id FROM pending_reports').get()).toEqual({ reporter_id: null, reporter_discord_id: 'd-new' });
+    const pick = r.payload.components[0][0] as { customId: string };
+    // Someone else pressing it gets the expired answer.
+    const other = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: pick.customId, userId: 'd-else', userName: 'x' });
+    expect(other.payload.content).toMatch(/expired/);
+    const mine = await handleReportButton({ db, adminSteamIds: [] }, { kind: 'button', customId: pick.customId, userId: 'd-new', userName: 'new' });
+    expect(mine.payload.content).toMatch(/^Thanks/);
   });
 });
 

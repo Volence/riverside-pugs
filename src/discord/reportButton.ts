@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { fileReport, latestSharedMatch, MAX_TEXT, REPORT_CATEGORIES } from '../tickets/filing.js';
+import {
+  fileReport, latestSharedMatch, MAX_TEXT, REPORT_CATEGORIES,
+  type DiscordReporter, type PickedTarget,
+} from '../tickets/filing.js';
 import { playerByDiscordId } from '../players.js';
 import { REPORT_LABELS } from './commands.js';
 import type { BotInteraction, BotTransport, InteractionReply, MessagePayload, ModalDef } from './transport.js';
@@ -70,8 +73,10 @@ const LABEL_MAX = 100;
 const clip = (s: string) => (s.length <= LABEL_MAX ? s : `${s.slice(0, LABEL_MAX - 1)}…`);
 
 /** The form, built for this reporter: the dropdown is their own recent
- *  opponents, so the common case is one pick rather than any typing. */
-export function reportModal(db: DB, reporter: string): ModalDef {
+ *  opponents, so the common case is one pick rather than any typing. `null`
+ *  for a Discord-only reporter, who has no match history to draw the
+ *  dropdown from: the sentinel is all it holds. */
+export function reportModal(db: DB, reporter: string | null): ModalDef {
   return {
     customId: `${REPORT_PREFIX}new`,
     title: 'Report a player',
@@ -79,13 +84,14 @@ export function reportModal(db: DB, reporter: string): ModalDef {
       {
         kind: 'select',
         id: 'who',
-        label: 'Who are you reporting?',
+        label: 'Someone you played with?',
         options: [
-          { label: 'Someone else (I will type the name below)', value: OTHER },
-          ...recentCoPlayers(db, reporter).map((c) => ({ label: clip(c.name), value: c.steamid })),
+          { label: 'Someone else (pick or type them below)', value: OTHER },
+          ...(reporter ? recentCoPlayers(db, reporter) : []).map((c) => ({ label: clip(c.name), value: c.steamid })),
         ],
       },
-      { kind: 'text', id: 'name', label: 'Or type their name', style: 'short', required: false, maxLength: 100 },
+      { kind: 'user', id: 'member', label: 'Or pick them from the Discord', required: false },
+      { kind: 'text', id: 'name', label: 'Or type their in-game name', style: 'short', required: false, maxLength: 100 },
       {
         kind: 'select',
         id: 'reason',
@@ -236,15 +242,30 @@ export interface ReportHandlerDeps { db: DB; adminSteamIds: string[]; now?: () =
 const say = (content: string, components: InteractionReply['payload']['components'] = []): InteractionReply =>
   ({ ephemeral: true, payload: { content, embeds: [], components } });
 
-const LINK_FIRST = 'Link your Steam account first with `/link`, then you can file a report.';
+/** Either side of the form: a linked player, or a Discord member with no
+ *  linked Steam account at all. */
+type Me = { kind: 'player'; steamid: string } | DiscordReporter;
+
+/** Who pressed a button or submitted a modal. A linked Discord account is
+ *  always the player; everyone else is reported exactly as Discord gave
+ *  them, with their current timeout (a button interaction carries none, so
+ *  it comes through as null). */
+function whoIsPressing(db: DB, i: { userId: string; userName: string; presserTimedOutUntil?: string | null }): Me {
+  const p = playerByDiscordId(db, i.userId);
+  return p ? { kind: 'player', steamid: p.steamid }
+    : { kind: 'discord', discordId: i.userId, name: i.userName, timedOutUntil: i.presserTimedOutUntil ?? null };
+}
 
 export async function handleReportButton(
   deps: ReportHandlerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
 ): Promise<InteractionReply> {
-  const me = playerByDiscordId(deps.db, i.userId);
-  if (!me) return say(LINK_FIRST);
+  const me = whoIsPressing(deps.db, i);
   if (i.customId === `${REPORT_PREFIX}open`) {
-    return { ephemeral: true, payload: { content: 'Opening the form...', embeds: [], components: [] }, modal: reportModal(deps.db, me.steamid) };
+    return {
+      ephemeral: true,
+      payload: { content: 'Opening the form...', embeds: [], components: [] },
+      modal: reportModal(deps.db, me.kind === 'player' ? me.steamid : null),
+    };
   }
   if (i.customId.startsWith(`${REPORT_PREFIX}pick:`)) {
     const [, , rawId, steamid] = i.customId.split(':');
@@ -254,16 +275,21 @@ export async function handleReportButton(
     // same answer on purpose. A distinct "not yours" reply would let
     // someone probe whether a given draft id exists at all; a missing row
     // and someone else's row must be indistinguishable from the outside.
+    // IS rather than = : either side of the scoping pair can be NULL (a
+    // Discord-only reporter has no reporter_id), and NULL = NULL is NULL,
+    // which a WHERE treats as no match at all.
     const row = deps.db.prepare(
-      'SELECT id, reporter_id, category, text, candidates FROM pending_reports WHERE id = ? AND reporter_id = ?',
-    ).get(Number(rawId), me.steamid) as { id: number; reporter_id: string; category: string; text: string; candidates: string } | undefined;
+      'SELECT id, category, text, candidates FROM pending_reports WHERE id = ? AND reporter_id IS ? AND reporter_discord_id IS ?',
+    ).get(
+      Number(rawId), me.kind === 'player' ? me.steamid : null, me.kind === 'discord' ? me.discordId : null,
+    ) as { id: number; category: string; text: string; candidates: string } | undefined;
     // Reaped after an hour, already used, or somebody else's: either way the
     // honest answer is the same, to start again.
     if (!row) return say('That draft has expired, please file it again.');
     if (!(JSON.parse(row.candidates) as string[]).includes(steamid)) {
       return say('That player was not one of the choices.');
     }
-    const outcome = file(deps, row.reporter_id, steamid, row.category, row.text);
+    const outcome = file(deps, me, { targetId: steamid }, row.category, row.text);
     // Only on success: a refusal (the daily limit, say) leaves the draft in
     // place so the reporter is not made to type it again. This has to come
     // from fileReport's own ok flag, never be guessed from the reply text:
@@ -280,13 +306,27 @@ export async function handleReportButton(
 export async function handleReportModal(
   deps: ReportHandlerDeps, i: Extract<BotInteraction, { kind: 'modal' }>,
 ): Promise<InteractionReply> {
-  const me = playerByDiscordId(deps.db, i.userId);
-  if (!me) return say(LINK_FIRST);
+  const me = whoIsPressing(deps.db, i);
   const category = i.fields.reason ?? '';
   const text = (i.fields.details ?? '').trim();
   const picked = i.fields.who ?? OTHER;
+  const member = i.picked?.member;
 
-  if (picked !== OTHER) return file(deps, me.steamid, picked, category, text).reply;
+  if (picked !== OTHER && member) {
+    // The dropdown and the member picker disagree: refuse rather than guess
+    // which the reporter meant, but keep what they wrote so nothing typed is
+    // lost to a form they now have to fill in again.
+    const memberPlayer = playerByDiscordId(deps.db, member.id);
+    if (memberPlayer?.steamid !== picked) {
+      return say(`You picked two different people. Pick one and send the form again.${text ? `\n\nWhat you wrote:\n> ${text.replace(/\n/g, '\n> ')}` : ''}`);
+    }
+  }
+  if (picked !== OTHER) return file(deps, me, { targetId: picked }, category, text).reply;
+  if (member) {
+    return file(deps, me, {
+      targetDiscord: { discordId: member.id, name: member.name, bot: member.bot, administrator: member.administrator },
+    }, category, text).reply;
+  }
 
   const typed = (i.fields.name ?? '').trim();
   if (!typed) return say('Pick someone from the list or type their name.');
@@ -295,11 +335,11 @@ export async function handleReportModal(
   if (found.length === 0) {
     return say('No player here by that name. They may never have played on these servers.');
   }
-  if (found.length === 1) return file(deps, me.steamid, found[0].steamid, category, text).reply;
+  if (found.length === 1) return file(deps, me, { targetId: found[0].steamid }, category, text).reply;
   if (found.length > MAX_CHOICES) {
     return say('Several players share that name. Type more of it, or pick them from the list if you played together recently.');
   }
-  return hold(deps, me.steamid, typed, category, text, found);
+  return hold(deps, me, typed, category, text, found);
 }
 
 /** The one place a report is actually filed, so every path shares the same
@@ -307,19 +347,29 @@ export async function handleReportModal(
  *  the reply, so a caller that must act differently on success (the pick
  *  branch, deciding whether to delete a draft) branches on that flag rather
  *  than on the reply's user-facing copy, which can be reworded without
- *  warning and must never double as control flow. */
+ *  warning and must never double as control flow.
+ *
+ *  A picked Discord target never travels in the report body: only
+ *  `deps.targetDiscord` carries it, so fileReport is the one place that
+ *  turns Discord facts (bot, administrator) into a filing decision. */
 function file(
-  deps: ReportHandlerDeps, reporter: string, targetId: string, category: string, text: string,
+  deps: ReportHandlerDeps, reporter: Me, target: { targetId: string } | { targetDiscord: PickedTarget },
+  category: string, text: string,
 ): { ok: boolean; reply: InteractionReply } {
   // '/report' gets its match from the same lookup. Without this, every report
   // filed through this button carried no match at all: moderators lost the
   // link on exactly the griefing and AFK reports the button exists to catch,
   // and fileReport's duplicate rule (keyed on the match) collapsed to "one
   // open report about this player, ever", refusing a second night's report
-  // that '/report' would have let through.
-  const matchId = latestSharedMatch(deps.db, reporter, targetId);
-  const r = fileReport(deps.db, reporter, { targetId, category, text, matchId }, {
-    adminSteamIds: deps.adminSteamIds, now: deps.now?.(),
+  // that '/report' would have let through. A match is only ever attached
+  // between two players.
+  const matchId = reporter.kind === 'player' && 'targetId' in target
+    ? latestSharedMatch(deps.db, reporter.steamid, target.targetId) : null;
+  const body = { category, text, matchId, ...('targetId' in target ? { targetId: target.targetId } : {}) };
+  const r = fileReport(deps.db, reporter.kind === 'player' ? reporter.steamid : reporter, body, {
+    adminSteamIds: deps.adminSteamIds,
+    now: deps.now?.(),
+    ...('targetDiscord' in target ? { targetDiscord: target.targetDiscord } : {}),
   });
   if (!r.ok) return { ok: false, reply: say(`Could not file the report: ${r.error}.`) };
   return { ok: true, reply: say('Thanks. The moderators will look at it. The person you reported is never told who filed it.') };
@@ -327,8 +377,10 @@ function file(
 
 /** Keep the words while the reporter says which of these people they meant. */
 function hold(
-  deps: ReportHandlerDeps, reporter: string, typed: string, category: string, text: string, found: Candidate[],
+  deps: ReportHandlerDeps, reporter: Me, typed: string, category: string, text: string, found: Candidate[],
 ): InteractionReply {
+  const reporterId = reporter.kind === 'player' ? reporter.steamid : null;
+  const reporterDiscordId = reporter.kind === 'discord' ? reporter.discordId : null;
   // Only the newest draft is ever useful: opening the form again means the
   // reporter is trying once more, and a stale draft's candidate buttons
   // already answer "expired" once it is gone, so nothing is lost by clearing
@@ -336,10 +388,10 @@ function hold(
   // resource bound, not a policy check: it must stay that, so nobody later
   // "upgrades" it into a banned/good-standing gate. That check belongs to
   // fileReport alone, which this path never reaches.
-  deps.db.prepare('DELETE FROM pending_reports WHERE reporter_id = ?').run(reporter);
+  deps.db.prepare('DELETE FROM pending_reports WHERE reporter_id IS ? AND reporter_discord_id IS ?').run(reporterId, reporterDiscordId);
   const id = Number(deps.db.prepare(
-    'INSERT INTO pending_reports (reporter_id, category, text, typed_name, candidates, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(reporter, category, text, typed, JSON.stringify(found.map((c) => c.steamid)),
+    'INSERT INTO pending_reports (reporter_id, reporter_discord_id, category, text, typed_name, candidates, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(reporterId, reporterDiscordId, category, text, typed, JSON.stringify(found.map((c) => c.steamid)),
     (deps.now?.() ?? new Date()).toISOString()).lastInsertRowid);
   return say(
     `More than one player is called "${typed}". Which one do you mean? Nothing is filed until you choose.`,
