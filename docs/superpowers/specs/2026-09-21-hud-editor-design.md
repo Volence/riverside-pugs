@@ -43,6 +43,9 @@ Verified earlier on the owner's client, recorded in the Modern HUD notes:
   replace a file that ships inside `pak01`.
 - HUD `.res` files and `scripts/` files ship loose. Textures ship in `pak01`.
 - An addon copy of `scripts/hudlayout.res` is honoured (the crosshair addon depends on it).
+  When two addons ship the same file, the one listed higher in addonlist.txt wins; newly
+  added addons are appended at the bottom (observed 2026-09-22 with the HUD losing to two
+  crosshair VPKs).
 - HUD coordinates are proportional units, 480 tall. Width depends on aspect ratio: 640 at
   4:3, 768 at 16:10, 853 at 16:9. `xpos "r160"` is measured from the right edge and
   `xpos "c-13"` from the centre, and the same prefixes work for `ypos`.
@@ -219,7 +222,9 @@ first line of `SearchPaths`), says a game restart is needed, and says Steam's "v
 undoes the edit. Same build as normal mode plus the stock-named textures.
 
 The page states next to both downloads that custom HUDs are allowed on the Riverside
-servers and that a rebuilt HUD needs a game restart to show.
+servers and that a rebuilt HUD needs a game restart to show. It also warns that a crosshair
+addon listed above it in addonlist.txt wins the shared scripts/hudlayout.res, and tells the
+player to move the HUD's line up.
 
 ## Sharing
 
@@ -296,28 +301,24 @@ Tab scoreboard and versus score panel beyond what the preset gives; L4D2.
 
 ## Phase 0 results
 
-As of 2026-09-22, all five questions in "Phase 0: the in-game test" above are UNANSWERED.
-The in-game test has not been run: it requires the project owner's own machine and copy of
-the game, and they were asleep when Task 9 (the generator's style pass, advanced mode and
-packaging) needed to proceed. Nothing below is an observed result; it is not to be read as
-one.
+The owner ran the in-game test on 2026-09-22. These are observed results, not assumptions:
 
-The throwaway addon VPK described in Phase 0 is already built and waiting, untouched, at
+1. Health number moved: YES.
+2. Bundled ttf via clientscheme.res: very likely yes (labels and the number rendered at a
+   different size and weight); owner confirmation pending.
+3. A .res image pointed at a new texture inside the addon: YES, the override was honoured.
+   The throwaway texture itself did not draw because the phase 0 build tool (srctools) wrote
+   VTF 7.5, which L4D1 cannot read; the editor's own encoder writes VTF 7.2 and its textures
+   drew correctly in the sample HUDs.
+4. xHair with no crosshair texture: still unanswered; it is not known whether the crosshair
+   VPKs were removed for the screenshot. No missing-texture square was visible.
+5. scripts/mod_textures.txt from an addon: YES, honoured (the weapon box changed; the texture
+   failed for the same VTF 7.5 reason). Weapon box slots can therefore move to normal mode in
+   a later change.
+
+Also observed: an addon HUD loses scripts/hudlayout.res to a crosshair addon listed above it
+in addonlist.txt; the gameinfo.txt mount used by advanced mode does not have this problem.
+The owner chose a note on the page over a mechanism.
+
+The throwaway addon VPK described in Phase 0 is at
 `/home/volence/l4d/hud/tools/phase0/hudeditor_phase0.vpk`.
-
-Per controller ruling R1, Task 9 proceeded on these assumptions rather than waiting:
-
-- Questions 1 to 3 (panel internals, a bundled font, a restyled teammate panel texture) are
-  treated as not failed. `scalePass`, `fontPass` and `stylePass` (this task) all run in
-  normal mode exactly as the rest of this spec assumes, not gated behind Advanced mode.
-- Question 4 (the `xHair` element with no crosshair addon installed) is treated the same as
-  "drew nothing or only the stock crosshair": `design.xhair` stays `true` and the page shows
-  no "I use a custom crosshair addon" checkbox. Nothing about `xhair` changed for Task 9.
-- Question 5 (`scripts/mod_textures.txt` for the weapon slot boxes) is treated the same as
-  "failed or unanswered": `weaponBoxActive` and `weaponBoxInactive` stay `advancedOnly: true`
-  in `slots.ts`, and no `mod_textures.txt` route was added to `stylePass`. The game's
-  `scripts/mod_textures.txt` was not copied into the repo.
-
-These are assumptions to keep the plan moving, not answers. When the owner runs the Phase 0
-VPK, this section should be replaced with what was actually observed, and any of the three
-assumptions above that turn out wrong should be unwound in the affected pass.

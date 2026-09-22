@@ -109,6 +109,14 @@ describe('Hud page', () => {
     expect(screen.getByText(/Riverside servers/i)).toBeTruthy();
   });
 
+  it('shows the crosshair/addonlist note only in normal mode, since the advanced zip does not have that conflict', () => {
+    render(<Hud />);
+    expect(screen.getByText(/addonlist\.txt/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /advanced mode/i }));
+    expect(screen.queryByText(/addonlist\.txt/i)).toBeNull();
+  });
+
   it('names the font file in the status line when the font fetch fails, rather than shipping a corrupt file silently', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 404 } as Response);
     render(<Hud />);

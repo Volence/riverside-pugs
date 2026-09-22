@@ -850,6 +850,13 @@ export default function Hud() {
             ? 'Unzip it and follow README.txt. It works alongside a crosshair addon. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
             : <>Put the file in <code>left4dead/addons/</code> and restart the game. It works alongside a crosshair from the Crosshair page. Custom HUDs are allowed on the Riverside servers.</>}
         </p>
+        {!design.advanced && (
+          <p class="muted hud__note">
+            Also using a crosshair addon? The game keeps only one layout file, and it is usually the
+            crosshair's, so this HUD's positions would not show. Open <code>left4dead/addonlist.txt</code> and
+            move this HUD's line above the crosshair's. Your crosshair keeps working.
+          </p>
+        )}
 
         <div class="hud__sharebar">
           <button type="button" class="btn btn--ghost btn--sm" onClick={() => { void copyShareLink(); }}>Copy share link</button>
