@@ -7,6 +7,7 @@ import {
   validateBio, validateCountry, validateHandle, validatePronouns,
 } from './profileFields.js';
 import { publishTicketSignal } from './tickets/signals.js';
+import { adoptDiscordPerson } from './tickets/adopt.js';
 
 export interface PlayerRow {
   steamid: string;
@@ -121,7 +122,7 @@ export type LinkResult =
  *  Every link is written to discord_link_history, in the same transaction. */
 export function linkDiscord(
   db: DB, steamid: string, discordId: string, discordName: string,
-  opts: { by?: string; now?: Date } = {},
+  opts: { by?: string; now?: Date; adminSteamIds?: string[] } = {},
 ): LinkResult {
   const now = opts.now ?? new Date();
   const owner = playerByDiscordId(db, discordId);
@@ -148,6 +149,8 @@ export function linkDiscord(
         'INSERT INTO discord_link_history (steamid, discord_id, discord_name, linked_at, linked_by) VALUES (?, ?, ?, ?, ?)',
       ).run(steamid, discordId, discordName, now.toISOString(), opts.by ?? steamid);
     }
+    // Reports about or by this Discord account from before they linked.
+    adoptDiscordPerson(db, discordId, steamid, opts.adminSteamIds ?? [], now);
   })();
 
   // Forum access and private thread membership are keyed on the Discord id.
