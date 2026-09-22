@@ -64,7 +64,7 @@ export async function handleTicketButton(
   if (m[2] === 'close') {
     if (ticket.status !== 'open') return say('This ticket is already closed.');
     // The payload is what is said if the modal cannot be shown.
-    return { ...say(`Close it on the site: ${deps.publicUrl}/admin?ticket=${id}`), modal: closeModal(id) };
+    return { ...say(`Close it on the site: ${deps.publicUrl}/admin/people/tickets/${id}`), modal: closeModal(id) };
   }
 
   // As the site's button does: an unclaimed ticket is claimed, a claimed one

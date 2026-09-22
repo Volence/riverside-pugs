@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { getSetting } from './settings.js';
+import { settingNumber } from './settings.js';
 import type { ServerReleaser } from './serverRelease.js';
 import { recordPenalty } from './penalties.js';
 import { publishAdminEvent } from './adminFeed.js';
@@ -21,21 +21,6 @@ export function recordPlayerConnect(db: DB, token: string, steamid: string): voi
 }
 
 /**
- * A numeric setting, or the fallback when the row is missing or blank.
- *
- * The emptiness check is not belt and braces. These rows are meant to be
- * hand-edited in sqlite, and Number('') is 0, not NaN, so a blank value used
- * to sail past the isFinite guard: noshow_minutes = 0 makes `age_min >= 0`
- * true for every live match, and the next 60 second tick aborted all of them.
- */
-function num(db: DB, key: string, fallback: number): number {
-  const value = getSetting(db, key);
-  if (value === undefined || value.trim() === '') return fallback;
-  const raw = Number(value);
-  return Number.isFinite(raw) ? raw : fallback;
-}
-
-/**
  * Abort live matches that never actually got going, and free their box.
  *
  * The orphan reaper cannot see these. Timer_Heartbeat fires whenever the
@@ -51,9 +36,11 @@ function num(db: DB, key: string, fallback: number): number {
  *      and then nobody readied.
  */
 export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
-  const noShowMin = num(db, 'noshow_minutes', 10);
-  const minConnected = num(db, 'noshow_min_connected', 6);
-  const noRoundMin = num(db, 'no_round_minutes', 30);
+  // settingNumber, not Number(): a blank row here once aborted every live
+  // match, and that is the incident the helper's comment records.
+  const noShowMin = settingNumber(db, 'noshow_minutes', 10);
+  const minConnected = settingNumber(db, 'noshow_min_connected', 6);
+  const noRoundMin = settingNumber(db, 'no_round_minutes', 30);
 
   const rows = db
     .prepare(

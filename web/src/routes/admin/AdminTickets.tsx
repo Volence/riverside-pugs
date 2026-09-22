@@ -2,7 +2,6 @@ import { useState } from 'preact/hooks';
 import { modApi, type TicketSummary } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel, Tabs } from '../../components/bits';
-import { AdminTicket } from './AdminTicket';
 import { fmtTime } from './useAction';
 
 const FILTERS: { key: 'open' | 'mine' | 'closed'; label: string }[] = [
@@ -14,25 +13,11 @@ const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
 export const reportLine = (t: TicketSummary) =>
   t.reports === 0 ? 'Opened by staff, no reports' : `${t.reports} report${t.reports === 1 ? '' : 's'} from ${people(t.reporters)}`;
 
-/** The ticket id in /admin?ticket=12, which is what the Discord feed links to. */
-export const ticketFromUrl = (): number | null => {
-  const raw = new URLSearchParams(location.search).get('ticket');
-  const id = raw === null ? NaN : Number(raw);
-  return Number.isInteger(id) && id > 0 ? id : null;
-};
-
-export function AdminTickets() {
+/** The list, and nothing else: which ticket is open is a URL the shell
+ *  reads, so opening one is the caller's business. */
+export function AdminTickets({ onOpen }: { onOpen: (id: number) => void }) {
   const [filter, setFilter] = useState<'open' | 'mine' | 'closed'>('open');
-  const [selected, setSelected] = useState<number | null>(ticketFromUrl);
-  const { data, reload } = useFetch((s) => modApi.tickets(filter, s), [filter]);
-
-  const select = (id: number | null) => {
-    setSelected(id);
-    history.replaceState(null, '', id === null ? '/admin' : `/admin?ticket=${id}`);
-    if (id === null) reload();
-  };
-
-  if (selected !== null) return <AdminTicket id={selected} onBack={() => select(null)} onOpen={select} />;
+  const { data } = useFetch((s) => modApi.tickets(filter, s), [filter]);
 
   return (
     <Panel>
@@ -42,7 +27,7 @@ export function AdminTickets() {
       <ul class="tickets">
         {data?.tickets.map((t) => (
           <li key={t.id}>
-            <button type="button" class="ticket-row" onClick={() => select(t.id)}>
+            <button type="button" class="ticket-row" onClick={() => onOpen(t.id)}>
               <span class="ticket-row__id">#{t.id}</span>
               <strong>{t.targetName ?? t.targetId}</strong>
               {t.restricted && <span class="admin-tag">restricted</span>}

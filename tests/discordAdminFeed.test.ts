@@ -49,7 +49,7 @@ describe('admin feed', () => {
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });
     await settled();
     expect(inFeed()).toHaveLength(2);
-    expect(text(0)).toContain(`https://pug.test/admin?ticket=${a.ticketId}`);
+    expect(text(0)).toContain(`https://pug.test/admin/people/tickets/${a.ticketId}`);
     expect(text(0)).toContain('player5');
     expect(text(0)).toContain('griefing');
     expect(text(0)).toMatch(/new ticket/i);
@@ -107,6 +107,17 @@ describe('admin feed', () => {
     expect(inFeed()).toEqual([]);
   });
 
+  it('a clock action names the player, the match and what was done', async () => {
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'hold', ok: true, remaining: 200, held: true });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'add', seconds: 300, ok: true, remaining: 500, held: false });
+    logAdmin(db, ADMIN, 'leave_clock', IDS[2], { matchId, action: 'end', ok: false, error: 'not dropped' });
+    await feed.idle();
+    expect(text(0)).toMatch(/player7.*put .*player2.*reconnect clock on hold/);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/gave .*player2.* 300 more seconds/);
+    expect(text(2)).toMatch(/failed: not dropped/);
+  });
+
   it('a button on an old report card answers instead of failing', async () => {
     const r = await feed.handleButton({ kind: 'button', customId: 'r:12:resolve', userId: '907', userName: 'd7' });
     expect(r.ephemeral).toBe(true);
@@ -117,7 +128,7 @@ describe('admin feed', () => {
     logAdmin(db, ADMIN, 'ticket_close', 12, { outcome: 'warned' });
     logAdmin(db, ADMIN, 'ticket_ban', 12, { reason: 'walls', minutes: 1440 });
     await feed.idle();
-    expect(text(0)).toContain('closed ticket [#12](https://pug.test/admin?ticket=12)');
+    expect(text(0)).toContain('closed ticket [#12](https://pug.test/admin/people/tickets/12)');
     expect(text(0)).toContain('warned');
     expect(text(1)).toContain('banned from ticket [#12]');
     expect(text(1)).toContain('1 day');
@@ -135,6 +146,23 @@ describe('admin feed', () => {
     expect(text(1)).toMatch(/5 min/);
     expect(text(2)).toMatch(/player1.*linked Discord/);
     expect(text(3)).toContain('Match #9 aborted for no-shows.');
+  });
+
+  it('names both the steam identity and the linked discord account, and never pings', async () => {
+    logAdmin(db, ADMIN, 'ban', IDS[3], { reason: 'throwing', minutes: 1440 });
+    await feed.idle();
+    // Every player linked in beforeEach: steam name plus a discord mention.
+    expect(text(0)).toContain('**player7** (<@907>)');
+    expect(text(0)).toContain('**player3** (<@903>)');
+    // The bot's transport pings only ids listed in mentionUserIds; the admin
+    // feed lists none, so the mention above renders but never notifies.
+    expect(t.live()[0].payload.mentionUserIds).toEqual([]);
+  });
+
+  it('a steamid with no player row shows no Discord linked', async () => {
+    publishAdminEvent({ kind: 'penalty', steamid: '76561198009999999', penalty: 'ready_fail', matchId: null });
+    await feed.idle();
+    expect(text(0)).toContain('(no Discord linked)');
   });
 
   it('each kind can be switched off, and no channel means no feed', async () => {
@@ -162,13 +190,13 @@ describe('admin feed', () => {
     expect(line).toContain('2 times in ten minutes');
     expect(line).toContain('5 on record');
     expect(line).toContain('likely rejected for a modified game file; the file name was shown on their screen');
-    expect(line).not.toContain('/player/');
+    expect(line).not.toContain('/admin/people/');
   });
 
   it('a connect drop by a known player links the steamid to their profile', async () => {
     publishAdminEvent({ kind: 'signon_drop', steamid: IDS[4], name: 'in game name', count: 2, total: 2 });
     await feed.idle();
-    expect(t.live()[0].payload.embeds[0].description).toContain(`[${IDS[4]}](https://pug.test/player/${IDS[4]})`);
+    expect(t.live()[0].payload.embeds[0].description).toContain(`[${IDS[4]}](https://pug.test/admin/people/${IDS[4]})`);
   });
 
   it('connect drops ride the problems toggle', async () => {
@@ -182,5 +210,52 @@ describe('admin feed', () => {
     logAdmin(db, ADMIN, 'setting', 'invite_code', { changed: true });
     await feed.idle();
     expect(text(0)).toMatch(/changed the invite_code setting/i);
+  });
+
+  it('a recent ban elsewhere is worded as context and links the match', async () => {
+    publishAdminEvent({
+      kind: 'steam_signal', steamid: IDS[2], matchId,
+      signal: { what: 'recent_ban', vacBans: 1, gameBans: 2, daysSinceLastBan: 40 },
+    });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**player2**');
+    expect(line).toContain('1 VAC ban and 2 game bans');
+    expect(line).toContain('40 days ago');
+    expect(line).toContain(`[#${matchId}](https://pug.test/match/${matchId})`);
+    expect(line).toContain('Steam does not say which game');
+  });
+
+  it('a game borrowed from a banned account names the lender', async () => {
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(IDS[6]);
+    publishAdminEvent({ kind: 'steam_signal', steamid: IDS[2], matchId, signal: { what: 'banned_lender', lenderId: IDS[6] } });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**player2**');
+    expect(line).toContain('**player6**');
+    expect(line).toContain('Family Sharing');
+    expect(line).toContain('banned here');
+  });
+
+  it('steam signals ride the problems toggle', async () => {
+    setSetting(db, 'admin_feed_problems', '0');
+    publishAdminEvent({ kind: 'steam_signal', steamid: IDS[2], matchId, signal: { what: 'banned_lender', lenderId: IDS[6] } });
+    await feed.idle();
+    expect(t.live()).toHaveLength(0);
+  });
+
+  it('warns once that a dropped player is nearly out of time, with a link to the board', async () => {
+    publishAdminEvent({ kind: 'clock', what: 'low_allowance', steamid: IDS[2], matchId, remainingS: 85 });
+    publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: IDS[2], matchId, remainingS: 197 });
+    await feed.idle();
+    expect(text(0)).toMatch(/player2.* has 85 s left/);
+    expect(text(0)).toContain(`https://pug.test/admin/live?live=${matchId}`);
+    expect(text(0)).toContain(`https://pug.test/match/${matchId}`);
+    expect(text(1)).toMatch(/hold on .*player2.* released itself/);
+    expect(text(1)).toContain('197 s');
+    // name() bolds the player itself, so a line that wraps it in its own
+    // asterisks renders four of them and no bold at all.
+    expect(text(0)).not.toContain('****');
+    expect(text(1)).not.toContain('****');
   });
 });

@@ -8,6 +8,8 @@ import { fileReport, myReports, openStaffTicket } from '../tickets/filing.js';
 import { addAccess, banFromTicket, claimTicket, closeTicket, reopenTicket, setRestricted, type ActionResult } from '../tickets/actions.js';
 import { listTickets, ticketCounts, ticketDetail, type TicketFilter } from '../tickets/views.js';
 import { caseFile } from '../tickets/caseFile.js';
+import { fileViewer } from '../admin/fileAccess.js';
+import { playerFileSummary } from '../admin/playerFileSummary.js';
 
 export interface TicketRouteOpts {
   db: DB;
@@ -70,7 +72,16 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
     if (!me) return reply;
     const d = ticketDetail(db, Number((req.params as { id: string }).id), me, { guildId });
     if (!d) return reply.code(404).send({ error: 'no such ticket' });
-    return { ...d, caseFile: caseFile(db, d.ticket.targetId, me) };
+    // One builder for the accused's record, shared with the Player File, so
+    // a new evidence source appears in both places the day it lands.
+    // caseFile stays alongside for good: a moderator added to a restricted
+    // ticket about a colleague gets summary.fileUrl null, so caseFile is the
+    // only detailed record that viewer can see at all.
+    return {
+      ...d,
+      caseFile: caseFile(db, d.ticket.targetId, me),
+      summary: playerFileSummary(db, d.ticket.targetId, fileViewer(db, me)),
+    };
   });
 
   /** Shared tail of every mutation: run it, answer, audit, nudge open pages. */
@@ -97,8 +108,9 @@ export async function ticketRoutes(app: FastifyInstance, opts: TicketRouteOpts):
   app.post('/api/mod/tickets/:id/reopen', act('ticket_reopen', (id, me) => reopenTicket(db, id, me)));
   app.post('/api/mod/tickets/:id/ban', act('ticket_ban', (id, me, b) => {
     const r = banFromTicket(db, id, me, b.reason, b.minutes);
-    // Out of the queue at once, as the Players tab ban does.
-    if (r.ok) matchmaker.leave(getTicketRow(db, id)!.target_id);
+    // Out of the queue AND out of any ready check or vote in progress, as the
+    // Players tab ban does. leave() only knows about the queue.
+    if (r.ok) matchmaker.remove(getTicketRow(db, id)!.target_id);
     return r;
   }, (b) => ({ reason: b.reason, minutes: b.minutes ?? null })));
 }

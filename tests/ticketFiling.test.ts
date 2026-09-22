@@ -72,6 +72,31 @@ describe('fileReport', () => {
     expect(bad({ targetId: ACCUSED, category: 'afk' }, R3)).toMatchObject({ ok: false, status: 403 });
   });
 
+  // Carried over from the reports this replaced: the rule lives in fileReport
+  // itself and is the predicate every surface shares (src/standing.ts), so
+  // the bans table and the alias table count, not only players.status.
+  it('the rule lives in fileReport itself, so no surface can file for a banned, inactive or merged reporter', async () => {
+    const { banPlayer } = await import('../src/admin/players.js');
+    const { addAlias } = await import('../src/aliases.js');
+    const body = { targetId: ACCUSED, category: 'afk', text: '' };
+    const filed = () => (db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get() as { n: number }).n;
+
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(R1);
+    expect(fileReport(db, R1, body, deps)).toMatchObject({ ok: false, status: 403 });
+
+    // A ban in force counts even where status has not caught up with it.
+    banPlayer(db, R2, ADMIN, 'toxic', 60);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(R2);
+    expect(fileReport(db, R2, body, deps)).toMatchObject({ ok: false, status: 403 });
+
+    // A SteamID merged into another account, whose leftover row still says active.
+    addAlias(db, { steamid: R3, canonical: MOD, by: 'test' });
+    expect(fileReport(db, R3, body, deps)).toMatchObject({ ok: false, status: 403 });
+
+    expect(filed()).toBe(0);
+    expect(fileReport(db, MOD, body, deps)).toMatchObject({ ok: true });
+  });
+
   it('checks the match and the moment', () => {
     expect(fileReport(db, R1, { targetId: ACCUSED, category: 'afk', matchId: 999 }, deps)).toMatchObject({ ok: false, status: 404 });
     expect(fileReport(db, R1, { targetId: R3, category: 'afk', matchId }, deps)).toMatchObject({ ok: false, status: 400 });

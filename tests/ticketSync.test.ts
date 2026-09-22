@@ -58,12 +58,12 @@ describe('the staff forum post', () => {
     const row = staffThread(db, id)!;
     expect(row).toMatchObject({ thread_id: posts[0].id, surface: 'forum', channel_id: 'forum1', card_message_id: posts[0].id, locked: 0 });
     const text = JSON.stringify(cardOf(row.thread_id));
-    expect(text).toContain(`https://pug.test/admin?ticket=${id}`);
+    expect(text).toContain(`https://pug.test/admin/people/tickets/${id}`);
     expect(text).toContain('player5');
     expect(text).toContain(`https://pug.test/match/${matchId}?ordinal=2&half=1&t=61500`);
     expect(text).not.toContain('player0');
     expect(text).not.toContain('kept killing us');
-    expect(buttons(row.thread_id)).toEqual([`t:${id}:claim=Claim`, `t:${id}:close=Close`, `link=https://pug.test/admin?ticket=${id}`]);
+    expect(buttons(row.thread_id)).toEqual([`t:${id}:claim=Claim`, `t:${id}:close=Close`, `link=https://pug.test/admin/people/tickets/${id}`]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE announced_at IS NULL').get()).toEqual({ n: 0 });
   });
 
@@ -152,7 +152,7 @@ describe('the staff forum post', () => {
     expect(t.threadsById.get(threadId)).toMatchObject({ locked: true, archived: true, tags: ['closed', 'afk'] });
     expect(JSON.stringify(cardOf(threadId))).toContain('closed: warned');
     expect(JSON.stringify(cardOf(threadId))).not.toContain('first time');
-    expect(buttons(threadId)).toEqual([`link=https://pug.test/admin?ticket=${id}`]);
+    expect(buttons(threadId)).toEqual([`link=https://pug.test/admin/people/tickets/${id}`]);
     expect(staffThread(db, id)!.locked).toBe(1);
     // A closed and locked ticket costs nothing on later passes.
     const edits = t.edits;
@@ -202,10 +202,10 @@ describe('the staff forum post', () => {
     const links = [...accused.matchAll(/\[([^[\]]*)\]\(([^()]*)\)/g)];
     expect(links).toHaveLength(1);
     expect(links[0][0]).toBe(`[profile](https://pug.test/player/${IDS[5]})`);
-    // The hostile name is still shown verbatim, as inert plain text: nothing
-    // strips it, but with no unescaped "[" in front of it, it never becomes
-    // a second, attacker-controlled link.
-    expect(accused).toContain('](http://evil.example)');
+    // The hostile name is still shown, as inert escaped text: nothing strips
+    // it, and once the escapes are rendered away it reads as typed. With no
+    // unescaped "[" or "(" left in it, it never becomes a second link.
+    expect(accused.replace(/\\(.)/g, '$1')).toContain('x](http://evil.example)[y');
   });
 
   it('a name that is itself a whole markdown link renders as inert text, not a link', async () => {

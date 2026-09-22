@@ -6,14 +6,17 @@ import { playerByDiscordId } from '../players.js';
 import { statDef } from '../statKeys.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
 import { fileReport, REPORT_CATEGORIES, type ReportCategory } from '../tickets/filing.js';
-import { linkPrompt } from './controller.js';
+import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
+import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
 export interface CommandDeps {
   db: DB;
   matchmaker: Matchmaker;
   publicUrl: string;
+  /** The ban explanation (reason, expiry), as the button controller has it. */
+  banMessage?: (steamid: string) => string;
   adminSteamIds?: string[];
 }
 
@@ -74,6 +77,11 @@ const standingLabel = (key: string) => FIXED_LABELS[key] ?? `${statDef(key)?.lab
 
 // Module scope, so it takes the db explicitly rather than closing over one.
 const campaign = (db: DB, slug: string) => campaignDisplayName(db, slug);
+
+/** A player row this module already has, as an Identity: avoids a second
+ *  lookup for a steamid we just fetched. */
+const idOf = (p: { steamid: string; name: string; discord_id: string | null; discord_name: string | null }): Identity =>
+  ({ steamid: p.steamid, steamName: p.name, discordId: p.discord_id, discordName: p.discord_name });
 
 type Cmd = Extract<BotInteraction, { kind: 'command' }>;
 
@@ -139,7 +147,7 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   if (recentLines.length) fields.push({ name: 'Recent matches', value: recentLines.join('\n') });
 
   return pub({
-    embeds: [{ title: player.name, url, color: COLOR, description: lines.join('\n'), fields }],
+    embeds: [{ title: plainLabelEscaped(identityOf(deps.db, player.steamid)), url, color: COLOR, description: lines.join('\n'), fields }],
     components: [[{ kind: 'link', url, label: 'Full profile' }]],
   });
 }
@@ -149,7 +157,10 @@ function leaderboard(deps: CommandDeps): InteractionReply {
   const ranked = data.rows.filter((r) => r.ranked).slice(0, 10);
   const url = `${deps.publicUrl}/leaderboard`;
   const body = ranked.length
-    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${escapeName(r.name)} · ${r.wins}W ${r.losses}L`).join('\n')
+    // Escaped plain form, not a mention: a row of up to ten of these next to
+    // each other is noisy as mentions, and this is an embed description,
+    // which still renders markdown, so the name still needs escaping.
+    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${plainLabelEscaped(identityOf(deps.db, r.steamid))} · ${r.wins}W ${r.losses}L`).join('\n')
     : 'Nobody is ranked yet. It takes 3 matches.';
   return pub({
     embeds: [{ title: `Leaderboard · ${data.season.name}`, url, color: COLOR, description: body }],
@@ -164,7 +175,7 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
     const who = target(deps, i);
     if ('reply' in who) return who.reply;
     const data = profileData(deps.db, who.steamid, null)!;
-    title = `Recent matches · ${data.player.name}`;
+    title = `Recent matches · ${plainLabelEscaped(identityOf(deps.db, data.player.steamid))}`;
     rows = data.matches.slice(0, 5).map((m) => ({
       id: m.id, campaign: m.campaign, teamAScore: m.teamAScore, teamBScore: m.teamBScore,
       extra: m.result === 'win' ? ' · won' : m.result === 'loss' ? ' · lost' : ' · draw',
@@ -184,7 +195,9 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
 
 function queue(deps: CommandDeps): InteractionReply {
   const q = deps.matchmaker.publicQueue();
-  const names = q.players.map((p, n) => `\`${n + 1}\` ${escapeName(p.name)}`).join('\n') || '_empty_';
+  // Escaped plain form, same reasoning as /leaderboard: an embed description
+  // still renders markdown, and a queue of eight mentions is noisy.
+  const names = q.players.map((p, n) => `\`${n + 1}\` ${plainLabelEscaped(identityOf(deps.db, p.steamid))}`).join('\n') || '_empty_';
   return priv({
     embeds: [{ title: `Queue ${q.count}/${QUEUE_SIZE}`, color: COLOR, description: names }],
   });
@@ -200,8 +213,12 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
 
 /** Always private: nobody else in the channel learns who reported whom. */
 function report(deps: CommandDeps, i: Cmd): InteractionReply {
-  const reporter = playerByDiscordId(deps.db, i.userId);
-  if (!reporter) return linkPrompt({ ...deps }, i.userId, i.userName);
+  // The same door the buttons use: linked, active, not banned, not merged
+  // away. The web route has always required an active player; this checked
+  // only that the Discord account was linked to somebody.
+  const who = resolve(deps, i);
+  if ('reply' in who) return who.reply;
+  const reporter = who.player;
   const target = playerByDiscordId(deps.db, i.options.player ?? '');
   if (!target) {
     return priv({ content: 'That player has not linked Discord, so the bot cannot tell who they are. Use Report on their profile on the website instead.' });
@@ -228,5 +245,5 @@ function report(deps: CommandDeps, i: Cmd): InteractionReply {
   }, { adminSteamIds: deps.adminSteamIds ?? [] });
   if (!r.ok) return priv({ content: `Could not file the report: ${r.error}.` });
   const about = matchId === null ? '' : ` for match #${matchId}`;
-  return priv({ content: `Reported ${escapeName(target.name)}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
+  return priv({ content: `Reported ${plainLabelEscaped(idOf(target))}${about}. Thanks, the moderators will look at it. They will not be told who reported them.` });
 }

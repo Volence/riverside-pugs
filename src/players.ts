@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { rating } from 'openskill';
 import type { DB } from './db.js';
+import { hasActiveBan } from './banState.js';
 import {
   LINK_PLATFORMS, isPlatform, linkUrl,
   validateBio, validateCountry, validateHandle, validatePronouns,
@@ -91,24 +92,133 @@ export function getRatings(db: DB, steamids: string[]): Map<string, RatingRow> {
   return out;
 }
 
-export type LinkResult = { ok: true } | { ok: false; error: 'discord_taken' };
+/** How recently a Discord account must have left another Steam account for
+ *  its arrival on this one to be worth telling the admins about. */
+export const DISCORD_MOVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type LinkResult =
+  | {
+    ok: true;
+    /** The different Steam account this Discord was on inside the window. */
+    movedFrom?: { steamid: string; unlinkedAt: string };
+  }
+  | { ok: false; error: 'discord_taken' | 'already_linked' | 'discord_banned' };
 
 /** Attach a Discord account to a player. Refuses an account already linked to
  *  someone else rather than moving it: that case is a second Steam account,
- *  and silently moving the link would orphan the first one's identity. */
-export function linkDiscord(db: DB, steamid: string, discordId: string, discordName: string): LinkResult {
+ *  and silently moving the link would orphan the first one's identity.
+ *
+ *  Refuses to REPLACE a link as well. A link is what lets somebody queue,
+ *  ready up and be sent the match password from Discord as this player, so a
+ *  new one landing on top of the old must be a decision (unlink, then link)
+ *  and never the side effect of following a URL somebody else sent.
+ *
+ *  And refuses a Discord account whose most recent other Steam account is
+ *  banned. The Discord account is the anchor that makes "everyone on their
+ *  main" enforceable, so a ban has to follow it: otherwise the banned player
+ *  unlinks, signs in on a second Steam account and links the same Discord.
+ *
+ *  Every link is written to discord_link_history, in the same transaction. */
+export function linkDiscord(
+  db: DB, steamid: string, discordId: string, discordName: string,
+  opts: { by?: string; now?: Date } = {},
+): LinkResult {
+  const now = opts.now ?? new Date();
   const owner = playerByDiscordId(db, discordId);
   if (owner && owner.steamid !== steamid) return { ok: false, error: 'discord_taken' };
-  db.prepare('UPDATE players SET discord_id = ?, discord_name = ? WHERE steamid = ?')
-    .run(discordId, discordName, steamid);
+  const current = getPlayer(db, steamid)?.discord_id ?? null;
+  if (current && current !== discordId) return { ok: false, error: 'already_linked' };
+
+  const last = db.prepare(
+    `SELECT steamid, unlinked_at FROM discord_link_history
+     WHERE discord_id = ? AND steamid != ? ORDER BY id DESC LIMIT 1`,
+  ).get(discordId, steamid) as { steamid: string; unlinked_at: string | null } | undefined;
+  if (last && hasActiveBan(db, last.steamid, now)) return { ok: false, error: 'discord_banned' };
+
+  db.transaction(() => {
+    db.prepare('UPDATE players SET discord_id = ?, discord_name = ? WHERE steamid = ?')
+      .run(discordId, discordName, steamid);
+    const open = db.prepare(
+      'SELECT id FROM discord_link_history WHERE steamid = ? AND discord_id = ? AND unlinked_at IS NULL',
+    ).get(steamid, discordId) as { id: number } | undefined;
+    if (open) {
+      db.prepare('UPDATE discord_link_history SET discord_name = ? WHERE id = ?').run(discordName, open.id);
+    } else {
+      db.prepare(
+        'INSERT INTO discord_link_history (steamid, discord_id, discord_name, linked_at, linked_by) VALUES (?, ?, ?, ?, ?)',
+      ).run(steamid, discordId, discordName, now.toISOString(), opts.by ?? steamid);
+    }
+  })();
+
   // Forum access and private thread membership are keyed on the Discord id.
+  // After the commit: a subscriber dials Discord.
   publishTicketSignal({ kind: 'staff' });
-  return { ok: true };
+  const recent = last?.unlinked_at && now.getTime() - Date.parse(last.unlinked_at) <= DISCORD_MOVE_WINDOW_MS;
+  // Only when it actually moved: a relink of the link already held is not news.
+  return recent && current !== discordId
+    ? { ok: true, movedFrom: { steamid: last.steamid, unlinkedAt: last.unlinked_at! } }
+    : { ok: true };
 }
 
-export function unlinkDiscord(db: DB, steamid: string): void {
-  db.prepare('UPDATE players SET discord_id = NULL, discord_name = NULL WHERE steamid = ?').run(steamid);
+/** Detach a player's Discord, and close its history row. `by` is who did it:
+ *  the player themselves, or the admin whose panel it came from. */
+export function unlinkDiscord(db: DB, steamid: string, by: string = steamid, now: Date = new Date()): void {
+  const current = getPlayer(db, steamid);
+  if (!current?.discord_id) return;
+  const iso = now.toISOString();
+  db.transaction(() => {
+    const closed = db.prepare(
+      'UPDATE discord_link_history SET unlinked_at = ?, unlinked_by = ? WHERE steamid = ? AND discord_id = ? AND unlinked_at IS NULL',
+    ).run(iso, by, steamid, current.discord_id).changes;
+    // A link with no open row was made before the table existed and missed
+    // the backfill. The unlink is the half that matters, so it is recorded
+    // anyway rather than lost.
+    if (closed === 0) {
+      db.prepare(
+        `INSERT INTO discord_link_history (steamid, discord_id, discord_name, linked_at, linked_by, unlinked_at, unlinked_by)
+         VALUES (?, ?, ?, ?, 'backfill', ?, ?)`,
+      ).run(steamid, current.discord_id, current.discord_name ?? '', iso, iso, by);
+    }
+    db.prepare('UPDATE players SET discord_id = NULL, discord_name = NULL WHERE steamid = ?').run(steamid);
+  })();
   publishTicketSignal({ kind: 'staff' });
+}
+
+export interface DiscordHistoryRow {
+  discordId: string;
+  discordName: string;
+  linkedAt: string;
+  linkedBy: string;
+  unlinkedAt: string | null;
+  unlinkedBy: string | null;
+  /** Every OTHER Steam account that has held this Discord account. */
+  others: { steamid: string; name: string | null; linkedAt: string; unlinkedAt: string | null }[];
+}
+
+/** One account's Discord links, newest first, each with who else has held
+ *  that Discord account. For the admin player page: "this Discord was
+ *  previously linked to X" is the sentence this exists to make possible. */
+export function discordHistoryOf(db: DB, steamid: string): DiscordHistoryRow[] {
+  const mine = db.prepare(
+    'SELECT * FROM discord_link_history WHERE steamid = ? ORDER BY id DESC',
+  ).all(steamid) as {
+    discord_id: string; discord_name: string; linked_at: string; linked_by: string;
+    unlinked_at: string | null; unlinked_by: string | null;
+  }[];
+  const others = db.prepare(
+    `SELECT h.steamid, p.name, h.linked_at AS linkedAt, h.unlinked_at AS unlinkedAt
+     FROM discord_link_history h LEFT JOIN players p ON p.steamid = h.steamid
+     WHERE h.discord_id = ? AND h.steamid != ? ORDER BY h.id DESC`,
+  );
+  return mine.map((r) => ({
+    discordId: r.discord_id,
+    discordName: r.discord_name,
+    linkedAt: r.linked_at,
+    linkedBy: r.linked_by,
+    unlinkedAt: r.unlinked_at,
+    unlinkedBy: r.unlinked_by,
+    others: others.all(r.discord_id, steamid) as DiscordHistoryRow['others'],
+  }));
 }
 
 export function playerByDiscordId(db: DB, discordId: string): PlayerRow | undefined {
@@ -254,15 +364,31 @@ export function createLinkCode(db: DB, discordId: string, discordName: string, n
   return code;
 }
 
+type LinkCodeRow = { discord_id: string; discord_name: string; created_at: string; used_at: string | null };
+
+/** A link code that could still be spent right now, or undefined. */
+function pendingLinkCode(db: DB, code: string, now: Date): LinkCodeRow | undefined {
+  const row = db.prepare('SELECT * FROM discord_link_codes WHERE code = ?').get(code) as LinkCodeRow | undefined;
+  if (!row || row.used_at) return undefined;
+  if (now.getTime() - Date.parse(row.created_at) > LINK_CODE_TTL_MS) return undefined;
+  return row;
+}
+
+/** Whose Discord a link code is for, WITHOUT spending it. The link page shows
+ *  this and asks before anything is attached to anyone. */
+export function peekLinkCode(
+  db: DB, code: string, now: Date = new Date(),
+): { discordId: string; discordName: string } | null {
+  const row = pendingLinkCode(db, code, now);
+  return row ? { discordId: row.discord_id, discordName: row.discord_name } : null;
+}
+
 /** Spend a link code. Null when unknown, already used, or expired. */
 export function consumeLinkCode(
   db: DB, code: string, now: Date = new Date(),
 ): { discordId: string; discordName: string } | null {
-  const row = db.prepare('SELECT * FROM discord_link_codes WHERE code = ?').get(code) as
-    | { discord_id: string; discord_name: string; created_at: string; used_at: string | null }
-    | undefined;
-  if (!row || row.used_at) return null;
-  if (now.getTime() - Date.parse(row.created_at) > LINK_CODE_TTL_MS) return null;
+  const row = pendingLinkCode(db, code, now);
+  if (!row) return null;
   db.prepare('UPDATE discord_link_codes SET used_at = ? WHERE code = ?').run(now.toISOString(), code);
   return { discordId: row.discord_id, discordName: row.discord_name };
 }

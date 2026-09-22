@@ -84,4 +84,63 @@ describe('RconClient', () => {
     await expect(client.connect()).rejects.toThrow(/auth/i);
     client.close();
   });
+
+  // srcds drops every other rcon connection the moment one of them closes
+  // (reproduced ten times out of ten on a real server, 2026-09-21), so two
+  // batches to one box must never overlap.
+  it('never holds two connections to one server at once', async () => {
+    const srv = await fakeServer();
+    stop = srv.close;
+    const mk = () => new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret' });
+    const order: string[] = [];
+    const run = async (tag: string) => {
+      const c = mk();
+      await c.connect();
+      order.push(`${tag}:open`);
+      await c.exec('status');
+      await new Promise((r) => setTimeout(r, 20));
+      order.push(`${tag}:close`);
+      c.close();
+    };
+    await Promise.all([run('a'), run('b'), run('c')]);
+    expect(order).toEqual(['a:open', 'a:close', 'b:open', 'b:close', 'c:open', 'c:close']);
+  });
+
+  it('a failed connect gives the turn to the next caller', async () => {
+    const srv = await fakeServer();
+    stop = srv.close;
+    const bad = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'wrong' });
+    const good = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret' });
+    const first = bad.connect();
+    const second = good.connect();
+    await expect(first).rejects.toThrow('rcon auth failed');
+    await second;
+    expect(await good.exec('status')).toBe('ran:status');
+    good.close();
+  });
+
+  it('a holder that never closes loses its turn after the hold limit', async () => {
+    const srv = await fakeServer();
+    stop = srv.close;
+    const hog = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret', holdMaxMs: 50 });
+    const next = new RconClient({ host: '127.0.0.1', port: srv.port, password: 'secret' });
+    await hog.connect();
+    await next.connect();
+    // The hog's socket was destroyed before the next one opened.
+    await expect(hog.exec('status')).rejects.toThrow('rcon not connected');
+    next.close();
+  });
+
+  it('different servers do not wait for each other', async () => {
+    const s1 = await fakeServer();
+    const s2 = await fakeServer();
+    stop = async () => { await s1.close(); await s2.close(); };
+    const a = new RconClient({ host: '127.0.0.1', port: s1.port, password: 'secret' });
+    const b = new RconClient({ host: '127.0.0.1', port: s2.port, password: 'secret' });
+    await a.connect();
+    await b.connect();
+    expect(await b.exec('status')).toBe('ran:status');
+    a.close();
+    b.close();
+  });
 });

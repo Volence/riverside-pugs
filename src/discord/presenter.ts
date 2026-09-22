@@ -1,5 +1,10 @@
 import type { ActionRow, Button, Embed, MessagePayload } from './transport.js';
 import { ENDORSE_KINDS, ENDORSE_LABEL, type EndorseKind } from '../endorsements.js';
+import { escapeName, sameName } from '../identity.js';
+
+// Moved to src/identity.ts, which src/discord/adminFeedPoster.ts and
+// src/discord/commands.ts also need; re-exported so nothing else here changes.
+export { escapeName };
 
 /**
  * Pure renderers: state in, Discord message payload out.
@@ -18,25 +23,27 @@ const COLOR = {
 export interface PlayerView {
   name: string;
   discordId: string | null;
+  /** Their linked Discord display name, when known. Only used to decide
+   *  whether it is worth showing alongside the mention: absent or equal to
+   *  `name` (case-insensitively) and the mention speaks for itself. */
+  discordName?: string | null;
   sr: number | null;
 }
 
-// Square brackets are in here too: without them, a name that is itself a
-// markdown link, [x](http://evil.example), renders as a live, attacker-chosen
-// link wherever a "plain" name is shown in an embed. A backslash-escaped
-// bracket still renders as a bracket, so nothing visible changes.
-const MARKDOWN = /([\\*_~`|>[\]])/g;
-
-/** A plain name with Discord markdown neutralised, so "b*o_b" is not italic
- *  and "[x](evil)" is not a link. */
-export function escapeName(name: string): string {
-  return name.replace(MARKDOWN, '\\$1');
+/** Mention when linked (Discord shows their server nickname), with the Steam
+ *  name added beside it when their Discord name reads differently, so a
+ *  reader who only knows one of the two names can still tell who this is.
+ *  Plain Steam name, escaped, when unlinked. Shared by playerLabel and
+ *  srChange, which differ only in what they append after this. */
+function mentionLabel(p: PlayerView): string {
+  if (!p.discordId) return escapeName(p.name);
+  if (p.discordName && !sameName(p.name, p.discordName)) return `<@${p.discordId}> (${escapeName(p.name)})`;
+  return `<@${p.discordId}>`;
 }
 
-/** Mention when linked (Discord shows their server nickname), else the Steam
- *  name. SR in brackets when the player has one. */
+/** mentionLabel with SR in brackets when the player has one. */
 export function playerLabel(p: PlayerView): string {
-  const who = p.discordId ? `<@${p.discordId}>` : escapeName(p.name);
+  const who = mentionLabel(p);
   return p.sr === null ? who : `${who} (${p.sr})`;
 }
 
@@ -289,7 +296,7 @@ export interface ResultView {
 }
 
 function srChange(p: ResultPlayer): string {
-  const who = p.discordId ? `<@${p.discordId}>` : escapeName(p.name);
+  const who = mentionLabel(p);
   if (p.srBefore === null || p.srAfter === null) return `${who} (not rated)`;
   const d = p.srAfter - p.srBefore;
   return `${who} ${p.srAfter} (${d >= 0 ? '+' : ''}${d})`;

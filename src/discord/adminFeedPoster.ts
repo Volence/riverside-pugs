@@ -2,8 +2,9 @@ import type { DB } from '../db.js';
 import { FEED_SETTING, subscribeAdminEvents, type AdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
 import { getPlayer } from '../players.js';
+import { resolveAlias } from '../aliases.js';
 import { activeTimeout } from '../penalties.js';
-import { escapeName } from './presenter.js';
+import { discordLabel, escapeName, identityOf } from '../identity.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
 const COLOR = { report: 0xde4e40, action: 0xc9a45c, penalty: 0x8a7f73, account: 0x45b39c, problem: 0xde4e40 };
@@ -44,8 +45,21 @@ export class AdminFeedPoster {
     return getSetting(this.deps.db, FEED_SETTING[kind]) === '0' ? null : id;
   }
 
+  /** Steam name and linked Discord side by side, bolded, so a line reads the
+   *  same whether the admin recognises the game name or the voice channel. */
   private name(steamid: string): string {
-    return escapeName(getPlayer(this.deps.db, steamid)?.name ?? steamid);
+    return discordLabel(identityOf(this.deps.db, steamid));
+  }
+
+  /** Where a named player's record lives. Every post that names somebody
+   *  links here, so reading the feed and opening the file is one click
+   *  rather than a search through the panel. */
+  private file(steamid: string): string {
+    return `${this.deps.publicUrl}/admin/people/${steamid}`;
+  }
+
+  private ticket(id: string | number): string {
+    return `${this.deps.publicUrl}/admin/people/tickets/${id}`;
   }
 
   private async deliver(e: AdminEvent): Promise<void> {
@@ -61,11 +75,11 @@ export class AdminFeedPoster {
   private line(e: AdminEvent): { text: string; color: number } | null {
     switch (e.kind) {
       case 'report': {
-        const link = `[#${e.ticketId}](${this.deps.publicUrl}/admin?ticket=${e.ticketId})`;
+        const link = `[#${e.ticketId}](${this.ticket(e.ticketId)})`;
         return {
           text: e.created
-            ? `🎫 New ticket ${link} about **${this.name(e.targetId)}** (${e.category}).`
-            : `🎫 Another report on ticket ${link} about **${this.name(e.targetId)}** (${e.category}).`,
+            ? `🎫 New ticket ${link} about ${this.name(e.targetId)} (${e.category}).`
+            : `🎫 Another report on ticket ${link} about ${this.name(e.targetId)} (${e.category}).`,
           color: COLOR.report,
         };
       }
@@ -77,30 +91,44 @@ export class AdminFeedPoster {
           : 'missed a ready check';
         const minutes = t ? Math.round((t.until.getTime() - Date.now()) / 60_000) : 0;
         const timeout = t ? ` · ${fmtMinutes(minutes)} queue timeout (offense ${t.offenses} this week)` : '';
-        return { text: `**${this.name(e.steamid)}** ${what}${timeout}`, color: COLOR.penalty };
+        return { text: `${this.name(e.steamid)} ${what}${timeout}`, color: COLOR.penalty };
       }
       case 'account':
+        // this.name() already shows the Discord side once linked, so the line
+        // does not also spell out e.discordName: that would say it twice.
         return {
           text: e.what === 'linked'
-            ? `**${this.name(e.steamid)}** linked Discord${e.discordName ? ` (${escapeName(e.discordName)})` : ''}`
-            : `**${this.name(e.steamid)}** is now active`,
+            ? `${this.name(e.steamid)} linked Discord`
+            : `${this.name(e.steamid)} is now active`,
           color: COLOR.account,
         };
       case 'problem':
         return { text: `⚠️ ${e.text}`, color: COLOR.problem };
       case 'abandon':
         return {
-          text: `🚪 **${this.name(e.steamid)}** abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
+          text: `🚪 ${this.name(e.steamid)} abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
+      case 'clock': {
+        // The board's own URL, with the card to scroll to. The old
+        // /admin?live=N form still redirects here, for posts already sent.
+        const board = `[live board](${this.deps.publicUrl}/admin/live?live=${e.matchId})`;
+        const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        return {
+          text: e.what === 'low_allowance'
+            ? `${this.name(e.steamid)} has ${e.remainingS} s left to reconnect in ${match}. Hold the clock or add time on the ${board}.`
+            : `The hold on ${this.name(e.steamid)}'s reconnect clock in ${match} released itself at the ceiling: ${e.remainingS} s left and counting. ${board}`,
+          color: COLOR.problem,
+        };
+      }
       case 'lilac_flag': {
         const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
         // "suspected" is LilAC's own word for the soft case and it is the right
         // one: its docs say few and rare suspicions are likely false positives.
         return {
           text: e.banned
-            ? `🛑 **${this.name(e.steamid)}** was BANNED by Little Anti-Cheat for \`${e.cheat}\`${match}.`
-            : `🎛️ **${this.name(e.steamid)}** is suspected by Little Anti-Cheat of \`${e.cheat}\`${match}. Few and rare suspicions are usually false positives.`,
+            ? `🛑 ${this.name(e.steamid)} was BANNED by Little Anti-Cheat for \`${e.cheat}\`${match}.`
+            : `🎛️ ${this.name(e.steamid)} is suspected by Little Anti-Cheat of \`${e.cheat}\`${match}. Few and rare suspicions are usually false positives.`,
           color: COLOR.problem,
         };
       }
@@ -109,18 +137,43 @@ export class AdminFeedPoster {
         // signature is evidence from input timing, and the admin decides.
         const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
         return {
-          text: `🎛️ **${this.name(e.steamid)}** tripped the \`${e.signature}\` input check${match} (${e.detail}). Worth a look at the replay.`,
+          text: `🎛️ ${this.name(e.steamid)} tripped the \`${e.signature}\` input check${match} (${e.detail}). Worth a look at the replay.`,
+          color: COLOR.problem,
+        };
+      }
+      case 'steam_signal': {
+        // Context, worded as context. A ban in some other game is not a ban
+        // in this one, and a borrowed library is how siblings share a PC.
+        const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
+        const who = this.name(e.steamid);
+        if (e.signal.what === 'recent_ban') {
+          const s = e.signal;
+          const parts = [
+            s.vacBans ? `${s.vacBans} VAC ban${s.vacBans === 1 ? '' : 's'}` : '',
+            s.gameBans ? `${s.gameBans} game ban${s.gameBans === 1 ? '' : 's'}` : '',
+          ].filter(Boolean).join(' and ');
+          const when = s.daysSinceLastBan === 0 ? 'today' : `${s.daysSinceLastBan} day${s.daysSinceLastBan === 1 ? '' : 's'} ago`;
+          return {
+            text: `🪪 ${who}${match} has ${parts} on their Steam account, the latest ${when}. Steam does not say which game, so this is context for their [file](${this.file(e.steamid)}), not a finding about this one.`,
+            color: COLOR.problem,
+          };
+        }
+        const lender = resolveAlias(this.deps.db, e.signal.lenderId);
+        return {
+          text: `🪪 ${who}${match} is playing on a copy of the game borrowed through Steam Family Sharing from ${this.name(lender)} (\`${e.signal.lenderId}\`), who is banned here. Could be a shared household; worth a look.`,
           color: COLOR.problem,
         };
       }
       case 'signon_drop': {
-        // The in-game name, not this.name(): most of these steamids have never
-        // signed in, and an admin searching the server log needs the name the
-        // player was actually using.
+        // Known players get the full identity (both worlds); an unknown
+        // steamid has never signed in and has no account to look up, so an
+        // admin searching the server log instead needs the name the player
+        // was actually using on screen.
         const known = getPlayer(this.deps.db, e.steamid);
-        const id = known ? `[${e.steamid}](${this.deps.publicUrl}/player/${e.steamid})` : `\`${e.steamid}\``;
+        const id = known ? `[${e.steamid}](${this.file(e.steamid)})` : `\`${e.steamid}\``;
+        const who = known ? this.name(e.steamid) : `**${escapeName(e.name)}**`;
         return {
-          text: `**${escapeName(e.name)}** (${id}) dropped while connecting ${e.count} times in ten minutes without getting in (${e.total} on record): likely rejected for a modified game file; the file name was shown on their screen. A cancelled loading screen looks the same, so this is a hint, not proof.`,
+          text: `${who} (${id}) dropped while connecting ${e.count} times in ten minutes without getting in (${e.total} on record): likely rejected for a modified game file; the file name was shown on their screen. A cancelled loading screen looks the same, so this is a hint, not proof.`,
           color: COLOR.problem,
         };
       }
@@ -128,8 +181,8 @@ export class AdminFeedPoster {
   }
 
   private actionText(e: Extract<AdminEvent, { kind: 'admin_action' }>): string {
-    const who = `**${this.name(e.adminId)}**`;
-    const target = `**${this.name(e.target)}**`;
+    const who = this.name(e.adminId);
+    const target = this.name(e.target);
     const d = e.detail;
     const match = `[#${e.target}](${this.deps.publicUrl}/match/${e.target})`;
     switch (e.action) {
@@ -148,13 +201,28 @@ export class AdminFeedPoster {
       case 'server_idle': return `${who} set server ${e.target} idle`;
       case 'server_restart_after_match':
         return `${who} turned ${d.on ? 'on' : 'off'} restart-after-match for server ${e.target}`;
+      case 'server_log_secret':
+        return `${who} ${d.rotated ? 'rotated' : 'pushed'} the log secret for server ${e.target}${d.pushed ? '' : ' (it did NOT reach the box)'}`;
+      case 'server_log_auth': return `${who} set log signing on server ${e.target} to \`${String(d.mode)}\``;
       case 'queue_remove': return `${who} removed ${target} from the queue`;
       case 'setting': return 'from' in d
         ? `${who} changed the ${e.target} setting from \`${String(d.from)}\` to \`${String(d.to)}\``
         : `${who} changed the ${e.target} setting`;
+      case 'leave_clock': {
+        const where = `match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)})`;
+        if (d.ok === false) {
+          return `${who} tried to ${String(d.action)} ${target}'s reconnect clock in ${where}, and it failed: ${escapeName(String(d.error ?? ''))}`;
+        }
+        switch (d.action) {
+          case 'hold': return `${who} put ${target}'s reconnect clock on hold in ${where}`;
+          case 'release': return `${who} released the hold on ${target}'s reconnect clock in ${where}`;
+          case 'add': return `${who} gave ${target} ${String(d.seconds)} more seconds to reconnect in ${where}`;
+          default: return `${who} ended ${target}'s reconnect time in ${where}`;
+        }
+      }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': {
-        const ticket = `ticket [#${e.target}](${this.deps.publicUrl}/admin?ticket=${e.target})`;
+        const ticket = `ticket [#${e.target}](${this.ticket(e.target)})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
           case 'ticket_claim': return `${who} ${d.claim === false ? 'released' : 'claimed'} ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
@@ -173,7 +241,7 @@ export class AdminFeedPoster {
   async handleButton(_i: Extract<BotInteraction, { kind: 'button' }>): Promise<InteractionReply> {
     return {
       ephemeral: true,
-      payload: { content: `Reports are tickets now. Open ${this.deps.publicUrl}/admin and use the Tickets tab.`, embeds: [], components: [], mentionUserIds: [] },
+      payload: { content: `Reports are tickets now. Open ${this.deps.publicUrl}/admin/people/tickets.`, embeds: [], components: [], mentionUserIds: [] },
     };
   }
 }

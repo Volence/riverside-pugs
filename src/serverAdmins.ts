@@ -8,6 +8,7 @@ import { steam64ToSteam2 } from './steamId.js';
 import { getSetting } from './settings.js';
 import { publishAdminEvent, subscribeAdminEvents, type AdminEvent } from './adminFeed.js';
 import type { ServerExec } from './serverBans.js';
+import { subscribeBanChanges } from './banEvents.js';
 
 /**
  * Gives every website admin the same admin rights on every enabled game box.
@@ -63,10 +64,24 @@ function kvSafe(name: string): string {
 
 export interface AdminRow { steamid: string; name: string | null }
 
-export function websiteAdmins(db: DB): AdminRow[] {
+/**
+ * Who gets admin on the boxes: website admins who are not banned.
+ *
+ * It was every row with is_admin = 1, so a banned admin kept SourceMod root
+ * on all four servers until somebody remembered to take the flag off by hand.
+ * The bans table is asked as well as the cached status, because status is
+ * only a consequence of it (see src/banState.ts). The ban itself is pushed to
+ * the boxes by ServerBanSync; this is about the rights, which would otherwise
+ * be waiting for them the moment the ban ended or was worked around.
+ */
+export function websiteAdmins(db: DB, now = new Date()): AdminRow[] {
   return db.prepare(
-    'SELECT steamid, name FROM players WHERE is_admin = 1 ORDER BY steamid',
-  ).all() as AdminRow[];
+    `SELECT p.steamid, p.name FROM players p
+     WHERE p.is_admin = 1 AND p.status != 'banned'
+       AND NOT EXISTS (SELECT 1 FROM bans b WHERE b.player_id = p.steamid
+                       AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?))
+     ORDER BY p.steamid`,
+  ).all(now.toISOString()) as AdminRow[];
 }
 
 /**
@@ -126,6 +141,7 @@ function configsDir(server: ServerRow): string | null {
 export class ServerAdminSync {
   private timer: ReturnType<typeof setInterval> | null = null;
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeBans: (() => void) | null = null;
   private lastReported = new Map<number, number>();
   /** One sync at a time. The sweep, a boot push and an admin toggle can all
    *  land together, and two transports writing admins.cfg at once on the same
@@ -216,6 +232,15 @@ export class ServerAdminSync {
     this.unsubscribe = subscribeAdminEvents((e) => {
       if (ServerAdminSync.affects(e)) void this.sync();
     });
+    // A ban or an unban of an admin changes the list too, and waiting for the
+    // sweep would leave a banned admin with root for up to fifteen minutes.
+    // Only for an admin: most bans are abandon bans on ordinary players, and
+    // each sync is a file transfer to every box.
+    this.unsubscribeBans = subscribeBanChanges((e) => {
+      const row = this.deps.db.prepare('SELECT is_admin FROM players WHERE steamid = ?')
+        .get(e.steamid) as { is_admin: number } | undefined;
+      if (row?.is_admin === 1) void this.sync();
+    });
     this.timer = setInterval(() => void this.sync(), SWEEP_MS);
     this.timer.unref();
   }
@@ -223,6 +248,8 @@ export class ServerAdminSync {
   stop(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.unsubscribeBans?.();
+    this.unsubscribeBans = null;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }

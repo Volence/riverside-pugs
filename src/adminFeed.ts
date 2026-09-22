@@ -20,6 +20,11 @@ export type AdminEvent =
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
   | { kind: 'problem'; text: string; matchId?: number }
   | { kind: 'abandon'; steamid: string; matchId: number; minutes: number }
+  // The live board's clocks. low_allowance: a dropped player is nearly out of
+  // reconnect time, once per drop, so an admin can hold the clock before it
+  // ends the match. hold_expired: a hold reached its ceiling and released
+  // itself. Both link to the board, where the buttons are.
+  | { kind: 'clock'; what: 'low_allowance' | 'hold_expired'; steamid: string; matchId: number; remainingS: number }
   // A steamid dropped while connecting for the second time in ten minutes
   // without getting in between. `name` is the in-game name off the drop line,
   // because the steamid is often nobody the site knows. `count` is the drops in
@@ -32,7 +37,18 @@ export type AdminEvent =
   // Little Anti-Cheat raised a flag on a player. Posted once per player per
   // cheat per match; LilAC fires repeatedly while a cheat looks active.
   | { kind: 'lilac_flag'; steamid: string; cheat: string; banned: boolean; matchId: number | null }
-  | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string };
+  | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string }
+  // Something Steam says about a player rostered in a live match: a VAC or
+  // game ban less than a year old, or a game borrowed through Family Sharing
+  // from an account that is banned here. Posted once per player per condition,
+  // not once per match. Context for an admin, not a verdict: a ban in another
+  // game is not a ban in this one, and a sibling's library is still a library.
+  | {
+    kind: 'steam_signal'; steamid: string; matchId: number | null;
+    signal:
+      | { what: 'recent_ban'; vacBans: number; gameBans: number; daysSinceLastBan: number }
+      | { what: 'banned_lender'; lenderId: string };
+  };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -42,9 +58,11 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   account: 'admin_feed_accounts',
   problem: 'admin_feed_problems',
   abandon: 'admin_feed_penalties',
+  clock: 'admin_feed_problems',
   signon_drop: 'admin_feed_problems',
   input_flag: 'admin_feed_problems',
   lilac_flag: 'admin_feed_problems',
+  steam_signal: 'admin_feed_problems',
 };
 
 type Listener = (e: AdminEvent) => void;

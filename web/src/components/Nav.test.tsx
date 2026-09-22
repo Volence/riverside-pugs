@@ -31,10 +31,11 @@ describe('NAV_LINKS', () => {
   });
 });
 
-import { render, cleanup } from '@testing-library/preact';
+import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/preact';
 import { LocationProvider } from 'preact-iso';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import { Nav } from './Nav';
+import { api } from '../api';
 
 afterEach(cleanup);
 
@@ -66,5 +67,43 @@ describe('Nav', () => {
     const live = container.querySelector('.nav__live');
     expect(live?.textContent).toContain('No Mercy');
     expect(live?.getAttribute('href')).toBe('/live');
+  });
+  // There was no way to sign out at all: the only exit was clearing cookies.
+  it('offers Sign out to a signed-in player, ends the session, and refreshes', async () => {
+    const logout = vi.spyOn(api, 'logout').mockResolvedValue({ ok: true });
+    const onSignedOut = vi.fn();
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false };
+    render(
+      <LocationProvider><Nav session={{ kind: 'active', me }} state={null} onSignedOut={onSignedOut} /></LocationProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(onSignedOut).toHaveBeenCalled());
+    expect(logout).toHaveBeenCalledTimes(1);
+    logout.mockRestore();
+  });
+
+  // The ban list is a People screen now, and moderators read it there.
+  it('links Bans into the panel, for moderators as well as admins', () => {
+    const mod = { steamid: '1', name: 'mod', avatar: null, status: 'active', isAdmin: false, isMod: true };
+    const { unmount } = render(
+      <LocationProvider><Nav session={{ kind: 'active', me: mod }} state={null} /></LocationProvider>,
+    );
+    expect((screen.getByRole('link', { name: 'Bans' }) as HTMLAnchorElement).getAttribute('href'))
+      .toBe('/admin/people/bans');
+    unmount();
+    const player = { steamid: '2', name: 'alice', avatar: null, status: 'active', isAdmin: false };
+    render(<LocationProvider><Nav session={{ kind: 'active', me: player }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('link', { name: 'Bans' })).toBeNull();
+  });
+
+  it('offers it to a pending or banned account too, and to nobody signed out', () => {
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'banned', isAdmin: false };
+    const { unmount } = render(
+      <LocationProvider><Nav session={{ kind: 'pending', me }} state={null} /></LocationProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    unmount();
+    render(<LocationProvider><Nav session={{ kind: 'anonymous' }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
   });
 });

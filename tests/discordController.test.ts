@@ -69,6 +69,13 @@ describe('discord buttons', () => {
     expect(body(await press(0, 'q:leave'))).toMatch(/not in the queue/i);
   });
 
+  it('an account that has been merged into another cannot queue from Discord, even with a row left over', async () => {
+    const { addAlias } = await import('../src/aliases.js');
+    addAlias(db, { steamid: IDS[0], canonical: IDS[1], by: 'test' });
+    expect(body(await press(0, 'q:join'))).toMatch(/merged into another/i);
+    expect(mm.publicQueue().count).toBe(0);
+  });
+
   it('a banned player is refused', async () => {
     db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(IDS[0]);
     expect(body(await press(0, 'q:join'))).toMatch(/banned/i);

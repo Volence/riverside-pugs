@@ -1,5 +1,6 @@
 import { publishAdminEvent } from './adminFeed.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
+import { sameName } from './identity.js';
 import type { DB } from './db.js';
 import { statDef } from './statKeys.js';
 import type { LogEvent, Phase } from './logParse.js';
@@ -14,6 +15,10 @@ export const STALE_AFTER_MS = 120_000;
 export interface LivePlayer {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, when it differs from `name`: Steam
+   *  and Discord names drift apart, and a viewer watching voice channels
+   *  needs both to tell who is who. Null when unlinked or the same name. */
+  discordName: string | null;
   /** Cosmetic counters from the UDP feed. Empty until the first LIVESTAT
    *  arrives, and missing keys mean "not measured", never zero. */
   stats: Record<string, number>;
@@ -349,10 +354,12 @@ export function readyupsFor(db: DB, matchId: number): MatchReadyup[] {
 
 /**
  * Who is slow to ready, across every finished ready-up of every match that
- * still counts. Sorted by how often they were the last one, then by total
- * seconds, so a repeat offender is at the top.
+ * still counts. Everybody, not a top few: the admin table re-sorts in the
+ * browser by share of ready-ups they were last for, by average and by total,
+ * and a cut made here by one of those orders would hide the top of the
+ * others. The limit is a backstop against an unbounded payload, not a ranking.
  */
-export function slowToReady(db: DB, limit = 25): SlowToReady[] {
+export function slowToReady(db: DB, limit = 1000): SlowToReady[] {
   return db
     .prepare(
       `SELECT rp.player_id AS steamid, COALESCE(p.name, rp.player_id) AS name,
@@ -806,7 +813,13 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
  *  that pair to a file server-side. The token bytes in the replay header are
  *  zeroed on the way out by routes/replays.ts, so the file contents do not
  *  leak it either. */
-export function getLiveMatches(db: DB): LiveMatch[] {
+/** `showDiscordNames` defaults to false: /api/live has no session at all, and
+ *  the only safe default for an anonymous, unauthenticated payload is to
+ *  leave a player's linked Discord name out of it. The route decides when to
+ *  pass true, after checking the viewer is a signed-in player in good
+ *  standing (see routes/guards.ts makeOptionalViewer / standing.ts
+ *  inGoodStanding); this function never re-derives that itself. */
+export function getLiveMatches(db: DB, showDiscordNames = false): LiveMatch[] {
   const matches = db
     .prepare(
       `SELECT m.id, m.campaign, m.server_id AS serverId, l.current_map AS currentMap, l.last_seen AS lastSeen
@@ -819,7 +832,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
   if (matches.length === 0) return [];
 
   const playersOf = db.prepare(
-    `SELECT mp.player_id AS steamid, p.name, mp.team
+    `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team
      FROM match_players mp JOIN players p ON p.steamid = mp.player_id
      WHERE mp.match_id = ? ORDER BY mp.player_id`,
   );
@@ -840,7 +853,7 @@ export function getLiveMatches(db: DB): LiveMatch[] {
 
   const now = Date.now();
   return matches.map((m) => {
-    const ps = playersOf.all(m.id) as { steamid: string; name: string; team: 'a' | 'b' }[];
+    const ps = playersOf.all(m.id) as { steamid: string; name: string; discordName: string | null; team: 'a' | 'b' }[];
     const rawMaps = mapsOf.all(m.id) as Omit<LiveMap, 'stats'>[];
     const byMap = mapStatsFor(db, m.id);
     const maps: LiveMap[] = rawMaps.map((mp) => ({ ...mp, stats: byMap.get(mp.ordinal) ?? {} }));
@@ -854,8 +867,10 @@ export function getLiveMatches(db: DB): LiveMatch[] {
       }
     }
     const nameOf = (id: string) => ps.find((p) => p.steamid === id)?.name ?? id;
-    const named = (p: { steamid: string; name: string }): LivePlayer => ({
-      steamid: p.steamid, name: p.name, stats: statsBy.get(p.steamid) ?? {},
+    const named = (p: { steamid: string; name: string; discordName: string | null }): LivePlayer => ({
+      steamid: p.steamid, name: p.name,
+      discordName: showDiscordNames && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
+      stats: statsBy.get(p.steamid) ?? {},
     });
     return {
       id: m.id,

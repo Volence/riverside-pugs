@@ -31,7 +31,11 @@ export type LogEvent =
   // result is computed, but the pause records built from it are what an admin
   // sees when a team complains about the other side's pausing.
   | { kind: 'phase'; token: string; phase: Phase }
-  | { kind: 'leave'; token: string; steamid: string; remaining: number }
+  // held, holdLeft and auto are pug-match 0.3.4 and later, sent when an admin
+  // changes a dropped player's clock (sm_pug_leave) or the hold ceiling
+  // releases it. Present only when the line carried them, so a 0.3.3 line
+  // parses to exactly the object it always did.
+  | { kind: 'leave'; token: string; steamid: string; remaining: number; held?: boolean; holdLeft?: number; auto?: boolean }
   | { kind: 'return'; token: string; steamid: string; remaining: number }
   | { kind: 'abandon'; token: string; steamid: string }
   | { kind: 'problem'; token: string; code: string }
@@ -181,6 +185,39 @@ function lineBody(text: string): string {
   return (stamp ? text.slice(stamp.index + stamp[0].length) : text).split('\n', 1)[0].trimEnd();
 }
 
+/** What pug-logauth.inc appends to a line once the backend has pushed the
+ *  server a secret: a boot stamp and a per-server counter, then the first four
+ *  bytes of HMAC-SHA1 over everything on the line before " mac=". `lseq`, not
+ *  `seq`, because EVENT and CHAT already have a per-match `seq=`. */
+const AUTH_TRAILER_RE = / lseq=(\d{1,10})\.(\d{1,10}) mac=([0-9a-f]{8})$/;
+
+export interface LogAuthTrailer {
+  /** The exact bytes the MAC covers: the line from just after the engine's
+   *  stamp up to, not including, " mac=". */
+  signed: Buffer;
+  boot: number;
+  seq: number;
+  mac: string;
+}
+
+/**
+ * The signature trailer of a datagram, or null when the line has none.
+ *
+ * Read from the BYTES, through latin1, which maps every byte to one character
+ * and back. The grammar below decodes as UTF-8, and a name or a chat message
+ * that is not valid UTF-8 comes out of that with replacement characters, which
+ * re-encode to different bytes than the plugin signed.
+ *
+ * Checking the MAC is src/logAuth.ts's business; this only finds it.
+ */
+export function readLogAuthTrailer(buf: Buffer): LogAuthTrailer | null {
+  const line = lineBody(buf.toString('latin1'));
+  const m = AUTH_TRAILER_RE.exec(line);
+  if (!m) return null;
+  const signed = Buffer.from(line.slice(0, line.length - ' mac='.length - m[3].length), 'latin1');
+  return { signed, boot: Number(m[1]), seq: Number(m[2]), mac: m[3] };
+}
+
 /** Anchored at BOTH ends, and the name is greedy, so the fields read are the
  *  last `<uid><steamid><team>` on the line: the engine's own. A name that
  *  contains a whole fake suffix only ends up inside the name group. A `say`
@@ -324,7 +361,10 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
  * player on the box was a complete, correctly addressed match line.
  */
 export function parseLogDatagram(buf: Buffer): LogEvent | null {
-  const line = lineBody(buf.toString('utf8'));
+  // The signature trailer is taken off before anything reads the line, in
+  // every mode: name= and msg= run to the end of the line and would swallow
+  // it, and kv() is last-wins, so nothing after them may reach the grammar.
+  const line = lineBody(buf.toString('utf8')).replace(AUTH_TRAILER_RE, '');
   const pinned = parseSourcePinned(line);
   if (pinned !== undefined) return pinned;
   if (!line.startsWith('PUG ')) return null;
@@ -360,7 +400,15 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
     case 'RETURN': {
       const remaining = intOf(rest.remaining);
       if (!/^\d{17}$/.test(rest.steamid ?? '') || remaining === null) return null;
-      return { kind: verb === 'LEAVE' ? 'leave' : 'return', token, steamid: rest.steamid, remaining };
+      if (verb === 'RETURN') return { kind: 'return', token, steamid: rest.steamid, remaining };
+      const ev: Extract<LogEvent, { kind: 'leave' }> = { kind: 'leave', token, steamid: rest.steamid, remaining };
+      // A LEAVE starts the clock that ends a match, so an optional key this
+      // parser cannot read costs the key and never the line.
+      if (rest.held === '0' || rest.held === '1') ev.held = rest.held === '1';
+      const holdLeft = intOf(rest.hold_left);
+      if (holdLeft !== null && holdLeft >= 0) ev.holdLeft = holdLeft;
+      if (rest.auto === '1') ev.auto = true;
+      return ev;
     }
     case 'ABANDON':
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;

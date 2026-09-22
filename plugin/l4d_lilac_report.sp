@@ -13,13 +13,15 @@
  *
  * Build:
  *   ./spcomp l4d_lilac_report.sp -i <dir containing lilac.inc>
+ *   with pug-logauth.inc and pug-hmac.inc beside it.
  */
 #pragma semicolon 1
 #pragma newdecls required
 #include <sourcemod>
 #include <lilac>
+#include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.1.1"
 
 ConVar g_cvEnabled;
 
@@ -37,6 +39,7 @@ public void OnPluginStart()
 		FCVAR_NOTIFY | FCVAR_DONTRECORD);
 	g_cvEnabled = CreateConVar("l4d_lilac_report_enabled", "1",
 		"Report Little Anti-Cheat detections to the site.", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	PugLogAuth_Init();
 }
 
 public void lilac_cheater_detected(int client, int cheat)
@@ -67,5 +70,5 @@ void Report(int client, int cheat, bool banned)
 		// STEAM_ form too, same as the consistency drop line.
 		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
 	}
-	LogToGame("L4DL id=%s cheat=%d banned=%d", id, cheat, banned ? 1 : 0);
+	PugLog("L4DL id=%s cheat=%d banned=%d", id, cheat, banned ? 1 : 0);
 }

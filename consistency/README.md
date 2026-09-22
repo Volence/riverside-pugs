@@ -71,7 +71,11 @@ The plugin compiles with the local test server's native spcomp:
     cd /home/volence/l4d1-ds/server/left4dead/addons/sourcemod/scripting
     ./spcomp /home/volence/l4d/pug/consistency/plugin/l4d_consistency.sp \
       -i /home/volence/l4d/pug/consistency/plugin \
+      -i /home/volence/l4d/pug/plugin \
       -o /home/volence/l4d/pug/consistency/plugin/l4d_consistency.smx
+
+The second `-i` is for `pug-logauth.inc` and `pug-hmac.inc`, which sign the
+SIGNON_DROP line and are shared with the plugins in `pug/plugin`.
 
 The `.smx` is committed, unlike `plugin/pug-match.smx`, so a checkout is
 installable without a compiler.

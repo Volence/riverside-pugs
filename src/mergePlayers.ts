@@ -47,6 +47,13 @@ const PLAIN: [table: string, column: string][] = [
   ['input_bursts', 'steamid'],
   ['input_detections', 'steamid'],
   ['signon_drops', 'steamid'],
+  // The losing account's open link is closed first, below: the survivor
+  // inherits the record of it, not the link.
+  ['discord_link_history', 'steamid'],
+  // Reviews of the file. The steamid moves; so does the reviewer, for the
+  // case where a member of staff was themselves merged.
+  ['player_reviews', 'steamid'],
+  ['player_reviews', 'reviewed_by'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -58,6 +65,9 @@ const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
   ['match_live_map_stats', 'player_id'],
   ['match_readyup_players', 'player_id'],
+  // Live scratch, like the rows above: if both accounts somehow have a row in
+  // one match, the survivor's is as good as the one dropped.
+  ['match_presence', 'steamid'],
   // A handle per platform. Where both accounts have one, `into` keeps its own.
   ['player_links', 'player_id'],
   // Summed first, below, where both accounts were seen on one address.
@@ -86,6 +96,8 @@ export const MERGE_HANDLED_PLAYER_COLUMNS: [table: string, column: string][] = [
   ['twitch_status', 'player_id'],
   ['endorsements', 'from_id'],
   ['endorsements', 'to_id'],
+  ['player_steam_signals', 'steamid'],
+  ['steam_signal_alerts', 'player_id'],
   // By hand in the ticket block: two open tickets about one player cannot
   // simply be repointed, tickets_one_open would refuse the second.
   ['tickets', 'target_id'],
@@ -136,6 +148,8 @@ export function mergePlayers(
   note('rating_history', count('SELECT COUNT(*) AS n FROM rating_history WHERE player_id = ?', from));
   note('endorsements', count('SELECT COUNT(*) AS n FROM endorsements WHERE from_id = ? OR to_id = ?', from, from));
   note('twitch_status', count('SELECT COUNT(*) AS n FROM twitch_status WHERE player_id = ?', from));
+  note('player_steam_signals', count('SELECT COUNT(*) AS n FROM player_steam_signals WHERE steamid = ?', from));
+  note('steam_signal_alerts', count('SELECT COUNT(*) AS n FROM steam_signal_alerts WHERE player_id = ?', from));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -176,7 +190,13 @@ export function mergePlayers(
          -- The earlier of the two: someone who was there from the start was
          -- there from the start, whichever account carried the row.
          joined_map   = MIN(keep.joined_map, gone.joined_map),
-         connected_at = COALESCE(keep.connected_at, gone.connected_at)
+         connected_at = COALESCE(keep.connected_at, gone.connected_at),
+         -- Rated if either row was. rated = 0 means the RCON dump never named
+         -- that account (see completeMatch), which is what the ghost half of
+         -- a two-account roster looks like; the person still played.
+         rated          = MAX(keep.rated, gone.rated),
+         unrated_reason = CASE WHEN MAX(keep.rated, gone.rated) = 1 THEN NULL
+                               ELSE COALESCE(keep.unrated_reason, gone.unrated_reason) END
        FROM match_players AS gone
        WHERE gone.match_id = keep.match_id AND keep.player_id = ? AND gone.player_id = ?`,
     ).run(into, from);
@@ -199,6 +219,12 @@ export function mergePlayers(
     ).run(from, into);
     db.prepare('UPDATE match_player_stats SET player_id = ? WHERE player_id = ?').run(into, from);
 
+    // The losing account's Discord link dies with its player row, so its
+    // history row is closed here. Left open, it would move to the survivor
+    // below and claim a link the survivor never had.
+    db.prepare(
+      "UPDATE discord_link_history SET unlinked_at = ?, unlinked_by = 'merge' WHERE steamid = ? AND unlinked_at IS NULL",
+    ).run(new Date().toISOString(), from);
     // Tickets ABOUT the merged account. tickets_one_open allows one open
     // ticket per player per flavour, so where both accounts have one the
     // alt's reports and history move into the main's and the empty shell
@@ -259,6 +285,13 @@ export function mergePlayers(
       db.prepare('UPDATE OR IGNORE twitch_status SET player_id = ? WHERE player_id = ?').run(into, from);
     }
     db.prepare('DELETE FROM twitch_status WHERE player_id = ?').run(from);
+
+    // Steam signals are dropped, never moved, even when `into` has none. They
+    // describe a Steam account rather than a person: the alt's age, bans and
+    // hours are not the main's, and the next refresh reads the main's own.
+    // The same goes for what the admin feed has already said about the alt.
+    db.prepare('DELETE FROM player_steam_signals WHERE steamid = ?').run(from);
+    db.prepare('DELETE FROM steam_signal_alerts WHERE player_id = ?').run(from);
 
     for (const [table, column] of KEYED) {
       db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

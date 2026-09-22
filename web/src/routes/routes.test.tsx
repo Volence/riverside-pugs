@@ -24,6 +24,7 @@ const { mockApi } = vi.hoisted(() => ({
     profile: vi.fn(),
     queue: vi.fn(),
     linkDiscordCode: vi.fn(),
+    peekDiscordCode: vi.fn(),
     site: vi.fn(),
     unlinkDiscord: vi.fn(),
     endorseState: vi.fn(),
@@ -308,6 +309,30 @@ describe('MatchDetail', () => {
     mockApi.match.mockRejectedValue(new Error('404'));
     render(<MatchDetail id="999" me={null} />);
     await waitFor(() => expect(screen.getByText(/match not found/i)).toBeTruthy());
+  });
+
+  // 2026-09-21: the same /match/:id link an admin-feed post gives out while
+  // the match is still running, so it has to say something other than "Match
+  // not found." until it ends.
+  it('says a match still being played is in progress, with the campaign and a link to Live', async () => {
+    mockApi.match.mockResolvedValue({ ongoing: true, id: 103, campaign: 'no_mercy', state: 'live' });
+    render(<MatchDetail id="103" me={null} />);
+    await waitFor(() => expect(screen.getByText(/Match #103 is still being played/)).toBeTruthy());
+    expect(screen.getByText('Match #103: No Mercy')).toBeTruthy();
+    const live = screen.getByText('Live page') as HTMLAnchorElement;
+    expect(live.getAttribute('href')).toBe('/live');
+    // None of the fields a finished match renders are on the page.
+    expect(screen.queryByText('Match totals')).toBeNull();
+  });
+
+  it('says a match is waiting for a server, or being set up, in those words', async () => {
+    mockApi.match.mockResolvedValue({ ongoing: true, id: 104, campaign: 'no_mercy', state: 'waiting' });
+    render(<MatchDetail id="104" me={null} />);
+    await waitFor(() => expect(screen.getByText(/Waiting for a server/)).toBeTruthy());
+
+    mockApi.match.mockResolvedValue({ ongoing: true, id: 105, campaign: 'no_mercy', state: 'configuring' });
+    render(<MatchDetail id="105" me={null} />);
+    await waitFor(() => expect(screen.getByText(/Setting up the server/)).toBeTruthy());
   });
 
   it('shows one map at a time, with a chip row to pick another', async () => {
@@ -1556,12 +1581,28 @@ describe('LinkDiscord', () => {
     expect(mockApi.linkDiscordCode).not.toHaveBeenCalled();
   });
 
-  it('spends the code once when signed in and shows the linked name', async () => {
+  // The hijack this page used to allow: a link sent by somebody else spent
+  // itself on arrival and put THEIR Discord on the account that opened it.
+  it('never spends the code on arrival: it names both accounts and waits for the button', async () => {
     at('/link/discord?code=abc123');
+    mockApi.peekDiscordCode.mockResolvedValue({ discordId: '111', discordName: 'Alice' });
+    render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: invited }} refresh={() => {}} /></LocationProvider>);
+    await waitFor(() => expect(screen.getByText('Alice')).toBeTruthy());
+    // Both halves of what is about to be joined are on screen.
+    expect(screen.getByText('alice')).toBeTruthy();
+    expect(screen.getByText(/111/)).toBeTruthy();
+    expect(mockApi.peekDiscordCode).toHaveBeenCalledWith('abc123');
+    expect(mockApi.linkDiscordCode).not.toHaveBeenCalled();
+  });
+
+  it('spends the code once on the button and shows the linked name', async () => {
+    at('/link/discord?code=abc123');
+    mockApi.peekDiscordCode.mockResolvedValue({ discordId: '111', discordName: 'Alice' });
     mockApi.linkDiscordCode.mockResolvedValue({ ok: true, active: true, discordName: 'Alice' });
     const refresh = vi.fn();
     render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: invited }} refresh={refresh} /></LocationProvider>);
-    await waitFor(() => expect(screen.getByText('Alice')).toBeTruthy());
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /link these accounts/i })));
+    await waitFor(() => expect(screen.getByText(/you can queue from discord/i)).toBeTruthy());
     expect(mockApi.linkDiscordCode).toHaveBeenCalledTimes(1);
     expect(mockApi.linkDiscordCode).toHaveBeenCalledWith('abc123');
     expect(refresh).toHaveBeenCalled();
@@ -1570,9 +1611,30 @@ describe('LinkDiscord', () => {
   it('explains a taken account', async () => {
     at('/link/discord?code=abc123');
     const { ApiError } = await import('../api');
+    mockApi.peekDiscordCode.mockResolvedValue({ discordId: '111', discordName: 'Alice' });
     mockApi.linkDiscordCode.mockRejectedValue(new ApiError(409, 'discord_taken'));
     render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: invited }} refresh={() => {}} /></LocationProvider>);
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /link these accounts/i })));
     await waitFor(() => expect(screen.getByText(/already linked to a different Steam account/)).toBeTruthy());
+  });
+
+  it('offers no button when the Steam account already has a different Discord', async () => {
+    at('/link/discord?code=abc123');
+    mockApi.peekDiscordCode.mockResolvedValue({ discordId: '666', discordName: 'Mallory' });
+    const linked = { ...invited, discord: { id: '111', name: 'Alice' } };
+    render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: linked }} refresh={() => {}} /></LocationProvider>);
+    await waitFor(() => expect(screen.getByText(/already linked to the Discord account/i)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /link these accounts/i })).toBeNull();
+    expect(mockApi.linkDiscordCode).not.toHaveBeenCalled();
+  });
+
+  it('says so when the code is expired or used, without offering a button', async () => {
+    at('/link/discord?code=abc123');
+    const { ApiError } = await import('../api');
+    mockApi.peekDiscordCode.mockRejectedValue(new ApiError(400, 'invalid_code'));
+    render(<LocationProvider><LinkDiscord session={{ kind: 'pending', me: invited }} refresh={() => {}} /></LocationProvider>);
+    await waitFor(() => expect(screen.getByText(/expired or was already used/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /link these accounts/i })).toBeNull();
   });
 });
 
@@ -1592,6 +1654,27 @@ describe('Profile Discord card', () => {
     render(<Profile steamid="1" session={{ kind: 'active', me: { ...me, steamid: '2' } }} refresh={() => {}} />);
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
     expect(screen.queryByText('Connect Discord')).toBeNull();
+  });
+
+  it('offers Edit profile to an active player only: the backend refuses the write from anyone else', async () => {
+    mockApi.profile.mockResolvedValue(profile);
+    const { unmount } = render(<Profile steamid="1" session={{ kind: 'active', me }} refresh={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Edit profile')).toBeTruthy());
+    unmount();
+    render(<Profile steamid="1" session={{ kind: 'pending', me: { ...me, status: 'invited' } }} refresh={() => {}} />);
+    // Still offered the Discord link, which is how a pending account gets in.
+    await waitFor(() => expect(screen.getByText('Connect Discord')).toBeTruthy());
+    expect(screen.queryByText('Edit profile')).toBeNull();
+  });
+
+  it('says why when the backend refuses to disconnect Discord', async () => {
+    const { ApiError } = await import('../api');
+    mockApi.profile.mockResolvedValue(profile);
+    mockApi.unlinkDiscord.mockRejectedValue(new ApiError(409, 'leave the queue before disconnecting Discord'));
+    const linked = { ...me, discord: { id: '111', name: 'Alice' } };
+    render(<Profile steamid="1" session={{ kind: 'active', me: linked }} refresh={() => {}} />);
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Disconnect' })));
+    await waitFor(() => expect(screen.getByText('leave the queue before disconnecting Discord')).toBeTruthy());
   });
 });
 

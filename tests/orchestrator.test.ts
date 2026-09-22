@@ -1,3 +1,6 @@
+import { subscribeAdminEvents } from '../src/adminFeed.js';
+import { setLogSecret } from '../src/logAuth.js';
+import { setSetting } from '../src/settings.js';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
@@ -14,7 +17,10 @@ import { pugReply } from './helpers.js';
 import { deleteCampaign, insertDraft, publishCampaign, setInstall } from '../src/customCampaigns.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
-function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
+function fakeServer(
+  dumpBody: string | ((cmd: string) => string),
+  overrides: Record<string, string> = {},
+): Promise<{ port: number; cmds: string[]; close: () => Promise<void> }> {
   const cmds: string[] = [];
   return new Promise((resolve) => {
     const server = net.createServer((sock) => {
@@ -29,7 +35,10 @@ function fakeServer(dumpBody: string): Promise<{ port: number; cmds: string[]; c
             sock.write(encodePacket(p.id, SERVERDATA_AUTH_RESPONSE, ''));
           } else if (p.type === SERVERDATA_EXECCOMMAND) {
             cmds.push(p.body);
-            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, pugReply(p.body, dumpBody)));
+            // Keyed by command name: how a test stands in for a plugin too old
+            // to know a command, which srcds answers with "Unknown command".
+            const canned = overrides[p.body.split(' ')[0]];
+            sock.write(encodePacket(p.id, SERVERDATA_RESPONSE_VALUE, canned ?? pugReply(p.body, dumpBody)));
           } else if (p.type === SERVERDATA_RESPONSE_VALUE) {
             // The client's multi-packet terminator. Source answers it with an
             // empty packet and then four junk bytes, both under the marker id.
@@ -104,6 +113,72 @@ describe('RealOrchestrator', () => {
     // The leaver rules come from the settings, after pug_match.
     expect(srv.cmds.indexOf('sm_pug_leave_budget 300')).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
     expect(srv.cmds).toContain('sm_pug_leave_autounpause 1');
+    // The hold ceiling, from clock_hold_max_minutes (30), and what its reply
+    // says about the plugin: anything but "Unknown command" is 0.3.4 or later.
+    expect(srv.cmds).toContain('sm_pug_leave_hold_max 1800');
+    expect(m.leave_control).toBe(1);
+  });
+
+  it('notices a plugin too old for clock control, and sets the match up anyway', async () => {
+    const srv = await fakeServer('', { sm_pug_leave_hold_max: 'Unknown command "sm_pug_leave_hold_max"' });
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+
+    const m = db.prepare('SELECT state, leave_control FROM matches WHERE id = ?').get(mid) as { state: string; leave_control: number | null };
+    expect(m).toEqual({ state: 'live', leave_control: 0 });
+  });
+
+  it('pushes the DEFAULT leaver rules when their settings rows are blank, never 0', async () => {
+    // These rows are hand-edited in sqlite, and Number('') is 0, not NaN, so
+    // a blank one sails past an integer check. The same bug once aborted every
+    // live match through noshow_minutes (src/noShow.ts). Here it is quieter
+    // and worse: `sm_pug_leave_hold_max 0` is clamped by the cvar to its own
+    // lower bound of 10, so every Hold on that match releases itself after ten
+    // seconds while the board's tooltip promises thirty minutes, and
+    // `sm_pug_leave_budget 0` turns leave tracking off for the match.
+    setSetting(db, 'clock_hold_max_minutes', '');
+    setSetting(db, 'leave_budget_seconds', '   ');
+    const srv = await fakeServer('');
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    await orch.setupMatch(seedMatch(db));
+
+    expect(srv.cmds).toContain('sm_pug_leave_budget 300');
+    expect(srv.cmds).toContain('sm_pug_leave_hold_max 1800');
+  });
+
+  it('unrelated "Unknown command" console noise in the same reply is not read as an old plugin', async () => {
+    // A real console can answer an unrelated command with "Unknown command"
+    // in the same window an rcon reply is collected from; the probe must key
+    // on the cvar it actually asked about, not on the words anywhere in the body.
+    const srv = await fakeServer('', { sm_pug_leave_hold_max: 'Unknown command "sm_cvar"' });
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+
+    const m = db.prepare('SELECT state, leave_control FROM matches WHERE id = ?').get(mid) as { state: string; leave_control: number | null };
+    expect(m).toEqual({ state: 'live', leave_control: 1 });
   });
 
 
@@ -338,6 +413,104 @@ describe('RealOrchestrator', () => {
     expect(after.state).toBe('completed');
     expect(after.ended_at).toBe(before.ended_at);
     expect(getServer(db, serverId)!.status).toBe('idle');
+  });
+
+  // pug-match 0.3.3 echoes the nonce and its state. WriteDump answers in ANY
+  // state, so before this a forged MATCH_END (it needs the token, which crosses
+  // the cleartext log stream) completed and rated a match at its current score.
+  describe('finishMatch against a plugin that echoes the nonce', () => {
+    const echoDump = (state: string, nonceOf: (cmd: string) => string) => (cmd: string): string => {
+      const n = nonceOf(cmd);
+      return [
+        `DUMP match=1 skilldetect=0 nonce=${n} state=${state}`,
+        'MAP map=l4d_hospital01 a=245 b=310',
+        ...IDS.map((id, i) => `STAT steamid=${id} team=${i < 4 ? 'a' : 'b'} joined_map=0 sidmg=${100 + i} sikill=${i} ck=${i * 10} ff=${i} rev=${i}`),
+        `END winner=b a=245 b=310 nonce=${n} state=${state}`,
+      ].join('\n');
+    };
+    const sentNonce = (cmd: string): string => cmd.split(' ')[2] ?? '';
+
+    async function rig(dump: (cmd: string) => string) {
+      const srv = await fakeServer(dump);
+      cleanup.push(srv.close);
+      const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+      const listener = new LogListener(() => {});
+      await listener.listen(0);
+      cleanup.push(() => listener.close());
+      const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o });
+      const mid = seedMatch(db);
+      await orch.setupMatch(mid);
+      return { srv, serverId, orch, mid };
+    }
+
+    it('sends a fresh nonce after the token, and completes on state=ended', async () => {
+      const { srv, orch, mid } = await rig(echoDump('ended', sentNonce));
+      expect(await orch.finishMatch(mid)).toBe('completed');
+      const dumps = srv.cmds.filter((c) => c.startsWith('sm_pug_dump '));
+      expect(dumps).toHaveLength(1);
+      expect(dumps[0]).toMatch(/^sm_pug_dump [0-9a-f]{32} [0-9a-f]{16}$/);
+      expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('completed');
+    });
+
+    it('does NOT complete, rate or release a match the plugin says is still live, and tells an admin', async () => {
+      const problems: string[] = [];
+      const unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+      cleanup.push(async () => unsub());
+      const { srv, serverId, orch, mid } = await rig(echoDump('live', sentNonce));
+      expect(await orch.finishMatch(mid)).toBe('not_ended');
+      expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
+      expect(db.prepare('SELECT COUNT(*) AS n FROM rating_history').get()).toEqual({ n: 0 });
+      expect(getServer(db, serverId)!.status).toBe('live');
+      // The plugin must keep the match: no abort behind a dump we refused.
+      expect(srv.cmds.some((c) => c.startsWith('sm_pug_abort'))).toBe(false);
+      expect(problems.some((t) => t.includes(`#${mid}`))).toBe(true);
+    });
+
+    it('leaves the match live for a retry when the answer carries somebody else\'s nonce', async () => {
+      const { orch, mid } = await rig(echoDump('ended', () => 'ffffffffffffffff'));
+      expect(await orch.finishMatch(mid)).toBe('retry');
+      expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(mid) as any).state).toBe('live');
+    });
+  });
+
+  // Audit 2026-09-21 item 15: a server with a log secret is given it on the
+  // setup connection, so its plugins sign every line of the match.
+  describe('the log secret', () => {
+    const SECRET = 'a'.repeat(32);
+    async function rig(secret: string | null) {
+      const srv = await fakeServer('');
+      cleanup.push(srv.close);
+      const serverId = addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+      if (secret) setLogSecret(db, serverId, secret);
+      const listener = new LogListener(() => {});
+      await listener.listen(0);
+      cleanup.push(() => listener.close());
+      const orch = new RealOrchestrator({ db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o });
+      return { srv, serverId, orch };
+    }
+
+    it('is pushed during setup with rcon logging off around it, since srcds logs every rcon command onto the very stream this protects', async () => {
+      const { srv, orch } = await rig(SECRET);
+      await orch.setupMatch(seedMatch(db));
+      const at = srv.cmds.indexOf(`sm_pug_log_secret "${SECRET}"`);
+      expect(at).toBeGreaterThan(-1);
+      expect(srv.cmds[at - 1]).toBe('sv_rcon_log 0');
+      expect(srv.cmds[at + 1]).toBe('sv_rcon_log 1');
+      // Before the match is configured, so MATCH lines are signed from the first.
+      expect(at).toBeLessThan(srv.cmds.findIndex((c) => c.startsWith('sm_pug_match')));
+    });
+
+    it('is not mentioned to a server that has none', async () => {
+      const { srv, orch } = await rig(null);
+      await orch.setupMatch(seedMatch(db));
+      expect(srv.cmds.some((c) => c.includes('sm_pug_log_secret') || c.includes('sv_rcon_log'))).toBe(false);
+    });
+
+    it('goes along with sm_pug_setid too, which is the only rcon a match started in game ever gets', async () => {
+      const { srv, serverId, orch } = await rig(SECRET);
+      await orch.assignMatchId(serverId, '0123456789abcdef0123456789abcdef', 7).catch(() => {});
+      expect(srv.cmds).toContain(`sm_pug_log_secret "${SECRET}"`);
+    });
   });
 
   it('runs beforeLive on the setup connection after the roster and before the changelevel', async () => {

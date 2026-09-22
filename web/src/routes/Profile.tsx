@@ -10,6 +10,7 @@ import { DiscordLinkCard } from '../components/DiscordLink';
 import { ProfileEdit } from '../components/ProfileEdit';
 import { ReportPlayer } from '../components/ReportPlayer';
 import { MyReports } from '../components/MyReports';
+import { ticketUrl } from './admin/adminRoutes';
 import { SocialChips } from '../components/SocialChips';
 import { ChemistryPanel } from '../components/Chemistry';
 import { EndorsementCounts } from '../components/TitleTag';
@@ -97,7 +98,7 @@ export function Profile(
                     // No id means the case is restricted and this account is
                     // not on its list, so there is nothing to navigate to.
                     if (r.ticketId === null) setTicketPassed(true);
-                    else location.href = `/admin?ticket=${r.ticketId}`;
+                    else location.href = ticketUrl(r.ticketId);
                   } catch (err) {
                     setTicketError(err instanceof ApiError ? err.message : 'Could not open a ticket.');
                   }
@@ -113,12 +114,17 @@ export function Profile(
         {session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid && (
           <Panel>
             <DiscordLinkCard me={session.me} onChange={refresh} />
-            <ProfileEdit
-              data={data}
-              twitchEnabled={session.me.twitchEnabled ?? false}
-              twitchLinked={Boolean(session.me.twitch)}
-              onSaved={() => refresh?.()}
-            />
+            {/* Active players only: the backend refuses a profile write or a
+                Twitch link from an account that is pending or banned. The
+                Discord card above stays, since linking is how they get in. */}
+            {session.kind === 'active' && (
+              <ProfileEdit
+                data={data}
+                twitchEnabled={session.me.twitchEnabled ?? false}
+                twitchLinked={Boolean(session.me.twitch)}
+                onSaved={() => refresh?.()}
+              />
+            )}
           </Panel>
         )}
         {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}

@@ -46,7 +46,7 @@ export function ticketCard(db: DB, ticketId: number, publicUrl: string): TicketC
   const reporters = (db.prepare('SELECT COUNT(DISTINCT reporter_id) AS n FROM ticket_reports WHERE ticket_id = ?').get(ticketId) as { n: number }).n;
   const categories = [...new Set(reports.map((r) => r.category))];
   const accused = getPlayer(db, t.target_id)?.name ?? t.target_id;
-  const url = `${publicUrl}/admin?ticket=${t.id}`;
+  const url = `${publicUrl}/admin/people/tickets/${t.id}`;
   const status = t.status === 'closed' ? 'closed' : t.claimed_by ? 'claimed' : 'open';
   const claimedBy = t.claimed_by ? escapeName(getPlayer(db, t.claimed_by)?.name ?? t.claimed_by) : '';
 
@@ -130,7 +130,7 @@ export function closeModal(ticketId: number): ModalDef {
 /** Sent once to each person on a restricted ticket's access list. It names
  *  nobody: the link does the telling, behind the site's own access check. */
 export function accessDm(ticketId: number, publicUrl: string): MessagePayload {
-  const url = `${publicUrl}/admin?ticket=${ticketId}`;
+  const url = `${publicUrl}/admin/people/tickets/${ticketId}`;
   return {
     content: [
       'You have been given access to a restricted ticket. Only the people on its access list can see it.',

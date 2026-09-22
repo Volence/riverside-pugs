@@ -17,6 +17,22 @@ describe('playerLabel', () => {
     expect(playerLabel(alice)).toBe('<@111> (1200)');
     expect(playerLabel(bob)).toBe('b\\*o\\_b');
   });
+
+  it('mentions alone when the discord name is the same as the steam name', () => {
+    expect(playerLabel({ ...alice, discordName: 'Alice' })).toBe('<@111> (1200)');
+  });
+
+  it('adds the steam name beside the mention when the discord name reads differently', () => {
+    expect(playerLabel({ ...alice, discordName: 'br1' })).toBe('<@111> (alice) (1200)');
+  });
+
+  it('eight players with long, differing names still fit an embed field (1024 chars)', () => {
+    const roster = Array.from({ length: 8 }, (_, i) => ({
+      name: 'x'.repeat(32), discordId: String(1000 + i), discordName: 'y'.repeat(32), sr: 1234,
+    }));
+    const field = roster.map((p) => playerLabel(p)).join('\n');
+    expect(field.length).toBeLessThanOrEqual(1024);
+  });
 });
 
 describe('escapeName', () => {
@@ -135,6 +151,14 @@ describe('renderMatch', () => {
     expect(text(p)).toContain('not linked');
   });
 
+  it('eight rostered players with 32-char names on both sides still fit each embed field', () => {
+    const team = (offset: number) => Array.from({ length: 4 }, (_, i) => ({
+      name: 'x'.repeat(32), discordId: String(2000 + offset + i), discordName: 'y'.repeat(32), sr: 1234,
+    }));
+    const p = renderMatch({ ...base, state: 'live', teamA: team(0), teamB: team(4) });
+    for (const f of p.embeds[0].fields ?? []) expect(f.value.length).toBeLessThanOrEqual(1024);
+  });
+
   it('finished and aborted drop the buttons except the match page', () => {
     for (const state of ['finished', 'aborted'] as const) {
       const p = renderMatch({ ...base, state });
@@ -164,6 +188,22 @@ describe('renderResult', () => {
       matchId: 1, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 5, scoreB: 5, winner: 'draw', teamA: [], teamB: [],
     });
     expect(text(p)).toContain('Draw');
+  });
+
+  it('names both the steam and discord identity when they differ, mention alone when they do not, and the escaped steam name when unlinked', () => {
+    const p = renderResult({
+      matchId: 1, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 5, scoreB: 5, winner: 'draw',
+      teamA: [
+        { name: 'mira', discordId: '111', discordName: 'br1', sr: null, srBefore: 1200, srAfter: 1180 },
+        { name: 'js', discordId: '222', discordName: 'JS', sr: null, srBefore: 900, srAfter: 925 },
+      ],
+      teamB: [{ name: 'b*o_b', discordId: null, sr: null, srBefore: 800, srAfter: 800 }],
+    });
+    const t = text(p);
+    expect(t).toContain('<@111> (mira) 1180 (-20)');
+    expect(t).toContain('<@222> 925 (+25)');
+    expect(t).not.toContain('<@222> (js)');
+    expect(t).toContain('b\\\\*o\\\\_b 800 (+0)');
   });
 });
 

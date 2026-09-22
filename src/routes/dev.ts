@@ -33,7 +33,7 @@ export async function devRoutes(app: FastifyInstance, opts: DevRouteOpts): Promi
     }
     upsertPlayer(db, { steamid, name: `dev_${steamid.slice(-4)}`, avatar: null }, []);
     activatePlayer(db, steamid);
-    setSession(reply, steamid, opts.config.publicUrl.startsWith('https://'));
+    setSession(reply, opts.db, steamid, opts.config.publicUrl.startsWith('https://'));
     return { ok: true, steamid };
   });
 

@@ -4,6 +4,8 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
+import { banPlayer } from '../src/admin/players.js';
+import { addAlias } from '../src/aliases.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -50,6 +52,29 @@ describe('filing over HTTP', () => {
     expect((await get(OWNER, '/api/matches/999/report-eligibility')).json()).toEqual({ canReport: false, reason: 'no such match' });
   });
 
+  // Carried over from the reports this replaced. requireActive and fileReport
+  // both ask src/standing.ts, so the bans table and the alias table count.
+  it('refuses a reporter who is banned, not yet active, or merged away, and files nothing', async () => {
+    const body = { targetId: ACCUSED, category: 'afk', text: '' };
+    const filed = () => (db.prepare('SELECT COUNT(*) AS n FROM ticket_reports').get() as { n: number }).n;
+
+    // Signed in again after the ban, which ended the session they had.
+    banPlayer(db, R1, ADMIN, 'toxic', 60);
+    cookie[R1] = authedCookie(app, db, R1, { active: false });
+    expect((await file(R1, body)).statusCode).toBe(403);
+    expect((await post(R1, `/api/matches/${matchId}/reports`, body)).statusCode).toBe(403);
+
+    db.prepare("UPDATE players SET status = 'invited' WHERE steamid = ?").run(R2);
+    expect((await file(R2, body)).statusCode).toBe(403);
+
+    // A row left over from before logins refused aliases, still marked active.
+    addAlias(db, { steamid: MOD2, canonical: MOD, by: 'test' });
+    expect((await file(MOD2, body)).statusCode).toBe(403);
+
+    expect(filed()).toBe(0);
+    expect((await file(OWNER, body)).statusCode).toBe(200);
+  });
+
   it('the old admin report routes are gone', async () => {
     expect((await get(ADMIN, '/api/admin/reports')).statusCode).toBe(404);
   });
@@ -73,13 +98,38 @@ describe('working tickets over HTTP', () => {
     expect((await get(ADMIN, '/api/mod/tickets?filter=nonsense')).statusCode).toBe(400);
   });
 
-  it('the detail carries reports with the moment, events, the case file and the viewer cap', async () => {
+  // requireMod asks the predicate every other guard asks (src/standing.ts):
+  // the flag alone is not enough, whatever players.status still says.
+  it('a banned moderator, and one whose SteamID was merged away, are refused', async () => {
+    expect((await get(MOD, '/api/mod/tickets')).statusCode).toBe(200);
+    // A ban in force counts even where status has not caught up with it. The
+    // ban ended the session they had, so this is them signed in again.
+    banPlayer(db, MOD, ADMIN, 'toxic', 60);
+    db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(MOD);
+    cookie[MOD] = authedCookie(app, db, MOD);
+    expect((await get(MOD, '/api/mod/tickets')).statusCode).toBe(403);
+    expect((await post(MOD, `/api/mod/tickets/${id}/claim`, { claim: true })).statusCode).toBe(403);
+
+    expect((await get(MOD2, '/api/mod/tickets')).statusCode).toBe(200);
+    addAlias(db, { steamid: MOD2, canonical: R1, by: 'test' });
+    expect((await get(MOD2, '/api/mod/tickets')).statusCode).toBe(403);
+    expect((await get(MOD2, `/api/mod/tickets/${id}`)).statusCode).toBe(403);
+
+    // A banned admin is staff no more than a banned moderator is.
+    banPlayer(db, ADMIN, OWNER, 'toxic', 60);
+    cookie[ADMIN] = authedCookie(app, db, ADMIN, { active: false });
+    expect((await get(ADMIN, '/api/mod/tickets')).statusCode).toBe(403);
+    expect((await get(OWNER, '/api/mod/tickets')).statusCode).toBe(200);
+  });
+
+  it('the detail carries reports with the moment, events, the case file, the summary and the viewer cap', async () => {
     const d = (await get(MOD, `/api/mod/tickets/${id}`)).json();
     expect(d.ticket).toMatchObject({ id, targetId: ACCUSED, status: 'open' });
     expect(d.reports.map((r: { reporterId: string }) => r.reporterId).sort()).toEqual([R1, R2].sort());
     expect(d.reports.find((r: { reporterId: string }) => r.reporterId === R1)).toMatchObject({ matchId, campaign: 'dead_air', moment: { ordinal: 2, half: 1, tMs: 61500 } });
     expect(d.events.map((e: { kind: string }) => e.kind)).toEqual(['opened', 'report_attached']);
     expect(d.caseFile).toMatchObject({ steamid: ACCUSED, bans: [], tickets: [{ id }] });
+    expect(d.summary).toMatchObject({ steamid: ACCUSED, bans: 0, fileUrl: `/admin/people/${ACCUSED}` });
     expect(d.viewer).toEqual({ isAdmin: false, banCapMinutes: 10080 });
     expect((await get(ADMIN, `/api/mod/tickets/${id}`)).json().viewer).toEqual({ isAdmin: true, banCapMinutes: null });
   });
@@ -102,6 +152,18 @@ describe('working tickets over HTTP', () => {
     const audit = (await get(ADMIN, '/api/admin/audit')).json();
     expect(audit.actions.slice(0, 4).map((a: { action: string }) => a.action)).toEqual(['ticket_reopen', 'ticket_close', 'ticket_ban', 'ticket_claim']);
     expect(audit.actions[0].target).toBe(String(id));
+  });
+
+  it('a ban from a ticket pulls the player out of a ready check, not only out of the queue', async () => {
+    const others = Array.from({ length: 7 }, (_, i) => `7656119800000010${i}`);
+    for (const p of others) await app.inject({ method: 'POST', url: '/api/queue/join', cookies: authedCookie(app, db, p) });
+    await post(ACCUSED, '/api/queue/join');
+    expect((await get(ACCUSED, '/api/state')).json().lobby).not.toBeNull();
+    expect((await post(MOD, `/api/mod/tickets/${id}/ban`, { reason: 'walls', minutes: 60 })).statusCode).toBe(200);
+    const seat = (await app.inject({ method: 'GET', url: '/api/state', cookies: authedCookie(app, db, others[0]) })).json();
+    expect(seat.lobby).toBeNull();
+    expect(seat.queue.count).toBe(7);
+    expect(seat.queue.players.map((p: { steamid: string }) => p.steamid)).not.toContain(ACCUSED);
   });
 
   it('staff open a ticket by hand', async () => {
@@ -195,7 +257,7 @@ describe('restricted tickets over HTTP', () => {
     expect((await get(MOD2, '/api/mod/tickets')).json().tickets).toEqual([]);
   });
 
-  it('a ban issued from a restricted ticket is withheld from a case file opened via a different ticket', async () => {
+  it('a ban issued from a restricted ticket is withheld from a case file and summary opened via a different ticket', async () => {
     await file(R1, { targetId: ACCUSED, category: 'unsafe', text: 'weapon threat' });
     const restrictedId = (db.prepare('SELECT id FROM tickets WHERE restricted = 1').get() as { id: number }).id;
     expect((await post(OWNER, `/api/mod/tickets/${restrictedId}/ban`, { reason: 'sensitive detail', minutes: 60 })).statusCode).toBe(200);
@@ -213,9 +275,18 @@ describe('restricted tickets over HTTP', () => {
     expect(JSON.stringify(modBody.caseFile.activeBan)).not.toContain('sensitive detail');
     expect(JSON.stringify(modBody.caseFile.activeBan)).not.toContain(OWNER);
     expect(modBody.caseFile.tickets.map((t: { id: number }) => t.id)).not.toContain(restrictedId);
+    expect(modBody.summary.bans).toBe(1);
+    expect(modBody.summary.activeBan).toMatchObject({ reason: 'Withheld (restricted ticket)', createdByName: null });
+    expect(modBody.summary.activeBan.createdBy).toBeFalsy();
+    expect(JSON.stringify(modBody.summary)).not.toContain('sensitive detail');
+    expect(JSON.stringify(modBody.summary)).not.toContain(OWNER);
+    // The summary carries counts rather than ticket ids, so the restricted
+    // ticket cannot be inferred from it at all.
+    expect(JSON.stringify(modBody.summary)).not.toContain(`"${restrictedId}"`);
 
     const ownerBody = (await get(OWNER, `/api/mod/tickets/${normalId}`)).json();
     expect(ownerBody.caseFile.bans[0]).toMatchObject({ reason: 'sensitive detail', createdBy: OWNER });
     expect(ownerBody.caseFile.tickets.map((t: { id: number }) => t.id)).toContain(restrictedId);
+    expect(ownerBody.summary.activeBan).toMatchObject({ reason: 'sensitive detail', createdBy: OWNER });
   });
 });

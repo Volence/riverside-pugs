@@ -653,6 +653,56 @@ CREATE TABLE IF NOT EXISTS input_detections (
 );
 CREATE INDEX IF NOT EXISTS input_detections_steamid ON input_detections(steamid, at);
 CREATE INDEX IF NOT EXISTS input_detections_match ON input_detections(match_id);
+
+-- What Steam itself says about an account: age, bans elsewhere, L4D1 hours,
+-- level, and whose copy of the game it plays on. One row per player, refreshed
+-- at login, at match start and slowly in the background (src/steamSignals.ts).
+-- Context for an admin reading a player page, never a verdict, and admin-only:
+-- nothing here may reach a public route, the WebSocket or a public embed.
+-- NULL always means "not known": a private profile or a failed call leaves the
+-- column alone rather than writing a zero that would read as a fact.
+CREATE TABLE IF NOT EXISTS player_steam_signals (
+  steamid TEXT PRIMARY KEY REFERENCES players(steamid),
+  -- Unix seconds, as Steam sends it. Absent from a private profile, and kept
+  -- once seen: an account's creation date does not change when it goes private.
+  time_created INTEGER,
+  -- communityvisibilitystate: 3 is public, anything else is not.
+  visibility INTEGER,
+  -- 1 once the account has set up a community profile.
+  profile_state INTEGER,
+  vac_banned INTEGER,
+  vac_bans INTEGER,
+  game_bans INTEGER,
+  -- As of bans_checked_at, not as of now: Steam sends an age, not a date.
+  days_since_last_ban INTEGER,
+  community_banned INTEGER,
+  economy_ban TEXT,
+  bans_checked_at TEXT,
+  -- 0: game details are private, so l4d1_minutes is whatever was last seen
+  -- (or NULL) and must be shown as hidden. 1 with NULL minutes: the library
+  -- is visible and L4D1 is not in it.
+  games_visible INTEGER,
+  l4d1_minutes INTEGER,
+  steam_level INTEGER,
+  -- Family Sharing. Steam only names a lender while the player is in game, so
+  -- this is the last NON-zero answer and when it was given, not the current one.
+  lender_id TEXT,
+  lender_seen_at TEXT,
+  checked_at TEXT NOT NULL
+);
+
+-- What has already been said in the admin feed about a player's Steam account,
+-- so the same fact is not posted again every match. The marker is what makes a
+-- condition news again: the ban count for recent_ban, the lender's id for
+-- banned_lender.
+CREATE TABLE IF NOT EXISTS steam_signal_alerts (
+  player_id TEXT NOT NULL REFERENCES players(steamid),
+  kind TEXT NOT NULL,
+  marker TEXT NOT NULL,
+  match_id INTEGER,
+  at TEXT NOT NULL,
+  PRIMARY KEY (player_id, kind, marker)
+);
 `;
 
 const DEFAULT_SETTINGS: Record<string, string> = {
@@ -724,6 +774,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // itself once everyone is back. Pushed to the plugin at match setup.
   leave_budget_seconds: '300',
   leave_auto_unpause: '1',
+  // The longest an admin may hold a clock from the live board, and how much
+  // of a dropped player's allowance is left when the admin feed says so.
+  clock_hold_max_minutes: '30',
+  abandon_low_alert_seconds: '90',
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
@@ -794,6 +848,17 @@ export function openDb(path: string): DB {
   // First time this rostered player was seen connected to the match server.
   // Null means they never turned up, which is what the no-show reaper counts.
   ensureColumn(db, 'match_players', 'connected_at', 'TEXT');
+  // Who put this player on the roster. 'web' is the site's own roster push for
+  // a match it queued. 'udp' is a MATCH_ROSTER line off the log stream: every
+  // player of a match started in game, and every late joiner on any match.
+  // The stream is lossy and forgeable, so a 'udp' row is only a claim until
+  // the RCON dump names the same player; see reconcile in src/matchResult.ts.
+  // Defaulted to 'web' so rows that predate it are never second-guessed.
+  ensureColumn(db, 'match_players', 'source', "TEXT NOT NULL DEFAULT 'web'");
+  // 0 keeps the row for the record and keeps the player out of the rating
+  // step, now and on every later recompute. unrated_reason says why.
+  ensureColumn(db, 'match_players', 'rated', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'match_players', 'unrated_reason', 'TEXT');
   // Input detections became one row per player, match and signature, carrying
   // how many bursts qualified and which. Rows from before this default to one
   // hit and no evidence list; scripts/rerun-input-signatures.ts rebuilds them.
@@ -817,6 +882,42 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'discord_id', 'TEXT');
   ensureColumn(db, 'players', 'discord_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_discord_id ON players(discord_id) WHERE discord_id IS NOT NULL');
+  // What players.status was when the account was banned, so the end of the
+  // ban can put it back. NULL when the account is not banned, and on a row
+  // banned before this column existed, which restoreStatus in
+  // src/admin/players.ts works out from the evidence instead.
+  ensureColumn(db, 'players', 'status_before_ban', 'TEXT');
+  // Bumped to end every session a player holds at once: the signed cookie
+  // carries the value it was issued under. See src/session.ts.
+  ensureColumn(db, 'players', 'session_epoch', 'INTEGER NOT NULL DEFAULT 0');
+  // Every Discord link there has ever been, open or closed. The players row
+  // only knows the link as it stands, which is what let one Discord account
+  // serve any number of Steam accounts in sequence with nothing to show for
+  // it. No foreign key on `steamid`, like the evidence tables: a merge moves
+  // these rows rather than being blocked by them. See linkDiscord.
+  db.exec(`CREATE TABLE IF NOT EXISTS discord_link_history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    steamid      TEXT NOT NULL,
+    discord_id   TEXT NOT NULL,
+    discord_name TEXT NOT NULL DEFAULT '',
+    linked_at    TEXT NOT NULL,
+    linked_by    TEXT NOT NULL,
+    unlinked_at  TEXT,
+    unlinked_by  TEXT
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_discord_link_history_discord ON discord_link_history (discord_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_discord_link_history_steamid ON discord_link_history (steamid)');
+  // Links made before this table existed get an open row, so the first unlink
+  // after the upgrade has something to close. `backfill` marks linked_at as
+  // the time of the upgrade rather than of the link, which nobody recorded.
+  db.prepare(
+    `INSERT INTO discord_link_history (steamid, discord_id, discord_name, linked_at, linked_by)
+     SELECT p.steamid, p.discord_id, COALESCE(p.discord_name, ''), ?, 'backfill' FROM players p
+     WHERE p.discord_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM discord_link_history h
+       WHERE h.steamid = p.steamid AND h.discord_id = p.discord_id AND h.unlinked_at IS NULL
+     )`,
+  ).run(new Date().toISOString());
   // Player-authored profile fields. All three are constrained rather than
   // trusted: see src/profileFields.ts. They are columns rather than rows in
   // player_links because they are one-per-player and are rendered with the
@@ -904,12 +1005,36 @@ export function openDb(path: string): DB {
   // own transport (see src/dlc4.ts), not set by hand. Defaults to 0 so an
   // existing row stays out of the dlc4 map pool until it is actually checked.
   ensureColumn(db, 'servers', 'has_dlc4', 'INTEGER NOT NULL DEFAULT 0');
+  // Signed log lines; see src/logAuth.ts. The secret is generated here and
+  // pushed to the box over rcon, NULL until an admin asks for one. log_auth is
+  // off | log | enforce and defaults to off, so nothing changes for a server
+  // until someone turns it on. The last two are where the replay check had
+  // got to, kept so a backend restart does not reopen the window.
+  ensureColumn(db, 'servers', 'log_secret', 'TEXT');
+  ensureColumn(db, 'servers', 'log_auth', "TEXT NOT NULL DEFAULT 'off'");
+  ensureColumn(db, 'servers', 'log_auth_boot', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'servers', 'log_auth_seq', 'INTEGER NOT NULL DEFAULT 0');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');
   // The ticket a ban was issued from, so the ban list and the ticket point at
   // each other. Null for every ban issued from the Players tab.
   ensureColumn(db, 'bans', 'ticket_id', 'INTEGER');
+  // "Somebody has looked at this file." What takes a player off the Needs a
+  // look list, and what puts them back when something newer arrives.
+  //
+  // No foreign key on steamid, like the evidence tables: the evidence that
+  // raises a file can sit under a merged alt's id, and a review of that file
+  // must not be blocked by whether that id still has a player row. No CHECK
+  // anywhere: this is a log, and a log has nothing to constrain.
+  db.exec(`CREATE TABLE IF NOT EXISTS player_reviews (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    steamid     TEXT NOT NULL,
+    reviewed_by TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT ''
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS player_reviews_steamid ON player_reviews (steamid, reviewed_at)');
   ensureTicketSchema(db);
   // When a report was said in Discord: in its ticket's thread, or as a line
   // in the admin channel while no forum is set. NULL means "not yet", which
@@ -938,6 +1063,33 @@ export function openDb(path: string): DB {
   // One-time backfill: every report already sitting on a restricted ticket
   // was always meant to be held, whether or not it predates this column.
   if (feedHeldIsNew) db.exec('UPDATE ticket_reports SET feed_held = 1 WHERE ticket_id IN (SELECT id FROM tickets WHERE restricted = 1)');
+  // Who is on the game server right now, one row per rostered player, written
+  // from PLAYER connect, LEAVE and RETURN and from the plugin's own answer to
+  // an admin clock action (src/presence.ts). `since` is when the current state
+  // began. `remaining_s` is the reconnect allowance as of `remaining_at`,
+  // which is a different instant after a hold, a release or an add, so the two
+  // cannot share a column. `low_alert_at` is what makes the admin feed warning
+  // once per drop, and what stops a restart from posting it again.
+  // No CHECK on state, and steamid is deliberately not a foreign key: the
+  // roster check happens at write time, against match_players.
+  db.exec(`CREATE TABLE IF NOT EXISTS match_presence (
+    match_id INTEGER NOT NULL REFERENCES matches(id),
+    steamid TEXT NOT NULL,
+    state TEXT NOT NULL,
+    since TEXT NOT NULL,
+    remaining_s INTEGER,
+    remaining_at TEXT,
+    held INTEGER NOT NULL DEFAULT 0,
+    hold_until TEXT,
+    low_alert_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (match_id, steamid)
+  )`);
+  // Whether this match's server understands sm_pug_leave (pug-match 0.3.4).
+  // NULL until something has asked: the setup path learns it for free from the
+  // reply to the hold ceiling cvar, and an action learns it from its own answer.
+  ensureColumn(db, 'matches', 'leave_control', 'INTEGER');
+
   seed(db);
   return db;
 }

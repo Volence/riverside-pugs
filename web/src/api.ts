@@ -86,22 +86,9 @@ export interface StateSnapshot {
   /** The ready check the viewer was just in, if it failed and they have not
    *  dismissed it. The failure no longer appears in #queue-here, so this is
    *  where they find out. */
-  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean } | null;
-}
-
-/** One row of the public ban list. Nothing private is on it: see
- *  `publicBans` in src/admin/players.ts. */
-export interface PublicBan {
-  steamid: string;
-  name: string;
-  reason: string;
-  createdAt: string;
-  expiresAt: string | null;
-  permanent: boolean;
-  active: boolean;
-  bannedByName: string | null;
-  liftedByName: string | null;
-  liftedAt: string | null;
+  /** `removed` is set instead of `notReady` when the pop was cancelled because
+   *  a player was taken out of it (banned mid ready check). */
+  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer } | null;
 }
 
 /** What a merge is about to move, or just moved. */
@@ -174,6 +161,9 @@ export interface MatchSummary {
 export interface MatchPlayerStats {
   steamid: string;
   name: string;
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   team: Team;
   siDamage: number;
   siKills: number;
@@ -198,6 +188,9 @@ export interface StatDef {
 }
 
 export interface LivePlayer extends NamedPlayer {
+  /** Their linked Discord display name, only when it reads differently from
+   *  `name`. Null when unlinked or the names match. */
+  discordName: string | null;
   /** Missing key means "not measured", never zero. skill_detect keys are
    *  absent entirely when that plugin is not loaded. */
   stats: Record<string, number>;
@@ -288,7 +281,19 @@ export interface MatchDemo {
   bytes: number;
 }
 
+/** A match still being played: 'waiting' for a server, 'configuring' one, or
+ *  'live'. Deliberately tiny; never the server address, the token or a
+ *  password, none of which belong in a link anyone can open. The same id
+ *  answers with a MatchDetail once the match ends. */
+export interface MatchOngoing {
+  ongoing: true;
+  id: number;
+  campaign: string;
+  state: 'waiting' | 'configuring' | 'live';
+}
+
 export interface MatchDetail {
+  ongoing: false;
   /** `winner` is null on an aborted match: it never reached a result. The
    *  void fields are set only when a COMPLETED match was voided afterwards,
    *  which the schema also records as state 'aborted'. */
@@ -326,6 +331,11 @@ export interface MatchDetail {
     byPlayer: Record<string, Record<string, number>>;
   }[];
 }
+
+/** What GET /api/matches/:id answers, narrowed by `ongoing` so a caller has
+ *  to handle the in-progress case before it can reach the finished one's
+ *  fields. */
+export type MatchApiResult = MatchOngoing | MatchDetail;
 
 export interface RoundAggregate {
   attempts: number;
@@ -627,6 +637,14 @@ export interface AdminBan {
 
 export interface AdminPlayerDetail extends AdminPlayerRow {
   discordId: string | null;
+  /** Every Discord account this player has linked, newest first, each with
+   *  the OTHER Steam accounts that have held it. `linkedBy` is 'backfill' for
+   *  a link older than the history table, whose real date nobody recorded. */
+  discordHistory?: {
+    discordId: string; discordName: string; linkedAt: string; linkedBy: string;
+    unlinkedAt: string | null; unlinkedBy: string | null;
+    others: { steamid: string; name: string | null; linkedAt: string; unlinkedAt: string | null }[];
+  }[];
   activeBan: AdminBan | null;
   bans: AdminBan[];
   notes: { id: number; authorId: string; authorName: string | null; text: string; createdAt: string }[];
@@ -664,6 +682,35 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
   networks: { ipHash: string; country: string | null; firstSeen: string; lastSeen: string; seenCount: number }[];
   /** Other accounts seen on one of those connections. Evidence, not proof. */
   sharesAddressWith: { steamid: string; name: string; country: string | null; seenCount: number; lastSeen: string }[];
+  /** What Steam says about the account. Null until Steam has been asked, and
+   *  for good on an install with no api key. Context, never a verdict. */
+  steamAccount?: SteamAccount | null;
+}
+
+export interface SteamAccount {
+  checkedAt: string;
+  /** Null for a private profile: Steam does not give the date. */
+  createdAt: string | null;
+  ageDays: number | null;
+  /** What the age is measured against: the first match here, or the day they
+   *  joined when they have not played yet. */
+  reference: { kind: 'first_match' | 'joined'; at: string } | null;
+  daysBeforeReference: number | null;
+  visibility: 'public' | 'private' | 'unknown';
+  profileConfigured: boolean | null;
+  bans: { vac: number; game: number; daysSinceLast: number | null; community: boolean; economy: string; checkedAt: string } | null;
+  /** `hidden` is never zero hours: game details are private. */
+  l4d1:
+    | { state: 'visible'; hours: number }
+    | { state: 'not_owned' }
+    | { state: 'hidden'; lastSeenHours: number | null }
+    | null;
+  level: number | null;
+  /** Last account seen lending this one the game through Family Sharing, and
+   *  the player here it belongs to, if any. */
+  lender: { steamid: string; seenAt: string; player: { steamid: string; name: string; banned: boolean } | null } | null;
+  /** Plain-worded and already hedged by the server. */
+  flags: { kind: string; text: string }[];
 }
 
 /** Team SR, the gap and the paper odds. `source` says which ratings it came
@@ -683,6 +730,19 @@ export interface Forecast {
   source: 'history' | 'current';
 }
 
+export type LogAuthMode = 'off' | 'log' | 'enforce';
+/** What the backend's log signature check has to say about one server. The
+ *  secret itself never leaves the backend; `hasSecret` is all the page gets.
+ *  Counters are since the backend last started, null when it has no verifier. */
+export interface ServerLogAuth {
+  mode: LogAuthMode;
+  hasSecret: boolean;
+  counters: {
+    ok: number; missing: number; badMac: number; replay: number;
+    lastOkAt: number | null; lastFailAt: number | null; lastFail: string | null;
+  } | null;
+}
+
 export interface AdminOverview {
   open: {
     id: number; campaign: string; state: string; serverId: number | null; createdAt: string;
@@ -692,7 +752,12 @@ export interface AdminOverview {
     connect: { host: string; port: number; password: string } | null;
     forecast: Forecast | null;
   }[];
-  servers: { id: number; name: string; host: string; port: number; status: string; enabled: number; tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number }[];
+  servers: {
+    id: number; name: string; host: string; port: number; status: string; enabled: number;
+    tvPort: number | null; tvPassword: string | null; tvEnabled: number; restartAfterMatch?: number;
+    /** Signed log lines. Optional: a payload from before it existed has none. */
+    logAuth?: ServerLogAuth;
+  }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
@@ -702,6 +767,50 @@ export interface AdminOverview {
   /** Across every counted match: who is habitually the one holding up the ready-up. */
   slowToReady: SlowToReady[];
 }
+
+/** The admin live board. Mirrors src/admin/liveBoard.ts field for field.
+ *  Every `...S` figure is whole seconds as of the moment the server answered;
+ *  the page counts on from when the payload arrived and never compares
+ *  anything here against its own wall clock. */
+export type LiveBoardReason = { kind: 'signon_drop'; at: string } | { kind: 'not_in_voice' };
+export type LiveBoardStatus =
+  | { kind: 'connected'; remainingS: number | null }
+  | { kind: 'never_connected'; sincePopS: number }
+  | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
+export interface LiveBoardPlayer {
+  steamid: string; name: string; team: 'a' | 'b'; status: LiveBoardStatus; reason: LiveBoardReason | null;
+}
+export interface LiveBoardClock {
+  kind: 'abandon'; steamid: string; name: string; remainingS: number; held: boolean; holdLeftS: number | null;
+}
+export interface LiveBoardMatch {
+  id: number;
+  campaign: string;
+  map: string | null;
+  state: 'waiting' | 'configuring' | 'live' | 'paused';
+  phase: 'live' | 'paused' | 'readyup' | 'roundover' | 'loading' | null;
+  server: { id: number; name: string } | null;
+  teamAScore: number;
+  teamBScore: number;
+  elapsedS: number;
+  spectate: SpectateInfo | null;
+  /** old_plugin: the server's pug-match predates 0.3.4 and has no clock control. */
+  leaveControl: 'ok' | 'old_plugin' | 'unknown';
+  /** False when the game server runs no reconnect clock for this match at
+   *  all, which is every match that was started in game. */
+  leaveTracking: boolean;
+  teamA: LiveBoardPlayer[];
+  teamB: LiveBoardPlayer[];
+  clocks: LiveBoardClock[];
+}
+export interface LiveBoard {
+  now: string;
+  holdMaxMinutes: number;
+  /** Where a countdown starts reading as nearly out, in seconds; 0 is off. */
+  lowAlertSeconds: number;
+  matches: LiveBoardMatch[];
+}
+export type LeaveClockAction = 'hold' | 'release' | 'add' | 'end';
 
 export interface AdminSetting {
   key: string; label: string; help: string; group: string; secret?: boolean; value: string;
@@ -755,55 +864,6 @@ export interface ReportEligibility {
 export interface MyReport {
   id: number; targetId: string; targetName: string | null; category: string;
   matchId: number | null; createdAt: string; status: 'open' | 'closed';
-}
-
-/** One row of the integrity board. trackShare, occZ, teamGap and their percentiles are nullable:
- *  a map with too little recorded history gets no occupancy score at all, and
- *  that must never be confused with an average (0) score. composite is a sort
- *  key, not a verdict. */
-export interface IntegrityPlayerRow {
-  steamid: string;
-  /** Resolved name, or the SteamID when the server has never seen one. */
-  name: string;
-  rounds: number;
-  /** Clips in existence for this player. Zero on every row means nothing has
-   *  been flagged at all, and a ranking with nothing flagged is a list of your
-   *  best players by another name. */
-  clips: number;
-  /** Rounds in which the detector had at least one chance. A player under the
-   *  server's minimum is listed but not ranked. */
-  eligibleRounds: number;
-  ranked: boolean;
-  /** The best single tracking window in their history. Context only: it is a
-   *  maximum, so it rises with playtime, and nothing is ranked on it. */
-  fidMax: number;
-  fidP95: number;
-  scoreable: number;
-  /** Tracking as ranked: summed fidelity over scoreable windows. Null with too
-   *  few windows to make a ratio of. */
-  trackShare: number | null;
-  occZ: number | null;
-  teamGap: number | null;
-  pFid: number | null;
-  pOcc: number | null;
-  pGap: number | null;
-  /** Null when unranked. */
-  composite: number | null;
-}
-
-/** A flag raised live by another plugin (today Little Anti-Cheat) rather than
- *  by replay analysis. No clip behind it, so nothing to watch. */
-/** One row of the cross-player flag feed: LilAC hits and input-stat detections
- *  merged, so the panel has a front door. */
-export interface RecentFlag {
-  id: number;
-  kind: string;
-  source: string;
-  severity: string;
-  steamid: string;
-  name: string;
-  matchId: number | null;
-  at: string;
 }
 
 /** Whether anything is being captured at all. An empty panel cannot otherwise
@@ -930,11 +990,146 @@ export interface TicketDetail {
   accessCandidates: { steamid: string; name: string }[];
   discussion: TicketDiscussion;
   caseFile: CaseFile | null;
+  /** The accused as the Player File's glance row shows them. Null only if
+   *  the player row vanished under the ticket. */
+  summary: FileSummaryData | null;
   /** banCapMinutes null means no cap: the viewer is an admin. */
   viewer: { isAdmin: boolean; banCapMinutes: number | null };
 }
 
 export interface TicketCounts { open: number; mine: number; closed: number }
+
+// ---------- people ----------
+
+export type TimelineSource =
+  | 'input' | 'lilac' | 'analyzer' | 'drop' | 'ticket' | 'penalty' | 'ban'
+  | 'note' | 'steam' | 'discord_link';
+
+/** One row of a player's merged history. The summary is written on the
+ *  server so every surface says the same sentence about the same evidence. */
+export interface TimelineItem {
+  at: string;
+  source: TimelineSource;
+  kind: string;
+  summary: string;
+  matchId: number | null;
+  replay: { ordinal: number; half: number; tMs: number } | null;
+  ref: { type: string; id: number | string } | null;
+}
+
+/** Mirrors src/admin/fileAccess.ts. `review_round` is admin-only: it marks a
+ *  round reviewed from the replay analyzer. `steam_refresh` is admin-only
+ *  too: it gates the Steam account panel's "Check now". */
+export type FileAction =
+  | 'note' | 'looked_at' | 'open_ticket'
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
+
+/** The analyzer board's columns for one player. A sort key, never a claim. */
+export interface AnalyzerRank {
+  steamid: string; ranked: boolean; rank: number | null; of: number;
+  rounds: number; eligibleRounds: number; clips: number;
+  trackShare: number | null; occZ: number | null; teamGap: number | null;
+  pFid: number | null; pOcc: number | null; pGap: number | null; composite: number | null;
+}
+
+export interface FileReview {
+  id: number; steamid: string; reviewedBy: string; reviewedByName: string | null;
+  reviewedAt: string; note: string;
+}
+
+/** "Is there anything here": the file's own glance row, and the accused's
+ *  section of a ticket page. fileUrl is null when the viewer may not open
+ *  the whole file. */
+export interface FileSummaryData {
+  steamid: string; name: string; avatar: string | null; status: string;
+  isAdmin: boolean; isMod: boolean; sr: number | null; games: number; createdAt: string | null;
+  activeBan: AdminBan | null; bans: number; penalties: number;
+  timeout: { until: string; offenses: number } | null;
+  openTickets: number; aliases: number;
+  sharesAddressWith: { steamid: string; name: string }[];
+  steamFlags: { kind: string; text: string }[];
+  evidence: { source: TimelineSource; count: number }[];
+  analyzer: AnalyzerRank | null;
+  lastReview: FileReview | null;
+  fileUrl: string | null;
+}
+
+export interface PlayerFileData {
+  steamid: string;
+  header: {
+    steamid: string; name: string; avatar: string | null; status: string;
+    isAdmin: boolean; isMod: boolean; discordName: string | null;
+    sr: number | null; games: number; createdAt: string;
+  };
+  glance: FileSummaryData;
+  timeline: TimelineItem[];
+  sections: {
+    identity: {
+      aliases: AdminPlayerDetail['aliases'];
+      discordHistory: NonNullable<AdminPlayerDetail['discordHistory']>;
+      steamAccount: SteamAccount | null;
+      networks: AdminPlayerDetail['networks'];
+      sharesAddressWith: AdminPlayerDetail['sharesAddressWith'];
+    };
+    standing: {
+      activeBan: AdminBan | null;
+      bans: AdminBan[];
+      penalties: AdminPlayerDetail['penalties'];
+      timeout: AdminPlayerDetail['timeout'];
+    };
+    matches: AdminPlayerDetail['matches'];
+    tickets: TicketSummary[];
+    notes: AdminPlayerDetail['notes'];
+    evidence: {
+      analyzer: AnalyzerRank | null;
+      rounds: IntegrityRound[];
+      clips: IntegrityClip[];
+      flags: IntegrityFlag[];
+      inputFlags: AdminPlayerDetail['inputFlags'];
+      inputCaps: AdminPlayerDetail['inputCaps'];
+      signonDrops: AdminPlayerDetail['signonDrops'];
+    };
+  };
+  actions: FileAction[];
+  lastReview: FileReview | null;
+}
+
+export interface NeedsALookRow {
+  steamid: string; name: string; avatar: string | null; status: string;
+  newestEvidenceAt: string; sources: TimelineSource[];
+  lastReviewAt: string | null; lastReviewBy: string | null;
+  openTickets: number; analyzer: AnalyzerRank | null;
+}
+
+/** One row of "everyone the analyzer has measured": the board's own columns
+ *  plus the name to print. Mirrors MeasuredRow in src/admin/needsALook.ts. */
+export type MeasuredRow = AnalyzerRank & { name: string };
+
+export interface PeopleBan {
+  id: number; steamid: string; name: string; reason: string; length: string;
+  createdAt: string; expiresAt: string | null; createdByName: string | null;
+  liftedAt: string | null; liftedByName: string | null; active: boolean;
+  ticketId: number | null; withheld: boolean; canOpen: boolean;
+}
+
+/** The People desk. Moderators may call all of it; the admin-only actions a
+ *  file offers stay on adminApi, which is where the server enforces them. */
+export const peopleApi = {
+  people: (q: string, signal?: AbortSignal) =>
+    get<{ players: AdminPlayerRow[] }>(`/api/admin/people?q=${encodeURIComponent(q)}`, signal),
+  file: (steamid: string, signal?: AbortSignal) =>
+    get<PlayerFileData>(`/api/admin/people/${encodeURIComponent(steamid)}`, signal),
+  review: (signal?: AbortSignal) =>
+    get<{ players: NeedsALookRow[]; measured: MeasuredRow[]; health: CaptureHealth }>(
+      '/api/admin/people/review', signal,
+    ),
+  bans: (filter: 'active' | 'expired' | 'all', q: string, signal?: AbortSignal) =>
+    get<{ bans: PeopleBan[] }>(`/api/admin/people/bans?filter=${filter}&q=${encodeURIComponent(q)}`, signal),
+  note: (steamid: string, text: string) =>
+    post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/notes`, { text }),
+  lookedAt: (steamid: string, note: string) =>
+    post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
+};
 
 export const modApi = {
   tickets: (filter: 'open' | 'mine' | 'closed', signal?: AbortSignal) =>
@@ -953,10 +1148,6 @@ export const modApi = {
 };
 
 export const adminApi = {
-  players: (q: string, signal?: AbortSignal) =>
-    get<{ players: AdminPlayerRow[] }>(`/api/admin/players?q=${encodeURIComponent(q)}`, signal),
-  player: (steamid: string, signal?: AbortSignal) =>
-    get<AdminPlayerDetail>(`/api/admin/players/${encodeURIComponent(steamid)}`, signal),
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
   unban: (steamid: string) => post(`/api/admin/players/${steamid}/unban`),
@@ -964,12 +1155,19 @@ export const adminApi = {
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   setMod: (steamid: string, isMod: boolean) => post(`/api/admin/players/${steamid}/mod`, { isMod }),
   unlinkDiscord: (steamid: string) => post(`/api/admin/players/${steamid}/unlink-discord`),
+  /** Ends every session the player holds, on every device. */
+  signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
   unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),
+  steamRefresh: (steamid: string) =>
+    post<{ ok: true; refreshed: number }>(`/api/admin/players/${steamid}/steam-refresh`),
   note: (steamid: string, text: string) => post(`/api/admin/players/${steamid}/notes`, { text }),
   overview: (signal?: AbortSignal) => get<AdminOverview>('/api/admin/overview', signal),
+  live: (signal?: AbortSignal) => get<LiveBoard>('/api/admin/live', signal),
+  leaveClock: (matchId: number, steamid: string, action: LeaveClockAction, seconds?: number) =>
+    post<{ ok: true; reply: string }>(`/api/admin/live/${matchId}/players/${steamid}/leave`, { action, seconds }),
   abortMatch: (id: number) => post(`/api/admin/matches/${id}/abort`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
@@ -982,18 +1180,14 @@ export const adminApi = {
   saveSetting: (key: string, value: unknown) => put<{ ok: true; value: string }>(`/api/admin/settings/${key}`, { value }),
   serverRestartAfterMatch: (id: number, on: boolean) =>
     post(`/api/admin/servers/${id}/restart-after-match`, { on }),
+  serverLogSecret: (id: number, rotate = false) =>
+    post<{ ok: true; pushed: boolean; rotated: boolean }>(`/api/admin/servers/${id}/log-secret`, { rotate }),
+  serverLogAuth: (id: number, mode: LogAuthMode) => post(`/api/admin/servers/${id}/log-auth`, { mode }),
   dlc4Check: () => post<{ results: { id: number; name: string; hasDlc4: boolean }[] }>('/api/admin/servers/dlc4-check'),
   syncServerAdmins: () => post<{ results: { serverId: number; server: string; ok: boolean; error?: string }[] }>('/api/admin/servers/admins-sync'),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
-  integrity: (season: string, signal?: AbortSignal) =>
-    get<{ players: IntegrityPlayerRow[]; flags: RecentFlag[]; health: CaptureHealth }>(
-      `/api/admin/integrity?season=${encodeURIComponent(season)}`, signal),
-  /** Flags raised live by another plugin (today Little Anti-Cheat). No replay
-   *  behind them, so they are listed beside the clips rather than among them. */
-  integrityPlayer: (steamid: string, signal?: AbortSignal) =>
-    get<{ rounds: IntegrityRound[]; clips: IntegrityClip[]; flags: IntegrityFlag[] }>(`/api/admin/integrity/${steamid}`, signal),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
   integrityJob: (signal?: AbortSignal) =>
@@ -1058,8 +1252,6 @@ export const api = {
   me: (signal?: AbortSignal) => get<Me>('/api/me', signal),
   site: (signal?: AbortSignal) => get<SiteInfo>('/api/site', signal),
   state: (signal?: AbortSignal) => get<StateSnapshot>('/api/state', signal),
-  bans: (q = '', signal?: AbortSignal) =>
-    get<{ bans: PublicBan[] }>(`/api/bans${q ? `?q=${encodeURIComponent(q)}` : ''}`, signal),
   queue: (signal?: AbortSignal) => get<PublicQueue>('/api/queue', signal),
   leaderboard: (signal?: AbortSignal, season?: number) =>
     get<Leaderboard>(season === undefined ? '/api/leaderboard' : `/api/leaderboard?season=${season}`, signal),
@@ -1080,7 +1272,7 @@ export const api = {
   map: (map: string, signal?: AbortSignal) =>
     get<MapDetail>(`/api/maps/${encodeURIComponent(map)}`, signal),
   match: (id: string, signal?: AbortSignal) =>
-    get<MatchDetail>(`/api/matches/${encodeURIComponent(id)}`, signal),
+    get<MatchApiResult>(`/api/matches/${encodeURIComponent(id)}`, signal),
   endorseState: (matchId: number, signal?: AbortSignal) =>
     get<EndorseState>(`/api/matches/${matchId}/endorse`, signal),
   endorse: (matchId: number, to: string, kind: EndorseKind) =>
@@ -1091,9 +1283,14 @@ export const api = {
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
 
   register: (code: string) => post('/api/register', { code }),
+  /** Whose Discord a link code is for. Reads, never spends. */
+  peekDiscordCode: (code: string) =>
+    get<{ discordId: string; discordName: string }>(`/api/discord/link-code?code=${encodeURIComponent(code)}`),
   linkDiscordCode: (code: string) =>
     post<{ ok: true; active: boolean; discordName: string }>('/api/discord/link-code', { code }),
   unlinkDiscord: () => post('/api/discord/unlink'),
+  /** Sign out of this browser. */
+  logout: () => post<{ ok: true }>('/auth/logout'),
   saveProfile: (body: ProfileFieldsInput) => post<{ ok: true }>('/api/profile', body),
   unlinkTwitch: () => post<{ ok: true }>('/api/twitch/unlink'),
   reportEligibility: (matchId: number, signal?: AbortSignal) =>

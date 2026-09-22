@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { upsertPlayer } from '../src/players.js';
+import { activatePlayer, upsertPlayer } from '../src/players.js';
+import { banPlayer, liftExpiredBans } from '../src/admin/players.js';
 import { OFFLINE_CAP, streamsView } from '../src/streamsView.js';
 
 const T0 = new Date('2026-09-20T12:00:00.000Z');
 let db: DB;
 
+/** An active member, which is who the Streams page is for. */
 function player(id: string, name: string) {
   upsertPlayer(db, { steamid: id, name, avatar: null }, []);
+  activatePlayer(db, id);
 }
 
 function linked(id: string, twitchId: string, login: string) {
@@ -196,5 +199,44 @@ describe('streamsView', () => {
     expect(json).not.toContain('123456');
     expect(json).not.toContain('654321');
     expect(json).toContain('alicetv');
+  });
+  // Linking Twitch needed nothing but a Steam login, so an account nobody had
+  // let in, or one that had been banned, could put a stream title and
+  // thumbnail of its choosing on a public page.
+  describe('who may appear', () => {
+    const A = '76561198000000071';
+
+    it('an account that was never let in is on no tier', () => {
+      upsertPlayer(db, { steamid: A, name: 'stranger', avatar: null }, []);
+      linked(A, '71', 'strangertv');
+      status(A, true);
+      const v = streamsView(db, { engaged: [], now: T0 });
+      expect([...v.inPug, ...v.live, ...v.offline]).toEqual([]);
+      expect(v.offlineTotal).toBe(0);
+    });
+
+    it('a banned account disappears, live or offline, and comes back when the ban ends', () => {
+      player(A, 'alice');
+      linked(A, '71', 'alicetv');
+      status(A, true);
+      expect(streamsView(db, { engaged: [], now: T0 }).live).toHaveLength(1);
+      banPlayer(db, A, 'admin', 'toxic', 60, T0);
+      const banned = streamsView(db, { engaged: [], now: T0 });
+      expect([...banned.inPug, ...banned.live, ...banned.offline]).toEqual([]);
+      const later = new Date(T0.getTime() + 2 * 60 * 60 * 1000);
+      liftExpiredBans(db, later);
+      polled(later);
+      expect(streamsView(db, { engaged: [], now: later }).live).toHaveLength(1);
+    });
+
+    it('asks the bans table too, not only the cached status', () => {
+      player(A, 'alice');
+      linked(A, '71', 'alicetv');
+      status(A, true);
+      banPlayer(db, A, 'admin', 'toxic', 60, T0);
+      // The shape a merge leaves: the ban row is there, the status is not.
+      db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(A);
+      expect(streamsView(db, { engaged: [], now: T0 }).live).toEqual([]);
+    });
   });
 });

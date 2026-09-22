@@ -59,7 +59,7 @@ describe('a restricted ticket in Discord', () => {
     expect(JSON.stringify(inThread[0].payload)).toContain('Discord Administrator permission');
     expect(staffThread(db, id)).toMatchObject({ surface: 'private', channel_id: 'chan1', card_message_id: inThread[0].id });
     expect(t.dms.map((d) => d.userId)).toEqual(['907']);
-    expect(JSON.stringify(t.dms[0].payload)).toContain(`https://pug.test/admin?ticket=${id}`);
+    expect(JSON.stringify(t.dms[0].payload)).toContain(`https://pug.test/admin/people/tickets/${id}`);
     expect(JSON.stringify(t.dms[0].payload)).not.toContain('player5');
     expect(events).toEqual([]);
   });

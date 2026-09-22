@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { upsertPlayer } from '../src/players.js';
+import { upsertPlayer, linkDiscord } from '../src/players.js';
 import { ServerReleaser } from '../src/serverRelease.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, getLiveMatches,
@@ -53,6 +53,30 @@ describe('liveView', () => {
     seedLive();
     const m = getLiveMatches(db)[0];
     expect(JSON.stringify(m)).not.toContain(TOKEN);
+  });
+
+  describe('discordName gating', () => {
+    // /api/live has no session at all, so this is the caller's job: pass
+    // showDiscordNames only once the route has checked the viewer is a
+    // signed-in player in good standing (default false, the safe one).
+    it('is null for everyone by default, even a player with a differing linked discord name', () => {
+      seedLive();
+      linkDiscord(db, A[0], '111', 'a totally different name');
+      const m = getLiveMatches(db)[0];
+      expect(m.teamA.find((p) => p.steamid === A[0])!.discordName).toBeNull();
+      expect(JSON.stringify(m)).not.toContain('a totally different name');
+    });
+
+    it('is filled in when the caller asks, only for a differing name, and never carries a discord id', () => {
+      seedLive();
+      linkDiscord(db, A[0], '111', 'a totally different name');
+      linkDiscord(db, A[1], '222', 'p2'); // same name as steam ("p2", from seedLive)
+      const m = getLiveMatches(db, true)[0];
+      expect(m.teamA.find((p) => p.steamid === A[0])!.discordName).toBe('a totally different name');
+      expect(m.teamA.find((p) => p.steamid === A[1])!.discordName).toBeNull();
+      expect(JSON.stringify(m)).not.toContain('discordId');
+      expect(JSON.stringify(m)).not.toContain('111');
+    });
   });
 
   it('records the current map from MATCH_START', () => {
@@ -941,4 +965,19 @@ describe('liveView: ready-up ledger', () => {
     expect(rows[1].totalSeconds).toBeGreaterThanOrEqual(29);
     expect(rows[1].totalSeconds).toBeLessThanOrEqual(32);
   });
+
+  // The admin table sorts in the browser (share of ready-ups they were last
+  // for, average, total), so the server must not pre-cut the list to the top
+  // few by one of those orders: the slowest average may never have been last.
+  it('returns everybody, not the top of one ordering', () => {
+    const id = seedLive();
+    clearLive(db, id);
+    const ru = Number(db.prepare(
+      "INSERT INTO match_readyups (match_id, map_ordinal, half, started_at, ended_at, last_unready) VALUES (?, 1, 1, datetime('now', '-60 seconds'), datetime('now'), '[]')",
+    ).run(id).lastInsertRowid);
+    const ins = db.prepare('INSERT INTO match_readyup_players (readyup_id, match_id, player_id, seconds) VALUES (?, ?, ?, ?)');
+    for (let i = 0; i < 40; i++) ins.run(ru, id, `7656119800009${String(i).padStart(4, '0')}`, i);
+    expect(slowToReady(db)).toHaveLength(40);
+  });
 });
+

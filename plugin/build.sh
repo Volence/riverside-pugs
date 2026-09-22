@@ -8,12 +8,17 @@ cp pug-match.sp "$SCRIPTING/pug-match.sp"
 cp pug-stats.inc "$SCRIPTING/pug-stats.inc"
 cp pug-leave.inc "$SCRIPTING/pug-leave.inc"
 cp pug-pause.inc "$SCRIPTING/pug-pause.inc"
+# Signed log lines: shared with l4d_inputstats, l4d_lilac_report and
+# consistency/plugin/l4d_consistency, which need the same two files beside
+# them when they are compiled.
+cp pug-logauth.inc "$SCRIPTING/pug-logauth.inc"
+cp pug-hmac.inc "$SCRIPTING/pug-hmac.inc"
 # include/l4d2_skill_detect.inc is shared with other plugins that build against
 # the same Rotoblin tree, so only copy it in (and only trap-delete it) when it
 # is not already there. Otherwise a build here would overwrite a real copy and
 # then the trap would delete it out from under whatever put it there.
 SKILL_DETECT_INC="$SCRIPTING/include/l4d2_skill_detect.inc"
-CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc"
+CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc"
 if [ ! -e "$SKILL_DETECT_INC" ]; then
 	cp /home/volence/l4d/L4D1_2-Plugins/l4d2_skill_detect/scripting/include/l4d2_skill_detect.inc "$SKILL_DETECT_INC"
 	CLEANUP="$CLEANUP $SKILL_DETECT_INC"

@@ -4,7 +4,8 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { setSetting } from '../src/settings.js';
-import { getPlayer } from '../src/players.js';
+import { getPlayer, upsertPlayer } from '../src/players.js';
+import { addAlias } from '../src/aliases.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const P1 = '76561198000000001';
@@ -78,5 +79,39 @@ describe('auth', () => {
     });
     expect(good.statusCode).toBe(200);
     expect(getPlayer(db, P1)!.status).toBe('active');
+  });
+
+  // A merged alt used to sign in, get a fresh `invited` row and be a separate
+  // identity again, with the alias still pointing its game traffic at the main.
+  describe('a Steam account that has been merged into another', () => {
+    const MAIN = '76561198000000099';
+    beforeEach(() => {
+      upsertPlayer(db, { steamid: MAIN, name: 'main', avatar: null }, []);
+      addAlias(db, { steamid: P1, canonical: MAIN, by: 'test' });
+    });
+
+    it('is refused at login: no player row, no session, and it is told why', async () => {
+      const res = await app.inject({ method: 'GET', url: '/auth/steam/return?openid.mode=id_res' });
+      expect(res.statusCode).toBe(403);
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.body).toMatch(/merged into another/i);
+      expect(res.body).toMatch(/contact an admin/i);
+      expect(getPlayer(db, P1)).toBeUndefined();
+      expect(res.cookies.find((c) => c.name === 'pug_session')).toBeUndefined();
+    });
+
+    it('is never signed in as the main, which would hand the main to whoever holds the alt', async () => {
+      const res = await app.inject({ method: 'GET', url: '/auth/steam/return?openid.mode=id_res' });
+      expect(res.body).not.toContain(MAIN);
+      expect(res.cookies).toEqual([]);
+    });
+
+    it('is not an active player even with a row left over from before, on the site or as an admin', async () => {
+      // The row the old hole could leave behind.
+      const cookies = authedCookie(app, db, P1);
+      db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(P1);
+      expect((await app.inject({ method: 'POST', url: '/api/queue/join', cookies })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'GET', url: '/api/admin/players', cookies })).statusCode).toBe(403);
+    });
   });
 });

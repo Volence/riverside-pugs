@@ -19,6 +19,7 @@ import { recordPlayerNet } from './playerNetworks.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
+import { peopleRoutes } from './routes/people.js';
 import { banMessage, liftExpiredBans } from './admin/players.js';
 import { botEnabled, startBot, type RunningBot } from './discord/index.js';
 import { createDjsTransport } from './discord/djsTransport.js';
@@ -29,18 +30,21 @@ import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
 import { startTwitchPoll } from './twitchPoll.js';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { STATUS_CODES } from 'node:http';
+import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
+import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
+import { renewSession } from './session.js';
 import { Hub } from './ws.js';
 import { wsRoutes } from './routes/ws.js';
 import { Matchmaker } from './matchmaker.js';
@@ -48,14 +52,16 @@ import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestr
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
-import { resolveServerBySource, type ServerRow } from './serverPool.js';
+import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
 import { PendingMatches } from './pendingMatches.js';
 import { RconClient as RealRcon } from './rcon.js';
+import type { ServerQuery } from './leaveControl.js';
 import { ServerBanSync, type ServerExec } from './serverBans.js';
 import { ServerAdminSync } from './serverAdmins.js';
 import { rconRestarter, type ServerRestarter } from './serverRestart.js';
-import { LogListener } from './logListener.js';
+import { LogListener, type LogMeta } from './logListener.js';
+import { LogAuth, pushLogSecret } from './logAuth.js';
 import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
 import {
@@ -65,6 +71,7 @@ import {
   recordPhase,
 } from './liveView.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
+import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
@@ -91,6 +98,10 @@ export interface ServerDeps {
    *  means "no Twitch even though it is configured", which is how a test keeps
    *  the poller from starting. */
   twitchApi?: TwitchApi | null;
+  /** Every Steam Web API call the signals and the persona backfill make.
+   *  Injected in tests, which also keeps the background refresher from
+   *  starting; production leaves it out and gets the real fetch. */
+  steamFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Injected in tests so releasing a server never dials rcon. */
   serverCleaner?: ServerCleaner;
   /** Runs a batch of console commands on one server, for the ban sync.
@@ -117,6 +128,12 @@ export interface ServerDeps {
    *  route. Injected in tests so the check never dials a real box; defaults
    *  to the real serverHasDlc4 otherwise. */
   dlc4Probe?: (server: ServerRow) => Promise<boolean>;
+  /** Pushes one server its log secret, for the admin's log-secret route.
+   *  Injected in tests so it never dials a real box. */
+  logSecretPusher?: (server: ServerRow, secret: string) => Promise<boolean>;
+  /** Runs one console command on one server and returns the reply, for the
+   *  live board's clock actions. Injected in tests so they never dial a box. */
+  serverQuery?: ServerQuery;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -152,14 +169,19 @@ export async function finishWithRetry(
     (db.prepare('SELECT state FROM matches WHERE id = ?').get(matchId) as
       { state: string } | undefined)?.state === 'live';
 
-  await orchestrator.finishMatch(matchId);
+  // `not_ended` is not a failed collection, and must not be treated as one:
+  // the plugin answered, and what it said is that the match is still being
+  // played. Everything below this loop aborts the match and releases its box,
+  // which sends sm_pug_abort, so falling through would let the forged
+  // MATCH_END that got us here kill the match it could no longer rate.
+  if (await orchestrator.finishMatch(matchId) === 'not_ended') return;
   for (const wait of delays) {
     if (!stillLive()) return;
     await sleep(wait);
     // Re-check after the wait: another path may have completed it meanwhile.
     if (!stillLive()) return;
     console.warn(`[orchestrator] retrying collection of match ${matchId}`);
-    await orchestrator.finishMatch(matchId);
+    if (await orchestrator.finishMatch(matchId) === 'not_ended') return;
   }
   if (!stillLive()) return;
 
@@ -234,8 +256,77 @@ export async function finishWithRetry(
   if (row?.server_id != null) releaser.release(row.server_id);
 }
 
+/** Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite
+ *  server owns the browser and proxies here, so this path only matters in
+ *  production. */
+const STATIC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
+
+/** The app shell as bytes, or null when there is no built frontend to serve.
+ *
+ *  Only for the malformed-URL handler, which runs before @fastify/static has
+ *  decorated a reply and so has no sendFile to call: the fallback at the
+ *  bottom of buildServer still goes through the plugin. Same file, same
+ *  directory, so the two cannot serve different shells. */
+function readShell(): Buffer | null {
+  try {
+    return readFileSync(join(STATIC_ROOT, 'index.html'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether this is a browser navigating to a page, rather than something
+ * asking this server for one of the things it owns.
+ *
+ * One list, asked by both the SPA fallback and the malformed-URL handler
+ * above it: two copies of "what counts as a page" would drift, and the one
+ * that drifted would start answering a typo'd endpoint with a 200 full of
+ * HTML that fails somewhere much less obvious. Non-GET methods are never a
+ * page navigation. The list is what the fallback has always used: a mistyped
+ * `/download/...` link still lands on the site's own not-found page rather
+ * than a JSON body, which is what somebody following a link from Discord
+ * should see.
+ */
+function isPageRequest(method: string, url: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return !['/api/', '/auth/', '/ws'].some((prefix) => url.startsWith(prefix));
+}
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+    // A URL fastify cannot even parse, which is almost always a percent
+    // escape truncated by a paste or a chat client, is refused here, before
+    // routing, so the SPA fallback at the bottom of this file never sees it.
+    // On a page path that handed the reader a bare 400 JSON body for what is
+    // otherwise an ordinary page URL, so the same answer the fallback gives
+    // is given here. Everything else is answered exactly as fastify would:
+    // this replaces the framework's own handler rather than wrapping it, so
+    // the default response is rebuilt rather than inherited.
+    frameworkErrors: (err, req, reply) => {
+      const e = err as Error & { code?: string; statusCode?: number };
+      // The reply handed to this hook is typed against a route that does not
+      // exist yet, so its send() accepts nothing; it is an ordinary reply.
+      const res = reply as unknown as FastifyReply;
+      if (e.code === 'FST_ERR_BAD_URL' && isPageRequest(req.method, req.raw.url ?? '')) {
+        const shell = readShell();
+        if (shell !== null) {
+          // Spelled out because this path sends bytes rather than going
+          // through @fastify/static, which appends the charset itself.
+          void res.type('text/html; charset=utf-8').send(shell);
+          return;
+        }
+      }
+      const statusCode = e.statusCode ?? 500;
+      void res.code(statusCode).send({
+        error: STATUS_CODES[statusCode] ?? 'Error',
+        code: e.code,
+        message: e.message,
+        statusCode,
+      });
+    },
+  });
 
   // Module state rather than a constructor argument: campaignRegistry(db) is
   // called from a dozen places that have no business knowing about the game
@@ -278,16 +369,35 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   // Best effort and never awaited: a Steam outage must not delay boot.
-  void backfillPersonas(deps.db, deps.config.steamApiKey)
+  void backfillPersonas(deps.db, deps.config.steamApiKey, deps.steamFetch)
     .then((n) => { if (n > 0) console.log(`[persona] backfilled ${n} player(s)`); })
     .catch((err) => console.error('[persona] backfill failed:', err));
 
+  // What Steam says about each account, for the admin player page. Without an
+  // api key every call below is a no-op, so nothing here is conditional on it.
+  const signalDeps: SignalDeps = { db: deps.db, apiKey: deps.config.steamApiKey, fetchFn: deps.steamFetch };
+  // Fire and forget, always: a caller is a login or a log event, and neither
+  // may wait on Steam or fail because of it. refreshSteamSignals does not
+  // throw; the catch is for whatever it has not thought of.
+  const refreshSignals = (steamids: string[], opts: Parameters<typeof refreshSteamSignals>[2] = {}): void => {
+    void refreshSteamSignals(signalDeps, steamids, opts)
+      .catch((err) => console.error('[steamSignals] refresh failed:', err));
+  };
+  // Same rule as the Twitch poller below: tests inject the fetch and drive the
+  // refresh directly, so a timer started for them would only outlive the test.
+  const stopSignalRefresh = deps.steamFetch === undefined ? startSteamSignalRefresh(signalDeps) : null;
+
   await app.register(cookie, { secret: deps.config.cookieSecret });
+  // Sliding renewal. After the cookie plugin, whose own onRequest hook is
+  // what parses the header this reads. Not on the way out: renewing a
+  // session in the same response that clears it would send both cookies.
+  const secureCookies = deps.config.publicUrl.startsWith('https://');
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.url.split('?')[0] === '/auth/logout') return;
+    renewSession(req, reply, deps.db, secureCookies);
+  });
   await app.register(websocket);
-  // Vite builds web/ to dist/public (see vite.config.ts). In dev the Vite server
-  // owns the browser and proxies here, so this path only matters in production.
-  const staticRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'public');
-  await app.register(fastifyStatic, { root: staticRoot });
+  await app.register(fastifyStatic, { root: STATIC_ROOT });
 
   const membership = new GuildMembership();
   const presence = new VoicePresence();
@@ -299,10 +409,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db,
     verifyLogin: deps.verifyLogin ?? realVerifyLogin,
     fetchPersona: deps.fetchPersona ?? realFetchPersona,
+    refreshSignals: (steamid) => refreshSignals([steamid]),
     discordApi,
     membership,
   });
-  await app.register(discordAuthRoutes, { config: deps.config, db: deps.db, api: discordApi });
+  await app.register(discordAuthRoutes, {
+    config: deps.config, db: deps.db, api: discordApi,
+    // The matchmaker is built further down; by the time a request can arrive
+    // it exists.
+    engaged: () => matchmaker.engagedIds(),
+  });
 
   // Injectable for tests, built from config otherwise. Null when unconfigured,
   // which makes every twitch route 404 rather than half-work.
@@ -452,6 +568,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }),
   });
 
+  // Built whether or not there is a listener to feed it: the admin overview
+  // reads its counters either way. See src/logAuth.ts.
+  const logAuth = new LogAuth(deps.db, deps.config.logPublicAddress.split(':')[0]);
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
@@ -464,7 +584,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // Declared before the listener so the message handler can close over it;
       // assigned just below, once the orchestrator it needs exists.
       let selfStarted: SelfStartedMatches | null = null;
-      logListener = new LogListener((raw, source) => {
+      // Which server row a datagram belongs to. The server whose secret
+      // signed the line, when one did: that cannot be forged or confused.
+      // Otherwise address AND port, because two srcds on one machine share an
+      // address (Riverside #3 and #4).
+      const serverOf = (source: string, meta: LogMeta): number | null =>
+        meta.serverId ?? resolveServerBySource(deps.db, source, feedHost, meta.port);
+      logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
         // merged into their main arrives here as the main, so the roster,
@@ -483,7 +609,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             const kind = cheatName(ev.cheat);
             // Stored whether or not the player is in a live match: unlike an
@@ -508,7 +634,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Same rules as a burst: evidence only, live matches only, and never
           // allowed to take the listener down.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             // The player's own match, like a burst: two live matches can share
             // a server id while the Riverside boxes share an address.
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
@@ -525,7 +651,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Evidence only, and never on the critical path: a failure here must
           // not take down the listener that also carries match_end.
           try {
-            const serverId = resolveServerBySource(deps.db, source, feedHost);
+            const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             // Rostered players in a live match only: a burst that belongs to
             // no match is not evidence about a ranked game, and storing warmup
@@ -587,6 +713,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             .catch((err) => console.error('[abandon] failed:', err));
           return;
         }
+        if (ev.kind === 'leave' || ev.kind === 'return') {
+          // The live board's view of who is missing. Guarded like everything
+          // here that is not the result path: a database error must not take
+          // down the listener that also carries match_end.
+          try {
+            const change = recordPresenceLine(deps.db, ev);
+            if (change?.changed) hub.broadcast('refresh');
+            // The plugin released a hold at its ceiling. Announced only on the
+            // held to not held transition, so whichever of this line and the
+            // sweep below gets there first is the one that speaks.
+            if (change?.holdReleased && ev.kind === 'leave' && ev.auto) {
+              publishAdminEvent({ kind: 'clock', what: 'hold_expired', steamid: ev.steamid, matchId: change.matchId, remainingS: ev.remaining });
+            }
+          } catch (err) {
+            console.error('[presence] failed to record', ev.kind, err);
+          }
+          return;
+        }
         if (ev.kind === 'problem') {
           // The plugin could not do part of a teardown (today: the game never
           // unpaused). The match is already aborted; this is for the admin
@@ -596,13 +740,44 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           return;
         }
         if (ev.kind === 'match_create' || ev.kind === 'match_roster' || ev.kind === 'match_create_end') {
-          selfStarted?.handle(ev, source);
+          // SelfStartedMatches keeps the sender of a burst's first line as an
+          // opaque string and hands it back to resolveServerId below, so the
+          // port, and the server a signature named, ride along inside it.
+          selfStarted?.handle(ev, `${source}|${meta.port}|${meta.serverId ?? ''}`);
+          // A roster line for a match that is already live is a sub being put
+          // on a team, in game by definition, and the plugin sends no connect
+          // event for them. During the opening burst the match is not live
+          // yet, so this stays quiet and MATCH_START does the whole roster.
+          // Guarded like everything else here that is not the result path.
+          if (ev.kind === 'match_roster') {
+            try {
+              const rostered = deps.db.prepare(
+                `SELECT m.id FROM matches m JOIN match_players mp ON mp.match_id = m.id
+                  WHERE m.token = ? AND m.state = 'live' AND mp.player_id = ?`,
+              ).get(ev.token, ev.steamid) as { id: number } | undefined;
+              if (rostered) refreshSignals([ev.steamid], { sharing: true, matchId: rostered.id, freshMs: 60 * 60 * 1000 });
+            } catch (err) {
+              console.error('[steamSignals] could not check a late joiner:', err);
+            }
+          }
           return;
         }
         // Spectator feed. Cosmetic by design, so a throw here must never take
         // down the listener that also carries match_end.
         try {
-          if (ev.kind === 'match_start') recordMatchStart(deps.db, ev.token, ev.map);
+          if (ev.kind === 'match_start') {
+            recordMatchStart(deps.db, ev.token, ev.map);
+            // Everyone has readied up, so everyone rostered is in game: the one
+            // moment the Family Sharing question means anything, and the point
+            // at which a ban elsewhere is worth an admin's attention.
+            const started = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (started) {
+              const roster = deps.db.prepare('SELECT player_id FROM match_players WHERE match_id = ?')
+                .all(started.id) as { player_id: string }[];
+              refreshSignals(roster.map((r) => r.player_id), { sharing: true, matchId: started.id });
+            }
+          }
           else if (ev.kind === 'heartbeat') {
             recordHeartbeat(deps.db, ev.token);
             // The heartbeat repeats the phase so a lost PHASE datagram is
@@ -625,11 +800,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'player' && ev.event === 'connect') {
             recordPlayerConnect(deps.db, ev.token, ev.steamid);
+            // A 'refresh' on top of the 'live' every feed line ends with: the
+            // admin board listens for refresh only, because 'live' fires ten
+            // times a second. Only a real change, so the connect pulse of a map
+            // change wakes nobody.
+            if (recordPresenceLine(deps.db, ev)?.changed) hub.broadcast('refresh');
             // The plugin emits this from OnClientPostAdminCheck, which only
             // fires once the client is fully in game, so it is an entry too.
             // The engine's own "entered the game" line normally gets here
             // first; this is the second chance when that datagram was lost.
             signonDrops?.onEntered(ev.steamid);
+            // Covers whoever the match-start pass cannot: a late joiner, and a
+            // reconnect on a different copy of the game. Someone checked
+            // within the hour is only asked whose copy they are playing on.
+            const joined = deps.db.prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+              .get(ev.token) as { id: number } | undefined;
+            if (joined) refreshSignals([ev.steamid], { sharing: true, matchId: joined.id, freshMs: 60 * 60 * 1000 });
           }
           else if (ev.kind === 'live_stat') recordLiveStat(deps.db, ev.token, ev.steamid, ev.stats);
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
@@ -672,6 +858,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           console.error('[live] failed to record', ev.kind, err);
         }
       });
+      logListener.setAuthenticator((input) => logAuth.check(input));
       await logListener.listen(deps.config.logListenPort);
       // pending is declared before the orchestrator it depends on and assigned
       // after: the same forward-reference the selfStarted callback above uses,
@@ -758,11 +945,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       for (const s of servers) logListener.allowMatchCreateFrom(s.host);
       const feedHost = deps.config.logPublicAddress.split(':')[0];
       if (feedHost) logListener.allowMatchCreateFrom(feedHost);
-      logListener.allowMatchCreateWhen((address) => resolveServerBySource(deps.db, address, feedHost) !== null);
+      logListener.allowMatchCreateWhen((address) => isKnownServerAddress(deps.db, address, feedHost));
       selfStarted = new SelfStartedMatches({
         db: deps.db,
         listener: logListener,
-        resolveServerId: (source) => resolveServerBySource(deps.db, source, feedHost),
+        resolveServerId: (key) => {
+          const [address, port, signedBy] = key.split('|');
+          if (signedBy) return Number(signedBy);
+          return resolveServerBySource(deps.db, address, feedHost, Number(port));
+        },
         setMatchId: (token, matchId, serverId) =>
           (orchestrator as RealOrchestrator).assignMatchId(serverId, token, matchId),
         adminSteamIds: deps.config.adminSteamIds,
@@ -847,6 +1038,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
   }, 60_000);
   reaper.unref();
+
+  // The live board's clocks. Five seconds because the warning it posts is
+  // about a countdown measured in tens of seconds; the pass is one indexed
+  // read when nobody is dropped, which is nearly always.
+  const presenceSweep = setInterval(() => {
+    try {
+      const events = sweepPresence(deps.db);
+      for (const e of events) publishAdminEvent({ kind: 'clock', ...e });
+      if (events.length > 0) hub.broadcast('refresh');
+    } catch (err) {
+      console.error('[presence] sweep failed:', err);
+    }
+  }, 5_000);
+  presenceSweep.unref();
 
   // Daily replay prune. Interval rather than cron because there is no
   // scheduler here and the exact hour does not matter: the window is 90 days.
@@ -957,7 +1162,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       opensModal: opensTicketModal,
       commands: {
         defs: COMMAND_DEFS,
-        handle: (i) => handleCommand({ db: deps.db, matchmaker, publicUrl: deps.config.publicUrl, adminSteamIds: deps.config.adminSteamIds }, i),
+        handle: (i) => handleCommand({
+          db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
+          banMessage: (steamid) => banMessage(deps.db, steamid),
+          adminSteamIds: deps.config.adminSteamIds,
+        }, i),
       },
     })
       .then((b) => { bot = b; })
@@ -969,12 +1178,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     adminFeed?.stop();
     await bot?.stop();
     clearInterval(reaper);
+    clearInterval(presenceSweep);
     clearInterval(pruneTimer);
     stopTwitchPoll?.();
+    stopSignalRefresh?.();
     clearTimeout(pruneOnBoot);
     banSync.stop();
     adminSync.stop();
     if (logListener) await logListener.close();
+    // Where each server's replay check had got to. Best effort: the caller may
+    // already have closed the database, and a few seconds of position is all
+    // that is lost.
+    try { logAuth.flush(); } catch { /* database already closed */ }
   });
   await app.register(apiRoutes, {
     db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds, broadcast: (e) => hub.broadcast(e),
@@ -985,8 +1200,33 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
-    dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds,
+    dlc4Probe: deps.dlc4Probe, adminSync, adminSteamIds: deps.config.adminSteamIds, logAuth,
+    voice: deps.config.discord !== null ? presence : null,
+    logSecretPusher: deps.logSecretPusher ?? (async (server, secret) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await pushLogSecret(rcon, secret);
+      } finally {
+        rcon.close();
+      }
+    }),
+    serverQuery: deps.serverQuery ?? (async (server, command) => {
+      const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      try {
+        await rcon.connect();
+        return await rcon.exec(command);
+      } finally {
+        rcon.close();
+      }
+    }),
+    // Sharing is asked too: the admin may be looking at someone who is in
+    // game right now. No match id, so a manual look never posts to the feed.
+    refreshSignals: deps.config.steamApiKey
+      ? (steamid) => refreshSteamSignals(signalDeps, [steamid], { sharing: true })
+      : undefined,
   });
+  await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
   await app.register(campaignRoutes, {
@@ -1016,12 +1256,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // a 200 full of HTML and fail somewhere much less obvious. Non-GET methods
   // are likewise never a page navigation.
   app.setNotFoundHandler((req, reply) => {
-    const isPageRequest =
-      (req.method === 'GET' || req.method === 'HEAD') &&
-      !req.url.startsWith('/api/') &&
-      !req.url.startsWith('/auth/') &&
-      !req.url.startsWith('/ws');
-    if (isPageRequest) return reply.type('text/html').sendFile('index.html');
+    if (isPageRequest(req.method, req.url)) return reply.type('text/html').sendFile('index.html');
     return reply.code(404).send({ error: 'not found' });
   });
 
