@@ -1,10 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildHud, elementRect, teamLayout, packHud } from './build';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
-import { encodeVPK } from '../vpk';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
@@ -157,6 +156,88 @@ describe('buildHud, team layout', () => {
     const got = layoutOf(buildHud(design({ elements: { infectedRow: { spacing: 124 } } })));
     expect(kvGet(kvFind(got, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')).toBe('124');
   });
+
+  it('scales the infected row spacing the preview shows, and only once', () => {
+    const d = design({ elements: { infectedRow: { scale: 1.5 } } });
+    const got = layoutOf(buildHud(d));
+    // Stock HorizPanelSpacing is 140; teamLayout is the only thing that
+    // applies the scale, so the file gets 210 and not 315.
+    expect(teamLayout(d, elementById('infectedRow')!).spacing).toBe(210);
+    expect(kvGet(kvFind(got, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')).toBe('210');
+  });
+});
+
+/**
+ * The whole point of teamLayout: one function decides a team element's
+ * direction, spacing, card size and container size, the generator writes
+ * exactly those numbers and elementRect reports exactly that container, so
+ * the canvas cannot show a layout the downloaded file contradicts. Before
+ * this, the preview drew cards at their unscaled spacing inside a scaled
+ * container while the file had them scaled, which is what a player would
+ * have seen the moment they resized the teammate panels.
+ */
+describe('team geometry: the canvas and the file agree for any scale, dir and spacing', () => {
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const dir of ['row', 'column'] as const) {
+      for (const spacing of [undefined, 20, 140]) {
+        for (const scale of [undefined, 0.75, 1.25]) {
+          const label = `${preset} ${dir} spacing=${spacing} scale=${scale}`;
+          it(label, () => {
+            const o: ElementOverride = { dir };
+            if (spacing !== undefined) o.spacing = spacing;
+            if (scale !== undefined) o.scale = scale;
+            const d = design({ preset, elements: { teamColumn: o } });
+            const files = buildHud(d, { fonts });
+            const t = teamLayout(d, elementById('teamColumn')!);
+            const rect = elementRect(d, 'teamColumn', d.aspect);
+
+            const team = parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
+            for (let n = 1; n <= 4; n++) {
+              const p = kvFind(team, [`TeamPlayer${n}`])!;
+              const along = String(t.spacing * (n - 1));
+              expect(kvGet(p, 'xpos'), `${label} TeamPlayer${n} xpos`).toBe(t.dir === 'row' ? along : '0');
+              expect(kvGet(p, 'ypos'), `${label} TeamPlayer${n} ypos`).toBe(t.dir === 'row' ? '0' : along);
+              expect(kvGet(p, 'wide'), `${label} TeamPlayer${n} wide`).toBe(String(Math.round(t.card!.w)));
+              expect(kvGet(p, 'tall'), `${label} TeamPlayer${n} tall`).toBe(String(Math.round(t.card!.h)));
+            }
+            // The container the preview draws is the container the file has.
+            const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
+            expect(kvGet(c, 'wide'), `${label} container wide`).toBe(String(Math.round(rect.w)));
+            expect(kvGet(c, 'tall'), `${label} container tall`).toBe(String(Math.round(rect.h)));
+            // And it covers all four cards, so nothing is clipped away that
+            // the canvas drew.
+            expect(rect.w, `${label} covers the last card`).toBeGreaterThanOrEqual(
+              t.dir === 'row' ? t.spacing * 3 + t.card!.w : t.card!.w);
+            expect(rect.h, `${label} covers the last card`).toBeGreaterThanOrEqual(
+              t.dir === 'column' ? t.spacing * 3 + t.card!.h : 0);
+          });
+        }
+      }
+    }
+  }
+
+  it('gives the owner sample (a) the same four cards on screen and in the file', () => {
+    // The exact design sample.vpkcheck.test.ts builds, and the case that
+    // used to disagree: the file had the cards 45 units apart at 188 tall in
+    // a 322-tall box while the canvas drew three 31-unit cards in a 94-unit
+    // box.
+    const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', spacing: 36 } } });
+    expect(teamLayout(d, elementById('teamColumn')!)).toEqual({
+      dir: 'column', spacing: 36, card: { w: 187.5, h: 187.5 }, container: { w: 187.5, h: 295.5 },
+    });
+    const t = parseKv(text(buildHud(d), 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
+    expect([1, 2, 3, 4].map((n) => kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'ypos'))).toEqual(['0', '36', '72', '108']);
+    expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'tall')).toBe('188');
+  });
+
+  it('leaves the container at its mock size while the generator writes no team geometry', () => {
+    // Nothing in the design touches the team layout, so no file says anything
+    // about it and the registry's mockSize (what the panel actually shows,
+    // not its full-width container) still stands.
+    expect(elementRect(design({}), 'teamColumn', '16:9')).toMatchObject({ w: 430, h: 75 });
+    expect(teamLayout(design({}), elementById('teamColumn')!).container).toBeUndefined();
+  });
 });
 
 describe('buildHud, fonts', () => {
@@ -179,6 +260,52 @@ describe('buildHud, fonts', () => {
 
   it('fails clearly when Roboto is needed and was not loaded', () => {
     expect(() => buildHud(design({ font: 'roboto' }))).toThrow(/font/i);
+  });
+
+  // scalePass clones existing scheme entries, and those clones carry the base
+  // face name, so fontPass has to run after it. Reversed, the panels the
+  // player resized would be the only ones left on Trade Gothic.
+  it('gives a scaled panel the chosen font, which only holds while scalePass runs before fontPass', () => {
+    const files = buildHud(design({ font: 'roboto', elements: { teamColumn: { scale: 1.5 } } }), { fonts: ttf });
+    const s = text(files, 'resource/clientscheme.res')!;
+    const fonts = kvFind(parseKv(s)[0].value as KvNode[], ['Fonts'])!;
+    const scaled = kvFind(fonts.value as KvNode[], ['HudEd_PlayerDisplayName_150', '1'])!;
+    expect(kvGet(scaled, 'name')).toBe('Roboto Condensed');
+    expect(s).not.toMatch(/Trade Gothic/);
+  });
+
+  // The chat box draws from its own scheme, which carries its own six Trade
+  // Gothic faces; the spec lists chatscheme.res as an output whenever the
+  // font changes for exactly this reason.
+  it('moves the chat scheme to Roboto as well, and registers the font files there', () => {
+    const chat = text(buildHud(design({ font: 'roboto' }), { fonts: ttf }), 'resource/chatscheme.res');
+    expect(chat).toBeDefined();
+    expect(chat).not.toMatch(/Trade Gothic/);
+    expect(chat).toMatch(/Roboto Condensed/);
+    expect(chat).toMatch(/resource\/robotocondensed-regular\.ttf/);
+    expect(chat).toMatch(/resource\/robotocondensed-bold\.ttf/);
+  });
+
+  it('leaves the chat scheme out entirely when the font did not change', () => {
+    expect(text(buildHud(design({})), 'resource/chatscheme.res')).toBeUndefined();
+  });
+});
+
+describe('buildHud, bad numbers', () => {
+  // parseFloat('') is NaN, and a NaN position comes out of formatPos as the
+  // token "rNaN": a file the game cannot read, and one the canvas reads back
+  // as 0, so the preview and the file disagree as well. Every control drops a
+  // non-finite entry, and download() runs the design through validateDesign
+  // before packing, which is the guard this pins.
+  it('cannot write a literal NaN into a shipped file, whatever the design carries', () => {
+    const bad = { ...design({}), elements: { chat: { x: NaN, y: 10, w: NaN, h: 60 },
+      teamColumn: { scale: NaN, spacing: NaN, dir: 'column' }, infectedRow: { spacing: NaN } } };
+    const files = buildHud(validateDesign(bad));
+    for (const f of files) {
+      expect(new TextDecoder('latin1').decode(f.data), f.path).not.toMatch(/NaN/i);
+    }
+    // The good values in the same override survive.
+    expect(kvGet(kvFind(layoutOf(files), ['HudChat'])!, 'tall')).toBe('60');
   });
 });
 
@@ -226,9 +353,15 @@ describe('buildHud, styles', () => {
     expect(vtf.data[80]).toBe(7);
   });
 
+  // panelBg is the one slot with a normal-mode route (it has targets and is
+  // not advancedOnly), so it is the only slot that can prove the rule. An
+  // advancedOnly slot is skipped outright in normal mode and would pass this
+  // by emitting no materials at all.
   it('never writes a stock texture name in normal mode', () => {
-    const files = buildHud(design({ styles: { barGreen: { kind: 'flat', color: '0 255 0 255' } } }));
-    expect(files.some((f) => f.path.startsWith('materials/') && !f.path.startsWith('materials/vgui/hud/hudeditor/'))).toBe(false);
+    const files = buildHud(design({ styles: { panelBg: { kind: 'flat', color: '0 0 0 140' } } }));
+    const materials = files.filter((f) => f.path.startsWith('materials/'));
+    expect(materials.length).toBeGreaterThan(0);
+    for (const f of materials) expect(f.path, f.path).toMatch(/^materials\/vgui\/hud\/hudeditor\//);
   });
 
   it('writes stock names in advanced mode', () => {

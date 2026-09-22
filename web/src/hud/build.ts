@@ -23,6 +23,7 @@ const enc = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);   
 const LAYOUT = 'scripts/hudlayout.res';
 const ANIMS = 'scripts/hudanimations.txt';
 const SCHEME = 'resource/clientscheme.res';
+const CHATSCHEME = 'resource/chatscheme.res';
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 
 class Work {
@@ -104,33 +105,89 @@ function layoutPass(work: Work, design: HudDesign) {
   }
 }
 
-export interface TeamLayout { dir: 'row' | 'column'; spacing: number }
+export interface TeamLayout {
+  dir: 'row' | 'column';
+  /**
+   * Units between two neighbouring cards, the element's own scale already
+   * applied: the exact number `teamPass` writes into the file, and the exact
+   * number the canvas steps each card by.
+   */
+  spacing: number;
+  /**
+   * One teammate card, and the container that has to cover four of them, both
+   * with the scale already applied. Present only when `teamWrites` is true,
+   * because these are the values `teamPass` writes; an element whose team
+   * geometry the generator is not rewriting has no such promise to keep, and
+   * the preview falls back to the registry's `mockSize`. An element with no
+   * per-player file (the infected row, whose cards the game places itself)
+   * never has them.
+   */
+  card?: { w: number; h: number };
+  container?: { w: number; h: number };
+}
 
 /**
- * The direction and per-card spacing a team element will actually use. An
- * explicit `dir`/`spacing` in the design wins outright. Failing that: for an
+ * Does the generator's team pass rewrite this element's team geometry? A
+ * direction, a spacing or a scale all make it do so, and nothing else does.
+ * `teamPass` and `elementRect` both ask, which is what stops the canvas
+ * reporting a container size the file contradicts.
+ */
+function teamWrites(el: HudElement, o: ElementOverride | undefined): boolean {
+  if (!el.team || !o) return false;
+  const scaled = el.resize === 'scale' && o.scale !== undefined && o.scale !== 1;
+  return o.dir !== undefined || o.spacing !== undefined || scaled;
+}
+
+/**
+ * A container's own `wide`/`tall` as the generator leaves it. An "f" token
+ * fills the screen on that axis and is never multiplied (`scaleToken` leaves
+ * it alone), so it has no fixed size to report and the caller decides what to
+ * do instead.
+ */
+function fixedExtent(token: string | undefined, k: number): number | undefined {
+  const n = parseFloat((token ?? '').trim());
+  return Number.isFinite(n) ? n * k : undefined;         // "f0" and anything unparsable: no fixed size
+}
+
+/**
+ * Everything about a team element's layout that both the generator and the
+ * canvas need, in final HUD units with the element's scale already applied.
+ * This is the single source of truth for team geometry: `teamPass` writes
+ * exactly these numbers, `elementRect` reports exactly this container and
+ * `mock.ts` draws exactly these cards, so the three cannot drift apart.
+ *
+ * An explicit `dir`/`spacing` in the design wins outright, and a spacing the
+ * player typed is taken as final units (what they typed is what they see and
+ * what the file gets), not as something to scale again. Failing that: for an
  * element with a `team.file` (the survivor team), direction comes from
  * whether the base file's TeamPlayer1 and TeamPlayer2 share a ypos, and
- * spacing is the real delta between them along whichever axis that
- * direction implies, both read straight out of that preset's real file. For
- * an element with only a `spacingKey` and no `team.file` (the infected row,
- * whose players the game positions itself, so there is no per-player panel
- * to read), spacing comes from that key's own value on the element's
- * hudlayout.res panel, and direction is simply the element's first
- * supported direction. A hardcoded constant is a last resort for when a
- * base file yields nothing usable; it is unreachable for both team elements
- * the HUD actually ships. Both the generator's team pass and the canvas
- * preview call this, so the preview can never disagree with the file the
- * generator writes.
+ * spacing is the real delta between them along whichever axis that direction
+ * implies, both read straight out of that preset's real file and then scaled.
+ * For an element with only a `spacingKey` and no `team.file` (the infected
+ * row, whose players the game positions itself, so there is no per-player
+ * panel to read), spacing comes from that key's own value on the element's
+ * hudlayout.res panel, and direction is simply the element's first supported
+ * direction. A hardcoded constant is a last resort for when a base file
+ * yields nothing usable; it is unreachable for both team elements the HUD
+ * actually ships.
  */
 export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const o = design.elements[el.id];
+  const k = el.resize === 'scale' ? o?.scale ?? 1 : 1;
+  // Parsed on demand: the survivor team needs it only to size its container,
+  // and this runs on every canvas repaint.
+  const layoutPanel = () => kvFind(parseKv(baseFile(design.preset, LAYOUT))[0].value as KvNode[], [el.key]);
   let baseDir: 'row' | 'column' | undefined;
   let baseSpacing: number | undefined;
+  let card: { w: number; h: number } | undefined;
   if (el.team?.file) {
     const tree = parseKv(baseFile(design.preset, el.team.file))[0].value as KvNode[];
     const first = kvFind(tree, ['TeamPlayer1']);
     const second = kvFind(tree, ['TeamPlayer2']);
+    if (first) {
+      const cw = parseFloat(kvGet(first, 'wide') ?? ''), ch = parseFloat(kvGet(first, 'tall') ?? '');
+      card = { w: (Number.isFinite(cw) ? cw : 150) * k, h: (Number.isFinite(ch) ? ch : 150) * k };
+    }
     if (first && second) {
       baseDir = (kvGet(second, 'ypos') ?? '0') === (kvGet(first, 'ypos') ?? '0') ? 'row' : 'column';
       const axis = baseDir === 'row' ? 'xpos' : 'ypos';
@@ -139,39 +196,54 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
     }
   } else if (el.team?.spacingKey) {
     baseDir = el.team.dirs[0];
-    const layout = kvFind(parseKv(baseFile(design.preset, LAYOUT))[0].value as KvNode[], [el.key]);
-    const v = layout ? kvGet(layout, el.team.spacingKey) : undefined;
+    const panel = layoutPanel();
+    const v = panel ? kvGet(panel, el.team.spacingKey) : undefined;
     if (v !== undefined) { const n = parseFloat(v); if (!Number.isNaN(n)) baseSpacing = n; }
   }
   const dir = o?.dir ?? baseDir ?? 'row';
-  const spacing = Math.round(o?.spacing ?? baseSpacing ?? (dir === 'row' ? 140 : 45));
-  return { dir, spacing };
+  const spacing = Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k);
+  const out: TeamLayout = { dir, spacing };
+  if (!card || !teamWrites(el, o)) return out;
+  const panel = layoutPanel();
+  if (!panel) return out;
+  out.card = card;
+  // The container clips its children, so along the direction it has to cover
+  // all four cards. Across the direction it keeps its own size, scaled; a
+  // fill token has no fixed size, and teamPass replaces it with one card's
+  // width rather than leave a column loose across the whole screen.
+  const tall = kvGet(panel, 'tall') ?? '0';
+  out.container = dir === 'column'
+    ? { w: fixedExtent(kvGet(panel, 'wide'), k) ?? card.w, h: spacing * 3 + card.h }
+    : { w: spacing * 3 + card.w, h: fixedExtent(tall, k) ?? parseSize(tall, SCREEN_H) };
+  return out;
 }
 
+/**
+ * Write the team geometry `teamLayout` decided. Every number here is already
+ * scaled, which is why `scalePass` skips a team element's `team.file` and its
+ * container size entirely: scaling them again would double the factor.
+ */
 function teamPass(work: Work, design: HudDesign) {
   for (const el of ELEMENTS) {
     const o = design.elements[el.id];
-    if (!el.team || !o) continue;
-    if (el.team.spacingKey && o.spacing !== undefined) {
-      kvSet(work.panel(LAYOUT, [el.key]), el.team.spacingKey, String(Math.round(o.spacing)));
-    }
-    if (!el.team.file || (o.dir === undefined && o.spacing === undefined)) continue;
-    const { dir, spacing: gap } = teamLayout(design, el);
-    const first = work.panel(el.team.file, ['TeamPlayer1']);
-    const pw = parseFloat(kvGet(first, 'wide') ?? '150'), ph = parseFloat(kvGet(first, 'tall') ?? '150');
-    for (let n = 1; n <= 4; n++) {
-      const p = work.panel(el.team.file, [`TeamPlayer${n}`]);
-      kvSet(p, 'xpos', String(dir === 'row' ? gap * (n - 1) : 0));
-      kvSet(p, 'ypos', String(dir === 'row' ? 0 : gap * (n - 1)));
-    }
-    // The container clips its children, so it has to cover the last panel.
+    if (!el.team || !teamWrites(el, o)) continue;
+    const team = el.team;
+    const t = teamLayout(design, el);
     const container = work.panel(LAYOUT, [el.key]);
-    if (dir === 'column') {
-      kvSet(container, 'tall', String(Math.round(gap * 3 + ph)));
-      if ((kvGet(container, 'wide') ?? '').toLowerCase().startsWith('f')) kvSet(container, 'wide', String(Math.round(pw)));
-    } else {
-      kvSet(container, 'wide', String(Math.round(gap * 3 + pw)));
+    if (team.spacingKey) kvSet(container, team.spacingKey, String(t.spacing));
+    if (!team.file || !t.card || !t.container) continue;
+    for (let n = 1; n <= 4; n++) {
+      const p = work.panel(team.file, [`TeamPlayer${n}`]);
+      kvSet(p, 'xpos', String(t.dir === 'row' ? t.spacing * (n - 1) : 0));
+      kvSet(p, 'ypos', String(t.dir === 'row' ? 0 : t.spacing * (n - 1)));
+      kvSet(p, 'wide', String(Math.round(t.card.w)));
+      kvSet(p, 'tall', String(Math.round(t.card.h)));
     }
+    kvSet(container, 'wide', String(Math.round(t.container.w)));
+    // A row leaves a fill `tall` alone: it already covers the cards, and
+    // replacing it with a number would pin the panel to one screen height.
+    const fillTall = /^f/i.test((kvGet(container, 'tall') ?? '').trim());
+    if (t.dir === 'column' || !fillTall) kvSet(container, 'tall', String(Math.round(t.container.h)));
   }
 }
 
@@ -194,18 +266,24 @@ function scaleBlock(nodes: KvNode[], k: number, fontLeaves: KvNode[]) {
 }
 
 function scalePass(work: Work, design: HudDesign) {
+  // One map for the whole pass, keyed by the scaled entry's own name: two
+  // elements scaled to the same rounded percent that share a font would
+  // otherwise each push their own HudEd_<font>_<tag> block, a duplicate key
+  // in a shipped file.
+  const renamed = new Map<string, string | null>();      // scaled entry name -> that name, or null when the scheme lacks the font
   for (const el of ELEMENTS) {
     const k = design.elements[el.id]?.scale;
     if (el.resize !== 'scale' || k === undefined || k === 1) continue;
     const tag = String(Math.round(k * 100));
     const fontLeaves: KvNode[] = [];
-    const container = work.panel(LAYOUT, [el.key]);
-    for (const key of ['wide', 'tall']) { const v = kvGet(container, key); if (v !== undefined) kvSet(container, key, scaleToken(v, k)); }
-    for (const file of [...el.children, ...(el.team?.file ? [el.team.file] : [])]) scaleBlock(work.tree(file), k, fontLeaves);
-    if (el.team?.spacingKey) {
-      const v = kvGet(container, el.team.spacingKey);
-      if (v !== undefined) kvSet(container, el.team.spacingKey, scaleToken(v, k));
+    // teamPass owns a team-file element's container size and the file that
+    // holds its cards, and writes both already scaled. Scaling them here too
+    // would square the factor.
+    if (!el.team?.file) {
+      const container = work.panel(LAYOUT, [el.key]);
+      for (const key of ['wide', 'tall']) { const v = kvGet(container, key); if (v !== undefined) kvSet(container, key, scaleToken(v, k)); }
     }
+    for (const file of el.children) scaleBlock(work.tree(file), k, fontLeaves);
     // The generator never writes a file the design did not change: an
     // element whose children reference no font at all must leave
     // clientscheme.res completely alone rather than pull it into the
@@ -216,15 +294,14 @@ function scalePass(work: Work, design: HudDesign) {
     // leaf, in more than one file) and rename the leaf only once that
     // lookup has succeeded and a scaled entry exists to point at.
     const schemeFonts = work.panel(SCHEME, ['Fonts']);
-    const renamed = new Map<string, string | null>();   // base font name -> new name, or null when the scheme lacks it
     for (const leaf of fontLeaves) {
       const name = leaf.value as string;
-      if (!renamed.has(name)) {
+      const newName = `HudEd_${name}_${tag}`;
+      if (!renamed.has(newName)) {
         const src = kvFind(schemeFonts.value as KvNode[], [name]);
         if (!src) {
-          renamed.set(name, null);                       // an icon font the scheme defines elsewhere: leave it alone
+          renamed.set(newName, null);                    // an icon font the scheme defines elsewhere: leave it alone
         } else {
-          const newName = `HudEd_${name}_${tag}`;
           const copy = structuredClone(src);
           copy.key = newName;
           for (const size of copy.value as KvNode[]) {
@@ -233,11 +310,10 @@ function scalePass(work: Work, design: HudDesign) {
             if (tall !== undefined) kvSet(size, 'tall', String(Math.round(parseFloat(tall) * k)));
           }
           (schemeFonts.value as KvNode[]).push(copy);
-          renamed.set(name, newName);
+          renamed.set(newName, newName);
         }
       }
-      const newName = renamed.get(name);
-      if (newName) leaf.value = newName;
+      if (renamed.get(newName)) leaf.value = newName;
     }
   }
 }
@@ -251,14 +327,25 @@ function fontPass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFi
       if (typeof n.value !== 'string') rename(n.value);
       else if (n.key.toLowerCase() === 'name' && /^Trade Gothic( Bold)?$/i.test(n.value)) n.value = 'Roboto Condensed';
     } };
+    // The chat box is drawn from its own scheme, which carries its own six
+    // Trade Gothic faces. Renaming only clientscheme.res would move the whole
+    // HUD to Roboto and leave the chat text behind, which is why the spec
+    // lists chatscheme.res as an output whenever the font changes.
     rename(work.tree(SCHEME));
+    rename(work.tree(CHATSCHEME));
   }
   // VPK lookups from an addon are case sensitive. The modern preset's own
-  // clientscheme.res already names these fonts, but with capitals, so its
+  // schemes already name these fonts, but with capitals, so their
   // CustomFontFiles entries need the same lower-case fix as the stock preset.
+  // Both schemes register the files: a face named in one scheme is not
+  // reliably loaded by the other, which is why the Modern HUD lists the two
+  // ttf files in both of its own.
   const custom = work.panel(SCHEME, ['CustomFontFiles']);
   kvSet(custom, '7', 'resource/robotocondensed-regular.ttf');
   kvSet(custom, '8', 'resource/robotocondensed-bold.ttf');
+  const chatCustom = work.panel(CHATSCHEME, ['CustomFontFiles']);
+  kvSet(chatCustom, '5', 'resource/robotocondensed-regular.ttf');
+  kvSet(chatCustom, '6', 'resource/robotocondensed-bold.ttf');
   out.push({ path: 'resource/robotocondensed-regular.ttf', data: assets.fonts.regular },
            { path: 'resource/robotocondensed-bold.ttf', data: assets.fonts.bold });
 }
@@ -295,6 +382,26 @@ function addonInfo(name: string): string {
   return `"AddonInfo"\n{\n\taddonSteamAppID\t\t500\n\taddontitle\t\t"${name.replace(/"/g, '')}"\n\taddonversion\t\t1.0\n\taddontagline\t\t"Custom HUD (riversidepug.com)"\n\taddonauthor\t\t"HUD editor"\n\taddonDescription\t\t"Custom HUD layout."\n}\n`;
 }
 
+/**
+ * The pass order is load bearing in one place, and deliberately not in the
+ * others.
+ *
+ * - `scalePass` MUST run before `fontPass`. scalePass pushes structuredClone
+ *   copies of existing font entries into the scheme's Fonts block as
+ *   HudEd_<font>_<tag>, and those clones carry the base face name ("Trade
+ *   Gothic"). fontPass then renames every Trade Gothic face in the scheme.
+ *   Reversed, every scaled panel would keep Trade Gothic while the rest of
+ *   the HUD moved to Roboto, so the player's font choice would silently miss
+ *   exactly the panels they resized.
+ * - `teamPass` and `scalePass` are independent, and must stay that way.
+ *   teamPass owns a team-file element's container size, its four player
+ *   panels and the spacing between them, and writes all of them already
+ *   scaled; scalePass skips those same values for that element. Neither pass
+ *   reads what the other wrote.
+ * - `layoutPass` only moves, hides and free-resizes panels. No team element
+ *   is free-resize, so it never writes a container size teamPass then reads.
+ * - `stylePass` only repoints image keys, which no other pass looks at.
+ */
 export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[] {
   const work = new Work(design.preset);
   const extra: VpkFile[] = [];
@@ -349,5 +456,10 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const moved = el.move && (o.x !== undefined || o.y !== undefined);
   const xTok = el.mockPos?.x ?? (moved ? p.xpos : kvGet(panel, 'xpos') ?? '0');
   const yTok = el.mockPos?.y ?? (moved ? p.ypos : kvGet(panel, 'ypos') ?? '0');
-  return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: p.w * k, h: p.h * k, visible };
+  // Once teamPass has written a concrete container, that is the container the
+  // player's game will have, so the preview reports it rather than the
+  // registry's mockSize. mockSize stands in only while the file is untouched
+  // and the real container is wider than anything it shows.
+  const box = (el.team ? teamLayout(design, el).container : undefined) ?? { w: p.w * k, h: p.h * k };
+  return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
 }

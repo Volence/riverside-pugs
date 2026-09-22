@@ -11,6 +11,12 @@
  */
 import type { Preset } from './base';
 
+/**
+ * Only 'visible' is live in v1. 'color', 'bg' and 'fontSize' are the reserved
+ * ElementOverride fields design.ts validates: every entry below lists
+ * ['visible'] or [], no pass in build.ts reads them, and the side panel
+ * therefore offers nothing but the Visible checkbox.
+ */
 export type Prop = 'visible' | 'color' | 'bg' | 'fontSize';
 
 export interface HudElement {

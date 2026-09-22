@@ -187,6 +187,21 @@ function Field({ legend, children }: { legend: string; children: preact.Componen
 
 type Patch = (p: Partial<ElementOverride>) => void;
 
+/**
+ * Apply a number box's value, or ignore it.
+ *
+ * An emptied box gives parseFloat('') === NaN, and nothing between here and
+ * the generator would reject it: a NaN position comes out of formatPos as the
+ * literal token "rNaN" and lands in a shipped .res file, which the game
+ * cannot read and the canvas reads back as 0. A non-finite entry patches
+ * nothing, so the box can be cleared and retyped while the design keeps its
+ * last good value.
+ */
+function patchNum(patch: Patch, e: Event, to: (n: number) => Partial<ElementOverride>): void {
+  const n = parseFloat((e.target as HTMLInputElement).value);
+  if (Number.isFinite(n)) patch(to(n));
+}
+
 /** Row/column and per-card spacing, offered only for elements with a team layout.
  *  Column is offered only when the registry says the element supports it: the
  *  infected row is a single line and has no column mode to switch to. */
@@ -211,8 +226,8 @@ function TeamControls(
       <label class="hud__row">
         <span>Spacing</span>
         <input
-          type="number" value={Math.round(o.spacing ?? spacing)}
-          onInput={(e) => patch({ spacing: parseFloat((e.target as HTMLInputElement).value) })}
+          type="number" value={spacing}
+          onInput={(e) => patchNum(patch, e, (n) => ({ spacing: n }))}
         />
         <span />
       </label>
@@ -241,7 +256,6 @@ function ElementControls(
     delete elements[id];
     return { ...d, elements };
   });
-  const num = (e: Event) => parseFloat((e.target as HTMLInputElement).value);
 
   return (
     <Field legend={el.label}>
@@ -263,11 +277,11 @@ function ElementControls(
         <div class="hud__row2">
           <label class="hud__field">
             <span>X</span>
-            <input type="number" value={Math.round(o.x ?? rect.x)} onInput={(e) => patch({ x: num(e) })} />
+            <input type="number" value={Math.round(o.x ?? rect.x)} onInput={(e) => patchNum(patch, e, (x) => ({ x }))} />
           </label>
           <label class="hud__field">
             <span>Y</span>
-            <input type="number" value={Math.round(o.y ?? rect.y)} onInput={(e) => patch({ y: num(e) })} />
+            <input type="number" value={Math.round(o.y ?? rect.y)} onInput={(e) => patchNum(patch, e, (y) => ({ y }))} />
           </label>
         </div>
       )}
@@ -278,14 +292,14 @@ function ElementControls(
             <span>W</span>
             <input
               type="number" min={20} value={Math.round(o.w ?? rect.w)}
-              onInput={(e) => patch({ w: Math.max(20, num(e)) })}
+              onInput={(e) => patchNum(patch, e, (n) => ({ w: Math.max(20, n) }))}
             />
           </label>
           <label class="hud__field">
             <span>H</span>
             <input
               type="number" min={20} value={Math.round(o.h ?? rect.h)}
-              onInput={(e) => patch({ h: Math.max(20, num(e)) })}
+              onInput={(e) => patchNum(patch, e, (n) => ({ h: Math.max(20, n) }))}
             />
           </label>
         </div>
@@ -613,7 +627,11 @@ export default function Hud() {
   const download = async () => {
     try {
       const assets = await assetsFor(design);
-      const p = packHud({ ...design, name: safeName(design.name) }, assets);
+      // Nothing that reaches a player's game skips the validator. Every
+      // control already guards its own input, but this is the one place the
+      // design turns into files, so a future control that forgets cannot put
+      // an out-of-range or non-finite number into a shipped .res file.
+      const p = packHud(validateDesign({ ...design, name: safeName(design.name) }), assets);
       const blob = new Blob([p.bytes], { type: p.mime });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);

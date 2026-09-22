@@ -58,6 +58,10 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   location.hash = '';
+  // A spy restored on the last line of its own test stays installed if an
+  // earlier assertion throws, and every later test in the file then runs
+  // against it. Restoring here happens either way.
+  vi.restoreAllMocks();
 });
 
 /* Shallow on purpose, like routes.test.tsx: happy-dom's canvas 2D context is
@@ -106,7 +110,7 @@ describe('Hud page', () => {
   });
 
   it('names the font file in the status line when the font fetch fails, rather than shipping a corrupt file silently', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 404 } as Response);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 404 } as Response);
     render(<Hud />);
 
     fireEvent.change(screen.getByRole('combobox', { name: /preset/i }), { target: { value: 'modern' } });
@@ -116,8 +120,28 @@ describe('Hud page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /download/i }));
     expect(await screen.findByText(/RobotoCondensed-Regular\.ttf/)).toBeTruthy();
+  });
 
-    fetchMock.mockRestore();
+  // parseFloat('') is NaN, and a NaN x would reach the generator and land in
+  // a shipped .res file as the literal token "rNaN". Clearing the box must
+  // leave the design alone, not patch it with a number the file cannot hold.
+  it('ignores an emptied number box rather than patching the design with NaN', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByText('Your health'));
+    const x = screen.getByLabelText('X') as HTMLInputElement;
+    const before = x.value;
+    expect(before).not.toBe('');
+
+    fireEvent.input(x, { target: { value: '' } });
+    // Reselecting rebuilds the controls from the design, so this reads back
+    // what the design actually holds: the untouched base position, not the
+    // Math.round(NaN) a patched design would render as "NaN".
+    fireEvent.click(screen.getByText('Chat'));
+    fireEvent.click(screen.getByText('Your health'));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe(before);
+
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '42' } });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('42');
   });
 
   it('shows a damaged-link message for a hash that will not decode', async () => {

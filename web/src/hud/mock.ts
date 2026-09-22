@@ -17,9 +17,12 @@ export function visibleElements(side: Side): HudElement[] {
   return ELEMENTS.filter((e) => e.side === side || e.side === 'both');
 }
 
-interface Rect { x: number; y: number; w: number; h: number; visible: boolean }
+/** What a painter is handed: a box in canvas pixels. Whether the element is
+ *  visible is decided before a painter is ever called, so it is not part of
+ *  this; `rectFor` carries it because hit-testing and drawHud both need it. */
+interface Rect { x: number; y: number; w: number; h: number }
 
-function rectFor(design: HudDesign, id: string): Rect {
+function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
   return elementRect(design, id, design.aspect);
 }
 
@@ -90,26 +93,33 @@ const TEAM_CARDS = 3;
 
 interface CardRect { x: number; y: number; w: number; h: number }
 
-/** Card rects for a team-style element, laid out by the same direction and
- *  spacing `teamLayout` gives the generator's own team pass, so the preview
- *  can never disagree with the file the generator writes. */
+/**
+ * Card rects for a team-style element, in canvas pixels.
+ *
+ * `teamLayout` is the one place that decides team geometry, and everything
+ * here is its numbers times `k` (pixels per HUD unit). Where it gives a card
+ * size, that is the size the generator writes into the file, so the canvas
+ * draws exactly that. Where it does not (an element whose team geometry the
+ * generator is not rewriting, or the infected row, whose cards the game
+ * places itself), there is no file to agree with and the card is fitted to
+ * the element's own rect instead.
+ */
 function teamCards(design: HudDesign, id: string, r: Rect, k: number): CardRect[] {
-  const { dir, spacing: gap } = teamLayout(design, elementById(id)!);
-  const spacing = gap * k;
-  const w = dir === 'row' ? Math.min(spacing, r.w / TEAM_CARDS) : r.w;
-  const h = dir === 'row' ? r.h : Math.min(spacing, r.h / TEAM_CARDS);
+  const t = teamLayout(design, elementById(id)!);
+  const spacing = t.spacing * k;
+  const w = t.card ? t.card.w * k : (t.dir === 'row' ? Math.min(spacing, r.w / TEAM_CARDS) : r.w);
+  const h = t.card ? t.card.h * k : (t.dir === 'row' ? r.h : Math.min(spacing, r.h / TEAM_CARDS));
   return Array.from({ length: TEAM_CARDS }, (_, i) => ({
-    x: r.x + (dir === 'row' ? spacing * i : 0),
-    y: r.y + (dir === 'column' ? spacing * i : 0),
+    x: r.x + (t.dir === 'row' ? spacing * i : 0),
+    y: r.y + (t.dir === 'column' ? spacing * i : 0),
     w, h,
   }));
 }
 
-/** The real container clips its children (teamPass has to grow it to cover
- *  the last panel for exactly this reason), so a spacing wide enough to run
- *  a card past the element's own rect must be truncated the same way here,
- *  or a player could see a card the real HUD would never show and click
- *  right through it. */
+/** The real container clips its children, and `elementRect` reports that same
+ *  container once the generator has written one, so clipping here shows the
+ *  player exactly what the game will cut off. Without it a card could be
+ *  drawn where the real HUD would never show one, and be clicked through. */
 function clipToRect(ctx: CanvasRenderingContext2D, r: Rect, draw: () => void) {
   ctx.save();
   ctx.beginPath();
@@ -283,7 +293,7 @@ export function drawHud(
     const hidden = !u.visible;
     if (hidden && el.id !== selectedId) continue;
 
-    const r: Rect = { x: u.x * k, y: u.y * k, w: u.w * k, h: u.h * k, visible: u.visible };
+    const r: Rect = { x: u.x * k, y: u.y * k, w: u.w * k, h: u.h * k };
     const paint = PAINTERS[el.id];
     if (!paint) continue;
 

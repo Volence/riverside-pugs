@@ -60,6 +60,21 @@ describe('ELEMENTS', () => {
     expect(elementById('killFeed')!.move).toBe(false);
     expect(elementById('targetId')!.move).toBe(false);
   });
+
+  // scalePass multiplies a file in place and Work memoises parsed trees, so
+  // scaling the same file for two elements would square the factor. Nothing
+  // in the code stops that; this does.
+  it('never gives the same child file to two scaled elements', () => {
+    const children = ELEMENTS.filter((e) => e.resize === 'scale').flatMap((e) => e.children);
+    expect(new Set(children).size, children.join(' ')).toBe(children.length);
+  });
+
+  // Only 'visible' is wired up in v1: 'color', 'bg' and 'fontSize' stay in
+  // the type because the spec declares them, but nothing reads or writes
+  // them, and the side panel would render a control it cannot honour.
+  it('lists no prop beyond visible', () => {
+    expect(ELEMENTS.flatMap((e) => e.props).filter((p) => p !== 'visible')).toEqual([]);
+  });
 });
 
 describe('SLOTS', () => {
@@ -72,7 +87,11 @@ describe('SLOTS', () => {
       expect(kvGet(panel!, t.key), `${s.id}: ${t.file} ${t.path.join('/')} ${t.key}`).toBeDefined();
     }
   });
-  it('gives stock names only to advanced-only slots or slots with no targets', () => {
-    for (const s of SLOTS) if (s.stockNames.length && s.targets.length === 0) expect(s.advancedOnly).toBe(true);
+  // No targets means no normal-mode route: nothing points a .res image key at
+  // the new texture, so the slot can only work from a VPK mounted ahead of
+  // pak01. The old guard also required stockNames, which let a slot with
+  // neither skip the check entirely.
+  it('marks every slot with no normal-mode route advanced only', () => {
+    for (const s of SLOTS) if (s.targets.length === 0) expect(s.advancedOnly, s.id).toBe(true);
   });
 });

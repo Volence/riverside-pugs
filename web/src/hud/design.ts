@@ -17,6 +17,13 @@ export interface ElementOverride {
   scale?: number;
   dir?: 'row' | 'column';
   spacing?: number;
+  /**
+   * Validated and reserved, not live. The spec's own HudDesign declares these
+   * three, so they are validated and clamped here and a design that carries
+   * them survives a round trip, but no pass in build.ts reads any of them in
+   * v1 and no registry entry in elements.ts lists them as a prop, so no
+   * control writes them either.
+   */
   color?: string; bg?: string;
   fontSize?: number;
 }
