@@ -13,6 +13,11 @@
  * game code decides at runtime are not drawn: their positions are still
  * reported by childRects so a later editor can move them.
  *
+ * The teammate card is the exception: the page can ask for the Down or Dead
+ * state (DrawOpts.state), and each state draws what the game shows in it,
+ * still from the same generated tree, so fitted, squared state art shows
+ * exactly as the file will make the game draw it.
+ *
  * The owner's in-game screenshot of the stock HUD at full health and the
  * probe caught two things game code decides that the .res files alone do not
  * say: the teammate card's splatter background is drawn only faintly at full
@@ -30,7 +35,9 @@ import { SLOTS } from './slots';
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
 export interface ChildRect { name: string; kind: ChildKind; x: number; y: number; w: number; h: number; visible: boolean }
 export interface PanelBox { x: number; y: number }
-export interface DrawOpts { card?: number; onAsset?: () => void }
+/** The teammate card state the preview shows. Game code picks it at runtime; the page lets the player pick it. */
+export type CardState = 'healthy' | 'down' | 'dead';
+export interface DrawOpts { card?: number; onAsset?: () => void; state?: CardState }
 
 const SCHEME = 'resource/clientscheme.res';
 
@@ -49,6 +56,29 @@ export const PANEL_FILE: Record<string, string> = {
  * it sits right over the live HealthPanel.
  */
 const STATE_CHILDREN = new Set(['incapacitated', 'dead', 'voice', 'skulliconplacement', 'duckingicon', 'spawntimelabel']);
+
+/**
+ * What the teammate card shows in each preview state, beyond what visible 0
+ * hides. Game code decides this at runtime; these are a best reading of the
+ * probe screenshots (a down teammate's portrait gives way to the
+ * incapacitated art, a dead one keeps only the dead art and a dimmed name),
+ * and the owner corrects them after seeing them. Voice shows only while
+ * someone talks, so it is never drawn.
+ */
+const TEAM_HIDDEN: Record<CardState, ReadonlySet<string>> = {
+  healthy: new Set(['incapacitated', 'dead', 'voice']),
+  down: new Set(['head', 'dead', 'voice']),
+  dead: new Set(['head', 'incapacitated', 'voice', 'health', 'healthnumber', 'items']),
+};
+
+/** Whether the preview leaves a child out in this state. Every panel but the teammate card shows the healthy, alive state. */
+export function hiddenInState(panelId: string, name: string, state: CardState): boolean {
+  const n = name.toLowerCase();
+  return panelId === 'teamColumn' ? TEAM_HIDDEN[state].has(n) : STATE_CHILDREN.has(n);
+}
+
+/** A dead teammate's name stays on the card, dimmed. */
+const DEAD_NAME_ALPHA = 0.5;
 
 /**
  * The stock teammate card's BackgroundImage is a black splatter texture
@@ -84,6 +114,8 @@ const CARD_NAMES = ['Francis', 'Louis', 'Zoey'];
 const CARD_PORTRAITS = ['vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_teenangst'];
 const OWN_PORTRAIT = 'vgui/s_panel_namvet';
 const PREVIEW_FONT = '"Roboto Condensed", "Arial Narrow", sans-serif';
+
+const portraitFor = (opts: DrawOpts) => (opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length]);
 
 function kindOf(n: KvNode): ChildKind {
   const c = (kvGet(n, 'ControlName') ?? '').toLowerCase();
@@ -300,7 +332,17 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
   if (lname === 'playerimage') { silhouette(ctx, r); return; }      // the special infected's own head: no survivor portrait
   if (lname === 'head') {
     // Game code picks the portrait; the preview picks a fixed one per card.
-    const material = opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length];
+    const material = portraitFor(opts);
+    const img = artImage(material, opts.onAsset);
+    if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
+    ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    return;
+  }
+  if (lname === 'incapacitated' || lname === 'dead') {
+    // Game code picks this art too: the character's own _incap panel, or the
+    // one dead panel. Drawn stretched to the rect, as scaleImage 1 has the
+    // game draw it, which is why the fit rule keeps the rect square.
+    const material = lname === 'dead' ? 'vgui/s_panel_dead' : `${portraitFor(opts)}_incap`;
     const img = artImage(material, opts.onAsset);
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }
     ctx.drawImage(img, r.x, r.y, r.w, r.h);
@@ -330,21 +372,45 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
 
 function sampleText(n: KvNode, opts: DrawOpts): string {
   const t = kvGet(n, 'labelText') ?? '';
-  if (t === '%HealthNumber%') return '100';
+  if (t === '%HealthNumber%') return opts.state === 'down' ? '299' : '100';   // down, the number is the incap health (probe T7)
   const lname = n.key.toLowerCase();
   if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
   if (lname === 'healthicon') return '+';                          // the real glyph lives in a Valve icon font
   return t;
 }
 
+/**
+ * The teammate's item icons are glyphs in a Valve icon font the page cannot
+ * ship, so the preview draws two neutral outlines in their place, a medkit
+ * and a pill bottle, each one icon tall at the label's font size: enough to
+ * see where the row sits and how big it is.
+ */
+function drawItemStandIns(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number) {
+  const s = fontFace(design, kvGet(n, 'font') ?? '').tall * k;
+  const y = r.y + (r.h - s) / 2;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = Math.max(1, s / 12);
+  ctx.strokeRect(r.x, y, s, s);                                     // medkit
+  ctx.beginPath();
+  ctx.moveTo(r.x + s / 2, y + s * 0.25); ctx.lineTo(r.x + s / 2, y + s * 0.75);
+  ctx.moveTo(r.x + s * 0.25, y + s / 2); ctx.lineTo(r.x + s * 0.75, y + s / 2);
+  ctx.stroke();
+  ctx.strokeRect(r.x + s * 1.25, y + s * 0.2, s * 0.5, s * 0.8);     // pill bottle
+  ctx.restore();
+}
+
 function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+  if (n.key.toLowerCase() === 'items') { drawItemStandIns(ctx, design, n, r, k); return; }
   const s = sampleText(n, opts);
   if (!s) return;
   const face = fontFace(design, kvGet(n, 'font') ?? '');
   const px = face.tall * k;                                          // scheme tall is already scaled by scalePass when the parent was
   ctx.save();
   ctx.font = `${face.bold ? 'bold ' : ''}${px}px ${PREVIEW_FONT}`;
-  ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
+  // Down, the game draws a teammate's number in red at the incap health (probe T7).
+  const downNumber = opts.state === 'down' && n.key.toLowerCase() === 'healthnumber';
+  ctx.fillStyle = colourOf(design, downNumber ? 'HealthHurtRed' : kvGet(n, 'fgcolor_override'));
   const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
   ctx.textBaseline = 'middle';
   let x = r.x;
@@ -356,23 +422,29 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, 
 }
 
 /**
- * The health bar at 100 health: the whole rect, stock green. The game draws
- * bar fills in code and never reads the healthbar_* textures (probe T8), so
+ * The health bar: the whole rect, stock green at 100 health, or red at the
+ * incap sample when the preview shows a down teammate. The game draws bar
+ * fills in code and never reads the healthbar_* textures (probe T8), so
  * there is nothing a design can restyle here.
  */
 function drawBar(ctx: CanvasRenderingContext2D, r: ChildRect, opts: DrawOpts) {
-  const img = artImage('vgui/healthbar_green', opts.onAsset);
+  const down = opts.state === 'down';
+  const img = artImage(down ? 'vgui/healthbar_red' : 'vgui/healthbar_green', opts.onAsset);
   if (img) ctx.drawImage(img, r.x, r.y, r.w, r.h);
-  else { ctx.fillStyle = 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
+  else { ctx.fillStyle = down ? 'rgba(192,28,0,0.9)' : 'rgba(76,217,100,0.9)'; ctx.fillRect(r.x, r.y, r.w, r.h); }
 }
 
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts: DrawOpts = {}): void {
+  const state = opts.state ?? 'healthy';
   const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
   const rects = childRects(design, panelId, origin, k);
   for (const [i, n] of nodes.entries()) {
     const r = rects[i];
-    if (!r.visible || STATE_CHILDREN.has(n.key.toLowerCase())) continue;
-    const alpha = isTeamColumnHealthbarBg(panelId, n) ? SPLATTER_ALPHA : 1;
+    const lname = n.key.toLowerCase();
+    if (!r.visible || hiddenInState(panelId, lname, state)) continue;
+    let alpha = 1;
+    if (isTeamColumnHealthbarBg(panelId, n)) alpha = SPLATTER_ALPHA;
+    if (panelId === 'teamColumn' && state === 'dead' && lname === 'name') alpha = DEAD_NAME_ALPHA;
     if (alpha !== 1) { ctx.save(); ctx.globalAlpha *= alpha; }
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;

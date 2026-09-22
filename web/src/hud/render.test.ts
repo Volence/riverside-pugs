@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, PANEL_FILE, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, PANEL_FILE, hiddenInState, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
@@ -94,6 +94,27 @@ describe('childRects', () => {
     expect(kinds.Health).toBe('bar');
     expect(kinds.HealthNumber).toBe('label');
     expect(kinds.Incapacitated).toBe('image');
+  });
+
+  it('agrees with the downloaded file for the teammate card with fit, inside edits, a background and every layout', () => {
+    const FOUR = [{ x: 8, y: 100 }, { x: 8, y: 150 }, { x: 700, y: 100 }, { x: 400, y: 440 }];
+    for (const preset of ['stock', 'modern'] as const) {
+      for (const dir of ['row', 'column', 'free'] as const) {
+        const d = design({ preset,
+          elements: { teamColumn: { fit: true, scale: 1.25, dir, gap: 6, slots: FOUR } },
+          children: { teamColumn: { Head: { w: 30, h: 30 }, Items: { y: 20, fontSize: 22 }, HealthNumber: { on: true, x: 110 }, Incapacitated: { x: 40 } } },
+          styles: { panelBg: { kind: 'rounded', color: '0 0 0 150' } } });
+        const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
+        const nodes = (parseKv(text(files, PANEL_FILE.teamColumn))[0].value as KvNode[]).filter((n) => typeof n.value !== 'string');
+        const rects = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1);
+        expect(rects.length, `${preset} ${dir}`).toBe(nodes.length);
+        for (const n of nodes) {
+          const r = rects.find((c) => c.name === n.key)!;
+          expect([r.x, r.y, r.w, r.h], `${preset} ${dir} ${n.key}`)
+            .toEqual(['xpos', 'ypos', 'wide', 'tall'].map((key) => parseFloat(kvGet(n, key) ?? '0') || 0));
+        }
+      }
+    }
   });
 });
 
@@ -295,6 +316,72 @@ describe('drawPanel', () => {
         for (const p of portraits) expect(srcs, `${preset} card ${card}`).not.toContain(p);
         expect(calls.some((c) => c.m === 'arc'), `${preset} card ${card}`).toBe(true);
       }
+    }
+  });
+});
+
+describe('the teammate card states', () => {
+  const fitted = (children: HudDesign['children'] = {}) => design({ elements: { teamColumn: { fit: true } }, children });
+  const srcs = (calls: { m: string; a: unknown[] }[]) =>
+    calls.filter((c) => c.m === 'drawImage').map((c) => (c.a[0] as HTMLImageElement).src);
+  const imageAt = (calls: { m: string; a: unknown[] }[], url: string) =>
+    calls.find((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === url);
+
+  it('Healthy draws the portrait and never the down or dead art', () => {
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, fitted(), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
+    expect(srcs(calls)).toContain(artUrl('vgui/s_panel_manager'));
+    expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager_incap'));
+    expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_dead'));
+  });
+
+  it("Down draws the character's incap art square at the card height, a red bar and 299 in red, and no portrait", () => {
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, fitted({ teamColumn: { HealthNumber: { on: true } } }), 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'down' });
+    // Stock fitted: a 36-unit square at the card's top-left (the Head's x, which fit moved to 0), at k = 2.
+    expect(imageAt(calls, artUrl('vgui/s_panel_manager_incap')!)!.a.slice(1)).toEqual([10, 20, 72, 72]);
+    expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
+    expect(srcs(calls)).toContain(artUrl('vgui/healthbar_red'));
+    expect(srcs(calls)).not.toContain(artUrl('vgui/healthbar_green'));
+    const number = calls.find((c) => c.m === 'fillText' && c.a[0] === '299')!;
+    expect(number.fill).toBe('rgba(192,28,0,1)');                       // the scheme's HealthHurtRed
+  });
+
+  it('Dead draws the dead art square, dims the name, and draws no bar, number, portrait or icons', () => {
+    const d = fitted({ teamColumn: { HealthNumber: { on: true } } });
+    const items = childRects(d, 'teamColumn', { x: 10, y: 20 }, 2).find((c) => c.name === 'Items')!;
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'dead' });
+    expect(imageAt(calls, artUrl('vgui/s_panel_dead')!)!.a.slice(1)).toEqual([10, 20, 72, 72]);
+    expect(srcs(calls).some((s) => /healthbar_(green|red)/.test(s))).toBe(false);
+    expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
+    expect(calls.some((c) => c.m === 'fillText' && (c.a[0] === '100' || c.a[0] === '299'))).toBe(false);
+    expect(calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.alpha).toBeCloseTo(0.5);
+    expect(calls.some((c) => c.m === 'strokeRect' && c.a[0] === items.x)).toBe(false);
+  });
+
+  it('hides by state only on the teammate card', () => {
+    expect(hiddenInState('teamColumn', 'Head', 'down')).toBe(true);
+    expect(hiddenInState('teamColumn', 'Incapacitated', 'down')).toBe(false);
+    expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(true);
+    expect(hiddenInState('teamColumn', 'Voice', 'healthy')).toBe(true);
+  });
+
+  it('draws stand-in item icons one font size tall where the Items label sits', () => {
+    const d = design({});
+    const r = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Items')!;
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+    // L4D_Icons_medium is 18 tall in the stock scheme; the label box is 14, so the icons centre on it.
+    expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
+  });
+
+  it('keeps drawing the card background child in Down and Dead, since the spec says it is visible in every state', () => {
+    const flat = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat', color: '255 0 0 255' } } });
+    for (const state of ['down', 'dead'] as const) {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, flat, 'teamColumn', { x: 5, y: 7 }, 2, { card: 0, state });
+      expect(calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)'), state).toBe(true);
     }
   });
 });
