@@ -371,6 +371,27 @@ export interface TeamLayout {
   cards?: { xpos: string; ypos: string }[];
   /** Fit was asked for but every content child is hidden, so the card keeps its file size. */
   fitEmpty?: boolean;
+  /**
+   * The container's new position tokens, when it grew back toward the far
+   * edge it is anchored to (growBack). Absent means it stays where the file
+   * or the player put it.
+   */
+  at?: { xpos?: string; ypos?: string };
+}
+
+/**
+ * Where a container that grew along one axis starts, measured along that
+ * axis. Anchored to the near edge (top or left) it grows away from it and
+ * `start` stands. Anchored to the far edge (bottom or right) it grows back
+ * toward the screen instead: its start moves back by exactly what it grew
+ * past `baseSize`, so the far edge stays where the file had it, then far
+ * enough for the whole stack to fit on screen, but never off the near edge.
+ * A container that did not grow never moves, so fitting a card, which only
+ * shrinks it, still moves nothing.
+ */
+export function growBack(start: number, size: number, baseSize: number, extent: number, far: boolean): number {
+  if (!far) return start;
+  return Math.max(0, Math.min(start - Math.max(0, size - baseSize), extent - size));
 }
 
 /**
@@ -474,6 +495,28 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   out.container = dir === 'column'
     ? { w: fixedExtent(kvGet(panel, 'wide'), k) ?? offset.x + card.w, h: offset.y + spacing * 3 + card.h }
     : { w: offset.x + spacing * 3 + card.w, h: fixedExtent(tall, k) ?? parseSize(tall, SCREEN_H) };
+  // Both presets anchor the team to the bottom of the screen (stock r75,
+  // Modern r148), and a column grows down from there: a stock fitted column
+  // would put its cards at 441, 481 and 521 on a 480-tall screen. Along its
+  // direction, a container the player has not moved that way and whose file
+  // anchors it to the far edge (an r token, or a file rect ending in the last
+  // third) grows back toward the screen instead, a column up and a row left
+  // (growBack). One the
+  // player moved along that axis stays exactly where they put it: that
+  // position is what the canvas showed them and what a drag starts from.
+  // Moving it across (the X box alone, for a column) leaves the growth be.
+  // A fill width spans the screen and has no far edge to keep.
+  const axis = dir === 'column'
+    ? { pos: 'ypos', size: tall, extent: SCREEN_H, grown: out.container.h, moved: o?.y !== undefined }
+    : { pos: 'xpos', size: kvGet(panel, 'wide') ?? '0', extent: screenW(design.aspect), grown: out.container.w, moved: o?.x !== undefined };
+  if (!(el.move && axis.moved)) {
+    const tok = (kvGet(panel, axis.pos) ?? '0').trim();
+    const start = parsePos(tok, axis.extent);
+    const baseSize = parseSize(axis.size, axis.extent);
+    const far = !/^f/i.test(axis.size.trim()) && (/^r/i.test(tok) || start + baseSize > (axis.extent * 2) / 3);
+    const at = growBack(start, axis.grown, baseSize, axis.extent, far);
+    if (at !== start) out.at = { [axis.pos]: formatPos(at, axis.grown, axis.extent) };
+  }
   return out;
 }
 
@@ -506,6 +549,8 @@ function teamPass(work: Work, design: HudDesign) {
       continue;
     }
     kvSet(container, 'wide', String(Math.round(t.container.w)));
+    if (t.at?.xpos) kvSet(container, 'xpos', t.at.xpos);
+    if (t.at?.ypos) kvSet(container, 'ypos', t.at.ypos);
     // A row leaves a fill `tall` alone: it already covers the cards, and
     // replacing it with a number would pin the panel to one screen height.
     const fillTall = /^f/i.test((kvGet(container, 'tall') ?? '').trim());
@@ -771,13 +816,15 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   // In Free the container covers the screen and each card places itself.
   if (el.team?.file && teamLayout(design, el).dir === 'free') return { x: 0, y: 0, w: screenW(aspect), h: SCREEN_H, visible };
   const moved = el.move && (o.x !== undefined || o.y !== undefined);
-  const xTok = el.mockPos?.x ?? (moved ? p.xpos : kvGet(panel, 'xpos') ?? '0');
-  const yTok = el.mockPos?.y ?? (moved ? p.ypos : kvGet(panel, 'ypos') ?? '0');
+  const t = el.team ? teamLayout(design, el) : undefined;
+  // A team container that grew back toward its far edge is where teamPass wrote it.
+  const xTok = el.mockPos?.x ?? t?.at?.xpos ?? (moved ? p.xpos : kvGet(panel, 'xpos') ?? '0');
+  const yTok = el.mockPos?.y ?? t?.at?.ypos ?? (moved ? p.ypos : kvGet(panel, 'ypos') ?? '0');
   // Once teamPass has written a concrete container, that is the container the
   // player's game will have, so the preview reports it rather than the
   // registry's mockSize. mockSize stands in only while the file is untouched
   // and the real container is wider than anything it shows.
-  const box = (el.team ? teamLayout(design, el).container : undefined) ?? { w: p.w * k, h: p.h * k };
+  const box = t?.container ?? { w: p.w * k, h: p.h * k };
   return { x: parsePos(xTok, screenW(aspect)), y: parsePos(yTok, SCREEN_H), w: box.w, h: box.h, visible };
 }
 

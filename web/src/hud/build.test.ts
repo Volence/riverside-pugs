@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam } from './build';
+import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack } from './build';
+import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
@@ -329,10 +330,12 @@ describe('team geometry: the canvas and the file agree for any scale, dir, gap a
                 expect(kvGet(p, 'wide'), `${label} TeamPlayer${n} wide`).toBe(String(Math.round(t.card!.w)));
                 expect(kvGet(p, 'tall'), `${label} TeamPlayer${n} tall`).toBe(String(Math.round(t.card!.h)));
               }
-              // The container the preview draws is the container the file has.
+              // The container the preview draws is the container the file has, where the file puts it.
               const c = kvFind(layoutOf(files), ['CHudTeamDisplay'])!;
               expect(kvGet(c, 'wide'), `${label} container wide`).toBe(String(Math.round(rect.w)));
               expect(kvGet(c, 'tall'), `${label} container tall`).toBe(String(Math.round(rect.h)));
+              expect(parsePos(kvGet(c, 'xpos')!, screenW(d.aspect)), `${label} container xpos`).toBe(rect.x);
+              expect(parsePos(kvGet(c, 'ypos')!, 480), `${label} container ypos`).toBe(rect.y);
               // And it covers all four cards, so nothing is clipped away that the canvas drew.
               if (t.dir === 'row') expect(rect.w, label).toBeGreaterThanOrEqual(t.offset!.x + t.spacing * 3 + t.card!.w);
               else expect(rect.h, label).toBeGreaterThanOrEqual(t.offset!.y + t.spacing * 3 + t.card!.h);
@@ -349,6 +352,8 @@ describe('team geometry: the canvas and the file agree for any scale, dir, gap a
       dir: 'column', spacing: 50, gap: 4, offset: { x: 16, y: 45 }, card: { w: 151.25, h: 45 },
       container: { w: 167.25, h: 240 },
       cards: [{ xpos: '16', ypos: '45' }, { xpos: '16', ypos: '95' }, { xpos: '16', ypos: '145' }, { xpos: '16', ypos: '195' }],
+      // 240 tall grows up from stock's r75 until its bottom is on the screen's.
+      at: { ypos: 'r240' },
     });
     const t = tree(buildHud(d), TEAM_FILE);
     expect(kvGet(kvFind(t, ['TeamPlayer1'])!, 'tall')).toBe('45');
@@ -358,6 +363,55 @@ describe('team geometry: the canvas and the file agree for any scale, dir, gap a
   it('leaves the container at its mock size while the generator writes no team geometry', () => {
     expect(elementRect(design({}), 'teamColumn', '16:9')).toMatchObject({ w: 430, h: 75 });
     expect(teamLayout(design({}), elementById('teamColumn')!).container).toBeUndefined();
+  });
+});
+
+describe('a team container anchored to the far edge grows back toward it', () => {
+  it('keeps a stock fitted column on screen by growing it up from the bottom', () => {
+    // Stock's container sits at r75 and would grow down from y 405, putting the cards at 441, 481, 521.
+    const d = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4 } } });
+    const cards = teamCardRects(d, '16:9');
+    for (const c of cards) {
+      expect(c.y).toBeGreaterThanOrEqual(0);
+      expect(c.y + c.h).toBeLessThanOrEqual(480);
+    }
+    // 192 tall, bottom on the screen's bottom edge.
+    const c = kvFind(layoutOf(buildHud(d)), ['CHudTeamDisplay'])!;
+    expect([kvGet(c, 'ypos'), kvGet(c, 'tall')]).toEqual(['r192', '192']);
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ y: 288, h: 192 });
+    expect(cards.map((r) => r.y)).toEqual([324, 364, 404, 444]);
+  });
+
+  it('keeps the owner sample column on screen at scale 1.25', () => {
+    const d = design({ elements: { teamColumn: { scale: 1.25, dir: 'column', fit: true, gap: 4 } } });
+    for (const c of teamCardRects(d, '16:9')) expect(c.y + c.h).toBeLessThanOrEqual(480);
+  });
+
+  it('leaves a Row where it was, and a moved team where the player put it', () => {
+    const row = kvFind(layoutOf(buildHud(design({ elements: { teamColumn: { fit: true, gap: 30, scale: 1.5 } } }))), ['CHudTeamDisplay'])!;
+    expect([kvGet(row, 'xpos'), kvGet(row, 'ypos')]).toEqual(['0', 'r75']);
+    const moved = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4, x: 8, y: 100 } } });
+    expect(elementRect(moved, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 100 });
+    // Moving it across only (the X box alone) leaves the column growing up from the bottom.
+    const across = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4, x: 8 } } });
+    expect(elementRect(across, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 288 });
+    expect(kvGet(kvFind(layoutOf(buildHud(across)), ['CHudTeamDisplay'])!, 'ypos')).toBe('r192');
+  });
+
+  it('never moves a container that did not grow past its file size, so fitting alone still moves nothing', () => {
+    // Modern's column: 136 tall in the file, 130 fitted, so it stays at r148.
+    const d = design({ preset: 'modern', elements: { teamColumn: { fit: true } } });
+    const c = kvFind(layoutOf(buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } })), ['CHudTeamDisplay'])!;
+    expect(kvGet(c, 'ypos')).toBe('r148');
+  });
+
+  it('grows back only toward a far edge, by what it grew, and stays on screen', () => {
+    expect(growBack(405, 192, 100, 480, true)).toBe(288);          // grew 92 past a bottom already off screen: clamped to the edge
+    expect(growBack(300, 150, 100, 480, true)).toBe(250);          // grew 50: the bottom stays at 400
+    expect(growBack(300, 80, 100, 480, true)).toBe(300);           // shrank: never moves down
+    expect(growBack(405, 192, 100, 480, false)).toBe(405);         // anchored to the near edge: grows away from it
+    expect(growBack(700, 900, 100, 853, true)).toBe(0);            // taller than the screen: its start stays on it
+    expect(growBack(600, 400, 200, 853, true)).toBe(400);          // a right-anchored row grows left the same way
   });
 });
 
