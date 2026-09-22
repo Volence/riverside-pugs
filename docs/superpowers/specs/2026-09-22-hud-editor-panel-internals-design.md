@@ -108,10 +108,16 @@ interface ChildOverride {
 - `siHealth` spans six files (one per special infected), and they are the same four children
   (`BackgroundImage`, `Health`, `HealthNumber`, `DuckingIcon`) at six different placements
   and sizes: the Boomer's bar is 64 wide at x 322, the Tank's 278 wide at x 112. An absolute
-  position or size would be right for one infected and wrong for five. So on `siHealth`
-  only, `x` and `y` are **offsets** added to each file's own base value, and `w` and `h` are
-  not offered. `visible`, `color` and `fontSize` apply as they are, and "hide the ducking
-  icon" hides it for every infected. The preview draws the Hunter's card and says so.
+  position or size would be right for one infected and wrong for five. So `siHealth` child
+  `x` and `y` are stored as **absolute positions on the Hunter's card**, which is the card the
+  preview draws and the X and Y boxes show, exactly like every other panel. `childPass`
+  writes them to `hunterhealth.res` as they are and to the other five files as the same
+  **delta** from each file's own base (`stored - hunterBase + thisFileBase`), so a number
+  nudged 10 units right moves 10 units right on every infected. `w` and `h` are not offered
+  on `siHealth` (six different bar widths make an absolute size wrong for five of them);
+  `validateDesign` drops them for that panel by an explicit per-panel rule, not through
+  `RANGES`. `visible`, `color` and `fontSize` apply as they are, so "hide the ducking icon"
+  hides it for every infected. The page says "Shown as the Hunter; applies to all infected".
 - Toggles are children: `HealthNumber` on `teamColumn` is a registry entry flagged
   `addable`, its template taken from the Modern card. `on: true` injects it and it then
   accepts every other override like any child. Absent means "as the base file has it": on
@@ -141,27 +147,49 @@ export const PANELS: PanelChildren[];
 First version, per panel (names are the real block names):
 
 - **ownHealth** (`localplayerpanel.res`): `Head` (portrait, image), `Health` (bar),
-  `HealthNumber` (label), `HealthIcon` (label, the cross glyph), `DuckingIcon` (image),
-  `HealthbarTextureTop` and `HealthbarTextureBottom` (images, the scratch art).
-  `Incapacitated` is listed as `other`: it can be hidden or moved but is not drawn in the
-  preview, since the preview shows the healthy state.
+  `HealthNumber` (label, font `HUDHealth`, which the scheme defines as an unquoted key, so
+  the registry test must look it up through `kvFind`, not a quoted grep), `HealthIcon`
+  (label, the cross glyph), `DuckingIcon` (image). `Incapacitated` is listed as `other`: it
+  can be hidden or moved but is not drawn, since the preview shows the healthy state. The
+  two scratch textures (`HealthbarTextureTop`, `HealthbarTextureBottom`) are not listed:
+  nobody asked to move decoration, and they ship untouched.
 - **teamColumn** (`teammatepanel.res`): `BackgroundImage` (image), `Head` (image),
-  `Health` (bar), `Name` (label), `Status` (label), `Items` (label, icon font),
-  `HealthNumber` (label, addable on stock; present on Modern). `Incapacitated`, `Dead`,
-  `Voice` as `other`.
+  `Health` (bar), `Name` (label), `HealthNumber` (label, addable on stock; present on
+  Modern). `Incapacitated`, `Dead`, `Voice` as `other`. `Status` and `Items` are not
+  listed: the preview would draw them empty, so moving them would be blind.
 - **siHealth** (`boomerhealth`, `hunterhealth`, `smokerhealth`, `tankhealth`,
   `zombiehealthleft_large`, `zombiehealthleft_small`): `BackgroundImage` (image, the
   `pz_healthbar_50/250/3000` frames), `Health` (bar), `HealthNumber` (label, font
   `MenuTitle`), `DuckingIcon` (image). All six files carry exactly these four, verified
   2026-09-22, and the registry test pins that they keep doing so.
 - **infectedRow** (`zombieteamdisplayplayer.res`): `BackgroundImage` (image), `PlayerImage`
-  (image), `HealthPanel` (bar), `NameLabel` (label), `SpawnTimeLabel` (label),
-  `AbilityProgress` (other: drawn as the ring stand-in), `Dead`, `Voice`, `SkullIconPlacement`
-  as `other`.
+  (image), `HealthPanel` (bar), `NameLabel` (label), `SpawnTimeLabel` (label, drawn with the
+  sample text `12`), and `AbilityProgress`, `Dead`, `Voice`, `SkullIconPlacement` as `other`
+  (hide or move; not drawn).
 
-The `HealthNumber` template is the Modern card's block with its font set to
-`PlayerDisplayName` and its position right of the stock card's `Name` (`xpos 100`,
-`ypos 60`, `wide 30`, `tall 12`); the plan records the exact block. A registry test parses
+The `HealthNumber` template is the Modern card's block, re-positioned to sit right of the
+stock card's `Name` (which is at `xpos 13`, `ypos 60`, `wide 120`) and with its colour written
+raw, because a named scheme colour silently draws nothing in some panels (v1 engine facts).
+This is the exact block, inserted after `Name`:
+
+```
+"HealthNumber"
+{
+    "ControlName"        "Label"
+    "fieldName"          "HealthNumber"
+    "xpos"               "103"
+    "ypos"               "60"
+    "wide"               "30"
+    "tall"               "12"
+    "visible"            "1"
+    "enabled"            "1"
+    "labelText"          "%HealthNumber%"
+    "textAlignment"      "east"
+    "font"               "PlayerDisplayName"
+    "zpos"               "3"
+    "fgcolor_override"   "255 255 255 255"
+}
+``` A registry test parses
 every panel file in both presets and asserts each non-addable child exists, each addable
 child's `after` sibling exists, and every label child has a `font`.
 
@@ -177,14 +205,19 @@ through `Work`, so a file ships only if touched), for each override:
   after its `after` sibling. `on: false`: remove the block if present. Then continue with
   the other fields as for any child.
 - `visible`, `x`, `y`, `w`, `h`: `kvSet` the corresponding keys as plain numbers. Children
-  never carry anchor letters. On `siHealth`, `x` and `y` are added to the file's own base
-  value (the offset rule above) and `w`, `h` are rejected by validation.
+  never carry anchor letters. On `siHealth`, `x` and `y` are written to `hunterhealth.res` as
+  stored and to the other five files as the delta rule above; `w`, `h` never reach the pass
+  because validation drops them for that panel.
 - `color` on a label: `kvSet('fgcolor_override', colour)`.
 - `fontSize` on a label: reuse `scalePass`'s font mechanism rather than a second one. A
-  `HudEd_<font>_<tall>` copy of the label's scheme font with `tall` set to the size, the label
-  pointed at it, the same rename-only-if-the-scheme-defines-it rule and the same
-  de-duplication map, hoisted so `childPass` and `scalePass` share it. If the parent is also
-  scaled, `scalePass` then scales the copy's `tall` as it does any font it collects.
+  `HudEd_<font>_t<tall>` copy of the label's scheme font with `tall` set to the size, the
+  label pointed at it, the same rename-only-if-the-scheme-defines-it rule and the same
+  de-duplication map, hoisted so `childPass` and `scalePass` share it. The `t` in the tag is
+  load bearing: `scalePass` tags its copies `_<percent>`, and without it a size-60 label and a
+  0.60-scaled parent on the same font would collide on one key with two meanings. If the
+  parent is also scaled, `scalePass` then collects the `HudEd_..._t14` leaf like any other
+  font and clones it again as `HudEd_HudEd_<font>_t14_150`; the plan writer should expect
+  that name, and a test pins that the final `tall` is `round(14 * 1.5)`.
 - A `color` or `fontSize` on a non-label child, an unknown child name, or a missing block
   (other than an addable one being turned on) fails the build with the file and child named,
   through the existing error path. Nothing is half written.
@@ -211,6 +244,14 @@ refuses to run if the total exceeds 1 MB, so a mistake in the list cannot bloat 
 The route is already lazy, so the art joins the HUD chunk's assets and costs nothing on
 other pages.
 
+The boundary is enforced, not just stated: a test asserts that nothing under `web/src/hud/`
+other than `render.ts` imports from `hud/art/`, and a build test asserts that no file
+`buildHud` emits under `materials/` has a name in `art/index.json` except the advanced-mode
+`stockNames` (whose bytes are the editor's own generated textures, never the exported PNGs).
+Two facts for the owner, stated here so nobody discovers them later: the pug repository is
+public on GitHub, so committing the PNGs publishes Valve's HUD art in the repo as well as on
+the page; and the export list is the only place a new texture can enter, by hand.
+
 **Fonts.** Preview text uses Roboto Condensed for both presets: it is the Modern preset's
 real font, it is already shipped, and it is a close enough stand-in for Trade Gothic, which
 is licensed and cannot ship. Label size comes from the label's scheme font `tall` (after
@@ -219,16 +260,21 @@ any `HudEd_` copy), so a font size edit shows at the right size.
 **Renderer** (`render.ts`). `drawPanel(ctx, panelId, design, parentRect, k)`:
 
 1. Reads the panel's generated tree from `buildTrees(design)`, which runs `layoutPass`,
-   `childPass`, `teamPass`, `scalePass`, `fontPass` and `stylePass` on a `Work` and returns
-   its parsed files, memoised in a `WeakMap` on the design object (designs are replaced, not
-   mutated, on every change, so one build per edit and none per frame).
+   `childPass`, `teamPass`, `scalePass` and `stylePass` on a `Work` and returns its parsed
+   files, memoised in a `WeakMap` on the design object (designs are replaced, not mutated,
+   on every change, so one build per edit and none per frame). It skips `fontPass`: that pass
+   only renames faces and demands the ttf bytes, and the preview draws every label in Roboto
+   Condensed regardless. `buildHud` is unchanged and still runs all six.
 2. Walks the root's children in file order, later over earlier, honouring a `zpos` key where
    present, skipping `visible 0` and `other` children that the preview does not draw
    (`Incapacitated`, `Dead`, `Voice`, `SkullIconPlacement`: the healthy, alive state).
-3. Draws by kind. `image` with an `image` key: the art index texture, or the style slot's
-   generated texture when the design restyled that slot (so a flat or rounded panel
-   background shows in place of the stock one), stretched to the rect when `scaleImage` is
-   set, else drawn at texture size clipped to the rect. `Head` and `PlayerImage`, whose
+3. Draws by kind. `image` with an `image` key: the art index texture; or, when the key
+   points at `hud/hudeditor/<slot>` because `stylePass` repointed it, the slot's generated
+   texture, which the renderer produces itself from `design.styles` with `textures.ts`'s
+   `flatTexture` or `roundedTexture` (or the stored upload) into an offscreen canvas, cached
+   per slot and style, so a flat or rounded panel background shows in place of the stock
+   one. Stretched to the rect when `scaleImage` is set, else drawn at texture size clipped
+   to the rect. `Head` and `PlayerImage`, whose
    texture game code chooses: a fixed portrait per card (Bill, Francis, Louis, Zoey for the
    survivor cards; the SI's own head is a plain silhouette). `label`: `labelText`, with
    `%HealthNumber%` shown as `100`, empty `Name` and `NameLabel` shown as the card's sample
@@ -269,7 +315,15 @@ rect, so all three cards draw from the one card file.
 - **The element list** below the canvas is unchanged. Copy near the download gains one
   sentence: "Edits inside a card apply to every teammate's card."
 - **Preset switch** with child edits present asks the same Keep or Reset question v1 asks
-  for moves, with the copy widened to "moves and inside edits".
+  for moves, with the copy widened to "moves and inside edits". Keep then drops any child
+  override whose child the new preset's file does not have (the registry records which
+  presets carry each child), so the build can never be asked to edit a block that is not
+  there; a missing block at build time is therefore a real bug and fails loudly.
+- **"Reset this element"** on a panel clears its child overrides as well as its own; a child
+  has its own "Reset this child".
+- **Three cards, one file.** Clicking inside any teammate card selects the child in the card
+  file; the outline is drawn on that child in all three cards, and dragging in any card moves
+  it in all three, because the game has one card file. The same holds for the infected row.
 
 ### Errors
 
@@ -277,6 +331,10 @@ rect, so all three cards draw from the one card file.
   that fails to parse: the build fails with file and child named on the status line, as v1.
 - A texture missing from the art index: hatched placeholder in the preview, logged once,
   never a build failure.
+- Child dragging is clamped inside the card the preview draws (for `siHealth`, the Hunter's).
+  The other five infected files receive the same delta unclamped; the game clips a child to
+  its parent, so the worst case is a partly hidden number on one infected, which the page's
+  "shown as the Hunter" note already warns about.
 - Everything else as v1: validated designs, guarded storage, damaged links reported.
 
 ### Testing
@@ -299,7 +357,12 @@ Unit tests (vitest, web project), alongside the v1 suites:
   the preview-versus-file guarantee for insides, pinned the same way v1 pins it for
   containers.
 - `art`: every material the registry and the slots need is in `index.json` and its file
-  exists; total size under the cap. The test reads the committed index, never pak01.
+  exists; total size under the cap; no module under `hud/` except `render.ts` imports from
+  `art/`; `buildHud` never emits a file whose bytes came from `art/`. The tests read the
+  committed index, never pak01.
+- `build`, fonts: a `fontSize` on a scaled parent yields `HudEd_HudEd_<font>_t<n>_<pct>` with
+  `tall` equal to `round(n * scale)`; a size-60 label and a 0.60-scaled parent on the same
+  font produce two distinct entries.
 - `mock`: `hitTest` prefers a child inside a selected panel and returns the panel otherwise.
 - `Hud`: selecting a panel shows its children list; toggling "Health number" on the stock
   teammate card writes `on: true`; selecting a child shows its controls; a child's X box
@@ -309,6 +372,18 @@ Unit tests (vitest, web project), alongside the v1 suites:
 In game, by the owner: a stock teammate card with the health number on and the bar hidden,
 and a scaled own-health panel with a moved number, screenshotted with the HUD listed above
 any crosshair addon in `addonlist.txt`.
+
+## Delivery: two plans
+
+This spec is one design delivered as two implementation plans, because the first is a
+complete upgrade on its own and the second is blind without it:
+
+1. **The honest preview.** The art export and index, `buildTrees`, `render.ts` with
+   `childRects`, the four panels delegated from `mock.ts`, and the preview-equals-file test
+   for insides. No change to `HudDesign`, no new controls: v1 users just see the real art
+   laid out by the real files, in both presets.
+2. **Editing the insides.** `children.ts`, `ChildOverride` and validation, `childPass`, the
+   two-level selection, the children list, toggles and child controls.
 
 ## Not in this version
 
