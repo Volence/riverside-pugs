@@ -29,7 +29,7 @@ describe('buildHud, layout', () => {
   });
 
   it('does not duplicate xHair on the modern preset, which already has it', () => {
-    const got = layoutOf(buildHud(design({ preset: 'modern' })));
+    const got = layoutOf(buildHud(design({ preset: 'modern' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }));
     expect(got.filter((n) => n.key.toLowerCase() === 'xhair').length).toBe(1);
   });
 
@@ -69,14 +69,14 @@ describe('buildHud, layout', () => {
   });
 
   it('ships every file the modern preset overrides even when nothing is edited', () => {
-    const paths = buildHud(design({ preset: 'modern' })).map((f) => f.path);
+    const paths = buildHud(design({ preset: 'modern' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }).map((f) => f.path);
     expect(paths).toContain('resource/ui/hud/teammatepanel.res');
     expect(paths).toContain('scripts/hudanimations.txt');
   });
 
   it('never ships a crosshair image', () => {
     for (const preset of ['stock', 'modern'] as const) {
-      expect(buildHud(design({ preset })).some((f) => f.path.includes('altcrosshair'))).toBe(false);
+      expect(buildHud(design({ preset }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }).some((f) => f.path.includes('altcrosshair'))).toBe(false);
     }
   });
 
@@ -94,5 +94,88 @@ describe('elementRect', () => {
   it('re-projects a moved element through its anchor', () => {
     const d = design({ aspect: '16:9', elements: { ownHealth: { x: 728, y: 389 } } });
     expect(elementRect(d, 'ownHealth', '4:3').x).toBe(515);
+  });
+});
+
+describe('buildHud, scale', () => {
+  const scheme = (files: { path: string; data: Uint8Array }[]) =>
+    parseKv(text(files, 'resource/clientscheme.res')!)[0].value as KvNode[];
+
+  it('multiplies the container and every child, and points children at scaled fonts', () => {
+    const files = buildHud(design({ elements: { teamColumn: { scale: 1.5 } } }));
+    const stockPanel = parseKv(baseFile('stock', 'resource/ui/hud/teammatepanel.res'))[0].value as KvNode[];
+    const gotPanel = parseKv(text(files, 'resource/ui/hud/teammatepanel.res')!)[0].value as KvNode[];
+    const named = stockPanel.find((n) => typeof n.value !== 'string' && kvGet(n, 'font') === 'PlayerDisplayName')!;
+    const after = kvFind(gotPanel, [named.key])!;
+    expect(kvGet(after, 'wide')).toBe(String(Math.round(parseFloat(kvGet(named, 'wide')!) * 1.5)));
+    expect(kvGet(after, 'font')).toBe('HudEd_PlayerDisplayName_150');
+
+    const fonts = kvFind(scheme(files), ['Fonts'])!;
+    const stockFont = kvFind(parseKv(baseFile('stock', 'resource/clientscheme.res'))[0].value as KvNode[], ['Fonts', 'PlayerDisplayName', '1'])!;
+    const scaled = kvFind(fonts.value as KvNode[], ['HudEd_PlayerDisplayName_150', '1'])!;
+    expect(kvGet(scaled, 'tall')).toBe(String(Math.round(parseFloat(kvGet(stockFont, 'tall')!) * 1.5)));
+    expect(kvGet(scaled, 'name')).toBe(kvGet(stockFont, 'name'));
+  });
+
+  it('writes nothing extra at scale 1', () => {
+    const paths = buildHud(design({ elements: { teamColumn: { scale: 1 } } })).map((f) => f.path);
+    expect(paths).not.toContain('resource/clientscheme.res');
+  });
+
+  it('scales all six infected health files together', () => {
+    const paths = buildHud(design({ elements: { siHealth: { scale: 1.2 } } })).map((f) => f.path);
+    for (const n of ['boomerhealth', 'hunterhealth', 'smokerhealth', 'tankhealth', 'zombiehealthleft_large', 'zombiehealthleft_small']) {
+      expect(paths).toContain(`resource/ui/hud/${n}.res`);
+    }
+  });
+});
+
+describe('buildHud, team layout', () => {
+  const team = (files: { path: string; data: Uint8Array }[]) =>
+    parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
+
+  it('stacks the survivor team as a column', () => {
+    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'column', spacing: 34 } } })));
+    expect([1, 2, 3, 4].map((n) => [kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'xpos'), kvGet(kvFind(t, [`TeamPlayer${n}`])!, 'ypos')]))
+      .toEqual([['0', '0'], ['0', '34'], ['0', '68'], ['0', '102']]);
+  });
+
+  it('lays it out as a row', () => {
+    const t = team(buildHud(design({ elements: { teamColumn: { dir: 'row', spacing: 140 } } })));
+    expect(kvGet(kvFind(t, ['TeamPlayer3'])!, 'xpos')).toBe('280');
+    expect(kvGet(kvFind(t, ['TeamPlayer3'])!, 'ypos')).toBe('0');
+  });
+
+  it('grows the container so a column is not clipped', () => {
+    const got = layoutOf(buildHud(design({ elements: { teamColumn: { dir: 'column', spacing: 40 } } })));
+    expect(parseFloat(kvGet(kvFind(got, ['CHudTeamDisplay'])!, 'tall')!)).toBeGreaterThanOrEqual(4 * 40);
+  });
+
+  it('sets infected spacing in hudlayout', () => {
+    const got = layoutOf(buildHud(design({ elements: { infectedRow: { spacing: 124 } } })));
+    expect(kvGet(kvFind(got, ['CHudZombieTeamDisplay'])!, 'HorizPanelSpacing')).toBe('124');
+  });
+});
+
+describe('buildHud, fonts', () => {
+  const ttf = { regular: new Uint8Array([1, 2, 3]), bold: new Uint8Array([4, 5, 6]) };
+
+  it('switches every Trade Gothic face to Roboto and ships both files', () => {
+    const files = buildHud(design({ font: 'roboto' }), { fonts: ttf });
+    const s = text(files, 'resource/clientscheme.res')!;
+    expect(s).not.toMatch(/Trade Gothic/);
+    expect(s).toMatch(/Roboto Condensed/);
+    expect(s).toMatch(/resource\/robotocondensed-regular\.ttf/i);
+    expect(files.map((f) => f.path)).toEqual(expect.arrayContaining(
+      ['resource/robotocondensed-regular.ttf', 'resource/robotocondensed-bold.ttf']));
+  });
+
+  it('ships the fonts for the modern preset, whose scheme already names them', () => {
+    const paths = buildHud(design({ preset: 'modern' }), { fonts: ttf }).map((f) => f.path);
+    expect(paths).toContain('resource/robotocondensed-bold.ttf');
+  });
+
+  it('fails clearly when Roboto is needed and was not loaded', () => {
+    expect(() => buildHud(design({ font: 'roboto' }))).toThrow(/font/i);
   });
 });

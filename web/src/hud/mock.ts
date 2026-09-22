@@ -5,8 +5,8 @@
  * disagreeing with the generator here would defeat the point of a preview.
  */
 import type { HudDesign } from './design';
-import { ELEMENTS, type HudElement } from './elements';
-import { elementRect } from './build';
+import { ELEMENTS, elementById, type HudElement } from './elements';
+import { elementRect, teamLayout } from './build';
 import { SCREEN_H } from './units';
 import { parseColour } from './textures';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
@@ -87,19 +87,15 @@ function paintOwnHealth(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
 
 const TEAMMATE_NAMES = ['Francis', 'Louis', 'Zoey'];
 const TEAM_CARDS = 3;
-// The stock team files (teamdisplayhud.res, and CHudZombieTeamDisplay's own
-// HorizPanelSpacing) both space their panels 140 HUD units apart, so that is
-// the default an override's `spacing` replaces.
-const TEAM_SPACING = 140;
 
 interface CardRect { x: number; y: number; w: number; h: number }
 
-/** Card rects for a team-style element, laid out by the design's `dir` and
- *  `spacing` the same way the generator's own team pass will read them. */
-function teamCards(design: HudDesign, id: string, r: Rect, k: number, dirDefault: 'row' | 'column'): CardRect[] {
-  const o = design.elements[id];
-  const dir = o?.dir ?? dirDefault;
-  const spacing = (o?.spacing ?? TEAM_SPACING) * k;
+/** Card rects for a team-style element, laid out by the same direction and
+ *  spacing `teamLayout` gives the generator's own team pass, so the preview
+ *  can never disagree with the file the generator writes. */
+function teamCards(design: HudDesign, id: string, r: Rect, k: number): CardRect[] {
+  const { dir, spacing: gap } = teamLayout(design, elementById(id)!);
+  const spacing = gap * k;
   const w = dir === 'row' ? Math.min(spacing, r.w / TEAM_CARDS) : r.w;
   const h = dir === 'row' ? r.h : Math.min(spacing, r.h / TEAM_CARDS);
   return Array.from({ length: TEAM_CARDS }, (_, i) => ({
@@ -110,7 +106,7 @@ function teamCards(design: HudDesign, id: string, r: Rect, k: number, dirDefault
 }
 
 function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
-  for (const [i, c] of teamCards(design, 'teamColumn', r, k, 'row').entries()) {
+  for (const [i, c] of teamCards(design, 'teamColumn', r, k).entries()) {
     panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
     ctx.fillStyle = '#3a3a3a';
     ctx.fillRect(c.x + 4, c.y + 4, c.h * 0.5, c.h * 0.5);
@@ -169,7 +165,7 @@ function paintXhair(ctx: CanvasRenderingContext2D, r: Rect) {
 }
 
 function paintInfectedRow(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
-  for (const c of teamCards(design, 'infectedRow', r, k, 'row')) {
+  for (const c of teamCards(design, 'infectedRow', r, k)) {
     panelBg(ctx, design, c.x, c.y, c.w, c.h, '0 0 0 140');
   }
 }
