@@ -150,3 +150,21 @@ export function accessDm(ticketId: number, publicUrl: string): MessagePayload {
     mentionUserIds: [],
   };
 }
+
+/** The neutral DM a reporter gets when their ticket closes, if the closer
+ *  left the tick on. It says nothing about the outcome. */
+export function closeDm(): MessagePayload {
+  return { content: 'Thank you for your report. The ticket is now closed.', embeds: [], components: [], mentionUserIds: [] };
+}
+
+/** To the access list of a restricted ticket whose reporter wrote in their
+ *  chat. No words of theirs and no name: the link does the telling, behind
+ *  the site's access check. */
+export function reporterWroteDm(ticketId: number, publicUrl: string): MessagePayload {
+  return {
+    content: `The reporter wrote on ticket #${ticketId}. Read it on the site.`,
+    embeds: [],
+    components: [[{ kind: 'link', url: `${publicUrl}/admin/people/tickets/${ticketId}`, label: `Open ticket #${ticketId}` }]],
+    mentionUserIds: [],
+  };
+}
