@@ -192,8 +192,11 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
  * aspect rule). Incapacitated and Dead become squares of the card height at
  * the Head's x and y 0; Voice a square of min(height, 16) at the right edge;
  * the splatter keeps its 2:1 shape at the card width, clipped by the card.
- * A state picture the player moved or sized keeps those fields, which
- * childPass already wrote and the shift already moved into the fitted frame.
+ * Modern's ModBg, the fill that paints its whole card, covers the fitted
+ * card exactly, so a card that grew past the file's still has a background
+ * all the way across. A state picture the player moved or sized keeps those
+ * fields, which childPass already wrote and the shift already moved into the
+ * fitted frame.
  */
 function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card: { w: number; h: number }) {
   const at = (name: string) => kvFind(nodes, [name]);
@@ -216,6 +219,11 @@ function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card
   if (splatter) {
     kvSet(splatter, 'xpos', '0'); kvSet(splatter, 'ypos', '0');
     kvSet(splatter, 'wide', String(card.w)); kvSet(splatter, 'tall', String(Math.round(card.w / 2)));
+  }
+  const fill = at('ModBg');
+  if (fill) {
+    kvSet(fill, 'xpos', '0'); kvSet(fill, 'ypos', '0');
+    kvSet(fill, 'wide', String(card.w)); kvSet(fill, 'tall', String(card.h));
   }
 }
 

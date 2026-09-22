@@ -806,8 +806,16 @@ describe('buildHud, fit', () => {
     expect(cardAt(modern, 'Dead')).toEqual(['0', '0', '26', '26']);
     expect(cardAt(modern, 'Voice')).toEqual(['97', '0', '16', '16']);
     expect(cardAt(modern, 'BackgroundImage')).toEqual(['0', '0', '113', '57']);
-    // Decoration the registry does not list is shifted like everything else; the card clips it.
-    expect(cardAt(modern, 'ModBg')).toEqual(['-3', '-2', '120', '31']);
+    // Modern's own fill background covers the fitted card, like the splatter, so a grown card stays covered.
+    expect(cardAt(modern, 'ModBg')).toEqual(['0', '0', '113', '26']);
+  });
+
+  it("grows Modern's fill background with a card that grew past the file card", () => {
+    // The health number moved right, to 140..170, and the name down to y 40: the card grows to 167 x 49.
+    const files = buildHud(fitted('modern', { teamColumn: { HealthNumber: { x: 140 }, Name: { y: 40 } } }), { fonts });
+    const team = kvFind(tree(files, TEAM_FILE, 'modern'), ['TeamPlayer1'])!;
+    expect(cardAt(tree(files, CARD_FILE, 'modern'), 'ModBg')).toEqual(['0', '0', kvGet(team, 'wide'), kvGet(team, 'tall')]);
+    expect([kvGet(team, 'wide'), kvGet(team, 'tall')]).toEqual(['167', '49']);
   });
 
   it('keeps a moved or sized state picture where the player put it, still square', () => {
