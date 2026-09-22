@@ -2630,7 +2630,7 @@ and add `reporterChats` to the returned object beside `messages`.
       {(data.reporterChats ?? []).length > 0 && (
         <section>
           <h4>Reporter chats</h4>
-          <p class="muted">Private Discord threads with the people who reported. Anyone with the Discord Administrator permission can read them.</p>
+          <p class="muted">Private Discord threads with the people who reported. Anyone with the Discord Administrator permission, or Manage Threads on the tickets channel, can read them.</p>
           <ul class="admin-list">
             {data.reporterChats!.map((c) => (
               <li key={c.id}>
@@ -2811,4 +2811,4 @@ git commit -m "Reporter chat on the site: My reports Chat, Contact reporter, the
 10. **The relay and the pings are done by the reconciler's pass** (queued by the mirror's hook), not sent from the hook itself. The handoff said "fire-and-forget through serialise"; queueing the ticket's pass is that, and it also makes the relay retry on the timer and catch messages written while the bot was down.
 11. **A relayed copy is re-sent onto a new post** when a ticket's post is replaced (a reopen of a ticket about staff, whose closed post 3b1 deletes), so the new post carries the reporter's words too.
 12. **Remove everything from this person covers every message they wrote in the ticket** (the original spec's words), not only the ones in their chat, and ends the chat only when the bot is running (`ended: false` otherwise, shown by the route; the page reloads and still shows the chat as open with its End button).
-13. **Open question left for the owner:** reporter chats on a restricted ticket are private Discord threads, and Discord Administrators (and anyone with Manage Threads on the tickets channel) can read them. The spec's owner ruling keeps restricted STAFF discussion off Discord but explicitly keeps reporter chats in Discord for restricted tickets too (the access list is only DMed). This plan follows the spec. If the owner wants a restricted ticket's reporter to be answered on the site instead, that is a different feature (the reporter has no site view of a ticket today).
+13. **Decided 2026-09-22 (owner took the recommendation): keep reporter chats in Discord for restricted tickets.** The ticket page's note must name both Discord Administrators and anyone with Manage Threads on the tickets channel. Was an open question: reporter chats on a restricted ticket are private Discord threads, and Discord Administrators (and anyone with Manage Threads on the tickets channel) can read them. The spec's owner ruling keeps restricted STAFF discussion off Discord but explicitly keeps reporter chats in Discord for restricted tickets too (the access list is only DMed). This plan follows the spec. If the owner wants a restricted ticket's reporter to be answered on the site instead, that is a different feature (the reporter has no site view of a ticket today).
