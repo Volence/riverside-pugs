@@ -144,9 +144,10 @@ function artImage(material: string, onAsset?: () => void): HTMLImageElement | un
  * generated texture. stylePass makes a flat or rounded texture in that colour
  * and the game stretches it over the panel, so a filled (or rounded) rect in
  * the same colour is the same picture, and it needs no offscreen canvas,
- * which happy-dom does not have. Uploads (kind image) are not drawn until the
- * editor for insides exists; the stock frame shows in their place.
- * Returns false when the slot is not restyled, so the caller can fall back.
+ * which happy-dom does not have. Uploads (kind image) are not drawn yet: this
+ * returns false for them, as it does for a slot that is not restyled, and the
+ * caller decides what shows instead. The health bar falls back to its stock
+ * art; an image the generator repointed at the upload draws nothing.
  */
 export function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
   const slot = SLOTS.find((s) => s.id.toLowerCase() === slotId);

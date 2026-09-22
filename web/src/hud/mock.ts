@@ -1,13 +1,14 @@
 /**
- * The canvas preview: a believable stand-in for each HUD element, drawn from
- * plain shapes and text, never game art. `elementRect` is the only source of
- * where anything sits, so this file never computes a position on its own;
+ * The canvas preview. `elementRect` is the only source of where an element
+ * sits, and the generated .res trees the only source of where anything
+ * inside one sits, so this file never computes a position on its own;
  * disagreeing with the generator here would defeat the point of a preview.
  *
- * Four elements (ownHealth, teamColumn, infectedRow, siHealth) are not
- * stand-ins: their insides are drawn straight from the generated .res files
- * by render.ts's drawPanel, so an edit to a slot or a scale is an edit to
- * the picture. Every other element here is still a hand-made approximation.
+ * Four elements (ownHealth, teamColumn, infectedRow, siHealth) are drawn
+ * straight from the generated .res files by render.ts's drawPanel, with the
+ * real exported game art, so an edit to a slot or a scale is an edit to the
+ * picture. Every other element here is still a hand-made stand-in drawn from
+ * plain shapes and text.
  */
 import type { HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
