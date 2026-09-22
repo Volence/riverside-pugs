@@ -4,8 +4,8 @@ import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN,
-  type HudDesign, type ElementOverride, type StyleOverride,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, clampOverride, DEFAULT_DESIGN,
+  type HudDesign, type ElementOverride, type StyleOverride, type RangeKey,
 } from '../hud/design';
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
@@ -188,7 +188,7 @@ function Field({ legend, children }: { legend: string; children: preact.Componen
 type Patch = (p: Partial<ElementOverride>) => void;
 
 /**
- * Apply a number box's value, or ignore it.
+ * Apply a number box's value, clamped, or ignore it.
  *
  * An emptied box gives parseFloat('') === NaN, and nothing between here and
  * the generator would reject it: a NaN position comes out of formatPos as the
@@ -196,10 +196,17 @@ type Patch = (p: Partial<ElementOverride>) => void;
  * cannot read and the canvas reads back as 0. A non-finite entry patches
  * nothing, so the box can be cleared and retyped while the design keeps its
  * last good value.
+ *
+ * Clamping through design.ts's clampOverride, the same table validateDesign
+ * clamps against, means the design can never hold a value the downloaded
+ * file would not: the box visibly snaps to the cap on the next render
+ * instead of the canvas and the file quietly disagreeing.
  */
-function patchNum(patch: Patch, e: Event, to: (n: number) => Partial<ElementOverride>): void {
+function patchNum(
+  patch: Patch, e: Event, key: RangeKey, to: (n: number) => Partial<ElementOverride>,
+): void {
   const n = parseFloat((e.target as HTMLInputElement).value);
-  if (Number.isFinite(n)) patch(to(n));
+  if (Number.isFinite(n)) patch(to(clampOverride(key, n)));
 }
 
 /** Row/column and per-card spacing, offered only for elements with a team layout.
@@ -227,7 +234,7 @@ function TeamControls(
         <span>Spacing</span>
         <input
           type="number" value={spacing}
-          onInput={(e) => patchNum(patch, e, (n) => ({ spacing: n }))}
+          onInput={(e) => patchNum(patch, e, 'spacing', (n) => ({ spacing: n }))}
         />
         <span />
       </label>
@@ -277,11 +284,11 @@ function ElementControls(
         <div class="hud__row2">
           <label class="hud__field">
             <span>X</span>
-            <input type="number" value={Math.round(o.x ?? rect.x)} onInput={(e) => patchNum(patch, e, (x) => ({ x }))} />
+            <input type="number" value={Math.round(o.x ?? rect.x)} onInput={(e) => patchNum(patch, e, 'x', (x) => ({ x }))} />
           </label>
           <label class="hud__field">
             <span>Y</span>
-            <input type="number" value={Math.round(o.y ?? rect.y)} onInput={(e) => patchNum(patch, e, (y) => ({ y }))} />
+            <input type="number" value={Math.round(o.y ?? rect.y)} onInput={(e) => patchNum(patch, e, 'y', (y) => ({ y }))} />
           </label>
         </div>
       )}
@@ -292,14 +299,14 @@ function ElementControls(
             <span>W</span>
             <input
               type="number" min={20} value={Math.round(o.w ?? rect.w)}
-              onInput={(e) => patchNum(patch, e, (n) => ({ w: Math.max(20, n) }))}
+              onInput={(e) => patchNum(patch, e, 'w', (n) => ({ w: Math.max(20, n) }))}
             />
           </label>
           <label class="hud__field">
             <span>H</span>
             <input
               type="number" min={20} value={Math.round(o.h ?? rect.h)}
-              onInput={(e) => patchNum(patch, e, (n) => ({ h: Math.max(20, n) }))}
+              onInput={(e) => patchNum(patch, e, 'h', (n) => ({ h: Math.max(20, n) }))}
             />
           </label>
         </div>

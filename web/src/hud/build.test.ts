@@ -262,10 +262,11 @@ describe('buildHud, fonts', () => {
     expect(() => buildHud(design({ font: 'roboto' }))).toThrow(/font/i);
   });
 
-  // scalePass clones existing scheme entries, and those clones carry the base
-  // face name, so fontPass has to run after it. Reversed, the panels the
-  // player resized would be the only ones left on Trade Gothic.
-  it('gives a scaled panel the chosen font, which only holds while scalePass runs before fontPass', () => {
+  // scalePass clones existing scheme entries into HudEd_<font>_<tag> font
+  // entries for a scaled panel. Those clones must end up on the chosen font
+  // too, not left behind on the base face, regardless of whether scalePass
+  // or fontPass runs first (see the note above buildHud).
+  it('gives a scaled panel the chosen font', () => {
     const files = buildHud(design({ font: 'roboto', elements: { teamColumn: { scale: 1.5 } } }), { fonts: ttf });
     const s = text(files, 'resource/clientscheme.res')!;
     const fonts = kvFind(parseKv(s)[0].value as KvNode[], ['Fonts'])!;

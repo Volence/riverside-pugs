@@ -383,16 +383,16 @@ function addonInfo(name: string): string {
 }
 
 /**
- * The pass order is load bearing in one place, and deliberately not in the
- * others.
+ * The pass order is not load bearing anywhere here.
  *
- * - `scalePass` MUST run before `fontPass`. scalePass pushes structuredClone
- *   copies of existing font entries into the scheme's Fonts block as
- *   HudEd_<font>_<tag>, and those clones carry the base face name ("Trade
- *   Gothic"). fontPass then renames every Trade Gothic face in the scheme.
- *   Reversed, every scaled panel would keep Trade Gothic while the rest of
- *   the HUD moved to Roboto, so the player's font choice would silently miss
- *   exactly the panels they resized.
+ * - `scalePass` and `fontPass` can run in either order. scalePass pushes
+ *   structuredClone copies of existing font entries into the scheme's Fonts
+ *   block as HudEd_<font>_<tag>. Work.tree memoises the parsed scheme by
+ *   path and kvFind/kvSet mutate the live nodes it returns, so whichever
+ *   pass runs first, the other sees its writes: fontPass first leaves the
+ *   base entries already renamed to "Roboto Condensed" before scalePass
+ *   clones them, and scalePass first leaves clones for fontPass to rename
+ *   alongside everything else. Both orders produce the same scheme.
  * - `teamPass` and `scalePass` are independent, and must stay that way.
  *   teamPass owns a team-file element's container size, its four player
  *   panels and the spacing between them, and writes all of them already

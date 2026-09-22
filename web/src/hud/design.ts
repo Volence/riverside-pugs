@@ -57,6 +57,20 @@ const RANGES = {
   scale: [0.5, 2], spacing: [0, 400], fontSize: [6, 64],
 } as const;
 
+export type RangeKey = keyof typeof RANGES;
+
+/**
+ * The one place that clamps an override number, shared by validateDesign
+ * (on load, share-link decode and download) and the editor's number boxes.
+ * Reusing RANGES here instead of a second table means a typed value can
+ * never be drawn on the canvas unclamped while the downloaded file clamps
+ * it: the box snaps to the same cap the file would have carried anyway.
+ */
+export function clampOverride(key: RangeKey, value: number): number {
+  const [lo, hi] = RANGES[key];
+  return Math.min(hi, Math.max(lo, value));
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const oneOf = <T extends string>(v: unknown, all: readonly T[], d: T): T => (all.includes(v as T) ? (v as T) : d);
 const colour = (v: unknown): string | undefined => {

@@ -1,7 +1,7 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName } from './design';
+import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName, clampOverride } from './design';
 
 describe('validateDesign', () => {
   it('returns the defaults for junk', () => {
@@ -32,6 +32,17 @@ describe('validateDesign', () => {
       heavy: { w: 64, h: 64, png: 'A'.repeat(1_500_000) },
     } });
     expect(Object.keys(d.images)).toEqual(['ok']);
+  });
+});
+
+describe('clampOverride', () => {
+  // The editor's number boxes call this directly so a typed value snaps to
+  // the same cap validateDesign would clamp it to on load: the canvas and
+  // the downloaded file must never disagree about what a value became.
+  it('clamps to the same RANGES bounds validateDesign uses, and leaves an in-range value alone', () => {
+    expect(clampOverride('spacing', 500)).toBe(400);
+    expect(clampOverride('spacing', -50)).toBe(0);
+    expect(clampOverride('spacing', 120)).toBe(120);
   });
 });
 

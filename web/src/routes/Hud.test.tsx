@@ -144,6 +144,18 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('42');
   });
 
+  // design.ts's RANGES caps team spacing at 400. Typing past the cap must
+  // snap the design to it immediately, not just at download time: otherwise
+  // the canvas would draw a value the packed file could never carry.
+  it('snaps an out-of-range number box to the clamp used at download time', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByText('Teammates'));
+    const spacing = screen.getByLabelText('Spacing') as HTMLInputElement;
+
+    fireEvent.input(spacing, { target: { value: '500' } });
+    expect(spacing.value).toBe('400');
+  });
+
   it('shows a damaged-link message for a hash that will not decode', async () => {
     location.hash = '#d=garbage';
     render(<Hud />);
