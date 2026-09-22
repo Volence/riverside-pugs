@@ -33,7 +33,8 @@ function Discussion({ d }: { d: TicketDiscussion }) {
   }
   const text = d.state === 'unconfigured' ? 'Discord discussion is not configured. An admin can set the tickets forum and the tickets channel in Settings; until then this ticket is worked here.'
     : d.state === 'pending' ? 'The Discord thread for this ticket has not been made yet. The bot makes it within a few minutes of being online.'
-      : 'This ticket has no Discord thread.';
+      : d.state === 'restricted' ? 'Restricted tickets have no Discord thread. Work it here: the people on its access list were sent a link to this page.'
+        : 'This ticket has no Discord thread.';
   return <p class="muted">{text}</p>;
 }
 
@@ -86,7 +87,7 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
 
       {t.restricted && (
         <section class="ticket-restricted">
-          <p>Only the people listed here can see this ticket, and its Discord thread is private to the same people. Anyone with the Discord Administrator permission can read every channel and thread on the Discord server all the same, so if that includes the accused, keep the discussion here and out of Discord.</p>
+          <p>Only the people listed here can see this ticket. It has no Discord thread, so keep the discussion on this page.</p>
           <ul class="admin-list">{data.access.map((a) => <li key={a.steamid}>{a.name}</li>)}</ul>
           {data.accessCandidates.length > 0 && (
             <div class="admin-form">

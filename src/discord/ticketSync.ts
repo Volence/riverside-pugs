@@ -221,11 +221,11 @@ export class TicketSync {
       setThreadState(db, thread.id, 'deleted');
       thread = undefined;
     }
-    // Only a private thread can be on the wrong surface here: a forum thread
-    // on a restricted ticket was deleted above. The restriction was lifted,
-    // so the thread's members are no longer the audience. `surface &&`: a
-    // null surface means a channel id was blanked in Settings, and a blanked
-    // setting ends nothing. The thread that exists is simply kept up.
+    // A thread on the wrong surface for a NON-null answer is replaced: a
+    // private thread from before restricted tickets went site-only, on a
+    // ticket that has since been un-restricted, ends and the forum takes over.
+    // A null answer ends nothing: a blanked setting, and a restricted
+    // ticket's surviving private thread, are simply kept up.
     if (thread && surface && thread.surface !== surface) {
       await this.endThread(thread, 'This ticket is no longer restricted. Its discussion continues in the staff forum.');
       thread = undefined;
@@ -264,7 +264,7 @@ export class TicketSync {
    * Marked before it is published: publishing cannot fail, and a report must
    * never be said twice.
    */
-  private announceInFeed(t: TicketRow, why: 'ok' | 'unconfigured'): void {
+  private announceInFeed(t: TicketRow, why: 'ok' | 'unconfigured' | 'restricted'): void {
     if (t.restricted === 1 || why !== 'unconfigured' || t.status !== 'open') return;
     const { db } = this.deps;
     // Promoted by some path that did not hold the feed (a flag set by hand in

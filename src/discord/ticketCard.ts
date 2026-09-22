@@ -143,7 +143,7 @@ export function accessDm(ticketId: number, publicUrl: string): MessagePayload {
   return {
     content: [
       'You have been given access to a restricted ticket. Only the people on its access list can see it.',
-      'Anyone with the Discord Administrator permission can read every thread on the Discord server, so if the ticket involves such a person, keep the discussion on the site.',
+      'Restricted tickets are worked on the site only, with no Discord thread, so keep the discussion there.',
     ].join('\n'),
     embeds: [],
     components: [[{ kind: 'link', url, label: `Open ticket #${ticketId}` }]],

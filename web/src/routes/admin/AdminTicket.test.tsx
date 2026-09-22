@@ -245,4 +245,14 @@ describe('AdminTicket', () => {
     expect(screen.queryByText(/goes to Discord's audit log/)).toBeNull();
   });
 
+  it('says a restricted ticket is worked here, with no Discord thread', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      ticket: { ...detail().ticket, restricted: true },
+      discussion: { state: 'restricted', surface: null, url: null },
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByText(/Restricted tickets have no Discord thread/)).toBeTruthy();
+    expect(screen.getByText(/It has no Discord thread, so keep the discussion on this page/)).toBeTruthy();
+  });
+
 });

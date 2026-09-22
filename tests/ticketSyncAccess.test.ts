@@ -152,7 +152,7 @@ describe('what the ticket page is told about the discussion', () => {
   const file = (targetId: string, category = 'griefing') =>
     (fileReport(db, IDS[0], { targetId, category, text: 'x' }, { adminSteamIds: [ADMIN] }) as { ticketId: number }).ticketId;
 
-  it('ready with a link, pending, unconfigured, and about staff', async () => {
+  it('ready with a link, pending, unconfigured, and restricted', async () => {
     const id = file(IDS[5]);
     expect(ticketDetail(db, id, MOD, { guildId: 'g1' })!.discussion).toEqual({ state: 'pending', surface: 'forum', url: null });
     sync.start();
@@ -162,7 +162,7 @@ describe('what the ticket page is told about the discussion', () => {
     expect(ticketDetail(db, id, MOD)!.discussion.url).toBeNull();
 
     const restricted = file(IDS[3], 'unsafe');
-    expect(ticketDetail(db, restricted, ADMIN, { guildId: 'g1' })!.discussion).toEqual({ state: 'unconfigured', surface: null, url: null });
+    expect(ticketDetail(db, restricted, ADMIN, { guildId: 'g1' })!.discussion).toEqual({ state: 'restricted', surface: null, url: null });
 
     setSetting(db, 'discord_tickets_forum_id', '');
     const other = file(IDS[2]);

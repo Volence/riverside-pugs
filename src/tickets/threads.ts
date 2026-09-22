@@ -88,24 +88,33 @@ export function forbiddenForumThreads(db: DB, ticketId?: number): ThreadRow[] {
 /**
  * Where a ticket's staff thread belongs, and why nowhere when it is nowhere.
  * One function, used by the reconciler to act and by the ticket page to
- * explain, so the two cannot disagree. A ticket about staff goes to the forum
- * like any other: forumAudience keeps its subject out of it.
+ * explain, so the two cannot disagree.
+ *
+ * A restricted ticket has no staff thread at all (owner, 2026-09-22): its
+ * discussion is on the site, where the access list is enforced, and the
+ * people on the list are DMed the link. Discord's own Administrator
+ * permission reads every thread there is, so a private thread was never as
+ * private as the ticket. A private thread made before this rule is left as
+ * it is: reconcileTicket replaces a thread only for a surface that is not
+ * null.
+ *
+ * A ticket about staff goes to the forum like any other: forumAudience keeps
+ * its subject out of it.
  */
 export function surfaceFor(
   db: DB, t: { restricted: number; target_id: string | null },
-): { surface: ThreadSurface | null; why: 'ok' | 'unconfigured' } {
-  if (t.restricted === 1) {
-    return (getSetting(db, 'discord_tickets_channel_id') ?? '') ? { surface: 'private', why: 'ok' } : { surface: null, why: 'unconfigured' };
-  }
+): { surface: ThreadSurface | null; why: 'ok' | 'unconfigured' | 'restricted' } {
+  if (t.restricted === 1) return { surface: null, why: 'restricted' };
   return (getSetting(db, 'discord_tickets_forum_id') ?? '') ? { surface: 'forum', why: 'ok' } : { surface: null, why: 'unconfigured' };
 }
 
 export interface PrivateThreadMember { steamid: string; discord_id: string; notified_at: string | null }
 
 /**
- * Who may be in a restricted ticket's private staff thread: on its access
- * list, active, still holding a staff flag, linked to Discord, and never the
- * ticket's own target.
+ * Who may be in a restricted ticket's private staff thread, where one
+ * survives from before restricted tickets went site-only, and who is DMed
+ * the link to a restricted ticket: on its access list, active, still holding
+ * a staff flag, linked to Discord, and never the ticket's own target.
  *
  * One definition, for adding people, for telling them, and for taking out
  * whoever is in there and should not be. The site asks the same question in

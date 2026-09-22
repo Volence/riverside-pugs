@@ -147,7 +147,8 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
   const discussion = {
     state: thread ? 'ready' as const
       : where.why === 'unconfigured' ? 'unconfigured' as const
-        : row.status === 'open' ? 'pending' as const : 'none' as const,
+        : where.why === 'restricted' ? 'restricted' as const
+          : row.status === 'open' ? 'pending' as const : 'none' as const,
     surface: thread?.surface ?? where.surface,
     url: thread && opts.guildId ? `https://discord.com/channels/${opts.guildId}/${thread.thread_id}` : null,
   };

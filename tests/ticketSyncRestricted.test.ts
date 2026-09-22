@@ -7,7 +7,7 @@ import { addAccess, closeTicket, setRestricted } from '../src/tickets/actions.js
 import { foldTicket, holdFeedAbout } from '../src/tickets/store.js';
 import { publishTicketSignal } from '../src/tickets/signals.js';
 import { publishBanChange } from '../src/banEvents.js';
-import { staffThread, threadByDiscordId } from '../src/tickets/threads.js';
+import { insertThread, staffThread, threadByDiscordId } from '../src/tickets/threads.js';
 import { mergePlayers } from '../src/mergePlayers.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { TicketSync } from '../src/discord/ticketSync.js';
@@ -46,27 +46,46 @@ const file = (reporter: string, targetId: string, category = 'griefing') =>
   (fileReport(db, reporter, { targetId, category, text: 'details' }, deps) as { ticketId: number }).ticketId;
 const members = async (threadId: string) => ((await t.threads.memberIds(threadId)) ?? []).sort();
 
+/** A private staff thread made before restricted tickets went site-only
+ *  (phase 3b1). None exist in production; the reconciler still keeps one:
+ *  its members, its card, its lock, the ejection sweep. */
+async function legacyThread(ticketId: number): Promise<string> {
+  const made = await t.threads.createPrivateThread('chan1', { name: `Ticket #${ticketId}` });
+  insertThread(db, { ticketId, kind: 'staff', surface: 'private', channelId: 'chan1', threadId: made.threadId });
+  // As createThread does: the card counts the reports already filed, so none
+  // of them gets an "another report" line.
+  db.prepare('UPDATE ticket_reports SET announced_at = ? WHERE ticket_id = ? AND announced_at IS NULL').run(new Date().toISOString(), ticketId);
+  await sync.reconcileTicket(ticketId);
+  return made.threadId;
+}
+
 describe('a restricted ticket in Discord', () => {
-  it('gets a private thread whose members are its access list, one DM each, and nothing in the forum', async () => {
+  it('gets no thread, one DM each with the site link, and nothing in the forum', async () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
     await sync.idle();
     expect(t.threadsIn('forum1')).toEqual([]);
-    const [thread] = t.threadsIn('chan1');
-    expect(thread).toMatchObject({ surface: 'private', name: `Ticket #${id}` });
-    expect(await members(thread.id)).toEqual(['907']);
-    const inThread = t.live().filter((m) => m.channelId === thread.id);
-    expect(inThread).toHaveLength(1);
-    expect(JSON.stringify(inThread[0].payload)).toContain('Discord Administrator permission');
-    expect(staffThread(db, id)).toMatchObject({ surface: 'private', channel_id: 'chan1', card_message_id: inThread[0].id });
+    expect(t.threadsIn('chan1')).toEqual([]);
+    expect(staffThread(db, id)).toBeUndefined();
     expect(t.dms.map((d) => d.userId)).toEqual(['907']);
     expect(JSON.stringify(t.dms[0].payload)).toContain(`https://pug.test/admin/people/tickets/${id}`);
     expect(JSON.stringify(t.dms[0].payload)).not.toContain('player5');
     expect(events).toEqual([]);
   });
 
+  it('keeps a private thread from before, whose members are its access list', async () => {
+    const id = file(IDS[0], IDS[5], 'unsafe');
+    await sync.idle();
+    const threadId = await legacyThread(id);
+    expect(await members(threadId)).toEqual(['907']);
+    const inThread = t.live().filter((m) => m.channelId === threadId);
+    expect(inThread).toHaveLength(1);
+    expect(staffThread(db, id)).toMatchObject({ surface: 'private', channel_id: 'chan1', card_message_id: inThread[0].id });
+  });
+
   it('giving access adds the person to the thread and DMs them, once', async () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
     await sync.idle();
+    await legacyThread(id);
     expect(addAccess(db, id, ADMIN, MOD).ok).toBe(true);
     await sync.idle();
     expect(await members(staffThread(db, id)!.thread_id)).toEqual(['906', '907']);
@@ -79,6 +98,7 @@ describe('a restricted ticket in Discord', () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
     addAccess(db, id, ADMIN, MOD);
     await sync.idle();
+    await legacyThread(id);
     const threadId = staffThread(db, id)!.thread_id;
     // A stranger added by hand in Discord goes too: the list is the membership.
     await t.threads.addMember(threadId, '555');
@@ -91,6 +111,7 @@ describe('a restricted ticket in Discord', () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
     addAccess(db, id, ADMIN, MOD);
     await sync.idle();
+    await legacyThread(id);
     const threadId = staffThread(db, id)!.thread_id;
     // Raw SQL, not unlinkDiscord/claimTicket: those publish their own
     // signals, and this test wants exactly one controlled pass.
@@ -132,7 +153,7 @@ describe('a restricted ticket in Discord', () => {
 });
 
 describe('forum posts that must not exist', () => {
-  it('restricting by hand deletes the forum post and opens a private thread', async () => {
+  it('restricting by hand deletes the forum post and opens nothing', async () => {
     const id = file(IDS[0], IDS[5]);
     await sync.idle();
     const post = staffThread(db, id)!.thread_id;
@@ -140,16 +161,15 @@ describe('forum posts that must not exist', () => {
     await sync.idle();
     expect(t.threadsById.get(post)!.deleted).toBe(true);
     expect(threadByDiscordId(db, post)!.state).toBe('deleted');
-    const now = staffThread(db, id)!;
-    expect(now.surface).toBe('private');
-    expect(await members(now.thread_id)).toEqual(['906', '907']);
+    expect(staffThread(db, id)).toBeUndefined();
+    expect(t.threadsIn('chan1')).toEqual([]);
   });
 
   it('lifting the restriction ends the private thread and posts to the forum', async () => {
     const id = file(IDS[0], IDS[5]);
     setRestricted(db, id, MOD, true, [ADMIN]);
     await sync.idle();
-    const priv = staffThread(db, id)!.thread_id;
+    const priv = await legacyThread(id);
     expect(setRestricted(db, id, MOD, false, [ADMIN]).ok).toBe(true);
     await sync.idle();
     expect(t.threadsById.get(priv)).toMatchObject({ locked: true, archived: true, deleted: false });
@@ -281,7 +301,7 @@ describe('a fold that lands a forum thread on a restricted ticket', () => {
     // announcement would itself be the one thing about the restricted ticket
     // that must never surface.
     expect(t.messages.some((m) => JSON.stringify(m.payload).includes(`<#${forumThread}>`))).toBe(false);
-    expect(staffThread(db, restricted)!.thread_id).not.toBe(forumThread);
+    expect(staffThread(db, restricted)).toBeUndefined();
   });
 });
 
@@ -306,6 +326,7 @@ describe('blanking the tickets channel setting ends nothing, on the private side
     const id = file(IDS[0], IDS[5], 'unsafe');
     addAccess(db, id, ADMIN, MOD);
     await sync.idle();
+    await legacyThread(id);
     const threadId = staffThread(db, id)!.thread_id;
     expect(await members(threadId)).toEqual(['906', '907']);
     setSetting(db, 'discord_tickets_channel_id', '');
@@ -394,6 +415,8 @@ describe('a thread member who is no longer entitled to be there', () => {
     addAccess(db, open, ADMIN, MOD);
     addAccess(db, closed, ADMIN, MOD);
     await sync.idle();
+    await legacyThread(open);
+    await legacyThread(closed);
     const openThread = staffThread(db, open)!.thread_id;
     const closedThread = staffThread(db, closed)!.thread_id;
     expect(await members(openThread)).toEqual(['906', '907']);
@@ -415,6 +438,7 @@ describe('a thread member who is no longer entitled to be there', () => {
     addAccess(db, id, ADMIN, MOD);
     db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(MOD);
     await sync.idle();
+    await legacyThread(id);
     expect(await members(staffThread(db, id)!.thread_id)).toEqual(['907']);
     expect(t.dms.map((d) => d.userId)).toEqual(['907']);
     // And nothing changes its mind about them on a later pass.
@@ -428,6 +452,7 @@ describe('the accused must never be a member of their own thread', () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
     addAccess(db, id, ADMIN, MOD);
     await sync.idle();
+    await legacyThread(id);
     const threadId = staffThread(db, id)!.thread_id;
     expect(await members(threadId)).toEqual(['906', '907']);
     closeTicket(db, id, MOD, 'no_action', '');
@@ -448,6 +473,7 @@ describe('the accused must never be a member of their own thread', () => {
     const id = file(IDS[0], IDS[5], 'unsafe');
     addAccess(db, id, ADMIN, MOD);
     await sync.idle();
+    await legacyThread(id);
     const threadId = staffThread(db, id)!.thread_id;
     // Discord archived it after a quiet week: the row still says unlocked, and
     // an archived thread refuses a removal until something undoes that.
@@ -466,6 +492,8 @@ describe('the accused must never be a member of their own thread', () => {
     addAccess(db, a, ADMIN, MOD);
     addAccess(db, b, ADMIN, IDS[4]);
     await sync.idle();
+    await legacyThread(a);
+    await legacyThread(b);
     const tha = staffThread(db, a)!.thread_id;
     const thb = staffThread(db, b)!.thread_id;
     expect(await members(tha)).toEqual(['906', '907']);
@@ -495,6 +523,7 @@ describe('the accused must never be a member of their own thread', () => {
     const restricted = file(IDS[0], IDS[5], 'unsafe');
     const normal = file(IDS[1], IDS[5], 'griefing');
     await sync.idle();
+    await legacyThread(restricted);
     const priv = staffThread(db, restricted)!.thread_id;
     const post = staffThread(db, normal)!.thread_id;
     // Someone added to the private thread by hand in Discord: the sweep has

@@ -156,14 +156,14 @@ describe('the Tickets section', () => {
     expect(values).toEqual(['60', '1440', '4320', '10080', '43200', '']);
   });
 
-  it('a restricted ticket says so, warns about Discord, and lists who can see it', async () => {
+  it('a restricted ticket says so, and lists who can see it', async () => {
     mockMod.ticket.mockResolvedValue(detail({
       ticket: { ...detail().ticket, restricted: true },
       access: [{ steamid: '9', name: 'Owner' }], accessCandidates: [{ steamid: '5', name: 'Other' }],
     }));
     renderAdmin('/admin/people/tickets/12', mod);
     await screen.findByText(/Restricted/);
-    expect(screen.getByText(/Discord Administrator/)).toBeTruthy();
+    expect(screen.getByText(/It has no Discord thread, so keep the discussion on this page/)).toBeTruthy();
     expect(screen.getByText('Owner')).toBeTruthy();
     expect(screen.getByText(/The ban reason is shown to the player/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Give access to'), { target: { value: '5' } });

@@ -125,15 +125,14 @@ describe('a report held from the feed by its history', () => {
     expect(heldValue()).toBe(1);
   });
 
-  it('T7: a restricted ticket with the tickets channel configured still gets an another-report line in its thread for a held report', async () => {
+  it('T7: a restricted ticket with the tickets channel configured says nothing anywhere in Discord', async () => {
     setSetting(db, 'discord_tickets_channel_id', 'chan1');
     fileReport(db, IDS[0], { targetId: IDS[5], category: 'unsafe', text: 'first' }, { adminSteamIds: [ADMIN] });
     await settled();
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'unsafe', text: 'second' }, { adminSteamIds: [ADMIN] });
     await settled();
-    const [thread] = t.threadsIn('chan1');
-    const inThread = t.live().filter((m) => m.channelId === thread.id);
-    expect(inThread.some((m) => /another report/i.test(JSON.stringify(m.payload)))).toBe(true);
+    expect(t.threadsIn('chan1')).toEqual([]);
+    expect(t.live().filter((m) => /another report/i.test(JSON.stringify(m.payload)))).toEqual([]);
     expect(inFeed()).toEqual([]);
   });
 });
