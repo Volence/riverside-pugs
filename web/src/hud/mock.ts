@@ -15,7 +15,7 @@ import { ELEMENTS, elementById, type HudElement } from './elements';
 import { buildTrees, elementRect, teamLayout } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { drawPanel, drawSlotStyle } from './render';
+import { drawPanel } from './render';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
 
 export type Side = 'survivor' | 'infected';
@@ -142,10 +142,6 @@ function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesi
       const p = parentPanel(design, file, `TeamPlayer${i + 1}`, k);
       const card = { x: c.x, y: c.y, w: p.w, h: p.h };
       clipToRect(ctx, card, () => {
-        // The panelBg slot targets TeamPlayer1..4 in teamdisplayhud.res, the
-        // card's parent, not the card file drawPanel reads; the game paints
-        // that parent's background before its children, so this does too.
-        drawSlotStyle(ctx, design, 'panelbg', { name: 'TeamPlayer', kind: 'image', ...card, visible: true });
         drawPanel(ctx, design, 'teamColumn', { x: c.x, y: c.y }, k, { card: i, onAsset });
       });
     }

@@ -234,6 +234,33 @@ function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card
   }
 }
 
+const CARD_BG = 'HudEdCardBg';
+
+/**
+ * The panelBg style as the card background child carries it. Flat is a
+ * plain fillcolor (the Modern ModBg pattern), so no texture ships; Rounded
+ * and Image point at the generated texture. An Image style with no stored
+ * upload has nothing to show and adds nothing. Stock adds nothing: the stock
+ * s_panel_background was never painted either.
+ */
+function cardBackground(design: HudDesign): { fill: string } | { image: string } | null {
+  const s = design.styles.panelBg;
+  if (!s || s.kind === 'stock') return null;
+  if (s.kind === 'image' && !design.images.panelBg) return null;
+  if (s.kind === 'flat') return { fill: s.color ?? SLOTS.find((x) => x.id === 'panelBg')!.defaultColor };
+  return { image: 'hud/hudeditor/panelbg' };
+}
+
+/** The background child, unscaled at the card's size: scalePass scales it with everything else in the card file. */
+function cardBgBlock(bg: { fill: string } | { image: string }, size: { w: number; h: number }): KvNode {
+  const pairs: [string, string][] = [
+    ['ControlName', 'ImagePanel'], ['fieldName', CARD_BG], ['xpos', '0'], ['ypos', '0'], ['zpos', '-2'],
+    ['wide', String(size.w)], ['tall', String(size.h)], ['visible', '1'], ['enabled', '1'],
+    ...('fill' in bg ? [['fillcolor', bg.fill]] as [string, string][] : [['scaleImage', '1'], ['image', bg.image]] as [string, string][]),
+  ];
+  return { key: CARD_BG, value: pairs.map(([key, value]) => ({ key, value })) };
+}
+
 /**
  * Shrink the teammate card to its content (probe T6: nothing is lost).
  * Every child is shifted so the content starts at the card's top-left, and
@@ -241,20 +268,30 @@ function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card
  * nothing on screen; only empty space goes. The card size itself is
  * teamPass's to write, from the same box through cardFit. Recomputed from
  * the tree on every build, so moving a child re-fits the card.
+ *
+ * Then the card background: a child the card really draws, injected first
+ * so it sits under everything, sized to the card after fit (or the file's
+ * card when fit is off or finds nothing), visible in every state.
  */
 function fitPass(work: Work, design: HudDesign) {
-  if (!design.elements.teamColumn?.fit) return;
+  const fit = design.elements.teamColumn?.fit === true;
+  const bg = cardBackground(design);
+  if (!fit && !bg) return;
   const nodes = work.tree(CARD);
-  const box = contentBox(nodes);
-  if (!box) return;
-  for (const n of nodes) {
-    if (typeof n.value === 'string') continue;
-    for (const [key, d] of [['xpos', box.x], ['ypos', box.y]] as const) {
-      const v = parseFloat(kvGet(n, key) ?? '');
-      if (Number.isFinite(v)) kvSet(n, key, String(v - d));
+  let size = baseTeam(design.preset).card;
+  const box = fit ? contentBox(nodes) : null;
+  if (box) {
+    for (const n of nodes) {
+      if (typeof n.value === 'string') continue;
+      for (const [key, d] of [['xpos', box.x], ['ypos', box.y]] as const) {
+        const v = parseFloat(kvGet(n, key) ?? '');
+        if (Number.isFinite(v)) kvSet(n, key, String(v - d));
+      }
     }
+    size = { w: box.w, h: box.h };
+    fitStateArt(nodes, design.children?.teamColumn ?? {}, size);
   }
-  fitStateArt(nodes, design.children.teamColumn ?? {}, { w: box.w, h: box.h });
+  if (bg) nodes.unshift(cardBgBlock(bg, size));
 }
 
 /**
@@ -587,6 +624,10 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
     const s = design.styles[slot.id];
     if (!s || s.kind === 'stock') continue;
     if (slot.advancedOnly && !design.advanced) continue;
+    // The card background is a child fitPass injects: a flat one is a plain
+    // fillcolor and needs no texture, and one fitPass did not inject (an
+    // Image style with no upload) has nothing to point at.
+    if (slot.id === 'panelBg') { const bg = cardBackground(design); if (!bg || 'fill' in bg) continue; }
     const { w, h } = slot.size;
     const colour = s.color ?? slot.defaultColor;
     const rgba = s.kind === 'image' ? assets.images?.[slot.id]

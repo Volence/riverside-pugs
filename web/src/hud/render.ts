@@ -205,7 +205,7 @@ function artImage(material: string, onAsset?: () => void): HTMLImageElement | un
  * returns false for them, as it does for a slot that is not restyled, and the
  * caller decides what shows instead.
  */
-export function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
+function drawSlotStyle(ctx: CanvasRenderingContext2D, design: HudDesign, slotId: string, r: ChildRect): boolean {
   const slot = SLOTS.find((s) => s.id.toLowerCase() === slotId);
   const style = slot && design.styles[slot.id];
   if (!slot || !style || style.kind === 'stock' || style.kind === 'image') return false;

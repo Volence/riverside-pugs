@@ -111,9 +111,8 @@ describe('drawHud delegates panels to the renderer', () => {
   });
 
   it('draws a restyled survivor panel background behind each teammate card', () => {
-    // panelBg targets TeamPlayer1..4 in teamdisplayhud.res, not the card
-    // file drawPanel reads, so paintTeamColumn must paint it itself before
-    // drawPanel, the way the game paints a parent's background first.
+    // The background is a child of the card file now (HudEdCardBg), so
+    // drawPanel draws it from the tree, once per card, and nothing else does.
     _setImageFactory(instant);
     const design = { ...DEFAULT_DESIGN, styles: { ...DEFAULT_DESIGN.styles, panelBg: { kind: 'flat' as const, color: '255 0 0 255' } } };
     const fills: { a: unknown[]; fill: string }[] = [];

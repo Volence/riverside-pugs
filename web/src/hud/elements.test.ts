@@ -87,6 +87,9 @@ describe('ELEMENTS', () => {
 describe('SLOTS', () => {
   it('points every target at a real image key in the stock file', () => {
     for (const s of SLOTS) for (const t of s.targets) {
+      // The card background is a child fitPass injects into the card file, so
+      // it is in no base file; build.test.ts pins that it is written.
+      if (t.path[0] === 'HudEdCardBg') continue;
       const panel = kvFind(root('stock', t.file), t.path);
       expect(panel, `${s.id}: ${t.file} ${t.path.join('/')}`).toBeDefined();
       // Finding the panel is not enough: the key itself must name a real

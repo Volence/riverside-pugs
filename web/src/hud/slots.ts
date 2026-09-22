@@ -21,11 +21,17 @@ export interface StyleSlot {
   defaultColor: string;
 }
 
-const team = (n: number) => ({ file: 'resource/ui/hud/teamdisplayhud.res', path: [`TeamPlayer${n}`], key: 'image' });
+/**
+ * The survivor card background. The card block's own `image`
+ * (TeamPlayerN in teamdisplayhud.res) is never painted (probe T6), so the
+ * slot targets a child fitPass injects into the card file instead:
+ * HudEdCardBg, which exists only when this slot is restyled.
+ */
+const CARD_BG = { file: 'resource/ui/hud/teammatepanel.res', path: ['HudEdCardBg'], key: 'image' };
 
 export const SLOTS: StyleSlot[] = [
   { id: 'panelBg', label: 'Survivor panel background', advancedOnly: false, size: { w: 32, h: 32 },
-    targets: [team(1), team(2), team(3), team(4)], stockNames: [], defaultColor: '0 0 0 140' },
+    targets: [CARD_BG], stockNames: [], defaultColor: '0 0 0 140' },
   { id: 'weaponBoxActive', label: 'Active weapon box', advancedOnly: true, size: { w: 32, h: 32 },
     targets: [], stockNames: ['vgui/hud/scalablepanel_bgmidgrey_glow'], defaultColor: '40 40 40 215' },
   { id: 'weaponBoxInactive', label: 'Other weapon boxes', advancedOnly: true, size: { w: 32, h: 32 },

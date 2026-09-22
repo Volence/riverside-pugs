@@ -33,6 +33,7 @@ export function artUrl(material: string): string | undefined {
 /** Every material the renderer can ask for. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
+  // Stock names this as the card block's image, which the game never paints (probe T6); kept so the index stays complete.
   'vgui/s_panel_background',
   'vgui/hud/healthbar_bg_1', 'vgui/hud/healthbar_bg_2', 'vgui/hud/healthbar_bg_3', 'vgui/hud/healthbar_bg_4',
   'vgui/hud/infected_healthbar_bg_1',

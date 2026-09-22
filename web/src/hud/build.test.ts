@@ -454,29 +454,25 @@ describe('teamLayout, real base-file defaults', () => {
 describe('buildHud, styles', () => {
   const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
 
-  it('writes a new texture and points the panels at it', () => {
-    const files = buildHud(design({ styles: { panelBg: { kind: 'flat', color: '0 0 0 140' } } }));
+  it('writes a new texture and points the card background at it', () => {
+    const files = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 140' } } }));
     const paths = files.map((f) => f.path);
     expect(paths).toContain('materials/vgui/hud/hudeditor/panelbg.vtf');
     expect(paths).toContain('materials/vgui/hud/hudeditor/panelbg.vmt');
-    const t = parseKv(text(files, 'resource/ui/hud/teamdisplayhud.res')!)[0].value as KvNode[];
-    expect(kvGet(kvFind(t, ['TeamPlayer2'])!, 'image')).toBe('hud/hudeditor/panelbg');
+    expect(kvGet(tree(files, CARD_FILE)[0], 'image')).toBe('hud/hudeditor/panelbg');
   });
 
   it('uses an uploaded image when the slot asks for one', () => {
     const rgba = new Uint8ClampedArray(32 * 32 * 4).fill(7);
-    const files = buildHud(design({ styles: { panelBg: { kind: 'image' } } }), { images: { panelBg: rgba } });
+    const files = buildHud(design({ styles: { panelBg: { kind: 'image' } }, images: { panelBg: { w: 32, h: 32, png: 'AAAA' } } }),
+      { images: { panelBg: rgba } });
     const vtf = files.find((f) => f.path.endsWith('panelbg.vtf'))!;
     expect(vtf.data.length).toBe(80 + 32 * 32 * 4);
     expect(vtf.data[80]).toBe(7);
   });
 
-  // panelBg is the one slot with a normal-mode route (it has targets and is
-  // not advancedOnly), so it is the only slot that can prove the rule. An
-  // advancedOnly slot is skipped outright in normal mode and would pass this
-  // by emitting no materials at all.
   it('never writes a stock texture name in normal mode', () => {
-    const files = buildHud(design({ styles: { panelBg: { kind: 'flat', color: '0 0 0 140' } } }));
+    const files = buildHud(design({ styles: { panelBg: { kind: 'rounded', color: '0 0 0 140' } } }));
     const materials = files.filter((f) => f.path.startsWith('materials/'));
     expect(materials.length).toBeGreaterThan(0);
     for (const f of materials) expect(f.path, f.path).toMatch(/^materials\/vgui\/hud\/hudeditor\//);
@@ -497,6 +493,49 @@ describe('buildHud, styles', () => {
     const files = buildHud(design({ preset: 'modern', advanced: true,
       styles: { incapPanel: { kind: 'flat' }, panelBg: { kind: 'rounded' } } }), { fonts });
     for (const f of files) expect(f.path).toBe(f.path.toLowerCase());
+  });
+});
+
+describe('buildHud, card background', () => {
+  const rounded = { panelBg: { kind: 'rounded' as const, color: '0 0 0 150' } };
+
+  it('injects HudEdCardBg first in the card file, at the fitted card size', () => {
+    const card = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: rounded })), CARD_FILE);
+    const bg = card[0];
+    expect(bg.key).toBe('HudEdCardBg');
+    expect(['ControlName', 'xpos', 'ypos', 'zpos', 'wide', 'tall', 'scaleImage', 'image'].map((k) => kvGet(bg, k)))
+      .toEqual(['ImagePanel', '0', '0', '-2', '121', '36', '1', 'hud/hudeditor/panelbg']);
+  });
+
+  it('covers the whole file card when fit is off', () => {
+    const bg = tree(buildHud(design({ styles: rounded })), CARD_FILE)[0];
+    expect([kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual(['150', '150']);
+  });
+
+  it('draws a flat background with fillcolor and ships no texture for it', () => {
+    const files = buildHud(design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat' } } }));
+    const bg = tree(files, CARD_FILE)[0];
+    expect(kvGet(bg, 'fillcolor')).toBe('0 0 0 140');                   // the slot's default colour
+    expect(kvGet(bg, 'image')).toBeUndefined();
+    expect(files.some((f) => f.path.includes('panelbg'))).toBe(false);
+  });
+
+  it('scales with the card', () => {
+    const files = buildHud(design({ elements: { teamColumn: { fit: true, scale: 1.5 } }, styles: rounded }));
+    const bg = tree(files, CARD_FILE)[0];
+    const card = kvFind(tree(files, TEAM_FILE), ['TeamPlayer1'])!;
+    expect([kvGet(bg, 'wide'), kvGet(bg, 'tall')]).toEqual([kvGet(card, 'wide'), kvGet(card, 'tall')]);
+  });
+
+  // Probe T6: the card block's own image is never painted, which is why the old target did nothing.
+  it('never writes the card block image', () => {
+    const team = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: rounded })), TEAM_FILE);
+    for (let n = 1; n <= 4; n++) expect(kvGet(kvFind(team, [`TeamPlayer${n}`])!, 'image')).toBe('../vgui/s_panel_background');
+  });
+
+  it('adds nothing for an Image style with no upload stored', () => {
+    const files = buildHud(design({ styles: { panelBg: { kind: 'image' } } }));
+    expect(text(files, CARD_FILE)).toBeUndefined();
   });
 });
 

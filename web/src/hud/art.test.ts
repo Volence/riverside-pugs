@@ -86,7 +86,11 @@ describe('the art boundary', () => {
   // their pak01 names on purpose (with generated pixels), so those names, and
   // only those, may appear; every other emitted material must be one of ours.
   const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
-  const everySlot = Object.fromEntries(SLOTS.map((s) => [s.id, { kind: 'flat' as const, color: '10 20 30 255' }]));
+  // panelBg rounded, everything else flat: a flat panelBg now ships no
+  // texture at all (it is a plain fillcolor on the injected card child), so
+  // rounded is what keeps this assertion meaningful for the one slot with a
+  // normal-mode route.
+  const everySlot = Object.fromEntries(SLOTS.map((s) => [s.id, { kind: s.id === 'panelBg' ? 'rounded' as const : 'flat' as const, color: '10 20 30 255' }]));
   for (const preset of ['stock', 'modern'] as const) {
     for (const advanced of [false, true]) {
       it(`a ${preset} build ${advanced ? 'in advanced mode ' : ''}emits no exported texture`, () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, drawSlotStyle, PANEL_FILE, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, PANEL_FILE, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
@@ -130,20 +130,18 @@ describe('drawPanel', () => {
     expect(calls.some((c) => c.m === 'fillRect')).toBe(true);
   });
 
-  it('draws a restyled panel background from the design colour, not from the art', () => {
-    const { ctx, calls } = recCtx();
-    // stylePass repoints the TeamPlayer slot image, which lives in teamdisplayhud.res, not in the card file.
-    // The card file's own BackgroundImage still names the stock frame, so this test targets the slot the
-    // renderer is asked to draw: a hud/hudeditor/panelbg image key on a card child.
-    const d = design({ styles: { panelBg: { kind: 'flat', color: '255 0 0 255' } } });
-    drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
-    // Nothing in the card file points at hudeditor/, so no red rect here; the unit that does is drawSlotStyle:
-    const { ctx: c2, calls: calls2 } = recCtx();
-    drawSlotStyle(c2, d, 'panelbg', { name: 'x', kind: 'image', x: 1, y: 2, w: 30, h: 20, visible: true });
-    const fills = calls2.filter((c) => c.m === 'fillRect');
-    expect(fills.length).toBe(1);
-    expect(c2.fillStyle).toBe('rgba(255,0,0,1)');
-    expect(calls.length).toBeGreaterThan(0);
+  it('draws the injected card background at the card size, from the design colour', () => {
+    const flat = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat', color: '255 0 0 255' } } });
+    const bg = childRects(flat, 'teamColumn', { x: 5, y: 7 }, 2).find((c) => c.name === 'HudEdCardBg')!;
+    expect([bg.x, bg.y, bg.w, bg.h]).toEqual([5, 7, 242, 72]);
+    const a = recCtx();
+    drawPanel(a.ctx, flat, 'teamColumn', { x: 5, y: 7 }, 2, { card: 0 });
+    expect(a.calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)' && c.a.join() === [5, 7, 242, 72].join())).toBe(true);
+
+    const rounded = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'rounded', color: '0 255 0 255' } } });
+    const b = recCtx();
+    drawPanel(b.ctx, rounded, 'teamColumn', { x: 5, y: 7 }, 2, { card: 0 });
+    expect(b.calls.some((c) => c.m === 'fill' && c.fill === 'rgba(0,255,0,1)')).toBe(true);
   });
 
   it('uses the scheme font size for a label, scaled to pixels', () => {
