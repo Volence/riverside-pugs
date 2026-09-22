@@ -31,9 +31,10 @@ const { mockApi } = vi.hoisted(() => ({
   },
 }));
 
+const mockChat = vi.hoisted(() => vi.fn());
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, api: { ...actual.api, ...mockApi } };
+  return { ...actual, api: { ...actual.api, ...mockApi }, peopleApi: { ...actual.peopleApi, chat: mockChat } };
 });
 
 const { Leaderboard } = await import('./Leaderboard');
@@ -240,6 +241,18 @@ describe('MatchDetail', () => {
     // Unrated: nothing, not "+0".
     expect(versus.querySelectorAll('.delta').length).toBe(2);
     expect(versus.textContent).toContain('carol');
+  });
+
+  it('offers the chat log to staff on a finished match, and to nobody else', async () => {
+    mockChat.mockResolvedValue({ lines: [] });
+    mockApi.match.mockResolvedValue(matchWith({}));
+    const { unmount } = render(<MatchDetail id="7" me="1" staff />);
+    expect(await screen.findByText('Chat log')).toBeTruthy();
+    unmount();
+    mockApi.match.mockResolvedValue(matchWith({}));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    expect(screen.queryByText('Chat log')).toBeNull();
   });
 
   it('shows no SR changes on a voided match, whose ratings were rebuilt without it', async () => {

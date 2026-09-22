@@ -1147,7 +1147,24 @@ export const peopleApi = {
     post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/notes`, { text }),
   lookedAt: (steamid: string, note: string) =>
     post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
+  chat: (matchId: number, signal?: AbortSignal) =>
+    get<{ lines: StaffChatLine[] }>(`/api/admin/people/chat/${matchId}`, signal),
 };
+
+/** One chat line of a finished match, as staff see it. `half` is -1 before
+ *  the first round of a map; `tMs` is -1 when no round clock was running
+ *  (ready-up, a pause, between rounds). `player` is the merged account. */
+export interface StaffChatLine {
+  seq: number;
+  mapOrdinal: number;
+  half: number;
+  tMs: number;
+  steamid: string;
+  player: string;
+  name: string;
+  team: 'a' | 'b' | null;
+  message: string;
+}
 
 /** Where a stored ticket file is served from. A plain function, not part of
  *  modApi: it makes no request, it is what an <img> points at. */

@@ -6,6 +6,7 @@ import { clearLatencyByPlayer } from '../clearLatency';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
+import { StaffChatLog } from './StaffChatLog';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { ReportPlayer } from '../components/ReportPlayer';
 import { EndorsePanel } from '../components/EndorsePanel';
@@ -248,7 +249,7 @@ function OngoingMatch({ data }: { data: MatchOngoing }) {
   );
 }
 
-export function MatchDetail({ id, me }: { id: string; me: string | null }) {
+export function MatchDetail({ id, me, staff = false }: { id: string; me: string | null; staff?: boolean }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
   if (error) {
@@ -590,6 +591,13 @@ export function MatchDetail({ id, me }: { id: string; me: string | null }) {
               ))}
             </ul>
           </Panel>
+        )}
+
+        {staff && (match.state === 'completed' || match.state === 'aborted') && (
+          <StaffChatLog
+            matchId={match.id}
+            highlight={typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('chat')}
+          />
         )}
 
         {me && (
