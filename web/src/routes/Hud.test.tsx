@@ -114,11 +114,15 @@ describe('Hud page', () => {
     expect(screen.getByLabelText('Name colour')).toBeTruthy();
   });
 
-  it('labels the splatter colour control Tint, not Colour, and offers X, Y, W and H', () => {
+  it('offers the splatter Opacity alone, no colour swatch, with a note why, and X, Y, W and H', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Damage splatter' }));
-    expect(screen.getByLabelText('Damage splatter tint')).toBeTruthy();
+    // The splatter art is pure black: an RGB tint would draw no visible difference, so there is no swatch.
+    expect(screen.getByLabelText('Damage splatter opacity')).toBeTruthy();
+    expect(screen.queryByLabelText('Damage splatter tint')).toBeNull();
     expect(screen.queryByLabelText('Damage splatter colour')).toBeNull();
+    expect(screen.getByText(/splatter art is black/)).toBeTruthy();
+    expect(screen.getByText(/Styles, Survivor panel background/)).toBeTruthy();
     expect(screen.getByLabelText('X')).toBeTruthy();
     expect(screen.getByLabelText('Y')).toBeTruthy();
     expect(screen.getByLabelText('W')).toBeTruthy();
@@ -540,7 +544,7 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('28');
   });
 
-  it('selects the splatter from Layers, resizes it by a handle, undoes the resize, then sets a Tint', () => {
+  it('selects the splatter from Layers, resizes it by a handle, undoes the resize, then sets Opacity', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     // Layers still works too: every teammate-card row is listed there, splatter included.
@@ -551,9 +555,9 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('131');
     undoKey();
     expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('121');
-    fireEvent.input(screen.getByLabelText('Damage splatter tint'), { target: { value: '#ff0000' } });
-    fireEvent.change(screen.getByLabelText('Damage splatter tint'));
-    expect((screen.getByLabelText('Damage splatter tint') as HTMLInputElement).value).toBe('#ff0000');
+    fireEvent.input(screen.getByLabelText('Damage splatter opacity'), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText('Damage splatter opacity'));
+    expect((screen.getByLabelText('Damage splatter opacity') as HTMLInputElement).value).toBe('50');
   });
 
   it('picks the splatter on the canvas where no other piece is, drags it, and undoes with Ctrl+Z', () => {

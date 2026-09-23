@@ -306,6 +306,20 @@ describe('drawPanel', () => {
     } finally { _setCanvasFactory(null); }
   });
 
+  it('composes the faint splatter alpha with an Opacity override, the realistic case (white, alpha only)', () => {
+    // The splatter's own art is pure black, so the editor's Opacity control never touches r, g or b
+    // (ContextPanel.tsx's opacityOnly); white at alpha 128 stays untinted (drawImageChild's own
+    // r < 255 || g < 255 || b < 255 check skips the scratch canvas), and only globalAlpha changes:
+    // SPLATTER_ALPHA (0.35) times the override's own alpha fraction (128 / 255).
+    const bg = artUrl('vgui/hud/healthbar_bg_1')!;
+    const d = design({ children: { teamColumn: { BackgroundImage: { color: '255 255 255 128' } } } });
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+    const splatter = calls.find((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === bg);
+    expect(splatter).toBeTruthy();
+    expect(splatter!.alpha).toBeCloseTo(0.35 * (128 / 255));
+  });
+
   it('tints the own-health scratch overlays with the health colour, matching the in-game screenshot at full health', () => {
     // Stock localplayerpanel.res's HealthbarTextureTop/Bottom (detail_scratches_top_1/bottom_1) carry no
     // drawColor of their own, but the owner's screenshot at full health shows them the same bright green

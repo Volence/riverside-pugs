@@ -41,6 +41,13 @@ export interface ChildDef {
    * whether one applies at all.
    */
   colour: boolean;
+  /**
+   * An image whose own art is a flat colour (pure black, the splatter):
+   * an RGB tint over it draws no visible difference, only its alpha does,
+   * so the control is Opacity alone, no swatch, and colourKey still writes
+   * drawColor "255 255 255 <alpha>". Ignored unless `colour` is also true.
+   */
+  opacityOnly?: boolean;
   /** A child some preset's file lacks: cloned from this template after `after` when turned on. */
   addable?: { template: KvNode; after: string };
   /** Shown under the child's controls. */
@@ -76,7 +83,9 @@ export const TEAM_PANEL: PanelChildren = {
     { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: false,
       note: "The preview draws stand-in icons; the real ones are the game's." },
     { name: 'Status', label: 'Status text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
-    { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true },
+    { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true,
+      opacityOnly: true,
+      note: 'The splatter art is black, so it fades but does not change colour. For a coloured backdrop use Styles, Survivor panel background.' },
     { name: 'Incapacitated', label: 'Down picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
     { name: 'Dead', label: 'Dead picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
     { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },

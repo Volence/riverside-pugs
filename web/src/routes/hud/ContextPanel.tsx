@@ -260,8 +260,10 @@ export function ChildControls(
   };
   const colour = o.color ?? info.color ?? '255 255 255 255';
   // A label's colour is its text colour; an image's is a tint over its texture (the splatter, so far),
-  // so the one shared control calls itself by what it means for this child's kind.
-  const colourWord = def.kind === 'image' ? 'Tint' : 'Colour';
+  // so the one shared control calls itself by what it means for this child's kind. An opacity-only
+  // image (a flat-colour texture, where an RGB tint would draw no visible difference) drops the word
+  // entirely for just "Opacity", since there is no swatch to name.
+  const colourWord = def.opacityOnly ? 'Opacity' : def.kind === 'image' ? 'Tint' : 'Colour';
   const reset = () => edit((d) => resetChild(d, name));
 
   return (
@@ -311,11 +313,13 @@ export function ChildControls(
       {def.colour && (
         <div class="hud__stylerow">
           <span class="hud__stylerow-label">{colourWord}</span>
-          <input
-            type="color" aria-label={`${def.label} ${colourWord.toLowerCase()}`} value={hexOf(colour)}
-            onInput={(e) => patch({ color: withHex(colour, (e.target as HTMLInputElement).value) }, 'gesture')}
-            onChange={end}
-          />
+          {!def.opacityOnly && (
+            <input
+              type="color" aria-label={`${def.label} ${colourWord.toLowerCase()}`} value={hexOf(colour)}
+              onInput={(e) => patch({ color: withHex(colour, (e.target as HTMLInputElement).value) }, 'gesture')}
+              onChange={end}
+            />
+          )}
           <input
             type="range" min={0} max={100} step={1} aria-label={`${def.label} opacity`} value={alphaPct(colour)}
             onInput={(e) => patch({ color: withAlphaPct(colour, parseFloat((e.target as HTMLInputElement).value)) }, 'gesture')}
@@ -323,8 +327,8 @@ export function ChildControls(
           />
         </div>
       )}
-      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
       {def.note && <p class="muted hud__note">{def.note}</p>}
+      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
       {def.addable && !baseHasChild(design.preset, name) && (
         <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }))}>
           {`Remove the ${def.label.toLowerCase()}`}
