@@ -25,6 +25,14 @@ describe('the imported HUD store', () => {
     expect((await s.list()).map((m) => m.id)).toEqual(['b']);
   });
 
+  it("lists what an import left out, so the download note can name it after a reload", async () => {
+    const s = memoryStore();
+    await s.put({ ...hud('a', 1), dropped: ['gameinfo.txt'] });
+    expect((await s.list())[0].dropped).toEqual(['gameinfo.txt']);
+    await s.put(hud('b', 2));
+    expect('dropped' in (await s.list())[1]).toBe(false);
+  });
+
   it('passes on the reason when IndexedDB will not open', async () => {
     const failing = { open: () => { const r: Record<string, unknown> = {}; queueMicrotask(() => { r.error = new Error('blocked'); (r.onerror as () => void)?.(); }); return r; } } as unknown as IDBFactory;
     await expect(indexedDbStore(failing).list()).rejects.toThrow('blocked');

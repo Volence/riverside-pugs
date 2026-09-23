@@ -11,7 +11,11 @@
  * or a private window that refuses it), use memoryStore, which keeps imports
  * for as long as the page is open. No fake-indexeddb dependency is needed.
  */
-export interface StoredHud { id: string; name: string; files: Map<string, Uint8Array>; bytes: number; added: number }
+export interface StoredHud {
+  id: string; name: string; files: Map<string, Uint8Array>; bytes: number; added: number;
+  /** What the import left out of the upload (upload.ts's `dropped`), for the download note. */
+  dropped?: string[];
+}
 export type HudMeta = Omit<StoredHud, 'files'>;
 export interface HudStore {
   get(id: string): Promise<StoredHud | undefined>;
@@ -21,7 +25,7 @@ export interface HudStore {
   delete(id: string): Promise<void>;
 }
 
-const meta = ({ id, name, bytes, added }: StoredHud): HudMeta => ({ id, name, bytes, added });
+const meta = ({ id, name, bytes, added, dropped }: StoredHud): HudMeta => ({ id, name, bytes, added, ...(dropped ? { dropped } : {}) });
 const byAdded = (a: HudMeta, b: HudMeta) => a.added - b.added || (a.id < b.id ? -1 : 1);
 
 export function memoryStore(): HudStore {

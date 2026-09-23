@@ -5,24 +5,30 @@ import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, TEX, type Backdrop } from '../crosshair/draw';
 import { savedArt } from '../crosshair/saved';
-import { artPixels } from '../crosshair/texture';
+import { artPixels, importedCrosshair } from '../crosshair/texture';
 import type { CrosshairArt } from '../crosshair/model';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN, newDesign, usableCrosshair,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, newDesign, usableCrosshair,
   type HudDesign, type StyleOverride, type Box,
 } from '../hud/design';
 import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
-import { elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, type BuildAssets, type CardChild } from '../hud/build';
+import {
+  elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, importedHasXhair,
+  type BuildAssets, type BuildReport, type CardChild,
+} from '../hud/build';
 import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
-import type { Preset } from '../hud/base';
+import { registerImport, unregisterImport, hasImport } from '../hud/base';
+import { readHudUpload, hudId } from '../hud/upload';
+import { hudStore, type HudMeta } from '../hud/hudStore';
 import * as undoStack from '../hud/history';
 import { teamChild } from '../hud/children';
 import {
-  elementsTouched, hasOverrides, moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
+  hasOverrides, withImport, withPreset, hasLayoutEdits,
+  moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection,
 } from '../hud/edit';
@@ -36,7 +42,7 @@ import {
 import { ContextMenu } from './hud/ContextMenu';
 import { ContextPanel } from './hud/ContextPanel';
 import { LayersPanel } from './hud/LayersPanel';
-import { Toolbar } from './hud/Toolbar';
+import { Toolbar, type PresetChoice } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
@@ -245,6 +251,12 @@ function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection
   );
 }
 
+/** A status sentence naming up to three of an upload's left-out paths, or nothing when there are none. */
+function leftOut(paths: string[], lead: string): string {
+  const n = paths.length;
+  return n ? ` ${lead}: ${paths.slice(0, 3).join(', ')}${n > 3 ? ` and ${n - 3} more` : ''}.` : '';
+}
+
 const modsOf = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): Mods => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
 
 export default function Hud() {
@@ -265,6 +277,21 @@ export default function Hud() {
   const hist = useRef(undoStack.emptyHistory<HudDesign>());
   const [, setHistTick] = useState(0);
   const apply = (next: HudDesign) => { current.current = next; setDesignState(next); };
+
+  // This browser's imports, for the Preset select, and whether the store has
+  // been read yet. `importTick` re-renders when the in-memory registry
+  // changes, since hasImport is not state.
+  const [imports, setImports] = useState<HudMeta[]>([]);
+  const [importsRead, setImportsRead] = useState(false);
+  const [, setImportTick] = useState(0);
+  const imp = design.preset === 'imported' ? design.imported : undefined;
+  // The design's imported HUD is not loaded (yet, or at all in this browser):
+  // nothing reads its files, so nothing draws, edits or downloads. Undo,
+  // Redo and the Preset select stay live, so the player can leave it.
+  const locked = imp !== undefined && !hasImport(imp.id);
+  const banner = !locked ? '' : importsRead
+    ? `This design was made on the imported HUD '${imp!.name}'. Import it again to edit or download it.`
+    : `Loading the imported HUD '${imp!.name}'...`;
 
   /**
    * The page's one way to change the design. A step records the value it
@@ -408,6 +435,7 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
+    if (locked) return;
     const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
     const box = selectionBox(design, sel);
     drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
@@ -420,11 +448,12 @@ export default function Hud() {
       marquee,
       guides,
     });
-  }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee]);
+  }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee, locked]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
-  useEffect(() => { setSel((s) => sanitize(design, side, s)); }, [design, side]);
+  // A locked design has nothing to select.
+  useEffect(() => { setSel((s) => (locked ? NONE : sanitize(design, side, s))); }, [design, side, locked]);
 
   // Debounced rather than immediate: a drag changes the design on every
   // pointermove, and an undebounced save would run a synchronous
@@ -464,6 +493,28 @@ export default function Hud() {
     return () => { cancelled = true; };
     // `design` is deliberately read only from the closure captured at mount:
     // this effect must run exactly once, not on every subsequent edit.
+  }, []);
+
+  // Mount only: list this browser's imports, and load the design's own into
+  // the registry before anything reads it. A browser whose storage is
+  // missing or refuses leaves every stored import missing, which the banner
+  // says; an import made in this page session still works from memory.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const store = hudStore();
+      try {
+        const list = await store.list();
+        if (live) setImports((l) => [...list, ...l.filter((m) => !list.some((n) => n.id === m.id))]);
+        const d = current.current;
+        if (d.preset === 'imported' && d.imported && !hasImport(d.imported.id)) {
+          const hud = await store.get(d.imported.id);
+          if (hud) registerImport(hud.id, hud.files);
+        }
+      } catch { /* no storage: nothing to load */ }
+      if (live) { setImportsRead(true); setImportTick((t) => t + 1); }
+    })();
+    return () => { live = false; };
   }, []);
 
   // Mount only: the Crosshair page's Open in the HUD editor button lands
@@ -520,6 +571,7 @@ export default function Hud() {
   };
 
   const onPointerDown = (e: PointerEvent) => {
+    if (locked) return;
     if (e.button !== 0) return;                            // the right button opens the menu instead
     const c = canvas.current;
     if (!c) return;
@@ -625,6 +677,7 @@ export default function Hud() {
   };
 
   const onPointerMove = (e: PointerEvent) => {
+    if (locked) return;                                     // hover reads the base files too
     const { ux, uy } = pointerUnits(e);
     const p = press.current;
     if (!p) {
@@ -687,6 +740,7 @@ export default function Hud() {
    */
   const onContextMenu = (e: MouseEvent) => {
     e.preventDefault();
+    if (locked) return;
     // A right-click in the middle of a left press or drag would reselect
     // under the drag and open a menu over it; the drag goes on instead.
     if (press.current) return;
@@ -711,6 +765,7 @@ export default function Hud() {
   // Arrows nudge (Shift by 10), Escape climbs or cancels a drag, Tab and
   // Shift+Tab cycle the side's elements: the editor works without a mouse.
   const onKeyDown = (e: KeyboardEvent) => {
+    if (locked) return;
     if (e.key === 'Escape') {
       if (press.current) { abortDrag(); return; }
       setSel(climb);
@@ -754,21 +809,87 @@ export default function Hud() {
     edit((d) => nudgeSelection(d, s, delta[0], delta[1]), { nudge: selectionKey(s) });
   };
 
-  /** Switching preset keeps whatever moves the reader made, but they were
-   *  placed for the other layout's own panel sizes, so a design with any
-   *  moved elements asks first whether to drop them. Either answer switches
-   *  the preset; only whether the moves survive it differs. */
-  const changePreset = async (preset: Preset) => {
-    if (preset === design.preset) return;
-    let resetElements = false;
-    if (elementsTouched(design) || Object.keys(design.children).length > 0) {
-      resetElements = await confirm({
-        title: 'Switching preset keeps your moves and inside edits, but they were placed for the other layout. Reset them as well?',
-        confirmLabel: 'Reset', cancelLabel: 'Keep',
-      });
+  /**
+   * Switching base keeps whatever moves the reader made, but they were placed
+   * for the other layout's own panel sizes, so a design with any layout edits
+   * asks first whether to drop them. Either answer switches; only whether the
+   * edits survive it differs.
+   */
+  const askReset = (d: HudDesign) => (hasLayoutEdits(d)
+    ? confirm({
+      title: 'Switching preset keeps your moves and inside edits, but they were placed for the other layout. Reset them as well?',
+      confirmLabel: 'Reset', cancelLabel: 'Keep',
+    })
+    : Promise.resolve(false));
+
+  const changePreset = async (choice: PresetChoice) => {
+    const cur = current.current;
+    if (typeof choice === 'string') {
+      if (choice === cur.preset) return;
+      const reset = await askReset(cur);
+      edit((d) => withPreset(d, choice, reset));
+    } else {
+      if (cur.preset === 'imported' && cur.imported?.id === choice.id) return;
+      const meta = imports.find((m) => m.id === choice.id);
+      if (!meta) return;
+      if (!hasImport(choice.id)) {
+        const hud = await hudStore().get(choice.id).catch(() => undefined);
+        if (!hud) { setStatus('That imported HUD is no longer in this browser.'); return; }
+        registerImport(hud.id, hud.files);
+        setImportTick((t) => t + 1);
+      }
+      const reset = await askReset(cur);
+      // Switching back onto an import keeps the design's crosshair: the
+      // upload's own texture was offered once, when it was imported.
+      edit((d) => withImport(d, { id: choice.id, name: meta.name }, { art: null, hasXhair: importedHasXhair(`imported:${choice.id}`), reset }));
     }
-    edit((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements), children: {} } : {}) }));
     dropPicks();
+  };
+
+  /**
+   * Import a HUD: read it, name it by its contents, keep it in this browser
+   * and in the registry, then move the design onto it. Every failure is one
+   * line on the status and leaves the design as it was. A browser that will
+   * not store it (no IndexedDB, blocked, over quota) still gets the import
+   * for this page session, and the status says so. Importing the HUD a
+   * design already names (the missing-import banner's own advice) only
+   * loads it: the design is already on it.
+   */
+  const importHud = async (file: File) => {
+    try {
+      const upload = await readHudUpload(file.name, new Uint8Array(await file.arrayBuffer()));
+      const id = await hudId(upload.files);
+      registerImport(id, upload.files);
+      const bytes = [...upload.files.values()].reduce((n, d) => n + d.length, 0);
+      const meta: HudMeta = { id, name: upload.name, bytes, added: Date.now(), dropped: upload.dropped };
+      let kept = true;
+      try { await hudStore().put({ ...meta, files: upload.files }); } catch { kept = false; }
+      // This session's list is the store's plus anything only in memory.
+      setImports((l) => [...l.filter((m) => m.id !== id), meta]);
+      setImportTick((t) => t + 1);
+      const cur = current.current;
+      const again = cur.preset === 'imported' && cur.imported?.id === id;
+      if (!again) {
+        const reset = await askReset(cur);
+        const art = importedCrosshair(upload.files);
+        edit((d) => withImport(d, { id, name: upload.name }, { art, hasXhair: importedHasXhair(`imported:${id}`), reset }));
+        dropPicks();
+      }
+      const lasting = kept ? '' : ' This browser could not store it, so it is kept only until this page closes.';
+      setStatus(`${again ? `Imported ${upload.name} again; this design can be edited and downloaded.` : `Imported ${upload.name}.`}${leftOut(upload.dropped, 'Left out')}${lasting}`);
+    } catch (err) {
+      setStatus((err as Error).message);
+    }
+  };
+
+  /** Remove an imported HUD from this browser. A design on it keeps its data and shows the banner. */
+  const removeImport = async (id: string) => {
+    const name = imports.find((m) => m.id === id)?.name ?? 'that HUD';
+    await hudStore().delete(id).catch(() => {});
+    unregisterImport(id);
+    setImports((l) => l.filter((m) => m.id !== id));
+    setImportTick((t) => t + 1);
+    setStatus(`Removed ${name} from this browser.`);
   };
 
   const patchStyle = (id: string, p: Partial<StyleOverride>, mode: EditMode = 'step') => edit((d) => ({
@@ -818,13 +939,15 @@ export default function Hud() {
   };
 
   const download = async () => {
+    if (locked) return;
     try {
       const assets = await assetsFor(design);
       // Nothing that reaches a player's game skips the validator. Every
       // control already guards its own input, but this is the one place the
       // design turns into files, so a future control that forgets cannot put
       // an out-of-range or non-finite number into a shipped .res file.
-      const p = packHud(validateDesign({ ...design, name: safeName(design.name) }), assets);
+      const report: BuildReport = { replaced: [] };
+      const p = packHud(validateDesign({ ...design, name: safeName(design.name) }), assets, report);
       const blob = new Blob([p.bytes], { type: p.mime });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -833,7 +956,11 @@ export default function Hud() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      setStatus(`Saved ${p.filename}.`);
+      // An imported HUD's download is not quite the upload: say which of its
+      // files the editor wrote over, and what the import left out.
+      const replaced = report.replaced.length ? ` The editor's own copies replaced these files from your HUD: ${report.replaced.join(', ')}.` : '';
+      const dropped = imp ? imports.find((m) => m.id === imp.id)?.dropped ?? [] : [];
+      setStatus(`Saved ${p.filename}.${replaced}${leftOut(dropped, 'Left out when it was imported')}`);
     } catch (err) {
       // The generator's own errors name the file and panel that broke, which
       // is exactly what is needed to file a useful bug report.
@@ -897,13 +1024,13 @@ export default function Hud() {
 
       <div class="hud">
         <Panel class="hud__layerpanel">
-          <LayersPanel
+          {!locked && <LayersPanel
             design={design} side={side} sel={sel}
             onPick={(t, shift) => setSel((s) => pick(s, t, shift))}
             onVisible={(t, v) => edit((d) => setSelectionVisible(d, t, v))}
             onAdd={(name) => { edit((d) => patchChild(d, name, { on: true })); setSel({ kind: 'children', names: [name], card: 0 }); }}
             onKeyDown={onKeyDown}
-          />
+          />}
         </Panel>
 
         <Panel class="hud__stage">
@@ -920,7 +1047,11 @@ export default function Hud() {
             onShot={pickShot}
             onFont={(f) => edit((d) => ({ ...d, font: f }))}
             onDownload={() => { void download(); }}
+            imports={imports} locked={locked}
+            onImportFile={(f) => { void importHud(f); }}
+            onRemoveImport={(id) => { void removeImport(id); }}
           />
+          {banner && <p class="hud__warn" role="status">{banner}</p>}
 
           <div class="hud__canvaswrap">
             <canvas
@@ -948,12 +1079,13 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
+          {!locked && <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />}
         </Panel>
       </div>
 
       <Panel>
         <h3>Styles</h3>
+        <fieldset class="hud__fieldset" disabled={locked}>
         {basicSlots.map((slot) => (
           <StyleRow
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
@@ -980,6 +1112,7 @@ export default function Hud() {
             onUpload={(f) => { void onSlotUpload(slot, f); }}
           />
         ))}
+        </fieldset>
       </Panel>
 
       <Panel>
@@ -1026,7 +1159,7 @@ export default function Hud() {
         </div>
 
         {status && <p class="muted hud__status">{status}</p>}
-        {teamLayout(design, elementById('teamColumn')!).fitEmpty && (
+        {!locked && teamLayout(design, elementById('teamColumn')!).fitEmpty && (
           <p class="muted hud__status">Every part of the teammate card is hidden, so it keeps its full size instead of fitting.</p>
         )}
       </Panel>

@@ -277,6 +277,10 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__note { margin-top: var(--sp-2); }
 /* A note the player has to act on (the addon load order, no crosshair at all). */
 .hud__warn { color: var(--text); border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
+/* The Styles panel is one fieldset so a missing import can switch it all off; it draws nothing of its own. */
+.hud__fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+/* Remove an imported HUD: a picker and two buttons beside the Preset select. */
+.hud__removerow { display: inline-flex; align-items: center; gap: var(--sp-2); }
 /* The custom crosshair: its zoomed texture above the Crosshair page's own builder controls. */
 .hud__xhair { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); min-width: 0; }
 .hud__xhairpreview { width: 128px; height: 128px; flex: none; border-radius: 4px; image-rendering: pixelated; }
