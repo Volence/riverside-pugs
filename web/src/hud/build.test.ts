@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame } from './build';
+import { buildHud, elementRect, pcSet, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
@@ -440,6 +440,19 @@ describe('buildHud, the chat window (basechat.res)', () => {
   it("ships Modern's own basechat.res unchanged while the chat is untouched", () => {
     const got = text(build(design({ preset: 'modern' })), CHAT)!;
     expect(parseKv(got)).toEqual(parseKv(baseFile('modern', CHAT)));
+  });
+});
+
+describe('pcSet', () => {
+  it('adds a plain entry rather than overwrite a console-only one', () => {
+    const block: KvNode = { key: 'HudChat', value: [{ key: 'wide', value: '350', cond: '[$X360]' }] };
+    pcSet(block, 'wide', '400');
+    expect(block.value).toEqual([{ key: 'wide', value: '350', cond: '[$X360]' }, { key: 'wide', value: '400' }]);
+  });
+  it('sets both a plain and a [$WIN32] entry and leaves the console one', () => {
+    const block: KvNode = { key: 'b', value: [{ key: 'xpos', value: '1', cond: '[$WIN32]' }, { key: 'xpos', value: '2', cond: '[$X360]' }, { key: 'tall', value: '3' }] };
+    pcSet(block, 'xpos', '9'); pcSet(block, 'tall', '8');
+    expect(block.value).toEqual([{ key: 'xpos', value: '9', cond: '[$WIN32]' }, { key: 'xpos', value: '2', cond: '[$X360]' }, { key: 'tall', value: '8' }]);
   });
 });
 
