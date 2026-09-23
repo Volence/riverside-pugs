@@ -398,6 +398,27 @@ describe('buildHud, the chat window (basechat.res)', () => {
       expect(['visible', 'wide', 'tall'].map((k) => kvGet(layoutChat, k))).toEqual(['0', '0', '0']);
     });
 
+    // The chat window's size is basechat.res's own (280 x 120 on both
+    // presets), not hudlayout's background panel (320 wide on stock), so
+    // moving the chat must not resize it or touch its children.
+    it(`keeps basechat's own size and children when the chat only moves: ${preset}`, () => {
+      const d = design({ preset, elements: { chat: { x: 853 - 280, y: 0 } } });
+      const nodes = chatOf(build(d), preset);
+      const base = parseKv(baseFile(preset, CHAT))[0].value as KvNode[];
+      const chat = kvFind(nodes, ['HudChat'])!;
+      expect([pc(chat, 'wide'), pc(chat, 'tall')]).toEqual(['280', '120']);
+      for (const name of ['HudChatHistory', 'ChatInputLine', 'KeyStateLabel', 'ChatFiltersButton']) {
+        expect(kvFind(nodes, [name]), name).toEqual(kvFind(base, [name]));
+      }
+      const r = elementRect(d, 'chat', d.aspect);
+      expect([r.w, r.h]).toEqual([280, 120]);
+    });
+
+    it(`reports an untouched chat at basechat's size: ${preset}`, () => {
+      const r = elementRect(design({ preset }), 'chat', '16:9');
+      expect([r.w, r.h]).toEqual([280, 120]);
+    });
+
     it(`agrees with elementRect wherever the chat goes: ${preset}`, () => {
       for (const aspect of ['4:3', '16:9', '16:10'] as const) {
         for (const chat of [{ x: 853 - 320, y: 0 }, { x: 20, y: 300, w: 200, h: 90 }, { w: 400, h: 150 }, { x: 400 }] as ElementOverride[]) {

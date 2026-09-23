@@ -87,10 +87,23 @@ const XHAIR: KvNode = { key: 'xHair', value: [
   ['wide', '26'], ['tall', '26'], ['visible', '1'], ['enabled', '1'], ['image', 'hud/altcrosshair'], ['scaleImage', '1'],
 ].map(([key, value]) => ({ key, value })) };
 
+/**
+ * The chat window's own size: basechat.res's HudChat as the PC reads it
+ * (280 x 120 on both presets). hudlayout's HudChat is only the background
+ * panel (probe T4), 320 wide on stock, so taking the size from there would
+ * make a chat that only moved 40 units wider than the game's.
+ */
+function chatBaseSize(preset: Preset, W: number): { w: number; h: number } {
+  const chat = kvFind(parseKv(baseFile(preset, BASECHAT))[0].value as KvNode[], ['HudChat']);
+  if (!chat) throw new Error(`${BASECHAT}: no panel HudChat`);
+  return { w: parseSize(pcGet(chat, 'wide') ?? '0', W), h: parseSize(pcGet(chat, 'tall') ?? '0', SCREEN_H) };
+}
+
 function baseRect(panel: KvNode, el: HudElement, preset: Preset, aspect: Aspect) {
   const W = screenW(aspect);
-  const w = el.mockSize?.[preset]?.w ?? parseSize(kvGet(panel, 'wide') ?? '0', W);
-  const h = el.mockSize?.[preset]?.h ?? parseSize(kvGet(panel, 'tall') ?? '0', SCREEN_H);
+  const chat = el.id === 'chat' ? chatBaseSize(preset, W) : undefined;
+  const w = chat?.w ?? el.mockSize?.[preset]?.w ?? parseSize(kvGet(panel, 'wide') ?? '0', W);
+  const h = chat?.h ?? el.mockSize?.[preset]?.h ?? parseSize(kvGet(panel, 'tall') ?? '0', SCREEN_H);
   return { x: parsePos(kvGet(panel, 'xpos') ?? '0', W), y: parsePos(kvGet(panel, 'ypos') ?? '0', SCREEN_H), w, h };
 }
 
@@ -152,7 +165,7 @@ function pcEntries(block: KvNode, key: string): KvNode[] {
   return block.value.filter((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string'
     && (!n.cond || n.cond.toUpperCase() === '[$WIN32]'));
 }
-const pcGet = (block: KvNode, key: string) => pcEntries(block, key)[0]?.value as string | undefined;
+function pcGet(block: KvNode, key: string): string | undefined { return pcEntries(block, key)[0]?.value as string | undefined; }
 function pcSet(block: KvNode, key: string, value: string) {
   const hits = pcEntries(block, key);
   if (hits.length) for (const n of hits) n.value = value; else kvSet(block, key, value);
