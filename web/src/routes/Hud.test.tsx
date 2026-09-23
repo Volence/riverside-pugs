@@ -880,4 +880,19 @@ describe('Hud page', () => {
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
   });
+
+  it('gives the keys back to the canvas once a menu item runs, or Escape closes the menu', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
+    expect(document.activeElement).toBe(canvas);
+    fireEvent.contextMenu(canvas, { clientX: 60, clientY: 460 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Select Teammates' }));
+    fireEvent.keyDown(document.activeElement!, { key: 'Delete' });
+    expect(hiddenRow('Teammates')).toBe(true);
+    fireEvent.contextMenu(canvas, { clientX: 30, clientY: 300 });
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Hide' }), { key: 'Escape' });
+    expect(document.activeElement).toBe(canvas);
+  });
 });

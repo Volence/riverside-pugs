@@ -2,21 +2,24 @@
  * The canvas's right-click menu: a short list of what can be done to the
  * thing under the pointer. It closes on a press anywhere outside it, on
  * Escape, and once an item has run; focus moves into it when it opens so
- * the keyboard can reach it.
+ * the keyboard can reach it. `onClose` hears whether to hand focus back:
+ * after an item or Escape, yes, so Delete and the arrows go on working on
+ * the canvas; after a press elsewhere, no, since that press puts focus
+ * where it lands.
  */
 import { useEffect, useRef } from 'preact/hooks';
 
 export interface MenuItem { label: string; run: () => void }
 
-export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
+export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: (refocus: boolean) => void }) {
   const ref = useRef<HTMLUListElement>(null);
   // The latest onClose, so the window listeners (added once) never call a stale one.
   const close = useRef(onClose);
   close.current = onClose;
 
   useEffect(() => {
-    const away = (e: Event) => { if (!ref.current?.contains(e.target as Node)) close.current(); };
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close.current(); };
+    const away = (e: Event) => { if (!ref.current?.contains(e.target as Node)) close.current(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close.current(true); };
     window.addEventListener('pointerdown', away);
     window.addEventListener('keydown', esc);
     ref.current?.querySelector('button')?.focus();
@@ -30,7 +33,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
     <ul ref={ref} class="hud__menu" role="menu" style={{ left: `${x}px`, top: `${y}px` }}>
       {items.map((it) => (
         <li key={it.label} role="none">
-          <button type="button" role="menuitem" onClick={() => { it.run(); close.current(); }}>{it.label}</button>
+          <button type="button" role="menuitem" onClick={() => { it.run(); close.current(true); }}>{it.label}</button>
         </li>
       ))}
     </ul>

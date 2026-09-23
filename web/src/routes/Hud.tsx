@@ -879,7 +879,7 @@ export default function Hud() {
             <Crumbs crumbs={breadcrumb(design, sel)} onSelect={setSel} />
             {menu && (
               <ContextMenu
-                x={menu.x} y={menu.y} onClose={() => setMenu(null)}
+                x={menu.x} y={menu.y} onClose={(refocus) => { setMenu(null); if (refocus) canvas.current?.focus(); }}
                 items={menuActions(design, menu.sel).map((a) => ({ label: MENU_LABELS[a], run: () => runMenu(a, menu.sel) }))}
               />
             )}
