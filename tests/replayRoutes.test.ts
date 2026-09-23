@@ -9,6 +9,7 @@ import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { stubOrchestrator } from './helpers.js';
 import { recordPhase } from '../src/liveView.js';
+import type { Phase } from '../src/logParse.js';
 import {
   encodeHeader, encodeFrame, decodeHeader, VERSION, HEADER_BYTES,
   PLAYER_SLOTS, frameBytes, type ReplayHeader, type Frame,
@@ -111,7 +112,7 @@ describe('GET /api/replays/live/match/:id', () => {
     writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 60, false);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
-    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null });
+    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null, current: null });
     expect(res.payload).not.toContain(TOKEN);
     expect(res.payload).not.toContain('.rpl');
   });
@@ -143,6 +144,41 @@ describe('GET /api/replays/live/match/:id', () => {
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
     expect(res.statusCode).toBe(404);
+  });
+
+  const livePhase = (): Phase => ({ state: 'live', team: null, limit: 0, leave: false, unready: [] });
+  function startRound(matchId: number, ordinal: number, half: number): void {
+    db.prepare(
+      `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at)
+       VALUES (?, ?, ?, 'a', datetime('now', '-5 seconds'))`,
+    ).run(matchId, ordinal, half);
+  }
+
+  it('says which round is being played when the file it serves is an older one', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 1, 1);
+    const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
+    expect(body).toMatchObject({ ordinal: 0, half: 1, closed: true, current: { ordinal: 1, half: 1 } });
+    expect(typeof body.current.sinceMs).toBe('number');
+  });
+
+  it('answers with no round, not 404, when the round being played has no file yet', async () => {
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ordinal: null, half: null, closed: false, current: { ordinal: 0, half: 1 } });
+    expect(res.payload).not.toContain(TOKEN);
+  });
+
+  it('reports no current round between rounds', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, { ...livePhase(), state: 'roundover' });
+    expect((await app.inject({ url: `/api/replays/live/match/${id}` })).json().current).toBeNull();
   });
 });
 

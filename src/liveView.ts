@@ -407,6 +407,32 @@ export function phaseFor(db: DB, matchId: number): LivePhase | null {
   };
 }
 
+/** The round the plugin says is being played. See roundInProgress. */
+export interface RoundInProgress { ordinal: number; half: number; sinceMs: number }
+
+/**
+ * The round being played right now, or null between rounds.
+ *
+ * The newest round row, only while it has started and not ended, and only
+ * while the reported phase is live or paused. The phase is the guard against
+ * a lost ROUND_END datagram: the heartbeat repeats the phase every thirty
+ * seconds, so a round cannot stay "in progress" for longer than that after
+ * the game has moved on. The live viewer compares this with the round whose
+ * bytes it is reading, which is how the page knows it is behind.
+ */
+export function roundInProgress(db: DB, matchId: number): RoundInProgress | null {
+  const phase = phaseFor(db, matchId);
+  if (!phase || (phase.state !== 'live' && phase.state !== 'paused')) return null;
+  const row = db
+    .prepare(
+      `SELECT ordinal, half, started_at, ended_at FROM match_rounds
+        WHERE match_id = ? ORDER BY ordinal DESC, half DESC LIMIT 1`,
+    )
+    .get(matchId) as { ordinal: number; half: number; started_at: string | null; ended_at: string | null } | undefined;
+  if (!row || row.started_at === null || row.ended_at !== null) return null;
+  return { ordinal: row.ordinal, half: row.half, sinceMs: sqliteToMs(row.started_at) };
+}
+
 /** Every pause of a match, oldest first. Survives clearLive on purpose. */
 export function pausesFor(db: DB, matchId: number): MatchPause[] {
   const rows = db
