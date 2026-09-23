@@ -46,14 +46,31 @@ export function decodeVfont(data: Uint8Array): Uint8Array {
   return out;
 }
 
-function vdmxRows(dv: DataView, o: number): number[] | undefined {
+/**
+ * A VDMX table's rows for its 1:1 ratio group, bounded to the table's own
+ * extent (o..o+len) the way the table-directory loop bounds every table
+ * against the buffer. ratios, group and each row count are font-controlled,
+ * so each is checked against that extent before it is used to compute the
+ * next offset; anything that would read past the table returns undefined
+ * (no VDMX row, the fontCell caller's winAscent + winDescent fallback)
+ * rather than throwing or reading another table's bytes.
+ */
+function vdmxRows(dv: DataView, o: number, len: number): number[] | undefined {
+  const end = o + len;
+  if (o + 6 > end) return undefined;
   const ratios = dv.getUint16(o + 4);
+  const ratiosEnd = o + 6 + 4 * ratios;
+  const offsetsEnd = ratiosEnd + 2 * ratios;
+  if (offsetsEnd > end) return undefined;                     // ratio records or their offset array run past the table
   for (let i = 0; i < ratios; i++) {
     const r = o + 6 + 4 * i;
     const x = dv.getUint8(r + 1), y0 = dv.getUint8(r + 2), y1 = dv.getUint8(r + 3);
     if ((x === 0 && y0 === 0 && y1 === 0) || (x === 1 && y0 <= 1 && 1 <= y1)) {
-      const group = o + dv.getUint16(o + 6 + 4 * ratios + 2 * i);
+      const group = o + dv.getUint16(ratiosEnd + 2 * i);
+      if (group < o || group + 4 > end) return undefined;      // group header runs outside the table
       const n = dv.getUint16(group);
+      const rowsEnd = group + 4 + 6 * n;
+      if (rowsEnd > end) return undefined;                     // rows run past the table
       const rows: number[] = [];
       for (let j = 0; j < n; j++) { const e = group + 4 + 6 * j; rows.push(dv.getUint16(e), dv.getInt16(e + 2), dv.getInt16(e + 4)); }
       return rows;
@@ -62,15 +79,26 @@ function vdmxRows(dv: DataView, o: number): number[] | undefined {
   return undefined;
 }
 
-function names(ttf: Uint8Array, dv: DataView, t: { off: number } | undefined): string[] {
+/**
+ * A name table's Windows family (1) and full (4) names, bounded to the
+ * table's own extent the same way: count and every record's own (len, at)
+ * pair are font-controlled, so a record or a string that would run past the
+ * table is skipped rather than read out of it (skipping the rest of that
+ * platform/id pass, since the record array itself is then out of bounds).
+ */
+function names(ttf: Uint8Array, dv: DataView, t: { off: number; len: number } | undefined): string[] {
   if (!t) return [];
+  const end = t.off + t.len;
+  if (t.off + 6 > end) return [];
   const count = dv.getUint16(t.off + 2), strings = t.off + dv.getUint16(t.off + 4);
   const out: string[] = [];
   for (const want of [1, 4]) {
     for (let i = 0; i < count; i++) {
       const r = t.off + 6 + 12 * i;
+      if (r + 12 > end) break;                          // the record array itself runs past the table
       if (dv.getUint16(r) !== 3 || dv.getUint16(r + 6) !== want) continue;
       const len = dv.getUint16(r + 8), at = strings + dv.getUint16(r + 10);
+      if (at < t.off || at + len > end) continue;        // this record's string runs outside the table
       let s = '';
       for (let k = 0; k + 1 < len; k += 2) s += String.fromCharCode((ttf[at + k] << 8) | ttf[at + k + 1]);
       if (s && !out.includes(s)) out.push(s);
@@ -104,7 +132,7 @@ export function readFont(ttf: Uint8Array): FontInfo {
   } else return bad();
   const metrics: FaceMetrics = { unitsPerEm: dv.getUint16(head.off + 18), winAscent, winDescent };
   const vdmx = tables.get('VDMX');
-  const rows = vdmx ? vdmxRows(dv, vdmx.off) : undefined;
+  const rows = vdmx ? vdmxRows(dv, vdmx.off, vdmx.len) : undefined;
   if (rows) metrics.vdmx = rows;
   return { names: names(ttf, dv, tables.get('name')), weight, metrics };
 }

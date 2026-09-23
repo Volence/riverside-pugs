@@ -12,6 +12,87 @@ import { parseKv, writeKv, type KvNode } from './kv';
 export const latin1 = (s: string): Uint8Array => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 export const MARKER_PANEL = 'HudImpMarker';
 
+/**
+ * Assembles a minimal but structurally valid sfnt: the 12-byte header, a
+ * table directory entry per table (offset and length computed from where
+ * each table's bytes land) and the table bytes themselves, in the order
+ * given. Lets a test hand ttf.ts's readFont a font whose 'name' or 'VDMX'
+ * table is real but hostile, without needing a real TrueType file.
+ */
+export function buildSfnt(tables: Record<string, Uint8Array>): Uint8Array {
+  const entries = Object.entries(tables);
+  const dirSize = 12 + 16 * entries.length;
+  let at = dirSize;
+  const offsets = entries.map(([, data]) => { const o = at; at += data.length; return o; });
+  const out = new Uint8Array(at);
+  const dv = new DataView(out.buffer);
+  out[0] = 0; out[1] = 1; out[2] = 0; out[3] = 0;              // sfnt version 1.0: isSfnt's TrueType marker
+  dv.setUint16(4, entries.length);
+  entries.forEach(([tag, data], i) => {
+    const dirAt = 12 + 16 * i;
+    out.set(latin1(tag.padEnd(4).slice(0, 4)), dirAt);
+    dv.setUint32(dirAt + 8, offsets[i]);
+    dv.setUint32(dirAt + 12, data.length);
+    out.set(data, offsets[i]);
+  });
+  return out;
+}
+
+/** A minimal head table: only the unitsPerEm field readFont reads (offset 18). */
+export function headTable(unitsPerEm = 2048): Uint8Array {
+  const t = new Uint8Array(20);
+  new DataView(t.buffer).setUint16(18, unitsPerEm);
+  return t;
+}
+
+/** A minimal hhea table: readFont's ascender/descender fallback for a font with no OS/2. */
+export function hheaTable(ascent = 800, descent = -200): Uint8Array {
+  const t = new Uint8Array(8);
+  const dv = new DataView(t.buffer);
+  dv.setInt16(4, ascent); dv.setInt16(6, descent);
+  return t;
+}
+
+/**
+ * Six ways an imported HUD's named font file can be broken: plain garbage, a
+ * real TTF cut short, a 'name' or 'VDMX' table whose own offset points past
+ * itself, and a 'name' or 'VDMX' table whose record count claims more room
+ * than the table holds. ttf.test.ts holds readFont to never reading past a
+ * table for each of these; fonts.ts/render.ts tests only need the upload
+ * path to never throw and to fall back to the default face.
+ */
+export type HostileFontKind = 'garbage' | 'truncated' | 'nameOffset' | 'vdmxOffset' | 'nameCount' | 'vdmxCount';
+
+export function hostileFont(kind: HostileFontKind, realTtf: Uint8Array): Uint8Array {
+  switch (kind) {
+    case 'garbage': return Uint8Array.from({ length: 64 }, (_, i) => (i * 37 + 11) & 0xff);
+    case 'truncated': return realTtf.slice(0, Math.floor(realTtf.length / 2));
+    case 'nameOffset': {
+      // format 0, count 1, storageOffset 18 (right after the one record), then a
+      // platform-3 name-id-1 record whose (offset, length) point 1000 bytes past
+      // the table's own end (18 bytes total).
+      const name = new Uint8Array([0, 0, 0, 1, 0, 18, 0, 3, 0, 1, 4, 9, 0, 1, 0, 10, 3, 232]);
+      return buildSfnt({ head: headTable(), hhea: hheaTable(), name });
+    }
+    case 'vdmxOffset': {
+      // version 0, numRecs 1, numRatios 1, one 1:1 ratio record (x=1, 0<=1<=2),
+      // then a group offset of 9999: past the table's own end (12 bytes total).
+      const vdmx = new Uint8Array([0, 0, 0, 1, 0, 1, 0, 1, 0, 2, 39, 15]);
+      return buildSfnt({ head: headTable(), hhea: hheaTable(), VDMX: vdmx });
+    }
+    case 'nameCount': {
+      // format 0, count 65535, storageOffset 6: no room in the table for any record.
+      const name = new Uint8Array([0, 0, 0xff, 0xff, 0, 6]);
+      return buildSfnt({ head: headTable(), hhea: hheaTable(), name });
+    }
+    case 'vdmxCount': {
+      // version 0, numRecs 1, numRatios 65535: no room in the table for a single ratio record.
+      const vdmx = new Uint8Array([0, 0, 0, 1, 0xff, 0xff]);
+      return buildSfnt({ head: headTable(), hhea: hheaTable(), VDMX: vdmx });
+    }
+  }
+}
+
 const vtf2x2 = (): Uint8Array => {
   // encodeVTF's own layout, inlined so this file needs nothing from ../vpk: 80-byte 7.2 header, BGRA8888.
   const out = new Uint8Array(80 + 16);
