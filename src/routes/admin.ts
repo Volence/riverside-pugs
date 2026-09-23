@@ -783,7 +783,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (typeof sides === 'string') return reply.code(400).send({ error: sides });
     const phases = q.phases === 'split' ? 'split' : 'all';
     const key = `compare|${JSON.stringify(sides)}|${phases}`;
-    return memo(key, () => {
+    return memo(db, key, () => {
       const result = compareSides(db, sides.a, sides.b, { phases });
       if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
       return result;
@@ -799,7 +799,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!METRICS.some((m) => m.id === metric)) return reply.code(400).send({ error: 'unknown metric' });
     const phase = q.phase as Phase;
     if (!(['all', ...SUB_PHASES] as string[]).includes(String(phase))) return reply.code(400).send({ error: 'unknown phase' });
-    return memo(`metric|${metric}|${phase}|${JSON.stringify(sides)}`, () => metricDetail(db, metric, phase, sides.a, sides.b));
+    return memo(db, `metric|${metric}|${phase}|${JSON.stringify(sides)}`, () => metricDetail(db, metric, phase, sides.a, sides.b));
   });
 
   app.post('/api/admin/balance/patches/:id', async (req, reply) => {

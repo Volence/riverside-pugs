@@ -1,19 +1,33 @@
+import type { DB } from '../../db.js';
 import { metricsGeneration } from '../store.js';
 import type { Origin, SideQuery } from './types.js';
 
 const MAX_ENTRIES = 50;
-const entries = new Map<string, { gen: number; value: unknown }>();
+const entries = new Map<string, { stamp: string; value: unknown }>();
 
-/** Caches `compute()` under `key` for as long as `metricsGeneration()` stays
- *  the same; a metrics write bumps the generation and invalidates every
- *  cached entry at once. Keeps at most MAX_ENTRIES, dropping the oldest. */
-export function memo<T>(key: string, compute: () => T): T {
-  const gen = metricsGeneration();
+/** A cheap fingerprint of everything a comparison reads that can change
+ *  without this process's writeRoundMetrics running: a void (voided_at set),
+ *  a round frozen or recomputed by another process (the backfill script),
+ *  which all move the round_metric_context count or its newest computed_at,
+ *  or the voided-match count. Combined with the in-process generation
+ *  counter, which still catches same-second rewrites. */
+export function dataStamp(db: DB): string {
+  const c = db.prepare('SELECT COUNT(*) AS n, MAX(computed_at) AS t FROM round_metric_context').get() as { n: number; t: string | null };
+  const v = db.prepare('SELECT COUNT(*) AS n FROM matches WHERE voided_at IS NOT NULL').get() as { n: number };
+  return `${metricsGeneration()}|${c.n}|${c.t ?? ''}|${v.n}`;
+}
+
+/** Caches `compute()` under `key` for as long as dataStamp(db) stays the
+ *  same; a metrics write, a void or an out-of-process recompute changes the
+ *  stamp and invalidates every cached entry at once. Keeps at most
+ *  MAX_ENTRIES, dropping the oldest. */
+export function memo<T>(db: DB, key: string, compute: () => T): T {
+  const stamp = dataStamp(db);
   const hit = entries.get(key);
-  if (hit && hit.gen === gen) return hit.value as T;
+  if (hit && hit.stamp === stamp) return hit.value as T;
   const value = compute();
   entries.delete(key);
-  entries.set(key, { gen, value });
+  entries.set(key, { stamp, value });
   while (entries.size > MAX_ENTRIES) entries.delete(entries.keys().next().value as string);
   return value;
 }
