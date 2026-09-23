@@ -454,7 +454,7 @@ export default function Hud() {
         setStatus('That link is damaged.');
       } else {
         let apply = true;
-        if (hasOverrides(design)) {
+        if (hasOverrides(design, crosshair !== null)) {
           apply = await confirm({
             title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',

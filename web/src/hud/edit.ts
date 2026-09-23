@@ -10,7 +10,7 @@
  * canvas draws.
  */
 import {
-  clampOverride, clampChild, baseTeam, DEFAULT_DESIGN,
+  clampOverride, clampChild, baseTeam, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box,
 } from './design';
 import { screenW, SCREEN_H } from './units';
@@ -57,14 +57,19 @@ export function elementsTouched(d: HudDesign): boolean {
 
 /** Whether a design holds anything beyond the untouched defaults: decides
  *  whether loading a share link needs to ask first rather than silently
- *  overwriting whatever a reader already had going. */
-export function hasOverrides(d: HudDesign): boolean {
+ *  overwriting whatever a reader already had going. `hasSavedCrosshair` is
+ *  this browser's own (the Crosshair page's storage), since a fresh design
+ *  on one that has a crosshair saved already starts 'bundle' (newDesign),
+ *  not the static default 'none': measuring against that fixed default
+ *  would both ask to replace a reader's untouched, auto-bundled design and
+ *  miss it when they deliberately turned the bundle back off. */
+export function hasOverrides(d: HudDesign, hasSavedCrosshair: boolean): boolean {
   return elementsTouched(d)
     || Object.keys(d.children).length > 0
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
     || d.hideGameCrosshair === true
-    || d.crosshair !== DEFAULT_DESIGN.crosshair
+    || d.crosshair !== newDesign(hasSavedCrosshair).crosshair
     || d.preset !== DEFAULT_DESIGN.preset
     || d.aspect !== DEFAULT_DESIGN.aspect
     || d.font !== DEFAULT_DESIGN.font
