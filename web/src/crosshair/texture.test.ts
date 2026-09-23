@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { artPixels, uploadArt, XHAIR_TEXTURE } from './texture';
+import { artPixels, uploadArt, importedCrosshair, XHAIR_TEXTURE } from './texture';
 import { crosshairPixels } from './saved';
 import { DEFAULT_STATE, TEX } from './draw';
 import { PNG_PREFIX, type CrosshairArt } from './model';
@@ -128,5 +128,19 @@ describe('uploadArt', () => {
     vi.stubGlobal('createImageBitmap', vi.fn(async () => { throw new Error('no'); }));
     await expect(uploadArt(new File(['hello'], 'notes.txt'))).rejects.toThrow(/not a crosshair/);
     await expect(uploadArt(new File([new Uint8Array(4_000_001)], 'big.png'))).rejects.toThrow(/over 4 MB/);
+  });
+});
+
+describe('importedCrosshair', () => {
+  it("takes an imported HUD's own altcrosshair texture, fitted like an uploaded one", () => {
+    stubCanvas();
+    const rgba = new Uint8ClampedArray(64 * 32 * 4).map((_, i) => i & 0xff);
+    expect(importedCrosshair(new Map([[XHAIR_TEXTURE, encodeVTF(64, 32, rgba)]]))).toEqual({ kind: 'image', png: `${PNG_PREFIX}UE5H`, w: TEX, h: TEX });
+  });
+
+  it('gives nothing when the HUD has no crosshair texture or it will not decode', () => {
+    stubCanvas();
+    expect(importedCrosshair(new Map())).toBeNull();
+    expect(importedCrosshair(new Map([[XHAIR_TEXTURE, new Uint8Array(10)]]))).toBeNull();
   });
 });

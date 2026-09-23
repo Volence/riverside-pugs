@@ -622,6 +622,11 @@ export function baseHasElement(key: BaseKey, el: HudElement): boolean {
   return [1, 2, 3, 4].every((n) => kvFind(team, [`TeamPlayer${n}`]) !== undefined);
 }
 
+/** Whether an imported HUD's own hudlayout.res has an xHair element: a HUD made to show a crosshair addon's texture. */
+export function importedHasXhair(key: BaseKey): boolean {
+  return kvFind(baseTree(key, LAYOUT), ['xHair']) !== undefined;
+}
+
 /** Whether the base's own card file has this child: an addable child it lacks shows as a checkbox. */
 export function baseHasChild(key: BaseKey, name: string): boolean {
   return kvFind(parseKv(baseFile(key, CARD))[0].value as KvNode[], [name]) !== undefined;

@@ -11,7 +11,7 @@
  */
 import {
   clampOverride, clampChild, baseTeam, DEFAULT_DESIGN, newDesign,
-  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride,
+  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride, type ImportedRef,
 } from './design';
 import { baseOf } from './base';
 import { screenW, SCREEN_H } from './units';
@@ -55,6 +55,46 @@ export function nudge(design: HudDesign, id: string, dx: number, dy: number): Hu
  *  none: a fresh design already fits the teammate card. */
 export function elementsTouched(d: HudDesign): boolean {
   return JSON.stringify(d.elements) !== JSON.stringify(DEFAULT_DESIGN.elements);
+}
+
+/**
+ * Whether switching this design's base should ask "keep or reset" first. On
+ * an imported HUD, a design with no edits has none at all (withImport starts
+ * it that way); on Stock and Modern it is elementsTouched, whose default is
+ * the fitted teammates.
+ */
+export function hasLayoutEdits(d: HudDesign): boolean {
+  const children = Object.keys(d.children).length > 0;
+  return d.preset === 'imported' ? Object.keys(d.elements).length > 0 || children : elementsTouched(d) || children;
+}
+
+/**
+ * A design moved onto an imported HUD: Import a HUD, or picking an import in
+ * the Preset select. Edits the player keeps come along; a design with none,
+ * or a reset, starts with none, so the HUD shows exactly as its author made
+ * it (not even the default fitted teammates). Fonts are the HUD's own. The
+ * crosshair: the upload's own altcrosshair texture becomes a bundled image
+ * crosshair (`art`); with no texture but an xHair element in its layout
+ * (`hasXhair`), a design on the game's crosshair becomes 'addon', so
+ * layoutPass keeps the HUD's element instead of removing it; otherwise the
+ * player's own choice stands.
+ */
+export function withImport(d: HudDesign, ref: ImportedRef, o: { art: CrosshairArt | null; hasXhair: boolean; reset: boolean }): HudDesign {
+  const keep = !o.reset && hasLayoutEdits(d);
+  const out: HudDesign = {
+    ...d, preset: 'imported', imported: { ...ref }, font: 'preset',
+    elements: keep ? d.elements : {}, children: keep ? d.children : {},
+  };
+  if (o.art) { out.crosshair = 'bundle'; out.xhairArt = structuredClone(o.art); }
+  else if (o.hasXhair && d.crosshair === 'none') out.crosshair = 'addon';
+  return out;
+}
+
+/** A design moved to Stock or Modern: no import, and the default teammates back when it had no edits or the player reset. */
+export function withPreset(d: HudDesign, preset: 'stock' | 'modern', reset: boolean): HudDesign {
+  const { imported: _dropped, ...rest } = d;
+  const fresh = reset || (d.preset === 'imported' && !hasLayoutEdits(d));
+  return { ...rest, preset, ...(fresh ? { elements: structuredClone(DEFAULT_DESIGN.elements), children: {} } : {}) };
 }
 
 /** Whether a design holds anything beyond the untouched defaults: decides

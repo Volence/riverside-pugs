@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { baseFile, baseOf, registerImport, unregisterImport, hasImport, MissingImportError } from './base';
 import { baseTeam, validateDesign, decodeShare, encodeShare } from './design';
-import { buildTrees, baseHasChild, buildHud, cardChild, baseHasElement } from './build';
+import { buildTrees, baseHasChild, buildHud, cardChild, baseHasElement, importedHasXhair } from './build';
 import { parseKv, writeKv, kvFind, kvSet, type KvNode } from './kv';
 import { drawHud, visibleElements } from './mock';
 import { elementById } from './elements';
@@ -10,7 +10,17 @@ import { sampleHud, latin1, MARKER_PANEL, dropBlock, recordingCtx } from './impo
 
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
-afterEach(() => { unregisterImport(A); unregisterImport(B); });
+/**
+ * An id is its files' content hash, so the base caches (baseTree, baseTeam)
+ * keep what they read for an id for ever. A test that registers different
+ * files must use an id no other test registers other files under, or it
+ * reads a stale cache and passes or fails by test order.
+ */
+const LACKING = 'c'.repeat(64);
+const NO_CARD = 'd'.repeat(64);
+const PLAIN = 'e'.repeat(64);
+const WITH_XHAIR = 'f'.repeat(64);
+afterEach(() => { for (const id of [A, B, LACKING, NO_CARD, PLAIN, WITH_XHAIR]) unregisterImport(id); });
 
 const TEAM = 'resource/ui/hud/teamdisplayhud.res';
 /** The stock team file with TeamPlayer2 moved down: a column, not a row. */
@@ -96,15 +106,15 @@ describe('an imported HUD that lacks a panel or a child', () => {
     'resource/ui/hud/teammatepanel.res': dropBlock(baseFile('stock', 'resource/ui/hud/teammatepanel.res'), 'Items'),
   });
   const design = (extra: Record<string, unknown> = {}) => {
-    registerImport(A, lacking());
-    return validateDesign({ v: 1, preset: 'imported', imported: { id: A, name: 'e' }, crosshair: 'none', ...extra });
+    registerImport(LACKING, lacking());
+    return validateDesign({ v: 1, preset: 'imported', imported: { id: LACKING, name: 'e' }, crosshair: 'none', ...extra });
   };
 
   it('offers no element the layout lacks, and still offers it on stock', () => {
     const d = design();
     expect(visibleElements('survivor', d).map((e) => e.id)).not.toContain('killNotices');
     expect(visibleElements('survivor', validateDesign({ v: 1, preset: 'stock' })).map((e) => e.id)).toContain('killNotices');
-    expect(baseHasElement(`imported:${A}`, elementById('killNotices')!)).toBe(false);
+    expect(baseHasElement(`imported:${LACKING}`, elementById('killNotices')!)).toBe(false);
   });
 
   it('offers no teammate child the card file lacks', () => {
@@ -113,8 +123,8 @@ describe('an imported HUD that lacks a panel or a child', () => {
   });
 
   it('drops the teammates when the team file lacks a card', () => {
-    registerImport(B, sampleHud({ [TEAM]: dropBlock(baseFile('stock', TEAM), 'TeamPlayer4') }));
-    expect(baseHasElement(`imported:${B}`, elementById('teamColumn')!)).toBe(false);
+    registerImport(NO_CARD, sampleHud({ [TEAM]: dropBlock(baseFile('stock', TEAM), 'TeamPlayer4') }));
+    expect(baseHasElement(`imported:${NO_CARD}`, elementById('teamColumn')!)).toBe(false);
   });
 
   it('builds a design that still carries edits for them, leaving them out, without throwing', () => {
@@ -131,5 +141,15 @@ describe('an imported HUD that lacks a panel or a child', () => {
     const { ctx } = recordingCtx();
     expect(() => drawHud(ctx, 853, 480, d, 'survivor', null)).not.toThrow();
     expect(() => drawHud(ctx, 853, 480, d, 'infected', null)).not.toThrow();
+  });
+});
+
+describe('importedHasXhair', () => {
+  it("says whether the upload's own layout has an xHair element", () => {
+    registerImport(PLAIN, sampleHud());
+    const withX = decodeText(sampleHud().get('scripts/hudlayout.res')!).text.replace(/\}\s*$/, '\t"xHair"\r\n\t{\r\n\t\t"fieldName" "xHair"\r\n\t}\r\n}\r\n');
+    registerImport(WITH_XHAIR, sampleHud({ 'scripts/hudlayout.res': withX }));
+    expect(importedHasXhair(`imported:${PLAIN}`)).toBe(false);
+    expect(importedHasXhair(`imported:${WITH_XHAIR}`)).toBe(true);
   });
 });

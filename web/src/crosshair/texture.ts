@@ -52,6 +52,35 @@ export async function artPixels(art: CrosshairArt): Promise<Uint8ClampedArray | 
   return ctx.getImageData(0, 0, TEX, TEX).data;
 }
 
+/** A crosshair drawn from `source` (w x h), fitted into the TEX square, aspect kept and centred, as the build would fit it. */
+function fitted(source: CanvasImageSource, w: number, h: number): CrosshairArt {
+  const { c, ctx } = canvas(TEX, TEX);
+  drawArt(ctx, TEX / 2, TEX / 2, TEX, { kind: 'image', png: '', w, h }, source);
+  return { kind: 'image', png: c.toDataURL('image/png'), w: TEX, h: TEX };
+}
+
+/** An altcrosshair texture's pixels as crosshair art. */
+function vtfArt(tex: Uint8Array): CrosshairArt {
+  const vtf = decodeVTF(tex);
+  const { c, ctx } = canvas(vtf.w, vtf.h);
+  const data = ctx.createImageData(vtf.w, vtf.h);
+  data.data.set(vtf.rgba);
+  ctx.putImageData(data, 0, 0);
+  return fitted(c, vtf.w, vtf.h);
+}
+
+/**
+ * An imported HUD's own crosshair texture (spec, "Crosshair"), as the
+ * design's crosshair, exactly as uploading that texture on the crosshair
+ * control would make it. Null when the HUD has none or it will not decode:
+ * the import then keeps the design's own crosshair choice.
+ */
+export function importedCrosshair(files: ReadonlyMap<string, Uint8Array>): CrosshairArt | null {
+  const tex = files.get(XHAIR_TEXTURE);
+  if (!tex) return null;
+  try { return vtfArt(tex); } catch { return null; }
+}
+
 const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12 && b[2] === 0xAA && b[3] === 0x55;
 
 /**
@@ -63,7 +92,6 @@ const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12
 export async function uploadArt(file: File): Promise<CrosshairArt> {
   if (file.size > MAX_UPLOAD) throw new Error('That file is over 4 MB.');
   const bytes = new Uint8Array(await file.arrayBuffer());
-  let source: CanvasImageSource, w: number, h: number;
   if (isVpk(bytes) || /\.vpk$/i.test(file.name)) {
     const split = new Set<string>();
     const tex = readVPK(bytes, split).get(XHAIR_TEXTURE);
@@ -71,19 +99,10 @@ export async function uploadArt(file: File): Promise<CrosshairArt> {
       throw new Error('This addon is split across several files (..._dir.vpk plus _000.vpk); the site needs a single-file .vpk.');
     }
     if (!tex) throw new Error('No crosshair found in this file.');
-    const vtf = decodeVTF(tex);
-    const { c, ctx } = canvas(vtf.w, vtf.h);
-    const data = ctx.createImageData(vtf.w, vtf.h);
-    data.data.set(vtf.rgba);
-    ctx.putImageData(data, 0, 0);
-    source = c; w = vtf.w; h = vtf.h;
-  } else {
-    const bmp = await createImageBitmap(file).catch(() => {
-      throw new Error('That is not a crosshair: pick a crosshair addon (.vpk) or an image.');
-    });
-    source = bmp; w = bmp.width; h = bmp.height;
+    return vtfArt(tex);
   }
-  const { c, ctx } = canvas(TEX, TEX);
-  drawArt(ctx, TEX / 2, TEX / 2, TEX, { kind: 'image', png: '', w, h }, source);
-  return { kind: 'image', png: c.toDataURL('image/png'), w: TEX, h: TEX };
+  const bmp = await createImageBitmap(file).catch(() => {
+    throw new Error('That is not a crosshair: pick a crosshair addon (.vpk) or an image.');
+  });
+  return fitted(bmp, bmp.width, bmp.height);
 }

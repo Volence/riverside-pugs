@@ -4,7 +4,7 @@ import {
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
-  ammoOnly,
+  ammoOnly, withImport, withPreset, hasLayoutEdits,
 } from './edit';
 import { buildHud, buildTrees } from './build';
 import { weaponSlots } from './weapons';
@@ -609,5 +609,47 @@ describe('the weapon selection', () => {
     expect(back.weapons).toBeUndefined();
     expect(back.elements.weaponSelection).toBeUndefined();
     expect(resetElement(d, 'chat').weapons).toEqual(d.weapons);
+  });
+});
+
+describe('moving a design onto an imported HUD and off it', () => {
+  const ref = { id: 'e'.repeat(64), name: 'edgehud' };
+  const art: CrosshairArt = { kind: 'image', png: 'data:image/png;base64,UE5H', w: 128, h: 128 };
+  const none = { art: null, hasXhair: false, reset: false };
+
+  it('starts a design with no layout edits with none, so the HUD shows as its author made it', () => {
+    const d = withImport(structuredClone(DEFAULT_DESIGN), ref, none);
+    expect(d).toMatchObject({ preset: 'imported', imported: ref, font: 'preset', elements: {}, children: {} });
+    expect(hasLayoutEdits(d)).toBe(false);
+  });
+
+  it('keeps the edits a player keeps, and drops them on reset', () => {
+    const edited = { ...structuredClone(DEFAULT_DESIGN), elements: { chat: { x: 8, y: 8 } } };
+    expect(hasLayoutEdits(edited)).toBe(true);
+    expect(withImport(edited, ref, none).elements).toEqual({ chat: { x: 8, y: 8 } });
+    expect(withImport(edited, ref, { ...none, reset: true }).elements).toEqual({});
+  });
+
+  it("takes the upload's crosshair texture as a bundled image crosshair", () => {
+    const d = withImport(structuredClone(DEFAULT_DESIGN), ref, { ...none, art });
+    expect(d.crosshair).toBe('bundle');
+    expect(d.xhairArt).toEqual(art);
+  });
+
+  it("keeps the HUD's own xHair element, as an addon crosshair, when it has no texture and none was chosen", () => {
+    expect(withImport(structuredClone(DEFAULT_DESIGN), ref, { ...none, hasXhair: true }).crosshair).toBe('addon');
+    const bundled = { ...structuredClone(DEFAULT_DESIGN), crosshair: 'bundle' as const, xhairArt: art };
+    expect(withImport(bundled, ref, { ...none, hasXhair: true }).crosshair).toBe('bundle');
+  });
+
+  it('moves back to Stock without the import, with the default teammates when it had no edits', () => {
+    const on = withImport(structuredClone(DEFAULT_DESIGN), ref, none);
+    const back = withPreset(on, 'stock', false);
+    expect(back.preset).toBe('stock');
+    expect('imported' in back).toBe(false);
+    expect(back.elements).toEqual(DEFAULT_DESIGN.elements);
+    const edited = withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', false);
+    expect(edited.elements).toEqual({ chat: { x: 8 } });
+    expect(withPreset({ ...on, elements: { chat: { x: 8 } } }, 'modern', true).elements).toEqual(DEFAULT_DESIGN.elements);
   });
 });
