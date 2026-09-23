@@ -91,6 +91,23 @@ function findOrOpen(
 
 type Reporter = { kind: 'player'; steamid: string } | DiscordReporter;
 
+/**
+ * The Discord-side equivalent of inGoodStanding, for somebody with no player
+ * account: timed out in Discord right now, under a sanction the bot carried
+ * out, or the most recent owner of this Discord id is a banned player (the
+ * gap a banned player walks through by unlinking and carrying on in Discord;
+ * linkDiscord refuses the same thing in the other direction). Filing a report
+ * and opening a chat about one both ask this.
+ */
+export function discordReporterBlocked(db: DB, discordId: string, timedOutUntil: string | null, now: Date): boolean {
+  const timedOut = timedOutUntil !== null && Date.parse(timedOutUntil) > now.getTime();
+  if (timedOut || activeDiscordSanction(db, discordId, now)) return true;
+  const lastOwner = db.prepare(
+    'SELECT steamid FROM discord_link_history WHERE discord_id = ? ORDER BY id DESC LIMIT 1',
+  ).get(discordId) as { steamid: string } | undefined;
+  return !!lastOwner && hasActiveBan(db, lastOwner.steamid, now);
+}
+
 /** A Discord account that has linked Steam is that player, always: the
  *  surfaces pass what Discord gave them, and this is the one place that
  *  decides. */
@@ -116,22 +133,8 @@ export function fileReport(db: DB, reporterIn: string | DiscordReporter, body: F
     // both check this before they get here, and the day a third surface forgets
     // to, this is what stops a banned player filing reports from it.
     if (!inGoodStanding(db, reporter.steamid, now)) return fail(403, 'not an active player');
-  } else {
-    // The Discord-side equivalent of inGoodStanding: timed out in Discord
-    // right now, or under a sanction the bot carried out (phase 3c).
-    const timedOut = reporter.timedOutUntil !== null && Date.parse(reporter.timedOutUntil) > now.getTime();
-    if (timedOut || activeDiscordSanction(db, reporter.discordId, now)) return fail(403, 'you cannot file reports right now');
-    // A Discord-only reporter has no player row of their own, which is
-    // exactly the gap a banned player can walk through: unlink (or never
-    // link at all before the ban), then file through Discord with nothing
-    // above to catch it. linkDiscord already refuses the opposite direction
-    // (a banned account's Discord cannot attach to a new one) by checking
-    // discord_link_history for this Discord id's most recent owner; the same
-    // lookup, the same rule, applied here.
-    const lastOwner = db.prepare(
-      'SELECT steamid FROM discord_link_history WHERE discord_id = ? ORDER BY id DESC LIMIT 1',
-    ).get(reporter.discordId) as { steamid: string } | undefined;
-    if (lastOwner && hasActiveBan(db, lastOwner.steamid, now)) return fail(403, 'you cannot file reports right now');
+  } else if (discordReporterBlocked(db, reporter.discordId, reporter.timedOutUntil, now)) {
+    return fail(403, 'you cannot file reports right now');
   }
 
   let target: Person;

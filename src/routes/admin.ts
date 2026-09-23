@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
+import { hasStaffFlag } from '../tickets/store.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin } from './guards.js';
 import type { ServerReleaser } from '../serverRelease.js';
@@ -293,7 +294,10 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       return reply.code(400).send({ error: 'a note needs text (up to 2000 characters)' });
     }
     addNote(db, t.steamid, t.adminId, text.trim());
-    logAdmin(db, t.adminId, 'note', t.steamid);
+    // The words go in the audit row (and so the admin feed), except for a note
+    // about staff: they may read the log and the feed, and the note is for
+    // those who can open their file.
+    logAdmin(db, t.adminId, 'note', t.steamid, hasStaffFlag(db, t.steamid) ? {} : { text: text.trim() });
     return { ok: true };
   });
 

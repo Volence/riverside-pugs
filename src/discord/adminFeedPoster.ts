@@ -4,6 +4,7 @@ import { getSetting } from '../settings.js';
 import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
 import { activeTimeout } from '../penalties.js';
+import { hasStaffFlag } from '../tickets/store.js';
 import { discordLabel, escapeName, identityOf } from '../identity.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
@@ -143,9 +144,27 @@ export class AdminFeedPoster {
         };
       }
       case 'cvar_flag': {
+        // Worded by what the plugin did. With the ready gate on, a Low player
+        // cannot ready, so `held` is the common case and nobody has played on
+        // it; `live` means they switched after the round went live.
+        const who = this.name(e.steamid);
+        const match = `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        if (e.act === 'fixed') {
+          return {
+            text: `✅ ${who} changed Effect Detail off Low (\`${e.cvar} ${e.value}\`) and can ready up for match ${match}.`,
+            color: COLOR.account,
+          };
+        }
+        if (e.act === 'held') {
+          return {
+            text: `🔧 ${who} tried to ready up for match ${match} with Effect Detail on Low (\`${e.cvar} ${e.value}\`), `
+              + 'which thins smoke and fire enough to see through. The server took the ready back and is holding ready-up until they change it.',
+            color: COLOR.action,
+          };
+        }
         return {
-          text: `🔧 ${this.name(e.steamid)} is playing match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) `
-            + `with \`${e.cvar} ${e.value}\`, which thins smoke and fire enough to see through (the settings check expects 1 or higher).`,
+          text: `🔧 ${who} is on Effect Detail Low (\`${e.cvar} ${e.value}\`) during live play in match ${match}, `
+            + 'which thins smoke and fire enough to see through. Ready-up blocks it, so they switched after the round went live. Worth a word.',
           color: COLOR.problem,
         };
       }
@@ -200,7 +219,16 @@ export class AdminFeedPoster {
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;
       case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
-      case 'note': return `${who} added a note on ${target}`;
+      case 'note': {
+        // The note's own words, quoted, so the channel shows what was written
+        // rather than that something was. Not for a note about a member of
+        // staff: they may well read this channel, and a note about them is
+        // for the people who can open their file.
+        const words = typeof d.text === 'string' ? d.text.trim() : '';
+        if (!words || hasStaffFlag(this.deps.db, e.target)) return `${who} added a note on ${target}`;
+        const clipped = words.length > 1500 ? `${words.slice(0, 1500)}...` : words;
+        return `${who} added a note on ${target}:\n${clipped.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
+      }
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;
       case 'abort_match': return `${who} aborted match ${match}`;
       case 'void_match': return `${who} voided match ${match}: ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
@@ -230,7 +258,8 @@ export class AdminFeedPoster {
       }
       case 'ticket_open': case 'ticket_claim': case 'ticket_restrict': case 'ticket_access':
       case 'ticket_close': case 'ticket_reopen': case 'ticket_ban': case 'ticket_remove':
-      case 'ticket_discord_sanction': case 'ticket_discord_sanction_lift': {
+      case 'ticket_discord_sanction': case 'ticket_discord_sanction_lift':
+      case 'ticket_contact': case 'ticket_chat_join': case 'ticket_chat_end': {
         const ticket = `ticket [#${e.target}](${this.ticket(e.target)})`;
         switch (e.action) {
           case 'ticket_open': return `${who} opened ${ticket}`;
@@ -249,6 +278,9 @@ export class AdminFeedPoster {
             return `${who} ${d.kind === 'ban' ? 'banned' : 'timed out'} the Discord member on ${ticket}${d.minutes ? ` (${fmtMinutes(Number(d.minutes))})` : ''}`;
           case 'ticket_discord_sanction_lift':
             return `${who} lifted a Discord ${d.kind === 'ban' ? 'ban' : 'timeout'} on ${ticket}`;
+          case 'ticket_contact': return `${who} opened a chat with a reporter on ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
+          case 'ticket_chat_join': return `${who} joined the reporter chat on ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
+          case 'ticket_chat_end': return `${who} ended a reporter chat on ${ticket}${d.via === 'discord' ? ' from Discord' : ''}`;
           default: return `${who} updated ${ticket}`;
         }
       }

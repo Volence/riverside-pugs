@@ -8,6 +8,7 @@ import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { TicketSync } from './discord/ticketSync.js';
 import { TicketMirror } from './discord/ticketMirror.js';
+import { ReporterChats } from './discord/reporterChats.js';
 import { AttachmentStore, httpFetcher } from './tickets/attachments.js';
 import { handleTicketButton, handleTicketModal, opensTicketModal } from './discord/ticketButtons.js';
 import { ReportButton, handleReportButton, handleReportModal, opensReportModal } from './discord/reportButton.js';
@@ -59,7 +60,7 @@ import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
+import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
@@ -84,6 +85,7 @@ import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
+import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { statsRoutes } from './routes/stats.js';
@@ -147,6 +149,9 @@ export interface ServerDeps {
    *  ticket-discord-sanction route can be tested without a real bot. When
    *  set, it wins over whatever the bot (if any) is actually running. */
   discordModeration?: ModerationOps;
+  /** Test seam: stands in for the running bot's reporter chats, so the
+   *  chat routes can be tested without a real bot. Wins when set. */
+  reporterChats?: ReporterChats;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -656,20 +661,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         }
         if (ev.kind === 'cvar_flag') {
           // Evidence only, never on the critical path. Stored in or out of a
-          // match, like a LilAC flag; the admin channel hears about it once per
-          // player per live match, since the plugin reports every connection.
+          // match, like a LilAC flag; the admin channel hears about each act
+          // once per player per live match, since the plugin reports every
+          // connection and every ready-up. The act rides in detail, after the
+          // value, so rows from before it existed read as `live`.
           try {
             const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
-            const seenThisMatch = matchId !== null && deps.db.prepare(
-              "SELECT 1 FROM integrity_flags WHERE source = 'cvar' AND kind = ? AND steamid = ? AND match_id = ? LIMIT 1",
-            ).get(ev.cvar, ev.steamid, matchId) !== undefined;
+            const seenThisMatch = matchId !== null && (deps.db.prepare(
+              "SELECT detail FROM integrity_flags WHERE source = 'cvar' AND kind = ? AND steamid = ? AND match_id = ?",
+            ).all(ev.cvar, ev.steamid, matchId) as { detail: string }[]).some((r) => cvarActOf(r.detail) === ev.act);
+            // Deduped on detail too: a `fixed` a few seconds after a `held` is
+            // the whole story, not a repeat of it.
             const stored = recordIntegrityFlag(deps.db, {
               matchId, serverId, steamid: ev.steamid, source: 'cvar',
-              kind: ev.cvar, severity: 'suspected', detail: `value=${ev.value}`,
-            });
+              kind: ev.cvar, severity: 'suspected', detail: `value=${ev.value} act=${ev.act}`,
+            }, new Date(), { dedupeOnDetail: true });
             if (stored && matchId !== null && !seenThisMatch) {
-              publishAdminEvent({ kind: 'cvar_flag', steamid: ev.steamid, matchId, cvar: ev.cvar, value: ev.value });
+              publishAdminEvent({ kind: 'cvar_flag', steamid: ev.steamid, matchId, cvar: ev.cvar, value: ev.value, act: ev.act });
             }
           } catch (err) {
             console.error('[cvarwatch] failed to record a client setting:', err);
@@ -1111,6 +1120,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 24 * 60 * 60 * 1000);
   pruneTimer.unref();
 
+  // Live replay copies. Every ten minutes, because a finished match's copy is
+  // superseded as soon as the pull job lands its final file, and the live
+  // directory should not hold a day of rounds for nothing.
+  const livePruneTimer = setInterval(() => {
+    pruneLiveFilesSafely(deps.db, deps.config.replayLiveDir, deps.config.replayDir, Date.now());
+  }, 10 * 60 * 1000);
+  livePruneTimer.unref();
+
   // Demo offload to R2, when it is configured. Hourly rather than daily and on
   // its own timer, because this one RECLAIMS space while the prunes above only
   // stop it growing, and it wants to get ahead of the prune rather than run
@@ -1150,6 +1167,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
+  let reporterChats: ReporterChats | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
   // for good when Discord is not configured: drops are then stored and shown
@@ -1213,6 +1231,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // chains they collide. Read per call, because the reconciler is
           // built just below this.
           serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+          // A reporter's own message is fed to the reconciler's chain (pings,
+          // relay, close notices), never handled from the mirror's own chain.
+          onReporterActivity: (th, m, fresh) => ticketSync?.reporterActivity(th, m, fresh),
         });
         ticketMirror = mirror;
         // After the feed: a problem found on the first pass has somewhere to go.
@@ -1232,15 +1253,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         mirror.start();
         reportButton = new ReportButton({ db: deps.db, transport: t });
         reportButton.start();
+        reporterChats = new ReporterChats({
+          db: deps.db, transport: t, publicUrl: deps.config.publicUrl, guildId: deps.config.discord!.guildId,
+          isMember: (id) => membership.isMember(id),
+          // On the reconciler's chain, like the mirror's removals: both
+          // unarchive a thread, act in it and archive it again.
+          serialise: (fn) => (ticketSync ? ticketSync.serialise(fn) : fn()),
+        });
       },
       extraButtons: {
         'r:': (i) => adminFeed!.handleButton(i),
-        't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
-        'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds }, i),
+        't:': (i) => handleTicketButton({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'rp:': (i) => handleReportButton({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
       },
       extraModals: {
-        't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
-        'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds }, i),
+        't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
+        'rp:': (i) => handleReportModal({ db: deps.db, adminSteamIds: deps.config.adminSteamIds, chats: () => deps.reporterChats ?? reporterChats }, i),
       },
       opensModal: (id) => opensTicketModal(id) || opensReportModal(id),
       messageCommands: {
@@ -1271,6 +1299,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(presenceSweep);
     clearInterval(pruneTimer);
+    clearInterval(livePruneTimer);
     stopTwitchPoll?.();
     stopSignalRefresh?.();
     clearTimeout(pruneOnBoot);
@@ -1291,6 +1320,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     attachmentsDir: deps.config.ticketAttachmentsDir,
     afterRemove: () => { void ticketMirror?.sweepRemovals(); },
     moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
+    chats: () => deps.reporterChats ?? reporterChats,
   });
   await app.register(adminRoutes, {
     db: deps.db, matchmaker, releaser, broadcast: (e) => hub.broadcast(e), integrityJobs,
@@ -1322,7 +1352,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
-  await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
+  await app.register(replayRoutes, {
+    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir,
+  });
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,

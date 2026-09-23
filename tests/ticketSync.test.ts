@@ -63,7 +63,9 @@ describe('the staff forum post', () => {
     expect(text).toContain(`https://pug.test/match/${matchId}?ordinal=2&half=1&t=61500`);
     expect(text).not.toContain('player0');
     expect(text).not.toContain('kept killing us');
-    expect(buttons(row.thread_id)).toEqual([`t:${id}:claim=Claim`, `t:${id}:close=Close`, `link=https://pug.test/admin/people/tickets/${id}`]);
+    expect(buttons(row.thread_id)).toEqual([
+      `t:${id}:claim=Claim`, `t:${id}:close=Close`, `link=https://pug.test/admin/people/tickets/${id}`, `t:${id}:contact=Contact reporter`,
+    ]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM ticket_reports WHERE announced_at IS NULL').get()).toEqual({ n: 0 });
   });
 

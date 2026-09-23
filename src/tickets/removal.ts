@@ -82,12 +82,13 @@ export function removeMessage(
     addTicketEvent(db, ticketId, by, 'removed', { messageId, files: n }, now);
     return n;
   })();
-  // Everything from here on is after the commit, so none of it can undo the
-  // removal and none of it may fail the caller: the tombstone is already what
-  // the page shows and what the serving route answers 404 for. A disk that
-  // refuses is logged and swept up at the next start; the nudge goes out
-  // either way, in a finally, because an open page that never hears is a page
-  // still showing what was just removed.
+  afterRemoval(db, dir, ticketId);
+  return { ok: true, files };
+}
+
+/** After a removal committed: purge the files, fold the log back, and nudge,
+ *  in a finally. Never throws: the removal already stands. */
+function afterRemoval(db: DB, dir: string, ticketId: number): void {
   try {
     if (purgeRemovedFiles(db, dir) > 0) {
       publishAdminEvent({ kind: 'problem', text: 'A file attached to a removed ticket message could not be deleted from disk. It is no longer served and is tried again at the next restart. Check the permissions on the ticket attachments directory.' });
@@ -111,5 +112,36 @@ export function removeMessage(
   } finally {
     publishTicketSignal({ kind: 'ticket', ticketId });
   }
-  return { ok: true, files };
+}
+
+/**
+ * Remove several messages of one ticket for good, in one transaction with
+ * one event, then one tidy-up and one nudge: "Remove everything from this
+ * person" (the 2b handoff's batch entry point). A message already removed,
+ * or of another ticket, is skipped rather than refused: the caller asked for
+ * "all of these", and the ones already gone are gone.
+ */
+export function removeMessages(
+  db: DB, dir: string, ticketId: number, messageIds: number[], by: string, reason: unknown, now = new Date(),
+): { ok: true; removed: number; files: number } | { ok: false; status: number; error: string } {
+  const t = getTicketRow(db, ticketId);
+  if (!t || !canSeeTicket(db, t, by)) return { ok: false, status: 404, error: 'no such ticket' };
+  const text = typeof reason === 'string' ? reason.trim().slice(0, MAX_REASON) : '';
+  const at = now.toISOString();
+  const done = db.transaction(() => {
+    const removed: number[] = [];
+    let files = 0;
+    for (const id of messageIds) {
+      const m = messageById(db, id);
+      if (!m || m.ticket_id !== ticketId || m.removed_at !== null) continue;
+      db.prepare("UPDATE ticket_messages SET content = '', history = '[]', removed_at = ?, removed_by = ?, removed_reason = ? WHERE id = ?")
+        .run(at, by, text, id);
+      files += db.prepare('UPDATE ticket_attachments SET removed_at = ? WHERE message_id = ? AND removed_at IS NULL').run(at, id).changes;
+      removed.push(id);
+    }
+    if (removed.length > 0) addTicketEvent(db, ticketId, by, 'removed', { messageIds: removed, count: removed.length, files }, now);
+    return { removed: removed.length, files };
+  })();
+  if (done.removed > 0) afterRemoval(db, dir, ticketId);
+  return { ok: true, ...done };
 }

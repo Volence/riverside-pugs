@@ -11,7 +11,7 @@ import { mapAspect, useMapLayer } from './useMapLayer';
 import { useCanvasSize } from './canvasSize';
 import { ReplayCanvas } from './ReplayCanvas';
 import { ReplayControls } from './ReplayControls';
-import { ReplayHud, ToggleChips } from './ReplayHud';
+import { ReplayHud, ToggleChips, liveStatusText } from './ReplayHud';
 import { KeyPanel } from './KeyPanel';
 import { HudStrip } from './HudStrip';
 import { TimelineRail } from './TimelineRail';
@@ -150,7 +150,7 @@ export function Viewer(
     momentRef?: { current: number };
   },
 ) {
-  const { header, frames, closed, phase, tooNew, error } = useReplaySource(spec);
+  const { header, frames, closed, phase, behindSinceMs = null, tooNew, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live, closed });
   if (momentRef) momentRef.current = playback.tMs;
@@ -340,7 +340,13 @@ export function Viewer(
     );
   }
   if (error && !header) return <div class="replay replay--empty">Couldn't load that replay.</div>;
-  if (!header) return <div class="replay replay--empty">Loading replay...</div>;
+  if (!header) {
+    // A live round with no bytes yet says why, rather than "Loading" for ever.
+    const waiting = live && behindSinceMs !== null
+      ? liveStatusText(live, false, 0, 0, phase, Date.now(), names, behindSinceMs)
+      : null;
+    return <div class="replay replay--empty">{waiting ?? 'Loading replay...'}</div>;
+  }
 
   const railOn = Boolean(timeline) && (toggles.events || toggles.chat);
   const theaterChip = { on: theater, toggle: toggleTheater };
@@ -423,6 +429,7 @@ export function Viewer(
           closed={closed}
           phase={phase}
           names={names}
+          behindSinceMs={behindSinceMs}
           toggles={toggles}
           toggle={toggle}
           theater={theaterChip}
@@ -520,6 +527,7 @@ export function Viewer(
           closed={closed}
           phase={phase}
           names={names}
+          behindSinceMs={behindSinceMs}
         />
       </div>
     );

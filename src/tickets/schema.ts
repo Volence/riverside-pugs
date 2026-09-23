@@ -160,5 +160,41 @@ export function ensureTicketSchema(db: DB): void {
       hash       TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    -- Phase 3b2. A reporter's message in a reporter thread, and its copy on
+    -- the staff forum post. source_message_id is the original's Discord id
+    -- (ticket_messages.discord_message_id). One copy at a time: a new post
+    -- (a reopen) replaces the row. 'hash' is of the payload last sent, so an
+    -- edit is only sent when the copy would change. The row goes once the
+    -- copy is deleted in Discord; while the original is removed or deleted
+    -- and the row stands, the removal sweep still owes that deletion.
+    CREATE TABLE IF NOT EXISTS relay_messages (
+      source_message_id TEXT PRIMARY KEY,
+      relay_message_id  TEXT NOT NULL,
+      relay_thread_id   TEXT NOT NULL,
+      hash              TEXT NOT NULL
+    );
+
+    -- The once-an-hour cap on telling staff about a reporter chat, per
+    -- Discord thread. wanted_at is a ping asked for and not yet sent; the
+    -- reconciler sends it once last_ping_at is an hour old.
+    CREATE TABLE IF NOT EXISTS reporter_chat_pings (
+      thread_id    TEXT PRIMARY KEY,
+      last_ping_at TEXT,
+      wanted_at    TEXT
+    );
+
+    -- DMs owed to reporters, written in the transaction that closes a
+    -- ticket and sent by the bot after that ticket's chats have ended.
+    -- Marked sent before the send: a refused DM is never retried.
+    CREATE TABLE IF NOT EXISTS ticket_notices (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id  INTEGER NOT NULL REFERENCES tickets(id),
+      discord_id TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      sent_at    TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_notices_unsent ON ticket_notices (ticket_id) WHERE sent_at IS NULL;
   `);
 }

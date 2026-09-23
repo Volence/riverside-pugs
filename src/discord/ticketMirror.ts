@@ -6,7 +6,7 @@ import { subscribeTicketSignals } from '../tickets/signals.js';
 import { setThreadLocked, threadByDiscordId, type ThreadRow } from '../tickets/threads.js';
 import {
   attachmentsOf, insertAttachment, insertMessage, lastMessageId, markDeleted, messageByDiscordId, messageById, recordEdit,
-  updateAttachment,
+  updateAttachment, type MessageRow,
 } from '../tickets/messages.js';
 import { attachmentPath, type AttachmentStore } from '../tickets/attachments.js';
 import { purgeRemovedFiles } from '../tickets/removal.js';
@@ -24,6 +24,11 @@ export interface TicketMirrorDeps {
    *  a reconcile pass unarchive a thread, act in it and archive it again.
    *  Left out (tests, and before the reconciler exists) the work simply runs. */
   serialise?: (fn: () => Promise<void>) => Promise<void>;
+  /** Something new in a reporter thread: TicketSync.reporterActivity, which
+   *  queues that ticket's pass (the relay onto the forum post, and the
+   *  restricted ticket's ping). Called on THIS chain and must return at once:
+   *  it may never wait on the reconciler's chain, which waits on this one. */
+  onReporterActivity?: (thread: ThreadRow, m: MessageRow, fresh: boolean) => void;
 }
 
 /** Threads whose history is still worth reading: every state but 'deleted'.
@@ -192,6 +197,22 @@ export class TicketMirror {
         this.problem('A message removed on the site is still standing in Discord, because the bot could not delete it. It is retried every few minutes. The usual cause is the bot missing Manage Messages in the tickets forum or the tickets channel.');
       }
     }
+    // Copies on a forum post whose original was removed on the site or
+    // deleted in Discord. The row goes once Discord confirms the copy is gone.
+    const copies = db.prepare(
+      `SELECT rm.source_message_id, rm.relay_message_id, rm.relay_thread_id FROM relay_messages rm
+         JOIN ticket_messages m ON m.discord_message_id = rm.source_message_id
+       WHERE m.removed_at IS NOT NULL OR m.deleted_at IS NOT NULL ORDER BY m.id`,
+    ).all() as { source_message_id: string; relay_message_id: string; relay_thread_id: string }[];
+    for (const c of copies) {
+      try {
+        await this.removeInDiscord(c.relay_thread_id, c.relay_message_id);
+        db.prepare('DELETE FROM relay_messages WHERE source_message_id = ?').run(c.source_message_id);
+      } catch (err) {
+        console.error('[discord] could not delete the forum copy of a reporter message; the next sweep tries again:', err instanceof Error ? err.message : err);
+        this.problem('A copy of a reporter\'s message on a staff forum post could not be deleted after the original was removed. It is retried every few minutes. The usual cause is the bot missing Manage Messages in the tickets forum.');
+      }
+    }
   }
 
   /**
@@ -265,6 +286,17 @@ export class TicketMirror {
     return th && th.state !== 'deleted' ? th : undefined;
   }
 
+  /** The hook, contained: a failure in it must not fail the copy onto the site. */
+  private told(thread: ThreadRow, messageId: number, fresh: boolean): void {
+    if (thread.kind !== 'reporter' || !this.deps.onReporterActivity) return;
+    try {
+      const row = messageById(this.deps.db, messageId);
+      if (row) this.deps.onReporterActivity(thread, row, fresh);
+    } catch (err) {
+      console.error('[discord] telling the reconciler about a reporter message failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
   /**
    * A message as Discord has it now: stored if this is the first sight of it,
    * applied as an edit if it is already stored.
@@ -308,6 +340,7 @@ export class TicketMirror {
       // The message is stored whatever became of its files, so the page has
       // something new to show either way.
       this.deps.onChange?.(thread.ticket_id);
+      this.told(thread, row.id, true);
     }
   }
 
@@ -340,7 +373,10 @@ export class TicketMirror {
         changed = true;
       }
     } finally {
-      if (changed) this.deps.onChange?.(thread.ticket_id);
+      if (changed) {
+        this.deps.onChange?.(thread.ticket_id);
+        this.told(thread, row.id, false);
+      }
     }
   }
 
@@ -355,6 +391,10 @@ export class TicketMirror {
     if (!before || before.deleted_at !== null || before.removed_at !== null) return;
     markDeleted(this.deps.db, messageId);
     this.deps.onChange?.(thread.ticket_id);
+    // A reporter who deletes their message takes its copy on the forum post
+    // with it. Asked for and not waited on: the sweep's chain waits on the
+    // reconciler's, which waits on this one.
+    if (thread.kind === 'reporter') void this.sweepRemovals();
   }
 
   private async saveOne(ticketId: number, messageId: number, a: InboundAttachment): Promise<void> {

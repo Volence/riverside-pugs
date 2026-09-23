@@ -2,14 +2,20 @@ import type { DB } from '../db.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getSetting } from '../settings.js';
 import { subscribeBanChanges } from '../banEvents.js';
+import type { MessageRow } from '../tickets/messages.js';
 import { subscribeTicketSignals } from '../tickets/signals.js';
 import { targetLabel } from '../tickets/person.js';
-import { getTicketRow, hasStaffFlag, holdFeedAbout, type TicketRow } from '../tickets/store.js';
+import {
+  isReporterMessage, reporterThreadAudience, reporterThreadsOf, requestPing, takeDuePings, takeNotices,
+} from '../tickets/reporterChat.js';
+import { addTicketEvent, getTicketRow, hasStaffFlag, holdFeedAbout, type TicketRow } from '../tickets/store.js';
 import {
   forbiddenForumThreads, forumAudience, insertThread, privateThreadAudience, setThreadCard, setThreadLocked,
-  setThreadState, staffThread, surfaceFor, threadsInState, type ThreadRow, type ThreadSurface,
+  setThreadState, staffThread, surfaceFor, threadByDiscordId, threadsInState, type ThreadRow, type ThreadSurface,
 } from '../tickets/threads.js';
-import { accessDm, reportLine, ticketCard } from './ticketCard.js';
+import { accessDm, closeDm, reportLine, reporterWroteDm, ticketCard } from './ticketCard.js';
+import { CHAT_ENDED_ON_CLOSE, endReporterThread } from './reporterChats.js';
+import { syncRelay } from './reporterRelay.js';
 import type { BotTransport } from './transport.js';
 
 /** The spec's figure: "A reconciler on bot ready and every five minutes". */
@@ -20,9 +26,10 @@ const RECONCILE_MS = 5 * 60_000;
  *  who the ticket is about. Anything as long as a snowflake goes. */
 const withoutIds = (s: string) => s.replace(/\d{17,}/g, '<id>');
 
-/** Every private staff thread that still stands, for the ejection sweep. */
+/** Every private thread that still stands, staff (from before restricted
+ *  tickets went site-only) and reporter alike, for the ejection sweep. */
 const PRIVATE_THREADS = `SELECT th.* FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
-   WHERE th.kind = 'staff' AND th.surface = 'private' AND th.state != 'deleted'`;
+   WHERE th.surface = 'private' AND th.state != 'deleted'`;
 
 export interface TicketSyncDeps {
   db: DB;
@@ -187,6 +194,11 @@ export class TicketSync {
        UNION
        SELECT th.ticket_id FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
         WHERE th.kind = 'staff' AND th.state = 'open' AND th.locked = 0 AND t.status = 'closed'
+       UNION
+       SELECT th.ticket_id FROM ticket_threads th JOIN tickets t ON t.id = th.ticket_id
+        WHERE th.kind = 'reporter' AND th.state = 'open' AND t.status = 'closed'
+       UNION
+       SELECT ticket_id FROM ticket_notices WHERE sent_at IS NULL
        ORDER BY 1`,
     ).all() as { id: number }[]).map((r) => r.id);
     for (const id of ids) await this.one(id);
@@ -222,6 +234,20 @@ export class TicketSync {
     await this.step(() => this.revokeForumAccess());
     await this.retireFolded(id);
     await this.notifyAccess(t);
+    // A closed ticket's chats end first, then its reporters are thanked: the
+    // thank-you must not arrive while the chat still looks open. Both steps
+    // re-read the ticket fresh (see endReporterChats and sendNotices): this
+    // pass's own `t` is several Discord round-trips old by now (ejectOutsiders,
+    // removeForbiddenPosts, revokeForumAccess, notifyAccess's DMs), and a
+    // moderator can reopen the ticket in that window. sendNotices only runs
+    // once every chat that needed ending actually did: a chat Discord refused
+    // to end must hold the thank-you back too, or "the chat has ended" and
+    // "thank you, it's closed" would both be said while the chat still shows
+    // open in Discord.
+    const stillClosed = getTicketRow(db, id)?.status === 'closed';
+    const allChatsEnded = stillClosed ? await this.endReporterChats(id) : true;
+    if (allChatsEnded) await this.sendNotices(id);
+    await this.pingByDm(t);
     const where = surfaceFor(db, t);
     const { surface } = where;
     let thread = staffThread(db, id);
@@ -260,6 +286,8 @@ export class TicketSync {
       // the people it is meant for.
       if (thread.surface === 'private') await this.syncMembers(t, thread);
       await this.announceReports(t, thread);
+      await this.pingInPost(t, thread);
+      if (thread.surface === 'forum') await syncRelay(this.deps, t, thread);
       await this.refreshCard(t, thread);
     }
     // A closed ticket is locked AFTER its card said so, for the same reason.
@@ -426,7 +454,9 @@ export class TicketSync {
         if (!(await transport.threads.exists(th.thread_id))) continue;
         const members = await transport.threads.memberIds(th.thread_id);
         if (!members) continue;
-        const entitled = new Set(privateThreadAudience(db, th.ticket_id).map((m) => m.discord_id));
+        const entitled = new Set(th.kind === 'reporter'
+          ? reporterThreadAudience(db, th)
+          : privateThreadAudience(db, th.ticket_id).map((m) => m.discord_id));
         const outsiders = members.filter((id) => !entitled.has(id));
         if (outsiders.length === 0) continue;
         // Whatever state Discord has this thread in, it has to take a removal
@@ -579,6 +609,131 @@ export class TicketSync {
         await transport.dm(r.discord_id, accessDm(t.id, publicUrl));
       } catch { /* refused: dropped, like every other DM this bot sends */ }
     }
+  }
+
+  /**
+   * Every chat still open on a closed ticket, ended, each on its own: one
+   * Discord refusal is logged and skipped rather than stopping the others,
+   * so a single stuck chat cannot leave every other reporter waiting on a
+   * chat that has, as far as they know, already been thanked and closed.
+   *
+   * Re-reads the ticket before every chat, not just once at the top: the
+   * loop awaits, and a moderator can reopen the ticket between one chat
+   * ending and the next. The moment that is seen, ending stops (the
+   * remaining chats are left exactly as they are, open); the ones already
+   * ended in this same pass, while the ticket genuinely was closed, stand.
+   *
+   * Returns whether every chat that needed ending actually did: the caller
+   * only thanks reporters once this is true, so "the chat has ended" is
+   * never left half true while "thank you, it's closed" goes out anyway.
+   */
+  private async endReporterChats(ticketId: number): Promise<boolean> {
+    const { db } = this.deps;
+    let allEnded = true;
+    for (const th of reporterThreadsOf(db, ticketId, 'open')) {
+      if (getTicketRow(db, ticketId)?.status !== 'closed') { allEnded = false; break; }
+      try {
+        await endReporterThread(this.deps, th, CHAT_ENDED_ON_CLOSE);
+        addTicketEvent(db, ticketId, null, 'reporter_chat_ended', { threadRowId: th.id, why: 'closed' });
+      } catch (err) {
+        console.error('[discord] ending a reporter chat on a closed ticket failed:', err);
+        this.problem(`Could not end a reporter chat on a closed ticket: ${err instanceof Error ? err.message : String(err)}. It is tried again every few minutes.`);
+        allEnded = false;
+      }
+    }
+    return allEnded;
+  }
+
+  /**
+   * The close DMs, charged one at a time, right before each is sent, never
+   * trusting a ticket row read earlier in this pass. A ticket reopened
+   * before a notice's turn came up, whether that happened before this pass
+   * started or partway through this very loop (it awaits a DM per person),
+   * is not "now closed": that notice is dropped, unsent, like a DM Discord
+   * itself refuses, rather than resent on some later pass once "the ticket
+   * is now closed" would be a lie.
+   */
+  private async sendNotices(ticketId: number): Promise<void> {
+    const { db, transport } = this.deps;
+    const due = takeNotices(db, ticketId);
+    for (const n of due) {
+      if (getTicketRow(db, ticketId)?.status !== 'closed') continue;
+      try {
+        await transport.dm(n.discord_id, closeDm());
+      } catch { /* refused: dropped, like every other DM this bot sends */ }
+    }
+  }
+
+  /** Charged pings whose own thread is, right now, still open: a ticket may
+   *  stay open while one of its reporter threads has since ended (staff can
+   *  End a chat any time), and a ping that was only ever pending for that
+   *  thread must never surface as "the reporter opened a chat" once it has
+   *  not. takeDuePings already marks every id it returns as sent, whether or
+   *  not it passes this filter, so a stale ping is dropped for good, not
+   *  retried. */
+  private dueOpenPings(t: TicketRow): string[] {
+    const { db } = this.deps;
+    return takeDuePings(db, t.id).filter((threadId) => threadByDiscordId(db, threadId)?.state === 'open');
+  }
+
+  /** A restricted ticket has no post to ping in: its access list (the same
+   *  people privateThreadAudience lets into anything about it) is DMed. */
+  private async pingByDm(t: TicketRow): Promise<void> {
+    if (t.restricted !== 1 || t.status !== 'open') return;
+    const { db, transport, publicUrl } = this.deps;
+    if (this.dueOpenPings(t).length === 0) return;
+    for (const m of privateThreadAudience(db, t.id)) {
+      try {
+        await transport.dm(m.discord_id, reporterWroteDm(t.id, publicUrl));
+      } catch { /* refused: dropped */ }
+    }
+  }
+
+  /** "The reporter opened a chat", on the forum post: the claimer if they
+   *  can read the forum, otherwise everyone who can. */
+  private async pingInPost(t: TicketRow, thread: ThreadRow): Promise<void> {
+    if (thread.surface !== 'forum' || t.restricted === 1 || t.status !== 'open') return;
+    const { db, transport } = this.deps;
+    if (this.dueOpenPings(t).length === 0) return;
+    const readers = forumAudience(db);
+    const claimer = t.claimed_by
+      ? (db.prepare('SELECT discord_id FROM players WHERE steamid = ?').get(t.claimed_by) as { discord_id: string | null } | undefined)?.discord_id ?? null
+      : null;
+    const who = claimer !== null && readers.includes(claimer) ? [claimer] : readers;
+    await transport.send(thread.thread_id, {
+      content: `${who.map((id) => `<@${id}>`).join(' ')} The reporter opened a chat with the moderators. Press Join reporter chat under the card to go in.`.trim(),
+      embeds: [], components: [], mentionUserIds: who,
+    });
+  }
+
+  /**
+   * Something new in a reporter thread, told by the mirror (Task 4 wires it).
+   * Called on the MIRROR's chain, so it writes at most one row and queues:
+   * it must never wait on this chain, which waits on the mirror's.
+   *
+   * A fresh message from the reporter on a restricted ticket asks for the
+   * access list to be told (capped). On any ticket the ticket's pass is
+   * queued once, which is what copies the message onto the forum post.
+   */
+  reporterActivity(thread: ThreadRow, m: MessageRow, fresh: boolean): void {
+    const { db } = this.deps;
+    const t = getTicketRow(db, thread.ticket_id);
+    if (!t) return;
+    if (fresh && t.restricted === 1 && t.status === 'open' && isReporterMessage(thread, m)) requestPing(db, thread.thread_id);
+    this.poke(t.id);
+  }
+
+  /** Tickets with a pass already queued by reporterActivity: a backfill hands
+   *  over a thread's history message by message, and one pass covers all. */
+  private poked = new Set<number>();
+
+  private poke(id: number): void {
+    if (this.poked.has(id)) return;
+    this.poked.add(id);
+    this.enqueue(async () => {
+      this.poked.delete(id);
+      await this.one(id);
+    });
   }
 
   /** One line per report the thread has not heard about, oldest first. Marked

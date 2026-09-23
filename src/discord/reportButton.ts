@@ -5,8 +5,11 @@ import {
   fileReport, latestSharedMatch, MAX_TEXT, REPORT_CATEGORIES,
   type DiscordReporter, type PickedTarget,
 } from '../tickets/filing.js';
+import { openReportsOf, type ReporterAsker } from '../tickets/reporterChat.js';
 import { playerByDiscordId } from '../players.js';
 import { REPORT_LABELS } from './commands.js';
+import { chatButton } from './ticketCard.js';
+import type { ReporterChats } from './reporterChats.js';
 import type { BotInteraction, BotTransport, InteractionReply, MessagePayload, ModalDef } from './transport.js';
 
 /** A player the reporter could mean. */
@@ -136,13 +139,18 @@ const BODY = [
   '',
   'Press the button below and fill in the form. Your report is private:',
   'the person you report is never told who reported them.',
+  '',
+  'Already reported something? Press My reports to chat with the moderators about it.',
 ].join('\n');
 
 function standingPayload(): MessagePayload {
   return {
     content: BODY,
     embeds: [],
-    components: [[{ kind: 'button', customId: `${REPORT_PREFIX}open`, label: 'Report a player', style: 'primary' }]],
+    components: [[
+      { kind: 'button', customId: `${REPORT_PREFIX}open`, label: 'Report a player', style: 'primary' },
+      { kind: 'button', customId: `${REPORT_PREFIX}mine`, label: 'My reports', style: 'secondary' },
+    ]],
   };
 }
 
@@ -245,7 +253,7 @@ export class ReportButton {
  *  asking for a better name beats a wall of buttons. */
 const MAX_CHOICES = 5;
 
-export interface ReportHandlerDeps { db: DB; adminSteamIds: string[]; now?: () => Date }
+export interface ReportHandlerDeps { db: DB; adminSteamIds: string[]; now?: () => Date; chats?: () => ReporterChats | null }
 
 const say = (content: string, components: InteractionReply['payload']['components'] = []): InteractionReply =>
   ({ ephemeral: true, payload: { content, embeds: [], components } });
@@ -263,6 +271,15 @@ function whoIsPressing(db: DB, i: { userId: string; userName: string; presserTim
   return p ? { kind: 'player', steamid: p.steamid }
     : { kind: 'discord', discordId: i.userId, name: i.userName, timedOutUntil: i.presserTimedOutUntil ?? null };
 }
+
+/** Me, as reporterChat.ts's rules ask for it. Built from whoIsPressing's
+ *  already-resolved identity, never straight from the raw Discord id: a
+ *  Discord account that has since linked Steam had its old reports adopted
+ *  onto reporter_id (adoptDiscordPerson), so asking for them by
+ *  reporter_discord_id here would miss every one of them. */
+const askerOf = (me: Me): ReporterAsker => (me.kind === 'player'
+  ? { kind: 'player', steamid: me.steamid }
+  : { kind: 'discord', discordId: me.discordId, timedOutUntil: me.timedOutUntil });
 
 export async function handleReportButton(
   deps: ReportHandlerDeps, i: Extract<BotInteraction, { kind: 'button' }>,
@@ -307,6 +324,20 @@ export async function handleReportButton(
       deps.db.prepare('DELETE FROM pending_reports WHERE id = ?').run(row.id);
     }
     return outcome.reply;
+  }
+  if (i.customId === `${REPORT_PREFIX}mine`) {
+    const rows = openReportsOf(deps.db, askerOf(me));
+    if (rows.length === 0) return say('You have no open reports. Once a report is closed its chat ends; file a new one if something has happened since.');
+    return say('Your open reports. Press one to chat with the moderators about it.',
+      [rows.map((r) => chatButton(r.reportId, `${r.targetName} (${r.category})`))]);
+  }
+  if (i.customId.startsWith(`${REPORT_PREFIX}chat:`)) {
+    const chats = deps.chats?.() ?? null;
+    if (!chats) return say('Chats with the moderators are not available right now. Try again in a few minutes.');
+    const r = await chats.openForReporter(Number(i.customId.split(':')[2]), askerOf(me));
+    if (!r.ok) return say(r.error);
+    return say(r.reopened ? 'Your chat with the moderators is open again.' : 'Your chat with the moderators is open.',
+      [[{ kind: 'link', url: r.url, label: 'Open the chat' }]]);
   }
   return say('That button no longer does anything.');
 }
@@ -394,7 +425,7 @@ function file(
     ...('targetDiscord' in target ? { targetDiscord: target.targetDiscord } : {}),
   });
   if (!r.ok) return { ok: false, reply: say(`Could not file the report: ${r.error}.`) };
-  return { ok: true, reply: say('Thanks. The moderators will look at it. The person you reported is never told who filed it.') };
+  return { ok: true, reply: say('Thanks. The moderators will look at it. The person you reported is never told who filed it.', [[chatButton(r.reportId)]]) };
 }
 
 /** Keep the words while the reporter says which of these people they meant. */

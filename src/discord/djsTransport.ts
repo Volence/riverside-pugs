@@ -5,6 +5,7 @@ import {
   type Interaction, type Message, type TextBasedChannel, type User,
 } from 'discord.js';
 import type { DiscordConfig } from '../config.js';
+import { NotInGuildError } from './transport.js';
 import type {
   BotInteraction, BotTransport, Button, InboundMessage, InteractionReply, MessageCommandDef, MessageHooks, MessagePayload, ModalDef,
   ModerationOps, ModerationResult, PickedMember, RoleOps, SlashCommandDef, ThreadOps, VoiceOps,
@@ -611,7 +612,14 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       return [...mine.values()];
     },
     async addMember(threadId, userId) {
-      await (await needThread(threadId)).members.add(userId);                 // ThreadMemberManager.add :5416
+      try {
+        await (await needThread(threadId)).members.add(userId);               // ThreadMemberManager.add :5416
+      } catch (err) {
+        // 10007 here is Discord saying the user is not in the guild, the one
+        // failure a caller may need to tell apart from a transient problem.
+        if (codeOf(err) === UNKNOWN_MEMBER) throw new NotInGuildError(err instanceof Error ? err.message : 'Unknown Member');
+        throw err;
+      }
     },
     async removeMember(threadId, userId) {
       try {

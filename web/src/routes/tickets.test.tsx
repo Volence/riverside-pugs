@@ -131,7 +131,7 @@ describe('the Tickets section', () => {
     fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'warned' } });
     fireEvent.input(screen.getByLabelText('Closing note'), { target: { value: 'first time' } });
     fireEvent.click(screen.getByRole('button', { name: 'Close ticket' }));
-    await waitFor(() => expect(mockMod.close).toHaveBeenCalledWith(12, 'warned', 'first time'));
+    await waitFor(() => expect(mockMod.close).toHaveBeenCalledWith(12, 'warned', 'first time', true));
     expect(screen.queryByText(/The ban reason is shown to the player/)).toBeNull();
   });
 

@@ -56,6 +56,8 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
   const [reason, setReason] = useState('');
   const [minutes, setMinutes] = useState('1440');
   const [grant, setGrant] = useState('');
+  const [tell, setTell] = useState(true);
+  const [chatUrl, setChatUrl] = useState<string | null>(null);
 
   if (error) return <Panel><button class="chip" type="button" onClick={onBack}>Back to tickets</button><Empty>No such ticket.</Empty></Panel>;
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
@@ -123,11 +125,14 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                 <span class="muted"> · {fmtTime(r.createdAt)}</span>
                 {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}{r.campaign ? ` ${campaignName(r.campaign)}` : ''}</a></>}
                 {r.matchId !== null && r.moment && <> · <a href={`/match/${r.matchId}?ordinal=${r.moment.ordinal}&half=${r.moment.half}&t=${r.moment.tMs}`}>replay moment</a></>}
+                {open && <> · <button class="chip" type="button" disabled={busy}
+                  onClick={() => run(async () => { setChatUrl((await modApi.contactReporter(t.id, r.id)).url); })}>Contact reporter</button></>}
               </p>
               {r.text && <blockquote>{r.text}</blockquote>}
             </li>
           ))}
         </ul>
+        {chatUrl && <p><a href={chatUrl} target="_blank" rel="noreferrer">Open the chat with the reporter in Discord</a></p>}
       </section>
 
       {data.summary && <FileSummary s={data.summary} />}
@@ -178,6 +183,30 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                     title: `Lift this Discord ${s.kind}?`, body: 'The bot lifts it in Discord.', confirmLabel: 'Lift',
                   })}>Lift</button>
                 )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(data.reporterChats ?? []).length > 0 && (
+        <section>
+          <h4>Reporter chats</h4>
+          <p class="muted">Private Discord threads with the people who reported. Anyone with the Discord Administrator permission, or Manage Threads on the tickets channel, can read them.</p>
+          <ul class="admin-list">
+            {data.reporterChats!.map((c) => (
+              <li key={c.id}>
+                {c.reporterName} · {c.state}
+                {c.url && <> · <a href={c.url} target="_blank" rel="noreferrer">Open in Discord</a></>}
+                {c.state === 'open' && open && <> <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.joinChats(t.id))}>Join</button></>}
+                {c.state === 'open' && <> <button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.endChat(t.id, c.id), {
+                  title: 'End this chat?', body: 'The reporter is taken out of the thread and it is locked. While the report is open they can start it again.', confirmLabel: 'End chat',
+                })}>End chat</button></>}
+                {' '}<button class="chip" type="button" disabled={busy} onClick={() => run(() => modApi.removeEverything(t.id, c.id), {
+                  title: `Remove everything from ${c.reporterName}?`,
+                  body: 'Every message they wrote in this ticket is removed for good, here and in Discord, with its files, and their chat is ended. This cannot be undone.',
+                  confirmLabel: 'Remove everything', danger: true,
+                })}>Remove everything from this person</button>
               </li>
             ))}
           </ul>
@@ -268,7 +297,8 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                 {OUTCOMES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
               <input value={note} maxLength={1000} placeholder="Closing note (staff only)" aria-label="Closing note" onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
-              <button class="btn" type="button" disabled={busy || !outcome} onClick={() => run(() => modApi.close(t.id, outcome, note))}>Close ticket</button>
+              <label><input type="checkbox" checked={tell} onChange={(e) => setTell((e.target as HTMLInputElement).checked)} /> Tell the reporters it is closed</label>
+              <button class="btn" type="button" disabled={busy || !outcome} onClick={() => run(() => modApi.close(t.id, outcome, note, tell))}>Close ticket</button>
             </div>
           </>
         )}

@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/preact';
 import type { CaseFile, DiscordSanction, FileSummaryData, TicketDetail } from '../../api';
 
-const { mockMod } = vi.hoisted(() => ({ mockMod: { ticket: vi.fn() } }));
+const { mockMod } = vi.hoisted(() => ({
+  mockMod: { ticket: vi.fn(), contactReporter: vi.fn(), joinChats: vi.fn(), endChat: vi.fn(), removeEverything: vi.fn(), close: vi.fn() },
+}));
 
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
@@ -259,6 +261,20 @@ describe('AdminTicket', () => {
     render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
     expect(await screen.findByText(/Restricted tickets have no Discord thread/)).toBeTruthy();
     expect(screen.getByText(/It has no Discord thread, so keep the discussion on this page/)).toBeTruthy();
+  });
+
+  it('lists reporter chats with Join, End and Remove everything', async () => {
+    mockMod.ticket.mockResolvedValue(detail({
+      reports: [{ id: 9, reporterId: '76561198000000020', reporterDiscordId: null, reporterName: 'Tattler', category: 'cheating', text: '', matchId: null, campaign: null, moment: null, createdAt: '2026-09-21T18:56:13.000Z' }],
+      reporterChats: [{ id: 3, reporterName: 'Tattler', state: 'open', url: 'https://discord.com/channels/g1/5' }],
+    }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    expect(await screen.findByText('Reporter chats')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Join' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'End chat' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove everything from this person' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Contact reporter' })).toBeTruthy();
+    expect(screen.getByLabelText(/Tell the reporters it is closed/)).toBeTruthy();
   });
 
 });
