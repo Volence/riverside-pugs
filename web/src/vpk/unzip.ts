@@ -8,21 +8,41 @@
  * checked and anything unexpected (zip64, encryption, a method other than
  * store or deflate, a size that does not match) fails with one sentence.
  * The declared unpacked sizes are added up and checked against the cap
- * before anything is inflated, so a zip that claims to be huge costs nothing.
+ * before anything is inflated, so a zip that honestly says it is huge costs
+ * nothing. A zip that lies (a "zip bomb" that declares a few bytes and
+ * inflates to gigabytes) is caught while it inflates: each entry streams out
+ * of the inflater with a running count, and the stream is cancelled as soon
+ * as it passes the size the entry declared. Since the declared sizes together
+ * are within the cap, so is everything this reader ever holds.
  */
-const NOT_ZIP = 'Could not read this file as a VPK or zip';
+/** The one sentence for a file that is neither a VPK nor a zip this reader can read; upload.ts shows it as is. */
+export const UNREADABLE = 'Could not read this file as a VPK or zip';
 
 /** The declared unpacked sizes passed the caller's cap. */
 export class ZipTooBig extends Error {}
 
-async function inflate(b: Uint8Array): Promise<Uint8Array> {
-  const s = new Blob([b as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return new Uint8Array(await new Response(s).arrayBuffer());
+/**
+ * Inflate a deflated entry that declared `size` unpacked bytes, chunk by
+ * chunk. Past `size` the stream is cancelled at once and null comes back, so
+ * a lying entry costs at most one chunk more than it declared. A short entry
+ * is null too: the caller wants exactly `size` bytes.
+ */
+async function inflate(b: Uint8Array, size: number): Promise<Uint8Array | null> {
+  const reader = new Blob([b as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const out = new Uint8Array(size);
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return got === size ? out : null;
+    if (got + value.length > size) { await reader.cancel().catch(() => {}); return null; }
+    out.set(value, got);
+    got += value.length;
+  }
 }
 
 export async function readZip(bytes: Uint8Array, maxBytes: number): Promise<Map<string, Uint8Array>> {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const fail = (): never => { throw new Error(NOT_ZIP); };
+  const fail = (): never => { throw new Error(UNREADABLE); };
   // The end record is 22 bytes plus a comment of up to 65535; its signature is found searching back.
   let eocd = -1;
   for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 22 - 65535; i--) {
@@ -62,8 +82,8 @@ export async function readZip(bytes: Uint8Array, maxBytes: number): Promise<Map<
     const start = e.local + 30 + dv.getUint16(e.local + 26, true) + dv.getUint16(e.local + 28, true);
     if (start + e.csize > bytes.length) fail();
     const packed = bytes.subarray(start, start + e.csize);
-    const data = e.method === 0 ? packed.slice() : await inflate(packed).catch(fail);
-    if (data.length !== e.usize) fail();
+    const data = e.method === 0 ? packed.slice() : await inflate(packed, e.usize).catch(fail);
+    if (!data || data.length !== e.usize) fail();
     out.set(e.name, data);
   }
   return out;

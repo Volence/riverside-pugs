@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readZip, ZipTooBig } from './unzip';
 import { encodeZip } from './zip';
 import { zipOf } from './fixtures';
@@ -45,5 +45,40 @@ describe('readZip', () => {
   it('stops on the declared sizes, before inflating anything, when they pass the cap', async () => {
     const zip = await zipOf([{ path: 'a.txt', data: new Uint8Array(10), deflate: true }]);
     await expect(readZip(zip, 3)).rejects.toBeInstanceOf(ZipTooBig);
+  });
+
+  describe('an entry that inflates past its declared size', () => {
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    // Counts every byte the browser's inflater hands on, to show the reader
+    // stops early rather than inflating the whole entry and checking after.
+    function countInflated() {
+      const Real = DecompressionStream;
+      const seen = { bytes: 0 };
+      vi.stubGlobal('DecompressionStream', class {
+        readable: ReadableStream<Uint8Array>;
+        writable: WritableStream<BufferSource>;
+        constructor(format: CompressionFormat) {
+          const inner = new Real(format);
+          this.writable = inner.writable;
+          this.readable = inner.readable.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, c) { seen.bytes += chunk.length; c.enqueue(chunk); },
+          }));
+        }
+      });
+      return seen;
+    }
+
+    it('is refused, and inflating stops soon after the declared size is passed', async () => {
+      const zip = await zipOf([{ path: 'scripts/hudlayout.res', data: new Uint8Array(32 * 1024 * 1024), deflate: true, usize: 10 }]);
+      const seen = countInflated();
+      await expect(readZip(zip, 1000)).rejects.toThrow(NOT_ZIP);
+      expect(seen.bytes).toBeLessThan(4 * 1024 * 1024);
+    });
+
+    it('is refused when it inflates to less than it declared', async () => {
+      const zip = await zipOf([{ path: 'a.txt', data: new Uint8Array(100), deflate: true, usize: 200 }]);
+      await expect(readZip(zip, 1000)).rejects.toThrow(NOT_ZIP);
+    });
   });
 });
