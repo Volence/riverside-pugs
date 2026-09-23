@@ -33,7 +33,13 @@ export interface ChildDef {
   move: boolean;
   /** Labels: a text size, written as a HudEd_<font>_t<size> copy of the label's font. */
   font: boolean;
-  /** Labels: a raw colour, written as fgcolor_override. */
+  /**
+   * A raw colour: fgcolor_override for a label (the name and status text),
+   * drawColor for an image (an ImagePanel tint, the key the game already
+   * honours on the stock infected card's frame). Which key a colour turns
+   * into follows the child's own kind, so the registry only has to say
+   * whether one applies at all.
+   */
   colour: boolean;
   /** A child some preset's file lacks: cloned from this template after `after` when turned on. */
   addable?: { template: KvNode; after: string };
@@ -70,7 +76,7 @@ export const TEAM_PANEL: PanelChildren = {
     { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: false,
       note: "The preview draws stand-in icons; the real ones are the game's." },
     { name: 'Status', label: 'Status text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
-    { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'none', move: false, font: false, colour: false },
+    { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true },
     { name: 'Incapacitated', label: 'Down picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
     { name: 'Dead', label: 'Dead picture', kind: 'image', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },
     { name: 'Voice', label: 'Voice icon', kind: 'other', role: 'state', box: 'square', move: true, font: false, colour: false, note: STATE_NOTE },

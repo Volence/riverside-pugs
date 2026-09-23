@@ -131,9 +131,9 @@ export function clampChild(key: ChildRangeKey, value: number): number {
 
 /**
  * One child override, rebuilt field by field from what its registry entry
- * offers: a colour on the health number, a size on the item icons or a move
- * on the splatter is dropped here, so the build only ever sees edits it can
- * write. Square art keeps both sides equal, the smaller winning when a
+ * offers: a colour on the health number, a size on the item icons or a text
+ * size on the splatter is dropped here, so the build only ever sees edits it
+ * can write. Square art keeps both sides equal, the smaller winning when a
  * hand-edited design disagrees.
  */
 function childOverride(def: ChildDef, raw: unknown): ChildOverride {

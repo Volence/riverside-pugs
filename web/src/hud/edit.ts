@@ -293,8 +293,10 @@ export function startsOf(design: HudDesign, names: string[]): Record<string, Car
  * Move pieces by (dx, dy) from where a gesture started them, unscaled units.
  * The delta is clamped once for the whole group, against the unfitted card
  * (the Phase 1 drag clamp), so the pieces keep their spacing when the group
- * meets an edge instead of piling up against it one by one. Pieces that
- * cannot move (the splatter) are skipped.
+ * meets an edge instead of piling up against it one by one. A piece that
+ * cannot move, or has nothing to start from (an addable child not yet in the
+ * file), is skipped; every registered piece can move today, the splatter
+ * included, but the guard stays for a future decor-only one.
  */
 export function moveChildren(
   design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number,

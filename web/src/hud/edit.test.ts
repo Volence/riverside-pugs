@@ -244,8 +244,9 @@ describe('moving several pieces', () => {
     expect(d.children.teamColumn).toEqual({ Head: { x: 20, y: 40 }, Health: { x: 44, y: 54 } });
   });
 
-  it('never moves a piece that cannot move', () => {
-    const d = moveChildren(DEFAULT_DESIGN, ['BackgroundImage'], startsOf(DEFAULT_DESIGN, ['BackgroundImage']), 5, 5);
+  it('never moves a piece with nothing to start from (an addable child not yet in the file)', () => {
+    // HealthNumber is off by default on stock: cardChild is null, so startsOf leaves it out.
+    const d = moveChildren(DEFAULT_DESIGN, ['HealthNumber'], startsOf(DEFAULT_DESIGN, ['HealthNumber']), 5, 5);
     expect(d).toBe(DEFAULT_DESIGN);
   });
 });

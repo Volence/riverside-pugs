@@ -69,8 +69,19 @@ describe('the teammate card registry', () => {
     expect(TEAM_PANEL.children.filter((c) => c.box === 'square').map((c) => c.name)).toEqual(['Head', 'Incapacitated', 'Dead', 'Voice']);
   });
 
-  it('offers colour only on labels, and never on the health number, which the game colours by health', () => {
-    for (const def of TEAM_PANEL.children) if (def.colour) expect(def.kind, def.name).toBe('label');
+  it('offers colour only on labels and the splatter, and never on the health number or the other art', () => {
+    for (const def of TEAM_PANEL.children) {
+      if (def.colour) expect(def.kind === 'label' || def.name === 'BackgroundImage', def.name).toBe(true);
+    }
     expect(TEAM_PANEL.children.find((c) => c.name === 'HealthNumber')!.colour).toBe(false);
+    expect(TEAM_PANEL.children.find((c) => c.name === 'Head')!.colour).toBe(false);
+  });
+
+  it('makes the splatter a movable, free-sized, tintable piece, still decoration', () => {
+    const splatter = TEAM_PANEL.children.find((c) => c.name === 'BackgroundImage')!;
+    expect(splatter.move).toBe(true);
+    expect(splatter.box).toBe('wh');
+    expect(splatter.colour).toBe(true);
+    expect(splatter.role).toBe('decor');
   });
 });
