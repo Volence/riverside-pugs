@@ -69,4 +69,59 @@ describe('Compare', () => {
     await waitFor(() => expect(screen.getByText(/at least one patch on each side/i)).toBeTruthy());
     expect(mockAdmin.balanceCompare).not.toHaveBeenCalled();
   });
+
+  // Regression: phaseFilter is local state applied as a hard filter, but its
+  // select is only rendered while phases is split. Picking "Tank alive" and
+  // then switching Phases back to whole-round-only used to leave every row
+  // filtered out with no visible control to explain why.
+  it('resets the phase filter instead of hiding whole-round rows when leaving split mode', async () => {
+    const splitResult = {
+      ...result,
+      rows: [row('hunter.skeet_rate', 'hunter', 'real', { phase: 'all' }), row('tank.killed_rate', 'tank', 'real', { phase: 'tank' })],
+      counts: { real: 2, too_early: 0, noise: 0, no_data: 0 },
+    };
+    mockAdmin.balancePatches.mockResolvedValue({ patches });
+    mockAdmin.balanceCompare.mockResolvedValue(splitResult);
+    history.replaceState(null, '', '/admin/balance?a=1&b=2&phases=split');
+    render(<LocationProvider><Compare /></LocationProvider>);
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+
+    // Filtering to a phase with no matching rows shows the empty-filter message.
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'witch' } });
+    await waitFor(() => expect(screen.queryByText('hunter.skeet_rate description')).toBeNull());
+    expect(screen.getByText('No rows match these filters.')).toBeTruthy();
+
+    // Filtering to tank shows only the tank row.
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'tank' } });
+    await waitFor(() => expect(screen.getByText('tank.killed_rate description')).toBeTruthy());
+    expect(screen.queryByText('hunter.skeet_rate description')).toBeNull();
+
+    // Switching Phases back to whole-round-only must bring the whole-round
+    // row back, not hide everything behind the stale "tank" filter.
+    fireEvent.change(screen.getByLabelText('Phases'), { target: { value: 'all' } });
+    await waitFor(() => expect(screen.getByText('hunter.skeet_rate description')).toBeTruthy());
+    expect(screen.getByText('tank.killed_rate description')).toBeTruthy();
+
+    // And the filter itself is reset, not just ignored: going back to split
+    // shows "Every phase" again, not the old "tank" leftover.
+    fireEvent.change(screen.getByLabelText('Phases'), { target: { value: 'split' } });
+    await waitFor(() => expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('any'));
+  });
+
+  it('opens the quick check stub on Enter', async () => {
+    renderAt();
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+    const tr = screen.getByText('hunter.skeet_rate description').closest('tr')!;
+    fireEvent.keyDown(tr, { key: 'Enter' });
+    expect(screen.getByText('Quick check')).toBeTruthy();
+  });
+
+  it('shows the older-metric-definition note on a side with older engine rounds', async () => {
+    mockAdmin.balancePatches.mockResolvedValue({ patches });
+    mockAdmin.balanceCompare.mockResolvedValue({ ...result, a: { ...side, olderEngineRounds: 7 } });
+    history.replaceState(null, '', '/admin/balance');
+    render(<LocationProvider><Compare /></LocationProvider>);
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+    expect(screen.getByText(/7 rounds use an older metric definition/)).toBeTruthy();
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { adminApi, type CompareQuery, type CompareRow, type PatchSummary, type Verdict } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
@@ -41,6 +41,14 @@ export function Compare() {
   const [phaseFilter, setPhaseFilter] = useState<(typeof PHASE_FILTERS)[number]>('any');
   const [open, setOpen] = useState<string | null>(null);
 
+  // The Show select only exists while phases is split; a value picked there
+  // (e.g. "Tank alive") must not keep hiding whole-round rows once Phases is
+  // switched back to "Whole round only", or every row silently vanishes with
+  // no control visible to explain why.
+  useEffect(() => {
+    if (q.phases !== 'split') setPhaseFilter('any');
+  }, [q.phases]);
+
   if (patches.error) return <Empty>Could not load patches.</Empty>;
   if (!patches.data) return <p class="muted">Loading...</p>;
 
@@ -51,7 +59,7 @@ export function Compare() {
   const newestFirst = [...list].reverse();
   const result = cmp.data;
   const rows = (result?.rows ?? []).filter((r) => (only ? r.verdict === only : true)
-    && (phaseFilter === 'any' ? true : r.phase === phaseFilter));
+    && (q.phases === 'split' && phaseFilter !== 'any' ? r.phase === phaseFilter : true));
 
   const table = (rs: CompareRow[]) => (
     <div class="table-wrap">
@@ -61,8 +69,20 @@ export function Compare() {
           {rs.flatMap((r) => {
             const k = `${r.metric}|${r.phase}`;
             const ch = fmtChange(r.metric, r);
+            const toggleOpen = () => setOpen(open === k ? null : k);
             const main = (
-              <tr key={k} class="is-clickable" onClick={() => setOpen(open === k ? null : k)}>
+              <tr
+                key={k}
+                class="is-clickable"
+                tabIndex={0}
+                onClick={toggleOpen}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.key === ' ') e.preventDefault();
+                    toggleOpen();
+                  }
+                }}
+              >
                 <td>{r.description}</td>
                 <td>{r.phase === 'all' ? 'whole round' : r.phase}</td>
                 <td>{fmtValue(r.metric, r.a)}</td>
@@ -143,15 +163,17 @@ export function Compare() {
             ))}
           </div>
           <Panel class="panel--table">
-            {q.view === 'ranked'
-              ? table(rows)
-              : Object.keys(GROUP_LABEL).map((g) => {
-                const rs = rows.filter((r) => r.group === g);
-                if (rs.length === 0) return null;
-                const c = VERDICTS.map((v) => [v, rs.filter((r) => r.verdict === v).length] as const).filter(([, n]) => n > 0)
-                  .map(([v, n]) => `${n} ${v === 'real' ? 'real' : VERDICT_LABEL[v]}`).join(', ');
-                return <section key={g}><h3>{GROUP_LABEL[g]} ({c})</h3>{table(rs)}</section>;
-              })}
+            {rows.length === 0 && result.rows.length > 0
+              ? <p class="muted">No rows match these filters.</p>
+              : q.view === 'ranked'
+                ? table(rows)
+                : Object.keys(GROUP_LABEL).map((g) => {
+                  const rs = rows.filter((r) => r.group === g);
+                  if (rs.length === 0) return null;
+                  const c = VERDICTS.map((v) => [v, rs.filter((r) => r.verdict === v).length] as const).filter(([, n]) => n > 0)
+                    .map(([v, n]) => `${n} ${v === 'real' ? 'real' : VERDICT_LABEL[v]}`).join(', ');
+                  return <section key={g}><h3>{GROUP_LABEL[g]} ({c})</h3>{table(rs)}</section>;
+                })}
           </Panel>
         </>
       )}
