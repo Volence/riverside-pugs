@@ -13,6 +13,63 @@ import { infectedMaskForHeader, prepareForUpload } from './replaySides.js';
  *  round ends, so a younger file may still be half-copied. */
 export const REPLAY_QUIET_MS = 10 * 60 * 1000;
 
+export interface EligibleReplay {
+  matchId: number;
+  ordinal: number;
+  half: number;
+  path: string;
+  filename: string;
+  bytes: number;
+}
+
+export interface EligibleReplaysResult {
+  eligible: EligibleReplay[];
+  /** Rows the query returned but a per-file check ruled out: the file did not
+   *  resolve, it has not sat quiet long enough, or its header is not closed. */
+  skipped: number;
+}
+
+/**
+ * Rows ready to upload right now: queued (no r2_key, not pruned), belonging
+ * to a finished match, whose file resolves on disk, has sat past
+ * REPLAY_QUIET_MS, and whose header reports a closed file (frameCount != 0).
+ *
+ * Pulled out of `sweepReplays` so `scripts/offload-replays.ts` can print
+ * exactly what the sweep would upload, without a second copy of the query and
+ * the per-file checks drifting from the real thing.
+ */
+export function eligibleReplays(
+  db: DB, replayDir: string, opts: { limit?: number; nowMs?: number } = {},
+): EligibleReplaysResult {
+  if (!replayDir) return { eligible: [], skipped: 0 };
+  const nowMs = opts.nowMs ?? Date.now();
+  const rows = db.prepare(
+    `SELECT r.match_id AS matchId, r.ordinal, r.half
+       FROM match_replays r JOIN matches m ON m.id = r.match_id
+      WHERE r.r2_key IS NULL AND r.pruned_at IS NULL
+        AND m.state IN ('completed', 'aborted')
+      ORDER BY r.match_id ASC, r.ordinal ASC, r.half ASC
+      LIMIT ?`,
+  ).all(opts.limit ?? 50) as { matchId: number; ordinal: number; half: number }[];
+
+  const eligible: EligibleReplay[] = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const found = resolveReplayPath(db, row.matchId, row.ordinal, row.half, replayDir);
+    if (!found) { skipped++; continue; }
+    try {
+      if (nowMs - statSync(found.path).mtimeMs < REPLAY_QUIET_MS) { skipped++; continue; }
+      const h = decodeHeader(readFileSync(found.path).subarray(0, HEADER_BYTES));
+      if (!h || h.frameCount === 0) { skipped++; continue; }
+    } catch { skipped++; continue; }
+    eligible.push({
+      matchId: row.matchId, ordinal: row.ordinal, half: row.half,
+      path: found.path, filename: found.filename, bytes: found.bytes,
+    });
+  }
+  return { eligible, skipped };
+}
+
 /**
  * Upload one replay: a copy with the token zeroed and the side mask stamped,
  * then HEAD to confirm the size, then record the key. Any failure leaves the
@@ -57,25 +114,11 @@ export async function sweepReplays(
 ): Promise<{ uploaded: number; skipped: number; failed: number }> {
   const out = { uploaded: 0, skipped: 0, failed: 0 };
   if (!replayDir) return out;
-  const nowMs = opts.nowMs ?? Date.now();
-  const rows = db.prepare(
-    `SELECT r.match_id AS matchId, r.ordinal, r.half
-       FROM match_replays r JOIN matches m ON m.id = r.match_id
-      WHERE r.r2_key IS NULL AND r.pruned_at IS NULL
-        AND m.state IN ('completed', 'aborted')
-      ORDER BY r.match_id ASC, r.ordinal ASC, r.half ASC
-      LIMIT ?`,
-  ).all(opts.limit ?? 50) as { matchId: number; ordinal: number; half: number }[];
+  const { eligible, skipped } = eligibleReplays(db, replayDir, { limit: opts.limit ?? 50, nowMs: opts.nowMs });
+  out.skipped = skipped;
 
-  for (const row of rows) {
-    const found = resolveReplayPath(db, row.matchId, row.ordinal, row.half, replayDir);
-    if (!found) { out.skipped++; continue; }
-    try {
-      if (nowMs - statSync(found.path).mtimeMs < REPLAY_QUIET_MS) { out.skipped++; continue; }
-      const h = decodeHeader(readFileSync(found.path).subarray(0, HEADER_BYTES));
-      if (!h || h.frameCount === 0) { out.skipped++; continue; }
-    } catch { out.skipped++; continue; }
-    const r = await offloadReplay(db, cfg, row, found.path, { ops: opts.ops });
+  for (const row of eligible) {
+    const r = await offloadReplay(db, cfg, row, row.path, { ops: opts.ops });
     if (r === 'uploaded') out.uploaded++; else out.failed++;
   }
   if (out.uploaded > 0 || out.failed > 0) {
