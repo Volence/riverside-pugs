@@ -622,12 +622,12 @@ describe('Hud page', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
-    // Chat is (10, 275) to (330, 395): its right handle is at (330, 335).
-    dragFrom(canvas, [330, 335], [360, 335]);
-    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('350');
+    // Chat is (10, 275) to (290, 395), basechat.res's 280 x 120 window: its right handle is at (290, 335).
+    dragFrom(canvas, [290, 335], [320, 335]);
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('310');
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('10');
     dragFrom(canvas, [10, 335], [0, 335]);
-    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('360');
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('320');
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('0');
   });
 
