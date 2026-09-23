@@ -164,8 +164,8 @@ collide with `half` or `part`:
 - `p:<plugin file relative to plugins/>=<size>.<fnv hex8>`: a RUNNING plugin
 - `f:<path relative to the game dir>=<size>.<fnv hex8>` or `=missing`
 - `d:<dir relative to the game dir>=<file count>.<fnv hex8>`: all files with
-  the listed extension, names sorted, each name and content folded into one
-  hash
+  the listed extension, names sorted, each name and that file's cached
+  `<size>.<fnv hex8>` value folded into one hash
 
 Values and keys are percent-encoded for exactly two characters: `%` becomes
 `%25` and space becomes `%20`. Nothing else is encoded.
