@@ -9,7 +9,8 @@ export const GROUP_LABEL: Record<string, string> = {
 };
 
 export function isShareMetric(id: string): boolean {
-  return id.startsWith('weapons.') || id === 'round.saferoom' || /_(rate|share)$/.test(id);
+  if (id.startsWith('weapons.')) return true;
+  return ['round.saferoom', 'round.phase_share', 'tank.killed_rate', 'witch.startle_rate', 'witch.kill_rate', 'witch.crown_rate', 'witch.draw_crown_rate', 'smoker.kill_clear_share'].includes(id);
 }
 const trim = (n: number, digits: number) => String(Number(n.toFixed(digits)));
 const sign = (n: number) => (n > 0 ? '+' : n < 0 ? '-' : '');
@@ -22,21 +23,42 @@ export function fmtValue(id: string, v: number | null): string {
   return trim(v, 2);
 }
 
-function unitAbs(id: string, v: number): string {
-  if (id.endsWith('_s')) return `${Math.round(Math.abs(v))} s`;
-  if (id.endsWith('_min')) return `${trim(Math.abs(v), 1)} min`;
-  return trim(Math.abs(v), 2);
-}
-
 export function fmtChange(id: string, r: { diff: number | null; rel: number | null; lo: number | null; hi: number | null }): { main: string; range: string } {
   if (r.diff === null) return { main: 'n/a', range: '' };
-  const range = (f: (v: number) => string) => (r.lo === null || r.hi === null ? '' : `[${f(r.lo)}, ${f(r.hi)}]`);
+
+  const formatUnit = (v: number): string => {
+    if (id.endsWith('_s')) {
+      const rounded = Math.round(Math.abs(v));
+      return `${sign(rounded)}${rounded} s`;
+    }
+    if (id.endsWith('_min')) {
+      const rounded = Number(trim(Math.abs(v), 1));
+      return `${sign(rounded)}${rounded} min`;
+    }
+    const rounded = Number(trim(Math.abs(v), 2));
+    return `${sign(rounded)}${rounded}`;
+  };
+
   if (isShareMetric(id)) {
-    const pts = (v: number) => `${sign(Math.round(v * 100))}${Math.abs(Math.round(v * 100))}`;
-    return { main: `${pts(r.diff)} pts`, range: range(pts) };
+    const formatPoints = (v: number): string => {
+      const rounded = Math.round(v * 100);
+      return `${sign(rounded)}${Math.abs(rounded)}`;
+    };
+    const main = `${formatPoints(r.diff)} pts`;
+    const range = r.lo === null || r.hi === null ? '' : `[${formatPoints(r.lo)}, ${formatPoints(r.hi)}]`;
+    return { main, range };
   }
-  const main = r.rel === null ? `${sign(r.diff)}${unitAbs(id, r.diff)}` : `${sign(r.rel)}${Math.abs(Math.round(r.rel * 100))}%`;
-  return { main, range: range((v) => `${sign(v)}${unitAbs(id, v)}`) };
+
+  if (r.rel === null) {
+    const main = formatUnit(r.diff);
+    const range = r.lo === null || r.hi === null ? '' : `[${formatUnit(r.lo)}, ${formatUnit(r.hi)}]`;
+    return { main, range };
+  }
+
+  const roundedPercent = Math.round(r.rel * 100);
+  const main = `${sign(roundedPercent)}${Math.abs(roundedPercent)}%`;
+  const range = r.lo === null || r.hi === null ? '' : `[${formatUnit(r.lo)}, ${formatUnit(r.hi)}]`;
+  return { main, range };
 }
 
 type View = 'ranked' | 'topic';
