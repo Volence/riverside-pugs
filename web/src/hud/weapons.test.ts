@@ -26,7 +26,7 @@ function recCtx() {
     globalCompositeOperation: 'source-over',
     save: (...a: unknown[]) => { stack.push(ctx.globalAlpha); noop('save')(...a); },
     restore: (...a: unknown[]) => { ctx.globalAlpha = stack.pop() ?? 1; noop('restore')(...a); },
-    beginPath: noop('beginPath'), rect: noop('rect'), clip: noop('clip'),
+    beginPath: noop('beginPath'), rect: noop('rect'), clip: noop('clip'), roundRect: noop('roundRect'), fill: noop('fill'),
     fillRect: noop('fillRect'), strokeRect: noop('strokeRect'), fillText: noop('fillText'), drawImage: noop('drawImage'),
     measureText: () => ({ width: 10 }),
   };
@@ -204,5 +204,67 @@ describe('drawWeapons', () => {
     expect(calls.filter((c) => c.m === 'drawImage')).toHaveLength(0);
     pending[0].onload!();
     expect(redraws).toBe(1);
+  });
+});
+
+describe('the weapon edits in the preview', () => {
+  const k = 2;
+  const origin = { x: 1000, y: 300 };
+  const at = (r: { x: number; y: number; w: number; h: number }) => [origin.x + r.x * k, origin.y + r.y * k, r.w * k, r.h * k];
+  const drawn = (d: HudDesign) => { const { ctx, calls } = recCtx(); drawWeapons(ctx, d, origin, k, 100); return calls; };
+  const boxArt = (calls: ReturnType<typeof recCtx>['calls']) => calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src?.includes('scalablepanel'));
+  const iconArt = (calls: ReturnType<typeof recCtx>['calls']) => calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src?.includes('icon-equip'));
+
+  it('reads the box art from mod_textures.txt, drawing nothing for a Hidden box', () => {
+    const d = design({ weapons: { boxActive: { kind: 'hidden' } } });
+    const slots = weaponSlots(d, '16:9', 100);
+    expect(slots.map((s) => s.art)).toEqual([null, ...Array(4).fill('vgui/hud/scalablepanel_bgmidgrey')]);
+    const calls = drawn(d);
+    expect(boxArt(calls)).toHaveLength(9 * 4);          // only the four inactive boxes, nine pieces each
+    expect(calls.some((c) => c.m === 'fillRect' || c.m === 'roundRect')).toBe(false);
+  });
+
+  it('draws a flat box as its colour over the frame, at the alpha the game draws every box at', () => {
+    const d = design({ weapons: { boxInactive: { kind: 'flat', color: '10 20 30 255' } } });
+    const slots = weaponSlots(d, '16:9', 100);
+    expect(slots[1].fill).toEqual({ color: '10 20 30 255', rounded: false });
+    const calls = drawn(d);
+    expect(boxArt(calls)).toHaveLength(9);              // the active box keeps the game art
+    const fills = calls.filter((c) => c.m === 'fillRect');
+    expect(fills.map((c) => c.a)).toEqual(slots.slice(1).map((s) => at(s.frame)));
+    for (const f of fills) { expect(f.fill).toBe('rgba(10,20,30,1)'); near(f.alpha, BOX_ALPHA); }
+  });
+
+  it('draws a rounded box with its corners round by one corner of the art, in the default colour when none is set', () => {
+    const d = design({ weapons: { boxActive: { kind: 'rounded' } } });
+    const slots = weaponSlots(d, '16:9', 100);
+    expect(slots[0].fill).toEqual({ color: '40 40 40 215', rounded: true });
+    const round = drawn(d).filter((c) => c.m === 'roundRect');
+    expect(round).toHaveLength(1);
+    expect(round[0].a).toEqual([...at(slots[0].frame), slots[0].corner * k]);
+  });
+
+  it('draws no gun or pistol picture with the weapon icons off, and no item pictures with the item icons off', () => {
+    const guns = weaponSlots(design({ weapons: { weaponIcons: false } }), '16:9', 100);
+    expect(guns.map((s) => !!s.icon.hidden)).toEqual([true, true, false, false, false]);
+    expect(iconArt(drawn(design({ weapons: { weaponIcons: false } })))).toHaveLength(3);
+    const items = weaponSlots(design({ weapons: { itemIcons: false } }), '16:9', 100);
+    expect(items.map((s) => !!s.icon.hidden)).toEqual([false, false, true, true, true]);
+    expect(iconArt(drawn(design({ weapons: { itemIcons: false } })))).toHaveLength(2);
+  });
+
+  it('draws no item slots at IconSize 0, box or picture, as the game does', () => {
+    const d = design({ weapons: { itemSize: 0 } });
+    expect(weaponSlots(d, '16:9', 100).map((s) => s.kind)).toEqual(['primary', 'pistol']);
+    expect(boxArt(drawn(d))).toHaveLength(9 * 2);
+  });
+
+  it('draws the numbers at the sizes the player chose', () => {
+    const d = design({ weapons: { clipFont: 30, pistolFont: 12 } });
+    const [primary, pistol] = weaponSlots(d, '16:9', 100);
+    expect(primary.texts.map((t) => t.font)).toEqual(['HudEd_HudAmmoLarge_t30', 'HudEd_HudAmmo_t12']);
+    expect(pistol.texts[0].font).toBe('HudEd_HudAmmo_t12');
+    const text = drawn(d).filter((c) => c.m === 'fillText');
+    expect(text.map((c) => c.font.match(/(\d+)px/)![1])).toEqual([String(30 * k), String(12 * k), String(12 * k)]);
   });
 });

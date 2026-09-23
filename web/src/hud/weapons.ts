@@ -34,12 +34,22 @@
  * vgui/hud/iconsheet (icon_equip_*); an item slot the player lacks keeps its
  * box and draws its icon tinted by InactiveItemColor.
  *
+ * The player's edits (HudDesign.weapons) reach the picture the way they
+ * reach the game: the keys through the generated hudlayout.res and the
+ * scheme's HudEd_ font copies, the boxes and pictures through the generated
+ * scripts/mod_textures.txt. An entry pointed at the clear texture draws
+ * nothing, one pointed at a generated box texture draws that box's style (a
+ * flat or rounded fill in its colour, as the texture is), and anything else
+ * draws the art the entry names. IconSize 0 draws no item slots at all, box
+ * or picture (probe B).
+ *
  * Preview only, like the rest of the art: nothing here is in a download.
  */
 import type { HudDesign } from './design';
 import type { Aspect } from './units';
 import { screenW } from './units';
-import { buildTrees, pcGet } from './build';
+import { buildTrees, pcGet, CLEAR_TEXTURE, WEAPON_BOX_ENTRY, weaponBoxTexture } from './build';
+import { WEAPON_BOX_COLOUR } from './design';
 import { kvFind, type KvNode } from './kv';
 import { artImage, colourOf, fontFace, hatch, isMissing, PREVIEW_FONT, rgbaOf, tinted } from './render';
 import { EQUIP_ICON_SIZE } from './art/index';
@@ -68,9 +78,15 @@ export interface WeaponSlot {
   frame: Rect;
   /** How big each corner of the art is drawn, in HUD units. */
   corner: number;
-  art: string;
-  /** tint: the colour the icon is multiplied by, or null to draw it as it is. */
-  icon: Rect & { name: string; tint: string | null };
+  /** The box art as mod_textures.txt names it, lower case; null when the box draws nothing or is a generated fill. */
+  art: string | null;
+  /** A generated flat or rounded box: its "r g b a" colour, drawn over the frame instead of art. */
+  fill?: { color: string; rounded: boolean };
+  /**
+   * tint: the colour the icon is multiplied by, or null to draw it as it is.
+   * hidden: its mod_textures.txt entry points at the clear texture.
+   */
+  icon: Rect & { name: string; tint: string | null; hidden?: boolean };
   texts: WeaponText[];
 }
 
@@ -89,8 +105,6 @@ const SAMPLE_ITEMS: { icon: string; has: boolean }[] = [
 
 /** The box art, both slot kinds: a scalable panel drawn at this alpha (180 of 255) in white. */
 export const BOX_ALPHA = 180 / 255;
-const ART_ACTIVE = 'vgui/hud/scalablepanel_bgmidgrey_glow';
-const ART_INACTIVE = 'vgui/hud/scalablepanel_bgmidgrey';
 /** The art's corners, in texels of its 128-texel texture, kept square when the box stretches. */
 const SRC_CORNER = 16;
 /** The active slot's size, against the others. */
@@ -122,6 +136,18 @@ function keys(design: HudDesign): (key: string) => string {
   return (key) => (panel && pcGet(panel, key)) ?? DEFAULTS[key];
 }
 
+/**
+ * What each mod_textures.txt entry the paint uses points at, in the
+ * generated file: lower case, as the art index names materials.
+ */
+function textureFiles(design: HudDesign): (entry: string) => string {
+  const cells = kvFind(buildTrees(design)('scripts/mod_textures.txt'), ['TextureData']);
+  return (entry) => {
+    const e = cells && kvFind(cells.value as KvNode[], [entry]);
+    return ((e && typeof e.value !== 'string' && e.value.find((n) => n.key.toLowerCase() === 'file')?.value) as string ?? '').toLowerCase();
+  };
+}
+
 /** An icon cell's width over its height, from the index; square when the art is not indexed. */
 function cellAspect(name: string): number {
   const size = EQUIP_ICON_SIZE[name];
@@ -144,9 +170,19 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
     const x = panelWide - w - indent;
     return active ? { x: x - (w * GROW - w), y, w: w * GROW, h: h * GROW } : { x, y, w, h };
   };
+  const file = textureFiles(design);
+  const hidden = (icon: string) => file(icon.replaceAll('/', '_')) === CLEAR_TEXTURE;
   const frameOf = (b: Rect, active: boolean) => {
     const pad = (active ? 4 : 2) * u;
-    return { frame: { x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, corner: (active ? 8 : 4) * u, art: active ? ART_ACTIVE : ART_INACTIVE };
+    const box = active ? 'boxActive' : 'boxInactive';
+    const art = file(WEAPON_BOX_ENTRY[box]);
+    const style = design.weapons?.[box];
+    const fill = art === weaponBoxTexture(box) && style && style.kind !== 'hidden'
+      ? { color: style.color ?? WEAPON_BOX_COLOUR[box], rounded: style.kind === 'rounded' } : undefined;
+    return {
+      frame: { x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, corner: (active ? 8 : 4) * u,
+      art: art === CLEAR_TEXTURE || fill ? null : art, ...(fill ? { fill } : {}),
+    };
   };
 
   // The primary weapon: its icon PrimaryWeaponTall high (times 1.2 when
@@ -171,7 +207,8 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
     const ammoX = panelWide - n('PrimaryWeaponAmmoX');
     slots.push({
       kind: 'primary', active, box, ...frameOf(box, active),
-      icon: { name: 'icon/equip/pumpshotgun', tint: null, x: panelWide - iw - indent, y: y - ih / 2, w: iw, h: ih },
+      icon: { name: 'icon/equip/pumpshotgun', tint: null, ...(hidden('icon/equip/pumpshotgun') ? { hidden: true } : {}),
+        x: panelWide - iw - indent, y: y - ih / 2, w: iw, h: ih },
       texts: [
         { text: WEAPON_SAMPLE.clip, font: clipFont, colour: null, align: 'right', x: ammoX - (active ? 5 : 0) - u, y: clipTop },
         { text: WEAPON_SAMPLE.reserve, font: reserveFont, colour: get('ReserveAmmoColor'), align: 'left',
@@ -190,20 +227,22 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
     const font = get('PistolAmmoFont');
     slots.push({
       kind: 'pistol', active, box, ...frameOf(box, active),
-      icon: { name: 'icon/equip/dualpistols', tint: null, x: iconX, y, w: box.h, h: box.h },
+      icon: { name: 'icon/equip/dualpistols', tint: null, ...(hidden('icon/equip/dualpistols') ? { hidden: true } : {}), x: iconX, y, w: box.h, h: box.h },
       texts: [{ text: WEAPON_SAMPLE.pistolClip, font, colour: null, align: 'right', x: iconX - 2 * u, y: y + (box.h - fontFace(design, font).tall) / 2 }],
     });
     y += box.h + 2 * u;
   }
 
-  // The items: IconSize squares, each icon filling its box.
+  // The items: IconSize squares, each icon filling its box. At IconSize 0
+  // the game draws no item slot at all, not even the box's rim (probe B).
+  if (n('IconSize') <= 0) return slots;
   for (const item of SAMPLE_ITEMS) {
     const active = false;
     const size = n('IconSize');
     const box = boxAt(y, size, size, active);
     slots.push({
       kind: 'item', active, box, ...frameOf(box, active),
-      icon: { name: item.icon, tint: item.has ? null : get('InactiveItemColor'), ...box },
+      icon: { name: item.icon, tint: item.has ? null : get('InactiveItemColor'), ...(hidden(item.icon) ? { hidden: true } : {}), ...box },
       texts: [],
     });
     y += box.h + 2 * u;
@@ -237,16 +276,29 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
   const px = (r: Rect): Rect => ({ x: origin.x + r.x * k, y: origin.y + r.y * k, w: r.w * k, h: r.h * k });
   for (const s of weaponSlots(design, design.aspect, panelWide)) {
     const frame = px(s.frame);
-    const box = artImage(s.art, onAsset);
-    if (box) {
+    const box = s.art ? artImage(s.art, onAsset) : undefined;
+    if (s.fill) {
+      // The generated texture is the colour edge to edge, its corners cut
+      // round by one 16-texel corner for Rounded, nine-sliced over the frame
+      // like the art, so the fill is the frame with round corners s.corner big.
+      ctx.save();
+      ctx.globalAlpha *= BOX_ALPHA;
+      ctx.fillStyle = colourOf(design, s.fill.color);
+      if (s.fill.rounded && typeof ctx.roundRect === 'function') {
+        ctx.beginPath();
+        ctx.roundRect(frame.x, frame.y, frame.w, frame.h, s.corner * k);
+        ctx.fill();
+      } else ctx.fillRect(frame.x, frame.y, frame.w, frame.h);
+      ctx.restore();
+    } else if (box) {
       ctx.save();
       ctx.globalAlpha *= BOX_ALPHA;
       drawNineSlice(ctx, box, frame.x, frame.y, frame.w, frame.h, s.corner * k);
       ctx.restore();
-    } else if (isMissing(s.art)) hatch(ctx, { name: s.art, kind: 'image', visible: true, ...frame });
+    } else if (s.art && isMissing(s.art)) hatch(ctx, { name: s.art, kind: 'image', visible: true, ...frame });
 
     const icon = px(s.icon);
-    const img = artImage(s.icon.name, onAsset);
+    const img = s.icon.hidden ? undefined : artImage(s.icon.name, onAsset);
     if (img) {
       let src: CanvasImageSource = img;
       ctx.save();
@@ -257,7 +309,7 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
       }
       ctx.drawImage(src, icon.x, icon.y, icon.w, icon.h);
       ctx.restore();
-    } else if (isMissing(s.icon.name)) hatch(ctx, { name: s.icon.name, kind: 'image', visible: true, ...icon });
+    } else if (!s.icon.hidden && isMissing(s.icon.name)) hatch(ctx, { name: s.icon.name, kind: 'image', visible: true, ...icon });
 
     for (const t of s.texts) {
       const face = fontFace(design, t.font);
