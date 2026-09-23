@@ -9,7 +9,7 @@
  * than as an error anywhere.
  */
 
-import { encodeVPK, encodeVTF } from '../vpk';
+import { encodeVPK, encodeVTF, type VpkFile } from '../vpk';
 export { crc32, encodeVTF, encodeVPK, type VpkFile } from '../vpk';
 const enc = new TextEncoder();
 
@@ -19,6 +19,20 @@ function addonInfo(name: string): string {
   return '"AddonInfo"\n{\n\taddonSteamAppID\t\t500\n\taddontitle\t\t"'
     + name.replace(/"/g, '')
     + '"\n\taddonversion\t\t1.0\n\taddontagline\t\t"Custom crosshair (Crosshair Maker)"\n\taddonauthor\t\t"Crosshair Maker"\n\taddonDescription\t\t"Custom crosshair image drawn at screen center."\n}\n';
+}
+
+/**
+ * The crosshair's own two files: the texture the xHair ImagePanel shows
+ * (vgui/hud/altcrosshair, which no pak01 has, so without these the element
+ * draws the missing-texture checker) and its material. Shared by this
+ * page's addon and the HUD editor's bundled crosshair, so one crosshair is
+ * the same bytes from either download.
+ */
+export function crosshairFiles(width: number, height: number, rgba: Uint8ClampedArray): VpkFile[] {
+  return [
+    { path: 'materials/vgui/hud/altcrosshair.vtf', data: encodeVTF(width, height, rgba) },
+    { path: 'materials/vgui/hud/altcrosshair.vmt', data: enc.encode(VMT) },
+  ];
 }
 
 /** The complete addon: texture, material, HUD layout and addon manifest. */
@@ -33,8 +47,7 @@ export function buildVPK(
   // buffer genuinely is an ArrayBuffer; only the annotation was too loose.
 ): Uint8Array<ArrayBuffer> {
   return encodeVPK([
-    { path: 'materials/vgui/hud/altcrosshair.vtf', data: encodeVTF(width, height, rgba) },
-    { path: 'materials/vgui/hud/altcrosshair.vmt', data: enc.encode(VMT) },
+    ...crosshairFiles(width, height, rgba),
     { path: 'scripts/hudlayout.res', data: enc.encode(hudlayout) },
     { path: 'addoninfo.txt', data: enc.encode(addonInfo(name)) },
   ]);

@@ -7,9 +7,10 @@ import {
   type Backdrop, type CrosshairState, type Res, type Shape,
 } from '../crosshair/draw';
 import { buildVPK } from '../crosshair/vpk';
+import { CROSSHAIR_KEY, crosshairPixels } from '../crosshair/saved';
 import HUDLAYOUT from '../crosshair/hudlayout.res?raw';
 
-const STORAGE_KEY = 'xhair';
+const STORAGE_KEY = CROSSHAIR_KEY;
 
 /** Per-viewer convenience only, so every access is guarded: a private window
  *  or blocked site data makes these throw rather than return null. */
@@ -133,11 +134,10 @@ export function Crosshair() {
       setStatus('Import an image first, or pick a shape.');
       return;
     }
-    const t = tex.current;
-    const tctx = t?.getContext('2d');
-    if (!t || !tctx) return;
+    // The same pixels the HUD editor bundles from this page's saved state.
+    const px = crosshairPixels(state, imported.current);
+    if (!px) return;
     const safe = (name.trim() || 'my_crosshair').replace(/[^A-Za-z0-9_-]+/g, '_');
-    const px = tctx.getImageData(0, 0, TEX, TEX).data;
     const vpk = buildVPK(safe, TEX, TEX, px, HUDLAYOUT);
     const blob = new Blob([vpk], { type: 'application/octet-stream' });
     const a = document.createElement('a');
