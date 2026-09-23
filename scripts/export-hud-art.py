@@ -54,8 +54,9 @@ MATERIALS = [
 # builds that text, found by disassembly: '!' medkit, '"' pills, then '$' pipe
 # bomb or '#' molotov, with a space between each), which the contact sheet of
 # the decoded font confirms are those four pictures. The weapon scripts name
-# other glyphs of the same font ('a' pills, 'b' molotov) for the weapon
-# selection, which is not this row.
+# other glyphs of the same font ('a' pills, 'b' molotov), but the weapon
+# selection paint never reads them: it draws icon_equip_* cells of
+# vgui/hud/iconsheet instead (see EQUIP below), so those glyphs go unused.
 GLYPHS = {
     'icon/item/medkit': '!',
     'icon/item/pills': '"',
