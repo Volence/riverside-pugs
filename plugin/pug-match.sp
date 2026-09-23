@@ -4035,6 +4035,10 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	event.GetString("weapon", wpnK, sizeof(wpnK));
 	RoundWpnAdd(attacker, wpnK, WS_SiKill, 1);
 	g_iStatSiDmg[slot] += g_iLastHealth[victim]; // overkill remainder
+	// Credited to the killing weapon too, before the remainder is zeroed, so
+	// the per-weapon w_*_sidmg columns sum to sidmg exactly, matching the
+	// invariant already kept for PS_DamageAsSi's dmg_as_* split.
+	RoundWpnAdd(attacker, wpnK, WS_SiDmg, g_iLastHealth[victim]);
 	g_iLastHealth[victim] = 0;
 }
 
