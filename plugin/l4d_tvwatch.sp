@@ -16,13 +16,22 @@
  * like EmitClientNet's PUGNET line in pug-match.sp. `name=` is always last on
  * the line, since spaces in a name are fine there but nowhere else.
  *
- * SourceTV Manager is optional. Its include ships without REQUIRE_EXTENSIONS
- * defined here, so the generated Extension block marks it `required = 0` and
- * every native it exposes gets marked optional (see the include's own
- * __ext_stvmngr_SetNTVOptional). A server that never loads the extension
- * loads this plugin cleanly; the SourceTV_On* forwards are simply never
- * invoked (nothing calls into a plugin's forward implementation but the
- * extension itself), so nothing here ever touches an unbound native.
+ * SourceTV Manager and GeoIP are both optional. <sourcemod> (via core.inc)
+ * `#define REQUIRE_EXTENSIONS` unconditionally, so both includes are wrapped
+ * in `#undef REQUIRE_EXTENSIONS` / `#include` / `#define REQUIRE_EXTENSIONS`,
+ * the same pattern pug-match.sp uses around its own `#include <geoip>`.
+ * Without that undef/define pair each include's Extension block would come
+ * out `required = 1` and SourceMod would refuse to load this plugin at all
+ * on a box missing either extension ("Required extension ... not running"),
+ * rather than loading it inert. With the pair, both Extension blocks come
+ * out `required = 0` and every native either exposes gets marked optional
+ * (see each include's own __ext_..._SetNTVOptional). A server missing
+ * SourceTV Manager loads this plugin cleanly; the SourceTV_On* forwards are
+ * simply never invoked (nothing calls into a plugin's forward implementation
+ * but the extension itself), so nothing here ever touches an unbound
+ * native. A server missing GeoIP also loads cleanly; GeoipCode2 is
+ * feature-checked before every call (see SourceTV_OnSpectatorConnected), so
+ * `cc=` is simply omitted.
  *
  * Disconnect timing: SourceTV_OnSpectatorDisconnected fires AFTER the client
  * is gone. SourceTV Manager's natives (GetClientName, GetClientIP,
@@ -39,8 +48,15 @@
 #pragma semicolon 1
 #pragma newdecls required
 #include <sourcemod>
+// Both optional: neither extension is guaranteed to be running on every box.
+// core.inc (pulled in by <sourcemod>) already #defined REQUIRE_EXTENSIONS by
+// this point, so it must be undef'd here or both Extension blocks below
+// would come out required = 1 and SourceMod would refuse to load this
+// plugin at all wherever either extension is absent.
+#undef REQUIRE_EXTENSIONS
 #include <sourcetvmanager>
 #include <geoip>
+#define REQUIRE_EXTENSIONS
 #include "pug-logauth.inc"
 
 #define PLUGIN_VERSION "0.1.0"
