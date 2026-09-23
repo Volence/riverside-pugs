@@ -57,10 +57,14 @@ const OFF = {
    *  so an old file reads as "sides unknown" and falls back to slot order. */
   infectedMask: 156,
   sidesFlag: 157,
+  /** 1 when frame bytes 6-7 carry line of sight (see `canSee`). Zero padding
+   *  in every file written before 2026-09-23, so those read as "unknown". */
+  losFlag: 158,
 } as const;
 
 export const INFECTED_MASK_OFFSET: number = OFF.infectedMask;
 export const SIDES_FLAG_OFFSET: number = OFF.sidesFlag;
+export const LOS_FLAG_OFFSET: number = OFF.losFlag;
 
 export const TOKEN_BYTES = 32;
 const MAP_BYTES = 32;
@@ -182,6 +186,10 @@ export interface ReplayHeader {
    *  Without it a reader has only slot order to go on, which is wrong for
    *  every second half and for any roster that was not team-ordered. */
   sidesKnown: boolean;
+  /** Whether frames record line of sight in bytes 6-7. False means unknown,
+   *  never "nobody saw anything". Optional so hand-built headers need not set
+   *  it; `decodeHeader` always does. */
+  losKnown?: boolean;
 }
 
 export interface PlayerSample {
@@ -203,6 +211,33 @@ export function slotInfected(h: Pick<ReplayHeader, 'infectedMask' | 'sidesKnown'
   return h.sidesKnown ? ((h.infectedMask >> slot) & 1) === 1 : slot >= 4;
 }
 
+/** Each slot's rank on its side, the numbering frame bytes 6-7 use: occupied
+ *  slots on each side in slot order, at most four per side. -1 for an empty
+ *  slot, a slot on the other side, a fifth player, or unknown sides. */
+export function sideRanks(h: Pick<ReplayHeader, 'slots' | 'infectedMask' | 'sidesKnown'>): { survivor: number[]; infected: number[] } {
+  const survivor = Array<number>(PLAYER_SLOTS).fill(-1);
+  const infected = Array<number>(PLAYER_SLOTS).fill(-1);
+  if (!h.sidesKnown) return { survivor, infected };
+  let s = 0, i = 0;
+  for (let slot = 0; slot < PLAYER_SLOTS; slot++) {
+    if (!h.slots[slot]) continue;
+    if ((h.infectedMask >> slot) & 1) { if (i < 4) infected[slot] = i++; }
+    else if (s < 4) survivor[slot] = s++;
+  }
+  return { survivor, infected };
+}
+
+/** Could this survivor see this spawned infected in this frame. Null when the
+ *  file does not record it or a slot has no rank on the side asked about:
+ *  unknown is never the same as "could not see". */
+export function canSee(h: ReplayHeader, f: Frame, survivorSlot: number, infectedSlot: number): boolean | null {
+  if (!h.losKnown) return null;
+  const { survivor, infected } = sideRanks(h);
+  const sr = survivor[survivorSlot], ir = infected[infectedSlot];
+  if (sr === undefined || ir === undefined || sr < 0 || ir < 0) return null;
+  return (((f.los ?? 0) >> (sr * 4 + ir)) & 1) === 1;
+}
+
 export interface EntitySample {
   /** Engine entity index. Indices are recycled, so two entities far apart in
    *  time can share one. Treat this as an identity hint for interpolation,
@@ -218,6 +253,10 @@ export interface Frame {
   tMs: number;
   players: PlayerSample[];
   entities: EntitySample[];
+  /** Frame bytes 6-7: bit survivorRank * 4 + infectedRank set when that
+   *  survivor could see that spawned infected. Meaningful only when the
+   *  header's `losKnown`; read it through `canSee`. */
+  los?: number;
   /** Byte offset this frame starts at. Filled in by the decoder; ignored by
    *  the encoder. This is what the keyframe index stores. */
   offset: number;
@@ -284,6 +323,7 @@ export function encodeHeader(h: ReplayHeader): Uint8Array {
   }
   v.setUint8(OFF.infectedMask, h.sidesKnown ? h.infectedMask & 0xff : 0);
   v.setUint8(OFF.sidesFlag, h.sidesKnown ? 1 : 0);
+  v.setUint8(OFF.losFlag, h.losKnown ? 1 : 0);
   return buf;
 }
 
@@ -311,6 +351,7 @@ export function decodeHeader(buf: Uint8Array): ReplayHeader | null {
     slots,
     infectedMask: v.getUint8(OFF.infectedMask),
     sidesKnown: v.getUint8(OFF.sidesFlag) === 1,
+    losKnown: v.getUint8(OFF.losFlag) === 1,
   };
 }
 
@@ -323,6 +364,7 @@ export function encodeFrame(f: Frame): Uint8Array {
   const v = dv(buf);
   v.setUint32(0, f.tMs, true);
   v.setUint16(4, f.entities.length, true);
+  v.setUint16(6, (f.los ?? 0) & 0xffff, true);
   for (let slot = 0; slot < PLAYER_SLOTS; slot++) {
     const p = f.players[slot];
     const o = FRAME_HEADER_BYTES + slot * PLAYER_RECORD_BYTES;
@@ -366,6 +408,7 @@ export function decodeFrames(
   while (off + FRAME_HEADER_BYTES + PLAYER_BLOCK_BYTES <= end) {
     const tMs = v.getUint32(off, true);
     const count = v.getUint16(off + 4, true);
+    const los = v.getUint16(off + 6, true);
     const size = frameBytes(count);
     // A frame whose declared entity count runs past the end is the partial
     // tail of a writer that died mid-frame. Stop; do not guess.
@@ -400,7 +443,7 @@ export function decodeFrames(
       });
       eo += ENTITY_RECORD_BYTES;
     }
-    frames.push({ tMs, players, entities, offset: off });
+    frames.push({ tMs, players, entities, offset: off, los });
     off += size;
   }
   return { frames, truncatedBytes: end - off };
