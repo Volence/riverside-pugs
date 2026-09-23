@@ -21,12 +21,14 @@ export function AdminPatches() {
   const [open, setOpen] = useState<PatchDetail | null>(null);
   const { busy, error, run } = useAction(patches.reload);
   const [name, setName] = useState('');
+  const [notes, setNotes] = useState('');
 
   const differing = (drift.data?.servers ?? []).flatMap((s) =>
     s.differsFrom.map((d) => `${s.name} differs from ${d.name}: ${d.diff}`));
 
   const openDetail = (p: PatchSummary) => {
     setName(p.name ?? '');
+    setNotes(p.notes ?? '');
     void run(() => adminApi.balancePatch(p.id).then(setOpen));
   };
 
@@ -69,9 +71,16 @@ export function AdminPatches() {
           <h3>{label(open)}</h3>
           <form class="admin-form" onSubmit={(e) => {
             e.preventDefault();
-            void run(() => adminApi.editBalancePatch(open.id, { name: name.trim() || null, reviewed: true })).then(() => setOpen(null));
+            void run(() => adminApi.editBalancePatch(open.id, { name: name.trim() || null, notes, reviewed: true })).then(() => setOpen(null));
           }}>
             <input value={name} placeholder="Patch name" aria-label="Patch name" onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+            <textarea
+              value={notes}
+              maxLength={2000}
+              placeholder="Notes"
+              aria-label="Patch notes"
+              onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)}
+            />
             <button class="btn" type="submit" disabled={busy}>Save and mark reviewed</button>
           </form>
           {open.diffVsPrevious
