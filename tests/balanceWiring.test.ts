@@ -84,4 +84,32 @@ describe('balance lines end to end', () => {
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM match_round_stats').get()).toEqual({ n: 0 });
   });
+
+  it('still boots and ignores BALANCE_END when balance/knobs.json fails to load', async () => {
+    const port = await freeUdpPort();
+    const db = openDb(':memory:');
+    const sid = addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, server_id, token) VALUES (1, 1, 'live', 'x', ?, ?)").run(sid, T);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (1, 'm', datetime('now'))").run();
+
+    // Points at a file that does not exist, standing in for a missing or
+    // corrupt balance/knobs.json. buildServer must not throw.
+    const app = await buildServer({
+      config: { ...loadConfig({}), devMode: false, logListenPort: port },
+      db,
+      balanceKnobsPath: '/nonexistent/balance-knobs-for-testing.json',
+    });
+    close = () => app.close();
+
+    await send(port, `PUG ${T} ROUND_START map=m half=1 surv=a`);
+    await settle();
+    await send(port, `PUG ${T} BALANCE half=1 part=0 c:z_tank_health=4000`);
+    await send(port, `PUG ${T} BALANCE_END half=1 parts=1 items=1`);
+    await settle();
+
+    const round = db.prepare('SELECT patch_id FROM match_rounds WHERE match_id = 1').get() as { patch_id: number | null };
+    expect(round.patch_id).toBeNull();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM balance_server_state').get()).toEqual({ n: 0 });
+  });
 });

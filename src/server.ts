@@ -83,7 +83,7 @@ import {
   currentOrdinal,
 } from './liveView.js';
 import { BalanceAssembler } from './balanceAssembler.js';
-import { loadBalanceKnobs } from './balanceKnobs.js';
+import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
 import { recordBalanceSighting } from './balancePatches.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
@@ -158,6 +158,10 @@ export interface ServerDeps {
   /** Test seam: stands in for the running bot's reporter chats, so the
    *  chat routes can be tested without a real bot. Wins when set. */
   reporterChats?: ReporterChats;
+  /** Overrides where balance knobs are read from. Injected in tests to
+   *  exercise a missing or invalid balance/knobs.json without touching the
+   *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
+  balanceKnobsPath?: string;
 }
 
 /** Delays between attempts to collect a finished match, in ms.
@@ -626,7 +630,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const serverOf = (source: string, meta: LogMeta): number | null =>
         meta.serverId ?? resolveServerBySource(deps.db, source, feedHost, meta.port);
       const balanceAssembler = new BalanceAssembler();
-      const balanceKnobs = loadBalanceKnobs();
+      // A missing or invalid balance/knobs.json must never crash the whole
+      // site at boot: it is one small feature's config, not core to serving
+      // the app. Guarded here rather than left to throw; balance recording is
+      // simply disabled (see the balance_end handler below) until the file is
+      // fixed and the process restarted. Deliberately no empty-list fallback:
+      // that would change every fingerprint computed while it was in effect.
+      let balanceKnobs: BalanceKnobs | null;
+      try {
+        balanceKnobs = loadBalanceKnobs(deps.balanceKnobsPath);
+      } catch (err) {
+        console.error(
+          `[balance] failed to load balance knobs from ${deps.balanceKnobsPath ?? BALANCE_KNOBS_PATH}, ` +
+          'balance patch recording is disabled until this is fixed:', err,
+        );
+        balanceKnobs = null;
+      }
       const liveMatchRow = (token: string) =>
         deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
           .get(token) as { id: number; server_id: number | null } | undefined;
@@ -915,7 +934,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           else if (ev.kind === 'balance_end') {
             const inv = balanceAssembler.end(ev.token, ev.half, ev.parts, ev.items);
             const m = liveMatchRow(ev.token);
-            if (!inv || !m) return;
+            // balanceKnobs is null when balance/knobs.json failed to load at
+            // boot (see above); recording is disabled until that is fixed.
+            if (!inv || !m || !balanceKnobs) return;
             // The match knows its server; the source address is the fallback
             // (Riverside #3 and #4 share one IP, see resolveServerBySource).
             recordBalanceSighting(deps.db, {
