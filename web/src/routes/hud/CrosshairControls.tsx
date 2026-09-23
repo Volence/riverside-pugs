@@ -53,14 +53,20 @@ export function CrosshairControls(
               />
               <span>{c.label}</span>
             </label>
-            <p class="muted hud__note">
-              {off
-                ? <>Make one on the <a href="/crosshair">Crosshair page</a> first; it is saved in this browser.</>
-                : c.says}
-            </p>
+            <p class="muted hud__note">{c.says}</p>
           </div>
         );
       })}
+
+      {/* Reachable from every choice, not only Bundle: the bundled preview
+          below already carries its own link, so this one steps aside for it. */}
+      {design.crosshair !== 'bundle' && (
+        <p class="muted hud__note">
+          {crosshair
+            ? <>See or change it on the <a href="/crosshair">Crosshair page</a>.</>
+            : <>Make one on the <a href="/crosshair">Crosshair page</a> first; it is saved in this browser.</>}
+        </p>
+      )}
 
       {design.crosshair === 'bundle' && crosshair && (
         <div class="hud__xhairbundle">

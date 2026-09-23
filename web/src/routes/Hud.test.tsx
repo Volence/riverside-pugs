@@ -306,6 +306,17 @@ describe('Hud page', () => {
       expect(radio(/^none/i).checked).toBe(true);
     });
 
+    it('links to the Crosshair page for every choice, not only Bundle', () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      render(<Hud />);
+      expect(radio(/bundle/i).checked).toBe(true);
+      expect(screen.getByRole('link', { name: /crosshair page/i })).toBeTruthy();
+      fireEvent.click(radio(/crosshair addon/i));
+      expect(screen.getByRole('link', { name: /crosshair page/i })).toBeTruthy();
+      fireEvent.click(radio(/^none/i));
+      expect(screen.getByRole('link', { name: /crosshair page/i })).toBeTruthy();
+    });
+
     it('warns what an addon crosshair needs, and when there will be no crosshair at all', () => {
       render(<Hud />);
       fireEvent.click(radio(/crosshair addon/i));
