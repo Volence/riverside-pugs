@@ -245,8 +245,22 @@ export async function replayRoutes(
       .prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
       .get(parsed.batch.token) as { id: number } | undefined;
     if (!live) return reply.code(404).send({ error: 'no live match for that token' });
-    const result = applyPush(liveDir, parsed.batch);
-    if (result.status === 400) return reply.code(400).send({ error: result.error });
+    let result;
+    try {
+      result = applyPush(liveDir, parsed.batch);
+    } catch (err) {
+      // A filesystem failure here (EACCES, ENOSPC, EISDIR, ...) carries the
+      // live file's path in its message, and that path is
+      // `pug_<token>_<ordinal>_<half>.rpl`: the match token, on its way to a
+      // log line, is exactly what the token-never-leaves-the-server-side rule
+      // exists to stop. Log only the error code and the match id, never the
+      // error itself or its message, and answer with a fixed body that names
+      // neither the token nor a path.
+      const code = (err as NodeJS.ErrnoException).code ?? 'unknown';
+      console.error('[replays] push failed for match', live.id, 'code:', code);
+      return reply.code(503).send({ error: 'live push is unavailable right now' });
+    }
+    if (result.status === 400 || result.status === 507) return reply.code(result.status).send({ error: result.error });
     return reply.code(result.status).send({ length: result.length });
   });
 

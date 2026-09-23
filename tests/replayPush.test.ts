@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, statSync, utimesSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -235,5 +235,41 @@ describe('applyPush', () => {
     expect(applyPush(liveDir, batch(0, second, { started: 5000 })))
       .toMatchObject({ status: 409 });
     expect(readFileSync(livePath()).equals(first)).toBe(true);
+  });
+
+  it('refuses a first batch whose declared started does not match its own header, with 400', () => {
+    // started and the header's startedUnix are independent fields the plugin
+    // sets from the same value; a mismatch is a plugin bug, not a race, so it
+    // must fail loudly rather than loop as 'stale round'.
+    const mismatched = roundBytes(1, { startedUnix: 1000 });
+    expect(applyPush(liveDir, batch(0, mismatched, { started: 999 })))
+      .toMatchObject({ status: 400, error: 'started does not match header' });
+    expect(existsSync(livePath())).toBe(false);
+  });
+
+  it('refuses to create a brand new live file when the store is already over an injected cap', () => {
+    mkdirSync(liveDir, { recursive: true });
+    writeFileSync(join(liveDir, 'stale.rpl'), Buffer.alloc(2000));
+    expect(applyPush(liveDir, batch(0, whole), 1000)).toEqual({ status: 507, error: 'live store is full' });
+    expect(existsSync(livePath())).toBe(false);
+  });
+
+  it('refuses a newer round replacing a stale file when it would put the store over an injected cap, leaving the stale file untouched', () => {
+    mkdirSync(liveDir, { recursive: true });
+    applyPush(liveDir, batch(0, roundBytes(5, { startedUnix: 1000 }), { started: 1000 }), 1_000_000_000);
+    writeFileSync(join(liveDir, 'stale.rpl'), Buffer.alloc(2000));
+    const newRound = roundBytes(2, { startedUnix: 2000 });
+    expect(applyPush(liveDir, batch(0, newRound, { started: 2000 }), 1000))
+      .toEqual({ status: 507, error: 'live store is full' });
+    // Nothing was truncated: the old round's own copy is exactly as it was.
+    expect(readFileSync(livePath()).equals(roundBytes(5, { startedUnix: 1000 }))).toBe(true);
+  });
+
+  it('does not cap an ordinary append to a file that already exists, even over the injected cap', () => {
+    mkdirSync(liveDir, { recursive: true });
+    applyPush(liveDir, batch(0, whole.subarray(0, 1000)), 1_000_000_000);
+    writeFileSync(join(liveDir, 'stale.rpl'), Buffer.alloc(2000));
+    expect(applyPush(liveDir, batch(1000, whole.subarray(1000)), 1000)).toEqual({ status: 200, length: 3520 });
+    expect(readFileSync(livePath()).equals(whole)).toBe(true);
   });
 });

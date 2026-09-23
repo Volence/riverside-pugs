@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -149,6 +149,34 @@ describe('POST /api/replays/push', () => {
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: 'live push is not configured' });
     await off.close();
+  });
+
+  it('answers a fixed error and never logs the token when the live directory cannot be created', async () => {
+    seedMatch('live');
+    // A regular file where the live directory should be: mkdirSync inside
+    // applyPush throws EEXIST, and the path in that error's own message
+    // contains the match token (pug_<token>_0_1.rpl's parent).
+    const blockedPath = join(dir, 'blocked-live');
+    writeFileSync(blockedPath, 'not a directory');
+    const blocked = Fastify();
+    await blocked.register(replayRoutes, { db, replayDir: join(dir, 'replays'), liveDir: blockedPath });
+    await blocked.ready();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await blocked.inject({ method: 'POST', url: '/api/replays/push', payload: body(0, WHOLE) });
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toEqual({ error: 'live push is unavailable right now' });
+      for (const call of spy.mock.calls) {
+        for (const arg of call) {
+          const text = typeof arg === 'string' ? arg : JSON.stringify(arg);
+          expect(text).not.toContain(TOKEN);
+          expect(text).not.toContain(blockedPath);
+        }
+      }
+    } finally {
+      spy.mockRestore();
+      await blocked.close();
+    }
   });
 
   it('is registered on the real server with the configured live directory', async () => {
