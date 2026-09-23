@@ -146,6 +146,35 @@ that cause database writes, so `src/logListener.ts` pins the source. Everything
 else stays gated on a registered token, so a spoofed `MATCH_END` cannot invent
 a score.
 
+### Balance inventory and per-round data
+
+```
+BALANCE half=<1|2> part=<0..> <item> <item> ...
+BALANCE_END half=<1|2> parts=<N> items=<M>
+ROUND_STAT half=<1|2> steamid=<17 digits> <key>=<int> ...
+ROUND_STATS_END half=<1|2> players=<N> sd=<0|1>
+ROUND_MARK half=<1|2> kind=<panic|finale_start|finale_radio> t=<ms>
+```
+
+Item keys on a `BALANCE` line carry a one-letter prefix so they can never
+collide with `half` or `part`:
+
+- `c:<cvar>=<value>`: a watched cvar's current value
+- `x:<cvar>=missing`: a watched cvar that does not exist on this server
+- `p:<plugin file relative to plugins/>=<size>.<fnv hex8>`: a RUNNING plugin
+- `f:<path relative to the game dir>=<size>.<fnv hex8>` or `=missing`
+- `d:<dir relative to the game dir>=<file count>.<fnv hex8>`: all files with
+  the listed extension, names sorted, each name and content folded into one
+  hash
+
+Values and keys are percent-encoded for exactly two characters: `%` becomes
+`%25` and space becomes `%20`. Nothing else is encoded.
+
+`BALANCE` is emitted at every go-live with the server's watched cvars and a
+static inventory (running plugins, listed files, listed directories) scanned
+and cached at map start, so the backend can tag the round with a patch and
+spot drift between servers.
+
 ### Authoritative: RCON `sm_pug_dump` response body (`src/dumpParse.ts`)
 
 ```
