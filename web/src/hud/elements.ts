@@ -58,6 +58,17 @@ export const ELEMENTS: HudElement[] = [
   { id: 'chat', label: 'Chat', side: 'both', key: 'HudChat', move: true, resize: 'free', children: [], props: ['visible'] },
   { id: 'progressBar', label: 'Use / revive bar', side: 'both', key: 'HudProgressBar', move: true, resize: 'none',
     children: [], mockSize: { stock: { w: 228, h: 24 }, modern: { w: 228, h: 24 } }, props: ['visible'] },
+  /**
+   * The game's real kill/incap feed: CHudPZDamageRecordPanel, whose
+   * hudlayout panel is HudPZDamageRecord (stock and Modern share the same
+   * numbers: xpos 10, ypos 170, wide f20, tall 75). Its rows
+   * (recordlabel0..4 in resource/ui/hud/pzdamagerecordpanel.res) are filled
+   * in by game code, not by any base file, so it carries no children entry
+   * here; mock.ts reads that file's own numbers straight through buildTrees
+   * for the preview instead.
+   */
+  { id: 'killNotices', label: 'Kill / incap notices', side: 'both', key: 'HudPZDamageRecord', move: true, resize: 'free',
+    children: [], props: ['visible'] },
   { id: 'xhair', label: 'Custom crosshair', side: 'both', key: 'xHair', move: false, resize: 'none', children: [], props: [] },
   { id: 'infectedRow', label: 'Infected teammates', side: 'infected', key: 'CHudZombieTeamDisplay', move: true, resize: 'scale',
     children: ['resource/ui/hud/zombieteamdisplayplayer.res'],
