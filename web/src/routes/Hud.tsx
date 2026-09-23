@@ -18,7 +18,8 @@ import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
 import { ElementControls, ChildList, ChildControls } from './hud/ContextPanel';
-import { hexOf, alphaPct, withHex, withAlphaPct } from './hud/controls';
+import { hexOf, alphaPct, withHex, withAlphaPct, endsOn, typedInto, type Edit, type EditMode } from './hud/controls';
+import * as undoStack from '../hud/history';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
 
@@ -129,9 +130,10 @@ const BACKDROPS: [Backdrop, string][] = [
  * something.
  */
 function StyleRow(
-  { slot, style, error, onChange, onUpload }: {
+  { slot, style, error, onChange, onEnd, onUpload }: {
     slot: StyleSlot; style: StyleOverride | undefined; error: string | undefined;
-    onChange: (p: Partial<StyleOverride>) => void;
+    onChange: (p: Partial<StyleOverride>, mode?: EditMode) => void;
+    onEnd: () => void;
     onUpload: (file: File) => void;
   },
 ) {
@@ -152,11 +154,13 @@ function StyleRow(
       </select>
       <input
         type="color" aria-label={`${slot.label} colour`} value={hexOf(color)}
-        onInput={(e) => onChange({ color: withHex(color, (e.target as HTMLInputElement).value) })}
+        onInput={(e) => onChange({ color: withHex(color, (e.target as HTMLInputElement).value) }, 'gesture')}
+        onChange={onEnd}
       />
       <input
         type="range" min={0} max={100} step={1} aria-label={`${slot.label} opacity`} value={alphaPct(color)}
-        onInput={(e) => onChange({ color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) })}
+        onInput={(e) => onChange({ color: withAlphaPct(color, parseFloat((e.target as HTMLInputElement).value)) }, 'gesture')}
+        onChange={onEnd}
       />
       {kind === 'image' && (
         <label class="hud__file hud__file--inline">
@@ -189,7 +193,82 @@ const CARD_STATES: { key: CardState; label: string }[] = [
 ];
 
 export default function Hud() {
-  const [design, setDesign] = useState<HudDesign>(loadDesign);
+  const [design, setDesignState] = useState<HudDesign>(loadDesign);
+  // The design as of the last edit, read synchronously: two edits in one
+  // event (a gesture's end, then a step) must each see the other's result,
+  // which a state value only shows on the next render.
+  const current = useRef(design);
+  // The undo stacks. A ref, like `current`, so recording a step never waits
+  // for a render; `histTick` re-renders the Undo and Redo buttons.
+  const hist = useRef(undoStack.emptyHistory<HudDesign>());
+  const [, setHistTick] = useState(0);
+  const apply = (next: HudDesign) => { current.current = next; setDesignState(next); };
+
+  /**
+   * The page's one way to change the design. A step records the value it
+   * replaced; a gesture records its start once and is closed by endGesture;
+   * a nudge coalesces with the last one on the same selection. A step or a
+   * nudge first closes any gesture still open, so a control that never
+   * signalled its end still cannot merge into the next edit. An edit that
+   * changes nothing records nothing.
+   */
+  const edit: Edit = (fn, mode: EditMode = 'step') => {
+    const cur = current.current;
+    const next = fn(cur);
+    if (next === cur) return;
+    if (mode === 'gesture') {
+      hist.current = undoStack.begin(hist.current, cur);
+    } else {
+      hist.current = undoStack.commit(hist.current, cur, undoStack.sameJson);
+      if (undoStack.sameJson(cur, next)) return;
+      hist.current = typeof mode === 'object'
+        ? undoStack.nudgeStep(hist.current, cur, mode.nudge, Date.now())
+        : undoStack.push(hist.current, cur);
+    }
+    apply(next);
+    setHistTick((t) => t + 1);
+  };
+  const endGesture = () => {
+    if (hist.current.pending === null) return;
+    hist.current = undoStack.commit(hist.current, current.current, undoStack.sameJson);
+    setHistTick((t) => t + 1);
+  };
+  /** Escape or a lost pointer mid-drag: put the design back where the gesture began, recording nothing. */
+  const cancelGesture = () => {
+    const { h, restore } = undoStack.cancel(hist.current);
+    hist.current = h;
+    if (restore) apply(restore);
+  };
+  const doUndo = () => {
+    endGesture();
+    const r = undoStack.undo(hist.current, current.current);
+    if (!r) return;
+    hist.current = r.h;
+    apply(r.value);
+    setHistTick((t) => t + 1);
+  };
+  const doRedo = () => {
+    endGesture();
+    const r = undoStack.redo(hist.current, current.current);
+    if (!r) return;
+    hist.current = r.h;
+    apply(r.value);
+    setHistTick((t) => t + 1);
+  };
+
+  // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (Cmd on macOS), anywhere on
+  // the page but inside a typing box, where the browser's own undo applies.
+  // Registered once: the handlers read only refs and state setters.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || typedInto(e.target)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); doRedo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [side, setSide] = useState<Side>('survivor');
   const [selected, setSelected] = useState<string | null>(null);
   // In Free, the teammate card the canvas or the card list picked.
@@ -268,7 +347,7 @@ export default function Hud() {
     if (selectedCard !== null && !isFreeTeam(design)) setSelectedCard(null);
   }, [design]);
 
-  // Debounced rather than immediate: a drag calls setDesign on every
+  // Debounced rather than immediate: a drag changes the design on every
   // pointermove, and an undebounced save would run a synchronous
   // JSON.stringify plus localStorage.setItem on every one of those ticks.
   // Resetting this timer on each change coalesces a burst (a drag, a
@@ -292,14 +371,14 @@ export default function Hud() {
       if (!decoded) {
         setStatus('That link is damaged.');
       } else {
-        let apply = true;
+        let load = true;
         if (hasOverrides(design)) {
-          apply = await confirm({
+          load = await confirm({
             title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
           });
         }
-        if (!cancelled && apply) { setDesign(decoded); dropPicks(); }
+        if (!cancelled && load) { edit(() => decoded); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
     })();
@@ -390,20 +469,20 @@ export default function Hud() {
       const scale = design.elements.teamColumn?.scale ?? 1;
       const parent = baseTeam(design.preset).card;
       const s = d.start;
-      setDesign((cur) => (d.mode === 'resize'
+      edit((cur) => (d.mode === 'resize'
         ? resizeChild(cur, d.name, { ...s, visible: true }, 'se', dux / scale, duy / scale)
-        : placeChild(cur, d.name, snap(s.x + dux / scale, s.w, parent.w), snap(s.y + duy / scale, s.h, parent.h))));
+        : placeChild(cur, d.name, snap(s.x + dux / scale, s.w, parent.w), snap(s.y + duy / scale, s.h, parent.h))), 'gesture');
       return;
     }
 
     if (d.kind === 'card') {
       const r = d.startRect;
-      setDesign((cur) => placeCard(cur, d.card,
+      edit((cur) => placeCard(cur, d.card,
         clampSpan(snap(r.x + dux, r.w, extentW), r.w, extentW, 8),
-        clampSpan(snap(r.y + duy, r.h, SCREEN_H), r.h, SCREEN_H, 8)));
+        clampSpan(snap(r.y + duy, r.h, SCREEN_H), r.h, SCREEN_H, 8)), 'gesture');
       return;
     }
-    setDesign((cur) => {
+    edit((cur) => {
       const old = cur.elements[d.id] ?? {};
       if (d.mode === 'resize') {
         const w = Math.max(20, d.startRect.w + dux);
@@ -413,13 +492,14 @@ export default function Hud() {
       const x = clampSpan(snap(d.startRect.x + dux, d.startRect.w, extentW), d.startRect.w, extentW, 8);
       const y = clampSpan(snap(d.startRect.y + duy, d.startRect.h, SCREEN_H), d.startRect.h, SCREEN_H, 8);
       return { ...cur, elements: { ...cur.elements, [d.id]: { ...old, x, y } } };
-    });
+    }, 'gesture');
   };
 
   const onPointerUp = (e: PointerEvent) => {
     const c = canvas.current;
     if (c && c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
     drag.current = null;
+    endGesture();
   };
 
   // Arrows nudge, Escape deselects, Tab/Shift+Tab cycle the current side's
@@ -427,6 +507,7 @@ export default function Hud() {
   const onKeyDown = (e: KeyboardEvent) => {
     // Escape steps up one level: a child or a picked card to the teammates, the teammates to nothing.
     if (e.key === 'Escape') {
+      if (drag.current) { cancelGesture(); drag.current = null; return; }
       if (selectedChild) setSelectedChild(null);
       else if (selectedCard !== null) setSelectedCard(null);
       else selectEl(null);
@@ -453,13 +534,15 @@ export default function Hud() {
     const delta = deltas[e.key];
     if (!delta) return;
     e.preventDefault();
+    // Which selection this nudge moves: a run of nudges on the same one is one undo step.
+    const key = [selected, selectedCard, selectedChild].join(':');
     if (selected === 'teamColumn' && selectedChild) {
       const name = selectedChild;
-      setDesign((d) => nudgeChild(d, name, delta[0], delta[1]));
+      edit((d) => nudgeChild(d, name, delta[0], delta[1]), { nudge: key });
     } else if (selected === 'teamColumn' && selectedCard !== null && isFreeTeam(design)) {
       const card = selectedCard;
-      setDesign((d) => nudgeCard(d, card, delta[0], delta[1]));
-    } else if (selected) setDesign((d) => nudge(d, selected, delta[0], delta[1]));
+      edit((d) => nudgeCard(d, card, delta[0], delta[1]), { nudge: key });
+    } else if (selected) edit((d) => nudge(d, selected, delta[0], delta[1]), { nudge: key });
   };
 
   /** Switching preset keeps whatever moves the reader made, but they were
@@ -475,13 +558,13 @@ export default function Hud() {
         confirmLabel: 'Reset', cancelLabel: 'Keep',
       });
     }
-    setDesign((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements), children: {} } : {}) }));
+    edit((d) => ({ ...d, preset, ...(resetElements ? { elements: structuredClone(DEFAULT_DESIGN.elements), children: {} } : {}) }));
     dropPicks();
   };
 
-  const patchStyle = (id: string, p: Partial<StyleOverride>) => setDesign((d) => ({
+  const patchStyle = (id: string, p: Partial<StyleOverride>, mode: EditMode = 'step') => edit((d) => ({
     ...d, styles: { ...d.styles, [id]: { ...(d.styles[id] ?? { kind: 'stock' }), ...p } },
-  }));
+  }), mode);
 
   const onSlotUpload = async (slot: StyleSlot, file: File) => {
     try {
@@ -490,7 +573,7 @@ export default function Hud() {
         if (!(slot.id in u)) return u;
         const n = { ...u }; delete n[slot.id]; return n;
       });
-      setDesign((d) => ({
+      edit((d) => ({
         ...d,
         images: { ...d.images, [slot.id]: { w: slot.size.w, h: slot.size.h, png } },
         styles: { ...d.styles, [slot.id]: { ...(d.styles[slot.id] ?? { kind: 'stock' }), kind: 'image' } },
@@ -581,7 +664,7 @@ export default function Hud() {
     try {
       const text = await f.text();
       const next = validateDesign(JSON.parse(text));
-      setDesign(next);
+      edit(() => next);
       dropPicks();
       setStatus(`Imported ${next.name}.`);
     } catch {
@@ -600,6 +683,18 @@ export default function Hud() {
       <div class="hud">
         <Panel class="hud__stage">
           <div class="hud__toolbar">
+            <button
+              type="button" class="btn btn--ghost btn--sm" aria-label="Undo" title="Undo (Ctrl+Z)"
+              disabled={!hist.current.past.length} onClick={doUndo}
+            >
+              ↶ Undo
+            </button>
+            <button
+              type="button" class="btn btn--ghost btn--sm" aria-label="Redo" title="Redo (Ctrl+Shift+Z)"
+              disabled={!hist.current.future.length} onClick={doRedo}
+            >
+              ↷ Redo
+            </button>
             <label>
               Preset{' '}
               <select
@@ -629,7 +724,7 @@ export default function Hud() {
               Aspect{' '}
               <select
                 value={design.aspect}
-                onChange={(e) => setDesign((d) => ({ ...d, aspect: (e.target as HTMLSelectElement).value as Aspect }))}
+                onChange={(e) => edit((d) => ({ ...d, aspect: (e.target as HTMLSelectElement).value as Aspect }))}
               >
                 <option value="16:9">16:9</option>
                 <option value="16:10">16:10</option>
@@ -658,7 +753,7 @@ export default function Hud() {
               Font{' '}
               <select
                 value={design.font} disabled={design.preset === 'modern'}
-                onChange={(e) => setDesign((d) => ({ ...d, font: (e.target as HTMLSelectElement).value as 'preset' | 'roboto' }))}
+                onChange={(e) => edit((d) => ({ ...d, font: (e.target as HTMLSelectElement).value as 'preset' | 'roboto' }))}
               >
                 <option value="preset">Preset default</option>
                 <option value="roboto">Roboto Condensed</option>
@@ -698,12 +793,12 @@ export default function Hud() {
 
         <Panel class="hud__side">
           {childShown
-            ? <ChildControls design={design} setDesign={setDesign} name={childShown} onBack={() => setSelectedChild(null)} />
+            ? <ChildControls design={design} edit={edit} end={endGesture} name={childShown} onBack={() => setSelectedChild(null)} />
             : selected
-              ? <ElementControls design={design} setDesign={setDesign} id={selected} selectedCard={selectedCard} onPickCard={setSelectedCard} />
+              ? <ElementControls design={design} edit={edit} end={endGesture} id={selected} />
               : <p class="muted">Select an element on the canvas or in the list below it.</p>}
           {selected === 'teamColumn' && (
-            <ChildList design={design} setDesign={setDesign} selectedChild={selectedChild} onPick={setSelectedChild} />
+            <ChildList design={design} edit={edit} selectedChild={selectedChild} onPick={setSelectedChild} />
           )}
         </Panel>
       </div>
@@ -713,14 +808,14 @@ export default function Hud() {
         {basicSlots.map((slot) => (
           <StyleRow
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
-            onChange={(p) => patchStyle(slot.id, p)}
+            onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
             onUpload={(f) => { void onSlotUpload(slot, f); }}
           />
         ))}
 
         <button
           type="button" class="btn btn--ghost btn--sm hud__advtoggle"
-          onClick={() => setDesign((d) => ({ ...d, advanced: !d.advanced }))}
+          onClick={() => edit((d) => ({ ...d, advanced: !d.advanced }))}
         >
           {design.advanced ? 'Turn off advanced mode' : 'Turn on advanced mode'}
         </button>
@@ -732,7 +827,7 @@ export default function Hud() {
         {design.advanced && advancedSlots.map((slot) => (
           <StyleRow
             key={slot.id} slot={slot} style={design.styles[slot.id]} error={uploadErrors[slot.id]}
-            onChange={(p) => patchStyle(slot.id, p)}
+            onChange={(p, mode) => patchStyle(slot.id, p, mode)} onEnd={endGesture}
             onUpload={(f) => { void onSlotUpload(slot, f); }}
           />
         ))}
@@ -744,7 +839,8 @@ export default function Hud() {
           <span>Name</span>
           <input
             type="text" value={design.name}
-            onInput={(e) => setDesign((d) => ({ ...d, name: (e.target as HTMLInputElement).value }))}
+            onInput={(e) => edit((d) => ({ ...d, name: (e.target as HTMLInputElement).value }), 'gesture')}
+            {...endsOn(endGesture)}
           />
           <span />
         </label>

@@ -7,12 +7,36 @@
 import type { ComponentChildren } from 'preact';
 import { clampOverride, type HudDesign, type ElementOverride, type RangeKey } from '../../hud/design';
 
-export type SetDesign = (fn: (d: HudDesign) => HudDesign) => void;
+/**
+ * How a control's change is recorded in the undo history: a discrete
+ * `step`, part of a `gesture` that ends when the control lets go (a slider
+ * released, a number box blurred), or an arrow-key nudge that coalesces with
+ * the previous one on the same selection.
+ */
+export type EditMode = 'step' | 'gesture' | { nudge: string };
+/** The page's one way to change the design: every control calls it. */
+export type Edit = (fn: (d: HudDesign) => HudDesign, mode?: EditMode) => void;
 
-/** One labelled slider with a live readout, matching Crosshair.tsx's. */
+/** A number box's gesture ends where typing ends: on blur, or on Enter. */
+export function endsOn(end: () => void): { onBlur: () => void; onKeyDown: (e: KeyboardEvent) => void } {
+  return { onBlur: end, onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter') end(); } };
+}
+
+/**
+ * Whether a key press lands in a box the browser keeps its own undo for.
+ * There Ctrl+Z undoes the typing, not the design; everywhere else (the
+ * canvas, a checkbox, a slider, a button) the editor's undo applies.
+ */
+export function typedInto(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  if (t.isContentEditable || t.tagName === 'TEXTAREA') return true;
+  return t.tagName === 'INPUT' && ['text', 'number', 'search', 'email', 'url'].includes((t as HTMLInputElement).type);
+}
+
+/** One labelled slider with a live readout, matching Crosshair.tsx's. A drag is one gesture: `onEnd` fires on release. */
 export function Slider(
-  { label, value, min, max, step, onInput }:
-  { label: string; value: number; min: number; max: number; step: number; onInput: (n: number) => void },
+  { label, value, min, max, step, onInput, onEnd }:
+  { label: string; value: number; min: number; max: number; step: number; onInput: (n: number) => void; onEnd?: () => void },
 ) {
   return (
     <label class="hud__row">
@@ -20,6 +44,7 @@ export function Slider(
       <input
         type="range" min={min} max={max} step={step} value={value}
         onInput={(e) => onInput(parseFloat((e.target as HTMLInputElement).value))}
+        onChange={onEnd}
       />
       <output class="num">{value}</output>
     </label>
@@ -35,7 +60,7 @@ export function Field({ legend, children }: { legend: string; children: Componen
   );
 }
 
-export type Patch = (p: Partial<ElementOverride>) => void;
+export type Patch = (p: Partial<ElementOverride>, mode?: EditMode) => void;
 
 /**
  * Apply a number box's value, clamped, or ignore it.
@@ -56,7 +81,7 @@ export function patchNum(
   patch: Patch, e: Event, key: RangeKey, to: (n: number) => Partial<ElementOverride>,
 ): void {
   const n = parseFloat((e.target as HTMLInputElement).value);
-  if (Number.isFinite(n)) patch(to(clampOverride(key, n)));
+  if (Number.isFinite(n)) patch(to(clampOverride(key, n)), 'gesture');
 }
 
 /** design.ts's colours are always the raw four-byte "r g b a" string; these

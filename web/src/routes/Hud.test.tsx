@@ -351,7 +351,6 @@ describe('Hud page', () => {
     // child (only the splatter, which is decoration), so even with the
     // teammates already selected this grabs the card, not a child.
     fireEvent.pointerDown(canvas, { clientX: 133, clientY: 442, pointerId: 1 });
-    expect(screen.getByText('Teammate card 1')).toBeTruthy();
     fireEvent.pointerMove(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
     fireEvent.pointerUp(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
     expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
@@ -367,7 +366,6 @@ describe('Hud page', () => {
     // Card 2 sits at (153, 441); (160, 450) is on its portrait. The card is
     // not the selected one, so the press picks and drags the card.
     fireEvent.pointerDown(canvas, { clientX: 160, clientY: 450, pointerId: 1 });
-    expect(screen.getByText('Teammate card 2')).toBeTruthy();
     fireEvent.pointerMove(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
     fireEvent.pointerUp(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
     expect((screen.getByLabelText('Card 2 X') as HTMLInputElement).value).toBe('253');
@@ -379,8 +377,11 @@ describe('Hud page', () => {
     // A press on another card's portrait picks that card instead.
     fireEvent.pointerDown(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
     fireEvent.pointerUp(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
-    expect(screen.getByText('Teammate card 1')).toBeTruthy();
     expect(screen.queryByText('Portrait', { selector: 'legend' })).toBeNull();
+    // Card 1 is now the picked one: the same press reaches its portrait.
+    fireEvent.pointerDown(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
   });
 
   it('picks a child inside the selected teammates on the canvas, drags it, and steps back up with Escape', () => {
@@ -422,5 +423,101 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
     fireEvent.click(screen.getByRole('button', { name: 'Custom crosshair' }));
     expect(box().checked).toBe(true);
+  });
+
+  const undoKey = (extra: Partial<KeyboardEventInit> = {}) =>
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true, ...extra });
+
+  it('undoes and redoes with Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    const x = () => screen.getByLabelText('X') as HTMLInputElement;
+    fireEvent.input(x(), { target: { value: '42' } });
+    fireEvent.blur(x());
+    undoKey();
+    expect(x().value).toBe('10');
+    undoKey({ shiftKey: true });
+    expect(x().value).toBe('42');
+    undoKey();
+    fireEvent.keyDown(document.body, { key: 'y', ctrlKey: true });
+    expect(x().value).toBe('42');
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+    expect(x().value).toBe('10');
+  });
+
+  it('undoes and redoes with the toolbar buttons, which are off when there is nothing to do', () => {
+    render(<Hud />);
+    const undoBtn = () => screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
+    const redoBtn = () => screen.getByRole('button', { name: 'Redo' }) as HTMLButtonElement;
+    expect(undoBtn().disabled).toBe(true);
+    expect(redoBtn().disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByLabelText('Visible'));
+    expect(undoBtn().disabled).toBe(false);
+    fireEvent.click(undoBtn());
+    expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(redoBtn());
+    expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('leaves Ctrl+Z to the browser while typing in a number box', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    const x = () => screen.getByLabelText('X') as HTMLInputElement;
+    fireEvent.input(x(), { target: { value: '42' } });
+    fireEvent.keyDown(x(), { key: 'z', ctrlKey: true });
+    expect(x().value).toBe('42');
+    fireEvent.blur(x());
+    undoKey();
+    expect(x().value).toBe('10');
+  });
+
+  it('makes typing into a number box one step, however many edits it takes', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    const x = () => screen.getByLabelText('X') as HTMLInputElement;
+    for (const v of ['4', '42', '420']) fireEvent.input(x(), { target: { value: v } });
+    fireEvent.keyDown(x(), { key: 'Enter' });
+    undoKey();
+    expect(x().value).toBe('10');
+  });
+
+  it('makes a slider drag one step', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    const gap = () => screen.getByRole('slider', { name: /^Gap/ }) as HTMLInputElement;
+    for (const v of ['20', '25', '30']) fireEvent.input(gap(), { target: { value: v } });
+    fireEvent.change(gap());
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(gap().value).toBe('19');
+  });
+
+  it('makes one canvas drag one step', () => {
+    const { container } = render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    // Alt keeps snapping out of it (it arrives with the selection model), so the numbers are the pointer's.
+    fireEvent.pointerDown(canvas, { clientX: 133, clientY: 442, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 183, clientY: 342, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 233, clientY: 242, pointerId: 1, altKey: true });
+    fireEvent.pointerUp(canvas, { clientX: 233, clientY: 242, pointerId: 1, altKey: true });
+    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
+    undoKey();
+    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('13');
+    // The Layout change before it is its own step.
+    undoKey();
+    expect(screen.queryByLabelText('Card 1 X')).toBeNull();
+  });
+
+  it('coalesces a run of arrow-key nudges into one step', () => {
+    const { container } = render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    undoKey();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('10');
   });
 });
