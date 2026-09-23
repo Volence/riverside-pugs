@@ -289,13 +289,8 @@ describe('buildHud, layout', () => {
   });
 
   it('hides an element', () => {
-    const got = layoutOf(buildHud(design({ elements: { targetId: { visible: false } } })));
-    expect(kvGet(kvFind(got, ['TargetID'])!, 'visible')).toBe('0');
-  });
-
-  it('ignores a move on an element that cannot move', () => {
-    const got = layoutOf(buildHud(design({ elements: { targetId: { x: 5, y: 5 } } })));
-    expect(kvGet(kvFind(got, ['TargetID'])!, 'xpos')).toBe('c-320');
+    const got = layoutOf(buildHud(design({ elements: { progressBar: { visible: false } } })));
+    expect(kvGet(kvFind(got, ['HudProgressBar'])!, 'visible')).toBe('0');
   });
 
   it('free-resizes chat and rewrites the three chat animations', () => {
@@ -456,7 +451,7 @@ describe('buildHud, the chat window (basechat.res)', () => {
 
   it('ships no basechat.res on stock while the chat is untouched', () => {
     expect(text(build(design({})), CHAT)).toBeUndefined();
-    expect(text(build(design({ elements: { targetId: { visible: false }, chat: { visible: true } } })), CHAT)).toBeUndefined();
+    expect(text(build(design({ elements: { ownHealth: { visible: false }, chat: { visible: true } } })), CHAT)).toBeUndefined();
   });
 
   it("ships Modern's own basechat.res unchanged while the chat is untouched", () => {

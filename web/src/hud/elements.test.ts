@@ -7,11 +7,11 @@ import { baseFile, BASE_PATHS } from './base';
 const root = (preset: 'stock' | 'modern', file: string) => parseKv(baseFile(preset, file))[0].value as KvNode[];
 
 describe('ELEMENTS', () => {
-  it('has unique ids and the twelve elements', () => {
+  it('has unique ids and the eleven elements', () => {
     const ids = ELEMENTS.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.sort()).toEqual(['abilityRing', 'chat', 'ghostPanel', 'infectedRow', 'ownHealth',
-      'progressBar', 'siHealth', 'tankPanel', 'targetId', 'teamColumn', 'weaponSelection', 'xhair'].sort());
+      'progressBar', 'siHealth', 'tankPanel', 'teamColumn', 'weaponSelection', 'xhair'].sort());
   });
 
   for (const preset of ['stock', 'modern'] as const) {
@@ -54,10 +54,6 @@ describe('ELEMENTS', () => {
       expect(Array.isArray(kids), `${e.id}: ${f}`).toBe(true);
       expect((kids as KvNode[]).length, `${e.id}: ${f}`).toBeGreaterThan(0);
     }
-  });
-
-  it('cannot move the full-screen target name container', () => {
-    expect(elementById('targetId')!.move).toBe(false);
   });
 
   // Probe T1: the Tank reads hunterhealth.res, and tankhealth.res is never

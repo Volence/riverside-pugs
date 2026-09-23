@@ -184,10 +184,10 @@ describe('box and Ctrl+A', () => {
     expect(selectAll(D, 'survivor', 'healthy', piece)).toEqual({ kind: 'children', names: ['Head', 'Health', 'Name', 'Items', 'Status'], card: 1 });
     expect(selectAll(D, 'survivor', 'down', piece)).toEqual({ kind: 'children', names: ['Health', 'Name', 'Items', 'Status', 'Incapacitated'], card: 1 });
     expect(selectAll({ ...D, crosshair: 'addon' }, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
-      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'targetId', 'progressBar', 'xhair'] });
+      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'progressBar', 'xhair'] });
     // With crosshair 'none' there is no xHair element to select.
     expect(selectAll(D, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
-      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'targetId', 'progressBar'] });
+      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'progressBar'] });
   });
 
   it('never counts a hidden piece or decoration as drawn', () => {
@@ -324,7 +324,7 @@ describe('what the canvas draws for a selection', () => {
     const el = (id: string) => handlesFor(D, { kind: 'elements', ids: [id] });
     expect(el('ownHealth')).toEqual(['nw', 'ne', 'se', 'sw']);
     expect(el('chat')).toEqual(['nw', 'ne', 'se', 'sw', 'n', 'e', 's', 'w']);
-    expect(el('targetId')).toEqual([]);
+    expect(el('xhair')).toEqual([]);       // move: false, resize: 'none'
     expect(handlesFor(FREE, TEAMMATES)).toEqual([]);
     expect(handlesFor(FREE, { kind: 'cards', cards: [0] })).toEqual([]);
     expect(handlesFor(D, { kind: 'cards', cards: [0, 1] })).toEqual([]);

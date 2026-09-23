@@ -18,7 +18,7 @@ describe('nudge', () => {
     expect(d.elements.ownHealth).toEqual({ x: 718, y: 389 });
   });
   it('does nothing to an element that cannot move', () => {
-    expect(nudge(DEFAULT_DESIGN, 'targetId', 5, 5)).toBe(DEFAULT_DESIGN);
+    expect(nudge(DEFAULT_DESIGN, 'xhair', 5, 5)).toBe(DEFAULT_DESIGN);
   });
 
   // Dragging clamps to an 8-unit floor via clampSpan; a plain x + dx nudge
@@ -352,7 +352,7 @@ describe('element edits', () => {
     expect(placeElement(DEFAULT_DESIGN, 'chat', 40.4, 60.6).elements.chat).toEqual({ x: 40, y: 61 });
     // clampSpan would allow 8 - 320 = -312; the validator's floor of -200 is tighter for a box this wide.
     expect(placeElement(DEFAULT_DESIGN, 'chat', -900, 0).elements.chat).toEqual({ x: -200, y: 0 });
-    expect(placeElement(DEFAULT_DESIGN, 'targetId', 5, 5)).toBe(DEFAULT_DESIGN);
+    expect(placeElement(DEFAULT_DESIGN, 'xhair', 5, 5)).toBe(DEFAULT_DESIGN);
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
     expect(placeElement(free, 'teamColumn', 5, 5)).toBe(free);
   });

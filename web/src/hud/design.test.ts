@@ -55,6 +55,16 @@ describe('validateDesign', () => {
     expect(d.elements).toEqual({ chat: { x: 5 } });
   });
 
+  // Owner in-game evidence 2026-09-23: aimed at and revived a downed
+  // teammate, nothing ever drew near the crosshair. TargetIDLabel is an empty
+  // label L4D1 never fills, so targetId is gone from the registry, and a
+  // design saved before that (or a hand-edited one) loads with the override
+  // dropped, same as any other id the editor no longer has.
+  it('drops a saved targetId override, the element removed as dead weight', () => {
+    const d = validateDesign({ v: 1, elements: { targetId: { visible: false, x: 5 }, chat: { x: 5 } } });
+    expect(d.elements).toEqual({ chat: { x: 5 } });
+  });
+
   it('reads the crosshair choice, migrating the old xhair boolean', () => {
     for (const c of ['bundle', 'addon', 'none'] as const) {
       expect(validateDesign({ v: 1, crosshair: c }).crosshair).toBe(c);

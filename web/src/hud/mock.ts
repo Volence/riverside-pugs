@@ -218,12 +218,6 @@ function paintChat(ctx: CanvasRenderingContext2D, r: Rect) {
   text(ctx, 'Francis: got it', r.x + 4, r.y + r.h - 12, 12, '#e8e8e8');
 }
 
-function paintTargetId(ctx: CanvasRenderingContext2D, r: Rect) {
-  ctx.textAlign = 'center';
-  text(ctx, 'Louis', r.x + r.w / 2, r.y + r.h / 2 + 4, 12, '#ffffff');
-  ctx.textAlign = 'left';
-}
-
 function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.fillRect(r.x, r.y, r.w, r.h);
@@ -304,7 +298,6 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   teamColumn: paintTeamColumn,
   weaponSelection: paintWeaponSelection,
   chat: paintChat,
-  targetId: paintTargetId,
   progressBar: paintProgressBar,
   xhair: paintXhair,
   infectedRow: paintInfectedRow,
