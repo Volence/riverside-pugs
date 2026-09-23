@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { childRects, drawPanel, setFont, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
-import { cssFamily, fontCell } from './fonts';
+import { cssFamily, fontCell, _resetImportFaces } from './fonts';
+import { registerImport, unregisterImport, baseFile } from './base';
+import { sampleHud } from './importFixtures';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card. */
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
@@ -663,5 +667,31 @@ describe('healthRgb', () => {
     expect(healthRgb(0, 100, false)).toEqual(red);
     expect(healthRgb(300, 100, false)).toEqual(green);
     expect(healthRgb(100, 100, true)).toEqual(red);
+  });
+});
+
+describe("an imported HUD's own fonts", () => {
+  const ID = '9'.repeat(64);
+  afterEach(() => { unregisterImport(ID); _resetImportFaces(); });
+  const ttf = new Uint8Array(readFileSync(join(__dirname, 'art/font-trade-gothic.ttf')));
+  const scheme = (fontName: string) => baseFile('stock', 'resource/clientscheme.res')
+    .replace(/CustomFontFiles\s*\{/, (m) => `${m}\r\n\t\t"9"\t\t"resource/MyHud.ttf"`)
+    .replace(/(\n\tFonts\s*\{)/, (m) => `${m}\r\n\t\t"HudImpFont"\r\n\t\t{\r\n\t\t\t"1"\r\n\t\t\t{\r\n\t\t\t\t"name"\t\t"${fontName}"\r\n\t\t\t\t"tall"\t\t"30"\r\n\t\t\t\t"weight"\t"0"\r\n\t\t\t}\r\n\t\t}`);
+  const design = (fontName: string, withFile = true) => {
+    registerImport(ID, sampleHud({ 'resource/clientscheme.res': scheme(fontName), ...(withFile ? { 'resource/myhud.ttf': ttf } : {}) }));
+    return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'e' }, crosshair: 'none' });
+  };
+
+  it('draws a label in the face the upload carries, under its own name, sized by its VDMX', () => {
+    const ctx = {} as CanvasRenderingContext2D;
+    const cell = setFont(ctx, design('Trade Gothic'), 'HudImpFont', 1);
+    expect(ctx.font).toMatch(/^400 25px "HudImp_9{12}_Trade_Gothic", /);
+    expect(cell).toMatchObject({ em: 25, ascent: 24, cell: 30 });
+  });
+
+  it('falls back as today for a face the upload does not carry', () => {
+    const ctx = {} as CanvasRenderingContext2D;
+    setFont(ctx, design('Futurot', false), 'HudImpFont', 1);
+    expect(ctx.font).not.toMatch(/HudImp_/);
   });
 });

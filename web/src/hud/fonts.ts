@@ -17,6 +17,9 @@
  * build.ts may import it (art.test.ts walks those imports).
  */
 import { FONT_FILES, FONT_METRICS, type FontMetrics } from './art/index';
+import { baseFile, importedFiles, type BaseKey } from './base';
+import { parseKv, kvFind, pcApplies } from './kv';
+import { decodeVfont, isVfont, readFont } from './ttf';
 import regularUrl from './base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from './base/fonts/RobotoCondensed-Bold.ttf?url';
 
@@ -32,6 +35,65 @@ function known(face: string): string | undefined {
   return Object.keys(FONT_METRICS).find((k) => k.toLowerCase() === f);
 }
 
+/** A face's file at one weight: a URL for a bundled face, the bytes themselves for an imported one. */
+interface FaceFile { url?: string; data?: ArrayBuffer; weight: string }
+
+/**
+ * Faces an imported HUD carries (spec, "Fonts"): the .ttf, .otf or .vfont
+ * files its schemes' CustomFontFiles name, read at runtime by ttf.ts. Each
+ * is registered under an alias that holds the import's id, so two imports
+ * with a face of the same name never share it, and fontCell sizes it from
+ * its own metrics by the same VDMX-first rule as the stock faces.
+ */
+const EXTRA_METRICS = new Map<string, FontMetrics>();
+const EXTRA_FILES = new Map<string, FaceFile[]>();
+const IMPORT_FACES = new Map<BaseKey, Map<string, string>>();
+
+/** The alias for a scheme face on an imported HUD, when the upload carries that face. */
+export function importedFace(key: BaseKey, face: string): string | undefined {
+  if (!key.startsWith('imported:')) return undefined;
+  let faces = IMPORT_FACES.get(key);
+  if (!faces) { faces = readImportFaces(key); IMPORT_FACES.set(key, faces); }
+  return faces.get(face.trim().toLowerCase());
+}
+
+function readImportFaces(key: BaseKey): Map<string, string> {
+  const out = new Map<string, string>();
+  const files = importedFiles(key)!;
+  const tag = key.slice('imported:'.length, 'imported:'.length + 12);
+  const paths = new Set<string>();
+  for (const scheme of ['resource/clientscheme.res', 'resource/chatscheme.res']) {
+    const root = parseKv(baseFile(key, scheme))[0];
+    const list = root && typeof root.value !== 'string' ? kvFind(root.value, ['CustomFontFiles']) : undefined;
+    if (!list || typeof list.value === 'string') continue;
+    for (const n of list.value) {
+      // "1" "resource/x.ttf", or the block form "1" { "font" "resource/x.ttf" ... }.
+      const v = typeof n.value === 'string' ? (pcApplies(n.cond) ? n.value : undefined)
+        : n.value.find((c) => c.key.toLowerCase() === 'font' && typeof c.value === 'string')?.value as string | undefined;
+      if (v) paths.add(v.replace(/\\/g, '/').toLowerCase());
+    }
+  }
+  for (const path of [...paths].sort()) {
+    const raw = files.get(path);
+    if (!raw) continue;                                        // a stock face, or one the upload lacks: the fallback as today
+    let ttf: Uint8Array;
+    let info: ReturnType<typeof readFont>;
+    try { ttf = isVfont(raw) ? decodeVfont(raw) : raw; info = readFont(ttf); }
+    catch { console.warn(`HUD preview: could not read the font ${path} in the imported HUD`); continue; }
+    for (const name of info.names) {
+      const lower = name.toLowerCase();
+      const alias = out.get(lower) ?? `HudImp_${tag}_${name.replace(/[^A-Za-z0-9]/g, '_')}`;
+      out.set(lower, alias);
+      if (!EXTRA_METRICS.has(alias)) EXTRA_METRICS.set(alias, info.metrics);
+      EXTRA_FILES.set(alias, [...(EXTRA_FILES.get(alias) ?? []), { data: ttf.slice().buffer, weight: String(cssWeight(info.weight)) }]);
+    }
+  }
+  return out;
+}
+
+/** Tests only: forget every imported face. */
+export function _resetImportFaces(): void { IMPORT_FACES.clear(); EXTRA_METRICS.clear(); EXTRA_FILES.clear(); }
+
 export interface FontCell { em: number; ascent: number; cell: number }
 
 /**
@@ -43,7 +105,7 @@ export interface FontCell { em: number; ascent: number; cell: number }
  * winDescent, as is a face without one.
  */
 export function fontCell(face: string, tallPx: number): FontCell {
-  const m: FontMetrics = FONT_METRICS[known(face) ?? FALLBACK];
+  const m: FontMetrics = EXTRA_METRICS.get(face) ?? FONT_METRICS[known(face) ?? FALLBACK];
   const tall = Math.floor(tallPx + 1e-9);
   const v = m.vdmx;
   if (v && v.length >= 3 && tall >= v[1] - v[2] && tall <= v[v.length - 2] - v[v.length - 1]) {
@@ -63,6 +125,7 @@ export function fontCell(face: string, tallPx: number): FontCell {
  * common stand-ins after them for a viewer without them.
  */
 export function cssFamily(face: string): string {
+  if (EXTRA_METRICS.has(face)) return `"${face}", ${FALLBACK_STACK}`;   // an imported HUD's own face, under its alias
   const name = known(face);
   if (name && name in FONT_FILES) return `"${name}", ${FALLBACK_STACK}`;   // an exported face: Trade Gothic, its bold, ToolBox
   switch (name) {
@@ -92,7 +155,7 @@ export function canvasFont(face: string, weight: number, tallPx: number): string
 // --- loading the faces ---
 
 /** Each face the preview registers: its files, one per weight. */
-const FILES: Record<string, { url: string | undefined; weight: string }[]> = {
+const FILES: Record<string, FaceFile[]> = {
   ...Object.fromEntries(Object.entries(FONT_FILES).map(([face, file]) => [face, [{ url: URLS[`./art/${file}`], weight: '400' }]])),
   'Roboto Condensed': [{ url: regularUrl, weight: '400' }, { url: boldUrl, weight: '700' }],
 };
@@ -107,8 +170,8 @@ const loads = new Map<string, { ready: boolean; waiting: Set<() => void> }>();
  * FontFace (happy-dom), or if a load fails, the fallback stays.
  */
 export function loadFace(face: string, onAsset?: () => void): void {
-  const name = known(face);
-  const files = name ? FILES[name] : undefined;
+  const name = EXTRA_FILES.has(face) ? face : known(face);
+  const files = name ? EXTRA_FILES.get(name) ?? FILES[name] : undefined;
   if (!name || !files) return;
   let hit = loads.get(name);
   if (!hit) {
@@ -116,7 +179,7 @@ export function loadFace(face: string, onAsset?: () => void): void {
     loads.set(name, entry);
     hit = entry;
     try {
-      const faces = files.filter((f) => f.url).map((f) => new FontFace(name, `url(${f.url})`, { weight: f.weight }));
+      const faces = files.filter((f) => f.data || f.url).map((f) => new FontFace(name, f.data ?? `url(${f.url})`, { weight: f.weight }));
       for (const f of faces) document.fonts.add(f);
       Promise.all(faces.map((f) => f.load())).then(() => {
         entry.ready = true;

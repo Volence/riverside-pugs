@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fontCell, cssFamily, cssWeight, canvasFont, loadFace, _resetFaces } from './fonts';
+import { fontCell, cssFamily, cssWeight, canvasFont, loadFace, _resetFaces, importedFace, _resetImportFaces } from './fonts';
+import { registerImport, unregisterImport, baseFile } from './base';
+import { sampleHud } from './importFixtures';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { FONT_METRICS } from './art/index';
 
 describe('fontCell: a scheme tall in pixels to the size the game draws', () => {
@@ -109,6 +113,21 @@ describe('loadFace', () => {
     for (const f of made) expect(f.source).toMatch(/RobotoCondensed-(Regular|Bold).*\.ttf/);
     loadFace('Verdana'); loadFace('Tahoma'); loadFace(''); loadFace('Futurot');
     expect(made).toHaveLength(2);
+  });
+
+  it("registers an imported face from the upload's own bytes, once", () => {
+    setUp();
+    const ID = '8'.repeat(64);
+    const scheme = baseFile('stock', 'resource/clientscheme.res').replace(/CustomFontFiles\s*\{/, (m) => `${m}\r\n\t\t"9"\t\t"resource/MyHud.ttf"`);
+    registerImport(ID, sampleHud({ 'resource/clientscheme.res': scheme, 'resource/myhud.ttf': new Uint8Array(readFileSync(join(__dirname, 'art/font-trade-gothic.ttf'))) }));
+    try {
+      const alias = importedFace(`imported:${ID}`, 'trade gothic')!;
+      expect(alias).toBe(`HudImp_${'8'.repeat(12)}_Trade_Gothic`);
+      loadFace(alias); loadFace(alias);
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(made[0].family).toBe(alias);
+      expect(made[0].source).toBeInstanceOf(ArrayBuffer);
+    } finally { unregisterImport(ID); _resetImportFaces(); }
   });
 
   it('draws on in the fallback without FontFace', () => {

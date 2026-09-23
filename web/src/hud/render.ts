@@ -32,7 +32,8 @@ import { artUrl, normaliseMaterial } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
-import { canvasFont, fontCell, loadFace, type FontCell } from './fonts';
+import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './fonts';
+import { baseOf } from './base';
 import { addLinear } from './additive';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -183,10 +184,13 @@ export function fontFace(design: HudDesign, name: string): { tall: number; face:
  */
 export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: string, k: number, onAsset?: () => void): FontCell & { additive: boolean } {
   const f = fontFace(design, name);
-  loadFace(f.face, onAsset);
-  ctx.font = canvasFont(f.face, f.weight, f.tall * k);
+  // An imported HUD's own face, when the upload carries it, under the alias
+  // fonts.ts registered it as; otherwise the face as named, as before.
+  const face = design.preset === 'imported' ? importedFace(baseOf(design), f.face) ?? f.face : f.face;
+  loadFace(face, onAsset);
+  ctx.font = canvasFont(face, f.weight, f.tall * k);
   ctx.textBaseline = 'alphabetic';
-  return { ...fontCell(f.face, f.tall * k), additive: f.additive };
+  return { ...fontCell(face, f.tall * k), additive: f.additive };
 }
 
 /**
