@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, recordBalanceSighting } from '../src/balance.js';
+import { diffInventories, fingerprintOf, formatDiff, recordBalanceSighting } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
