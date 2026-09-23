@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Export the HUD textures the editor's preview draws, from the owner's own copy of
-pak01, to PNGs under web/src/hud/art/, plus a generated TypeScript index.
+pak01, to PNGs under web/src/hud/art/, plus a generated TypeScript index. Also
+the teammate card's item icons, which are not textures but glyphs of the game's
+ToolBox icon font (resource/toolbox.vfont, loose in the install, not in pak01),
+drawn to PNGs the same way.
 
 Preview only. These files never enter a build: build.ts does not import them and
 a test says so. The list below is the only way a texture gets in here, and the
@@ -12,11 +15,13 @@ page. Run by hand, from the repo root:
 
 Requires the game installed at the Steam path below. Never run this on a server.
 """
-import io, json, os, sys
+import io, json, math, os, sys
 import vpk
+from PIL import Image, ImageDraw, ImageFont
 from srctools.vtf import VTF
 
 PAK = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/pak01_dir.vpk')
+VFONT = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/resource/toolbox.vfont')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'art')
 CAP = 1_000_000
 
@@ -42,6 +47,77 @@ MATERIALS = [
     'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
 ]
 
+# The item icons: index name -> ToolBox character. The characters are the ones
+# client.dll writes into the teammate card's Items label (the function that
+# builds that text, found by disassembly: '!' medkit, '"' pills, then '$' pipe
+# bomb or '#' molotov, with a space between each), which the contact sheet of
+# the decoded font confirms are those four pictures. The weapon scripts name
+# other glyphs of the same font ('a' pills, 'b' molotov) for the weapon
+# selection, which is not this row.
+GLYPHS = {
+    'icon/item/medkit': '!',
+    'icon/item/pills': '"',
+    'icon/item/molotov': '#',
+    'icon/item/pipebomb': '$',
+}
+# Every glyph is drawn into the font's whole cell (ascent plus descent) at this
+# many pixels tall, so the preview can scale a PNG to the label's font tall and
+# have the glyph sit where the font puts it inside that height.
+GLYPH_CELL = 64
+
+def decode_vfont(data: bytes) -> bytes:
+    """
+    A .vfont is a TrueType file with every byte XORed against a running key,
+    then a salt, the salt's length and the marker "VFONT1" appended. The key
+    starts at 167 folded with all but the last salt byte, and after each byte
+    becomes that encoded byte plus 167. The same routine as ValveResourceFormat's
+    ValveFont.cs, the public reading of the format.
+    """
+    magic = b'VFONT1'
+    if not data.endswith(magic):
+        raise ValueError('not a VFONT1 file')
+    salt_len = data[-len(magic) - 1]
+    end = len(data) - len(magic) - salt_len
+    key = 167
+    for b in data[end:end + salt_len - 1]:
+        key ^= (b + 167) % 256
+    out = bytearray(end)
+    for i in range(end):
+        out[i] = data[i] ^ key
+        key = (data[i] + 167) % 256
+    if bytes(out[:4]) not in (b'\x00\x01\x00\x00', b'OTTO', b'true'):
+        raise ValueError('decoded vfont is not a TrueType font')
+    return bytes(out)
+
+def export_glyphs() -> tuple[dict[str, bytes], dict[str, float], float]:
+    """
+    Each item glyph, white on transparent, one font cell tall and one advance
+    wide (widened if the ink overhangs it). Returns the PNGs, each glyph's
+    advance and the space's advance, both as a fraction of the cell height,
+    which is how the game spaces the row: glyph, space, glyph.
+    """
+    ttf = decode_vfont(open(VFONT, 'rb').read())
+    size = GLYPH_CELL
+    font = ImageFont.truetype(io.BytesIO(ttf), size)
+    while sum(font.getmetrics()) < GLYPH_CELL:        # the smallest size whose cell reaches the target
+        size += 1
+        font = ImageFont.truetype(io.BytesIO(ttf), size)
+    cell = sum(font.getmetrics())
+    pngs: dict[str, bytes] = {}
+    advances: dict[str, float] = {}
+    for name, ch in GLYPHS.items():
+        bbox = font.getbbox(ch, anchor='la')
+        if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            sys.exit('refusing: the ToolBox font draws nothing for %r (%s)' % (ch, name))
+        adv = font.getlength(ch)
+        img = Image.new('RGBA', (max(math.ceil(adv), bbox[2]), cell), (255, 255, 255, 0))
+        ImageDraw.Draw(img).text((0, 0), ch, font=font, fill=(255, 255, 255, 255), anchor='la')
+        buf = io.BytesIO(); img.save(buf, 'PNG', optimize=True)
+        pngs[name] = buf.getvalue()
+        advances[name] = round(adv / cell, 4)
+        print('  %-48s %4dx%-4d %6d bytes  (%r)' % (name, img.width, img.height, len(buf.getvalue()), ch))
+    return pngs, advances, round(font.getlength(' ') / cell, 4)
+
 def main() -> int:
     pak = vpk.open(PAK)
     # Everything is exported in memory first, so a failure (a missing texture,
@@ -58,6 +134,12 @@ def main() -> int:
             sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, name))
         exported[name] = data
         print('  %-48s %4dx%-4d %6d bytes' % (name, img.width, img.height, len(data)))
+    glyphs, advances, space = export_glyphs()
+    for name, data in glyphs.items():
+        total += len(data)
+        if total > CAP:
+            sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, name))
+        exported[name] = data
     # art.ts bundles every PNG in the folder (import.meta.glob), not just the
     # ones the index names, so a PNG left over from an older list would ship
     # to the page and could push it past the cap. The folder is cleared of
@@ -72,12 +154,18 @@ def main() -> int:
         with open(os.path.join(OUT, fname), 'wb') as f: f.write(data)
         index[name] = fname
     lines = ['// GENERATED by scripts/export-hud-art.py. Do not edit; rerun the script.',
-             '// Material name (lower case, relative to materials/, no extension) -> png in this folder.',
+             '// Material name (lower case, relative to materials/, no extension), or icon/item/* for an item glyph, -> png in this folder.',
              'export const ART: Record<string, string> = {']
     for k in sorted(index): lines.append("  '%s': '%s'," % (k, index[k]))
-    lines += ['};', '', 'export const ART_TOTAL_BYTES = %d;' % total, '']
+    lines += ['};', '',
+              '// Item icon glyphs: how far each one advances the row, and the space the game puts',
+              '// between two, as a fraction of the font cell height the PNGs are drawn at.',
+              'export const ICON_ADVANCE: Record<string, number> = {']
+    for k in sorted(advances): lines.append("  '%s': %s," % (k, advances[k]))
+    lines += ['};', '', 'export const ICON_SPACE = %s;' % space, '',
+              'export const ART_TOTAL_BYTES = %d;' % total, '']
     with open(os.path.join(OUT, 'index.ts'), 'w') as f: f.write('\n'.join(lines))
-    print('%d textures, %d bytes total' % (len(index), total))
+    print('%d files, %d bytes total' % (len(index), total))
     return 0
 
 if __name__ == '__main__':

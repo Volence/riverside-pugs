@@ -8,8 +8,8 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ART, ART_TOTAL_BYTES } from './art/index';
-import { artUrl, normaliseMaterial, NEEDED_MATERIALS } from './art';
+import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE } from './art/index';
+import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS } from './art';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { SLOTS } from './slots';
@@ -28,6 +28,15 @@ describe('normaliseMaterial', () => {
 describe('the art index', () => {
   it('covers every material the preview draws', () => {
     for (const m of NEEDED_MATERIALS) expect(ART[m], m).toBeDefined();
+  });
+  it('covers every item icon, with its advance, as the preview draws the Items row', () => {
+    expect(ITEM_ICONS).toEqual(['icon/item/medkit', 'icon/item/pills', 'icon/item/molotov', 'icon/item/pipebomb']);
+    for (const m of ITEM_ICONS) {
+      expect(NEEDED_MATERIALS, m).toContain(m);
+      expect(ART[m], m).toBe(m.replace(/\//g, '-') + '.png');
+      expect(ICON_ADVANCE[m], m).toBeGreaterThan(0);
+    }
+    expect(ICON_SPACE).toBeGreaterThan(0);
   });
   it('stays under the size cap', () => {
     expect(ART_TOTAL_BYTES).toBeLessThan(1_000_000);

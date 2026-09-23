@@ -30,7 +30,15 @@ export function artUrl(material: string): string | undefined {
   return file ? URLS[`./art/${file}`] : undefined;
 }
 
-/** Every material the renderer can ask for. art.test.ts holds the index to this list. */
+/**
+ * The teammate card's item icons. They are glyphs of the game's ToolBox icon
+ * font, not textures, so they are named icon/item/* rather than by a material;
+ * the export script draws each to a PNG. Medkit, pills, molotov, pipe bomb:
+ * the characters '!', '"', '#' and '$'.
+ */
+export const ITEM_ICONS: readonly string[] = ['icon/item/medkit', 'icon/item/pills', 'icon/item/molotov', 'icon/item/pipebomb'];
+
+/** Every material the renderer can ask for, and the item icons. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
   // Stock names this as the card block's image, which the game never paints (probe T6); kept so the index stays complete.
@@ -44,4 +52,5 @@ export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/hud/scalablepanel_bgmidgrey', 'vgui/hud/scalablepanel_bgmidgrey_glow',
   'vgui/s_panel_dead',
   'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
+  ...ITEM_ICONS,
 ];
