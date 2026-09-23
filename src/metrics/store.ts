@@ -26,7 +26,7 @@ export function roundContext(db: DB, key: RoundKey): RoundContext {
 }
 
 export function writeRoundMetrics(db: DB, key: RoundKey, rows: MetricRow[],
-  meta: { hasReplay: boolean; hasStats: boolean; engine: string; now?: string }): void {
+  meta: { hasReplay: boolean; hasStats: boolean; replaySeen: boolean; engine: string; now?: string }): void {
   const now = meta.now ?? new Date().toISOString().replace('T', ' ').slice(0, 19);
   const ctx = roundContext(db, key);
   db.transaction(() => {
@@ -34,13 +34,13 @@ export function writeRoundMetrics(db: DB, key: RoundKey, rows: MetricRow[],
     const ins = db.prepare('INSERT INTO round_metrics (match_id, ordinal, half, metric, phase, num, den) VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (const r of rows) ins.run(key.matchId, key.ordinal, key.half, r.metric, r.phase, r.num, r.den);
     db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, map, origin, server_id, patch_id, surv_mu, inf_mu,
-                  has_replay, has_stats, engine, computed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  has_replay, has_stats, replay_seen, engine, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (match_id, ordinal, half) DO UPDATE SET map = excluded.map, origin = excluded.origin,
                   server_id = excluded.server_id, patch_id = excluded.patch_id, surv_mu = excluded.surv_mu, inf_mu = excluded.inf_mu,
-                  has_replay = excluded.has_replay, has_stats = excluded.has_stats, engine = excluded.engine,
-                  computed_at = excluded.computed_at`)
+                  has_replay = excluded.has_replay, has_stats = excluded.has_stats, replay_seen = excluded.replay_seen,
+                  engine = excluded.engine, computed_at = excluded.computed_at`)
       .run(key.matchId, key.ordinal, key.half, ctx.map, ctx.origin, ctx.serverId, ctx.patchId, ctx.survMu, ctx.infMu,
-        meta.hasReplay ? 1 : 0, meta.hasStats ? 1 : 0, meta.engine, now);
+        meta.hasReplay ? 1 : 0, meta.hasStats ? 1 : 0, meta.replaySeen ? 1 : 0, meta.engine, now);
   })();
 }

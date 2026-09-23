@@ -25,11 +25,11 @@ describe('metrics store', () => {
     const db = setup();
     const key = { matchId: 1, ordinal: 0, half: 1 as const };
     writeRoundMetrics(db, key, [{ metric: 'a.x', phase: 'all', num: 1, den: 1 }, { metric: 'a.y', phase: 'tank', num: 2, den: 3 }],
-      { hasReplay: true, hasStats: false, engine: 'e1', now: '2026-09-23 10:00:00' });
+      { hasReplay: true, hasStats: false, replaySeen: true, engine: 'e1', now: '2026-09-23 10:00:00' });
     writeRoundMetrics(db, key, [{ metric: 'a.x', phase: 'all', num: 5, den: 1 }],
-      { hasReplay: false, hasStats: true, engine: 'e2', now: '2026-09-23 11:00:00' });
+      { hasReplay: false, hasStats: true, replaySeen: false, engine: 'e2', now: '2026-09-23 11:00:00' });
     expect(db.prepare('SELECT metric, phase, num FROM round_metrics').all()).toEqual([{ metric: 'a.x', phase: 'all', num: 5 }]);
-    expect(db.prepare('SELECT has_replay, has_stats, engine, map, surv_mu FROM round_metric_context').get())
-      .toEqual({ has_replay: 0, has_stats: 1, engine: 'e2', map: 'l4d_vs_hospital01_apartment', surv_mu: 20 });
+    expect(db.prepare('SELECT has_replay, has_stats, replay_seen, engine, map, surv_mu FROM round_metric_context').get())
+      .toEqual({ has_replay: 0, has_stats: 1, replay_seen: 0, engine: 'e2', map: 'l4d_vs_hospital01_apartment', surv_mu: 20 });
   });
 });

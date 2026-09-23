@@ -26,7 +26,7 @@ export function decodeRoundReplay(buf: Uint8Array, fallbackMask: () => number | 
     if (mask === null) return null;
     sideOf = (s) => ((mask >> s) & 1) === 1;
   }
-  const end = h.indexOffset > 0 ? h.indexOffset : buf.length;
+  const end = h.indexOffset > 0 && h.indexOffset <= buf.length ? h.indexOffset : buf.length;
   const frames = unpausedFrames(decodeFrames(buf, HEADER_BYTES, end, sideOf).frames);
   if (frames.length < 2) return null;
   let durationMs = 0;
