@@ -81,7 +81,7 @@ export const TEAM_PANEL: PanelChildren = {
     { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
       addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.' },
     { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: false,
-      note: "The preview draws stand-in icons; the real ones are the game's." },
+      note: "The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries." },
     { name: 'Status', label: 'Status text', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
     { name: 'BackgroundImage', label: 'Damage splatter', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: true,
       opacityOnly: true,

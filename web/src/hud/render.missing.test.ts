@@ -7,9 +7,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const GONE = 'vgui/hud/detail_scratches_top_1';
+// An item icon too, as if the font glyph could not be exported: the Items row falls back to its stand-ins.
+const GONE_ICON = 'icon/item/pills';
 vi.mock('./art', async (importOriginal) => {
   const real = await importOriginal<typeof import('./art')>();
-  return { ...real, artUrl: (m: string) => (m === GONE ? undefined : real.artUrl(m)) };
+  return { ...real, artUrl: (m: string) => (m === GONE || m === GONE_ICON ? undefined : real.artUrl(m)) };
 });
 
 import { childRects, drawPanel, _setImageFactory, _resetAssetCache } from './render';
@@ -45,5 +47,19 @@ describe('a material the index lacks', () => {
     }
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain(GONE);
+  });
+
+  it('draws the stand-in item icons when an icon is not in the index, warning once across draws', () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), elements: {} };
+    const r = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Items')!;
+    for (let i = 0; i < 2; i++) {
+      const { ctx, calls } = recCtx();
+      expect(() => drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 })).not.toThrow();
+      // Stock's L4D_Icons_medium is 18 tall, centred on the 14-tall label.
+      expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
+      expect(calls.some((c) => c.m === 'drawImage' && /icon-item-/.test((c.a[0] as HTMLImageElement).src))).toBe(false);
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('item icon');
   });
 });

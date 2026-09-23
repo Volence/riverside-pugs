@@ -183,7 +183,7 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Item icons' }));
     expect((screen.getByLabelText('Icon size') as HTMLInputElement).value).toBe('18');
     expect(screen.queryByLabelText('W')).toBeNull();
-    expect(screen.getByText(/stand-in icons/)).toBeTruthy();
+    expect(screen.getByText(/the game's own item icons, a full loadout/)).toBeTruthy();
   });
 
   it('lists the current side elements and swaps them when the side toggle changes', () => {

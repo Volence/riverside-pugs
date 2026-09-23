@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, PANEL_FILE, hiddenInState, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
@@ -405,6 +406,7 @@ describe('the teammate card states', () => {
     expect(calls.some((c) => c.m === 'fillText' && (c.a[0] === '100' || c.a[0] === '299'))).toBe(false);
     expect(calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.alpha).toBeCloseTo(0.5);
     expect(calls.some((c) => c.m === 'strokeRect' && c.a[0] === items.x)).toBe(false);
+    expect(srcs(calls).some((u) => /icon-item-/.test(u))).toBe(false);
   });
 
   it('hides by state only on the teammate card', () => {
@@ -414,28 +416,66 @@ describe('the teammate card states', () => {
     expect(hiddenInState('teamColumn', 'Voice', 'healthy')).toBe(true);
   });
 
-  it('draws stand-in item icons one font size tall where the Items label sits', () => {
+  const icon = <C extends { m: string; a: unknown[] }>(calls: C[], name: string) =>
+    calls.find((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === artUrl(name));
+
+  it('draws the real item icons, a full loadout in the game\'s order, one font size tall where the Items label sits', () => {
     const d = design({});
     const r = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Items')!;
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
     // L4D_Icons_medium is 18 tall in the stock scheme; the label box is 14, so the icons centre on it.
-    expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
+    const s = 18, y = r.y + (r.h - s) / 2;
+    const medkit = icon(calls, 'icon/item/medkit')!, pills = icon(calls, 'icon/item/pills')!, pipe = icon(calls, 'icon/item/pipebomb')!;
+    // The test images are 64 x 64, so each draws s wide; the row advances by each glyph's own advance plus a space.
+    expect(medkit.a.slice(1)).toEqual([r.x, y, s, s]);
+    const x2 = r.x + (ICON_ADVANCE['icon/item/medkit'] + ICON_SPACE) * s;
+    expect(pills.a.slice(1)).toEqual([x2, y, s, s]);
+    expect(pipe.a.slice(1)).toEqual([x2 + (ICON_ADVANCE['icon/item/pills'] + ICON_SPACE) * s, y, s, s]);
+    expect(calls.indexOf(medkit)).toBeLessThan(calls.indexOf(pills));
+    expect(calls.indexOf(pills)).toBeLessThan(calls.indexOf(pipe));
+    // One throwable at a time, as the game carries it, and no stand-in outlines.
+    expect(icon(calls, 'icon/item/molotov')).toBeUndefined();
+    expect(calls.some((c) => c.m === 'strokeRect' && c.a[0] === r.x)).toBe(false);
   });
 
-  // The game draws the icon glyphs inside the Items label and nowhere else. A
-  // stand-in taller than its label (Modern: a 16-tall icon in a 13-tall label
-  // at y 10, right under the Name at y 2..13) would otherwise spill up over
-  // the name text, so the stand-ins are clipped to the label rect.
+  it('scales the icons with the preview and with the icon size the player picks', () => {
+    const d = design({ children: { teamColumn: { Items: { fontSize: 36 } } } });
+    const r = childRects(d, 'teamColumn', { x: 10, y: 20 }, 2).find((c) => c.name === 'Items')!;
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 10, y: 20 }, 2, { card: 0 });
+    expect(icon(calls, 'icon/item/medkit')!.a.slice(1)).toEqual([r.x, r.y + (r.h - 72) / 2, 72, 72]);
+  });
+
+  it('lays the icon row out by the label\'s textAlignment', () => {
+    const s = 10;
+    const row = ITEM_ROW.reduce((w, n, i) => w + ICON_ADVANCE[n] * s + (i ? ICON_SPACE * s : 0), 0);
+    expect(itemRowStart(100, 50, s, 'west')).toBe(100);
+    expect(itemRowStart(100, 50, s, 'north-west')).toBe(100);
+    expect(itemRowStart(100, 50, s, 'east')).toBeCloseTo(150 - row);
+    expect(itemRowStart(100, 50, s, 'center')).toBeCloseTo(100 + (50 - row) / 2);
+  });
+
+  it('keeps a full stock loadout inside the stock Items label', () => {
+    // The game's own row, medkit, space, pills, space, throwable, fits the 50-wide label at 18 tall.
+    const s = 18;
+    const row = ITEM_ROW.reduce((w, n, i) => w + ICON_ADVANCE[n] * s + (i ? ICON_SPACE * s : 0), 0);
+    expect(row).toBeLessThanOrEqual(50);
+  });
+
+  // The game draws the icon glyphs inside the Items label and nowhere else. An
+  // icon taller than its label (Modern: a 16-tall icon in a 13-tall label at
+  // y 10, right under the Name at y 2..13) would otherwise spill up over the
+  // name text, so the icons are clipped to the label rect.
   for (const preset of ['stock', 'modern'] as const) {
-    it(`draws the item stand-ins only inside the Items label: ${preset}`, () => {
-      // Stock at icon size 36, whose label grows to 100 x 36 so both icons still fit; Modern as it ships.
+    it(`draws the item icons only inside the Items label: ${preset}`, () => {
+      // Stock at icon size 36, whose label grows to 100 x 36 so the icons still fit; Modern as it ships.
       const d = design({ preset, children: preset === 'stock' ? { teamColumn: { Items: { fontSize: 36 } } } : {} });
       const rects = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1);
       const r = rects.find((c) => c.name === 'Items')!;
       const { ctx, calls } = recCtx();
       drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
-      const first = calls.findIndex((c) => c.m === 'strokeRect' && c.a[0] === r.x);
+      const first = calls.indexOf(icon(calls, 'icon/item/medkit')!);
       expect(first, preset).toBeGreaterThan(0);
       const clip = calls.slice(0, first).map((c) => c.m).lastIndexOf('clip');
       expect(clip, preset).toBeGreaterThan(0);
@@ -444,17 +484,40 @@ describe('the teammate card states', () => {
       // The clip is dropped again before the next child draws.
       expect(calls.slice(first).findIndex((c) => c.m === 'restore')).toBeGreaterThan(0);
       if (preset === 'stock') {
-        // Both stand-ins, the medkit and the pill bottle beside it, fit inside the widened label.
-        const pill = calls.slice(first).find((c) => c.m === 'strokeRect' && c.a[0] !== r.x)!;
-        expect((pill.a[0] as number) + (pill.a[2] as number)).toBeLessThanOrEqual(r.x + r.w);
+        // The whole row, the throwable last, fits inside the widened label.
+        const pipe = icon(calls, 'icon/item/pipebomb')!;
+        expect((pipe.a[1] as number) + ICON_ADVANCE['icon/item/pipebomb'] * 36).toBeLessThanOrEqual(r.x + r.w);
       } else {
         // Unclipped, the icon row would start above the label, over the Name text.
         const name = rects.find((c) => c.name === 'Name')!;
-        expect(calls[first].a[1] as number).toBeLessThan(r.y);
+        expect(calls[first].a[2] as number).toBeLessThan(r.y);
         expect(r.y).toBeGreaterThan(name.y + name.h / 2);
       }
     });
   }
+
+  it('falls back to the stand-in outlines when an icon fails to load', () => {
+    const pills = artUrl('icon/item/pills')!;
+    const failing: (HTMLImageElement & { onerror: (() => void) | null })[] = [];
+    _setImageFactory((url) => {
+      if (url !== pills) return instantImage(url);
+      const img = { src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null } as unknown as HTMLImageElement & { onerror: (() => void) | null };
+      failing.push(img);
+      return img;
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const d = design({});
+      const r = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'Items')!;
+      drawPanel(recCtx().ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+      failing[0].onerror!();
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+      expect(calls.filter((c) => c.m === 'strokeRect').map((c) => c.a)).toContainEqual([r.x, r.y + (r.h - 18) / 2, 18, 18]);
+      expect(icon(calls, 'icon/item/medkit')).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally { warn.mockRestore(); }
+  });
 
   it('keeps drawing the card background child in Down and Dead, since the spec says it is visible in every state', () => {
     const flat = design({ elements: { teamColumn: { fit: true } }, styles: { panelBg: { kind: 'flat', color: '255 0 0 255' } } });

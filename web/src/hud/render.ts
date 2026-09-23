@@ -29,6 +29,7 @@ import type { HudDesign } from './design';
 import { buildTrees } from './build';
 import { kvFind, kvGet, type KvNode } from './kv';
 import { artUrl, normaliseMaterial } from './art';
+import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
 
@@ -173,14 +174,19 @@ function fontFace(design: HudDesign, name: string): { tall: number; bold: boolea
 
 /** Base files use scheme colour names; the generator never writes one, but the preview has to read them. */
 function colourOf(design: HudDesign, value: string | undefined): string {
-  if (!value) return 'rgba(255,255,255,1)';
+  const [r, g, b, a] = rgbaOf(design, value);
+  return `rgba(${r},${g},${b},${a / 255})`;
+}
+
+/** The same colour as numbers: a literal "r g b a", or a scheme colour name, white when there is none. */
+function rgbaOf(design: HudDesign, value: string | undefined): [number, number, number, number] {
+  if (!value) return [255, 255, 255, 255];
   let raw = value.trim();
   if (!/^\d+ \d+ \d+ \d+$/.test(raw)) {
     const named = kvFind(buildTrees(design)(SCHEME), ['Colors', raw]);
     raw = named && typeof named.value === 'string' ? named.value : '255 255 255 255';
   }
-  const [r, g, b, a] = parseColour(raw);
-  return `rgba(${r},${g},${b},${a / 255})`;
+  return parseColour(raw);
 }
 
 /**
@@ -299,7 +305,7 @@ function tinted(img: HTMLImageElement, material: string, r: number, g: number, b
 }
 
 /** Test seam: forget every loaded image, tint and warned-about material. */
-export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); }
+export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); warnedNoIcons = false; }
 
 function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();
@@ -390,7 +396,7 @@ function sampleText(n: KvNode, opts: DrawOpts): string {
  * label (Status, in both presets) whose own labelText is blank and has no
  * stand-in of its own (unlike Name, which falls back to a sample name, or
  * HealthNumber, whose labelText is the literal "%HealthNumber%" token, so
- * neither is ever blank). Items is a label too but draws stand-in icons
+ * neither is ever blank). Items is a label too but draws its item icons
  * regardless of its own text, so it is never counted empty. Every other
  * kind (image, bar) always draws something. mock.ts's childAt uses this so
  * a click cannot land on words that are not there: an empty label is not a
@@ -405,17 +411,78 @@ export function labelDrawsNothing(design: HudDesign, panelId: string, name: stri
 }
 
 /**
- * The teammate's item icons are glyphs in a Valve icon font the page cannot
- * ship, so the preview draws two neutral outlines in their place, a medkit
- * and a pill bottle, each one icon tall at the label's font size: enough to
- * see where the row sits and how big it is. The game draws the glyphs inside
- * the label and nowhere else, so the stand-ins are clipped to the label's
- * rect: an icon taller than its label (Modern's 16-tall icons in a 13-tall
- * label just under the name) would otherwise spill over the text beside it.
+ * The row the preview shows: a full loadout, in the order the game writes it.
+ * client.dll builds the Items label's text as the medkit ('!'), the pills
+ * ('"'), then one throwable (the pipe bomb '$', or the molotov '#' when that
+ * is what is carried), with a space between each; a teammate carries one
+ * throwable, so the row shows the pipe bomb.
  */
-function drawItemStandIns(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number) {
+export const ITEM_ROW: readonly string[] = ['icon/item/medkit', 'icon/item/pills', 'icon/item/pipebomb'];
+
+/** How wide the row is at s canvas pixels tall: each glyph's advance, and a space between two. */
+function itemRowWidth(s: number): number {
+  return ITEM_ROW.reduce((w, name, i) => w + (ICON_ADVANCE[name] ?? 1) * s + (i ? ICON_SPACE * s : 0), 0);
+}
+
+/** Where the row starts in a label at x, w wide: the label's textAlignment places the whole row, as it would the text. */
+export function itemRowStart(x: number, w: number, s: number, align: string): number {
+  const a = align.toLowerCase();
+  if (a.includes('east')) return x + w - itemRowWidth(s);
+  if (a.includes('center')) return x + (w - itemRowWidth(s)) / 2;
+  return x;
+}
+
+let warnedNoIcons = false;
+
+/**
+ * The teammate's item icons, drawn from the ToolBox glyphs the export script
+ * made into PNGs (preview only, like the rest of the art). Each is scaled so
+ * the font's cell is the label's font tall in canvas pixels, which puts the
+ * glyph where the font puts it, and the row is laid glyph, space, glyph, as
+ * the game writes it. They are white: the font is additive, so on the HUD
+ * they show as white, dimmed only by the label's own colour when the file
+ * gives it one. The game draws the glyphs inside the label and nowhere else,
+ * so they are clipped to the label's rect: an icon taller than its label
+ * (Modern's 16-tall icons in a 13-tall label just under the name) would
+ * otherwise spill over the text beside it.
+ *
+ * While the icons load nothing is drawn (onAsset asks for a redraw). If one
+ * is not in the art index or fails to load, the row falls back to
+ * drawItemStandIns, so the preview never loses the row.
+ */
+function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   const s = fontFace(design, kvGet(n, 'font') ?? '').tall * k;
   const y = r.y + (r.h - s) / 2;
+  if (ITEM_ROW.some((name) => !artUrl(name))) {
+    if (!warnedNoIcons) { warnedNoIcons = true; console.warn('HUD preview: no item icon art, drawing stand-ins'); }
+    drawItemStandIns(ctx, r, s, y);
+    return;
+  }
+  const imgs = ITEM_ROW.map((name) => artImage(name, opts.onAsset));
+  if (ITEM_ROW.some((name) => missing.has(name))) { drawItemStandIns(ctx, r, s, y); return; }
+  if (imgs.some((img) => !img)) return;                            // still loading
+  const [cr, cg, cb, ca] = rgbaOf(design, kvGet(n, 'fgcolor_override'));
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+  ctx.globalAlpha *= ca / 255;
+  let x = itemRowStart(r.x, r.w, s, kvGet(n, 'textAlignment') ?? 'west');
+  for (const [i, name] of ITEM_ROW.entries()) {
+    const img = imgs[i]!;
+    const src = cr < 255 || cg < 255 || cb < 255 ? tinted(img, name, cr, cg, cb) : img;
+    ctx.drawImage(src, x, y, (img.naturalWidth / img.naturalHeight) * s, s);
+    x += ((ICON_ADVANCE[name] ?? 1) + ICON_SPACE) * s;
+  }
+  ctx.restore();
+}
+
+/**
+ * The fallback when the icon art is missing: two neutral outlines, a medkit
+ * and a pill bottle, each one icon tall at the label's font size, clipped to
+ * the label's rect like the real icons.
+ */
+function drawItemStandIns(ctx: CanvasRenderingContext2D, r: ChildRect, s: number, y: number) {
   ctx.save();
   ctx.beginPath();
   ctx.rect(r.x, r.y, r.w, r.h);
@@ -432,7 +499,7 @@ function drawItemStandIns(ctx: CanvasRenderingContext2D, design: HudDesign, n: K
 }
 
 function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
-  if (n.key.toLowerCase() === 'items') { drawItemStandIns(ctx, design, n, r, k); return; }
+  if (n.key.toLowerCase() === 'items') { drawItems(ctx, design, n, r, k, opts); return; }
   const s = sampleText(n, opts);
   if (!s) return;
   const face = fontFace(design, kvGet(n, 'font') ?? '');
