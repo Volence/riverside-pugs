@@ -6,12 +6,13 @@ import { liveSurvivors } from '../timeline.js';
 
 export const defs: MetricDef[] = [
   {
-    id: 'pace.si_damage_per_min', group: 'pace', version: 1,
-    description: 'Damage special infected dealt to survivors per playing minute (all phases combined).',
+    id: 'pace.si_damage_per_min', group: 'pace', version: 2,
+    description: 'Damage special infected dealt to standing survivors per playing minute.',
     compute: (c) => {
       if (!c.hasStats || !c.timeline) return null;
       const m = c.timeline.minutes('all');
-      return m > 0 ? { all: { num: sideStat(c, 'infected', 'damage_as_si'), den: m } } : null;
+      const dmg = sideStat(c, 'infected', 'damage_as_si') - sideStat(c, 'infected', 'dmg_to_incapped');
+      return m > 0 ? { all: { num: dmg, den: m } } : null;
     },
   },
   {
@@ -30,7 +31,7 @@ export const defs: MetricDef[] = [
     compute: (c) => perMinute(c, kind(c, 'death')),
   },
   {
-    id: 'pace.revives', group: 'pace', version: 1,
+    id: 'pace.revives', group: 'pace', version: 2,
     description: 'Revives per round.',
     compute: (c) => countByPhase(c, kind(c, 'revive')),
   },

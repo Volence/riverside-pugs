@@ -49,7 +49,7 @@ export function single(num: number, den = 1): MetricOut {
 export function countByPhase(c: RoundCtx, evs: RoundEvent[], weight: (e: RoundEvent) => number = one): MetricOut {
   const s = sums(c, evs, weight);
   const out: MetricOut = { all: { num: s.all, den: 1 } };
-  if (c.timeline) for (const p of SUB_PHASES) out[p] = { num: s[p], den: 1 };
+  if (c.timeline) for (const p of SUB_PHASES) if (c.timeline.minutes(p) > 0) out[p] = { num: s[p], den: 1 };
   return out;
 }
 
