@@ -225,14 +225,16 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__layer { display: flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); }
 .hud__layer--d1 { padding-left: var(--sp-4); }
 .hud__layer.is-active { background: var(--accent); }
+/* Name above note, and the name wraps: a row never hides what it is. */
+.hud__layertext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .hud__layername {
-  flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 2px 0;
+  text-align: left; background: none; border: 0; padding: 2px 0;
   color: var(--text); font: inherit; font-size: var(--fs-dense); cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .hud__layer.is-active .hud__layername { color: #fff; }
 .hud__layer--hidden .hud__layername { text-decoration: line-through; color: var(--text-muted); }
-.hud__layernote { font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
+.hud__layernote { font-size: var(--fs-label); color: var(--text-muted); line-height: 1.2; padding-bottom: 2px; }
 .hud__layeradd { color: var(--text-muted); }
 .hud__eye { background: none; border: 0; padding: 2px; color: var(--text-muted); cursor: pointer; line-height: 0; }
 .hud__eye:hover { color: var(--text-bright); }

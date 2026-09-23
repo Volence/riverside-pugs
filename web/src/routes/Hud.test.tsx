@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { toUnits } from './Hud';
 import Hud from './Hud';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('toUnits', () => {
   it('converts a pointer position to HUD units', () => {
@@ -824,5 +826,19 @@ describe('Hud page', () => {
     // A typed value inside the reach lands where it is typed.
     fireEvent.input(x(), { target: { value: '10' } });
     expect(x().value).toBe('10');
+  });
+
+  it('shows every Layers row its name, with a state note on its own line under it', () => {
+    render(<Hud />);
+    for (const [label, note] of [['Down picture', 'shown when down'], ['Dead picture', 'shown when dead'], ['Voice icon', 'shown when talking']]) {
+      const name = screen.getByRole('button', { name: label });
+      const text = name.closest('.hud__layertext');
+      expect(text, label).toBeTruthy();
+      expect(within(text as HTMLElement).getByText(note)).toBeTruthy();
+    }
+    // The 190px column must never cut a name short.
+    const css = readFileSync(join(__dirname, '../styles/app.css'), 'utf8');
+    const rule = css.slice(css.indexOf('.hud__layername {'), css.indexOf('}', css.indexOf('.hud__layername {')));
+    expect(rule).not.toMatch(/ellipsis|nowrap/);
   });
 });

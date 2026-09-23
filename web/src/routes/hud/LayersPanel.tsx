@@ -35,6 +35,11 @@ function Eye({ hidden }: { hidden: boolean }) {
   );
 }
 
+/**
+ * One row: the name, and under it on its own line when the game shows a
+ * state piece. The 190px column cannot fit both on one line, and the name
+ * is what the row is for, so it wraps rather than being cut short.
+ */
 function Row(
   { label, depth, active, hidden, note, onPick, onEye }: {
     label: string; depth: 0 | 1; active: boolean; hidden: boolean; note?: string;
@@ -43,8 +48,10 @@ function Row(
 ) {
   return (
     <div class={`hud__layer hud__layer--d${depth}${active ? ' is-active' : ''}${hidden ? ' hud__layer--hidden' : ''}`}>
-      <button type="button" class="hud__layername" onClick={(e) => onPick(e.shiftKey)}>{label}</button>
-      {note && <span class="hud__layernote">{note}</span>}
+      <span class="hud__layertext">
+        <button type="button" class="hud__layername" onClick={(e) => onPick(e.shiftKey)}>{label}</button>
+        {note && <span class="hud__layernote">{note}</span>}
+      </span>
       {onEye && (
         <button type="button" class="hud__eye" aria-label={`${hidden ? 'Show' : 'Hide'} ${label}`} onClick={() => onEye(hidden)}>
           <Eye hidden={hidden} />
