@@ -176,7 +176,7 @@ function alertText(db: DB, serverId: number, patchNumber: number, newPatch: bool
   prev: { inventory_json: string } | undefined, inv: Inventory): string {
   const name = serverName(db, serverId);
   const head = newPatch
-    ? `Balance config on ${name} is a new patch (#${patchNumber}, unnamed; name it in Admin > Setup > Patches).`
+    ? `Balance config on ${name} is a new patch (#${patchNumber}, unnamed; name it in Admin > Balance > Patches).`
     : `Balance config on ${name} changed (still patch #${patchNumber}).`;
   const vsOwn = prev ? ` Changed: ${formatDiff(diffInventories(JSON.parse(prev.inventory_json) as Inventory, inv))}.` : ' First sighting.';
   const others = db.prepare('SELECT server_id, inventory_json FROM balance_server_state WHERE server_id != ?')
