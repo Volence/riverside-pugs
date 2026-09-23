@@ -12,6 +12,7 @@ import { weaponKey } from '../../hud/weapons';
 import { fontFace } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, cardChild, baseHasChild, isFreeTeam } from '../../hud/build';
+import { baseOf } from '../../hud/base';
 import { teamChild } from '../../hud/children';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
@@ -461,7 +462,7 @@ export function ChildControls(
       )}
       {def.note && <p class="muted hud__note">{def.note}</p>}
       <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
-      {def.addable && !baseHasChild(design.preset, name) && (
+      {def.addable && !baseHasChild(baseOf(design), name) && (
         <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }))}>
           {`Remove the ${def.label.toLowerCase()}`}
         </button>

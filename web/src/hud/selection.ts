@@ -16,6 +16,7 @@
  * and the handles.
  */
 import { baseTeam, type Box, type HudDesign } from './design';
+import { baseOf } from './base';
 import { elementById } from './elements';
 import { cardChild, cardFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
 import { childRects, hiddenInState, type CardState, type ChildRect } from './render';
@@ -397,7 +398,7 @@ export function handleAt(box: Box, handles: Handle[], ux: number, uy: number, sl
  * Phase 1 drag clamps to, and the other drawn pieces.
  */
 export function pieceTargets(design: HudDesign, state: CardState, moving: string[]): Box[] {
-  const p = baseTeam(design.preset).card;
+  const p = baseTeam(baseOf(design)).card;
   const out: Box[] = [{ x: 0, y: 0, w: p.w, h: p.h }];
   for (const name of drawnPieces(design, state)) {
     if (moving.includes(name)) continue;

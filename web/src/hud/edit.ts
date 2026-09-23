@@ -13,6 +13,7 @@ import {
   clampOverride, clampChild, baseTeam, DEFAULT_DESIGN, newDesign,
   type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride,
 } from './design';
+import { baseOf } from './base';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
 import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, type CardChild } from './build';
@@ -248,7 +249,7 @@ export function patchChild(design: HudDesign, name: string, p: Partial<ChildOver
 export function placeChild(design: HudDesign, name: string, x: number, y: number): HudDesign {
   const r = cardChild(design, name);
   if (!r || !teamChild(name)?.move) return design;
-  const p = baseTeam(design.preset).card;
+  const p = baseTeam(baseOf(design)).card;
   const cx = Math.round(Math.min(Math.max(0, p.w - r.w), Math.max(0, x)));
   const cy = Math.round(Math.min(Math.max(0, p.h - r.h), Math.max(0, y)));
   return patchChild(design, name, { x: clampChild('x', cx), y: clampChild('y', cy) });
@@ -297,7 +298,7 @@ export function resizeChild(
 ): HudDesign {
   const def = teamChild(name);
   if (!def) return design;
-  const p = baseTeam(design.preset).card;
+  const p = baseTeam(baseOf(design)).card;
   if (def.box === 'none') {
     if (!def.font || start.fontTall === undefined || !CORNERS.includes(handle)) return design;
     return patchChild(design, name, { fontSize: clampChild('fontSize', Math.round(start.fontTall * cornerFactor(start, handle, dx, dy))) });
@@ -373,7 +374,7 @@ export function startsOf(design: HudDesign, names: string[]): Record<string, Car
 export function moveChildren(
   design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number,
 ): HudDesign {
-  const p = baseTeam(design.preset).card;
+  const p = baseTeam(baseOf(design)).card;
   const list = names.filter((n) => teamChild(n)?.move && starts[n]);
   if (!list.length) return design;
   const cx = Math.min(Math.min(...list.map((n) => p.w - starts[n].w - starts[n].x)), Math.max(Math.max(...list.map((n) => -starts[n].x)), dx));
@@ -419,7 +420,7 @@ export function anchorOf(box: Box, handle: Handle): { x: number; y: number } {
 export function scaleChildren(
   design: HudDesign, names: string[], starts: Record<string, CardChild>, anchor: { x: number; y: number }, f: number,
 ): HudDesign {
-  const p = baseTeam(design.preset).card;
+  const p = baseTeam(baseOf(design)).card;
   let d = design;
   for (const n of names) {
     const def = teamChild(n);

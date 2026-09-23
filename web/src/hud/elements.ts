@@ -9,7 +9,6 @@
  * editor, so `elements.test.ts` checks every `key` and `children` path
  * against the real base files.
  */
-import type { Preset } from './base';
 
 /**
  * Only 'visible' is live in v1. 'color', 'bg' and 'fontSize' are the reserved
@@ -31,7 +30,7 @@ export interface HudElement {
   /** Team displays: how teammate panels are laid out. */
   team?: { file: string | null; dirs: ('row' | 'column')[]; spacingKey?: string };
   /** Size used for hit-testing and the mock when the container is bigger than what it shows. */
-  mockSize?: Partial<Record<Preset, { w: number; h: number }>>;
+  mockSize?: Partial<Record<'stock' | 'modern', { w: number; h: number }>>;
   /** Elements the game places itself (move: false): where the preview draws them, as position tokens. */
   mockPos?: { x: string; y: string };
   props: Prop[];

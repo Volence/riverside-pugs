@@ -7,7 +7,7 @@
  * trusting its shape. It never throws: a bad field is dropped, a bad design
  * becomes the defaults.
  */
-import { baseFile, type Preset } from './base';
+import { baseFile, baseOf, type Preset, type BaseKey } from './base';
 import type { Aspect } from './units';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
@@ -142,10 +142,20 @@ export interface UploadedImage { w: number; h: number; png: string }
  * the same file, and offered only while a design has it.
  */
 export type CrosshairChoice = 'bundle' | 'addon' | 'none';
+/**
+ * The imported HUD a design is built on: its content hash (upload.ts's
+ * hudId) and the name the upload gave it. The files themselves are never in
+ * the design, so a share link or an exported file carries only this, and
+ * opens on another browser with the missing-import banner until the same
+ * HUD is imported there.
+ */
+export interface ImportedRef { id: string; name: string }
 export interface HudDesign {
   v: 1;
   name: string;
   preset: Preset;
+  /** Only with preset 'imported': which import. validateDesign drops it anywhere else. */
+  imported?: ImportedRef;
   advanced: boolean;
   aspect: Aspect;
   font: 'preset' | 'roboto';
@@ -284,9 +294,15 @@ export function safeName(name: string): string {
   return s || 'my_hud';
 }
 
+/** A stored reference, or nothing: an id is exactly hudId's 64 lower-case hex characters. */
+function importedRef(v: unknown): ImportedRef | undefined {
+  if (!isObj(v) || typeof v.id !== 'string' || !/^[0-9a-f]{64}$/.test(v.id) || typeof v.name !== 'string') return undefined;
+  return { id: v.id, name: safeName(v.name) };
+}
+
 const TEAM_FILE = 'resource/ui/hud/teamdisplayhud.res';
 export interface BaseTeam { dir: 'row' | 'column'; pitch: number; card: { w: number; h: number } }
-const BASE_TEAMS = new Map<Preset, BaseTeam>();
+const BASE_TEAMS = new Map<BaseKey, BaseTeam>();
 
 /**
  * The survivor team as the preset's own teamdisplayhud.res lays it out: the
@@ -296,10 +312,10 @@ const BASE_TEAMS = new Map<Preset, BaseTeam>();
  * 120 x 34 cards. The spacing migration, the default gap and the child drag
  * clamp all start here, which is why it reads the real file, not constants.
  */
-export function baseTeam(preset: Preset): BaseTeam {
-  const hit = BASE_TEAMS.get(preset);
+export function baseTeam(key: BaseKey): BaseTeam {
+  const hit = BASE_TEAMS.get(key);
   if (hit) return hit;
-  const tree = parseKv(baseFile(preset, TEAM_FILE))[0].value as KvNode[];
+  const tree = parseKv(baseFile(key, TEAM_FILE))[0].value as KvNode[];
   const first = kvFind(tree, ['TeamPlayer1']);
   const second = kvFind(tree, ['TeamPlayer2']);
   const n = (p: KvNode | undefined, key: string, d: number) => {
@@ -310,7 +326,7 @@ export function baseTeam(preset: Preset): BaseTeam {
   const axis = dir === 'row' ? 'xpos' : 'ypos';
   const pitch = Math.abs(n(second, axis, dir === 'row' ? 140 : 45) - n(first, axis, 0));
   const out: BaseTeam = { dir, pitch, card: { w: n(first, 'wide', 150), h: n(first, 'tall', 150) } };
-  BASE_TEAMS.set(preset, out);
+  BASE_TEAMS.set(key, out);
   return out;
 }
 
@@ -339,13 +355,13 @@ export function contentBox(nodes: KvNode[]): Box | null {
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
 }
 
-const BASE_CONTENT = new Map<Preset, Box | null>();
-/** The preset's own card, fitted with no inside edits: stock 121 x 36, Modern 113 x 26. */
-export function baseContent(preset: Preset): Box | null {
-  if (!BASE_CONTENT.has(preset)) {
-    BASE_CONTENT.set(preset, contentBox(parseKv(baseFile(preset, TEAM_PANEL.file))[0].value as KvNode[]));
+const BASE_CONTENT = new Map<BaseKey, Box | null>();
+/** The base's own card, fitted with no inside edits: stock 121 x 36, Modern 113 x 26. */
+export function baseContent(key: BaseKey): Box | null {
+  if (!BASE_CONTENT.has(key)) {
+    BASE_CONTENT.set(key, contentBox(parseKv(baseFile(key, TEAM_PANEL.file))[0].value as KvNode[]));
   }
-  return BASE_CONTENT.get(preset)!;
+  return BASE_CONTENT.get(key)!;
 }
 
 /** Four finite points, each clamped like an element's x/y, or nothing: a Free layout is all four cards or none. */
@@ -376,17 +392,21 @@ function cardSlots(v: unknown): CardSlot[] | undefined {
  * fitted card, or an overlap with fit explicitly off, is clamped at 0 and
  * moves.
  */
-function teamFields(raw: Record<string, unknown>, out: ElementOverride, preset: Preset) {
+function teamFields(raw: Record<string, unknown>, out: ElementOverride, key: BaseKey) {
   if (typeof raw.fit === 'boolean') out.fit = raw.fit;
   const slots = cardSlots(raw.slots);
   if (slots) out.slots = slots;
   if (raw.dir === 'free' && slots) out.dir = 'free';
-  if (out.gap === undefined && typeof raw.spacing === 'number' && Number.isFinite(raw.spacing)) {
-    const base = baseTeam(preset);
+  // `spacing` is from before designs had `gap`, long before imports existed,
+  // so an imported design never carries it: it is dropped rather than
+  // migrated, which also keeps validation off the import's files, which may
+  // not be loaded yet.
+  if (!key.startsWith('imported:') && out.gap === undefined && typeof raw.spacing === 'number' && Number.isFinite(raw.spacing)) {
+    const base = baseTeam(key);
     const dir = out.dir === 'row' || out.dir === 'column' ? out.dir : base.dir;
     const along = (c: { w: number; h: number }) => (dir === 'row' ? c.w : c.h);
     const pitch = clampOverride('spacing', raw.spacing) / (out.scale ?? 1);
-    const fitted = baseContent(preset);
+    const fitted = baseContent(key);
     let gap = pitch - along(base.card);
     if (fitted && (out.fit === true || (out.fit === undefined && gap < 0))) {
       out.fit = true;
@@ -396,7 +416,7 @@ function teamFields(raw: Record<string, unknown>, out: ElementOverride, preset: 
   }
 }
 
-function element(id: string, raw: unknown, preset: Preset): ElementOverride {
+function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   const out: ElementOverride = {};
   if (!isObj(raw)) return out;
   const team = id === 'teamColumn';
@@ -408,7 +428,7 @@ function element(id: string, raw: unknown, preset: Preset): ElementOverride {
     if (typeof v === 'number' && Number.isFinite(v)) out[k] = clampOverride(k, v);
   }
   if (raw.dir === 'row' || raw.dir === 'column') out.dir = raw.dir;
-  if (team) teamFields(raw, out, preset);
+  if (team) teamFields(raw, out, key);
   const c = colour(raw.color); if (c) out.color = c;
   const b = colour(raw.bg); if (b) out.bg = b;
   return out;
@@ -459,9 +479,15 @@ export function validateDesign(raw: unknown): HudDesign {
   // existed, and those must render exactly as they did.
   d.elements = {};
   if (typeof raw.name === 'string') d.name = safeName(raw.name);
-  d.preset = oneOf(raw.preset, ['stock', 'modern'] as const, 'stock');
+  d.preset = oneOf(raw.preset, ['stock', 'modern', 'imported'] as const, 'stock');
+  if (d.preset === 'imported') {
+    const ref = importedRef(raw.imported);
+    if (ref) d.imported = ref; else d.preset = 'stock';
+  }
   d.aspect = oneOf(raw.aspect, ['16:9', '16:10', '4:3'] as const, '16:9');
-  d.font = oneOf(raw.font, ['preset', 'roboto'] as const, 'preset');
+  // An imported HUD brings its own fonts: Roboto's CustomFontFiles entries
+  // would overwrite the upload's own entries 7 and 8.
+  d.font = d.preset === 'imported' ? 'preset' : oneOf(raw.font, ['preset', 'roboto'] as const, 'preset');
   d.advanced = raw.advanced === true;
   // Designs saved before the choice carry the `xhair` boolean, where absent
   // meant true: true kept writing the xHair element for a crosshair addon, so
@@ -473,7 +499,7 @@ export function validateDesign(raw: unknown): HudDesign {
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
     // An element the registry no longer has (the kill feed, say) has nothing to apply to.
     if (!ID.test(id) || !elementById(id)) continue;
-    const e = element(id, v, d.preset);
+    const e = element(id, v, baseOf(d));
     if (Object.keys(e).length) d.elements[id] = e;
   }
   // A slot the editor no longer has (the removed health bar slots) has nothing to restyle.

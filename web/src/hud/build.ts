@@ -8,7 +8,7 @@
  * already has it and shipping it would only widen what this addon can break.
  */
 import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
-import { baseFile, presetOverrides, BASE_PATHS, type Preset } from './base';
+import { baseFile, baseOf, presetOverrides, BASE_PATHS, type BaseKey } from './base';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
@@ -54,12 +54,12 @@ class Work {
    * never push a duplicate key into a shipped scheme.
    */
   readonly fonts = new Map<string, string | null>();
-  constructor(readonly preset: Preset) {}
+  constructor(readonly key: BaseKey) {}
   /** The children of the file's single root block. */
   tree(path: string): KvNode[] {
     let t = this.trees.get(path);
     if (!t) {
-      try { t = parseKv(baseFile(this.preset, path)); }
+      try { t = parseKv(baseFile(this.key, path)); }
       catch (e) { throw new Error(`${path}: ${(e as Error).message}`); }
       this.trees.set(path, t);
     }
@@ -72,11 +72,11 @@ class Work {
     if (!p) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
-  text(path: string): string { return this.texts.get(path) ?? baseFile(this.preset, path); }
+  text(path: string): string { return this.texts.get(path) ?? baseFile(this.key, path); }
   setText(path: string, s: string) { this.texts.set(path, s); }
   files(): VpkFile[] {
     const out: VpkFile[] = [];
-    const paths = new Set([...this.trees.keys(), ...this.texts.keys(), ...BASE_PATHS.filter((p) => presetOverrides(this.preset, p))]);
+    const paths = new Set([...this.trees.keys(), ...this.texts.keys(), ...BASE_PATHS.filter((p) => presetOverrides(this.key, p))]);
     for (const path of [...paths].sort()) {
       if (this.texts.has(path) || path === ANIMS) { out.push({ path, data: enc(this.text(path)) }); continue; }
       this.tree(path);
@@ -97,17 +97,19 @@ const XHAIR: KvNode = { key: 'xHair', value: [
  * panel (probe T4), 320 wide on stock, so taking the size from there would
  * make a chat that only moved 40 units wider than the game's.
  */
-function chatBaseSize(preset: Preset, W: number): { w: number; h: number } {
-  const chat = kvFind(parseKv(baseFile(preset, BASECHAT))[0].value as KvNode[], ['HudChat']);
+function chatBaseSize(key: BaseKey, W: number): { w: number; h: number } {
+  const chat = kvFind(parseKv(baseFile(key, BASECHAT))[0].value as KvNode[], ['HudChat']);
   if (!chat) throw new Error(`${BASECHAT}: no panel HudChat`);
   return { w: parseSize(pcGet(chat, 'wide') ?? '0', W), h: parseSize(pcGet(chat, 'tall') ?? '0', SCREEN_H) };
 }
 
-function baseRect(panel: KvNode, el: HudElement, preset: Preset, aspect: Aspect) {
+function baseRect(panel: KvNode, el: HudElement, key: BaseKey, aspect: Aspect) {
   const W = screenW(aspect);
-  const chat = el.id === 'chat' ? chatBaseSize(preset, W) : undefined;
-  const w = chat?.w ?? el.mockSize?.[preset]?.w ?? parseSize(kvGet(panel, 'wide') ?? '0', W);
-  const h = chat?.h ?? el.mockSize?.[preset]?.h ?? parseSize(kvGet(panel, 'tall') ?? '0', SCREEN_H);
+  const chat = el.id === 'chat' ? chatBaseSize(key, W) : undefined;
+  // mockSize is measured on the two built-in presets; an import is sized by its own file.
+  const mock = key === 'stock' || key === 'modern' ? el.mockSize?.[key] : undefined;
+  const w = chat?.w ?? mock?.w ?? parseSize(kvGet(panel, 'wide') ?? '0', W);
+  const h = chat?.h ?? mock?.h ?? parseSize(kvGet(panel, 'tall') ?? '0', SCREEN_H);
   return { x: parsePos(kvGet(panel, 'xpos') ?? '0', W), y: parsePos(kvGet(panel, 'ypos') ?? '0', SCREEN_H), w, h };
 }
 
@@ -138,7 +140,7 @@ function layoutPass(work: Work, design: HudDesign) {
     const moved = el.move && (o.x !== undefined || o.y !== undefined);
     const sized = el.resize === 'free' && (o.w !== undefined || o.h !== undefined);
     if (!moved && !sized) continue;
-    const p = placed(o, baseRect(panel, el, work.preset, design.aspect), el, design.aspect);
+    const p = placed(o, baseRect(panel, el, work.key, design.aspect), el, design.aspect);
     if (moved) { kvSet(panel, 'xpos', p.xpos); kvSet(panel, 'ypos', p.ypos); }
     if (sized) { kvSet(panel, 'wide', String(Math.round(p.w))); kvSet(panel, 'tall', String(Math.round(p.h))); }
     if (el.id === 'chat' && moved) {
@@ -416,7 +418,7 @@ function fitPass(work: Work, design: HudDesign) {
   const bg = cardBackground(design);
   if (!fit && !bg) return;
   const nodes = work.tree(CARD);
-  let size = baseTeam(design.preset).card;
+  let size = baseTeam(baseOf(design)).card;
   const box = fit ? contentBox(nodes) : null;
   if (box) {
     for (const n of nodes) {
@@ -491,7 +493,7 @@ const CARD_WORK = new WeakMap<HudDesign, { work: Work; box: Box | null }>();
 function cardWork(design: HudDesign) {
   let w = CARD_WORK.get(design);
   if (!w) {
-    const work = new Work(design.preset);
+    const work = new Work(baseOf(design));
     childPass(work, design);
     const box = contentBox(work.tree(CARD));
     fitPass(work, design);
@@ -562,9 +564,9 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
   };
 }
 
-/** Whether the preset's own card file has this child: an addable child it lacks shows as a checkbox. */
-export function baseHasChild(preset: Preset, name: string): boolean {
-  return kvFind(parseKv(baseFile(preset, CARD))[0].value as KvNode[], [name]) !== undefined;
+/** Whether the base's own card file has this child: an addable child it lacks shows as a checkbox. */
+export function baseHasChild(key: BaseKey, name: string): boolean {
+  return kvFind(parseKv(baseFile(key, CARD))[0].value as KvNode[], [name]) !== undefined;
 }
 
 export interface TeamLayout {
@@ -675,7 +677,7 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const o = design.elements[el.id];
   const k = el.resize === 'scale' ? o?.scale ?? 1 : 1;
   // Parsed on demand: it is needed only to size a container, and this runs on every canvas repaint.
-  const layoutPanel = () => kvFind(parseKv(baseFile(design.preset, LAYOUT))[0].value as KvNode[], [el.key]);
+  const layoutPanel = () => kvFind(parseKv(baseFile(baseOf(design), LAYOUT))[0].value as KvNode[], [el.key]);
   if (!el.team?.file) {
     const dir = el.team?.dirs[0] ?? 'row';
     let baseSpacing: number | undefined;
@@ -686,7 +688,7 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
     }
     return { dir, spacing: Math.round(o?.spacing ?? (baseSpacing ?? (dir === 'row' ? 140 : 45)) * k) };
   }
-  const base = baseTeam(design.preset);
+  const base = baseTeam(baseOf(design));
   // A fitted card is its content box and sits at the box's top-left, so
   // fitting alone moves nothing on screen.
   const box = o?.fit ? cardFit(design) : null;
@@ -989,15 +991,15 @@ const BOX_CORNER = 16;
  */
 const CLEAR_TEXELS = 16;
 
-const BASE_SCHEMES = new Map<Preset, KvNode[]>();
+const BASE_SCHEMES = new Map<BaseKey, KvNode[]>();
 /**
  * A scheme font's tall in the preset's own file, read without pulling the
  * scheme into the build: asking the Work for it would ship an untouched
  * clientscheme.res.
  */
-function baseFontTall(preset: Preset, font: string): number | undefined {
-  let t = BASE_SCHEMES.get(preset);
-  if (!t) { t = parseKv(baseFile(preset, SCHEME))[0].value as KvNode[]; BASE_SCHEMES.set(preset, t); }
+function baseFontTall(key: BaseKey, font: string): number | undefined {
+  let t = BASE_SCHEMES.get(key);
+  if (!t) { t = parseKv(baseFile(key, SCHEME))[0].value as KvNode[]; BASE_SCHEMES.set(key, t); }
   const size = kvFind(t, ['Fonts', font, '1']);
   return size ? num(kvGet(size, 'tall')) : undefined;
 }
@@ -1035,7 +1037,7 @@ function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
     let leaves = pcEntries(panel, key);
     if (!leaves.length) { pcSet(panel, key, dllDefault); leaves = pcEntries(panel, key); }
     const tall = Math.round(size);
-    if (baseFontTall(work.preset, leaves[0].value as string) === tall) continue;
+    if (baseFontTall(work.key, leaves[0].value as string) === tall) continue;
     for (const leaf of leaves) useFontCopy(work, leaf, `t${tall}`, () => tall);
   }
 
@@ -1130,7 +1132,7 @@ function addonInfo(name: string): string {
  *   `layoutPass` wrote; it reads no tree.
  */
 export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[] {
-  const work = new Work(design.preset);
+  const work = new Work(baseOf(design));
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   weaponsPass(work, design, extra);
@@ -1193,7 +1195,7 @@ const BUILD_TREES = new WeakMap<HudDesign, Work>();
 export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
   let work = BUILD_TREES.get(design);
   if (!work) {
-    work = new Work(design.preset);
+    work = new Work(baseOf(design));
     const discard: VpkFile[] = [];
     layoutPass(work, design);
     weaponsPass(work, design, discard);
@@ -1212,11 +1214,11 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
 export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   const el = elementById(id);
   if (!el) throw new Error(`No HUD element ${id}`);
-  const work = new Work(design.preset);
+  const work = new Work(baseOf(design));
   const o = design.elements[id] ?? {};
   if (id === 'xhair') return { x: screenW(aspect) / 2 - 13, y: SCREEN_H / 2 - 13, w: 26, h: 26, visible: design.crosshair !== 'none' };
   const panel = work.panel(LAYOUT, [el.key]);
-  const base = baseRect(panel, el, design.preset, design.aspect);
+  const base = baseRect(panel, el, baseOf(design), design.aspect);
   const p = placed(o, base, el, design.aspect);
   const k = el.resize === 'scale' ? o.scale ?? 1 : 1;
   const visible = o.visible ?? (kvGet(panel, 'visible') ?? '1') !== '0';
