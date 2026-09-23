@@ -7,6 +7,7 @@ import { baseFile } from './base';
 import { elementById } from './elements';
 import { PANEL_FILE, childRects } from './render';
 import { crosshairFiles } from '../crosshair/vpk';
+import { decodeVTF } from '../vpk/read';
 import { TEX } from '../crosshair/draw';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
@@ -247,7 +248,17 @@ describe('buildHud, layout', () => {
   });
 
   it('fails a bundled crosshair with no pixels rather than ship the missing-texture checker', () => {
-    expect(() => buildHud(design({ crosshair: 'bundle' }))).toThrow(/Crosshair page/);
+    expect(() => buildHud(design({ crosshair: 'bundle' }))).toThrow(/Custom crosshair/);
+  });
+
+  it("packs the crosshair as a TEX x TEX texture holding exactly the pixels it was handed", () => {
+    // artPixels draws an image crosshair, fitted and centred, into these
+    // pixels (crosshair/texture.test.ts); here they must come back out of
+    // the shipped texture unchanged, whatever the art was.
+    const files = buildHud(design({ crosshair: 'bundle' }), { crosshair: PIXELS });
+    const got = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/altcrosshair.vtf')!.data);
+    expect([got.w, got.h]).toEqual([TEX, TEX]);
+    expect(got.rgba).toEqual(PIXELS);
   });
 
   it('reports the crosshair element visible unless the choice is none', () => {

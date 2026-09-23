@@ -4,7 +4,8 @@ import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, TEX, type Backdrop, type CrosshairState } from '../crosshair/draw';
-import { savedArt, crosshairPixels } from '../crosshair/saved';
+import { savedArt } from '../crosshair/saved';
+import { artPixels } from '../crosshair/texture';
 import type { CrosshairArt } from '../crosshair/model';
 import {
   loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN, newDesign, usableCrosshair,
@@ -80,8 +81,9 @@ async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
 }
 
 /**
- * Rebuild `BuildAssets` from a design: decoded pixels for every uploaded
- * style image, plus the Roboto Condensed files when the design needs them.
+ * Rebuild `BuildAssets` from a design: the crosshair's texture pixels,
+ * decoded pixels for every uploaded style image, plus the Roboto Condensed
+ * files when the design needs them.
  *
  * A design's `images[id].w/h` are untrusted metadata: nothing has ever
  * cross-checked them against the PNG they came with, and a share link or an
@@ -90,12 +92,13 @@ async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
  * actually encodes, and it is the only thing here that comes from the
  * registry rather than from the design itself.
  */
-export async function assetsFor(design: HudDesign, crosshair: CrosshairState | null = null): Promise<BuildAssets> {
+export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   const assets: BuildAssets = {};
-  // A bundled crosshair's texture, drawn exactly as the Crosshair page
-  // exports it. Without it the generator refuses the build, naming that page.
-  if (design.crosshair === 'bundle' && crosshair) {
-    const px = crosshairPixels(crosshair, null);
+  // A bundled crosshair's texture, drawn from the design's own crosshair as
+  // the preview draws it (a built one exactly as the Crosshair page
+  // exports it). Without it the generator refuses the build.
+  if (design.crosshair === 'bundle' && design.xhairArt) {
+    const px = await artPixels(design.xhairArt);
     if (px && px.length === TEX * TEX * 4) assets.crosshair = px;
   }
   const entries = Object.entries(design.images);
@@ -805,7 +808,7 @@ export default function Hud() {
 
   const download = async () => {
     try {
-      const assets = await assetsFor(design, crosshair);
+      const assets = await assetsFor(design);
       // Nothing that reaches a player's game skips the validator. Every
       // control already guards its own input, but this is the one place the
       // design turns into files, so a future control that forgets cannot put

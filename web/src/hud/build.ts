@@ -21,8 +21,8 @@ import { TEX } from '../crosshair/draw';
 
 /**
  * Uploaded images and fonts, already decoded, keyed by slot id, and for a
- * bundled crosshair the Crosshair page's texture pixels (TEX x TEX RGBA,
- * from crosshairPixels), which the page reads from this browser's storage.
+ * bundled crosshair its texture pixels (TEX x TEX RGBA), which the page
+ * draws from the design's own `xhairArt` with artPixels.
  */
 export interface BuildAssets {
   fonts?: { regular: Uint8Array; bold: Uint8Array };
@@ -930,7 +930,8 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
 /**
  * A bundled crosshair's texture and material, the Crosshair page's own
  * files (crosshairFiles), so the xHair element layoutPass wrote has
- * something to show. vgui/hud/altcrosshair is in no pak01: an xHair with
+ * something to show. The page draws the pixels from the design's
+ * `xhairArt` (crosshair/texture.ts's artPixels). vgui/hud/altcrosshair is in no pak01: an xHair with
  * nothing behind it draws the magenta and black missing-texture checker,
  * which is what a HUD without its crosshair addon showed in game on
  * 2026-09-23. So a bundle with no pixels fails the build, like missing
@@ -941,7 +942,7 @@ function crosshairPass(design: HudDesign, assets: BuildAssets, out: VpkFile[]) {
   if (design.crosshair !== 'bundle') return;
   const px = assets.crosshair;
   if (!px || px.length !== TEX * TEX * 4) {
-    throw new Error('The crosshair from the Crosshair page was not found. Make one there, or pick another Crosshair option.');
+    throw new Error("This HUD's crosshair could not be drawn. Select Custom crosshair and pick it again, or choose Game default.");
   }
   out.push(...crosshairFiles(TEX, TEX, px));
 }
