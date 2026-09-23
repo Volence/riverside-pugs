@@ -4,7 +4,8 @@ import { toUnits } from './Hud';
 import Hud from './Hud';
 import { readFileSync } from 'node:fs';
 import { crosshairFiles } from '../crosshair/vpk';
-import { TEX } from '../crosshair/draw';
+import { TEX, PX_AT_1080 } from '../crosshair/draw';
+import { encodeVPK, encodeVTF } from '../vpk';
 import { join } from 'node:path';
 
 describe('toUnits', () => {
@@ -235,28 +236,54 @@ describe('Hud page', () => {
   });
 
   it('shows the crosshair/addonlist note only in normal mode, since the advanced zip does not have that conflict', () => {
+    localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'addon' }));
     render(<Hud />);
-    fireEvent.click(screen.getByRole('radio', { name: /crosshair addon/i }));
     expect(screen.getAllByText(/addonlist\.txt/i).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /advanced mode/i }));
     expect(screen.queryByText(/addonlist\.txt/i)).toBeNull();
   });
 
-  describe('the Crosshair choice', () => {
+  describe('the crosshair', () => {
     const SAVED = { shape: 'dot', dot: 4, color: '#ffffff', alpha: 100, outline: 0 };
     const radio = (name: RegExp) => screen.getByRole('radio', { name }) as HTMLInputElement;
+    const PNG = 'data:image/png;base64,UE5H';
 
     /**
-     * happy-dom has no 2D context. The crosshair texture canvas (TEX x TEX,
-     * sized before its context is asked for) gets a stand-in whose pixels are
-     * PIXELS; every other canvas still gets none, so the preview stays a no-op.
+     * happy-dom has no 2D context. Every canvas gets a stand-in that records
+     * its arcs and drawImages, and the texture canvas (TEX x TEX) hands back
+     * PIXELS from getImageData, so the download's texture is known.
      */
     const PIXELS = new Uint8ClampedArray(TEX * TEX * 4).map((_, i) => (i * 13) & 0xff);
-    const stubTexture = () => vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
-      if (this.width !== TEX || this.height !== TEX) return null;
-      return new Proxy({}, { get: (_t, k) => (k === 'getImageData' ? () => ({ data: PIXELS }) : () => {}), set: () => true }) as never;
-    } as never);
+    const stubCanvas = () => {
+      const calls: { canvas: HTMLCanvasElement; m: string; a: unknown[] }[] = [];
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+        const canvas = this;
+        return new Proxy({}, {
+          get: (_t, k) => (...a: unknown[]) => {
+            calls.push({ canvas, m: String(k), a });
+            if (k === 'getImageData') return { data: PIXELS };
+            if (k === 'createImageData') return { data: new Uint8ClampedArray((a[0] as number) * (a[1] as number) * 4) };
+            if (k === 'measureText') return { width: 10 };
+            if (k === 'createLinearGradient' || k === 'createRadialGradient') return { addColorStop() {} };
+            return undefined;
+          },
+          set: () => true,
+        }) as never;
+      } as never);
+      vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(PNG);
+      return calls;
+    };
+    /** Images that decode at once, as a data URL's would. */
+    const stubImages = () => vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      complete = false; naturalWidth = 0; naturalHeight = 0; width = 0; height = 0;
+      set src(_v: string) {
+        queueMicrotask(() => { this.complete = true; this.naturalWidth = this.width = TEX; this.naturalHeight = this.height = TEX; this.onload?.(); });
+      }
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
     /** Click Download and hand back the bytes it saved. */
     const downloaded = async (): Promise<Uint8Array> => {
       const blobs: Blob[] = [];
@@ -266,79 +293,155 @@ describe('Hud page', () => {
       await waitFor(() => expect(blobs).toHaveLength(1));
       return new Uint8Array(await blobs[0].arrayBuffer());
     };
+    const hasTexture = (bytes: Uint8Array) => crosshairFiles(TEX, TEX, PIXELS).every((f) => indexOf(bytes, f.data) > 0);
+    const selectCrosshair = () => fireEvent.click(screen.getByRole('button', { name: 'Custom crosshair' }));
 
-    it('starts a new design bundling the crosshair saved on the Crosshair page, and the download carries its texture', async () => {
+    it('starts a new design with the crosshair saved on the Crosshair page, and the download carries its texture', async () => {
       localStorage.setItem('xhair', JSON.stringify(SAVED));
-      stubTexture();
+      stubCanvas();
       render(<Hud />);
-      expect(radio(/bundle/i).checked).toBe(true);
+      expect(radio(/^custom/i).checked).toBe(true);
       expect(screen.getByText(/disable any separate crosshair addon/i)).toBeTruthy();
-      const bytes = await downloaded();
-      for (const f of crosshairFiles(TEX, TEX, PIXELS)) expect(indexOf(bytes, f.data), f.path).toBeGreaterThan(0);
-      expect(new TextDecoder('latin1').decode(bytes)).toContain('altcrosshair');
+      expect(hasTexture(await downloaded())).toBe(true);
     });
 
-    it('starts a new design with no crosshair when none is saved, and does not offer the bundle', async () => {
+    it('starts a new design on the game default when none is saved, and Custom gives it the default crosshair', async () => {
+      stubCanvas();
       render(<Hud />);
-      expect(radio(/^none/i).checked).toBe(true);
-      expect(radio(/bundle/i).disabled).toBe(true);
-      expect(screen.getByRole('link', { name: /crosshair page/i }).getAttribute('href')).toBe('/crosshair');
-      const text = new TextDecoder('latin1').decode(await downloaded());
-      expect(text).not.toContain('altcrosshair');
-      expect(text).not.toContain('xHair');
+      expect(radio(/game default/i).checked).toBe(true);
+      expect(screen.queryByRole('radio', { name: /legacy/i })).toBeNull();
+      const none = new TextDecoder('latin1').decode(await downloaded());
+      expect(none).not.toContain('altcrosshair');
+      expect(none).not.toContain('xHair');
+      vi.mocked(URL.createObjectURL).mockRestore();
+      vi.mocked(HTMLAnchorElement.prototype.click).mockRestore();
+      fireEvent.click(radio(/^custom/i));
+      expect(radio(/^custom/i).checked).toBe(true);
+      selectCrosshair();
+      expect((screen.getByRole('slider', { name: 'Length' }) as HTMLInputElement).value).toBe('7');
+      expect(hasTexture(await downloaded())).toBe(true);
     });
 
-    it('keeps the choice of a design saved before it existed', () => {
+    it('keeps a design saved with a separate crosshair addon, offering that choice only to it', () => {
       localStorage.setItem('xhair', JSON.stringify(SAVED));
       localStorage.setItem('hud', JSON.stringify({ v: 1, xhair: true }));
       render(<Hud />);
-      expect(radio(/crosshair addon/i).checked).toBe(true);
+      expect(radio(/separate crosshair addon \(legacy\)/i).checked).toBe(true);
+      expect(screen.getByText(/magenta/i)).toBeTruthy();
+      expect(screen.getAllByText(/Add-ons menu cannot/i).length).toBeGreaterThan(0);
     });
 
     it('says so on the status line when a stored bundle loses its crosshair to empty storage, on load', () => {
       localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle' }));
       render(<Hud />);
-      expect(radio(/^none/i).checked).toBe(true);
+      expect(radio(/game default/i).checked).toBe(true);
       expect(screen.getByText(/no longer saved/i)).toBeTruthy();
     });
 
     it('says nothing on the status line when the design never asked for a bundle', () => {
       render(<Hud />);
-      expect(radio(/^none/i).checked).toBe(true);
+      expect(radio(/game default/i).checked).toBe(true);
       expect(screen.queryByText(/no longer saved/i)).toBeNull();
     });
 
-    it('turns a bundle with no saved crosshair into none, from storage or a file', async () => {
+    it("adopts the saved crosshair into a stored bundle that has none of its own, once", () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
       localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle' }));
       render(<Hud />);
-      expect(radio(/^none/i).checked).toBe(true);
-      fireEvent.click(radio(/crosshair addon/i));
+      expect(radio(/^custom/i).checked).toBe(true);
+      selectCrosshair();
+      expect((screen.getByRole('combobox', { name: 'Shape' }) as HTMLSelectElement).value).toBe('dot');
+    });
+
+    it('turns an imported bundle with no crosshair into the game default when none is saved', async () => {
+      render(<Hud />);
       const file = new File([JSON.stringify({ v: 1, name: 'theirs', crosshair: 'bundle' })], 'theirs.hud.json', { type: 'application/json' });
       fireEvent.change(screen.getByLabelText('Import a HUD design file'), { target: { files: [file] } });
       await screen.findByText('Imported theirs.');
-      expect(radio(/^none/i).checked).toBe(true);
+      expect(radio(/game default/i).checked).toBe(true);
     });
 
-    it('links to the Crosshair page for every choice, not only Bundle', () => {
-      localStorage.setItem('xhair', JSON.stringify(SAVED));
+    it('warns when there will be no crosshair at all', () => {
       render(<Hud />);
-      expect(radio(/bundle/i).checked).toBe(true);
-      expect(screen.getByRole('link', { name: /crosshair page/i })).toBeTruthy();
-      fireEvent.click(radio(/crosshair addon/i));
-      expect(screen.getByRole('link', { name: /crosshair page/i })).toBeTruthy();
-      fireEvent.click(radio(/^none/i));
-      expect(screen.getByRole('link', { name: /crosshair page/i })).toBeTruthy();
-    });
-
-    it('warns what an addon crosshair needs, and when there will be no crosshair at all', () => {
-      render(<Hud />);
-      fireEvent.click(radio(/crosshair addon/i));
-      expect(screen.getByText(/magenta/i)).toBeTruthy();
-      expect(screen.getAllByText(/Add-ons menu cannot/i).length).toBeGreaterThan(0);
-      fireEvent.click(radio(/^none/i));
       expect(screen.queryByText(/no crosshair at all/i)).toBeNull();
       fireEvent.click(screen.getByRole('checkbox', { name: /hide the game's crosshair/i }));
       expect(screen.getByText(/no crosshair at all/i)).toBeTruthy();
+    });
+
+    it('shows the builder for the selected crosshair; a slider redraws the canvas and is one undo step', () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      const calls = stubCanvas();
+      const { container } = render(<Hud />);
+      const main = container.querySelector('canvas.hud__canvas') as HTMLCanvasElement;
+      selectCrosshair();
+      const dot = () => screen.getByRole('slider', { name: 'Dot size' }) as HTMLInputElement;
+      expect(dot().value).toBe('4');
+      // The xHair's 26 units are 26 * height / 480 canvas pixels (happy-dom
+      // lays nothing out, so the height is the page's minimum), and a dot of
+      // size n is radius n / 2 of their PX_AT_1080.
+      const radius = (n: number) => (n / 2) * (26 * main.height / 480) / PX_AT_1080;
+      const drewDot = (n: number) => calls.some((c) => c.canvas === main && c.m === 'arc' && Math.abs((c.a[2] as number) - radius(n)) < 1e-9);
+      expect(drewDot(4)).toBe(true);
+      fireEvent.input(dot(), { target: { value: '6' } });
+      fireEvent.input(dot(), { target: { value: '8' } });
+      fireEvent.change(dot());
+      expect(drewDot(8)).toBe(true);
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      expect(dot().value).toBe('4');
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true, shiftKey: true });
+      expect(dot().value).toBe('8');
+    });
+
+    it('takes an uploaded crosshair .vpk as the crosshair, and the download carries it', async () => {
+      stubCanvas();
+      stubImages();
+      render(<Hud />);
+      selectCrosshair();
+      const vpk = new File([encodeVPK([{ path: 'materials/vgui/hud/altcrosshair.vtf', data: encodeVTF(2, 2, new Uint8ClampedArray(16).fill(255)) }])], 'theirs.vpk');
+      fireEvent.change(screen.getByLabelText('Upload a crosshair'), { target: { files: [vpk] } });
+      await screen.findByText(/your uploaded crosshair/i);
+      expect(radio(/^custom/i).checked).toBe(true);
+      expect(hasTexture(await downloaded())).toBe(true);
+      // And back to building one, as one more step.
+      fireEvent.click(screen.getByRole('button', { name: /build one instead/i }));
+      expect(screen.getByRole('slider', { name: 'Length' })).toBeTruthy();
+    });
+
+    it('says so when an uploaded .vpk has no crosshair, and keeps the crosshair it had', async () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      stubCanvas();
+      render(<Hud />);
+      selectCrosshair();
+      const vpk = new File([encodeVPK([{ path: 'scripts/hudlayout.res', data: new Uint8Array(1) }])], 'hud.vpk');
+      fireEvent.change(screen.getByLabelText('Upload a crosshair'), { target: { files: [vpk] } });
+      await screen.findByText('No crosshair found in this file.');
+      expect((screen.getByRole('slider', { name: 'Dot size' }) as HTMLInputElement).value).toBe('4');
+    });
+  });
+
+  describe('from the Crosshair page', () => {
+    const SAVED = { shape: 'circle', radius: 9, color: '#ffe14d' };
+    afterEach(() => { history.replaceState(null, '', '/'); });
+
+    it("brings the page's crosshair into a design that already exists, selected, as one undo step", () => {
+      localStorage.setItem('hud', JSON.stringify({ v: 1, name: 'mine', crosshair: 'none', elements: { chat: { x: 5 } } }));
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      history.replaceState(null, '', '/hud?from=crosshair');
+      render(<Hud />);
+      expect(screen.getByText('Custom crosshair', { selector: 'legend' })).toBeTruthy();
+      expect((screen.getByRole('radio', { name: /^custom/i }) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole('slider', { name: 'Radius' }) as HTMLInputElement).value).toBe('9');
+      expect(location.search).toBe('');
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      expect((screen.getByRole('radio', { name: /game default/i }) as HTMLInputElement).checked).toBe(true);
+    });
+
+    it("brings the page's imported image too", () => {
+      localStorage.setItem('xhair', JSON.stringify({ shape: 'image' }));
+      localStorage.setItem('xhairImage', JSON.stringify({ png: 'data:image/png;base64,UE5H', w: TEX, h: TEX }));
+      history.replaceState(null, '', '/hud?from=crosshair');
+      render(<Hud />);
+      expect(screen.getByText(/your uploaded crosshair/i)).toBeTruthy();
     });
   });
 

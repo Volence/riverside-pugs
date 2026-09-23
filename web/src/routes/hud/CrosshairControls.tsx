@@ -1,85 +1,134 @@
 /**
- * The Crosshair group: where the HUD's crosshair comes from, and whether the
- * game's own one is hidden. Shown when nothing is selected and when the
- * crosshair element is, so it can be reached even while the choice is
- * 'none' and there is no element on the canvas to click.
+ * The Crosshair group: whether this HUD carries its own crosshair, and the
+ * crosshair itself. With the crosshair element selected it is the whole
+ * builder (the Crosshair page's own controls, crosshair/Builder.tsx), a
+ * zoomed preview, and an upload for a crosshair made elsewhere: any
+ * crosshair addon's .vpk, or an image. With nothing selected it is just the
+ * choice, so the crosshair can be turned on even while it is the game's own
+ * and there is no element on the canvas to click.
  *
- * The three choices exist because the xHair element's texture,
- * vgui/hud/altcrosshair, is in no pak01: a HUD that writes the element with
- * nothing behind it shows the magenta and black missing-texture checker, which
- * is what the owner saw in game on 2026-09-23 with the crosshair addon off.
+ * The crosshair ships inside the HUD because a crosshair addon ships a whole
+ * scripts/hudlayout.res (the xHair ImagePanel that draws it lives there),
+ * so a crosshair addon and a HUD addon fight over that file and the first in
+ * addonlist.txt wins; the in-game Add-ons menu cannot reorder them. The
+ * legacy 'addon' choice still writes the element for such an addon, and is
+ * offered only to a design that already has it. Without the addon its
+ * texture, vgui/hud/altcrosshair, is in no pak01, so the element shows the
+ * magenta and black missing-texture checker, as the owner saw in game on
+ * 2026-09-23.
  */
-import { useEffect, useRef } from 'preact/hooks';
-import { PX_AT_1080, drawCrosshair, type CrosshairState } from '../../crosshair/draw';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { DEFAULT_STATE, type CrosshairState } from '../../crosshair/draw';
+import { drawArt, readArt, type CrosshairArt } from '../../crosshair/model';
+import { uploadArt } from '../../crosshair/texture';
+import { CrosshairBuilder } from '../../crosshair/Builder';
+import { urlImage } from '../../hud/render';
 import type { CrosshairChoice, HudDesign } from '../../hud/design';
 import { Field, type Edit } from './controls';
 
-/** The preview's side in CSS pixels; the whole exported texture is drawn into it. */
-const PREVIEW = 64;
+/** The zoomed preview's side in CSS pixels: the whole texture, a little over twice the size the game draws it at 1080p. */
+const ZOOM = 128;
 
-/** The bundled crosshair as its texture holds it, on a dark square. */
-function CrosshairPreview({ crosshair }: { crosshair: CrosshairState }) {
+/** The crosshair as its texture holds it, on a dark square, drawn by the same drawArt as the canvas and the download. */
+function CrosshairZoom({ art }: { art: CrosshairArt }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.fillStyle = '#17161a';
-    ctx.fillRect(0, 0, PREVIEW, PREVIEW);
-    drawCrosshair(ctx, PREVIEW / 2, PREVIEW / 2, PREVIEW / PX_AT_1080, crosshair, null);
-  }, [crosshair]);
-  return <canvas ref={ref} width={PREVIEW} height={PREVIEW} class="hud__xhairpreview" aria-label="Your crosshair" />;
+    ctx.fillRect(0, 0, ZOOM, ZOOM);
+    const img = art.kind === 'image' ? urlImage(art.png, () => setTick((t) => t + 1)) ?? null : null;
+    drawArt(ctx, ZOOM / 2, ZOOM / 2, ZOOM, art, img);
+  }, [art, tick]);
+  return <canvas ref={ref} width={ZOOM} height={ZOOM} class="hud__xhairpreview" aria-label="Your crosshair, zoomed" />;
 }
 
 const CHOICES: { id: CrosshairChoice; label: string; says: string }[] = [
-  { id: 'bundle', label: 'Bundle my crosshair', says: 'Ships the crosshair from the Crosshair page inside this HUD. No crosshair addon needed.' },
-  { id: 'addon', label: 'Crosshair addon', says: 'Leaves room for a crosshair addon you already use to draw it.' },
-  { id: 'none', label: 'None', says: "No custom crosshair: the game's own crosshair shows." },
+  { id: 'bundle', label: 'Custom', says: 'Your crosshair ships inside this HUD. No crosshair addon needed.' },
+  { id: 'none', label: 'Game default', says: "No custom crosshair: the game's own crosshair shows." },
+  { id: 'addon', label: 'Separate crosshair addon (legacy)', says: 'Leaves room for a crosshair addon you already use to draw it.' },
 ];
 
 export function CrosshairControls(
-  { design, edit, crosshair }: { design: HudDesign; edit: Edit; crosshair: CrosshairState | null },
+  { design, edit, end, full = false }: { design: HudDesign; edit: Edit; end: () => void; full?: boolean },
 ) {
-  const choose = (c: CrosshairChoice) => edit((d) => (d.crosshair === c ? d : { ...d, crosshair: c }));
+  const [error, setError] = useState('');
+  // Custom with no crosshair yet starts from the builder's defaults, so a 'bundle' always has one.
+  const choose = (c: CrosshairChoice) => edit((d) => (d.crosshair === c ? d : {
+    ...d, crosshair: c, ...(c === 'bundle' && !d.xhairArt ? { xhairArt: { kind: 'built', state: { ...DEFAULT_STATE } } } : {}),
+  }));
+  const art = design.crosshair === 'bundle' ? design.xhairArt : undefined;
+  const build = (patch: Partial<CrosshairState>, gesture?: boolean) => edit((d) => {
+    const from = d.xhairArt?.kind === 'built' ? d.xhairArt.state : DEFAULT_STATE;
+    return { ...d, xhairArt: { kind: 'built', state: { ...from, ...patch } } };
+  }, gesture ? 'gesture' : 'step');
+
+  const upload = async (file: File) => {
+    try {
+      // Checked like any stored crosshair before it goes in: a design is always one the build takes.
+      const got = readArt(await uploadArt(file));
+      if (!got) throw new Error('That crosshair could not be read.');
+      setError('');
+      edit((d) => ({ ...d, crosshair: 'bundle', xhairArt: got }));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <Field legend="Crosshair">
-      {CHOICES.map((c) => {
-        const off = c.id === 'bundle' && !crosshair;
-        return (
-          <div key={c.id}>
-            <label class="hud__check">
-              <input
-                type="radio" name="hud-crosshair" value={c.id} checked={design.crosshair === c.id} disabled={off}
-                onChange={() => choose(c.id)}
-              />
-              <span>{c.label}</span>
-            </label>
-            <p class="muted hud__note">{c.says}</p>
-          </div>
-        );
-      })}
+      {CHOICES.filter((c) => c.id !== 'addon' || design.crosshair === 'addon').map((c) => (
+        <div key={c.id}>
+          <label class="hud__check">
+            <input type="radio" name="hud-crosshair" value={c.id} checked={design.crosshair === c.id} onChange={() => choose(c.id)} />
+            <span>{c.label}</span>
+          </label>
+          <p class="muted hud__note">{c.says}</p>
+        </div>
+      ))}
 
-      {/* Reachable from every choice, not only Bundle: the bundled preview
-          below already carries its own link, so this one steps aside for it. */}
-      {design.crosshair !== 'bundle' && (
-        <p class="muted hud__note">
-          {crosshair
-            ? <>See or change it on the <a href="/crosshair">Crosshair page</a>.</>
-            : <>Make one on the <a href="/crosshair">Crosshair page</a> first; it is saved in this browser.</>}
-        </p>
+      {!full && art && (
+        <p class="muted hud__note">Select the crosshair, on the canvas or in Layers, to change it or upload one.</p>
       )}
 
-      {design.crosshair === 'bundle' && crosshair && (
-        <div class="hud__xhairbundle">
-          <CrosshairPreview crosshair={crosshair} />
-          <p class="muted hud__note">Change it on the <a href="/crosshair">Crosshair page</a>, then download again.</p>
+      {full && art && (
+        <div class="hud__xhair">
+          <CrosshairZoom art={art} />
+          {art.kind === 'built'
+            ? <CrosshairBuilder state={art.state} set={build} end={end} />
+            : (
+              <div>
+                <p class="muted hud__note">Your uploaded crosshair, as the game will draw it.</p>
+                <button type="button" class="btn btn--ghost btn--sm" onClick={() => build({})}>Build one instead</button>
+              </div>
+            )}
         </div>
       )}
+
+      {full && (
+        <label class="hud__file">
+          <span>Upload a crosshair: a crosshair addon's .vpk, or an image</span>
+          <input
+            type="file" accept=".vpk,image/*" aria-label="Upload a crosshair"
+            onChange={(e) => {
+              const input = e.target as HTMLInputElement;
+              const f = input.files?.[0];
+              input.value = '';
+              if (f) void upload(f);
+            }}
+          />
+        </label>
+      )}
+      {error && <p class="error">{error}</p>}
+
       {design.crosshair === 'addon' && (
         <p class="muted hud__note hud__warn">
           {/* Advanced mode mounts ahead of every addon from gameinfo.txt, so there the order takes care of itself. */}
           {!design.advanced && <>The crosshair addon ships its own layout file, so this HUD must be listed above it in{' '}
           <code>left4dead/addonlist.txt</code>; the in-game Add-ons menu cannot change the order. </>}
-          Without the addon the crosshair shows as a magenta and black checker.
+          Without the addon the crosshair shows as a magenta and black checker. Choose Custom to put your crosshair in
+          this HUD instead.
         </p>
       )}
 

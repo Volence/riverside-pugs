@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
-import { drawBackdrop, TEX, type Backdrop, type CrosshairState } from '../crosshair/draw';
+import { drawBackdrop, TEX, type Backdrop } from '../crosshair/draw';
 import { savedArt } from '../crosshair/saved';
 import { artPixels } from '../crosshair/texture';
 import type { CrosshairArt } from '../crosshair/model';
@@ -222,8 +222,10 @@ const MENU_LABELS: Record<MenuAction, string> = {
 };
 /** Said on the status line when moving a card takes a Row or Column team into Free. */
 const WENT_FREE = 'Teammates switched to Free layout';
+/** Said on the status line when the Crosshair page's button brings its crosshair in. */
+const FROM_PAGE = 'Your crosshair from the Crosshair page is in this HUD now, and goes into its download.';
 /** Said on the status line when a stored 'bundle' choice loses its crosshair, below. */
-const BUNDLE_LOST = "This design's crosshair is no longer saved on this browser, so it now shows None.";
+const BUNDLE_LOST = "This design's crosshair is no longer saved on this browser, so it now uses the game default. Choose Custom to make one.";
 
 /** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
 function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
@@ -253,7 +255,6 @@ export default function Hud() {
   const [design, setDesignState] = useState<HudDesign>(
     () => usableCrosshair(loadDesign(() => newDesign(saved)), saved),
   );
-  const crosshair = design.xhairArt?.kind === 'built' ? design.xhairArt.state : null;
   // The design as of the last edit, read synchronously: two edits in one
   // event (a gesture's end, then a step) must each see the other's result,
   // which a state value only shows on the next render.
@@ -335,12 +336,14 @@ export default function Hud() {
   // On load only: a design's own crosshair choice is loaded and coerced
   // twice (here and in `design`, above), rather than threading the loaded
   // value through, so the two reads stay obviously in sync with each other.
-  // A stored 'bundle' silently becomes 'none' when this browser's Crosshair
-  // page storage is empty (usableCrosshair); the player never asked for
-  // that, unlike picking Addon or None themselves, so it is worth a word.
-  const [status, setStatus] = useState(() => (
-    (() => { const d = loadDesign(() => newDesign(saved)); return d.crosshair === 'bundle' && !d.xhairArt && !saved; })() ? BUNDLE_LOST : ''
-  ));
+  // A stored 'bundle' with no crosshair of its own (saved before designs
+  // carried one) silently becomes 'none' when this browser's Crosshair page
+  // storage is empty too (usableCrosshair); the player never asked for
+  // that, unlike picking Game default themselves, so it is worth a word.
+  const [status, setStatus] = useState(() => {
+    const d = loadDesign(() => newDesign(saved));
+    return d.crosshair === 'bundle' && !d.xhairArt && !saved ? BUNDLE_LOST : '';
+  });
   // Moving cards of a Row or Column team makes it Free (edit.ts's moveCards
   // and freeInPlace do it inside the same edit); say so, since the Layout
   // select that changed is out of sight.
@@ -472,6 +475,23 @@ export default function Hud() {
     return () => { cancelled = true; };
     // `design` is deliberately read only from the closure captured at mount:
     // this effect must run exactly once, not on every subsequent edit.
+  }, []);
+
+  // Mount only: the Crosshair page's Open in the HUD editor button lands
+  // here with ?from=crosshair, having just saved its crosshair. It goes into
+  // the design as one step (so Undo gives back the crosshair the design had)
+  // and is selected, showing the builder. A new design already carries it,
+  // and then the step changes nothing and records nothing.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get('from') !== 'crosshair') return;
+    q.delete('from');
+    const rest = q.toString();
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
+    if (!saved) { setStatus('No crosshair was saved on the Crosshair page, so there was nothing to bring in.'); return; }
+    edit((d) => ({ ...d, crosshair: 'bundle', xhairArt: structuredClone(saved) }));
+    setSel({ kind: 'elements', ids: ['xhair'] });
+    setStatus(FROM_PAGE);
   }, []);
 
   const pointerUnits = (e: { clientX: number; clientY: number }) => toUnits(e, canvas.current!.getBoundingClientRect());
@@ -935,7 +955,7 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} crosshair={crosshair} />
+          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
         </Panel>
       </div>
 

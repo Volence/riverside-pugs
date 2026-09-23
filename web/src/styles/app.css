@@ -274,10 +274,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__note { margin-top: var(--sp-2); }
 /* A note the player has to act on (the addon load order, no crosshair at all). */
 .hud__warn { color: var(--text); border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
-/* The bundled crosshair's texture beside its note. */
-.hud__xhairbundle { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
-.hud__xhairbundle .hud__note { margin-top: 0; }
-.hud__xhairpreview { width: 64px; height: 64px; flex: none; border-radius: 4px; }
+/* The custom crosshair: its zoomed texture above the Crosshair page's own builder controls. */
+.hud__xhair { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); min-width: 0; }
+.hud__xhairpreview { width: 128px; height: 128px; flex: none; border-radius: 4px; image-rendering: pixelated; }
 .hud__reset { margin-top: var(--sp-4); }
 
 /* The six align buttons of a group, in one wrapping row. */

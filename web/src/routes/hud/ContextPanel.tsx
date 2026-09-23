@@ -14,7 +14,6 @@ import {
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
-import type { CrosshairState } from '../../crosshair/draw';
 import { CrosshairControls } from './CrosshairControls';
 import { TEAMMATES, type Selection } from '../../hud/selection';
 import {
@@ -124,7 +123,7 @@ export function TeamControls(
  * rather than blanks.
  */
 export function ElementControls(
-  { design, edit, end, id, crosshair = null }: { design: HudDesign; edit: Edit; end: () => void; id: string; crosshair?: CrosshairState | null },
+  { design, edit, end, id }: { design: HudDesign; edit: Edit; end: () => void; id: string },
 ) {
   const el = elementById(id);
   if (!el) return null;
@@ -171,7 +170,7 @@ export function ElementControls(
         <p class="muted hud__note">The game places this one. It can be hidden but not moved.</p>
       )}
 
-      {id === 'xhair' && <CrosshairControls design={design} edit={edit} crosshair={crosshair} />}
+      {id === 'xhair' && <CrosshairControls design={design} edit={edit} end={end} full />}
 
       {id === 'siHealth' && (
         <p class="muted hud__note">Shown as the Hunter; the Tank uses the same file.</p>
@@ -496,10 +495,8 @@ export function CardsControls(
 
 /** The right-hand panel: only what the selection can do. */
 export function ContextPanel(
-  { design, sel, edit, end, onSelect, onWentFree, crosshair }: {
+  { design, sel, edit, end, onSelect, onWentFree }: {
     design: HudDesign; sel: Selection; edit: Edit; end: () => void; onSelect: (s: Selection) => void; onWentFree: () => void;
-    /** The crosshair saved on the Crosshair page, or null: what a 'bundle' ships. */
-    crosshair: CrosshairState | null;
   },
 ) {
   switch (sel.kind) {
@@ -507,12 +504,12 @@ export function ContextPanel(
       return (
         <>
           <p class="muted">Select an element on the canvas or in Layers. A click picks the piece under the pointer; a drag moves the card or element under it.</p>
-          <CrosshairControls design={design} edit={edit} crosshair={crosshair} />
+          <CrosshairControls design={design} edit={edit} end={end} />
         </>
       );
     case 'elements':
       return sel.ids.length === 1
-        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} crosshair={crosshair} />
+        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} />
         : <ElementsControls design={design} edit={edit} ids={sel.ids} />;
     case 'cards':
       return sel.cards.length === 1
