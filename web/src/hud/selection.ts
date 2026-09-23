@@ -17,8 +17,8 @@
  */
 import { baseTeam, type Box, type HudDesign } from './design';
 import { elementById } from './elements';
-import { cardChild, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
-import { childRects, hiddenInState, type CardState } from './render';
+import { cardChild, cardFrame, elementRect, isFreeTeam, teamCardRects, type CardFrame } from './build';
+import { childRects, hiddenInState, type CardState, type ChildRect } from './render';
 import { childAt, hitTest, inside, TEAM_CARDS, visibleElements, type Side } from './mock';
 import { TEAM_PANEL, teamChild } from './children';
 import { screenW, SCREEN_H } from './units';
@@ -302,6 +302,24 @@ export function elementFrame(design: HudDesign, id: string): Box {
   return plain(elementRect(design, id, design.aspect));
 }
 
+/**
+ * A selected piece's frame, from a childRects entry: as drawn, or, for a
+ * piece the player hid, from cardChild instead. hidePass (build.ts) zeroes a
+ * hidden piece's wide and tall in the generated tree so the game can't force
+ * it visible, but that would collapse its frame to a point at its (still
+ * correct) origin. cardChild reads cardWork, which never runs hidePass, so
+ * its w and h are the piece's real, undoctored size; only that size needs
+ * scaling by the team's own scale, to match childRects' already-scaled
+ * numbers (cardChild's frame is unscaled, the file's own stored one).
+ */
+function pieceFrame(design: HudDesign, r: ChildRect): Box {
+  if (r.visible) return plain(r);
+  const c = cardChild(design, r.name);
+  if (!c) return plain(r);
+  const k = cardFrame(design).k;
+  return { x: r.x, y: r.y, w: c.w * k, h: c.h * k };
+}
+
 /** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, each picked card, a piece in every card. */
 export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
   switch (sel.kind) {
@@ -313,7 +331,7 @@ export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
     }
     case 'children':
       return drawnCards(design).flatMap((c) => childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)
-        .filter((r) => sel.names.includes(r.name)).map(plain));
+        .filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r)));
   }
 }
 
@@ -321,7 +339,7 @@ export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
 export function selectionBox(design: HudDesign, sel: Selection): Box | null {
   if (sel.kind === 'children') {
     const c = teamCardRects(design, design.aspect)[sel.card];
-    return unionBox(childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1).filter((r) => sel.names.includes(r.name)).map(plain));
+    return unionBox(childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1).filter((r) => sel.names.includes(r.name)).map((r) => pieceFrame(design, r)));
   }
   return unionBox(selectionFrames(design, sel));
 }

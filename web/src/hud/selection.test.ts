@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
-import { teamCardRects, cardFrame } from './build';
+import { DEFAULT_DESIGN, type HudDesign, type Box } from './design';
+import { teamCardRects, cardFrame, cardChild } from './build';
 import { childRects, type CardState } from './render';
 import { withTeamDir, patchChild } from './edit';
 import {
@@ -277,6 +277,39 @@ describe('what the canvas draws for a selection', () => {
   it("boxes several pieces in the card they were picked in", () => {
     expect(selectionBox(D, { kind: 'children', names: ['Head', 'Health'], card: 1 })).toEqual({ x: 153, y: 443, w: 120, h: 23 });
     expect(selectionBox(D, NONE)).toBeNull();
+  });
+
+  // buildTrees runs hidePass, so a piece the player hid is 0 x 0 in the
+  // generated tree childRects reads; picking it in Layers must still show a
+  // real frame, from cardChild (which cardWork never hides), not a point.
+  it('frames a hidden piece by its real size, not the 0x0 buildTrees writes for it', () => {
+    const hidden = patchChild(D, 'BackgroundImage', { visible: false });
+    const cards = teamCardRects(hidden, hidden.aspect).slice(0, 3);
+    const zeroedIn = (c: Box) => childRects(hidden, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'BackgroundImage')!;
+    for (const c of cards) expect([zeroedIn(c).w, zeroedIn(c).h]).toEqual([0, 0]);   // pins the trap this fix works around
+
+    // The fitted splatter is card.w wide (the fit rule in fitStateArt), not
+    // 0: cardChild reads it from cardWork, which never runs hidePass.
+    const real = cardChild(hidden, 'BackgroundImage')!;
+    expect(real.w).toBeGreaterThan(0);
+    expect(real.h).toBeGreaterThan(0);
+    const frames = selectionFrames(hidden, { kind: 'children', names: ['BackgroundImage'], card: 0 });
+    expect(frames).toEqual(cards.map((c) => ({ x: zeroedIn(c).x, y: zeroedIn(c).y, w: real.w, h: real.h })));
+    expect(selectionBox(hidden, { kind: 'children', names: ['BackgroundImage'], card: 0 })).toEqual(frames[0]);
+  });
+
+  // A mixed group's union must use the hidden piece's real footprint, not
+  // the point buildTrees zeroes it to: pinned against that old, buggy union.
+  it("does not stretch a mixed group's union box to a hidden piece's zeroed origin", () => {
+    const hidden = patchChild(D, 'BackgroundImage', { visible: false });
+    const card = teamCardRects(hidden, hidden.aspect)[0];
+    const zeroed = childRects(hidden, 'teamColumn', { x: card.x, y: card.y }, 1).find((r) => r.name === 'BackgroundImage')!;
+    const headBox = selectionBox(hidden, { kind: 'children', names: ['Head'], card: 0 })!;
+    const mixedBox = selectionBox(hidden, { kind: 'children', names: ['Head', 'BackgroundImage'], card: 0 })!;
+    const oldBuggyBox = unionBox([headBox, { x: zeroed.x, y: zeroed.y, w: 0, h: 0 }])!;
+    expect(mixedBox).not.toEqual(oldBuggyBox);
+    const bgFrame = selectionFrames(hidden, { kind: 'children', names: ['BackgroundImage'], card: 0 })[0];
+    expect(mixedBox).toEqual(unionBox([headBox, bgFrame]));
   });
 
   it('offers the handles the spec table lists', () => {
