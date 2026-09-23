@@ -1431,7 +1431,7 @@ describe('Hud page', () => {
       render(<Hud />);
       pick();
       fireEvent.click(screen.getByRole('button', { name: 'Ammo only' }));
-      expect(box('Numbers in from box edge').value).toBe('48');
+      expect(box('Numbers in from box edge').value).toBe('42'); // AmmoX 48 less the inset of 6
       expect(box('Item size').value).toBe('0');
       expect((screen.getByRole('combobox', { name: 'Active box' }) as HTMLSelectElement).value).toBe('hidden');
       expect((screen.getByRole('checkbox', { name: 'Weapon pictures' }) as HTMLInputElement).checked).toBe(false);

@@ -544,8 +544,10 @@ describe('the weapon selection', () => {
       const ws = kvFind(parseKv(fileText(files, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection'])!;
       const want: Record<string, string> = {
         xpos: 'c-10', ypos: 'c-12', wide: '100', PrimaryWeaponsYPos: '12',
-        PrimaryWeaponBoxWide: '0', PrimaryWeaponBoxTall: '0', PistolBoxWide: '0', PistolBoxTall: '0',
-        RightSideIndent: '0', PrimaryWeaponAmmoX: '48', ReserveAmmoYPos: '0', IconSize: '0', PrimaryWeaponTall: '20',
+        // Two changes from probe B, both from the owner's tests 1 and 3: a PistolBoxTall of -5
+        // lifts the pistol row onto the clip's line, and an inset of 6 keeps its clip inside the panel.
+        PrimaryWeaponBoxWide: '0', PrimaryWeaponBoxTall: '0', PistolBoxWide: '0', PistolBoxTall: '-5',
+        RightSideIndent: '6', PrimaryWeaponAmmoX: '48', ReserveAmmoYPos: '0', IconSize: '0', PrimaryWeaponTall: '20',
         // Probe B named HudAmmo for the clip; the editor sizes the clip's own font to HudAmmo's 18, the same face.
         PrimaryAmmoFont: 'HudEd_HudAmmoLarge_t18', PistolAmmoFont: 'HudAmmo',
       };
@@ -573,10 +575,21 @@ describe('the weapon selection', () => {
     const [clip, reserve] = primary.texts;
     expect(r.x + clip.x - cx).toBeCloseTo(35.67, 1);        // right edge
     expect(r.x + reserve.x - cx).toBeCloseTo(40.33, 1);     // left edge
-    expect(r.x + pistol.texts[0].x - cx).toBeCloseTo(86, 1);
+    expect(r.x + pistol.texts[0].x - cx).toBeCloseTo(85, 1);
     expect(r.y + clip.y + 9 - cy).toBeCloseTo(0, 6);        // centred on the crosshair
-    expect(pistol.texts[0].y - clip.y).toBeCloseTo(2 * 853 / 640, 6);
     expect(weaponSlots(d, d.aspect, r.w)).toHaveLength(2);
+  });
+
+  it('puts the pistol clip on the same line as the clip, inside the panel, on every aspect', () => {
+    for (const aspect of ['16:9', '16:10', '4:3'] as const) {
+      const d = ammoOnly({ ...structuredClone(DEFAULT_DESIGN), aspect });
+      const r = elementRect(d, 'weaponSelection', aspect);
+      const [primary, pistol] = weaponSlots(d, aspect, r.w);
+      // Keys are whole numbers, so the row lands within half a unit of the clip's.
+      expect(Math.abs(pistol.texts[0].y - primary.texts[0].y), aspect).toBeLessThanOrEqual(0.5);
+      // The text's right edge, with room for the game's active-slot nudge.
+      expect(pistol.texts[0].x, aspect).toBeLessThanOrEqual(r.w - 4);
+    }
   });
 
   it("keeps the player's colours and visibility, and replaces everything else in one design", () => {

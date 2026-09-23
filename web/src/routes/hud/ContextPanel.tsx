@@ -131,7 +131,7 @@ const WEAPON_ROWS: { group: string; rows: { field: WeaponNumKey | 'clipFont' | '
     { field: 'primaryBoxW', label: 'Gun box W', min: 0, max: 200 },
     { field: 'primaryBoxH', label: 'Gun box H', min: 0, max: 200 },
     { field: 'pistolBoxW', label: 'Pistol box W', min: 0, max: 200 },
-    { field: 'pistolBoxH', label: 'Pistol box H', min: 0, max: 200 },
+    { field: 'pistolBoxH', label: 'Pistol box H', min: -40, max: 200 },
     { field: 'iconTall', label: 'Gun picture height', min: 0, max: 200 },
     { field: 'itemSize', label: 'Item size', min: 0, max: 200 },
   ] },
@@ -232,7 +232,7 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
               onInput={(n) => setRow(r.field, n)}
             />
           ))}
-          {g.group === 'Sizes' && <p class="muted hud__note">Item size 0 hides the three item slots.</p>}
+          {g.group === 'Sizes' && <p class="muted hud__note">Item size 0 hides the three item slots. A pistol box below 0 lifts the pistol row: with hidden boxes, about -5 puts its number on the gun's line.</p>}
         </div>
       ))}
       <ColourRow label="Reserve number" value={w.reserveColor ?? weaponKey(design, 'ReserveAmmoColor')} end={end} onPick={(c) => patch({ reserveColor: c })} />

@@ -85,7 +85,12 @@ export const WEAPON_BOX_COLOUR = { boxActive: '40 40 40 215', boxInactive: '0 0 
 /**
  * The HudWeaponSelection keys the game's paint reads (weapons.ts's header,
  * from client.dll, and the owner's probes of 2026-09-23), one field each.
- * `size` fields are 0..200, `offset` fields -200..200. The generator writes
+ * `size` fields are 0..200, `offset` fields -200..200, and `pull` -40..200:
+ * PistolBoxTall may go below 0, because the game starts the pistol row two
+ * 640-units under the gun's box whatever its size, and a negative pistol box
+ * is the one key that lifts the row back onto the clip's line (the owner's
+ * test 3, 2026-09-23; drawn with a hidden box, a negative one shows nothing).
+ * The generator writes
  * each present field into that key; the preview reads the key back.
  */
 export const WEAPON_KEYS = {
@@ -94,14 +99,14 @@ export const WEAPON_KEYS = {
   primaryBoxW: { key: 'PrimaryWeaponBoxWide', range: 'size' },
   primaryBoxH: { key: 'PrimaryWeaponBoxTall', range: 'size' },
   pistolBoxW: { key: 'PistolBoxWide', range: 'size' },
-  pistolBoxH: { key: 'PistolBoxTall', range: 'size' },
+  pistolBoxH: { key: 'PistolBoxTall', range: 'pull' },
   iconTall: { key: 'PrimaryWeaponTall', range: 'size' },
   itemSize: { key: 'IconSize', range: 'size' },
   ammoX: { key: 'PrimaryWeaponAmmoX', range: 'offset' },
   reserveY: { key: 'ReserveAmmoYPos', range: 'offset' },
 } as const;
 export type WeaponNumKey = keyof typeof WEAPON_KEYS;
-const WEAPON_RANGES = { size: [0, 200], offset: [-200, 200], font: [6, 64] } as const;
+const WEAPON_RANGES = { size: [0, 200], offset: [-200, 200], pull: [-40, 200], font: [6, 64] } as const;
 
 /** The same clamp validateDesign applies, for the weapon number boxes and sliders. */
 export function clampWeapon(key: WeaponNumKey | 'clipFont' | 'pistolFont', value: number): number {

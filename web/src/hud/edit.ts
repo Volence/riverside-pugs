@@ -113,9 +113,16 @@ export function patchWeapons(d: HudDesign, p: Partial<WeaponsOverride>): HudDesi
  * panel sits at c-10, c-12 (its 100 wide is both presets' own); the boxes
  * are 0 and Hidden, every picture is off and IconSize 0 drops the item
  * slots; the clip ends 48 in from the panel's right, the reserve follows on
- * the same line and the pistol clip sits at the far end, a fixed two
- * 640-units lower. Probe B named HudAmmo for the clip; here the clip keeps
+ * the same line and the pistol clip sits at the far end. Probe B named HudAmmo for the clip; here the clip keeps
  * its own font at HudAmmo's size, 18, which is the same face.
+ *
+ * Two changes from probe B, from the owner's tests 1 and 3 in game. The
+ * pistol row starts two 640-units under the gun's (zero) box, which put its
+ * clip that much below the line; a PistolBoxTall of minus four 640-units
+ * centres the row back on it. With the box that far up the pistol clip ends
+ * past the panel's right edge and was cut off, so an inset of 6 brings it
+ * back inside; the gun's numbers are measured from the panel, not the inset,
+ * so they stay where probe B had them.
  *
  * One design in, one out, so the page records it as a single undo step. The
  * player's colours and the element's visibility stay; every other weapon
@@ -129,7 +136,7 @@ export function ammoOnly(d: HudDesign): HudDesign {
   if (d.weapons?.inactiveColor) keep.inactiveColor = d.weapons.inactiveColor;
   const weapons: WeaponsOverride = {
     ...keep,
-    primaryY: 12, primaryBoxW: 0, primaryBoxH: 0, pistolBoxW: 0, pistolBoxH: 0, indent: 0,
+    primaryY: 12, primaryBoxW: 0, primaryBoxH: 0, pistolBoxW: 0, pistolBoxH: -Math.round(4 * screenW(d.aspect) / 640), indent: 6,
     ammoX: 48, reserveY: 0, itemSize: 0, clipFont: 18, pistolFont: 18,
     boxActive: { kind: 'hidden' }, boxInactive: { kind: 'hidden' }, weaponIcons: false, itemIcons: false,
   };
