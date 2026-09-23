@@ -35,7 +35,7 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
-import { eligibleReplays, offloadReplay, sweepReplays } from '../src/replayOffload.js';
+import { eligibleReplays, offloadReplay, sweepReplays, validateBackupFile } from '../src/replayOffload.js';
 import { r2FromEnv, type R2Config } from '../src/r2.js';
 import { loadDotEnv } from './dotenv.js';
 
@@ -50,7 +50,16 @@ const commit = args.includes('--commit');
 const limitArg = args.find((a) => a.startsWith('--limit='));
 const limit = limitArg ? Number(limitArg.split('=')[1]) : 1000;
 const backupsIdx = args.indexOf('--backups');
-const backupsDir = backupsIdx >= 0 ? args[backupsIdx + 1] : undefined;
+const backupsArg = backupsIdx >= 0 ? args[backupsIdx + 1] : undefined;
+// --backups with no directory (or one that is really the next flag) must
+// refuse outright rather than silently falling through to the normal sweep:
+// that would run a different mode than the one asked for, over the sweep's
+// own default limit, with no sign anything was wrong.
+if (backupsIdx >= 0 && (backupsArg === undefined || backupsArg.startsWith('--'))) {
+  console.error('--backups requires a directory argument, e.g. --backups /path/to/backups');
+  process.exit(1);
+}
+const backupsDir = backupsArg;
 
 const cfg = loadConfig(process.env);
 const r2 = r2FromEnv();
@@ -103,14 +112,18 @@ async function runSweep(db: DB, r2: R2Config): Promise<void> {
 
 async function runBackups(db: DB, r2: R2Config, backupsDir: string): Promise<void> {
   const rows = db.prepare(
-    `SELECT match_id AS matchId, ordinal, half, filename
+    `SELECT match_id AS matchId, ordinal, half, filename, bytes
        FROM match_replays
       WHERE pruned_at IS NOT NULL AND r2_key IS NULL
       ORDER BY match_id ASC, ordinal ASC, half ASC
       LIMIT ?`,
-  ).all(limit) as { matchId: number; ordinal: number; half: number; filename: string }[];
+  ).all(limit) as { matchId: number; ordinal: number; half: number; filename: string; bytes: number }[];
+
+  console.log(`bucket      : ${r2.bucket}`);
+  console.log(`backups dir : ${backupsDir}`);
 
   const found: { matchId: number; ordinal: number; half: number; filename: string; path: string }[] = [];
+  let invalid = 0;
   for (const row of rows) {
     // Same hardening resolveReplayPath uses: a filename that is not exactly
     // what we write is left alone rather than normalised into something
@@ -119,12 +132,21 @@ async function runBackups(db: DB, r2: R2Config, backupsDir: string): Promise<voi
     if (row.filename !== basename(row.filename) || !NAME_RE.test(row.filename)) continue;
     const path = join(backupsDir, row.filename);
     if (!existsSync(path)) continue;
+    // Once this row's key is recorded the backup becomes the ONLY served
+    // copy of the round: a garbage or partial file that only passed the
+    // filename and existence checks above would be served back to a viewer
+    // with no way for anyone to notice. Reject it here instead.
+    const check = validateBackupFile(path, row.bytes);
+    if (!check.ok) {
+      invalid++;
+      console.log(`  skip match ${row.matchId} ${row.ordinal}/${row.half}  ${row.filename}  (${check.reason})`);
+      continue;
+    }
     found.push({ ...row, path });
   }
 
-  console.log(`bucket      : ${r2.bucket}`);
-  console.log(`backups dir : ${backupsDir}`);
-  console.log(`eligible    : ${found.length} of ${rows.length} pruned-without-key row(s)`);
+  console.log(`eligible    : ${found.length} of ${rows.length} pruned-without-key row(s)`
+    + (invalid > 0 ? ` (${invalid} rejected, see above)` : ''));
 
   if (!commit) {
     for (const row of found) console.log(`  match ${row.matchId} ${row.ordinal}/${row.half}  ${row.filename}`);

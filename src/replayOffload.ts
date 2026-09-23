@@ -1,4 +1,6 @@
-import { readFileSync, statSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import {
+  readFileSync, statSync, writeFileSync, rmSync, mkdtempSync, openSync, readSync, closeSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DB } from './db.js';
@@ -79,6 +81,50 @@ export function eligibleReplays(
     console.log(`[replayOffload] ${skipped} row(s) considered but none eligible; the backlog may be stuck`);
   }
   return { eligible, skipped };
+}
+
+export interface BackupCheckResult {
+  ok: boolean;
+  /** Set when `ok` is false: why the file was skipped. */
+  reason?: string;
+}
+
+/**
+ * Checked before `scripts/offload-replays.ts --backups` uploads a workstation
+ * backup copy: the header must decode, the file must be closed (frameCount
+ * not 0), and its size must equal the row's recorded `bytes`. Those rows were
+ * pruned on the box already, so once a backup's key is recorded it becomes
+ * the ONLY served copy: a garbage or partial file passing only the filename
+ * check would be served back to a viewer with no way to notice.
+ *
+ * Reads just the header (like `resolveReplayPath`'s discovery does), not the
+ * whole file, so checking a batch of backups before upload stays cheap.
+ */
+export function validateBackupFile(path: string, expectedBytes: number): BackupCheckResult {
+  let size: number;
+  try {
+    size = statSync(path).size;
+  } catch {
+    return { ok: false, reason: 'file not found' };
+  }
+  if (size !== expectedBytes) {
+    return { ok: false, reason: `size ${size} does not match the row's ${expectedBytes} bytes` };
+  }
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, 'r');
+    const buf = Buffer.alloc(HEADER_BYTES);
+    const got = readSync(fd, buf, 0, HEADER_BYTES, 0);
+    if (got < HEADER_BYTES) return { ok: false, reason: 'file is shorter than the header' };
+    const h = decodeHeader(buf);
+    if (!h) return { ok: false, reason: 'header does not decode' };
+    if (h.frameCount === 0) return { ok: false, reason: 'never closed (frameCount is 0)' };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  } finally {
+    if (fd !== null) try { closeSync(fd); } catch { /* nothing useful to do */ }
+  }
 }
 
 /**
