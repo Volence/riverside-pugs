@@ -120,7 +120,7 @@ const HEALTH_TINT_CHILDREN = new Set(['healthbartexturetop', 'healthbartexturebo
 const CARD_NAMES = ['Francis', 'Louis', 'Zoey'];
 const CARD_PORTRAITS = ['vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_teenangst'];
 const OWN_PORTRAIT = 'vgui/s_panel_namvet';
-const PREVIEW_FONT = '"Roboto Condensed", "Arial Narrow", sans-serif';
+export const PREVIEW_FONT = '"Roboto Condensed", "Arial Narrow", sans-serif';
 
 const portraitFor = (opts: DrawOpts) => (opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length]);
 
@@ -162,7 +162,7 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
  * skips fontPass, which on the stock preset with Roboto renames both Trade
  * Gothic faces to plain "Roboto Condensed", so that rename is applied here.
  */
-function fontFace(design: HudDesign, name: string): { tall: number; bold: boolean } {
+export function fontFace(design: HudDesign, name: string): { tall: number; bold: boolean } {
   const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
   const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
   if (!first) return { tall: 12, bold: false };
@@ -173,13 +173,13 @@ function fontFace(design: HudDesign, name: string): { tall: number; bold: boolea
 }
 
 /** Base files use scheme colour names; the generator never writes one, but the preview has to read them. */
-function colourOf(design: HudDesign, value: string | undefined): string {
+export function colourOf(design: HudDesign, value: string | undefined): string {
   const [r, g, b, a] = rgbaOf(design, value);
   return `rgba(${r},${g},${b},${a / 255})`;
 }
 
 /** The same colour as numbers: a literal "r g b a", or a scheme colour name, white when there is none. */
-function rgbaOf(design: HudDesign, value: string | undefined): [number, number, number, number] {
+export function rgbaOf(design: HudDesign, value: string | undefined): [number, number, number, number] {
   if (!value) return [255, 255, 255, 255];
   let raw = value.trim();
   if (!/^\d+ \d+ \d+ \d+$/.test(raw)) {
@@ -215,6 +215,9 @@ export function _setImageFactory(f: ((url: string) => HTMLImageElement) | null):
 const images = new Map<string, HTMLImageElement>();
 const missing = new Set<string>();
 
+/** Whether a material's art is missing (not in the index, or its file failed to load), as opposed to still loading. */
+export const isMissing = (material: string): boolean => missing.has(material);
+
 function markMissing(material: string, why: string) {
   if (!missing.has(material)) { missing.add(material); console.warn(`HUD preview: ${why} ${material}`); }
 }
@@ -226,7 +229,7 @@ function markMissing(material: string, why: string) {
  * the cache incomplete and draw nothing for ever, so the error marks it
  * missing (the child hatches instead) and asks for a redraw to show that.
  */
-function artImage(material: string, onAsset?: () => void): HTMLImageElement | undefined {
+export function artImage(material: string, onAsset?: () => void): HTMLImageElement | undefined {
   if (missing.has(material)) return undefined;
   let img = images.get(material);
   if (!img) {
@@ -314,7 +317,7 @@ function defaultCanvas(w: number, h: number): HTMLCanvasElement | null {
 export function _setCanvasFactory(f: ((w: number, h: number) => HTMLCanvasElement | null) | null): void { canvasFactory = f ?? defaultCanvas; }
 const tints = new Map<string, CanvasImageSource>();
 
-function tinted(img: HTMLImageElement, material: string, r: number, g: number, b: number): CanvasImageSource {
+export function tinted(img: HTMLImageElement, material: string, r: number, g: number, b: number): CanvasImageSource {
   const key = `${material}|${r},${g},${b}`;
   const cached = tints.get(key);
   if (cached) return cached;
@@ -336,7 +339,7 @@ function tinted(img: HTMLImageElement, material: string, r: number, g: number, b
 /** Test seam: forget every loaded image, tint and warned-about material. */
 export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); warnedNoIcons = false; }
 
-function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
+export function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();
   ctx.fillStyle = 'rgba(128,128,128,0.35)';
   ctx.fillRect(r.x, r.y, r.w, r.h);

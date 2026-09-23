@@ -196,6 +196,26 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(redFills.length).toBe(3);   // one per teammate card
   });
 
+  it('draws the weapon selection from the game art, clipped to its element, with no stand-in boxes', () => {
+    // The game paints the slots inside the HudWeaponSelection panel and VGUI
+    // clips that paint to the panel, so the preview clips to elementRect.
+    _setImageFactory(instant);
+    const srcs: string[] = [];
+    const rects: number[][] = [];
+    const fills: string[] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.drawImage = ((img: HTMLImageElement) => { srcs.push(img.src); }) as unknown as typeof ctx.drawImage;
+    ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
+    const realFill = ctx.fillRect.bind(ctx);
+    ctx.fillRect = ((...a: [number, number, number, number]) => { fills.push(ctx.fillStyle as string); return realFill(...a); }) as typeof ctx.fillRect;
+    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null);
+    expect(srcs).toContain(artUrl('vgui/hud/scalablepanel_bgmidgrey_glow'));
+    for (const n of ['pumpshotgun', 'dualpistols', 'molotov', 'medkit', 'pills']) expect(srcs).toContain(artUrl(`icon/equip/${n}`));
+    const w = elementRect(DEFAULT_DESIGN, 'weaponSelection', DEFAULT_DESIGN.aspect);
+    expect(rects).toContainEqual([w.x, w.y, w.w, w.h]);
+    expect(fills).not.toContain('rgba(210,190,60,0.85)');
+  });
+
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
     const green = artUrl('vgui/healthbar_green')!;

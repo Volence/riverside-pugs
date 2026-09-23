@@ -165,7 +165,7 @@ function pcEntries(block: KvNode, key: string): KvNode[] {
   return block.value.filter((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string'
     && (!n.cond || n.cond.toUpperCase() === '[$WIN32]'));
 }
-function pcGet(block: KvNode, key: string): string | undefined { return pcEntries(block, key)[0]?.value as string | undefined; }
+export function pcGet(block: KvNode, key: string): string | undefined { return pcEntries(block, key)[0]?.value as string | undefined; }
 /** Set every entry the PC reads; with none, add a plain one, never overwriting a console-only ([$X360]) entry. */
 export function pcSet(block: KvNode, key: string, value: string) {
   const hits = pcEntries(block, key);

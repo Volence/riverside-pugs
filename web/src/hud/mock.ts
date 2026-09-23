@@ -7,8 +7,9 @@
  * Four elements (ownHealth, teamColumn, infectedRow, siHealth) are drawn
  * straight from the generated .res files by render.ts's drawPanel, with the
  * real exported game art, so an edit to a slot or a scale is an edit to the
- * picture. Every other element here is still a hand-made stand-in drawn from
- * plain shapes and text.
+ * picture. The weapon selection is drawn by weapons.ts from its hudlayout.res
+ * keys, the way the game's own code lays it out. Every other element here is
+ * still a hand-made stand-in drawn from plain shapes and text.
  */
 import type { Box, HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
@@ -19,6 +20,7 @@ import { SCREEN_H } from './units';
 import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, type CardState } from './render';
 import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
+import { drawWeapons } from './weapons';
 
 export type Side = 'survivor' | 'infected';
 
@@ -200,15 +202,15 @@ function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesi
   });
 }
 
-function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect) {
-  const slots = 5;
-  const gap = 2;
-  const boxH = (r.h - gap * (slots - 1)) / slots;
-  for (let i = 0; i < slots; i++) {
-    const y = r.y + i * (boxH + gap);
-    ctx.fillStyle = i === 1 ? 'rgba(210,190,60,0.85)' : 'rgba(0,0,0,0.5)';
-    ctx.fillRect(r.x, y, r.w, boxH);
-  }
+/**
+ * The weapon slots, drawn as the game paints them (weapons.ts) with the
+ * sample loadout. The game paints inside the HudWeaponSelection panel and
+ * VGUI clips that paint to the panel, so the preview clips to the element's
+ * rect: the top of the shotgun, which the game centres on its box's top edge,
+ * is cut where the panel starts, as in game.
+ */
+function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  clipToRect(ctx, r, () => drawWeapons(ctx, design, { x: r.x, y: r.y }, k, r.w / k, onAsset));
 }
 
 function paintChat(ctx: CanvasRenderingContext2D, r: Rect) {
@@ -414,8 +416,8 @@ function drawGuides(ctx: CanvasRenderingContext2D, guides: Guide[], k: number) {
  * is designed to read against that backdrop, not against a blank canvas.
  *
  * ownHealth, teamColumn, infectedRow and siHealth are drawn from the
- * generated .res files by render.ts, not as stand-ins here; the rest are
- * hand-made approximations. `onAsset` is passed through to every drawPanel
+ * generated .res files by render.ts, and the weapon selection by weapons.ts,
+ * not as stand-ins here; the rest are hand-made approximations. `onAsset` is passed through to every drawPanel
  * call so a texture that finishes loading after this call returns can
  * trigger a redraw. `view` carries what the page shows beyond the design:
  * the teammate card state and the selection chrome, drawn over everything else.
