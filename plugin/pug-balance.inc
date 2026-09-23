@@ -184,10 +184,11 @@ void BalanceScanStatic()
 	PugDebug("balance scan: %d items in %.1f ms", g_hBalStatic.Length, (GetEngineTime() - t0) * 1000.0);
 }
 
-/** Append one item, flushing the line first when it would pass BAL_LINE_MAX. */
+/** Append one item, flushing the line first when it would reach BAL_LINE_MAX,
+ *  so a line body always stays strictly under 600 bytes. */
 static void BalAppend(char[] line, int maxlen, const char[] item, int &part, int &items, bool &dirty)
 {
-	if (dirty && strlen(line) + strlen(item) + 1 > BAL_LINE_MAX)
+	if (dirty && strlen(line) + strlen(item) + 1 >= BAL_LINE_MAX)
 	{
 		EmitPug("%s", line);
 		part++;
