@@ -5,6 +5,8 @@ import { openDb } from '../src/db.js';
 import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { addServer } from '../src/serverPool.js';
+import { fingerprintOf } from '../src/balancePatches.js';
+import { loadBalanceKnobs } from '../src/balanceKnobs.js';
 
 // Copied verbatim from tests/logAuthWiring.test.ts.
 function freeUdpPort(): Promise<number> {
@@ -111,5 +113,24 @@ describe('balance lines end to end', () => {
     const round = db.prepare('SELECT patch_id FROM match_rounds WHERE match_id = 1').get() as { patch_id: number | null };
     expect(round.patch_id).toBeNull();
     expect(db.prepare('SELECT COUNT(*) AS n FROM balance_server_state').get()).toEqual({ n: 0 });
+  });
+
+  it('refingerprints stored patches at boot with the loaded knobs', async () => {
+    const port = await freeUdpPort();
+    const db = openDb(':memory:');
+    // Two detected patches recorded before l4d2_spec_stays_spec.smx was on
+    // the ignored list: the only difference between them is that plugin.
+    const inv = { 'c:z_tank_health': '4000' };
+    const withSpec = { ...inv, 'p:l4d2_spec_stays_spec.smx': '10.aaaa0001' };
+    const ins = db.prepare("INSERT INTO balance_patches (fingerprint, source, inputs_json, first_seen_at) VALUES (?, 'detected', ?, ?)");
+    ins.run(fingerprintOf(inv, []), JSON.stringify(inv), '2026-09-01 00:00:00');
+    ins.run(fingerprintOf(withSpec, []), JSON.stringify(withSpec), '2026-09-02 00:00:00');
+    const app = await buildServer({ config: { ...loadConfig({}), devMode: false, logListenPort: port }, db });
+    close = () => app.close();
+    const knobs = loadBalanceKnobs();
+    expect(db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all()).toEqual([
+      { id: 1, fingerprint: fingerprintOf(inv, knobs.versionless, knobs.ignored) },
+      { id: 2, fingerprint: null },
+    ]);
   });
 });

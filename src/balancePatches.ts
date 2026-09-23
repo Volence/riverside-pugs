@@ -76,6 +76,12 @@ export function recordBalanceSighting(db: DB, s: {
         .run(patchId, s.serverId, now, now);
       const prev = db.prepare('SELECT patch_id, inventory_json FROM balance_server_state WHERE server_id = ?')
         .get(s.serverId) as { patch_id: number; inventory_json: string } | undefined;
+      if (prev && prev.inventory_json === invJson && prev.patch_id !== patchId) {
+        // Same inventory, different patch: the boot refingerprint merged the
+        // patch this server was on into an older one. Nothing about the box
+        // changed, so follow the patch silently rather than alert.
+        db.prepare('UPDATE balance_server_state SET patch_id = ? WHERE server_id = ?').run(patchId, s.serverId);
+      }
       if (!prev || prev.inventory_json !== invJson) {
         serverChanged = true;
         db.prepare(`INSERT INTO balance_server_state (server_id, patch_id, inventory_json, since) VALUES (?, ?, ?, ?)
@@ -93,6 +99,79 @@ export function recordBalanceSighting(db: DB, s: {
       }
     }
     return { patchId, newPatch, serverChanged };
+  })();
+}
+
+const patchNumbers = (db: DB): Map<number, number> => new Map((db.prepare(
+  'SELECT id, ROW_NUMBER() OVER (ORDER BY first_seen_at, id) AS number FROM balance_patches',
+).all() as { id: number; number: number }[]).map((r) => [r.id, r.number]));
+
+/** Boot step: recompute every detected patch's fingerprint under the current
+ *  versionless and ignored plugin lists, so a knobs.json change to either
+ *  list takes effect on patches already in the database, not only on new
+ *  sightings (otherwise the next sighting of an unchanged box would hash
+ *  differently and open a spurious new patch).
+ *
+ *  Only detected patches that still hold a fingerprint and have inputs are
+ *  recomputed. A fingerprint that stays unique is updated in place. When two
+ *  or more patches now hash the same, the oldest (first_seen_at, then id)
+ *  keeps the fingerprint and the others are set to NULL: they keep their
+ *  already-tagged rounds and their history, but new sightings go to the
+ *  keeper. If the new fingerprint is already held by a patch this step does
+ *  not recompute (an announced patch, say), that holder keeps it and every
+ *  recomputed patch landing on it is merged into it. One admin 'problem'
+ *  event lists all the merges. A NULLed patch is skipped on the next run, so
+ *  running this again with the same lists changes nothing and posts nothing.
+ *
+ *  Called from buildServer right after balance/knobs.json loads (that is
+ *  where the lists are known; openDb has no knobs). */
+export function refingerprintPatches(db: DB, versionless: string[], ignored: string[],
+  publish: (e: { kind: 'problem'; text: string }) => void = publishAdminEvent,
+): { updated: number; merged: { keep: number; into: number[] }[] } {
+  return db.transaction(() => {
+    const rows = db.prepare(`SELECT id, fingerprint, inputs_json, first_seen_at FROM balance_patches
+      WHERE source = 'detected' AND inputs_json IS NOT NULL AND fingerprint IS NOT NULL
+      ORDER BY first_seen_at, id`).all() as { id: number; fingerprint: string; inputs_json: string; first_seen_at: string }[];
+    const mine = new Set(rows.map((r) => r.id));
+    const groups = new Map<string, number[]>();
+    for (const r of rows) {
+      let fp: string;
+      try {
+        fp = fingerprintOf(JSON.parse(r.inputs_json) as Inventory, versionless, ignored);
+      } catch {
+        continue; // unreadable inputs: leave the patch exactly as it is
+      }
+      const g = groups.get(fp) ?? [];
+      g.push(r.id);
+      groups.set(fp, g);
+    }
+    const current = new Map(rows.map((r) => [r.id, r.fingerprint]));
+    const holderOf = db.prepare('SELECT id FROM balance_patches WHERE fingerprint = ?');
+    const want = new Map<number, string | null>();
+    const merged: { keep: number; into: number[] }[] = [];
+    for (const [fp, ids] of groups) {
+      const holder = holderOf.get(fp) as { id: number } | undefined;
+      const keep = holder && !mine.has(holder.id) ? holder.id : ids[0];
+      for (const id of ids) want.set(id, id === keep ? fp : null);
+      const others = ids.filter((id) => id !== keep);
+      if (others.length > 0) merged.push({ keep, into: others });
+    }
+    const changed = [...want].filter(([id, fp]) => current.get(id) !== fp);
+    // Clear first, then set, so a fingerprint moving from one row to another
+    // never trips the UNIQUE constraint halfway through.
+    const setFp = db.prepare('UPDATE balance_patches SET fingerprint = ? WHERE id = ?');
+    for (const [id] of changed) setFp.run(null, id);
+    for (const [id, fp] of changed) if (fp !== null) setFp.run(fp, id);
+    if (merged.length > 0) {
+      const num = patchNumbers(db);
+      const tag = (id: number) => `#${num.get(id)} (id ${id})`;
+      const text = 'Balance patches merged after the versionless/ignored plugin lists changed: '
+        + merged.map((m) => `${m.into.map(tag).join(', ')} into ${tag(m.keep)}`).join('; ')
+        + '. The merged patches keep the rounds already tagged with them; new rounds go to the patch they were merged into.';
+      console.warn(`[balance] ${text}`);
+      publish({ kind: 'problem', text });
+    }
+    return { updated: changed.filter(([, fp]) => fp !== null).length, merged };
   })();
 }
 

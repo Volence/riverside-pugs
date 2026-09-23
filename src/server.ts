@@ -87,7 +87,7 @@ import {
 } from './liveView.js';
 import { BalanceAssembler } from './balanceAssembler.js';
 import { loadBalanceKnobs, BALANCE_KNOBS_PATH, type BalanceKnobs } from './balanceKnobs.js';
-import { recordBalanceSighting } from './balancePatches.js';
+import { recordBalanceSighting, refingerprintPatches } from './balancePatches.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
@@ -614,6 +614,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // reads its counters either way. See src/logAuth.ts.
   const logAuth = new LogAuth(deps.db, deps.config.logPublicAddress.split(':')[0]);
 
+  // Admin 'problem' events raised during boot, before anything is listening
+  // on the admin feed (the Discord poster subscribes only once the bot has
+  // connected). Posted from onConnected below, once.
+  const bootProblems: string[] = [];
+
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
@@ -648,6 +653,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           'balance patch recording is disabled until this is fixed:', err,
         );
         balanceKnobs = null;
+      }
+      // Bring stored fingerprints in line with the versionless/ignored lists
+      // just loaded, before the first sighting can hash against them. Here,
+      // not in openDb, because this is the one place the knobs are known.
+      if (balanceKnobs) {
+        try {
+          refingerprintPatches(deps.db, balanceKnobs.versionless, balanceKnobs.ignored ?? [], (e) => bootProblems.push(e.text));
+        } catch (err) {
+          console.error('[balance] refingerprinting patches failed:', err);
+        }
       }
       const liveMatchRow = (token: string) =>
         deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
@@ -1316,6 +1331,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       onConnected: (t) => {
         adminFeed = new AdminFeedPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         adminFeed.start();
+        for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
         // Built before the reconciler so its hook can reach it. Which of the
         // two starts first decides nothing: start() only queues a first pass
         // on each one's own chain, and a thread the reconciler creates has
