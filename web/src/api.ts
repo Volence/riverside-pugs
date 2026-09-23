@@ -849,7 +849,11 @@ export interface AuditEntry {
 
 export interface PatchSummary {
   id: number; number: number; name: string | null; notes: string;
-  source: 'announced' | 'detected' | 'historical'; firstSeenAt: string; reviewed: boolean; rounds: number;
+  source: 'announced' | 'detected' | 'historical'; firstSeenAt: string; reviewed: boolean;
+  /** Every round tagged with this patch (live, voided and unfinished included). */
+  rounds: number;
+  /** Rounds the comparison uses: computed rounds of completed, non-voided matches. */
+  countedRounds: number;
   servers: { serverId: number; name: string; lastSeenAt: string }[];
 }
 export interface PatchDetail extends PatchSummary {
@@ -866,6 +870,7 @@ export interface SideSummary {
   matches: number;
   rounds: number;
   meanMu: number | null;
+  /** Mean team rating mismatch, |survivor mu - infected mu| per round. */
   meanGap: number | null;
   olderEngineRounds: number;
   historical: boolean;
@@ -886,6 +891,8 @@ export interface CompareRow {
   verdict: Verdict;
   moreMatches: number | null;
   excludedMaps: string[];
+  /** Both sides have data, but on no common map. */
+  noSharedMaps: boolean;
   nA: number;
   nB: number;
 }
@@ -902,12 +909,15 @@ export interface CompareResult {
 export interface TrendPoint { matchId: number; endedAt: string; patchId: number | null; side: 'a' | 'b'; value: number }
 export interface MapBar { map: string; a: number; b: number; roundsA: number; roundsB: number }
 export interface ExampleRound { matchId: number; ordinal: number; half: number; map: string | null; value: number }
+export interface PatchValue { patchId: number; label: string; value: number | null; matches: number }
 export interface MetricDetail {
   metric: string;
   phase: Phase;
   trend: TrendPoint[];
   boundaries: { patchId: number; label: string; at: string }[];
   perMap: MapBar[];
+  /** Every selected patch's own pooled value, oldest first. */
+  perPatch: PatchValue[];
   examples: ExampleRound[];
 }
 

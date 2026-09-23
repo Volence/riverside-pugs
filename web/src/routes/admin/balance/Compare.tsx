@@ -3,14 +3,17 @@ import { useLocation } from 'preact-iso';
 import { adminApi, type CompareQuery, type CompareRow, type PatchSummary, type Verdict } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
-import { fmtChange, fmtValue, GROUP_LABEL, readCompareQuery, VERDICT_LABEL, writeCompareQuery } from './format';
+import { fmtChange, fmtMoreMatches, fmtValue, GROUP_LABEL, readCompareQuery, VERDICT_LABEL, writeCompareQuery } from './format';
 import { QuickCheck } from './QuickCheck';
 
 type CompareQueryWithView = CompareQuery & { view: 'ranked' | 'topic' };
 
 const VERDICTS: Verdict[] = ['real', 'too_early', 'noise', 'no_data'];
 const PHASE_FILTERS = ['any', 'all', 'tank', 'witch', 'event', 'normal'] as const;
-const patchLabel = (p: PatchSummary) => `${p.name ?? `Unnamed patch ${p.number}`} (${p.rounds} rounds)`;
+const patchName = (p: PatchSummary) => p.name ?? `Unnamed patch ${p.number}`;
+/** The picker shows the rounds the comparison would actually use, not every
+ *  tagged round (the Patches tab keeps that raw total). */
+const patchLabel = (p: PatchSummary) => `${patchName(p)} (${p.countedRounds} rounds counted)`;
 
 /** Picks two groups of patches and shows every metric's verdict against them,
  *  Ranked or grouped By topic. The row-click expansion (QuickCheck) is a
@@ -31,7 +34,7 @@ export function Compare() {
   const patches = useFetch((s) => adminApi.balancePatches(s), []);
   const list = patches.data?.patches ?? [];
   const oldestFirst = list.map((p) => p.id);
-  const q = readCompareQuery(location.search, oldestFirst);
+  const q = readCompareQuery(location.search, oldestFirst, list.filter((p) => p.countedRounds > 0).map((p) => p.id));
   const set = (next: Partial<CompareQueryWithView>) => route(`/admin/balance${writeCompareQuery({ ...q, ...next })}`, true);
   const ready = list.length > 0 && q.a.length > 0 && q.b.length > 0;
   const same = ready && q.a.length === q.b.length && q.a.every((id) => q.b.includes(id));
@@ -57,12 +60,15 @@ export function Compare() {
     set({ [sideKey]: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] } as Partial<CompareQueryWithView>);
   };
   const newestFirst = [...list].reverse();
+  const byId = new Map(list.map((p) => [p.id, p]));
+  const nameOf = (id: number) => { const p = byId.get(id); return p ? patchName(p) : `patch ${id}`; };
+  const onBoth = same ? [] : q.a.filter((id) => q.b.includes(id));
   const result = cmp.data;
   const rows = (result?.rows ?? []).filter((r) => (only ? r.verdict === only : true)
     && (q.phases === 'split' && phaseFilter !== 'any' ? r.phase === phaseFilter : true));
 
   const table = (rs: CompareRow[]) => (
-    <div class="table-wrap">
+    <div class={`table-wrap balance-table${cmp.loading ? ' is-stale' : ''}`} aria-busy={cmp.loading}>
       <table class="admin-table">
         <thead><tr><th>Metric</th><th>Phase</th><th>A</th><th>B</th><th>Change</th><th>Verdict</th></tr></thead>
         <tbody>
@@ -89,8 +95,8 @@ export function Compare() {
                 <td>{fmtValue(r.metric, r.b)}</td>
                 <td>{ch.main} <span class="muted">{ch.range}</span></td>
                 <td class={`verdict verdict--${r.verdict}`}>
-                  {VERDICT_LABEL[r.verdict]}
-                  {r.verdict === 'too_early' && r.moreMatches !== null && <span class="muted">, about {r.moreMatches >= 500 ? '500+' : r.moreMatches} more matches</span>}
+                  {r.noSharedMaps ? 'no shared maps' : VERDICT_LABEL[r.verdict]}
+                  {r.verdict === 'too_early' && r.moreMatches !== null && <span class="muted">, about {fmtMoreMatches(r.moreMatches)}</span>}
                 </td>
               </tr>
             );
@@ -144,8 +150,24 @@ export function Compare() {
 
       {!ready && <p class="balance-banner">Pick at least one patch on each side.</p>}
       {same && <p class="balance-banner">Side A and side B are the same.</p>}
+      {onBoth.map((id) => (
+        <p class="balance-banner" key={`both-${id}`}>Patch {nameOf(id)} is on both sides; the sides are no longer independent.</p>
+      ))}
+      {!same && (['a', 'b'] as const).filter((sk) => q[sk].length > 1).map((sk) => (
+        <p class="balance-banner" key={`pool-${sk}`}>
+          Side {sk.toUpperCase()} pools {q[sk].length} patches ({q[sk].map(nameOf).join(', ')}). A change between them is averaged in
+          and can show here as a real change; open a row and check the trend at the patch lines to see where it moved.
+        </p>
+      ))}
       {cmp.error && <Empty>Could not load the comparison.</Empty>}
-      {result && (
+      {result && (result.a.matches === 0 || result.b.matches === 0) && (
+        (['a', 'b'] as const).filter((sk) => result[sk].matches === 0).map((sk) => (
+          <p class="balance-banner" key={`empty-${sk}`}>
+            Side {sk.toUpperCase()} has no finished matches yet (live, voided and unfinished matches are not counted).
+          </p>
+        ))
+      )}
+      {result && result.a.matches > 0 && result.b.matches > 0 && (
         <>
           {result.banners.skill && <p class="balance-banner">{result.banners.skill}</p>}
           {result.banners.approximate && <p class="balance-banner">Includes historical patches: their dates are approximate.</p>}

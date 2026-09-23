@@ -1631,7 +1631,12 @@ body.is-theater { overflow: hidden; }
 .balance-check { padding: var(--sp-3); background: var(--surface-2); }
 .balance-map { margin-top: var(--sp-3); }
 .balance-map__row { margin-bottom: var(--sp-3); font-size: var(--fs-dense); }
-.balance-map__row .bar__track { margin-bottom: 3px; }
+.balance-map__bar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 3px; }
+.balance-map__bar .bar__track { flex: 1; }
+.balance-map__side { width: 1.5ch; color: var(--text-muted); font-weight: 600; }
+/* The previous comparison stays on screen while the next one loads, dimmed
+ * so it does not read as the answer to the new selection. */
+.balance-table.is-stale { opacity: 0.5; transition: opacity 0.15s; }
 
 .admin-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
 .admin-ban { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
