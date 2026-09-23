@@ -65,7 +65,11 @@ export async function uploadArt(file: File): Promise<CrosshairArt> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let source: CanvasImageSource, w: number, h: number;
   if (isVpk(bytes) || /\.vpk$/i.test(file.name)) {
-    const tex = readVPK(bytes).get(XHAIR_TEXTURE);
+    const split = new Set<string>();
+    const tex = readVPK(bytes, split).get(XHAIR_TEXTURE);
+    if (!tex && split.has(XHAIR_TEXTURE)) {
+      throw new Error('This addon is split across several files (..._dir.vpk plus _000.vpk); the site needs a single-file .vpk.');
+    }
     if (!tex) throw new Error('No crosshair found in this file.');
     const vtf = decodeVTF(tex);
     const { c, ctx } = canvas(vtf.w, vtf.h);

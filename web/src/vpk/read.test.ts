@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readVPK, decodeVTF } from './read';
 import { encodeVPK, encodeVTF } from './index';
+import { handMade } from './fixtures';
 
 const enc = new TextEncoder();
 
@@ -64,6 +65,21 @@ describe('readVPK', () => {
     out.set(treeBytes, 12);
     out.set(enc.encode('llo'), 12 + treeBytes.length);
     expect(new TextDecoder().decode(readVPK(out).get('a.txt'))).toBe('hello');
+  });
+
+  it("keeps a preload-only file whatever archive it names, and lists files kept in side archives without failing", () => {
+    // A multi-part addon's _dir.vpk: a small file wholly preloaded in the
+    // tree (length 0, archive 0), and the texture itself in _000.vpk at an
+    // offset far past the end of this file.
+    const out = handMade([
+      { path: 'addoninfo.txt', archive: 0, offset: 9_000_000, length: 0, preload: enc.encode('INFO') },
+      { path: 'materials/vgui/hud/altcrosshair.vtf', archive: 0, offset: 5_000_000, length: 4096, preload: new Uint8Array(0) },
+    ]);
+    const split = new Set<string>();
+    const got = readVPK(out, split);
+    expect(new TextDecoder().decode(got.get('addoninfo.txt'))).toBe('INFO');
+    expect(got.has('materials/vgui/hud/altcrosshair.vtf')).toBe(false);
+    expect([...split]).toEqual(['materials/vgui/hud/altcrosshair.vtf']);
   });
 
   it('refuses what is not a VPK, or is cut short', () => {

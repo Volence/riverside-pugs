@@ -17,11 +17,14 @@ const NOT_VTF = 'That crosshair is not a texture the site can read.';
  * Every file stored inside a single-file VPK, by lower-cased path. Versions
  * 1 and 2 share the directory tree; version 2 only adds four section sizes
  * to the header (and sections after the data this reader has no use for).
- * A file whose data lives in a numbered side archive (_000.vpk) cannot be
- * read from this one file, so it is left out; crosshair addons are single
- * files.
+ *
+ * A multi-part addon's _dir.vpk names a numbered side archive (_000.vpk)
+ * for most files. A file wholly preloaded into the tree (length 0) is read
+ * whatever archive it names, since its offset means nothing. One whose data
+ * is in a side archive cannot be read from this one file: it is left out,
+ * and its path goes into `split`, so the caller can say why.
  */
-export function readVPK(bytes: Uint8Array): Map<string, Uint8Array> {
+export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uint8Array> {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const need = (end: number) => { if (end > bytes.length) throw new Error(NOT_VPK); };
   need(12);
@@ -56,15 +59,18 @@ export function readVPK(bytes: Uint8Array): Map<string, Uint8Array> {
         if (o + preload > treeEnd) throw new Error(NOT_VPK);
         const head = bytes.subarray(o, o + preload);
         o += preload;
-        if (archive !== 0x7FFF && length > 0) continue;
-        const start = treeEnd + offset;
-        need(start + length);
-        const data = new Uint8Array(preload + length);
-        data.set(head, 0);
-        data.set(bytes.subarray(start, start + length), preload);
         // A blank directory or extension is written as a single space.
         const file = (ext === ' ' ? name : `${name}.${ext}`);
-        out.set((dir === ' ' ? file : `${dir}/${file}`).toLowerCase(), data);
+        const path = (dir === ' ' ? file : `${dir}/${file}`).toLowerCase();
+        if (archive !== 0x7FFF && length > 0) { split?.add(path); continue; }
+        const data = new Uint8Array(preload + length);
+        data.set(head, 0);
+        if (length > 0) {
+          const start = treeEnd + offset;
+          need(start + length);
+          data.set(bytes.subarray(start, start + length), preload);
+        }
+        out.set(path, data);
       }
     }
   }

@@ -4,6 +4,7 @@ import { crosshairPixels } from './saved';
 import { DEFAULT_STATE, TEX } from './draw';
 import { PNG_PREFIX, type CrosshairArt } from './model';
 import { encodeVPK, encodeVTF } from '../vpk';
+import { handMade } from '../vpk/fixtures';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -97,6 +98,13 @@ describe('uploadArt', () => {
   it('says so when a .vpk has no crosshair in it', async () => {
     stubCanvas();
     await expect(uploadArt(vpk([{ path: 'scripts/hudlayout.res', data: new Uint8Array(1) }]))).rejects.toThrow('No crosshair found in this file.');
+  });
+
+  it('says so when the crosshair is in a side archive of a multi-part addon', async () => {
+    stubCanvas();
+    const bytes = handMade([{ path: XHAIR_TEXTURE, archive: 0, offset: 0, length: 4096, preload: new Uint8Array(0) }]);
+    await expect(uploadArt(new File([bytes], 'crosshair_dir.vpk'))).rejects.toThrow(
+      'This addon is split across several files (..._dir.vpk plus _000.vpk); the site needs a single-file .vpk.');
   });
 
   it('reads a .vpk by its signature, whatever it is called, and refuses a broken one by its name', async () => {
