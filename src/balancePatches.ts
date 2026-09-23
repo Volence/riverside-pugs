@@ -73,7 +73,14 @@ export function recordBalanceSighting(db: DB, s: {
                     ON CONFLICT (server_id) DO UPDATE SET patch_id = excluded.patch_id,
                       inventory_json = excluded.inventory_json, since = excluded.since`)
           .run(s.serverId, patchId, invJson, now);
-        publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchId, newPatch, prev, s.inventory) });
+        // Same time-ordered number the admin page shows (see listPatches), not
+        // the raw row id: a historical patch inserted later would otherwise
+        // make the alert and the page disagree about which patch "#N" is.
+        const patchNumber = (db.prepare(`
+          SELECT number FROM (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY first_seen_at, id) AS number FROM balance_patches
+          ) WHERE id = ?`).get(patchId) as { number: number }).number;
+        publishAdminEvent({ kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, prev, s.inventory) });
       }
     }
     return { patchId, newPatch, serverChanged };
@@ -156,12 +163,12 @@ export function editPatch(db: DB, id: number, p: { name?: string | null; notes?:
   return true;
 }
 
-function alertText(db: DB, serverId: number, patchId: number, newPatch: boolean,
+function alertText(db: DB, serverId: number, patchNumber: number, newPatch: boolean,
   prev: { inventory_json: string } | undefined, inv: Inventory): string {
   const name = serverName(db, serverId);
   const head = newPatch
-    ? `Balance config on ${name} is a new patch (#${patchId}, unnamed; name it in Admin > Setup > Patches).`
-    : `Balance config on ${name} changed (still patch #${patchId}).`;
+    ? `Balance config on ${name} is a new patch (#${patchNumber}, unnamed; name it in Admin > Setup > Patches).`
+    : `Balance config on ${name} changed (still patch #${patchNumber}).`;
   const vsOwn = prev ? ` Changed: ${formatDiff(diffInventories(JSON.parse(prev.inventory_json) as Inventory, inv))}.` : ' First sighting.';
   const others = db.prepare('SELECT server_id, inventory_json FROM balance_server_state WHERE server_id != ?')
     .all(serverId) as { server_id: number; inventory_json: string }[];
