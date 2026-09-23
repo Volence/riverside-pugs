@@ -105,6 +105,29 @@ export function appendChunk(state: ReplayState, chunk: Uint8Array, base: number)
   return { header, frames: state.frames.concat(shifted), cursor: end };
 }
 
+/** The page's own record of a live phase over a closed file: when it was
+ *  first seen, and for which round and phase. */
+export interface ClosedWhileLive { sinceMs: number; key: string }
+
+/**
+ * Track how long the page has seen a live phase over a closed file.
+ *
+ * At a normal round end the file closes (ROUND_END and the header patch) up
+ * to a second before the phase turns 'roundover'. Timing that window from
+ * `phase.sinceMs`, which is when the round went live minutes ago, would jump
+ * straight to "not available". Timing it from when this page first saw the
+ * combination reads "catching up" for the whole grace period instead.
+ * `key` names the round and the phase; when it changes the clock restarts,
+ * and when the combination ends it is forgotten.
+ */
+export function closedWhileLiveSince(
+  prev: ClosedWhileLive | null, phaseLive: boolean, closed: boolean, key: string, nowMs: number,
+): ClosedWhileLive | null {
+  if (!phaseLive || !closed) return null;
+  if (prev && prev.key === key) return prev;
+  return { sinceMs: nowMs, key };
+}
+
 /**
  * Hold a replay, saved or live, and keep it current.
  *
@@ -119,9 +142,12 @@ export function useReplaySource(spec: ReplaySpec | null): {
   frames: Frame[];
   closed: boolean;
   phase: LivePhase | null;
-  /** When the round being played is not the one being read (or has no file
-   *  yet), since when it has been played. Null otherwise, and always null
-   *  for a saved round or a standalone session. */
+  /** Since when the view has been behind the round being played, or null.
+   *  Behind means the round being played is not the one being read (or has
+   *  no file yet), timed from when that round started; or the phase is live
+   *  over a closed file, timed from when THIS PAGE first saw that (see
+   *  `closedWhileLiveSince`). Always null for a saved round or a standalone
+   *  session. */
   behindSinceMs: number | null;
   /** The file's format version is newer than this page understands. */
   tooNew: boolean;
@@ -153,6 +179,13 @@ export function useReplaySource(spec: ReplaySpec | null): {
     // change is noticed at all.
     let round: RoundSpec | null = isRound(spec) ? spec : null;
     let roundKey = round ? JSON.stringify(round) : '';
+    // Per poll, for a live match: the phase just reported, and since when the
+    // round being played has been some other round than the one being read
+    // (null when the served file is it). Folded with the file's closed flag
+    // into `behindSinceMs` once the bytes have been fetched.
+    let lastPhase: LivePhase | null = null;
+    let otherRoundSince: number | null = null;
+    let closedLive: ClosedWhileLive | null = null;
 
     cursorRef.current = 0;
     setState({ header: null, frames: [], cursor: 0 });
@@ -180,24 +213,31 @@ export function useReplaySource(spec: ReplaySpec | null): {
             const body = (await res.json()) as {
               ordinal: number | null; half: number | null; closed: boolean;
               phase?: LivePhase | null; current?: LiveRound | null;
+              servingCurrent?: boolean;
             };
             if (cancelled) return;
-            setPhase(body.phase ?? null);
+            lastPhase = body.phase ?? null;
+            setPhase(lastPhase);
             const cur = body.current ?? null;
             if (body.ordinal === null || body.half === null) {
               // The round being played has no bytes on the site yet: that
               // server's push is off, failing or not started. Nothing to
               // fetch; say since when, and ask again next second.
+              closedLive = null;
               setBehindSinceMs(cur?.sinceMs ?? null);
               setError(null);
               if (!cancelled) timer = setTimeout(tick, POLL_MS);
               return;
             }
             // Reading an older round than the one being played. The page
-            // says it is catching up instead of "Round over".
-            setBehindSinceMs(
-              cur && (cur.ordinal !== body.ordinal || cur.half !== body.half) ? cur.sinceMs : null,
-            );
+            // says it is catching up instead of "Round over". The server
+            // decides "is the served file the current round" by start time
+            // (`servingCurrent`), because its ordinal can lag the file's by
+            // a map after a lost MAP_RESULT. An older server that does not
+            // send it falls back to comparing (ordinal, half).
+            const serving = body.servingCurrent
+              ?? (cur !== null && cur.ordinal === body.ordinal && cur.half === body.half);
+            otherRoundSince = cur && !serving ? cur.sinceMs : null;
             next = { kind: 'match', matchId: live.matchId, ordinal: body.ordinal, half: body.half };
           } else {
             const body = (await res.json()) as { filename: string; closed: boolean };
@@ -235,6 +275,13 @@ export function useReplaySource(spec: ReplaySpec | null): {
         });
         setClosed(isClosed);
         setError(null);
+        if (spec!.kind === 'live-match') {
+          closedLive = closedWhileLiveSince(
+            closedLive, lastPhase?.state === 'live', isClosed,
+            `${roundKey}|${lastPhase?.sinceMs ?? ''}`, Date.now(),
+          );
+          setBehindSinceMs(otherRoundSince ?? closedLive?.sinceMs ?? null);
+        }
 
         // A closed FILE has nothing more to say, which is the end of the
         // story for a 'file' or 'match' spec: stopping here is what keeps a

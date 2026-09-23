@@ -129,9 +129,18 @@ describe('liveStatusText while the view is behind the round being played', () =>
       .toBe("Live view isn't available for this server right now");
   });
 
-  it('treats a live phase over a finished file as behind, timed from the phase', () => {
+  // At a normal round end the file closes up to a second before the phase
+  // turns 'roundover'. The phase went live minutes ago, so timing from
+  // phase.sinceMs would flash "not available" at every round end.
+  it('reads a live phase over a finished file as catching up, never timed from the phase', () => {
     expect(liveStatusText(true, true, 10, 10, phase({ sinceMs: NOW - 5_000 }), NOW)).toBe('Live view is catching up');
-    expect(liveStatusText(true, true, 5, 10, phase({ sinceMs: NOW - 40_000 }), NOW))
+    expect(liveStatusText(true, true, 5, 10, phase({ sinceMs: NOW - 40 * 60_000 }), NOW)).toBe('Live view is catching up');
+  });
+
+  it('escalates a live phase over a finished file only after thirty seconds of the page seeing it', () => {
+    const old = phase({ sinceMs: NOW - 40 * 60_000 });
+    expect(liveStatusText(true, true, 10, 10, old, NOW, {}, NOW - 29_999)).toBe('Live view is catching up');
+    expect(liveStatusText(true, true, 10, 10, old, NOW, {}, NOW - 30_000))
       .toBe("Live view isn't available for this server right now");
   });
 

@@ -52,8 +52,9 @@ export const CATCH_UP_MS = 30_000;
  * so the page never says "Round over" while a round is actually being
  * played. The view is behind when `behindSinceMs` is set (the server
  * reports a round in progress other than the one being read, or no file at
- * all), or when the phase is `live` and the file is closed (timed from
- * `phase.sinceMs`). Behind for under `CATCH_UP_MS` reads "Live view is
+ * all, or the page has seen a live phase over a closed file), or when the
+ * phase is `live` and the file is closed with no `behindSinceMs` (read as
+ * just begun). Behind for under `CATCH_UP_MS` reads "Live view is
  * catching up"; after that, "Live view isn't available for this server
  * right now". Only then the existing texts: open file "Live, 10s delayed",
  * closed file "Round over, catching up" or "Round over, waiting for the
@@ -84,8 +85,12 @@ export function liveStatusText(
   // The round is being played but the bytes on screen are from an earlier
   // one, or none have arrived. Never "Round over" while the server says the
   // round is live. A live phase over a finished file is the same case seen
-  // from the file's side, timed from when the phase began.
-  const behind = behindSinceMs ?? (phase?.state === 'live' && closed ? phase.sinceMs : null);
+  // from the file's side: useReplaySource times it from when the page first
+  // saw it and passes that in `behindSinceMs`. Without one it reads as just
+  // begun, never from `phase.sinceMs`, which is when the round went live and
+  // is minutes old at a normal round end (the file closes up to a second
+  // before the phase turns 'roundover').
+  const behind = behindSinceMs ?? (phase?.state === 'live' && closed ? nowMs : null);
   if (behind !== null) {
     return nowMs - behind < CATCH_UP_MS
       ? 'Live view is catching up'
