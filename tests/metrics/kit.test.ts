@@ -32,6 +32,12 @@ describe('metric kit', () => {
     expect(out.tank).toEqual({ num: 2, den: 1 });
   });
 
+  it('skips a sub-phase row for a phase the round never had', () => {
+    const c = withTank();
+    const out = countByPhase(c, [ev('boom', 'i1', 10_000)]);
+    expect(out.witch).toBeUndefined();
+  });
+
   it('gives only all without a timeline, and skips unknown times in phases', () => {
     const c = { ...input(), timeline: null };
     expect(countByPhase(c, [ev('boom', 'i1', -1)])).toEqual({ all: { num: 1, den: 1 } });

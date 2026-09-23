@@ -17,6 +17,11 @@ describe('outcome metrics', () => {
     expect(run('round.survivors_alive', input({ survivorsAlive: 2 }))).toEqual({ all: { num: 2, den: 1 } });
   });
 
+  it('score needs a reliable, ended round', () => {
+    expect(run('round.score', input({ reliable: true, ended: true, score: 400 }))).toEqual({ all: { num: 400, den: 1 } });
+    expect(run('round.score', input({ ended: false }))).toBeNull();
+  });
+
   it('score on wipe only counts wipes', () => {
     expect(run('round.score_on_wipe', input({ survivorsAlive: 0, score: 250 }))).toEqual({ all: { num: 250, den: 1 } });
     expect(run('round.score_on_wipe', input({ survivorsAlive: 1 }))).toBeNull();
@@ -35,8 +40,11 @@ describe('outcome metrics', () => {
 describe('pace metrics', () => {
   const replay = replayOf(frames(0, 120_000, () => ({ surv: standing4 })));
 
-  it('SI damage per minute from per-round stats', () => {
-    const out = run('pace.si_damage_per_min', input({ replay, hasStats: true, stats: stats([['i1', 'damage_as_si', 200], ['i2', 'damage_as_si', 100]]) }))!;
+  it('SI damage per minute from per-round stats, bleed-out drain excluded', () => {
+    const out = run('pace.si_damage_per_min', input({
+      replay, hasStats: true,
+      stats: stats([['i1', 'damage_as_si', 800], ['i2', 'damage_as_si', 500], ['i1', 'dmg_to_incapped', 600], ['i2', 'dmg_to_incapped', 400]]),
+    }))!;
     expect(out.all!.num).toBe(300);
     expect(out.all!.den).toBeCloseTo(2, 2);
     expect(run('pace.si_damage_per_min', input({ replay }))).toBeNull();
@@ -45,6 +53,23 @@ describe('pace metrics', () => {
   it('friendly fire per minute is weighted by damage', () => {
     const out = run('pace.ff_per_min', input({ replay, events: [ev('ff', 's1', 1000, 's2', 40)] }))!;
     expect(out.all!.num).toBe(40);
+  });
+
+  it('incaps per minute counts incap events over playing time', () => {
+    const out = run('pace.incaps_per_min', input({ replay, events: [ev('incap', 'i1', 1000, 's1')] }))!;
+    expect(out.all!.num).toBe(1);
+    expect(out.all!.den).toBeCloseTo(2, 2);
+  });
+
+  it('deaths per minute counts death events over playing time', () => {
+    const out = run('pace.deaths_per_min', input({ replay, events: [ev('death', 'i1', 1000, 's1')] }))!;
+    expect(out.all!.num).toBe(1);
+    expect(out.all!.den).toBeCloseTo(2, 2);
+  });
+
+  it('revives count per round', () => {
+    const out = run('pace.revives', input({ events: [ev('revive', 's1', 1000, 's2'), ev('revive', 's3', 2000, 's4')] }))!;
+    expect(out.all).toEqual({ num: 2, den: 1 });
   });
 
   it('pin gap is the mean seconds between pins', () => {
