@@ -551,7 +551,7 @@ export interface RoundRow {
 /** Which map this round belongs to: however many have already finished.
  *  Same derivation recordLiveEvent uses for map_ordinal, and for the same
  *  reason: nothing on the wire carries it. */
-function currentOrdinal(db: DB, matchId: number): number {
+export function currentOrdinal(db: DB, matchId: number): number {
   const done = db
     .prepare('SELECT COUNT(*) AS n FROM match_live_maps WHERE match_id = ?')
     .get(matchId) as { n: number };
