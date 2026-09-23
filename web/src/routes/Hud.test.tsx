@@ -1587,6 +1587,41 @@ describe('Importing a HUD', () => {
     await waitFor(() => expect(preset().value).toBe(`imported:${id}`));
   });
 
+  it('undoes a switch onto an import and a switch off it, back to the design and preset each started from', async () => {
+    // Each switch is one undo step that holds the whole design: the import
+    // empties the layout edits and the switch to Stock brings the fitted
+    // teammates back, so Undo has to restore those as well as the preset.
+    const saved = async (preset: string) => {
+      await waitFor(() => expect(JSON.parse(localStorage.getItem('hud') ?? '{}').preset).toBe(preset));
+      return JSON.parse(localStorage.getItem('hud')!);
+    };
+    const undo = () => fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    render(<Hud />);
+    const onStock = await saved('stock');
+    importFile(vpkFile());
+    await screen.findByText('Imported edgehud.');
+    const onImport = await saved('imported');
+    expect(onImport.elements).toEqual({});
+    expect(onStock.elements).not.toEqual({});
+
+    undo();
+    await waitFor(() => expect(preset().value).toBe('stock'));
+    expect(await saved('stock')).toEqual(onStock);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    await waitFor(() => expect(preset().value).toBe(`imported:${id}`));
+    expect(await saved('imported')).toEqual(onImport);
+
+    fireEvent.change(preset(), { target: { value: 'stock' } });
+    await waitFor(() => expect(preset().value).toBe('stock'));
+    expect((await saved('stock')).elements).toEqual(onStock.elements);
+
+    undo();
+    await waitFor(() => expect(preset().value).toBe(`imported:${id}`));
+    expect(await saved('imported')).toEqual(onImport);
+    expect(screen.getByRole('button', { name: 'Teammates' })).toBeTruthy();
+  });
+
   it('still imports when this browser will not store it, and says it lasts only while the page is open', async () => {
     _setHudStore({ ...memoryStore(), put: () => Promise.reject(new Error('quota')) });
     render(<Hud />);
