@@ -3,7 +3,9 @@ import { readHudUpload, hudId, IMPORT_ERRORS, MAX_HUD_BYTES } from './upload';
 import { encodeVPK } from '../vpk';
 import { encodeZip } from '../vpk/zip';
 import { handMade, zipOf } from '../vpk/fixtures';
-import { sampleHud, asList, latin1 } from './importFixtures';
+import { sampleHud, asList, latin1, dropBlock } from './importFixtures';
+import { parseKv, writeKv, type KvNode } from './kv';
+import { baseFile } from './base';
 
 const vpkOf = (files: Map<string, Uint8Array>) => encodeVPK(asList(files));
 const under = (folder: string, files: Map<string, Uint8Array>, deflate = true) =>
@@ -108,6 +110,45 @@ describe('readHudUpload', () => {
   it('names a file the editor parses that KeyValues cannot read', async () => {
     const files = sampleHud({ 'scripts/hudlayout.res': '"Resource/HudLayout.res"\r\n{\r\n' });
     await expect(readHudUpload('bad.vpk', vpkOf(files))).rejects.toThrow(/^This HUD's scripts\/hudlayout\.res could not be read \(/);
+  });
+
+  describe('refuses a file that parses but lacks the shape the editor reads, naming the file', () => {
+    const stock = (path: string) => baseFile('stock', path);
+    // The stock file with one top-level block turned into a plain value.
+    const asString = (path: string, name: string) => {
+      const t = parseKv(stock(path));
+      const n = (t[0].value as KvNode[]).find((c) => c.key.toLowerCase() === name.toLowerCase())!;
+      n.value = 'x';
+      return writeKv(t);
+    };
+    const cases: [string, string, string][] = [
+      ['an empty hudlayout.res', 'scripts/hudlayout.res', ''],
+      ['a comment-only hudlayout.res', 'scripts/hudlayout.res', '// nothing\r\n'],
+      ['a hudlayout.res whose root is a string', 'scripts/hudlayout.res', '"Resource/HudLayout.res" "x"'],
+      ['a teammatepanel.res whose root is a string', 'resource/ui/hud/teammatepanel.res', '"a" "b"'],
+      ['an empty teamdisplayhud.res', 'resource/ui/hud/teamdisplayhud.res', '// blank\r\n'],
+      ['an empty clientscheme.res', 'resource/clientscheme.res', ''],
+      ['a clientscheme.res whose root is a string', 'resource/clientscheme.res', '"Scheme" "x"'],
+      ['an empty basechat.res', 'resource/ui/basechat.res', ''],
+      ['a basechat.res with no HudChat', 'resource/ui/basechat.res', '"Resource/UI/BaseChat.res" { "Other" { } }'],
+      ['a mod_textures.txt with no TextureData', 'scripts/mod_textures.txt', '"sprites/640_hud.txt" { }'],
+      ['an empty mod_textures.txt', 'scripts/mod_textures.txt', ''],
+      ['a hudlayout.res panel written as a string', 'scripts/hudlayout.res', asString('scripts/hudlayout.res', 'HudWeaponSelection')],
+      ['TeamPlayer1 written as a string', 'resource/ui/hud/teamdisplayhud.res', asString('resource/ui/hud/teamdisplayhud.res', 'TeamPlayer1')],
+      ['a card child written as a string', 'resource/ui/hud/teammatepanel.res', asString('resource/ui/hud/teammatepanel.res', 'Name')],
+    ];
+    for (const [what, path, text] of cases) {
+      it(what, async () => {
+        const files = sampleHud({ [path]: text });
+        const escaped = path.replace(/[./]/g, (c) => `\\${c}`);
+        await expect(readHudUpload('bad.vpk', vpkOf(files))).rejects.toThrow(new RegExp(`^This HUD's ${escaped} `));
+      });
+    }
+
+    it('and still takes a HUD that simply lacks a panel, which the editor degrades around', async () => {
+      const layout = dropBlock(stock('scripts/hudlayout.res'), 'HudWeaponSelection');
+      await expect(readHudUpload('ok.vpk', vpkOf(sampleHud({ 'scripts/hudlayout.res': layout })))).resolves.toBeTruthy();
+    });
   });
 });
 

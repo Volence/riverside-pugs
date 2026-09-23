@@ -12,16 +12,19 @@
  * unwanted), before the root is looked for, so junk can never be the root.
  *
  * Every file the editor parses is parsed here once, so a HUD whose files
- * KeyValues cannot read is refused with the file's name rather than failing
- * later inside the canvas draw.
+ * KeyValues cannot read, or read into a shape the editor cannot walk, is
+ * refused with the file's name rather than failing later inside the canvas
+ * draw (checkFiles).
  */
 import { vpkPathProblem } from '../vpk';
 import { readVPK, isVpk } from '../vpk/read';
 import { readZip, ZipTooBig, UNREADABLE } from '../vpk/unzip';
-import { parseKv } from './kv';
+import { parseKv, kvFind, type KvNode } from './kv';
 import { BASE_PATHS } from './base';
 import { decodeText } from './text';
 import { safeName } from './design';
+import { ELEMENTS } from './elements';
+import { TEAM_PANEL } from './children';
 
 export const MAX_HUD_BYTES = 50 * 1024 * 1024;
 export const IMPORT_ERRORS = {
@@ -90,13 +93,55 @@ const nameOf = (fileName: string, root: string) => {
   return safeName(folder || base);
 };
 
-/** Refuse a HUD whose files the editor parses cannot be read, naming the file. */
-function checkParses(files: Map<string, Uint8Array>) {
+/**
+ * The blocks the editor looks up by name, by file: a HUD may lack any of
+ * them (the editor then offers no control for it, as the spec's "Degrading"
+ * says), but one written as a plain value where a block belongs is not a
+ * HUD the game can read either, and every reader would trip on it.
+ * `required` names blocks the editor cannot work without when the upload
+ * ships that file at all: the chat window's size comes from basechat.res's
+ * HudChat, and every weapon and item icon from mod_textures.txt's
+ * TextureData.
+ */
+const SHAPES: { path: string; blocks: string[]; required?: string[] }[] = [
+  { path: LAYOUT, blocks: [...ELEMENTS.map((e) => e.key), 'HudCrosshair'] },
+  { path: 'resource/ui/hud/teamdisplayhud.res', blocks: ['TeamPlayer1', 'TeamPlayer2', 'TeamPlayer3', 'TeamPlayer4'] },
+  { path: TEAM_PANEL.file, blocks: TEAM_PANEL.children.map((c) => c.name) },
+  { path: 'resource/ui/basechat.res', blocks: ['HudChat', 'HudChatHistory'], required: ['HudChat'] },
+  { path: 'scripts/mod_textures.txt', blocks: ['TextureData'], required: ['TextureData'] },
+  { path: 'resource/clientscheme.res', blocks: ['Colors', 'Fonts', 'CustomFontFiles'] },
+];
+
+/**
+ * Refuse a HUD whose files the editor parses cannot be read, or can be read
+ * but not in the shape the editor walks, naming the file. Every file must
+ * parse and have one root block (an empty or comment-only file, or a root
+ * that is a plain value, has none), and the blocks SHAPES lists must be
+ * blocks. This is the first of two checks: the page then draws and builds
+ * the new HUD once, off screen (importCheck.ts), which catches whatever a
+ * list like this one misses.
+ */
+function checkFiles(files: Map<string, Uint8Array>) {
+  const roots = new Map<string, KvNode[]>();
   for (const path of BASE_PATHS) {
     const data = files.get(path);
     if (!data || path === 'scripts/hudanimations.txt') continue;           // hudanimations.txt is not KeyValues
-    try { parseKv(decodeText(data).text); }
-    catch (e) { fail(`This HUD's ${path} could not be read (${(e as Error).message})`); }
+    let tree: KvNode[];
+    try { tree = parseKv(decodeText(data).text); }
+    catch (e) { return fail(`This HUD's ${path} could not be read (${(e as Error).message})`); }
+    const root = tree[0];
+    if (!root || typeof root.value === 'string') fail(`This HUD's ${path} has no root block, so the editor cannot read it`);
+    roots.set(path, root.value as KvNode[]);
+  }
+  for (const { path, blocks, required = [] } of SHAPES) {
+    const root = roots.get(path);
+    if (!root) continue;
+    for (const name of blocks) {
+      const n = kvFind(root, [name]);
+      if (n ? typeof n.value === 'string' : required.includes(name)) {
+        fail(`This HUD's ${path} has no ${name} block, so the editor cannot read it`);
+      }
+    }
   }
 }
 
@@ -145,7 +190,7 @@ export async function readHudUpload(fileName: string, bytes: Uint8Array): Promis
 function finish(name: string, files: Map<string, Uint8Array>, dropped: string[]): HudUpload {
   dropUnwanted(files, dropped);                                  // again, for a VPK found inside a zip
   for (const p of [...files.keys()]) if (p === 'gameinfo.txt' || p.endsWith('/gameinfo.txt')) { files.delete(p); dropped.push(p); }
-  checkParses(files);
+  checkFiles(files);
   return { name, files, dropped: dropped.sort() };
 }
 
