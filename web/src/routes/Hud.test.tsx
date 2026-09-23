@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
+import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testing-library/preact';
+import { _setImageFactory, _resetAssetCache } from '../hud/render';
 import { toUnits } from './Hud';
 import Hud from './Hud';
 import { readFileSync } from 'node:fs';
@@ -405,6 +406,69 @@ describe('Hud page', () => {
       // And back to building one, as one more step.
       fireEvent.click(screen.getByRole('button', { name: /build one instead/i }));
       expect(screen.getByRole('slider', { name: 'Length' })).toBeTruthy();
+    });
+
+    /**
+     * The preview's image seam: every image the canvas asks for is handed
+     * out unloaded, and `load` finishes one later, as a data URL's decode
+     * would, firing whatever onload the page set.
+     */
+    const lateImages = () => {
+      const made: { src: string; complete: boolean; naturalWidth: number; naturalHeight: number; onload: (() => void) | null }[] = [];
+      // An earlier test's decoded copy of the same URL would otherwise be handed back already loaded.
+      _resetAssetCache();
+      _setImageFactory((url) => {
+        const img = { src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null as (() => void) | null, onerror: null };
+        made.push(img);
+        return img as unknown as HTMLImageElement;
+      });
+      const load = (url: string) => act(() => {
+        for (const img of made.filter((m) => m.src === url)) {
+          img.complete = true; img.naturalWidth = TEX; img.naturalHeight = TEX;
+          img.onload?.();
+        }
+      });
+      return { made, load };
+    };
+    const drewImage = (calls: { canvas: HTMLCanvasElement; m: string; a: unknown[] }[], main: HTMLCanvasElement, url: string) =>
+      calls.some((c) => c.canvas === main && c.m === 'drawImage' && (c.a[0] as { src?: string }).src === url);
+
+    it('draws an uploaded crosshair on the main canvas once its image loads, with the crosshair selected', async () => {
+      const calls = stubCanvas();
+      const { made, load } = lateImages();
+      try {
+        const { container } = render(<Hud />);
+        const main = container.querySelector('canvas.hud__canvas') as HTMLCanvasElement;
+        selectCrosshair();
+        const vpk = new File([encodeVPK([{ path: 'materials/vgui/hud/altcrosshair.vtf', data: encodeVTF(2, 2, new Uint8ClampedArray(16).fill(255)) }])], 'theirs.vpk');
+        fireEvent.change(screen.getByLabelText('Upload a crosshair'), { target: { files: [vpk] } });
+        await screen.findByText(/your uploaded crosshair/i);
+        // Both the zoom and the main canvas ask for it once their effects run; neither can draw it yet.
+        await waitFor(() => expect(made.some((m) => m.src === PNG)).toBe(true));
+        await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+        expect(drewImage(calls, main, PNG)).toBe(false);
+        await load(PNG);
+        expect(drewImage(calls, main, PNG)).toBe(true);
+      } finally {
+        _setImageFactory(null);
+        _resetAssetCache();
+      }
+    });
+
+    it('draws a stored image crosshair on the main canvas once its image loads, on a fresh page', async () => {
+      localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle', xhairArt: { kind: 'image', png: PNG, w: TEX, h: TEX } }));
+      const calls = stubCanvas();
+      const { load } = lateImages();
+      try {
+        const { container } = render(<Hud />);
+        const main = container.querySelector('canvas.hud__canvas') as HTMLCanvasElement;
+        expect(drewImage(calls, main, PNG)).toBe(false);
+        await load(PNG);
+        expect(drewImage(calls, main, PNG)).toBe(true);
+      } finally {
+        _setImageFactory(null);
+        _resetAssetCache();
+      }
     });
 
     it('says so when an uploaded .vpk has no crosshair, and keeps the crosshair it had', async () => {

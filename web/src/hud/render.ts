@@ -240,22 +240,33 @@ function artImage(material: string, onAsset?: () => void): HTMLImageElement | un
   return img.complete && img.naturalWidth > 0 ? img : undefined;
 }
 
-const urls = new Map<string, HTMLImageElement>();
+const urls = new Map<string, { img: HTMLImageElement; waiting: Set<() => void> }>();
 /**
  * An image the design itself carries (an uploaded crosshair's data URL),
- * once decoded; undefined while it loads, and onAsset asks for a redraw
- * then. Only the latest few are kept: each upload or undo step can bring a
- * new one, and the old ones are never drawn again.
+ * once decoded; undefined while it loads. Several views ask for the same
+ * image (the main canvas and the side panel's zoom), and each needs its own
+ * redraw when it arrives, so every caller's onAsset is kept until the load
+ * and all of them are called then; keeping only the first left the main
+ * canvas blank for ever when the zoom asked first. Only the latest few
+ * images are kept: each upload or undo step can bring a new one, and the
+ * old ones are never drawn again.
  */
 export function urlImage(url: string, onAsset?: () => void): HTMLImageElement | undefined {
-  let img = urls.get(url);
-  if (!img) {
+  let hit = urls.get(url);
+  if (!hit) {
     if (urls.size >= 8) urls.delete(urls.keys().next().value!);
-    img = imageFactory(url);
-    img.onload = () => onAsset?.();
-    urls.set(url, img);
+    const entry = { img: imageFactory(url), waiting: new Set<() => void>() };
+    entry.img.onload = () => {
+      const fns = [...entry.waiting];
+      entry.waiting.clear();
+      for (const fn of fns) fn();
+    };
+    urls.set(url, entry);
+    hit = entry;
   }
-  return img.complete && img.naturalWidth > 0 ? img : undefined;
+  if (hit.img.complete && hit.img.naturalWidth > 0) return hit.img;
+  if (onAsset) hit.waiting.add(onAsset);
+  return undefined;
 }
 
 /**
