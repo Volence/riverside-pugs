@@ -8,13 +8,23 @@ import { readVPK } from '../vpk/read';
 import { parsePos, screenW, SCREEN_H } from './units';
 import { sampleHud, latin1, MARKER_PANEL } from './importFixtures';
 
-const ID = 'c'.repeat(64);
-afterEach(() => unregisterImport(ID));
+/**
+ * An id is its files' content hash, so the base caches (baseTeam, the parsed
+ * trees) keep what they read for an id for ever. These tests register a
+ * different file set almost every time, so each registration gets an id of
+ * its own: reusing one would read another test's files back from the cache
+ * and pass or fail by test order.
+ */
+let minted = 0;                                   // never reset, so no id comes round twice
+const used: string[] = [];
+const freshId = () => { const id = (++minted).toString(16).padStart(64, '0'); used.push(id); return id; };
+afterEach(() => { for (const id of used.splice(0)) unregisterImport(id); });
 
 /** An imported design on `files`, with the game's own crosshair so layoutPass adds no xHair. */
 const imported = (files: Map<string, Uint8Array>, extra: Record<string, unknown> = {}): HudDesign => {
-  registerImport(ID, files);
-  return validateDesign({ v: 1, name: 'edgehud', preset: 'imported', imported: { id: ID, name: 'edgehud' }, crosshair: 'none', ...extra });
+  const id = freshId();
+  registerImport(id, files);
+  return validateDesign({ v: 1, name: 'edgehud', preset: 'imported', imported: { id, name: 'edgehud' }, crosshair: 'none', ...extra });
 };
 const byPath = (files: { path: string; data: Uint8Array }[]) => new Map(files.map((f) => [f.path, f.data]));
 const root = (m: Map<string, Uint8Array>, path: string) => parseKv(decodeText(m.get(path)!).text)[0].value as KvNode[];
@@ -64,7 +74,6 @@ describe('downloading an imported HUD', () => {
     expect(kvGet(kvFind(cells, ['rounded_background_glow'])!, 'file')).toBe(CLEAR_TEXTURE);
     expect(report.replaced).toEqual([]);
 
-    unregisterImport(ID);
     const theirs = new Uint8Array([1, 2, 3]);
     const again: BuildReport = { replaced: [] };
     const out2 = byPath(buildHud(imported(sampleHud({ [`materials/${CLEAR_TEXTURE}.vtf`]: theirs }), { weapons: { boxActive: { kind: 'hidden' } } }), {}, again));

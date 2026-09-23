@@ -8,6 +8,7 @@ import { elementById } from './elements';
 import { decodeText } from './text';
 import { sampleHud, latin1, MARKER_PANEL, dropBlock, recordingCtx } from './importFixtures';
 
+/** sampleHud() as it is, wherever a test needs no file changed. */
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
 /**
@@ -20,7 +21,9 @@ const LACKING = 'c'.repeat(64);
 const NO_CARD = 'd'.repeat(64);
 const PLAIN = 'e'.repeat(64);
 const WITH_XHAIR = 'f'.repeat(64);
-afterEach(() => { for (const id of [A, B, LACKING, NO_CARD, PLAIN, WITH_XHAIR]) unregisterImport(id); });
+const BOM_TEAM = '1'.repeat(64);
+const MODERN_CARD = '2'.repeat(64);
+afterEach(() => { for (const id of [A, B, LACKING, NO_CARD, PLAIN, WITH_XHAIR, BOM_TEAM, MODERN_CARD]) unregisterImport(id); });
 
 const TEAM = 'resource/ui/hud/teamdisplayhud.res';
 /** The stock team file with TeamPlayer2 moved down: a column, not a row. */
@@ -45,8 +48,8 @@ describe('the imported layer', () => {
 
   it('strips a UTF-8 byte order mark before the editor parses a file', () => {
     const text = baseFile('stock', TEAM);
-    registerImport(A, sampleHud({ [TEAM]: new Uint8Array([0xef, 0xbb, 0xbf, ...latin1(text)]) }));
-    expect(baseFile(`imported:${A}`, TEAM)).toBe(text);
+    registerImport(BOM_TEAM, sampleHud({ [TEAM]: new Uint8Array([0xef, 0xbb, 0xbf, ...latin1(text)]) }));
+    expect(baseFile(`imported:${BOM_TEAM}`, TEAM)).toBe(text);
   });
 
   it('keys the base team on the import, so two imports never share it', () => {
@@ -58,9 +61,9 @@ describe('the imported layer', () => {
   });
 
   it("asks the import's own card file whether a child is there", () => {
-    registerImport(A, sampleHud({ 'resource/ui/hud/teammatepanel.res': baseFile('modern', 'resource/ui/hud/teammatepanel.res') }));
+    registerImport(MODERN_CARD, sampleHud({ 'resource/ui/hud/teammatepanel.res': baseFile('modern', 'resource/ui/hud/teammatepanel.res') }));
     expect(baseHasChild('stock', 'HealthNumber')).toBe(false);
-    expect(baseHasChild(`imported:${A}`, 'HealthNumber')).toBe(true);
+    expect(baseHasChild(`imported:${MODERN_CARD}`, 'HealthNumber')).toBe(true);
   });
 
   it("builds an imported design's trees from the upload, and a stock design's from stock", () => {
