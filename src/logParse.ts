@@ -89,6 +89,11 @@ export type LogEvent =
   // most interesting, value. Optional for the same reason `map` is, an older
   // plugin does not send it.
   | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null }
+  | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string> }
+  | { kind: 'balance_end'; token: string; half: 1 | 2; parts: number; items: number }
+  | { kind: 'round_stat'; token: string; half: 1 | 2; steamid: string; stats: Record<string, number> }
+  | { kind: 'round_stats_end'; token: string; half: 1 | 2; players: number; skillDetect: boolean }
+  | { kind: 'round_mark'; token: string; half: 1 | 2; mark: 'panic' | 'finale_start' | 'finale_radio'; tMs: number }
   // One discrete thing that happened, for the live feed. Generic on purpose:
   // the plugin decides the `kind` and the page renders per kind, so a new
   // event type needs no backend change. `seq` is per-match monotonic and makes
@@ -196,6 +201,15 @@ function halfOf(s: string | undefined): number | null {
   const n = intOf(s);
   return n === 1 || n === 2 ? n : null;
 }
+
+/** The plugin encodes exactly '%' and ' ' in balance keys and values. */
+export function pctDecode(s: string): string {
+  return s.replace(/%20/g, ' ').replace(/%25/g, '%');
+}
+
+const BAL_ITEM_RE = /^[cxpfd]:/;
+const STAT_KEY_RE = /^[a-z0-9_]{1,40}$/;
+const ROUND_MARKS = new Set(['panic', 'finale_start', 'finale_radio']);
 
 /** The engine's `L MM/DD/YYYY - HH:MM:SS: ` stamp, which opens every log line. */
 const LOG_STAMP_RE = /L \d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}: /;
@@ -610,6 +624,46 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (a === null || b === null) return null;
       if (rest.winner !== 'a' && rest.winner !== 'b' && rest.winner !== 'draw') return null;
       return { kind: 'match_end', token, a, b, winner: rest.winner };
+    }
+    case 'BALANCE': {
+      const half = halfOf(rest.half);
+      const part = intOf(rest.part);
+      if (half === null || part === null || part < 0) return null;
+      const items: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rest)) {
+        if (BAL_ITEM_RE.test(k)) items[pctDecode(k)] = pctDecode(v);
+      }
+      return { kind: 'balance_part', token, half: half as 1 | 2, part, items };
+    }
+    case 'BALANCE_END': {
+      const half = halfOf(rest.half);
+      const parts = intOf(rest.parts);
+      const items = intOf(rest.items);
+      if (half === null || parts === null || items === null || parts < 0 || items < 0) return null;
+      return { kind: 'balance_end', token, half: half as 1 | 2, parts, items };
+    }
+    case 'ROUND_STAT': {
+      const half = halfOf(rest.half);
+      if (half === null || !/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      const stats: Record<string, number> = {};
+      for (const [k, v] of Object.entries(rest)) {
+        if (k === 'half' || k === 'steamid' || !STAT_KEY_RE.test(k)) continue;
+        const n = intOf(v);
+        if (n !== null) stats[k] = n;
+      }
+      return { kind: 'round_stat', token, half: half as 1 | 2, steamid: rest.steamid, stats };
+    }
+    case 'ROUND_STATS_END': {
+      const half = halfOf(rest.half);
+      const players = intOf(rest.players);
+      if (half === null || players === null || (rest.sd !== '0' && rest.sd !== '1')) return null;
+      return { kind: 'round_stats_end', token, half: half as 1 | 2, players, skillDetect: rest.sd === '1' };
+    }
+    case 'ROUND_MARK': {
+      const half = halfOf(rest.half);
+      const tMs = intOf(rest.t);
+      if (half === null || tMs === null || tMs < 0 || !ROUND_MARKS.has(rest.kind ?? '')) return null;
+      return { kind: 'round_mark', token, half: half as 1 | 2, mark: rest.kind as 'panic' | 'finale_start' | 'finale_radio', tMs };
     }
     default:
       return null;

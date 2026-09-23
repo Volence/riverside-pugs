@@ -509,3 +509,51 @@ describe('parseLogDatagram: PUG text a player typed is not a PUG line', () => {
     expect(ev).toMatchObject({ kind: 'chat', token: TOKEN, message: `PUG ${FORGED} MATCH_END a=0 b=1 winner=b` });
   });
 });
+
+describe('balance and per-round lines', () => {
+  it('parses a BALANCE part, decoding %20 and %25 and keeping only prefixed items', () => {
+    const ev = parseLogDatagram(framed(
+      `PUG ${TOKEN} BALANCE half=1 part=0 c:z_tank_health=4000 c:sv_tags=a%20b%25 p:l4d_skypounce.smx=1234.0a0b0c0d x:l4d_nope=missing junk=1`,
+    ));
+    expect(ev).toEqual({
+      kind: 'balance_part', token: TOKEN, half: 1, part: 0,
+      items: {
+        'c:z_tank_health': '4000', 'c:sv_tags': 'a b%',
+        'p:l4d_skypounce.smx': '1234.0a0b0c0d', 'x:l4d_nope': 'missing',
+      },
+    });
+  });
+
+  it('parses BALANCE_END', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE_END half=2 parts=3 items=71`))).toEqual({
+      kind: 'balance_end', token: TOKEN, half: 2, parts: 3, items: 71,
+    });
+  });
+
+  it('rejects BALANCE with a bad half', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} BALANCE half=3 part=0 c:a=1`))).toBeNull();
+  });
+
+  it('parses ROUND_STAT and drops non-integer values', () => {
+    const ev = parseLogDatagram(framed(
+      `PUG ${TOKEN} ROUND_STAT half=1 steamid=76561198000000001 crowns=1 w_pumpshotgun_sidmg=250 bad=x`,
+    ));
+    expect(ev).toEqual({
+      kind: 'round_stat', token: TOKEN, half: 1, steamid: '76561198000000001',
+      stats: { crowns: 1, w_pumpshotgun_sidmg: 250 },
+    });
+  });
+
+  it('parses ROUND_STATS_END', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_STATS_END half=1 players=8 sd=1`))).toEqual({
+      kind: 'round_stats_end', token: TOKEN, half: 1, players: 8, skillDetect: true,
+    });
+  });
+
+  it('parses ROUND_MARK and rejects an unknown mark', () => {
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_MARK half=2 kind=panic t=91234`))).toEqual({
+      kind: 'round_mark', token: TOKEN, half: 2, mark: 'panic', tMs: 91234,
+    });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_MARK half=2 kind=boom t=1`))).toBeNull();
+  });
+});
