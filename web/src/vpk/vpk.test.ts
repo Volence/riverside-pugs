@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { crc32, encodeVTF, encodeVPK } from './index';
+import { readVPK } from './read';
 
 /** Read a little-endian uint32 at `off`. */
 const u32 = (b: Uint8Array, off: number) =>
@@ -100,5 +101,11 @@ describe('encodeVPK', () => {
     // Extensions sorted: res before vmt.
     expect(text.indexOf('res\0')).toBeLessThan(text.indexOf('vmt\0'));
     expect(text).toContain('materials/vgui/hud\0');
+  });
+
+  it('packs a file with no extension under a blank extension, as Valve does, and reads it back', () => {
+    const got = readVPK(encodeVPK([{ path: 'docs/LICENSE', data: new Uint8Array([7]) }, { path: 'README', data: new Uint8Array([8]) }]));
+    expect(got.get('docs/license')).toEqual(new Uint8Array([7]));
+    expect(got.get('readme')).toEqual(new Uint8Array([8]));
   });
 });

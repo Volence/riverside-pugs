@@ -17,6 +17,9 @@
 //      which comes out as a zip instead of a VPK.
 //   w: a stock design with the weapons' Ammo only preset (edit.ts's ammoOnly),
 //      so the reader also sees mod_textures.txt and the clear texture.
+//   i: an imported HUD (importFixtures.ts's sampleHud) with the health panel
+//      moved, so the reader also sees pass-through files and the upload's
+//      own hudlayout.res with an edit in it.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -25,6 +28,8 @@ import { packHud } from './build';
 import { validateDesign, DEFAULT_DESIGN } from './design';
 import { ammoOnly } from './edit';
 import type { BuildAssets } from './build';
+import { registerImport } from './base';
+import { sampleHud } from './importFixtures';
 
 const FONT_DIR = fileURLToPath(new URL('./base/fonts/', import.meta.url));
 const fonts = (): BuildAssets['fonts'] => ({
@@ -54,6 +59,13 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
   if (sample === 'c') {
     const d = validateDesign({ ...SAMPLE_A, advanced: true,
       styles: { ...SAMPLE_A.styles, incapPanel: { kind: 'flat', color: '120 60 200 255' } } });
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
+    return;
+  }
+  if (sample === 'i') {
+    const id = 'f'.repeat(64);
+    registerImport(id, sampleHud());
+    const d = validateDesign({ v: 1, preset: 'imported', imported: { id, name: 'edgehud' }, crosshair: 'none', elements: { ownHealth: { x: 8, y: 400 } } });
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d).bytes);
     return;
   }

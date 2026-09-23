@@ -84,9 +84,12 @@ export function encodeVPK(files: VpkFile[]): Uint8Array<ArrayBuffer> {
     const slash = f.path.lastIndexOf('/');
     const dir = slash < 0 ? ' ' : f.path.slice(0, slash);
     const base = f.path.slice(slash + 1);
+    // A file with no extension is stored under a blank one, which the format
+    // writes as a single space (readVPK reads it back the same way). An
+    // imported HUD can carry one, a LICENSE say, and it passes through.
     const dot = base.lastIndexOf('.');
-    const name = base.slice(0, dot);
-    const ext = base.slice(dot + 1);
+    const name = dot < 0 ? base : base.slice(0, dot);
+    const ext = dot < 0 ? ' ' : base.slice(dot + 1);
     ((tree[ext] ??= {})[dir] ??= {})[name] = f.data;
   }
 

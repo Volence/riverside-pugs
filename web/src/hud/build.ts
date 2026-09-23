@@ -8,12 +8,13 @@
  * already has it and shipping it would only widen what this addon can break.
  */
 import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
-import { baseFile, baseOf, presetOverrides, BASE_PATHS, type BaseKey } from './base';
+import { baseFile, baseOf, importedFiles, presetOverrides, BASE_PATHS, type BaseKey } from './base';
 import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
+import { decodeText, encodeText } from './text';
 import {
   baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
   type WeaponNumKey,
@@ -74,13 +75,26 @@ class Work {
   }
   text(path: string): string { return this.texts.get(path) ?? baseFile(this.key, path); }
   setText(path: string, s: string) { this.texts.set(path, s); }
+  /**
+   * The files this build touched. For an imported HUD, a file the passes
+   * parsed but left as they found it goes back as the upload's own bytes:
+   * writeKv would drop its comments and reformat it, and a HUD author's file
+   * should reach the game exactly as they wrote it unless an edit is in it.
+   * "Left as found" is measured by writing both trees the same way. An
+   * edited file is written back in the encoding it came in.
+   */
   files(): VpkFile[] {
     const out: VpkFile[] = [];
+    const layer = importedFiles(this.key);
     const paths = new Set([...this.trees.keys(), ...this.texts.keys(), ...BASE_PATHS.filter((p) => presetOverrides(this.key, p))]);
     for (const path of [...paths].sort()) {
-      if (this.texts.has(path) || path === ANIMS) { out.push({ path, data: enc(this.text(path)) }); continue; }
+      const own = layer?.get(path);
+      const write = (text: string) => (own ? encodeText(text, decodeText(own).encoding) : enc(text));
+      if (this.texts.has(path) || path === ANIMS) { out.push({ path, data: write(this.text(path)) }); continue; }
       this.tree(path);
-      out.push({ path, data: enc(writeKv(this.trees.get(path)!)) });
+      const now = writeKv(this.trees.get(path)!);
+      if (own && now === writeKv(parseKv(baseFile(this.key, path)))) { out.push({ path, data: own }); continue; }
+      out.push({ path, data: write(now) });
     }
     return out;
   }
@@ -1091,6 +1105,9 @@ function addonInfo(name: string): string {
   return `"AddonInfo"\n{\n\taddonSteamAppID\t\t500\n\taddontitle\t\t"${name.replace(/"/g, '')}"\n\taddonversion\t\t1.0\n\taddontagline\t\t"Custom HUD (riversidepug.com)"\n\taddonauthor\t\t"HUD editor"\n\taddonDescription\t\t"Custom HUD layout."\n}\n`;
 }
 
+/** What a download did beyond the design: the upload files a generated file replaced, for the download note. */
+export interface BuildReport { replaced: string[] }
+
 /**
  * Where the pass order matters, and where it does not.
  *
@@ -1131,8 +1148,9 @@ function addonInfo(name: string): string {
  * - `crosshairPass` only adds the texture files for the xHair element
  *   `layoutPass` wrote; it reads no tree.
  */
-export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[] {
-  const work = new Work(baseOf(design));
+export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport): VpkFile[] {
+  const key = baseOf(design);
+  const work = new Work(key);
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   weaponsPass(work, design, extra);
@@ -1144,7 +1162,20 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
   crosshairPass(design, assets, extra);
-  return [...work.files(), ...extra, { path: 'addoninfo.txt', data: enc(addonInfo(design.name)) }];
+  const edited = work.files();
+  const layer = importedFiles(key);
+  if (!layer) return [...edited, ...extra, { path: 'addoninfo.txt', data: enc(addonInfo(design.name)) }];
+  // An imported HUD: every file of the upload, then the edited files over
+  // them, then the generated ones (a font copy, a texture, the crosshair),
+  // which replace an upload file at the same path and are reported. The
+  // upload's own addoninfo.txt is kept; one without gets the editor's.
+  const out = new Map<string, Uint8Array>(layer);
+  for (const f of edited) out.set(f.path, f.data);
+  const replaced = new Set<string>();
+  for (const f of extra) { if (layer.has(f.path)) replaced.add(f.path); out.set(f.path, f.data); }
+  if (!out.has('addoninfo.txt')) out.set('addoninfo.txt', enc(addonInfo(design.name)));
+  if (report) report.replaced = [...replaced].sort();
+  return [...out.keys()].sort().map((path) => ({ path, data: out.get(path)! }));
 }
 
 const README = (name: string) => `${name}: advanced install\r\n\r\n`
@@ -1166,8 +1197,8 @@ const README = (name: string) => `${name}: advanced install\r\n\r\n`
  * player to drop next to left4dead and wire into gameinfo.txt by hand.
  * `addoninfo.txt` is harmless inside a gameinfo.txt mount and is left in.
  */
-export function packHud(design: HudDesign, assets: BuildAssets = {}) {
-  const vpk = encodeVPK(buildHud(design, assets));
+export function packHud(design: HudDesign, assets: BuildAssets = {}, report?: BuildReport) {
+  const vpk = encodeVPK(buildHud(design, assets, report));
   if (!design.advanced) return { filename: `${design.name}.vpk`, mime: 'application/octet-stream', bytes: vpk };
   const zip = encodeZip([
     { path: 'riversidehud/pak01_dir.vpk', data: vpk },
