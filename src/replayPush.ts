@@ -1,5 +1,5 @@
 import {
-  closeSync, mkdirSync, openSync, readSync, statSync, truncateSync, writeSync,
+  closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, truncateSync, writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -34,6 +34,11 @@ export const PUSH_BODY_LIMIT = 128 * 1024;
 /** No live file grows past this. The plugin's own per-round cap
  *  (sm_pug_replay_max_mb) defaults to 64 MB, and a full round is 10 to 15. */
 export const PUSH_MAX_FILE_BYTES = 64 * 1024 * 1024;
+/** Total bytes the live directory (across every match) is allowed to hold
+ *  before a brand new live file is refused. Guards disk space against a pile
+ *  of live copies from matches that never got cleaned up; it never blocks a
+ *  batch that only appends to a file already on disk. */
+export const PUSH_LIVE_STORE_MAX_BYTES = 1024 * 1024 * 1024;
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -56,7 +61,8 @@ export type ParsedPush = { ok: true; batch: PushBatch } | { ok: false; status: 4
 export type PushResult =
   | { status: 200; length: number }
   | { status: 409; length: number; error?: string }
-  | { status: 400; error: string };
+  | { status: 400; error: string }
+  | { status: 507; error: string };
 
 function isU32(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 0xffff_ffff;
@@ -102,6 +108,24 @@ function sizeOf(path: string): number {
   } catch {
     return 0;
   }
+}
+
+/** Sum of every file's size directly inside `liveDir`. Only called right
+ *  before a brand new live file would be created, never on the hot append
+ *  path, so paying for a directory listing here does not cost a busy round
+ *  anything. A missing directory (nothing pushed yet) sums to zero. */
+function liveDirTotalBytes(liveDir: string): number {
+  let names: string[];
+  try {
+    names = readdirSync(liveDir);
+  } catch {
+    return 0;
+  }
+  let total = 0;
+  for (const name of names) {
+    total += sizeOf(join(liveDir, name));
+  }
+  return total;
 }
 
 function readU32(path: string, at: number): number | null {
@@ -190,8 +214,21 @@ function ensureDir(dir: string): void {
  *   writing, only when those bytes are identical to what is on disk. Anything
  *   else, including a same-second restart (same `started`, different
  *   content), is refused rather than silently kept or silently overwritten.
+ * - The first batch's own `started` must equal the `startedUnix` baked into
+ *   the header bytes it carries. The plugin sets both from the same value, so
+ *   a mismatch is a plugin bug, not a stale or racing request, and is
+ *   refused with 400 rather than folded into the 409 'stale round' path
+ *   where it would look like an ordinary race and retry forever.
+ * - Before a brand new live file is created, whether because none exists yet
+ *   or because a newer round is about to replace a stale one, the live
+ *   directory's total size is checked against `maxStoreBytes`. Over the cap,
+ *   the batch is refused with 507 and nothing is written or truncated: a
+ *   stale file on disk is left exactly as it was rather than being wiped for
+ *   a round that then cannot be written either.
  */
-export function applyPush(liveDir: string, b: PushBatch): PushResult {
+export function applyPush(
+  liveDir: string, b: PushBatch, maxStoreBytes: number = PUSH_LIVE_STORE_MAX_BYTES,
+): PushResult {
   ensureDir(liveDir);
   const path = join(liveDir, liveFileName(b.token, b.ordinal, b.half));
   let length = sizeOf(path);
@@ -206,14 +243,22 @@ export function applyPush(liveDir: string, b: PushBatch): PushResult {
     if (!h || h.token !== b.token || h.half !== b.half || h.ordinal !== b.ordinal) {
       return { status: 400, error: 'the header does not match the batch' };
     }
-    if (existingStarted !== null && existingStarted !== b.started) {
-      if (b.started > existingStarted) {
-        truncateSync(path, 0);
-        length = 0;
-        existingStarted = null;
-      } else {
-        return { status: 409, length, error: 'stale round' };
+    if (h.startedUnix !== b.started) {
+      return { status: 400, error: 'started does not match header' };
+    }
+    const willReplaceStale = existingStarted !== null && b.started > existingStarted;
+    if (existingStarted !== null && existingStarted !== b.started && !willReplaceStale) {
+      return { status: 409, length, error: 'stale round' };
+    }
+    if (length === 0 || willReplaceStale) {
+      if (liveDirTotalBytes(liveDir) > maxStoreBytes) {
+        return { status: 507, error: 'live store is full' };
       }
+    }
+    if (willReplaceStale) {
+      truncateSync(path, 0);
+      length = 0;
+      existingStarted = null;
     }
   } else if (b.offset !== 0 && existingStarted !== null && existingStarted !== b.started) {
     return { status: 409, length, error: 'stale round' };
