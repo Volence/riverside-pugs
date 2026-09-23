@@ -90,6 +90,7 @@ const ID_FIELDS: Partial<Record<LogEvent['kind'], readonly string[]>> = {
   name: ['steamid'],
   input_burst: ['steamid'],
   input_cap: ['steamid'],
+  round_stat: ['steamid'],
 };
 
 /**

@@ -102,6 +102,7 @@ describe('aliases', () => {
         { kind: 'abandon', token: TOKEN, steamid: ALT },
         { kind: 'player', token: TOKEN, steamid: ALT, event: 'connect' },
         { kind: 'live_stat', token: TOKEN, steamid: ALT, stats: { skeets: 1 } },
+        { kind: 'round_stat', token: TOKEN, half: 1, steamid: ALT, stats: { crowns: 1 } },
         { kind: 'entered', steamid: ALT },
       ];
       for (const ev of kinds) {
