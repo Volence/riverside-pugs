@@ -29,6 +29,8 @@ export interface RoundReplay {
 
 export interface RoundInput {
   key: RoundKey;
+  /** match_rounds.started_at (SQLite datetime string), or null before the round went live. */
+  startedAt: string | null;
   survTeam: 'a' | 'b';
   reliable: boolean;
   ended: boolean;

@@ -34,6 +34,7 @@ export function loadRoundInput(db: DB, key: RoundKey): Omit<RoundInput, 'replay'
 
   return {
     key,
+    startedAt: row.started_at,
     survTeam: row.surv_team,
     reliable: row.reliable === 1,
     ended: row.ended_at !== null && row.started_at !== null,

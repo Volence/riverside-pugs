@@ -26,6 +26,7 @@ function setup() {
 describe('loadRoundInput', () => {
   it('loads one round and only its own events, ordered by time', () => {
     const r = loadRoundInput(setup(), { matchId: 1, ordinal: 0, half: 2 })!;
+    expect(r.startedAt).toBe('2026-09-20 10:00:00');
     expect(r.survTeam).toBe('b');
     expect(r.reliable).toBe(true);
     expect(r.ended).toBe(true);
