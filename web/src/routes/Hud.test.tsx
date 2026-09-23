@@ -855,4 +855,16 @@ describe('Hud page', () => {
     fireEvent.pointerMove(canvas, { clientX: 60, clientY: 460, pointerId: 1 });
     expect(draws.mock.calls.length).toBeGreaterThan(after);
   });
+
+  it('offers Undo while the first edit is still being typed into a number box', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    const x = () => screen.getByLabelText('X') as HTMLInputElement;
+    const undoBtn = () => screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement;
+    expect(undoBtn().disabled).toBe(true);
+    fireEvent.input(x(), { target: { value: '42' } });
+    expect(undoBtn().disabled).toBe(false);
+    fireEvent.click(undoBtn());
+    expect(x().value).toBe('10');
+  });
 });

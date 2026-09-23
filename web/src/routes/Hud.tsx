@@ -817,6 +817,13 @@ export default function Hud() {
     }
   };
 
+  // A gesture still open (a number box not yet left) has not recorded its
+  // step, but Undo would close and take it back, so it counts once it has
+  // changed something. By reference, not sameJson: this runs on every render
+  // of a drag, and a design can carry megabytes of image data.
+  const pending = hist.current.pending;
+  const canUndo = hist.current.past.length > 0 || (pending !== null && pending !== design);
+
   const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
@@ -838,7 +845,7 @@ export default function Hud() {
         <Panel class="hud__stage">
           <Toolbar
             design={design} side={side} cardState={cardState} backdrop={backdrop} shotError={uploadErrors.shot}
-            canUndo={hist.current.past.length > 0} canRedo={hist.current.future.length > 0}
+            canUndo={canUndo} canRedo={hist.current.future.length > 0}
             onUndo={doUndo} onRedo={doRedo}
             onSide={(s) => { setSide(s); setSel(NONE); }}
             onState={setCardState}
