@@ -73,6 +73,27 @@ describe('recordBalanceSighting', () => {
     expect(problems[0]).toMatch(/differs from dallas/);
   });
 
+  it('alerts with the time-ordered patch number, not the row id', () => {
+    // First sighting gets row id 1 but a LATER first_seen_at than the one below.
+    recordBalanceSighting(db, {
+      matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [], now: '2026-06-01 00:00:00',
+    });
+    problems.length = 0;
+
+    // Second sighting is a different inventory (a new patch), so it gets row
+    // id 2, but its first_seen_at is EARLIER, so it ranks #1 on the admin
+    // page (ROW_NUMBER OVER (ORDER BY first_seen_at, id)). The alert must
+    // name it #1, not #2.
+    const changed = { ...INV, 'p:l4d_itemlimiter.smx': '50.cccc0001' };
+    const r = recordBalanceSighting(db, {
+      matchId: 1, serverId: 2, half: 1, inventory: changed, versionless: [], now: '2020-01-01 00:00:00',
+    });
+    expect(r.patchId).toBe(2);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/new patch \(#1,/);
+    expect(problems[0]).not.toMatch(/#2/);
+  });
+
   it('alerts on a versionless plugin update without making a new patch', () => {
     const v = ['pug-match.smx'];
     const first = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: v });
