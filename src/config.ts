@@ -60,6 +60,11 @@ export interface Config {
    *  Deliberately NOT part of the 6 hourly database backup: removing a file
    *  has to remove every copy the system holds. */
   ticketAttachmentsDir: string;
+  /** Where live replay bytes pushed by the game servers are kept while a
+   *  round is played. The site's own directory, not the replay directory: on
+   *  Dallas the plugin writes its own file into that one, and a pushed copy
+   *  beside it must never race it. Created on first push. */
+  replayLiveDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
 }
@@ -106,6 +111,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     missionsDir: env.MISSIONS_DIR ?? '',
     dlc4MissionsDir: env.DLC4_MISSIONS_DIR ?? '',
     ticketAttachmentsDir: env.TICKET_ATTACHMENTS_DIR?.trim() || join(dirname(dbPath), 'ticket-attachments'),
+    replayLiveDir: env.REPLAY_LIVE_DIR?.trim() || join(dirname(dbPath), 'replays-live'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
   };
