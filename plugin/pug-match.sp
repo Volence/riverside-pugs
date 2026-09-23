@@ -291,6 +291,7 @@ bool g_bHasBoomLanded;
 #include "pug-logauth.inc"
 #include "pug-stats.inc"
 #include "pug-balance.inc"
+#include "pug-roundstats.inc"
 
 // ---------- replay recording ----------
 ConVar g_cvReplayHz;                     // 0 = off. Instant rcon kill switch, no reload.
@@ -546,6 +547,12 @@ No config exec and no restart: it tracks the game already being played. Implies 
 		LogError("pug: player_say not hooked; chat will not be captured");
 	if (!HookEventEx("player_changename", Event_PlayerChangeName))
 		LogError("pug: player_changename not hooked; renames will not reach the conduct alerts");
+	if (!HookEventEx("create_panic_event", Event_PanicMark))
+		LogMessage("[pug] create_panic_event not on this engine; no panic markers");
+	if (!HookEventEx("finale_start", Event_FinaleStartMark))
+		LogMessage("[pug] finale_start not on this engine");
+	if (!HookEventEx("finale_radio_start", Event_FinaleRadioMark))
+		LogMessage("[pug] finale_radio_start not on this engine");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -3376,6 +3383,7 @@ public void OnRoundIsLive()
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
 
 		EmitBalance();
+		RoundStatsBegin();
 
 		RosterLateJoiners();
 		CheckRosterMismatch();
@@ -3490,6 +3498,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	// rewrites g_iHalf and the team lock timer can flip g_iPugSide before
 	// Timer_ReadScore's retry chain (2-8s out) ever fires. See EmitRoundEnd.
 	int half = g_iHalf;
+	EmitRoundStats(half);
 	char survEnd[2];
 	SurvSideOf(survPug, survEnd, sizeof(survEnd));
 	// Captured here for the same reason as half and survEnd: by the time the
@@ -3881,6 +3890,9 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (IsInfectedClient(victim) && GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK)
 	{
 		AddStat(attacker, PS_TankDamage, damage);
+		char wpnT[32];
+		event.GetString("weapon", wpnT, sizeof(wpnT));
+		RoundWpnAdd(attacker, wpnT, WS_TankDmg, damage);
 	}
 
 	// SI damage: player-controlled smoker/boomer/hunter. Tank excluded
@@ -3917,6 +3929,9 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	else if (siVictim && remaining > 0)
 	{
 		g_iStatSiDmg[slot] += damage;
+		char wpnS[32];
+		event.GetString("weapon", wpnS, sizeof(wpnS));
+		RoundWpnAdd(attacker, wpnS, WS_SiDmg, damage);
 	}
 }
 
@@ -4016,6 +4031,9 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	if (slot == -1 || !IsSurvivorClient(attacker) || !IsInfectedClient(victim) || IsFakeClient(victim)) return;
 	if (GetEntProp(victim, Prop_Send, "m_zombieClass") == ZC_TANK) return;
 	g_iStatSiKill[slot]++;
+	char wpnK[32];
+	event.GetString("weapon", wpnK, sizeof(wpnK));
+	RoundWpnAdd(attacker, wpnK, WS_SiKill, 1);
 	g_iStatSiDmg[slot] += g_iLastHealth[victim]; // overkill remainder
 	g_iLastHealth[victim] = 0;
 }
@@ -4028,6 +4046,8 @@ public void Event_InfectedDeath(Event event, const char[] name, bool dontBroadca
 	int slot = g_iClientRoster[attacker];
 	if (slot == -1 || !IsSurvivorClient(attacker)) return;
 	g_iStatCk[slot]++;
+	if (event.GetBool("blast")) RoundWpnAdd(attacker, "pipe_bomb", WS_CiKill, 1);
+	else RoundWpnAddActive(attacker, WS_CiKill, 1);
 }
 
 public void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast)

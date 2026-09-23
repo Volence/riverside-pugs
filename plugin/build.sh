@@ -8,6 +8,7 @@ SCRIPTING=${PUG_SCRIPTING:-/home/volence/l4d/Rotoblin-AZMod/SourceCode/scripting
 cp pug-match.sp "$SCRIPTING/pug-match.sp"
 cp pug-stats.inc "$SCRIPTING/pug-stats.inc"
 cp pug-balance.inc "$SCRIPTING/pug-balance.inc"
+cp pug-roundstats.inc "$SCRIPTING/pug-roundstats.inc"
 cp pug-balance-list.inc "$SCRIPTING/pug-balance-list.inc"
 cp pug-leave.inc "$SCRIPTING/pug-leave.inc"
 cp pug-pause.inc "$SCRIPTING/pug-pause.inc"
@@ -22,7 +23,7 @@ cp pug-livepush.inc "$SCRIPTING/pug-livepush.inc"
 # is not already there. Otherwise a build here would overwrite a real copy and
 # then the trap would delete it out from under whatever put it there.
 SKILL_DETECT_INC="$SCRIPTING/include/l4d2_skill_detect.inc"
-CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-balance.inc $SCRIPTING/pug-balance-list.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc $SCRIPTING/pug-livepush.inc"
+CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-balance.inc $SCRIPTING/pug-balance-list.inc $SCRIPTING/pug-roundstats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc $SCRIPTING/pug-livepush.inc"
 if [ ! -e "$SKILL_DETECT_INC" ]; then
 	cp /home/volence/l4d/L4D1_2-Plugins/l4d2_skill_detect/scripting/include/l4d2_skill_detect.inc "$SKILL_DETECT_INC"
 	CLEANUP="$CLEANUP $SKILL_DETECT_INC"

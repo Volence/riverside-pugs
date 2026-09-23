@@ -50,8 +50,12 @@ enum PugStat
 
 /** Wire keys. MUST match src/statKeys.ts exactly; tests/statKeys.test.ts is the
  *  backstop on the TypeScript side and a mismatch here is a silently missing
- *  stat, not an error. */
-static const char g_sStatKey[PS_MAX][24] = {
+ *  stat, not an error.
+ *
+ *  Not `static`: pug-roundstats.inc (a separate physical file, per this
+ *  compiler's static-scoping) reads this table too, for the per-round skill
+ *  deltas in EmitRoundStats. */
+char g_sStatKey[PS_MAX][24] = {
 	"skeets", "team_skeets", "skeets_hurt", "skeet_assists",
 	"skeets_shotgun", "skeets_sniper", "skeets_melee",
 	"deadstops", "boomer_pops", "crowns", "draw_crowns",
@@ -72,8 +76,11 @@ static const char g_sStatKey[PS_MAX][24] = {
  *  therefore always report. That was a chain of `s != X` negations, which is
  *  unreadable past a handful and fails silently in the dangerous direction: a
  *  new own-capture stat left out of it is not an error, it is a stat quietly
- *  dropped from every dump taken without skill_detect loaded. */
-static bool StatNeedsSkillDetect(PugStat s)
+ *  dropped from every dump taken without skill_detect loaded.
+ *
+ *  Not `static`: pug-roundstats.inc calls this too, to omit skill-detect
+ *  stats from the per-round delta when skill_detect is not loaded. */
+bool StatNeedsSkillDetect(PugStat s)
 {
 	switch (s)
 	{
