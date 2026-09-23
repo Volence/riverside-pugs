@@ -1,7 +1,7 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, newDesign, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
+import { DEFAULT_DESIGN, validateDesign, newDesign, usableCrosshair, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
 
 describe('validateDesign', () => {
   it('returns the defaults for junk', () => {
@@ -70,6 +70,16 @@ describe('validateDesign', () => {
     expect(newDesign(true)).toEqual({ ...DEFAULT_DESIGN, crosshair: 'bundle' });
     expect(newDesign(false)).toEqual(DEFAULT_DESIGN);
     expect(newDesign(true)).not.toBe(DEFAULT_DESIGN);
+  });
+
+  it('turns a bundle into none when this browser has no crosshair to bundle, and leaves the rest alone', () => {
+    const bundle = { ...DEFAULT_DESIGN, crosshair: 'bundle' as const };
+    expect(usableCrosshair(bundle, true)).toBe(bundle);
+    expect(usableCrosshair(bundle, false)).toEqual({ ...bundle, crosshair: 'none' });
+    for (const c of ['addon', 'none'] as const) {
+      const d = { ...DEFAULT_DESIGN, crosshair: c };
+      expect(usableCrosshair(d, false)).toBe(d);
+    }
   });
 
   it('keeps hideGameCrosshair only when it is true', () => {

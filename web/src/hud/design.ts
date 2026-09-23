@@ -115,6 +115,17 @@ export function newDesign(hasSavedCrosshair: boolean): HudDesign {
   return d;
 }
 
+/**
+ * A design the page can build: a 'bundle' needs a crosshair saved on the
+ * Crosshair page in this browser, so without one it becomes 'none', which
+ * ships no xHair element to show the missing-texture checker. The page runs
+ * every design it takes in (storage, a share link, an imported file)
+ * through this, since a design can come from a browser that had one.
+ */
+export function usableCrosshair(d: HudDesign, hasSavedCrosshair: boolean): HudDesign {
+  return d.crosshair === 'bundle' && !hasSavedCrosshair ? { ...d, crosshair: 'none' } : d;
+}
+
 const MAX_IMAGE_SIDE = 512;
 const MAX_IMAGE_B64 = 1_400_000;          // about 1 MB decoded
 const ID = /^[A-Za-z][A-Za-z0-9]{0,31}$/;
