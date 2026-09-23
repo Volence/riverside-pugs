@@ -41,6 +41,7 @@ export const SETUP_TABS: { key: string; label: string; path: string }[] = [
   { key: 'seasons', label: 'Seasons', path: '/admin/setup/seasons' },
   { key: 'settings', label: 'Settings', path: '/admin/setup/settings' },
   { key: 'audit', label: 'Audit', path: '/admin/setup/audit' },
+  { key: 'patches', label: 'Patches', path: '/admin/setup/patches' },
 ];
 
 /**

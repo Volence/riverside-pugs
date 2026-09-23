@@ -34,6 +34,10 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/setup/campaigns', asAdmin)).toEqual({ desk: 'setup', section: 'campaigns', param: null });
   });
 
+  it('parses the patches setup tab', () => {
+    expect(parseAdminPath('/admin/setup/patches', asAdmin)).toEqual({ desk: 'setup', section: 'patches', param: null });
+  });
+
   it('gives a moderator the People desk whatever the URL says', () => {
     expect(parseAdminPath('/admin/live', asMod)).toEqual({ desk: 'people', section: 'search', param: null });
     expect(parseAdminPath('/admin/setup/settings', asMod)).toEqual({ desk: 'people', section: 'search', param: null });
