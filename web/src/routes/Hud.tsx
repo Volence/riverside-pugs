@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
-import { drawBackdrop, type Backdrop } from '../crosshair/draw';
+import { drawBackdrop, TEX, type Backdrop, type CrosshairState } from '../crosshair/draw';
+import { savedCrosshair, crosshairPixels } from '../crosshair/saved';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN, newDesign, usableCrosshair,
   type HudDesign, type StyleOverride, type Box,
 } from '../hud/design';
 import { screenW, SCREEN_H } from '../hud/units';
@@ -88,8 +89,14 @@ async function fontBytes(u: string, filename: string): Promise<Uint8Array> {
  * actually encodes, and it is the only thing here that comes from the
  * registry rather than from the design itself.
  */
-export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
+export async function assetsFor(design: HudDesign, crosshair: CrosshairState | null = null): Promise<BuildAssets> {
   const assets: BuildAssets = {};
+  // A bundled crosshair's texture, drawn exactly as the Crosshair page
+  // exports it. Without it the generator refuses the build, naming that page.
+  if (design.crosshair === 'bundle' && crosshair) {
+    const px = crosshairPixels(crosshair, null);
+    if (px && px.length === TEX * TEX * 4) assets.crosshair = px;
+  }
   const entries = Object.entries(design.images);
   if (entries.length) {
     const images: Record<string, Uint8ClampedArray> = {};
@@ -232,7 +239,13 @@ function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection
 const modsOf = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): Mods => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
 
 export default function Hud() {
-  const [design, setDesignState] = useState<HudDesign>(loadDesign);
+  // The crosshair saved on the Crosshair page, read once: the preview draws
+  // it and a 'bundle' download packs it, so both use this one copy. It also
+  // decides a new design's crosshair, and whether a 'bundle' is buildable.
+  const [crosshair] = useState<CrosshairState | null>(savedCrosshair);
+  const [design, setDesignState] = useState<HudDesign>(
+    () => usableCrosshair(loadDesign(() => newDesign(crosshair !== null)), crosshair !== null),
+  );
   // The design as of the last edit, read synchronously: two edits in one
   // event (a gesture's end, then a step) must each see the other's result,
   // which a state value only shows on the next render.
@@ -384,6 +397,7 @@ export default function Hud() {
       hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
       marquee,
       guides,
+      crosshair,
     });
   }, [design, side, sel, backdrop, imgTick, cardState, hover, guides, marquee]);
 
@@ -436,7 +450,7 @@ export default function Hud() {
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
           });
         }
-        if (!cancelled && apply) { edit(() => decoded); dropPicks(); }
+        if (!cancelled && apply) { edit(() => usableCrosshair(decoded, crosshair !== null)); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
     })();
@@ -778,7 +792,7 @@ export default function Hud() {
 
   const download = async () => {
     try {
-      const assets = await assetsFor(design);
+      const assets = await assetsFor(design, crosshair);
       // Nothing that reaches a player's game skips the validator. Every
       // control already guards its own input, but this is the one place the
       // design turns into files, so a future control that forgets cannot put
@@ -831,7 +845,7 @@ export default function Hud() {
     if (!f) return;
     try {
       const text = await f.text();
-      const next = validateDesign(JSON.parse(text));
+      const next = usableCrosshair(validateDesign(JSON.parse(text)), crosshair !== null);
       edit(() => next);
       dropPicks();
       setStatus(`Imported ${next.name}.`);
@@ -906,7 +920,7 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
+          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} crosshair={crosshair} />
         </Panel>
       </div>
 
@@ -954,14 +968,20 @@ export default function Hud() {
 
         <p class="muted hud__note">
           {design.advanced
-            ? 'Unzip it and follow README.txt. It works alongside a crosshair addon. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
-            : <>Put the file in <code>left4dead/addons/</code> and restart the game. It works alongside a crosshair from the Crosshair page. Custom HUDs are allowed on the Riverside servers.</>}
+            ? 'Unzip it and follow README.txt. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
+            : <>Put the file in <code>left4dead/addons/</code> and restart the game. Custom HUDs are allowed on the Riverside servers.</>}
         </p>
-        {!design.advanced && (
+        {design.crosshair === 'bundle' && (
           <p class="muted hud__note">
-            Also using a crosshair addon? The game keeps only one layout file, and it is usually the
-            crosshair's, so this HUD's positions would not show. Open <code>left4dead/addonlist.txt</code> and
-            move this HUD's line above the crosshair's. Your crosshair keeps working.
+            Your crosshair is inside this HUD, so disable any separate crosshair addon: it uses the same texture name,
+            and whichever loads first wins.
+          </p>
+        )}
+        {design.crosshair === 'addon' && !design.advanced && (
+          <p class="muted hud__note">
+            The game keeps only one layout file, and a crosshair addon ships its own, so this HUD's positions would not
+            show. Open <code>left4dead/addonlist.txt</code> and move this HUD's line above the crosshair's; the in-game
+            Add-ons menu cannot change the order. Your crosshair keeps working.
           </p>
         )}
 

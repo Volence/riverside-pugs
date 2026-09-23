@@ -3,6 +3,8 @@ import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-li
 import { toUnits } from './Hud';
 import Hud from './Hud';
 import { readFileSync } from 'node:fs';
+import { crosshairFiles } from '../crosshair/vpk';
+import { TEX } from '../crosshair/draw';
 import { join } from 'node:path';
 
 describe('toUnits', () => {
@@ -27,6 +29,15 @@ afterEach(() => {
   // against it. Restoring here happens either way.
   vi.restoreAllMocks();
 });
+
+/** Where `needle` first occurs in `hay`, or -1. */
+function indexOf(hay: Uint8Array, needle: Uint8Array): number {
+  outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
 
 /** happy-dom lays nothing out: a 1:1 box makes client pixels HUD units. */
 const unitCanvas = (container: Element) => {
@@ -225,10 +236,86 @@ describe('Hud page', () => {
 
   it('shows the crosshair/addonlist note only in normal mode, since the advanced zip does not have that conflict', () => {
     render(<Hud />);
-    expect(screen.getByText(/addonlist\.txt/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /crosshair addon/i }));
+    expect(screen.getAllByText(/addonlist\.txt/i).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /advanced mode/i }));
     expect(screen.queryByText(/addonlist\.txt/i)).toBeNull();
+  });
+
+  describe('the Crosshair choice', () => {
+    const SAVED = { shape: 'dot', dot: 4, color: '#ffffff', alpha: 100, outline: 0 };
+    const radio = (name: RegExp) => screen.getByRole('radio', { name }) as HTMLInputElement;
+
+    /**
+     * happy-dom has no 2D context. The crosshair texture canvas (TEX x TEX,
+     * sized before its context is asked for) gets a stand-in whose pixels are
+     * PIXELS; every other canvas still gets none, so the preview stays a no-op.
+     */
+    const PIXELS = new Uint8ClampedArray(TEX * TEX * 4).map((_, i) => (i * 13) & 0xff);
+    const stubTexture = () => vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+      if (this.width !== TEX || this.height !== TEX) return null;
+      return new Proxy({}, { get: (_t, k) => (k === 'getImageData' ? () => ({ data: PIXELS }) : () => {}), set: () => true }) as never;
+    } as never);
+    /** Click Download and hand back the bytes it saved. */
+    const downloaded = async (): Promise<Uint8Array> => {
+      const blobs: Blob[] = [];
+      vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => { blobs.push(b as Blob); return 'blob:hud'; });
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      fireEvent.click(screen.getByRole('button', { name: /download/i }));
+      await waitFor(() => expect(blobs).toHaveLength(1));
+      return new Uint8Array(await blobs[0].arrayBuffer());
+    };
+
+    it('starts a new design bundling the crosshair saved on the Crosshair page, and the download carries its texture', async () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      stubTexture();
+      render(<Hud />);
+      expect(radio(/bundle/i).checked).toBe(true);
+      expect(screen.getByText(/disable any separate crosshair addon/i)).toBeTruthy();
+      const bytes = await downloaded();
+      for (const f of crosshairFiles(TEX, TEX, PIXELS)) expect(indexOf(bytes, f.data), f.path).toBeGreaterThan(0);
+      expect(new TextDecoder('latin1').decode(bytes)).toContain('altcrosshair');
+    });
+
+    it('starts a new design with no crosshair when none is saved, and does not offer the bundle', async () => {
+      render(<Hud />);
+      expect(radio(/^none/i).checked).toBe(true);
+      expect(radio(/bundle/i).disabled).toBe(true);
+      expect(screen.getByRole('link', { name: /crosshair page/i }).getAttribute('href')).toBe('/crosshair');
+      const text = new TextDecoder('latin1').decode(await downloaded());
+      expect(text).not.toContain('altcrosshair');
+      expect(text).not.toContain('xHair');
+    });
+
+    it('keeps the choice of a design saved before it existed', () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      localStorage.setItem('hud', JSON.stringify({ v: 1, xhair: true }));
+      render(<Hud />);
+      expect(radio(/crosshair addon/i).checked).toBe(true);
+    });
+
+    it('turns a bundle with no saved crosshair into none, from storage or a file', async () => {
+      localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle' }));
+      render(<Hud />);
+      expect(radio(/^none/i).checked).toBe(true);
+      fireEvent.click(radio(/crosshair addon/i));
+      const file = new File([JSON.stringify({ v: 1, name: 'theirs', crosshair: 'bundle' })], 'theirs.hud.json', { type: 'application/json' });
+      fireEvent.change(screen.getByLabelText('Import a HUD design file'), { target: { files: [file] } });
+      await screen.findByText('Imported theirs.');
+      expect(radio(/^none/i).checked).toBe(true);
+    });
+
+    it('warns what an addon crosshair needs, and when there will be no crosshair at all', () => {
+      render(<Hud />);
+      fireEvent.click(radio(/crosshair addon/i));
+      expect(screen.getByText(/magenta/i)).toBeTruthy();
+      expect(screen.getAllByText(/Add-ons menu cannot/i).length).toBeGreaterThan(0);
+      fireEvent.click(radio(/^none/i));
+      expect(screen.queryByText(/no crosshair at all/i)).toBeNull();
+      fireEvent.click(screen.getByRole('checkbox', { name: /hide the game's crosshair/i }));
+      expect(screen.getByText(/no crosshair at all/i)).toBeTruthy();
+    });
   });
 
   it('names the font file in the status line when the font fetch fails, rather than shipping a corrupt file silently', async () => {
