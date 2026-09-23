@@ -24,6 +24,7 @@ import { makeQueueGate } from './queueGate.js';
 import { makeReadyGate } from './readyGate.js';
 import { canonicalise } from './aliases.js';
 import { recordPlayerNet } from './playerNetworks.js';
+import { onSourceTv } from './sourcetvSessions.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
@@ -785,6 +786,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             recordPlayerNet(deps.db, ev);
           } catch (err) {
             console.error('[networks] failed to record a connect address:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'sourcetv') {
+          try {
+            const sid = serverOf(source, meta);
+            if (sid !== null) onSourceTv(deps.db, sid, ev);
+          } catch (err) {
+            console.error('[sourcetv] failed to record:', err);
           }
           return;
         }
