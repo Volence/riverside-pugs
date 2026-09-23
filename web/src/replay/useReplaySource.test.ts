@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/preact';
-import { useReplaySource } from './source';
+import { useReplaySource, closedWhileLiveSince } from './source';
+import { liveStatusText } from './ReplayHud';
 import {
   encodeHeader, encodeFrame, PLAYER_SLOTS, VERSION,
   type ReplayHeader, type Frame,
@@ -215,6 +216,9 @@ describe('useReplaySource behind the round being played', () => {
     }));
     const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
     await vi.advanceTimersByTimeAsync(0);
+    // behindSinceMs is set after the byte fetch, with the file's closed
+    // flag; a nonzero advance lets Preact flush it (see the no-file case).
+    await vi.advanceTimersByTimeAsync(40);
     expect(result.current.behindSinceMs).toBe(SINCE);
   });
 
@@ -255,3 +259,106 @@ describe('useReplaySource behind the round being played', () => {
   });
 });
 
+describe('useReplaySource over a closed file while the phase is live', () => {
+  const chunk = () => concat([encodeHeader(header()), encodeFrame(emptyFrame(0))]);
+  // The phase went live forty minutes ago: the round end window must not be
+  // timed from this.
+  const PHASE_SINCE = 1_700_000_000_000 - 40 * 60_000;
+  const livePhase = { state: 'live', team: null, limit: 0, leave: false, unready: [], sinceMs: PHASE_SINCE };
+
+  function serve(state: { phase: typeof livePhase | { state: string; sinceMs: number } }): void {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) {
+        return jsonResponse({
+          ordinal: 0, half: 1, closed: true, phase: state.phase,
+          current: { ordinal: 0, half: 1, sinceMs: PHASE_SINCE }, servingCurrent: true,
+        });
+      }
+      return fileResponse(chunk(), true);
+    }));
+  }
+
+  it('says catching up at first, and not available only after thirty seconds of that combination', async () => {
+    vi.setSystemTime(1_700_000_000_000);
+    serve({ phase: livePhase });
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(40);
+    const seen = result.current.behindSinceMs;
+    expect(seen).toBe(1_700_000_000_000);
+    const text = () => liveStatusText(
+      true, result.current.closed, 10, 10, result.current.phase, Date.now(), {}, result.current.behindSinceMs,
+    );
+    expect(text()).toBe('Live view is catching up');
+    await vi.advanceTimersByTimeAsync(28_960);
+    expect(result.current.behindSinceMs).toBe(seen);
+    expect(text()).toBe('Live view is catching up');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(text()).toBe("Live view isn't available for this server right now");
+  });
+
+  it('forgets the combination when it ends, and times a new one afresh', async () => {
+    vi.setSystemTime(1_700_000_000_000);
+    const state: { phase: typeof livePhase | { state: string; sinceMs: number } } = { phase: livePhase };
+    serve(state);
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(result.current.behindSinceMs).toBe(1_700_000_000_000);
+    await vi.advanceTimersByTimeAsync(20_000);
+    // The phase catches up: round over. Nothing is behind any more.
+    state.phase = { ...livePhase, state: 'roundover', sinceMs: Date.now() };
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(result.current.behindSinceMs).toBeNull();
+    // Live over the closed file again: the clock starts now, not twenty
+    // seconds ago.
+    state.phase = livePhase;
+    await vi.advanceTimersByTimeAsync(1_000);
+    const again = result.current.behindSinceMs;
+    expect(again).not.toBeNull();
+    expect(again!).toBeGreaterThanOrEqual(1_700_000_021_000);
+  });
+
+  it('keys the clock on the round and the phase', () => {
+    const a = closedWhileLiveSince(null, true, true, 'r1|100', 5);
+    expect(a).toEqual({ sinceMs: 5, key: 'r1|100' });
+    expect(closedWhileLiveSince(a, true, true, 'r1|100', 50)).toBe(a);
+    expect(closedWhileLiveSince(a, true, true, 'r2|100', 50)).toEqual({ sinceMs: 50, key: 'r2|100' });
+    expect(closedWhileLiveSince(a, true, true, 'r1|200', 50)).toEqual({ sinceMs: 50, key: 'r1|200' });
+    expect(closedWhileLiveSince(a, false, true, 'r1|100', 50)).toBeNull();
+    expect(closedWhileLiveSince(a, true, false, 'r1|100', 50)).toBeNull();
+  });
+});
+
+describe('useReplaySource deciding which round it is reading', () => {
+  const chunk = () => concat([encodeHeader(header()), encodeFrame(emptyFrame(0))]);
+  const SINCE = 1_700_000_000_000;
+
+  // A lost MAP_RESULT leaves the site's ordinal a map behind the file's. The
+  // server judged by start time that the file is the current round.
+  it('trusts servingCurrent over mismatched ordinals', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) {
+        return jsonResponse({
+          ordinal: 1, half: 1, closed: false, current: { ordinal: 0, half: 1, sinceMs: SINCE }, servingCurrent: true,
+        });
+      }
+      return fileResponse(chunk(), false);
+    }));
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result.current.behindSinceMs).toBeNull();
+  });
+
+  it('is behind when the server says the file is an older round, even with matching ordinals', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) {
+        return jsonResponse({
+          ordinal: 0, half: 1, closed: false, current: { ordinal: 0, half: 1, sinceMs: SINCE }, servingCurrent: false,
+        });
+      }
+      return fileResponse(chunk(), false);
+    }));
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(result.current.behindSinceMs).toBe(SINCE);
+  });
+});

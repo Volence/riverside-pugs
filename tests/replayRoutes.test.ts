@@ -112,7 +112,7 @@ describe('GET /api/replays/live/match/:id', () => {
     writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 60, false);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
-    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null, current: null });
+    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null, current: null, servingCurrent: false });
     expect(res.payload).not.toContain(TOKEN);
     expect(res.payload).not.toContain('.rpl');
   });
@@ -160,8 +160,30 @@ describe('GET /api/replays/live/match/:id', () => {
     recordPhase(db, TOKEN, livePhase());
     startRound(id, 1, 1);
     const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
-    expect(body).toMatchObject({ ordinal: 0, half: 1, closed: true, current: { ordinal: 1, half: 1 } });
+    expect(body).toMatchObject({ ordinal: 0, half: 1, closed: true, current: { ordinal: 1, half: 1 }, servingCurrent: false });
     expect(typeof body.current.sinceMs).toBe('number');
+  });
+
+  // The site's ordinal counts match_live_maps rows, one per MAP_RESULT
+  // datagram. Lose one and the round row reads ordinal 0 while the plugin's
+  // file is ordinal 1. The file started after the round did, so it is the
+  // round being played whatever the ordinals say.
+  it('treats the served file as current by start time when a lost MAP_RESULT leaves the ordinals apart', async () => {
+    writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 3, false);
+    const id = seedMatchReplay(`pug_${TOKEN}_1_1.rpl`, 1, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
+    expect(body).toMatchObject({ ordinal: 1, half: 1, current: { ordinal: 0, half: 1 }, servingCurrent: true });
+  });
+
+  it('does not treat an older round\'s file as current even when the ordinals agree', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
+    expect(body).toMatchObject({ ordinal: 0, half: 1, current: { ordinal: 0, half: 1 }, servingCurrent: false });
   });
 
   it('answers with no round, not 404, when the round being played has no file yet', async () => {
@@ -170,7 +192,7 @@ describe('GET /api/replays/live/match/:id', () => {
     startRound(id, 0, 1);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ ordinal: null, half: null, closed: false, current: { ordinal: 0, half: 1 } });
+    expect(res.json()).toMatchObject({ ordinal: null, half: null, closed: false, current: { ordinal: 0, half: 1 }, servingCurrent: false });
     expect(res.payload).not.toContain(TOKEN);
   });
 

@@ -222,6 +222,30 @@ export function infectedMaskFor(
   return mask;
 }
 
+/** How much earlier than the round row's `started_at` a file's own header
+ *  may say it began and still count as that round. The two clocks are the
+ *  game server's and the site's, and the round row is stamped when the
+ *  ROUND_START datagram lands, so a small skew either way is normal. A real
+ *  previous round began minutes before the current one, far outside this. */
+export const SAME_ROUND_SLACK_MS = 60_000;
+
+/**
+ * Whether the file being served is the round being played, by round identity.
+ *
+ * Not by (ordinal, half): the site's ordinal counts match_live_maps rows, one
+ * per MAP_RESULT datagram, so a single lost MAP_RESULT leaves it a map behind
+ * the ordinal in the plugin's file name for the rest of the match, and every
+ * round would then read as behind. The header's `startedUnix` (seconds) and
+ * the round row's `started_at` (ms here) do not depend on that count: the
+ * served file is the current round when it started no earlier than
+ * `SAME_ROUND_SLACK_MS` before the round did. False with no file or no round
+ * in progress.
+ */
+export function servesCurrentRound(fileStartedUnix: number | null, currentSinceMs: number | null): boolean {
+  if (fileStartedUnix === null || currentSinceMs === null) return false;
+  return fileStartedUnix * 1000 >= currentSinceMs - SAME_ROUND_SLACK_MS;
+}
+
 export async function replayRoutes(
   app: FastifyInstance, opts: { db: DB; replayDir: string; liveDir?: string },
 ): Promise<void> {
@@ -286,7 +310,9 @@ export async function replayRoutes(
    *
    * `current` is the round being played (`roundInProgress`), which may be
    * newer than the round served; with no file yet the ordinal and half are
-   * null.
+   * null. `servingCurrent` says whether the served file IS that round, judged
+   * by start time (see `servesCurrentRound`) so the client does no clock
+   * math and a lost MAP_RESULT cannot make every round look behind.
    */
   app.get('/api/replays/live/match/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -311,6 +337,7 @@ export async function replayRoutes(
       closed: info?.closed ?? false,
       phase: phaseFor(db, matchId),
       current,
+      servingCurrent: servesCurrentRound(info?.startedUnix ?? null, current?.sinceMs ?? null),
     };
   });
 
