@@ -2,7 +2,7 @@ import { readFileSync, createReadStream, openSync, readSync, closeSync } from 'n
 import { PassThrough, pipeline, type Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
-import { currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
+import { currentFileFor, resolveByName, resolveFurther, type ReplayFileInfo } from '../replaySessions.js';
 import { phaseFor } from '../liveView.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
@@ -285,7 +285,7 @@ export async function replayRoutes(
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(Number(id)) as { token: string | null } | undefined;
     if (!row?.token) return reply.code(404).send({ error: 'no replay for that match' });
-    const info = currentFileFor(replayDir, row.token, Date.now(), db);
+    const info = currentFileFor(replayDir, row.token, Date.now(), db, undefined, liveDir);
     if (!info) return reply.code(404).send({ error: 'no replay for that match' });
     // The game's phase rides along: this is polled once a second already, and
     // it is what lets the viewer say "paused" or "readying up" while no frames
@@ -331,7 +331,7 @@ export async function replayRoutes(
     // path directly, because that is what knows whether the file is still
     // being written. A match's current map is live too.
     const found = row
-      ? resolveByName(replayDir, row.filename, now)
+      ? resolveFurther(replayDir, liveDir, row.filename, now)
       : liveRoundFor(Number(id), ordinal, half, now);
     if (!found) return reply.code(404).send({ error: 'no such replay' });
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now,
@@ -361,7 +361,7 @@ export async function replayRoutes(
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(matchId) as { token: string | null } | undefined;
     if (!row?.token) return null;
-    return resolveByName(replayDir, `pug_${row.token}_${ord}_${hf}.rpl`, nowMs);
+    return resolveFurther(replayDir, liveDir, `pug_${row.token}_${ord}_${hf}.rpl`, nowMs);
   }
 
   /**

@@ -79,24 +79,41 @@ function readInfo(dir: string, filename: string, nowMs: number): ReplayFileInfo 
   };
 }
 
-/** Every replay on disk, grouped by the session token in its filename.
- *
- *  Never throws. A missing or unreadable directory yields no sessions,
- *  because a browse page returning empty is a far better failure than a
- *  browse page returning 500. */
-export function listSessions(dir: string, nowMs: number, db?: DB): ReplaySession[] {
-  if (!dir) return [];
+/** Every replay in one directory, keyed by filename. */
+function infosIn(dir: string, nowMs: number): Map<string, ReplayFileInfo> {
+  const out = new Map<string, ReplayFileInfo>();
+  if (!dir) return out;
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
-    return [];
+    return out;
+  }
+  for (const name of names) {
+    const info = readInfo(dir, name, nowMs);
+    if (info) out.set(name, info);
+  }
+  return out;
+}
+
+/** Every replay on disk, grouped by the session token in its filename.
+ *
+ *  With a live directory, a round present in both is represented by the copy
+ *  that is further along (more bytes), the replay directory's on a tie: see
+ *  resolveFurther.
+ *
+ *  Never throws. A missing or unreadable directory yields no sessions,
+ *  because a browse page returning empty is a far better failure than a
+ *  browse page returning 500. */
+export function listSessions(dir: string, nowMs: number, db?: DB, liveDir = ''): ReplaySession[] {
+  const infos = infosIn(dir, nowMs);
+  for (const [name, live] of infosIn(liveDir, nowMs)) {
+    const own = infos.get(name);
+    if (!own || live.bytes > own.bytes) infos.set(name, live);
   }
 
   const byToken = new Map<string, ReplayFileInfo[]>();
-  for (const name of names) {
-    const info = readInfo(dir, name, nowMs);
-    if (!info) continue;
+  for (const info of infos.values()) {
     const list = byToken.get(info.token);
     if (list) list.push(info);
     else byToken.set(info.token, [info]);
@@ -144,12 +161,15 @@ export function listSessions(dir: string, nowMs: number, db?: DB): ReplaySession
  * first file rather than nothing: the client needs the header's map name and
  * slot roster before it can render at all, and the header carries no
  * positions, so there is nothing to hold back.
+ *
+ * A live directory, when given, is merged in as listSessions describes.
  */
 export function currentFileFor(
   dir: string, token: string, nowMs: number, db?: DB, delayMs: number = DEFAULT_DELAY_MS,
+  liveDir = '',
 ): ReplayFileInfo | null {
-  if (!dir || !TOKEN_RE.test(token)) return null;
-  const session = listSessions(dir, nowMs, db).find((s) => s.token === token);
+  if ((!dir && !liveDir) || !TOKEN_RE.test(token)) return null;
+  const session = listSessions(dir, nowMs, db, liveDir).find((s) => s.token === token);
   if (!session || session.files.length === 0) return null;
   const cutoffUnixMs = nowMs - Math.max(0, delayMs);
   for (let i = session.files.length - 1; i >= 0; i--) {
@@ -183,4 +203,24 @@ export function resolveByName(
   const info = readInfo(dir, filename, nowMs);
   if (!info) return null;
   return { path, info };
+}
+
+/**
+ * Resolve a round by name in both the replay directory and the live
+ * directory, and take the copy that is further along.
+ *
+ * More bytes wins; the replay directory wins a tie. That is what lets the
+ * pulled final file take over from the pushed copy the moment it is as long,
+ * and what keeps Dallas, where the plugin's own growing file and the pushed
+ * copy sit side by side, from ever making the viewer go backwards. Both
+ * lookups go through resolveByName, so both get its path hardening.
+ */
+export function resolveFurther(
+  replayDir: string, liveDir: string, filename: string, nowMs: number,
+): { path: string; info: ReplayFileInfo } | null {
+  const own = resolveByName(replayDir, filename, nowMs);
+  const live = liveDir ? resolveByName(liveDir, filename, nowMs) : null;
+  if (!own) return live;
+  if (!live) return own;
+  return live.info.bytes > own.info.bytes ? live : own;
 }
