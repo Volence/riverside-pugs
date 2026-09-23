@@ -5,6 +5,9 @@ import {
   type Frame, type ReplayHeader,
 } from '../../../src/replayFormat';
 
+/** The round the server says is being played, from the live answer. */
+export interface LiveRound { ordinal: number; half: number; sinceMs: number }
+
 export type ReplaySpec =
   | { kind: 'file'; name: string }
   | { kind: 'match'; matchId: number; ordinal: number; half: number }
@@ -116,6 +119,10 @@ export function useReplaySource(spec: ReplaySpec | null): {
   frames: Frame[];
   closed: boolean;
   phase: LivePhase | null;
+  /** When the round being played is not the one being read (or has no file
+   *  yet), since when it has been played. Null otherwise, and always null
+   *  for a saved round or a standalone session. */
+  behindSinceMs: number | null;
   /** The file's format version is newer than this page understands. */
   tooNew: boolean;
   error: Error | null;
@@ -125,6 +132,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
   // What the game is doing, from the live answer. Null for a saved round and
   // for a standalone session, whose route does not carry one.
   const [phase, setPhase] = useState<LivePhase | null>(null);
+  const [behindSinceMs, setBehindSinceMs] = useState<number | null>(null);
   const [error, setError] = useState<Error | null>(null);
   // The cursor used to build the next request. Updated synchronously the
   // moment it changes (a fresh chunk, or a live round change resetting it to
@@ -150,6 +158,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
     setState({ header: null, frames: [], cursor: 0 });
     setClosed(false);
     setPhase(null);
+    setBehindSinceMs(null);
     setError(null);
 
     async function tick(): Promise<void> {
@@ -169,11 +178,27 @@ export function useReplaySource(spec: ReplaySpec | null): {
           let next: RoundSpec;
           if (live.kind === 'live-match') {
             const body = (await res.json()) as {
-              ordinal: number; half: number; closed: boolean; phase?: LivePhase | null;
+              ordinal: number | null; half: number | null; closed: boolean;
+              phase?: LivePhase | null; current?: LiveRound | null;
             };
             if (cancelled) return;
-            next = { kind: 'match', matchId: live.matchId, ordinal: body.ordinal, half: body.half };
             setPhase(body.phase ?? null);
+            const cur = body.current ?? null;
+            if (body.ordinal === null || body.half === null) {
+              // The round being played has no bytes on the site yet: that
+              // server's push is off, failing or not started. Nothing to
+              // fetch; say since when, and ask again next second.
+              setBehindSinceMs(cur?.sinceMs ?? null);
+              setError(null);
+              if (!cancelled) timer = setTimeout(tick, POLL_MS);
+              return;
+            }
+            // Reading an older round than the one being played. The page
+            // says it is catching up instead of "Round over".
+            setBehindSinceMs(
+              cur && (cur.ordinal !== body.ordinal || cur.half !== body.half) ? cur.sinceMs : null,
+            );
+            next = { kind: 'match', matchId: live.matchId, ordinal: body.ordinal, half: body.half };
           } else {
             const body = (await res.json()) as { filename: string; closed: boolean };
             if (cancelled) return;
@@ -236,5 +261,8 @@ export function useReplaySource(spec: ReplaySpec | null): {
     };
   }, [key]);
 
-  return { header: state.header, frames: state.frames, closed, phase, tooNew: state.tooNew === true, error };
+  return {
+    header: state.header, frames: state.frames, closed, phase, behindSinceMs,
+    tooNew: state.tooNew === true, error,
+  };
 }

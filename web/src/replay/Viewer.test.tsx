@@ -14,6 +14,7 @@ const HEADER: ReplayHeader = {
   sidesKnown: false,
 };
 const NAMES = { A: 'bill', B: 'zoey', C: 'francis', D: 'louis', E: 'smk', F: 'boom', G: 'hunt', H: 'tank' };
+let sourceOverride: Record<string, unknown> = {};
 
 // 8000/10000 give the hover/click tests below an endMs far past
 // BOOKMARK_LEAD_MS (3000), so a seek's lead-in is never clamped to the round
@@ -34,7 +35,10 @@ vi.mock('./source', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./source')>();
   return {
     ...actual,
-    useReplaySource: () => ({ header: HEADER, frames: frames(), closed: true, tooNew: false, error: null }),
+    useReplaySource: () => ({
+      header: HEADER, frames: frames(), closed: true, tooNew: false, error: null, phase: null, behindSinceMs: null,
+      ...sourceOverride,
+    }),
   };
 });
 
@@ -80,6 +84,7 @@ afterEach(() => {
   mockHits = [];
   mockShift = { x: 0, y: 0 };
   tooltipRenders = 0;
+  sourceOverride = {};
 });
 
 function mount(timeline: TimelineEntry[] = DEFAULT_TIMELINE, seekMs?: number) {
@@ -369,5 +374,19 @@ describe('edgeTop', () => {
   it('pushes the columns clear when the chrome has wrapped', () => {
     expect(edgeTop(190)).toBeGreaterThan(190);
     expect(edgeTop(260)).toBeGreaterThan(260);
+  });
+});
+
+describe('Viewer live with nothing to draw yet', () => {
+  it('says the live view is catching up instead of loading for ever', () => {
+    sourceOverride = { header: null, frames: [], closed: false, behindSinceMs: Date.now() - 5_000 };
+    render(<Viewer spec={{ kind: 'live-match', matchId: 1 }} live names={NAMES} />);
+    expect(screen.getByText('Live view is catching up')).toBeTruthy();
+  });
+
+  it('still says loading for a saved replay with no header yet', () => {
+    sourceOverride = { header: null, frames: [] };
+    render(<Viewer spec={{ kind: 'file', name: 'x' }} names={NAMES} />);
+    expect(screen.getByText('Loading replay...')).toBeTruthy();
   });
 });

@@ -32,6 +32,11 @@ export function ToggleChips(
   );
 }
 
+/** How long the page says the live view is catching up before it says the
+ *  view is not available. Longer than the ten-second delay plus a push that
+ *  fell a few seconds behind, shorter than anyone waits before giving up. */
+export const CATCH_UP_MS = 30_000;
+
 /**
  * What the live flag under the clock should say, or null for a saved replay.
  *
@@ -41,11 +46,23 @@ export function ToggleChips(
  * word about it that read as frozen (2026-09-19). While the clock is still
  * short of the end the last ten seconds are playing out, and that is said
  * too, so a viewer who sees action under a "round over" flag knows why.
+ *
+ * Rule order: not live gives null; paused, readyup and loading keep their
+ * texts (the plugin's word wins); then "behind" wins over the file state,
+ * so the page never says "Round over" while a round is actually being
+ * played. The view is behind when `behindSinceMs` is set (the server
+ * reports a round in progress other than the one being read, or no file at
+ * all), or when the phase is `live` and the file is closed (timed from
+ * `phase.sinceMs`). Behind for under `CATCH_UP_MS` reads "Live view is
+ * catching up"; after that, "Live view isn't available for this server
+ * right now". Only then the existing texts: open file "Live, 10s delayed",
+ * closed file "Round over, catching up" or "Round over, waiting for the
+ * next round", which can now appear only when the phase is not `live`.
  */
 export function liveStatusText(
   live: boolean, closed: boolean, tMs: number, endMs: number,
   phase: LivePhase | null = null, nowMs: number = Date.now(),
-  names: Record<string, string> = {},
+  names: Record<string, string> = {}, behindSinceMs: number | null = null,
 ): string | null {
   if (!live) return null;
   // The plugin's word wins when it names a state with nothing to draw. A
@@ -64,6 +81,16 @@ export function liveStatusText(
     return `Readying up, waiting on ${phase.unready.map((id) => names[id] ?? id).join(', ')}`;
   }
   if (phase?.state === 'loading') return 'Loading the next map';
+  // The round is being played but the bytes on screen are from an earlier
+  // one, or none have arrived. Never "Round over" while the server says the
+  // round is live. A live phase over a finished file is the same case seen
+  // from the file's side, timed from when the phase began.
+  const behind = behindSinceMs ?? (phase?.state === 'live' && closed ? phase.sinceMs : null);
+  if (behind !== null) {
+    return nowMs - behind < CATCH_UP_MS
+      ? 'Live view is catching up'
+      : "Live view isn't available for this server right now";
+  }
   if (!closed) return 'Live, 10s delayed';
   return tMs < endMs ? 'Round over, catching up' : 'Round over, waiting for the next round';
 }
@@ -75,7 +102,7 @@ export function liveStatusText(
  * Purely presentational, like ReplayControls.
  */
 export function ReplayHud(
-  { tMs, endMs, counts, live, closed, phase = null, names = {}, toggles, toggle, theater }: {
+  { tMs, endMs, counts, live, closed, phase = null, names = {}, behindSinceMs = null, toggles, toggle, theater }: {
     tMs: number;
     endMs: number;
     counts: { survivors: number; commons: number; specials: number };
@@ -83,6 +110,7 @@ export function ReplayHud(
     closed: boolean;
     phase?: LivePhase | null;
     names?: Record<string, string>;
+    behindSinceMs?: number | null;
     toggles: Toggles;
     toggle: (k: BoolToggle) => void;
     theater?: TheaterChip;
@@ -96,8 +124,10 @@ export function ReplayHud(
         <span class="rhud__counts eyebrow">
           {counts.survivors} alive · {counts.commons} common · {counts.specials} special
         </span>
-        {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names) && (
-          <span class="rhud__live eyebrow">{liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names)}</span>
+        {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names, behindSinceMs) && (
+          <span class="rhud__live eyebrow">
+            {liveStatusText(live, closed, tMs, endMs, phase, Date.now(), names, behindSinceMs)}
+          </span>
         )}
       </div>
       <div class="rhud__right">
