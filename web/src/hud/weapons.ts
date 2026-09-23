@@ -131,6 +131,9 @@ const DEFAULTS: Record<string, string> = {
   ReserveAmmoColor: '128 128 128 255', InactiveItemColor: '100 100 100 255',
 };
 
+/** A HudWeaponSelection key as the generated file has it, or the dll's default when the file leaves it out. */
+export function weaponKey(design: HudDesign, key: string): string { return keys(design)(key); }
+
 function keys(design: HudDesign): (key: string) => string {
   const panel: KvNode | undefined = kvFind(buildTrees(design)('scripts/hudlayout.res'), ['HudWeaponSelection']);
   return (key) => (panel && pcGet(panel, key)) ?? DEFAULTS[key];

@@ -15,12 +15,15 @@
 //      files off disk and hands them to packHud as assets.fonts.
 //   c: sample (a) again, but in advanced mode with a recoloured incapacitated panel,
 //      which comes out as a zip instead of a VPK.
+//   w: a stock design with the weapons' Ammo only preset (edit.ts's ammoOnly),
+//      so the reader also sees mod_textures.txt and the clear texture.
 // Unset (or any other value) keeps the original default: sample (a).
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { packHud } from './build';
-import { validateDesign } from './design';
+import { validateDesign, DEFAULT_DESIGN } from './design';
+import { ammoOnly } from './edit';
 import type { BuildAssets } from './build';
 
 const FONT_DIR = fileURLToPath(new URL('./base/fonts/', import.meta.url));
@@ -42,6 +45,10 @@ it('writes a sample VPK or zip for the Python/unzip readers', () => {
   if (sample === 'b') {
     const d = validateDesign({ v: 1, preset: 'modern' });
     writeFileSync(process.env.HUD_VPK_OUT, packHud(d, { fonts: fonts() }).bytes);
+    return;
+  }
+  if (sample === 'w') {
+    writeFileSync(process.env.HUD_VPK_OUT, packHud(ammoOnly(structuredClone(DEFAULT_DESIGN))).bytes);
     return;
   }
   if (sample === 'c') {

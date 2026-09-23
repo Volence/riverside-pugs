@@ -95,6 +95,19 @@ export function resetElement(d: HudDesign, id: string): HudDesign {
 }
 
 /**
+ * Merge weapon edits into a design. A field given as undefined goes back to
+ * the preset's, and a design left with no weapon edits carries no `weapons`
+ * at all, so its download is the untouched one again.
+ */
+export function patchWeapons(d: HudDesign, p: Partial<WeaponsOverride>): HudDesign {
+  const weapons: Record<string, unknown> = { ...d.weapons, ...p };
+  for (const k of Object.keys(weapons)) if (weapons[k] === undefined) delete weapons[k];
+  const out: HudDesign = { ...d, weapons: weapons as WeaponsOverride };
+  if (!Object.keys(weapons).length) delete out.weapons;
+  return out;
+}
+
+/**
  * The "Ammo only" look: probe B's values, which the owner saw in game on
  * 2026-09-23 as "8 128 30" on one line just right of the crosshair. The
  * panel sits at c-10, c-12 (its 100 wide is both presets' own); the boxes

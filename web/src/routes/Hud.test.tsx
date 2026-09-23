@@ -1406,4 +1406,78 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('Card 3 Y') as HTMLInputElement).value).toBe('200');
     expect((screen.getByLabelText('Card 3 X') as HTMLInputElement).value).toBe('293');
   });
+
+  describe('the weapon selection', () => {
+    const pick = () => fireEvent.click(screen.getByRole('button', { name: 'Weapons' }));
+    const box = (name: string) => screen.getByRole('spinbutton', { name }) as HTMLInputElement;
+    const slider = (name: string) => screen.getByRole('slider', { name }) as HTMLInputElement;
+
+    it('shows the keys the game reads, with the preset values, and says what cannot change', () => {
+      render(<Hud />);
+      pick();
+      expect(screen.getByRole('button', { name: 'Ammo only' })).toBeTruthy();
+      expect([
+        'Inset from right', 'Start height', 'Gun box W', 'Gun box H', 'Pistol box W', 'Pistol box H', 'Gun picture height',
+        'Item size', 'Numbers from right', 'Reserve lower by', 'Clip text size', 'Reserve and pistol text size',
+      ].map((n) => box(n).value)).toEqual(['10', '10', '53', '24', '53', '24', '20', '24', '38', '5', '24', '18']);
+      expect(slider('Gun box W').value).toBe('53');
+      expect((screen.getByRole('checkbox', { name: 'Weapon pictures' }) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole('checkbox', { name: 'Item pictures' }) as HTMLInputElement).checked).toBe(true);
+      expect(screen.getByText(/clip numbers are always white/i)).toBeTruthy();
+      expect(screen.getByText(/pistol always sits just under the main gun/i)).toBeTruthy();
+    });
+
+    it('applies Ammo only in one undo step', () => {
+      render(<Hud />);
+      pick();
+      fireEvent.click(screen.getByRole('button', { name: 'Ammo only' }));
+      expect(box('Numbers from right').value).toBe('48');
+      expect(box('Item size').value).toBe('0');
+      expect((screen.getByRole('combobox', { name: 'Active box' }) as HTMLSelectElement).value).toBe('hidden');
+      expect((screen.getByRole('checkbox', { name: 'Weapon pictures' }) as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('417');
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(box('Numbers from right').value).toBe('38');
+      expect((screen.getByRole('combobox', { name: 'Active box' }) as HTMLSelectElement).value).toBe('stock');
+      expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('755');
+    });
+
+    it('moves a slider and its number box together, clamped as the download is', () => {
+      render(<Hud />);
+      pick();
+      fireEvent.input(slider('Gun box W'), { target: { value: '80' } });
+      fireEvent.change(slider('Gun box W'));
+      expect(box('Gun box W').value).toBe('80');
+      fireEvent.input(box('Numbers from right'), { target: { value: '999' } });
+      fireEvent.blur(box('Numbers from right'));
+      expect(box('Numbers from right').value).toBe('200');
+      fireEvent.input(box('Clip text size'), { target: { value: '' } });
+      expect(box('Clip text size').value).toBe('');
+      fireEvent.blur(box('Clip text size'));
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(box('Numbers from right').value).toBe('38');
+    });
+
+    it('offers a colour only for a flat or rounded box', () => {
+      render(<Hud />);
+      pick();
+      const select = () => screen.getByRole('combobox', { name: 'Other boxes' }) as HTMLSelectElement;
+      expect(screen.queryByLabelText('Other boxes colour')).toBeNull();
+      fireEvent.change(select(), { target: { value: 'rounded' } });
+      expect((screen.getByLabelText('Other boxes colour') as HTMLInputElement).value).toBe('#000000');
+      fireEvent.change(select(), { target: { value: 'hidden' } });
+      expect(screen.queryByLabelText('Other boxes colour')).toBeNull();
+      fireEvent.change(select(), { target: { value: 'stock' } });
+      expect(select().value).toBe('stock');
+    });
+
+    it('clears every weapon edit with Reset this element', () => {
+      render(<Hud />);
+      pick();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Item pictures' }));
+      expect((screen.getByRole('checkbox', { name: 'Item pictures' }) as HTMLInputElement).checked).toBe(false);
+      fireEvent.click(screen.getByText('Reset this element'));
+      expect((screen.getByRole('checkbox', { name: 'Item pictures' }) as HTMLInputElement).checked).toBe(true);
+    });
+  });
 });

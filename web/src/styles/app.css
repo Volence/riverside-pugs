@@ -256,6 +256,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   font-size: var(--fs-dense);
 }
 
+/* A slider with its number box: a wider last column, room for "-200". */
+.hud__row--num { grid-template-columns: 5.5rem 1fr 3.75rem; }
+
 .hud__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-top: var(--sp-3); }
 .hud__field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); min-width: 0; }
 .hud__field input {

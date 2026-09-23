@@ -4,20 +4,25 @@
  * the generator, so a freshly reset thing shows real numbers.
  */
 import {
-  clampOverride, clampChild, type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
+  clampOverride, clampChild, clampWeapon, WEAPON_KEYS, WEAPON_BOX_COLOUR,
+  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
+  type WeaponNumKey, type WeaponsOverride, type WeaponBoxStyle,
 } from '../../hud/design';
+import { weaponKey } from '../../hud/weapons';
+import { fontFace } from '../../hud/render';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, cardChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { teamChild } from '../../hud/children';
 import {
   cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
-  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
+  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, patchWeapons, ammoOnly,
+  type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
 import { CrosshairControls } from './CrosshairControls';
 import { TEAMMATES, type Selection } from '../../hud/selection';
 import {
-  Slider, Field, patchNum, endsOn, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode, type Patch,
+  Slider, SliderNum, Field, patchNum, endsOn, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode, type Patch,
 } from './controls';
 
 const LAYOUT_LABELS: Record<TeamDir, string> = { row: 'Row', column: 'Column', free: 'Free' };
@@ -112,6 +117,130 @@ export function TeamControls(
           <span />
         </label>
       )}
+    </>
+  );
+}
+
+/** The weapon number rows: which field, its label, and the slider's range (the clamp's own, or a narrower useful one). */
+const WEAPON_ROWS: { group: string; rows: { field: WeaponNumKey | 'clipFont' | 'pistolFont'; label: string; min: number; max: number }[] }[] = [
+  { group: 'Position', rows: [
+    { field: 'indent', label: 'Inset from right', min: -200, max: 200 },
+    { field: 'primaryY', label: 'Start height', min: -200, max: 200 },
+  ] },
+  { group: 'Sizes', rows: [
+    { field: 'primaryBoxW', label: 'Gun box W', min: 0, max: 200 },
+    { field: 'primaryBoxH', label: 'Gun box H', min: 0, max: 200 },
+    { field: 'pistolBoxW', label: 'Pistol box W', min: 0, max: 200 },
+    { field: 'pistolBoxH', label: 'Pistol box H', min: 0, max: 200 },
+    { field: 'iconTall', label: 'Gun picture height', min: 0, max: 200 },
+    { field: 'itemSize', label: 'Item size', min: 0, max: 200 },
+  ] },
+  { group: 'Ammo numbers', rows: [
+    { field: 'ammoX', label: 'Numbers from right', min: -200, max: 200 },
+    { field: 'reserveY', label: 'Reserve lower by', min: -200, max: 200 },
+    { field: 'clipFont', label: 'Clip text size', min: 6, max: 64 },
+    { field: 'pistolFont', label: 'Reserve and pistol text size', min: 6, max: 64 },
+  ] },
+];
+
+const BOX_KINDS: { kind: 'stock' | WeaponBoxStyle['kind']; label: string }[] = [
+  { kind: 'stock', label: 'Game' }, { kind: 'hidden', label: 'Hidden' }, { kind: 'flat', label: 'Flat colour' }, { kind: 'rounded', label: 'Rounded colour' },
+];
+
+/** A colour swatch and an opacity slider over one raw "r g b a" value, as a child's colour row has. */
+function ColourRow({ label, value, onPick, end }: { label: string; value: string; onPick: (c: string) => void; end: () => void }) {
+  return (
+    <div class="hud__stylerow">
+      <span class="hud__stylerow-label">{label}</span>
+      <input
+        type="color" aria-label={`${label} colour`} value={hexOf(value)}
+        onInput={(e) => onPick(withHex(value, (e.target as HTMLInputElement).value))} onChange={end}
+      />
+      <input
+        type="range" min={0} max={100} step={1} aria-label={`${label} opacity`} value={alphaPct(value)}
+        onInput={(e) => onPick(withAlphaPct(value, parseFloat((e.target as HTMLInputElement).value)))} onChange={end}
+      />
+    </div>
+  );
+}
+
+/**
+ * The weapon selection's own controls: the HudWeaponSelection keys the game
+ * reads (weapons.ts's header), the two box styles, the picture switches and
+ * the Ammo only preset. Every value shown is read back from the generated
+ * file (weaponKey, fontFace), so an untouched design shows the preset's
+ * numbers. The box sizes are sliders with number boxes rather than canvas
+ * handles in this phase; the element's own handles are unchanged.
+ */
+function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; end: () => void }) {
+  const w = design.weapons ?? {};
+  const patch = (p: Partial<WeaponsOverride>, mode: EditMode = 'gesture') => edit((d) => patchWeapons(d, p), mode);
+  const value = (field: WeaponNumKey | 'clipFont' | 'pistolFont') => {
+    if (field === 'clipFont') return fontFace(design, weaponKey(design, 'PrimaryAmmoFont')).tall;
+    if (field === 'pistolFont') return fontFace(design, weaponKey(design, 'PistolAmmoFont')).tall;
+    return Math.round(parseFloat(weaponKey(design, WEAPON_KEYS[field].key)) || 0);
+  };
+  const boxRow = (box: 'boxActive' | 'boxInactive', label: string) => {
+    const s = w[box];
+    const colour = s?.color ?? WEAPON_BOX_COLOUR[box];
+    const onKind = (e: Event) => {
+      const kind = (e.target as HTMLSelectElement).value as 'stock' | WeaponBoxStyle['kind'];
+      patch({ [box]: kind === 'stock' ? undefined : { kind, ...(kind !== 'hidden' && s?.color ? { color: s.color } : {}) } }, 'step');
+    };
+    return (
+      <>
+        <label class="hud__row">
+          <span>{label}</span>
+          <select aria-label={label} value={s?.kind ?? 'stock'} onChange={onKind}>
+            {BOX_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
+          </select>
+          <span />
+        </label>
+        {s && s.kind !== 'hidden' && (
+          <ColourRow label={label} value={colour} end={end} onPick={(c) => patch({ [box]: { kind: s.kind, color: c } })} />
+        )}
+      </>
+    );
+  };
+  return (
+    <>
+      <button type="button" class="btn btn--sm hud__reset" onClick={() => edit(ammoOnly)}>Ammo only</button>
+      <p class="muted hud__note">Only the ammo numbers, on one line just right of the crosshair: no boxes, no pictures, no item slots.</p>
+      {WEAPON_ROWS.map((g) => (
+        <div key={g.group}>
+          <p class="eyebrow hud__note">{g.group}</p>
+          {g.rows.map((r) => (
+            <SliderNum
+              key={r.field} label={r.label} value={value(r.field)} min={r.min} max={r.max} onEnd={end}
+              onInput={(n) => patch({ [r.field]: clampWeapon(r.field, n) })}
+            />
+          ))}
+          {g.group === 'Sizes' && <p class="muted hud__note">Item size 0 hides the three item slots.</p>}
+        </div>
+      ))}
+      <ColourRow label="Reserve" value={w.reserveColor ?? weaponKey(design, 'ReserveAmmoColor')} end={end} onPick={(c) => patch({ reserveColor: c })} />
+      <ColourRow label="Empty item" value={w.inactiveColor ?? weaponKey(design, 'InactiveItemColor')} end={end} onPick={(c) => patch({ inactiveColor: c })} />
+      <p class="eyebrow hud__note">Boxes</p>
+      {boxRow('boxActive', 'Active box')}
+      {boxRow('boxInactive', 'Other boxes')}
+      <label class="hud__check">
+        <input
+          type="checkbox" checked={w.weaponIcons !== false}
+          onChange={(e) => patch({ weaponIcons: (e.target as HTMLInputElement).checked ? undefined : false }, 'step')}
+        />
+        <span>Weapon pictures</span>
+      </label>
+      <label class="hud__check">
+        <input
+          type="checkbox" checked={w.itemIcons !== false}
+          onChange={(e) => patch({ itemIcons: (e.target as HTMLInputElement).checked ? undefined : false }, 'step')}
+        />
+        <span>Item pictures</span>
+      </label>
+      <p class="muted hud__note">
+        The game fixes the rest: clip numbers are always white, the slot order and the gap between slots cannot change,
+        and the pistol always sits just under the main gun.
+      </p>
     </>
   );
 }
@@ -213,6 +342,8 @@ export function ElementControls(
       )}
 
       <TeamControls design={design} edit={edit} end={end} el={el} o={o} patch={patch} />
+
+      {id === 'weaponSelection' && <WeaponControls design={design} edit={edit} end={end} />}
 
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this element</button>
     </Field>

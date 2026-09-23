@@ -51,6 +51,30 @@ export function Slider(
   );
 }
 
+/**
+ * A slider with a number box beside it, both editing one value: the slider
+ * for a quick drag, the box for an exact number. Both carry `label` as
+ * their name, told apart by role (slider, spinbutton). A drag or a typed
+ * run is one gesture, ended on release, blur or Enter; an emptied box
+ * patches nothing, like patchNum.
+ */
+export function SliderNum(
+  { label, value, min, max, onInput, onEnd }:
+  { label: string; value: number; min: number; max: number; onInput: (n: number) => void; onEnd: () => void },
+) {
+  const typed = (e: Event) => {
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (Number.isFinite(n)) onInput(n);
+  };
+  return (
+    <div class="hud__row hud__row--num">
+      <span>{label}</span>
+      <input type="range" aria-label={label} min={min} max={max} step={1} value={value} onInput={typed} onChange={onEnd} />
+      <input type="number" aria-label={label} min={min} max={max} value={value} onInput={typed} {...endsOn(onEnd)} />
+    </div>
+  );
+}
+
 export function Field({ legend, children }: { legend: string; children: ComponentChildren }) {
   return (
     <fieldset class="hud__group">
