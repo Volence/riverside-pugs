@@ -8,7 +8,7 @@ import {
 } from '../crosshair/draw';
 import { CrosshairBuilder, Field } from '../crosshair/Builder';
 import { buildVPK } from '../crosshair/vpk';
-import { CROSSHAIR_KEY, crosshairPixels } from '../crosshair/saved';
+import { CROSSHAIR_KEY, crosshairPixels, savedArt, saveImage } from '../crosshair/saved';
 import HUDLAYOUT from '../crosshair/hudlayout.res?raw';
 
 const STORAGE_KEY = CROSSHAIR_KEY;
@@ -22,6 +22,20 @@ function loadState(): CrosshairState {
   } catch {
     return DEFAULT_STATE;
   }
+}
+
+/**
+ * Keep an imported image in this browser as the texture this page exports
+ * from it (the image drawn into the TEX square), so it survives a reload and
+ * the HUD editor can take it in (savedArt). Storage failing only loses that.
+ */
+function saveTexture(img: HTMLImageElement) {
+  const c = document.createElement('canvas');
+  c.width = TEX; c.height = TEX;
+  const ctx = c.getContext('2d');
+  if (!ctx) return;
+  drawCrosshair(ctx, TEX / 2, TEX / 2, TEX / PX_AT_1080, { ...DEFAULT_STATE, shape: 'image' }, img);
+  saveImage({ png: c.toDataURL('image/png'), w: TEX, h: TEX });
 }
 
 const BACKDROPS: [Backdrop, string][] = [
@@ -49,9 +63,19 @@ export function Crosshair() {
 
   const set = (patch: Partial<CrosshairState>) => setState((s) => ({ ...s, ...patch }));
 
+  const save = (s: CrosshairState) => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* not important enough to surface */ }
+  };
+  useEffect(() => save(state), [state]);
+
+  // Mount only: on the image shape, the image imported last time, saved as its texture.
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* not important enough to surface */ }
-  }, [state]);
+    const art = state.shape === 'image' ? savedArt() : null;
+    if (art?.kind !== 'image') return;
+    const img = new Image();
+    img.onload = () => { imported.current = img; setImgTick((n) => n + 1); };
+    img.src = art.png;
+  }, []);
 
   // One effect draws everything, so the texture and the preview can never
   // disagree about what the current settings are.
@@ -92,11 +116,26 @@ export function Crosshair() {
     const url = URL.createObjectURL(f);
     img.onload = () => {
       into.current = img;
+      if (into === imported) saveTexture(img);
       set(patch);
       setImgTick((n) => n + 1);
       URL.revokeObjectURL(url);
     };
     img.src = url;
+  };
+
+  /**
+   * The Open in the HUD editor link: save the crosshair as it is now (the
+   * image was saved when it was imported), and let the link take the player
+   * to /hud?from=crosshair, where the editor takes it into the HUD design.
+   */
+  const openInHud = (e: Event) => {
+    if (state.shape === 'image' && !imported.current) {
+      e.preventDefault();
+      setStatus('Import an image first, or pick a shape.');
+      return;
+    }
+    save(state);
   };
 
   const download = () => {
@@ -146,6 +185,11 @@ export function Crosshair() {
             </label>
             <button class="btn btn--block" onClick={download}>Download .vpk</button>
             {status && <p class="muted xh__status">{status}</p>}
+            <p class="muted xh__status">
+              Planning a custom HUD too? A crosshair addon and a HUD addon fight over the same file, so bring your
+              crosshair into the HUD editor instead: it goes into the HUD's download.
+            </p>
+            <a class="btn btn--ghost btn--block xh__tohud" href="/hud?from=crosshair" onClick={openInHud}>Open in the HUD editor</a>
           </Field>
         </Panel>
 
