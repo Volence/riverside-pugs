@@ -7,7 +7,7 @@ import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
 import { cssFamily, fontCell, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
-import { sampleHud, fakeCanvas, recordingCtx } from './importFixtures';
+import { sampleHud, fakeCanvas, recordingCtx, hostileFont, type HostileFontKind } from './importFixtures';
 import { _resetImportedArt } from './importArt';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -693,6 +693,24 @@ describe("an imported HUD's own fonts", () => {
   it('falls back as today for a face the upload does not carry', () => {
     const ctx = {} as CanvasRenderingContext2D;
     setFont(ctx, design('Futurot', false), 'HudImpFont', 1);
+    expect(ctx.font).not.toMatch(/HudImp_/);
+  });
+
+  it.each<[string, HostileFontKind]>([
+    ['random bytes', 'garbage'],
+    ['a real TTF cut off mid-file', 'truncated'],
+    ['a name table offset that points past the end', 'nameOffset'],
+    ['a VDMX group offset that points past the end', 'vdmxOffset'],
+    ['a name table whose record count claims more room than it has', 'nameCount'],
+    ['a VDMX table whose ratio count claims more room than it has', 'vdmxCount'],
+  ])('never throws and falls back to the default face when the named font file is %s', (_label, kind) => {
+    registerImport(ID, sampleHud({
+      'resource/clientscheme.res': scheme('Trade Gothic'),
+      'resource/myhud.ttf': hostileFont(kind, ttf),
+    }));
+    const d = validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'e' }, crosshair: 'none' });
+    const ctx = {} as CanvasRenderingContext2D;
+    expect(() => setFont(ctx, d, 'HudImpFont', 1)).not.toThrow();
     expect(ctx.font).not.toMatch(/HudImp_/);
   });
 });
