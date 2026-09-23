@@ -9,6 +9,10 @@ const r = parseReplay(readFileSync(process.argv[2]));
 if (!r) { console.error('not a replay'); process.exit(1); }
 const h = r.header;
 console.log(`map ${h.map} half ${h.half} frames ${r.frames.length} losKnown ${h.losKnown}`);
+if (!h.losKnown) {
+  console.log('line of sight is not recorded in this file: visibility unknown');
+  process.exit(0);
+}
 const ranks = sideRanks(h);
 console.log('survivor ranks', ranks.survivor.join(','), ' infected ranks', ranks.infected.join(','));
 for (let s = 0; s < 8; s++) {
