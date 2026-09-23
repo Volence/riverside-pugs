@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeFrame, encodeHeader, STATE, type Frame, type ReplayHeader } from '../../src/replayFormat.js';
+import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type ReplayHeader } from '../../src/replayFormat.js';
 import { decodeRoundReplay } from '../../src/metrics/replayRound.js';
 
 function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
@@ -47,5 +47,10 @@ describe('decodeRoundReplay', () => {
   it('returns null for garbage and for fewer than two frames', () => {
     expect(decodeRoundReplay(new Uint8Array(10), () => null)).toBeNull();
     expect(decodeRoundReplay(bytes(header(), [frame(0)]), () => null)).toBeNull();
+  });
+
+  it('returns null for a format newer than this reader understands', () => {
+    const future = header({ version: VERSION + 1 });
+    expect(decodeRoundReplay(bytes(future, [frame(0), frame(100)]), () => null)).toBeNull();
   });
 });
