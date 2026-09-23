@@ -57,30 +57,28 @@ the first clear trace, so typically far fewer. Must be measured before shipping:
 round on the local test server with `l4d_tickstats` and compare p99 frame time against the 11.25 ms
 baseline. Budget: no measurable change in p99. If it shows up, drop to two points (head, chest).
 
-## 2. Replay format version 4
+## 2. Replay format: visibility in the spare frame bytes (revised while planning)
 
-Two changes ride one version bump, because version 4 was already reserved for the demo tick
-stamp (see the viewer bookmarks work).
+The first draft grew the frame and bumped the format to version 4. Planning found that every
+frame header already carries two spare bytes: bytes 6 and 7 are written as zero by the plugin
+(`RplU16(6, 0)`) and never read by the decoder. Sixteen bits is exactly a 4 survivor x 4 infected
+grid, so the visibility goes there and **nothing about the format's size or version changes**.
+Every existing reader (viewer, live push, `replayTail`, routes, scripts) keeps working untouched,
+and there is no reader-first deploy ordering to get wrong.
 
-**Per-frame visibility block.** Frames grow by 8 bytes, placed immediately after the player block
-and before the entities: byte *i* is a bitmask over roster slots, bit *j* set when slot *i* could
-see slot *j* this frame. Only survivor rows carry bits, and only for spawned human infected; every
-other byte is 0. Frame size for version 4 is `8 + 160 + 8 + entities * 12`.
+**Frame bytes 6-7 (u16, little-endian).** Bit `survivorRank * 4 + infectedRank` is set when that
+survivor could see that infected this frame. Ranks come from the header: the occupied slots
+(non-empty SteamID) whose side-mask bit is 0, in slot order, are survivor ranks 0 to 3; those whose
+bit is 1 are infected ranks 0 to 3. A fifth slot on one side (an over-full roster) gets no bits.
 
-**Header growth for the demo tick.** The header grows from 160 to 192 bytes. New fields at 160:
-`demoStartTick` (u32, `GetGameTickCount()` when the match demo started) and 164: `replayOpenTick`
-(u32, the same at replay open). Bytes 168 to 191 are reserved zero padding. Offsets below 160 do
-not move, so the byte-serving route's token blanking and the sides mask are unchanged.
+**Header byte 158 = 1** means this file records visibility. It was zero padding, so every existing
+file reads as "not recorded", which a reader must treat as unknown, never as "saw nothing".
 
-**Readers.** `replayFormat.ts` branches on `version`: version 3 files decode exactly as today
-(no visibility, 160-byte header); version 4 decodes the block into `frame.sees: number[8]`. The
-encoder writes version 4. Everything that reads frames (viewer, live push, analyzer, `replayTail`)
-goes through `decodeFrames`, so one branch covers them; the plan must still grep for any reader
-that hardcodes `HEADER_BYTES` or the frame stride. The SourcePawn writer and the TypeScript encoder
-must agree byte for byte, closed by an encode/decode test on a real v4 file pulled from the local
-test server.
+**The demo tick stamp is dropped from this project.** It only rode along because a version bump
+was planned; without one it has nowhere to go (one spare header byte is left). It can take its own
+format change when the bookmark feature needs it.
 
-## 3. The checks (analyzer version 5)
+## 3. The checks (analyzer version 5, plan 2)
 
 All scores compare a player against the league, like the ghost metrics. All share the existing
 gates (`D_MIN` 300, `R_MAX` 2000, `SPAWN_GRACE_MS`, pitch tolerance) plus two new ones:
@@ -115,8 +113,8 @@ compared with the league. 10 Hz makes this coarse (100 ms buckets), which is why
 Boomers and smokers are noisy and hunters are quiet when crouched, so a player far above the league
 on hunters specifically is the strongest signal. Crouch state is not recorded, so class is the proxy.
 
-**Minimums.** No per-player score is shown under `MIN_BOARD_ROUNDS` survivor rounds with v4 data,
-and metric F needs at least 30 reveals. Until enough v4 rounds exist, the board says so rather than
+**Minimums.** No per-player score is shown under `MIN_BOARD_ROUNDS` survivor rounds with visibility recorded,
+and metric F needs at least 30 reveals. Until enough such rounds exist, the board says so rather than
 showing numbers.
 
 ## 4. Surfacing
@@ -147,9 +145,10 @@ the league's history does not. Repeat with the survivor playing honestly as the 
 ## 7. Rollout order
 
 1. `CLIP_MIN` 0.4 (web only).
-2. Plugin: LOS sampling + v4 writer, with the TypeScript v4 reader deployed **first** (a v4 file
-   hitting a v3-only reader is the failure to avoid). Perf check on the local server before it.
-3. Let v4 data accumulate. The ghost metrics keep running unchanged meanwhile.
+2. Plugin: LOS sampling into the spare frame bytes, plus the TypeScript reader for them. The format
+   is unchanged, so the order between web and plugin does not matter. Perf check on the local
+   server first.
+3. Let visibility data accumulate. The ghost metrics keep running unchanged meanwhile.
 4. Analyzer version 5 (lag tolerance, D, E, F) behind the board minimums; re-measure all rounds.
 5. Calibration session, thresholds set, then the Discord toggle is considered.
 
@@ -166,8 +165,8 @@ Other sessions work in this repo at the same time. Before planning or building, 
 
 ## Testing
 
-- Format: encode/decode round trip for v3 and v4; a v3 file still decodes identically after the
-  change; header offsets checked against a real v4 file from the local server.
+- Format: visibility round-trips through encode/decode; an existing file decodes identically and
+  reports visibility unknown; the plugin's bytes checked against a real file from the local server.
 - Plugin: on the local server with bots, a known wall between a bot hunter and a survivor gives
   bit 0, line of sight gives 1, a fence gives 1; tickstats p99 before and after.
 - Analyzer: extend `scripts/inject-synthetic-tracker.ts` to plant a lagged tracker on a hidden
