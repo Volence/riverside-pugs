@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtChange, fmtValue, isShareMetric, readCompareQuery, writeCompareQuery } from './format';
+import { fmtChange, fmtMoreMatches, fmtValue, isShareMetric, readCompareQuery, writeCompareQuery } from './format';
 
 describe('balance formatting', () => {
   it('knows share metrics', () => {
@@ -28,11 +28,20 @@ describe('balance formatting', () => {
     expect(fmtChange('tank.spawns', { diff: -0.001, rel: null, lo: null, hi: null }).main).toBe('0');
     expect(fmtChange('tank.lifetime_s', { diff: 12, rel: 0.12, lo: -0.001, hi: 23 }).range).toBe('[0 s, +23 s]');
   });
+  it('says match or matches as the number needs', () => {
+    expect(fmtMoreMatches(1)).toBe('1 more match');
+    expect(fmtMoreMatches(60)).toBe('60 more matches');
+    expect(fmtMoreMatches(500)).toBe('500+ more matches');
+  });
   it('reads and writes the comparison in the URL', () => {
     expect(readCompareQuery('', [1, 2, 3])).toEqual({ a: [2], b: [3], origin: 'all', maps: [], phases: 'all', view: 'ranked' });
     const q = readCompareQuery('?a=1,2&b=3&origin=queue&view=topic&phases=split', [1, 2, 3]);
     expect(q).toEqual({ a: [1, 2], b: [3], origin: 'queue', maps: [], phases: 'split', view: 'topic' });
     expect(readCompareQuery('?a=99&b=3', [1, 2, 3]).a).toEqual([2]);
+    // Defaults skip patches with no counted rounds; URL-chosen ids stay.
+    expect(readCompareQuery('', [1, 2, 3, 4], [1, 2])).toMatchObject({ a: [1], b: [2] });
+    expect(readCompareQuery('?a=3&b=4', [1, 2, 3, 4], [1, 2])).toMatchObject({ a: [3], b: [4] });
+    expect(readCompareQuery('', [1, 2, 3], [2])).toMatchObject({ a: [2], b: [3] });
     expect(writeCompareQuery({ a: [1, 2], b: [3], origin: 'all', maps: [], phases: 'all', view: 'ranked' })).toBe('?a=1%2C2&b=3');
   });
 });

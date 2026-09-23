@@ -15,13 +15,13 @@ const { Compare } = await import('./Compare');
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const patches = [
-  { id: 1, number: 1, name: 'Sky pounce fix', notes: '', source: 'historical', firstSeenAt: '2026-09-21 20:10:00', reviewed: true, rounds: 216, servers: [] },
-  { id: 2, number: 2, name: 'Saferoom lock', notes: '', source: 'historical', firstSeenAt: '2026-09-22 21:36:00', reviewed: true, rounds: 136, servers: [] },
+  { id: 1, number: 1, name: 'Sky pounce fix', notes: '', source: 'historical', firstSeenAt: '2026-09-21 20:10:00', reviewed: true, rounds: 220, countedRounds: 216, servers: [] },
+  { id: 2, number: 2, name: 'Saferoom lock', notes: '', source: 'historical', firstSeenAt: '2026-09-22 21:36:00', reviewed: true, rounds: 138, countedRounds: 136, servers: [] },
 ];
 const side = { matches: 40, rounds: 80, meanMu: 25, meanGap: 0, olderEngineRounds: 0, historical: true };
 const row = (metric: string, group: string, verdict: string, over = {}) => ({
   metric, group, description: `${metric} description`, phase: 'all', a: 0.18, b: 0.24, diff: 0.06, rel: 0.33, lo: 0.01, hi: 0.1,
-  p: 0.01, verdict, moreMatches: verdict === 'too_early' ? 60 : null, excludedMaps: [], nA: 40, nB: 40, ...over,
+  p: 0.01, verdict, moreMatches: verdict === 'too_early' ? 60 : null, excludedMaps: [], noSharedMaps: false, nA: 40, nB: 40, ...over,
 });
 const result = {
   a: side, b: side, ms: 5,
@@ -34,7 +34,7 @@ function renderAt(search = '') {
   history.replaceState(null, '', `/admin/balance${search}`);
   mockAdmin.balancePatches.mockResolvedValue({ patches });
   mockAdmin.balanceCompare.mockResolvedValue(result);
-  mockAdmin.balanceMetric.mockResolvedValue({ metric: 'x', phase: 'all', trend: [], boundaries: [], perMap: [], examples: [] });
+  mockAdmin.balanceMetric.mockResolvedValue({ metric: 'x', phase: 'all', trend: [], boundaries: [], perMap: [], perPatch: [], examples: [] });
   return render(<LocationProvider><Compare /></LocationProvider>);
 }
 
@@ -127,5 +127,66 @@ describe('Compare', () => {
     render(<LocationProvider><Compare /></LocationProvider>);
     await waitFor(() => screen.getByText('hunter.skeet_rate description'));
     expect(screen.getByText(/7 rounds use an older metric definition/)).toBeTruthy();
+  });
+
+  it('labels patches with the rounds the comparison counts', async () => {
+    renderAt();
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+    expect(screen.getAllByText(/Sky pounce fix \(216 rounds counted\)/)).toHaveLength(2);
+  });
+
+  it('defaults to the two newest patches that have counted rounds', async () => {
+    const fresh = { ...patches[1], id: 3, number: 3, name: 'Fresh', firstSeenAt: '2026-09-23 20:00:00', rounds: 6, countedRounds: 0 };
+    mockAdmin.balancePatches.mockResolvedValue({ patches: [...patches, fresh] });
+    mockAdmin.balanceCompare.mockResolvedValue(result);
+    history.replaceState(null, '', '/admin/balance');
+    render(<LocationProvider><Compare /></LocationProvider>);
+    await waitFor(() => expect(mockAdmin.balanceCompare).toHaveBeenCalledWith(expect.objectContaining({ a: [1], b: [2] }), expect.anything()));
+  });
+
+  it('explains an empty side instead of showing chips and rows', async () => {
+    mockAdmin.balancePatches.mockResolvedValue({ patches });
+    mockAdmin.balanceCompare.mockResolvedValue({ ...result, b: { ...side, matches: 0, rounds: 0 }, rows: [], counts: { real: 0, too_early: 0, noise: 0, no_data: 0 } });
+    history.replaceState(null, '', '/admin/balance?a=1&b=2');
+    render(<LocationProvider><Compare /></LocationProvider>);
+    await waitFor(() => expect(screen.getByText('Side B has no finished matches yet (live, voided and unfinished matches are not counted).')).toBeTruthy());
+    expect(screen.queryByText(/real changes/)).toBeNull();
+    expect(document.querySelector('.admin-table')).toBeNull();
+  });
+
+  it('warns when a side pools patches and when a patch is on both sides', async () => {
+    renderAt('?a=1,2&b=2');
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+    expect(screen.getByText(/Side A pools 2 patches \(Sky pounce fix, Saferoom lock\)/)).toBeTruthy();
+    expect(screen.getByText('Patch Saferoom lock is on both sides; the sides are no longer independent.')).toBeTruthy();
+  });
+
+  it('shows "no shared maps" and says "1 more match" in the verdict column', async () => {
+    mockAdmin.balancePatches.mockResolvedValue({ patches });
+    mockAdmin.balanceCompare.mockResolvedValue({
+      ...result,
+      rows: [
+        row('hunter.skeet_rate', 'hunter', 'no_data', { noSharedMaps: true, a: null, b: null, diff: null, p: null }),
+        row('tank.killed_rate', 'tank', 'too_early', { moreMatches: 1 }),
+      ],
+      counts: { real: 0, too_early: 1, noise: 0, no_data: 1 },
+    });
+    history.replaceState(null, '', '/admin/balance?a=1&b=2');
+    render(<LocationProvider><Compare /></LocationProvider>);
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+    expect(screen.getByText('no shared maps')).toBeTruthy();
+    expect(screen.getByText(/, about 1 more match$/)).toBeTruthy();
+  });
+
+  it('dims the table while the next comparison loads', async () => {
+    renderAt('?a=1&b=2');
+    await waitFor(() => screen.getByText('hunter.skeet_rate description'));
+    expect(document.querySelector('.balance-table.is-stale')).toBeNull();
+    let release: (v: unknown) => void = () => {};
+    mockAdmin.balanceCompare.mockReturnValue(new Promise((r) => { release = r; }));
+    fireEvent.change(screen.getByLabelText('Games'), { target: { value: 'queue' } });
+    await waitFor(() => expect(document.querySelector('.balance-table.is-stale')).toBeTruthy());
+    release(result);
+    await waitFor(() => expect(document.querySelector('.balance-table.is-stale')).toBeNull());
   });
 });

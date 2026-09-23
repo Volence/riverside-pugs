@@ -61,13 +61,24 @@ export function fmtChange(id: string, r: { diff: number | null; rel: number | nu
   return { main, range };
 }
 
+/** "1 more match", "60 more matches", "500+ more matches". */
+export function fmtMoreMatches(n: number): string {
+  return n >= 500 ? '500+ more matches' : `${n} more match${n === 1 ? '' : 'es'}`;
+}
+
 type View = 'ranked' | 'topic';
-export function readCompareQuery(search: string, patchIds: number[]): CompareQuery & { view: View } {
+/** `patchIds` is every patch, oldest first; `withData` is the subset (same
+ *  order) that has counted rounds. Ids chosen in the URL are kept as they are
+ *  (as long as the patch exists); only the defaults prefer the two newest
+ *  patches with data, so a fresh detected patch with nothing finished yet
+ *  does not open the page on an empty side. */
+export function readCompareQuery(search: string, patchIds: number[], withData: number[] = patchIds): CompareQuery & { view: View } {
   const p = new URLSearchParams(search);
   const known = new Set(patchIds);
   const ids = (k: string) => (p.get(k) ?? '').split(',').filter(Boolean).map(Number).filter((n) => known.has(n));
-  const newest = patchIds[patchIds.length - 1];
-  const prev = patchIds[patchIds.length - 2];
+  const pool = withData.length >= 2 ? withData : patchIds;
+  const newest = pool[pool.length - 1];
+  const prev = pool[pool.length - 2];
   const a = ids('a'), b = ids('b');
   const origin = p.get('origin');
   return {

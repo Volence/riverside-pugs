@@ -2,7 +2,7 @@ import { adminApi, type CompareQuery, type CompareRow } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty } from '../../../components/bits';
 import { rolling, trendGeometry } from './charts';
-import { fmtChange, fmtValue } from './format';
+import { fmtChange, fmtMoreMatches, fmtValue } from './format';
 
 const W = 800;
 const H = 160;
@@ -41,7 +41,7 @@ export function QuickCheck({ query, row }: { query: CompareQuery; row: CompareRo
         A {fmtValue(row.metric, row.a)} ({row.nA} matches) vs B {fmtValue(row.metric, row.b)} ({row.nB} matches).
         {' '}Change {ch.main}{ch.range && <>, likely range {ch.range}</>}.
         {row.verdict === 'too_early' && row.moreMatches !== null && (
-          <> Needs about {row.moreMatches >= 500 ? '500+' : row.moreMatches} more matches.</>
+          <> Needs about {fmtMoreMatches(row.moreMatches)}.</>
         )}
       </p>
       {row.excludedMaps.length > 0 && (
@@ -85,13 +85,35 @@ export function QuickCheck({ query, row }: { query: CompareQuery; row: CompareRo
           ) : (
             <p class="muted">Not enough matches for a trend yet.</p>
           )}
+          {detail.perPatch.length > 0 && (
+            <ul class="admin-list" data-testid="balance-per-patch">
+              {detail.perPatch.map((pp) => {
+                const sides = [query.a.includes(pp.patchId) && 'A', query.b.includes(pp.patchId) && 'B'].filter(Boolean).join(' and ');
+                return (
+                  <li key={pp.patchId}>
+                    {pp.label} <span class="muted">(side {sides})</span>:{' '}
+                    {pp.value === null ? 'no data' : fmtValue(row.metric, pp.value)} <span class="muted">over {pp.matches} match{pp.matches === 1 ? '' : 'es'}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           {detail.perMap.length > 0 && (
             <div class="balance-map" data-testid="balance-map">
               {detail.perMap.map((m) => (
                 <div class="balance-map__row" key={m.map}>
                   <div>{m.map} <span class="muted">({m.roundsA} vs {m.roundsB} rounds)</span></div>
-                  <div class="bar__track"><div class="bar__fill bar__fill--neutral" style={{ width: `${(m.a / maxBar) * 100}%` }} /></div>
-                  <div class="bar__track"><div class="bar__fill bar__fill--good" style={{ width: `${(m.b / maxBar) * 100}%` }} /></div>
+                  {/* Same neutral fill on both sides: a longer B bar is not
+                      "better", only different, so the sides are told apart by
+                      their labels, not by a good/bad colour. */}
+                  <div class="balance-map__bar">
+                    <span class="balance-map__side">A</span>
+                    <div class="bar__track"><div class="bar__fill bar__fill--neutral" style={{ width: `${(m.a / maxBar) * 100}%` }} /></div>
+                  </div>
+                  <div class="balance-map__bar">
+                    <span class="balance-map__side">B</span>
+                    <div class="bar__track"><div class="bar__fill bar__fill--neutral" style={{ width: `${(m.b / maxBar) * 100}%` }} /></div>
+                  </div>
                   <div class="muted">A {fmtValue(row.metric, m.a)}, B {fmtValue(row.metric, m.b)}</div>
                 </div>
               ))}
