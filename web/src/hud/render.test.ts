@@ -454,6 +454,10 @@ describe('the teammate card states', () => {
     expect(itemRowStart(100, 50, s, 'north-west')).toBe(100);
     expect(itemRowStart(100, 50, s, 'east')).toBeCloseTo(150 - row);
     expect(itemRowStart(100, 50, s, 'center')).toBeCloseTo(100 + (50 - row) / 2);
+    // A bare north or south is centred across, as VGUI places the text.
+    expect(itemRowStart(100, 50, s, 'north')).toBeCloseTo(100 + (50 - row) / 2);
+    expect(itemRowStart(100, 50, s, 'south')).toBeCloseTo(100 + (50 - row) / 2);
+    expect(itemRowStart(100, 50, s, 'south-east')).toBeCloseTo(150 - row);
   });
 
   it('keeps a full stock loadout inside the stock Items label', () => {

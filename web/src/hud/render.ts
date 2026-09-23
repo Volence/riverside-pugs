@@ -428,7 +428,9 @@ function itemRowWidth(s: number): number {
 export function itemRowStart(x: number, w: number, s: number, align: string): number {
   const a = align.toLowerCase();
   if (a.includes('east')) return x + w - itemRowWidth(s);
-  if (a.includes('center')) return x + (w - itemRowWidth(s)) / 2;
+  if (a.includes('west')) return x;
+  // center, and a bare north or south: VGUI centres those across the label.
+  if (a === 'center' || a === 'north' || a === 'south') return x + (w - itemRowWidth(s)) / 2;
   return x;
 }
 
