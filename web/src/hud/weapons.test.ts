@@ -229,6 +229,15 @@ describe('drawWeapons', () => {
     expect(pistol.a.slice(1)).toEqual([origin.x + slots[1].texts[0].x * k, origin.y + slots[1].texts[0].y * k + small.ascent]);
   });
 
+  it('adds the numbers onto the scene, as the game draws its additive fonts', () => {
+    // HudAmmoLarge and HudAmmo both say "additive" "1" in clientscheme.res: the
+    // game adds each glyph's colour to what is behind it, so a grey reserve on
+    // a mid-brown wall shows lighter than a plain blend would draw it. The
+    // canvas's 'lighter' composite is that same addition.
+    const calls = draw().filter((c) => c.m === 'fillText');
+    expect(calls.map((c) => c.op)).toEqual(['lighter', 'lighter', 'lighter']);
+  });
+
   it('draws nothing while the art loads, and asks for a redraw', () => {
     const pending: (HTMLImageElement & { onload: (() => void) | null })[] = [];
     _setImageFactory((url) => {

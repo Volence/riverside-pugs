@@ -33,6 +33,7 @@ import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
 import { canvasFont, fontCell, loadFace, type FontCell } from './fonts';
+import { addLinear } from './additive';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
 export interface ChildRect { name: string; kind: ChildKind; x: number; y: number; w: number; h: number; visible: boolean }
@@ -163,13 +164,13 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
  * boldness lives in the face itself, which the preview draws in the exported
  * font of that name, so the weight is kept as the file says.
  */
-export function fontFace(design: HudDesign, name: string): { tall: number; face: string; weight: number } {
+export function fontFace(design: HudDesign, name: string): { tall: number; face: string; weight: number; additive: boolean } {
   const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
   const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
-  if (!first) return { tall: 12, face: '', weight: 0 };
+  if (!first) return { tall: 12, face: '', weight: 0, additive: false };
   let face = kvGet(first, 'name') ?? '';
   if (design.font === 'roboto' && /^Trade Gothic( Bold)?$/i.test(face)) face = 'Roboto Condensed';
-  return { tall: num(kvGet(first, 'tall'), 12), face, weight: num(kvGet(first, 'weight')) };
+  return { tall: num(kvGet(first, 'tall'), 12), face, weight: num(kvGet(first, 'weight')), additive: num(kvGet(first, 'additive')) !== 0 };
 }
 
 /**
@@ -178,13 +179,70 @@ export function fontFace(design: HudDesign, name: string): { tall: number; face:
  * (fonts.ts), with an alphabetic baseline. Returns the cell in pixels: the
  * game draws text from the cell's top, so the caller puts the baseline the
  * ascent below that. Asks for the face too; onAsset redraws once it is in.
+ * Also says whether the font is additive, for fillFontText.
  */
-export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: string, k: number, onAsset?: () => void): FontCell {
+export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: string, k: number, onAsset?: () => void): FontCell & { additive: boolean } {
   const f = fontFace(design, name);
   loadFace(f.face, onAsset);
   ctx.font = canvasFont(f.face, f.weight, f.tall * k);
   ctx.textBaseline = 'alphabetic';
-  return fontCell(f.face, f.tall * k);
+  return { ...fontCell(f.face, f.tall * k), additive: f.additive };
+}
+
+/**
+ * Draws what paint draws the way the game draws an additive font (see
+ * additive.ts): the glyphs alone on a clear canvas the size of box (canvas
+ * pixels, widened to whole ones), with the scene's font, colour, alignment
+ * and alpha, then added onto the scene's pixels under the box in linear
+ * light and written back. paint draws in the scene's own coordinates and
+ * sets nothing but what it needs beyond those (a clip, say).
+ *
+ * Where the pixels cannot be read (a context without getImageData, as in
+ * the tests, or no canvas to draw on) it falls back to the canvas's own
+ * 'lighter' composite, the same sum on the sRGB numbers, which overshoots
+ * but still reads as additive.
+ */
+export function paintAdditive(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }, paint: (c: CanvasRenderingContext2D) => void): void {
+  const readable = typeof ctx.getImageData === 'function' && !!ctx.canvas;
+  const x0 = Math.max(0, Math.floor(box.x)), y0 = Math.max(0, Math.floor(box.y));
+  const x1 = readable ? Math.min(ctx.canvas.width, Math.ceil(box.x + box.w)) : 0;
+  const y1 = readable ? Math.min(ctx.canvas.height, Math.ceil(box.y + box.h)) : 0;
+  if (readable && (x1 <= x0 || y1 <= y0)) return;                   // wholly off the canvas: nothing to add onto
+  const off = readable ? canvasFactory(x1 - x0, y1 - y0) : null;
+  const octx = off?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
+  if (!octx) {
+    const prev = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'lighter';
+    paint(ctx);
+    ctx.globalCompositeOperation = prev;
+    return;
+  }
+  octx.font = ctx.font; octx.fillStyle = ctx.fillStyle; octx.textAlign = ctx.textAlign;
+  octx.textBaseline = ctx.textBaseline; octx.globalAlpha = ctx.globalAlpha;
+  octx.translate(-x0, -y0);
+  paint(octx);
+  const glyphs = octx.getImageData(0, 0, x1 - x0, y1 - y0);
+  const scene = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+  addLinear(scene.data, glyphs.data);
+  ctx.putImageData(scene, x0, y0);
+}
+
+/**
+ * Draws one line of text at (x, y) (the baseline, with ctx's alignment
+ * already set): through paintAdditive when its font is additive, over the
+ * box the text covers (measured, one cell tall from cellTop, with a cell's
+ * width of slack either side for glyphs that overhang their advance),
+ * plainly otherwise. clip, when the caller clips the text to a rect, cuts
+ * the box down to it too: the pixels paintAdditive writes back ignore the
+ * canvas's clip.
+ */
+export function fillFontText(ctx: CanvasRenderingContext2D, cell: FontCell & { additive: boolean }, s: string, x: number, y: number, cellTop: number, clip?: { x: number; y: number; w: number; h: number }): void {
+  if (!cell.additive) { ctx.fillText(s, x, y); return; }
+  const w = ctx.measureText(s).width;
+  const left = ctx.textAlign === 'right' || ctx.textAlign === 'end' ? x - w : ctx.textAlign === 'center' ? x - w / 2 : x;
+  let bx = left - cell.cell, by = cellTop - cell.cell / 4, bx2 = left + w + cell.cell, by2 = cellTop + cell.cell * 1.25;
+  if (clip) { bx = Math.max(bx, clip.x); by = Math.max(by, clip.y); bx2 = Math.min(bx2, clip.x + clip.w); by2 = Math.min(by2, clip.y + clip.h); }
+  paintAdditive(ctx, { x: bx, y: by, w: bx2 - bx, h: by2 - by }, (c) => c.fillText(s, x, y));
 }
 
 /** Base files use scheme colour names; the generator never writes one, but the preview has to read them. */
@@ -516,13 +574,20 @@ function drawItems(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, 
   ctx.rect(r.x, r.y, r.w, r.h);
   ctx.clip();
   ctx.globalAlpha *= ca / 255;
-  let x = itemRowStart(r.x, r.w, s, kvGet(n, 'textAlignment') ?? 'west');
-  for (const [i, name] of ITEM_ROW.entries()) {
-    const img = imgs[i]!;
-    const src = cr < 255 || cg < 255 || cb < 255 ? tinted(img, name, cr, cg, cb) : img;
-    ctx.drawImage(src, x, y, (img.naturalWidth / img.naturalHeight) * s, s);
-    x += ((ICON_ADVANCE[name] ?? 1) + ICON_SPACE) * s;
-  }
+  const row = (c: CanvasRenderingContext2D) => {
+    let x = itemRowStart(r.x, r.w, s, kvGet(n, 'textAlignment') ?? 'west');
+    for (const [i, name] of ITEM_ROW.entries()) {
+      const img = imgs[i]!;
+      const src = cr < 255 || cg < 255 || cb < 255 ? tinted(img, name, cr, cg, cb) : img;
+      c.drawImage(src, x, y, (img.naturalWidth / img.naturalHeight) * s, s);
+      x += ((ICON_ADVANCE[name] ?? 1) + ICON_SPACE) * s;
+    }
+  };
+  // The icons are glyphs of the label's font, so they are laid on the scene
+  // the way that font is: added, for the stock ToolBox icon fonts. The box
+  // is the label's rect, which also clips them there.
+  if (fontFace(design, kvGet(n, 'font') ?? '').additive) paintAdditive(ctx, r, row);
+  else row(ctx);
   ctx.restore();
 }
 
@@ -565,7 +630,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, 
   // A Label puts its text's cell at the top for north, the bottom for
   // south, and centres it otherwise; the glyphs hang from the cell's top.
   const top = align.startsWith('north') ? r.y : align.startsWith('south') ? r.y + r.h - cell.cell : r.y + (r.h - cell.cell) / 2;
-  ctx.fillText(s, x, top + cell.ascent);
+  fillFontText(ctx, cell, s, x, top + cell.ascent, top);
   ctx.restore();
 }
 

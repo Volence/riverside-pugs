@@ -51,7 +51,7 @@ import { screenW } from './units';
 import { buildTrees, pcGet, CLEAR_TEXTURE, WEAPON_BOX_ENTRY, weaponBoxTexture } from './build';
 import { WEAPON_BOX_COLOUR } from './design';
 import { kvFind, type KvNode } from './kv';
-import { artImage, colourOf, fontFace, hatch, isMissing, rgbaOf, setFont, tinted } from './render';
+import { artImage, colourOf, fillFontText, fontFace, hatch, isMissing, rgbaOf, setFont, tinted } from './render';
 import { EQUIP_ICON_SIZE } from './art/index';
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -327,7 +327,7 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
       const cell = setFont(ctx, design, t.font, k, onAsset);
       ctx.fillStyle = colourOf(design, t.colour ?? undefined);
       ctx.textAlign = t.align;
-      ctx.fillText(t.text, origin.x + t.x * k, origin.y + t.y * k + cell.ascent);
+      fillFontText(ctx, cell, t.text, origin.x + t.x * k, origin.y + t.y * k + cell.ascent, origin.y + t.y * k);
       ctx.restore();
     }
   }

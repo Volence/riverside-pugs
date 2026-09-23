@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
@@ -127,6 +127,27 @@ describe('drawPanel', () => {
     const drawn = calls.filter((c) => c.m === 'drawImage').length;
     expect(drawn).toBeGreaterThanOrEqual(2);                           // portrait + bar fill at least
     expect(calls.some((c) => c.m === 'fillText' && c.a[0] === '100')).toBe(true);
+  });
+
+  it('adds text in an additive scheme font onto the scene, and blends the rest', () => {
+    // HUDHealth (the own health number) says "additive" "1"; PlayerDisplayName
+    // (the teammate's name) does not. The game adds an additive font's glyphs
+    // to what is behind them, which the canvas's 'lighter' composite does too.
+    const own = recCtx();
+    drawPanel(own.ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
+    expect(own.calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.op).toBe('lighter');
+    const team = recCtx();
+    drawPanel(team.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
+    expect(team.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.op).toBe('source-over');
+  });
+
+  it("adds the teammate's item icons onto the scene, as their additive icon font is drawn", () => {
+    // The Items label's font, L4D_Icons_medium, is the ToolBox face with "additive" "1".
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
+    const icons = calls.filter((c) => c.m === 'drawImage' && ITEM_ROW.some((n) => (c.a[0] as HTMLImageElement).src === artUrl(n)));
+    expect(icons.length).toBe(ITEM_ROW.length);
+    for (const c of icons) expect(c.op).toBe('lighter');
   });
 
   it('never draws the state children the game controls', () => {
@@ -542,5 +563,47 @@ describe('the teammate card states', () => {
       drawPanel(ctx, flat, 'teamColumn', { x: 5, y: 7 }, 2, { card: 0, state });
       expect(calls.some((c) => c.m === 'fillRect' && c.fill === 'rgba(255,0,0,1)'), state).toBe(true);
     }
+  });
+});
+
+describe('paintAdditive', () => {
+  it('draws the glyphs alone off screen, then adds them onto the scene in linear light, in place', () => {
+    // The scene: a 2 x 1 wall of (135, 126, 110). The glyphs, drawn alone:
+    // grey 128 over the left pixel, nothing over the right one.
+    const put: { data: Uint8ClampedArray; x: number; y: number }[] = [];
+    const main = {
+      font: '12px X', fillStyle: 'rgba(128,128,128,1)', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      getImageData: (x: number, y: number, w: number, h: number) => {
+        expect([x, y, w, h]).toEqual([10, 20, 2, 1]);
+        return { data: new Uint8ClampedArray([135, 126, 110, 255, 135, 126, 110, 255]) };
+      },
+      putImageData: (d: { data: Uint8ClampedArray }, x: number, y: number) => put.push({ data: d.data, x, y }),
+      canvas: { width: 100, height: 100 },
+    };
+    const painted: unknown[] = [];
+    const off = {
+      font: '', fillStyle: '', textAlign: '', textBaseline: '', globalAlpha: 1,
+      translate: (x: number, y: number) => painted.push(['translate', x, y]),
+      getImageData: () => ({ data: new Uint8ClampedArray([128, 128, 128, 255, 0, 0, 0, 0]) }),
+    };
+    _setCanvasFactory((w, h) => ({ width: w, height: h, getContext: () => off }) as unknown as HTMLCanvasElement);
+    try {
+      paintAdditive(main as unknown as CanvasRenderingContext2D, { x: 10.4, y: 20.2, w: 1.2, h: 0.5 }, (c) => {
+        painted.push(['paint', c === (off as unknown), c.font, c.fillStyle]);
+      });
+    } finally { _setCanvasFactory(null); }
+    // The box is widened to whole pixels, the glyphs painted in the scene's coordinates with its font and colour.
+    expect(painted).toEqual([['translate', -10, -20], ['paint', true, '12px X', 'rgba(128,128,128,1)']]);
+    expect(put).toHaveLength(1);
+    expect([put[0].x, put[0].y]).toEqual([10, 20]);
+    expect([...put[0].data]).toEqual([180, 174, 164, 255, 135, 126, 110, 255]);
+  });
+
+  it("falls back to the canvas's own 'lighter' sum where pixels cannot be read, and puts the composite back", () => {
+    const { ctx, calls } = recCtx();
+    paintAdditive(ctx, { x: 0, y: 0, w: 5, h: 5 }, (c) => c.fillText('8', 0, 0));
+    expect(calls.find((c) => c.m === 'fillText')!.op).toBe('lighter');
+    expect(ctx.globalCompositeOperation).toBe('source-over');
   });
 });

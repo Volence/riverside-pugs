@@ -17,7 +17,7 @@ import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, type CardState } from './render';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type CardState } from './render';
 import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
 import { drawWeapons, type WeaponHeld } from './weapons';
@@ -263,10 +263,12 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       // Label centres it, the glyphs hanging from the cell's top.
       const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, onAsset);
       ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
-      const y = r.y + ypos * k + (tall * k - cell.cell) / 2 + cell.ascent;
-      if (align.includes('east')) { ctx.textAlign = 'right'; ctx.fillText(line, r.x + (xpos + wide) * k, y); }
-      else if (align.includes('center')) { ctx.textAlign = 'center'; ctx.fillText(line, r.x + (xpos + wide / 2) * k, y); }
-      else { ctx.textAlign = 'left'; ctx.fillText(line, r.x + xpos * k, y); }
+      const top = r.y + ypos * k + (tall * k - cell.cell) / 2;
+      let x = r.x + xpos * k;
+      if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + (xpos + wide) * k; }
+      else if (align.includes('center')) { ctx.textAlign = 'center'; x = r.x + (xpos + wide / 2) * k; }
+      else ctx.textAlign = 'left';
+      fillFontText(ctx, cell, line, x, top + cell.ascent, top, r);
     }
     ctx.restore();
   });
