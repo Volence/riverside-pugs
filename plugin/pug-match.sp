@@ -1466,19 +1466,26 @@ int RplWeaponId(const char[] cls)
 
 // ---------- line of sight (frame bytes 6-7) ----------
 
-/** Players never block sight here, and neither do common infected: a common
- *  walking between a survivor and a hunter is not a wall. Everything else the
- *  mask hits does. */
+/** An allowlist of what blocks sight: the world, and entities that are drawn
+ *  and solid (props, doors, breakables, func_wall/func_rotating/func_brush).
+ *  Everything else passes: players, common infected (a common walking between
+ *  a survivor and a hunter is not a wall), weapons and ammo piles, and
+ *  invisible entities such as env_player_blocker and triggers. The direction
+ *  matters: an invisible blocker must never make a visible infected count as
+ *  hidden, because "hidden" is what would wrongly flag a player who aimed at
+ *  it. */
 public bool RplLosFilter(int ent, int mask, any viewer)
 {
-	if (ent >= 1 && ent <= MaxClients) return false;
-	if (ent > MaxClients && IsValidEntity(ent))
-	{
-		char cls[16];
-		GetEntityClassname(ent, cls, sizeof(cls));
-		if (StrEqual(cls, "infected")) return false;
-	}
-	return true;
+	if (ent == 0) return true;
+	if (ent <= MaxClients || !IsValidEntity(ent)) return false;
+	char cls[32];
+	GetEntityClassname(ent, cls, sizeof(cls));
+	return StrContains(cls, "prop_") == 0
+		|| StrContains(cls, "func_door") == 0
+		|| StrContains(cls, "func_breakable") == 0
+		|| StrContains(cls, "func_wall") == 0
+		|| StrContains(cls, "func_rotating") == 0
+		|| StrEqual(cls, "func_brush");
 }
 
 bool RplLosClear(const float from[3], const float to[3], int viewer)
