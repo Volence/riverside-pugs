@@ -23,12 +23,12 @@ import {
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
-  NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, climb, breadcrumb, selectionLabel,
+  NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
   selectionBox, handlesFor, handlePoint, handleAt,
   type Selection, type Hit, type Mods, type Crumb,
 } from '../hud/selection';
-import { ElementControls, ChildList, ChildControls } from './hud/ContextPanel';
+import { ElementControls, ChildList, ChildControls, PiecesControls, ElementsControls } from './hud/ContextPanel';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
@@ -635,6 +635,12 @@ export default function Hud() {
       return;
     }
 
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      setSel((s) => selectAll(current.current, side, cardState, s));
+      return;
+    }
+
     const amount = e.shiftKey ? 10 : 1;
     const deltas: Record<string, [number, number]> = {
       ArrowUp: [0, -amount], ArrowDown: [0, amount], ArrowLeft: [-amount, 0], ArrowRight: [amount, 0],
@@ -909,7 +915,11 @@ export default function Hud() {
               ? <ElementControls design={design} edit={edit} end={endGesture} id={sel.ids[0]} />
               : sel.kind === 'card'
                 ? <ElementControls design={design} edit={edit} end={endGesture} id="teamColumn" />
-                : <p class="muted">Select an element on the canvas or in the list below it.</p>}
+                : sel.kind === 'children'
+                  ? <PiecesControls design={design} edit={edit} end={endGesture} names={sel.names} />
+                  : sel.kind === 'elements'
+                    ? <ElementsControls design={design} edit={edit} ids={sel.ids} />
+                    : <p class="muted">Select an element on the canvas or in the list below it.</p>}
           {teamPicked && (
             <ChildList
               design={design} edit={edit} selectedChild={oneChild}

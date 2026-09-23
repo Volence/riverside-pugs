@@ -9,7 +9,11 @@ import {
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, cardChild, baseHasChild } from '../../hud/build';
 import { TEAM_PANEL, teamChild } from '../../hud/children';
-import { cardOffset, withTeamDir, placeCard, patchChild, resetElement, resetChild } from '../../hud/edit';
+import {
+  cardOffset, withTeamDir, placeCard, patchChild, resetElement, resetChild,
+  startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
+} from '../../hud/edit';
+import { unionBox } from '../../hud/guides';
 import {
   Slider, Field, patchNum, endsOn, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode, type Patch,
 } from './controls';
@@ -342,6 +346,93 @@ export function ChildControls(
       {def.note && <p class="muted hud__note">{def.note}</p>}
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this child</button>
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>Back to Teammates</button>
+    </Field>
+  );
+}
+
+const ALIGNS: { how: Align; label: string }[] = [
+  { how: 'left', label: 'Left' }, { how: 'centre', label: 'Centre' }, { how: 'right', label: 'Right' },
+  { how: 'top', label: 'Top' }, { how: 'middle', label: 'Middle' }, { how: 'bottom', label: 'Bottom' },
+];
+
+/** Six buttons that line a group up against the box around it. */
+function AlignRow({ onAlign }: { onAlign: (how: Align) => void }) {
+  return (
+    <div class="hud__align" role="group" aria-label="Align">
+      {ALIGNS.map((a) => (
+        <button
+          key={a.how} type="button" class="btn btn--ghost btn--sm" aria-label={`Align ${a.label.toLowerCase()}`}
+          onClick={() => onAlign(a.how)}
+        >
+          {a.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Several pieces of the teammate card: the group's X and Y (the box around
+ * them, in the card file's frame, moving all of them), Align, Visible for
+ * all and Reset all. Every edit is the one card file, so every card follows.
+ */
+export function PiecesControls({ design, edit, end, names }: { design: HudDesign; edit: Edit; end: () => void; names: string[] }) {
+  const box = unionBox(Object.values(startsOf(design, names)));
+  if (!box) return null;
+  const allVisible = names.every((n) => cardChild(design, n)?.visible);
+  const place = (key: 'x' | 'y', e: Event) => {
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(n)) return;
+    edit((d) => {
+      const b = unionBox(Object.values(startsOf(d, names)));
+      return b ? placeChildren(d, names, key === 'x' ? n : b.x, key === 'y' ? n : b.y) : d;
+    }, 'gesture');
+  };
+  return (
+    <Field legend={`${names.length} pieces in the teammate card`}>
+      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
+      <div class="hud__row2">
+        <label class="hud__field">
+          <span>X</span>
+          <input type="number" value={Math.round(box.x)} onInput={(e) => place('x', e)} {...endsOn(end)} />
+        </label>
+        <label class="hud__field">
+          <span>Y</span>
+          <input type="number" value={Math.round(box.y)} onInput={(e) => place('y', e)} {...endsOn(end)} />
+        </label>
+      </div>
+      <AlignRow onAlign={(how) => edit((d) => alignChildren(d, names, how))} />
+      <label class="hud__check">
+        <input
+          type="checkbox" checked={allVisible}
+          onChange={(e) => { const v = (e.target as HTMLInputElement).checked; edit((d) => setChildrenVisible(d, names, v)); }}
+        />
+        <span>Visible</span>
+      </label>
+      <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => resetChildren(d, names))}>Reset all</button>
+    </Field>
+  );
+}
+
+/** Several elements of the side: Align against their box, and Visible for all of those that can hide. */
+export function ElementsControls({ design, edit, ids }: { design: HudDesign; edit: Edit; ids: string[] }) {
+  const hideable = ids.filter((id) => elementById(id)?.props.includes('visible'));
+  const allVisible = hideable.every((id) => elementRect(design, id, design.aspect).visible);
+  return (
+    <Field legend={`${ids.length} elements`}>
+      <AlignRow onAlign={(how) => edit((d) => alignElements(d, ids, how))} />
+      {hideable.length > 0 && (
+        <label class="hud__check">
+          <input
+            type="checkbox" checked={allVisible}
+            onChange={(e) => {
+              const v = (e.target as HTMLInputElement).checked;
+              edit((d) => setSelectionVisible(d, { kind: 'elements', ids: hideable }, v));
+            }}
+          />
+          <span>Visible</span>
+        </label>
+      )}
     </Field>
   );
 }

@@ -628,4 +628,71 @@ describe('Hud page', () => {
     undoKey();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('10');
   });
+
+  it('picks several pieces with Shift+click and moves them together', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    clickAt(canvas, 60, 460, { shiftKey: true });
+    expect(screen.getByText('2 pieces in the teammate card', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    dragFrom(canvas, [24, 454], [29, 454]);
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('18');
+    // The health bar moved too: it now starts at 42.
+    clickAt(canvas, 65, 460);
+    expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('42');
+  });
+
+  it('picks the pieces a Shift+drag box touches', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    dragFrom(canvas, [60, 456], [100, 470], { shiftKey: true });
+    expect(screen.getByText('2 pieces in the teammate card', { selector: 'legend' })).toBeTruthy();
+  });
+
+  // Task 11's review found no page-level test wired a Shift+drag box across
+  // plain elements (only across teammate-card pieces): ownHealth (728, 389)
+  // to (853, 480) and Weapons (755, 165) to (855, 325) both sit inside this
+  // box, and nothing else on the survivor side does.
+  it('picks two elements with a Shift+drag box outside the teammate card', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    dragFrom(canvas, [700, 300], [860, 400], { shiftKey: true });
+    expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
+  });
+
+  it('selects every drawn piece of the card, or every visible element, with Ctrl+A', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+    expect(screen.getByText('5 pieces in the teammate card', { selector: 'legend' })).toBeTruthy();
+    clickAt(canvas, 426, 100);
+    fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
+    expect(screen.getByText('7 elements', { selector: 'legend' })).toBeTruthy();
+  });
+
+  it('aligns several pieces, and hides them all', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    clickAt(canvas, 60, 460, { shiftKey: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Align right' }));
+    // Their box ends at 133 (the bar's right edge): the portrait moves to 110.
+    fireEvent.click(screen.getByLabelText('Visible'));
+    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('110');
+    expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('aligns several elements picked with Shift+click in the list', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }), { shiftKey: true });
+    expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Align left' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('10');
+  });
 });

@@ -256,6 +256,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__note { margin-top: var(--sp-2); }
 .hud__reset { margin-top: var(--sp-4); }
 
+/* The six align buttons of a group, in one wrapping row. */
+.hud__align { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-3); }
+
 /* The native file input is unstylable across browsers, so it is hidden and
  * the label around it does the work, same as the crosshair page's xh__file. */
 .hud__file { display: block; margin-top: var(--sp-2); font-size: var(--fs-dense); color: var(--text-muted); cursor: pointer; }
