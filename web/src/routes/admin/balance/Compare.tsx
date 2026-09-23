@@ -1,3 +1,160 @@
+import { useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { adminApi, type CompareQuery, type CompareRow, type PatchSummary, type Verdict } from '../../../api';
+import { useFetch } from '../../../hooks/useFetch';
+import { Empty, Panel } from '../../../components/bits';
+import { fmtChange, fmtValue, GROUP_LABEL, readCompareQuery, VERDICT_LABEL, writeCompareQuery } from './format';
+import { QuickCheck } from './QuickCheck';
+
+type CompareQueryWithView = CompareQuery & { view: 'ranked' | 'topic' };
+
+const VERDICTS: Verdict[] = ['real', 'too_early', 'noise', 'no_data'];
+const PHASE_FILTERS = ['any', 'all', 'tank', 'witch', 'event', 'normal'] as const;
+const patchLabel = (p: PatchSummary) => `${p.name ?? `Unnamed patch ${p.number}`} (${p.rounds} rounds)`;
+
+/** Picks two groups of patches and shows every metric's verdict against them,
+ *  Ranked or grouped By topic. The row-click expansion (QuickCheck) is a
+ *  stub until Task 8 lands; this page only wires up the open/close state and
+ *  passes it the query and row it needs.
+ *
+ *  Deviations from the brief, recorded for the report:
+ *  - `key` for useFetch is built from the same fields as the brief's example,
+ *    but `ready`/`same` are folded into the loader itself (returning
+ *    Promise.resolve(null) when not ready) rather than only gating the deps,
+ *    matching the brief's own sample exactly.
+ *  - Phase filter state resets are NOT persisted to the URL (kept as brief
+ *    specifies: local useState), so it does not survive a reload; only the
+ *    controls the brief calls out as URL state (a, b, origin, phases, view)
+ *    go through readCompareQuery/writeCompareQuery. */
 export function Compare() {
-  return <div class="stack"><p class="muted">Compare</p></div>;
+  const { route } = useLocation();
+  const patches = useFetch((s) => adminApi.balancePatches(s), []);
+  const list = patches.data?.patches ?? [];
+  const oldestFirst = list.map((p) => p.id);
+  const q = readCompareQuery(location.search, oldestFirst);
+  const set = (next: Partial<CompareQueryWithView>) => route(`/admin/balance${writeCompareQuery({ ...q, ...next })}`, true);
+  const ready = list.length > 0 && q.a.length > 0 && q.b.length > 0;
+  const same = ready && q.a.length === q.b.length && q.a.every((id) => q.b.includes(id));
+  const key = JSON.stringify([q.a, q.b, q.origin, q.maps, q.phases]);
+  const cmp = useFetch((s) => (ready && !same ? adminApi.balanceCompare(q, s) : Promise.resolve(null)), [key, ready, same]);
+  const [only, setOnly] = useState<Verdict | null>(null);
+  const [phaseFilter, setPhaseFilter] = useState<(typeof PHASE_FILTERS)[number]>('any');
+  const [open, setOpen] = useState<string | null>(null);
+
+  if (patches.error) return <Empty>Could not load patches.</Empty>;
+  if (!patches.data) return <p class="muted">Loading...</p>;
+
+  const toggle = (sideKey: 'a' | 'b', id: number) => {
+    const cur = q[sideKey];
+    set({ [sideKey]: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] } as Partial<CompareQueryWithView>);
+  };
+  const newestFirst = [...list].reverse();
+  const result = cmp.data;
+  const rows = (result?.rows ?? []).filter((r) => (only ? r.verdict === only : true)
+    && (phaseFilter === 'any' ? true : r.phase === phaseFilter));
+
+  const table = (rs: CompareRow[]) => (
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>Metric</th><th>Phase</th><th>A</th><th>B</th><th>Change</th><th>Verdict</th></tr></thead>
+        <tbody>
+          {rs.flatMap((r) => {
+            const k = `${r.metric}|${r.phase}`;
+            const ch = fmtChange(r.metric, r);
+            const main = (
+              <tr key={k} class="is-clickable" onClick={() => setOpen(open === k ? null : k)}>
+                <td>{r.description}</td>
+                <td>{r.phase === 'all' ? 'whole round' : r.phase}</td>
+                <td>{fmtValue(r.metric, r.a)}</td>
+                <td>{fmtValue(r.metric, r.b)}</td>
+                <td>{ch.main} <span class="muted">{ch.range}</span></td>
+                <td class={`verdict verdict--${r.verdict}`}>
+                  {VERDICT_LABEL[r.verdict]}
+                  {r.verdict === 'too_early' && r.moreMatches !== null && <span class="muted">, about {r.moreMatches >= 500 ? '500+' : r.moreMatches} more matches</span>}
+                </td>
+              </tr>
+            );
+            return open === k
+              ? [main, <tr key={`${k}-check`}><td colSpan={6}><QuickCheck query={q} row={r} /></td></tr>]
+              : [main];
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return (
+    <div class="stack">
+      <Panel>
+        <div class="balance-controls">
+          {(['a', 'b'] as const).map((sk) => (
+            <fieldset class="balance-side" key={sk}>
+              <legend>Side {sk.toUpperCase()}</legend>
+              {newestFirst.map((p) => (
+                <label key={p.id}>
+                  <input type="checkbox" checked={q[sk].includes(p.id)} onChange={() => toggle(sk, p.id)} /> {patchLabel(p)}
+                </label>
+              ))}
+            </fieldset>
+          ))}
+          <label>Games
+            <select value={q.origin} onChange={(e) => set({ origin: (e.target as HTMLSelectElement).value as CompareQueryWithView['origin'] })}>
+              <option value="all">All rated</option><option value="queue">Queue only</option><option value="in_game">In-game only</option>
+            </select>
+          </label>
+          <label>Phases
+            <select value={q.phases} onChange={(e) => set({ phases: (e.target as HTMLSelectElement).value as CompareQueryWithView['phases'] })}>
+              <option value="all">Whole round only</option><option value="split">Include phase splits</option>
+            </select>
+          </label>
+          {q.phases === 'split' && (
+            <label>Show
+              <select value={phaseFilter} onChange={(e) => setPhaseFilter((e.target as HTMLSelectElement).value as (typeof PHASE_FILTERS)[number])}>
+                <option value="any">Every phase</option><option value="all">Whole round</option><option value="tank">Tank alive</option>
+                <option value="witch">Witch near</option><option value="event">Event</option><option value="normal">Normal play</option>
+              </select>
+            </label>
+          )}
+          <div class="admin-sections">
+            <button type="button" class={`chip${q.view === 'ranked' ? ' is-on' : ''}`} onClick={() => set({ view: 'ranked' })}>Ranked</button>
+            <button type="button" class={`chip${q.view === 'topic' ? ' is-on' : ''}`} onClick={() => set({ view: 'topic' })}>By topic</button>
+          </div>
+        </div>
+      </Panel>
+
+      {!ready && <p class="balance-banner">Pick at least one patch on each side.</p>}
+      {same && <p class="balance-banner">Side A and side B are the same.</p>}
+      {cmp.error && <Empty>Could not load the comparison.</Empty>}
+      {result && (
+        <>
+          {result.banners.skill && <p class="balance-banner">{result.banners.skill}</p>}
+          {result.banners.approximate && <p class="balance-banner">Includes historical patches: their dates are approximate.</p>}
+          <p class="muted">
+            {(['a', 'b'] as const).map((sk) => {
+              const s = result[sk];
+              return <span key={sk}>{sk.toUpperCase()}: {s.matches} matches, {s.rounds} rounds{s.olderEngineRounds > 0 && ` (${s.olderEngineRounds} rounds use an older metric definition)`}. </span>;
+            })}
+          </p>
+          <div class="admin-sections">
+            {VERDICTS.map((v) => (
+              <button key={v} type="button" class={`chip${only === v ? ' is-on' : ''}`} onClick={() => setOnly(only === v ? null : v)}>
+                {result.counts[v]} {v === 'real' ? 'real changes' : VERDICT_LABEL[v]}
+              </button>
+            ))}
+          </div>
+          <Panel class="panel--table">
+            {q.view === 'ranked'
+              ? table(rows)
+              : Object.keys(GROUP_LABEL).map((g) => {
+                const rs = rows.filter((r) => r.group === g);
+                if (rs.length === 0) return null;
+                const c = VERDICTS.map((v) => [v, rs.filter((r) => r.verdict === v).length] as const).filter(([, n]) => n > 0)
+                  .map(([v, n]) => `${n} ${v === 'real' ? 'real' : VERDICT_LABEL[v]}`).join(', ');
+                return <section key={g}><h3>{GROUP_LABEL[g]} ({c})</h3>{table(rs)}</section>;
+              })}
+          </Panel>
+        </>
+      )}
+    </div>
+  );
 }
