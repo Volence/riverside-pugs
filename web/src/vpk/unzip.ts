@@ -83,7 +83,7 @@ export async function readZip(bytes: Uint8Array, maxBytes: number): Promise<Map<
     if (start + e.csize > bytes.length) fail();
     const packed = bytes.subarray(start, start + e.csize);
     const data = e.method === 0 ? packed.slice() : await inflate(packed, e.usize).catch(fail);
-    if (!data || data.length !== e.usize) fail();
+    if (!data || data.length !== e.usize) return fail();
     out.set(e.name, data);
   }
   return out;
