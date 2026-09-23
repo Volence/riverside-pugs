@@ -114,6 +114,20 @@ describe('Crosshair page', () => {
     expect(screen.queryByText('Import an image first, or pick a shape.')).toBeNull();
   });
 
+  it('downloads a saved image straight after a reload, before the page has decoded it again', () => {
+    stubCanvas();
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'image' }));
+    localStorage.setItem('xhairImage', JSON.stringify({ png: PNG, w: TEX, h: TEX }));
+    // Images that never finish loading: the page's own copy is still on its way.
+    vi.stubGlobal('Image', class { onload = null; onerror = null; set src(_v: string) {} });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:vpk');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    render(<Crosshair />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download .vpk' }));
+    expect(screen.queryByText('Import an image first, or pick a shape.')).toBeNull();
+    expect(screen.getByText(/^Saved /)).toBeTruthy();
+  });
+
   it('carries a built crosshair into the HUD editor, selected', () => {
     localStorage.setItem('hud', JSON.stringify({ v: 1, name: 'mine', crosshair: 'none' }));
     render(<Crosshair />);

@@ -142,7 +142,7 @@ export function Crosshair() {
   };
 
   const download = () => {
-    if (state.shape === 'image' && !imported.current) {
+    if (state.shape === 'image' && savedArt()?.kind !== 'image') {
       setStatus('Import an image first, or pick a shape.');
       return;
     }
