@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { DB } from '../db.js';
-import { decodeFrames, decodeHeader, HEADER_BYTES, slotInfected } from '../replayFormat.js';
+import { decodeFrames, decodeHeader, HEADER_BYTES, slotInfected, VERSION } from '../replayFormat.js';
 import { unpausedFrames } from '../integrity/round.js';
 import { resolveReplayPath } from '../replays.js';
 import { infectedMaskFor } from '../routes/replays.js';
@@ -15,6 +15,10 @@ export const FRAME_DT_CAP_MS = 1000;
 export function decodeRoundReplay(buf: Uint8Array, fallbackMask: () => number | null): RoundReplay | null {
   const h = decodeHeader(buf);
   if (!h) return null;
+  // A newer writer may have changed a record's size or the meaning of a
+  // field, so decoding frames below would produce plausible nonsense rather
+  // than an error. Same ceiling parseReplay applies, for the same reason.
+  if (h.version > VERSION) return null;
   let sideOf: (slot: number) => boolean;
   if (h.sidesKnown) sideOf = (s) => slotInfected(h, s);
   else {
