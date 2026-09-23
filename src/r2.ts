@@ -205,6 +205,29 @@ export async function del(cfg: R2Config, key: string): Promise<void> {
   if (!res.ok && res.status !== 404) throw new Error(`R2 DELETE ${key} failed: ${res.status}`);
 }
 
+/** Bytes of an object from `from` to its end, plus the object's total size.
+ *  Null when the object is not there. An offset at or past the end is not an
+ *  error: it answers an empty body and the total, which is what a viewer that
+ *  already has the whole file asks for. */
+export async function getRange(
+  cfg: R2Config, key: string, from: number,
+): Promise<{ body: Buffer; total: number } | null> {
+  const headers = { range: `bytes=${from}-` };
+  const signed = signRequest(cfg, { method: 'GET', path: pathFor(cfg, key), headers, payloadHash: EMPTY_SHA256 });
+  const res = await fetch(`${cfg.endpoint}${pathFor(cfg, key)}`, { method: 'GET', headers: signed });
+  if (res.status === 404) return null;
+  const range = res.headers.get('content-range');
+  if (res.status === 416) {
+    return { body: Buffer.alloc(0), total: Number(/\/(\d+)$/.exec(range ?? '')?.[1] ?? 0) };
+  }
+  if (!res.ok) throw new Error(`R2 GET ${key} failed: ${res.status}`);
+  const body = Buffer.from(await res.arrayBuffer());
+  const total = res.status === 206
+    ? Number(/\/(\d+)$/.exec(range ?? '')?.[1] ?? from + body.length)
+    : Number(res.headers.get('content-length') ?? body.length);
+  return { body, total };
+}
+
 /** Where a stored demo lives, for the redirect. */
 export function publicUrlFor(cfg: R2Config, key: string): string {
   return `${cfg.publicUrl}/${encodeKey(key)}`;
@@ -217,6 +240,15 @@ export function publicUrlFor(cfg: R2Config, key: string): string {
  *  never what a human reads: the download name comes from Content-Disposition. */
 export function demoKey(matchId: number, filename: string): string {
   return `demos/${matchId}/${filename}`;
+}
+
+/** The object key for one replay round.
+ *
+ *  Unlike `demoKey`, NOT derived from the filename: replay filenames carry the
+ *  match token, which seeds that match's server password, and the bucket is
+ *  public by URL. Match id, ordinal and half identify the round completely. */
+export function replayKey(matchId: number, ordinal: number, half: number): string {
+  return `replays/${matchId}/${ordinal}_${half}.rpl`;
 }
 
 /** The object key for one map overview layer.
