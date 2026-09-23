@@ -128,9 +128,12 @@ export function Crosshair() {
    * The Open in the HUD editor link: save the crosshair as it is now (the
    * image was saved when it was imported), and let the link take the player
    * to /hud?from=crosshair, where the editor takes it into the HUD design.
+   * On the image shape what counts is the saved image, which is what the
+   * editor reads: straight after a reload the page's own decoded copy may
+   * not be back yet, and the saved one is already there.
    */
   const openInHud = (e: Event) => {
-    if (state.shape === 'image' && !imported.current) {
+    if (state.shape === 'image' && savedArt()?.kind !== 'image') {
       e.preventDefault();
       setStatus('Import an image first, or pick a shape.');
       return;
