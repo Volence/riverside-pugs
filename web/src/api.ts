@@ -324,6 +324,10 @@ export interface MatchDetail {
   /** What the ratings said before the match. Admin only: the field is absent
    *  entirely for anyone else, so the page has nothing to hide. */
   forecast?: Forecast;
+  /** Every SourceTV spectator on the match, admin only, absent entirely for
+   *  anyone else. A session is evidence of a connection watching, never proof
+   *  of who was behind it. */
+  sourcetv?: SourceTvSession[];
   /** Per-round side attribution. An empty array means this match predates
    *  round capture, which is NOT the same as a match that had no rounds. */
   rounds: {
@@ -729,6 +733,19 @@ export interface Forecast {
   winProbA: number; winProbB: number;
   ratedA: number; ratedB: number;
   source: 'history' | 'current';
+}
+
+/** One person watching a match over SourceTV. `accounts` is every player
+ *  whose recorded connection matches this session's, evidence of the same
+ *  connection watching rather than proof of who was behind it. */
+export interface SourceTvSession {
+  id: number;
+  name: string;
+  country: string | null;
+  joinedAt: string;
+  leftAt: string | null;
+  leaveReason: string | null;
+  accounts: { steamid: string; name: string | null }[];
 }
 
 export type LogAuthMode = 'off' | 'log' | 'enforce';

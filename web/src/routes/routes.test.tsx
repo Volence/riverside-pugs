@@ -345,6 +345,54 @@ describe('MatchDetail', () => {
     await waitFor(() => expect(screen.getByText(/Built from 4 v 3 players/)).toBeTruthy());
   });
 
+  // Admin only, mirroring the forecast panel above: the server omits the
+  // field entirely for anyone else, so there is nothing here to render.
+  it('shows who watched on SourceTV when the server sent sessions, with the matched account linked', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      sourcetv: [{
+        id: 1, name: 'Watcher', country: 'US',
+        joinedAt: '2026-09-11T00:00:00', leftAt: '2026-09-11T00:10:00', leaveReason: 'Disconnect',
+        accounts: [{ steamid: '1', name: 'alice' }],
+      }],
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('SourceTV watchers')).toBeTruthy());
+    expect(screen.getByText('Watcher')).toBeTruthy();
+    expect(screen.getByText(/US/)).toBeTruthy();
+    expect(screen.getByText(/Disconnect/)).toBeTruthy();
+    expect(screen.getByText(/same connection as/)).toBeTruthy();
+    const link = container.querySelector('a[href="/player/1"]');
+    expect(link?.textContent).toBe('alice');
+  });
+
+  it('says nobody watched when the server sent an empty SourceTV list, and "no known account" for an unmatched session', async () => {
+    mockApi.match.mockResolvedValue(matchWith({ sourcetv: [] }));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('SourceTV watchers')).toBeTruthy());
+    expect(screen.getByText('Nobody watched on SourceTV.')).toBeTruthy();
+
+    cleanup();
+    mockApi.match.mockResolvedValue(matchWith({
+      sourcetv: [{
+        id: 2, name: 'Lurker', country: null,
+        joinedAt: '2026-09-11T00:00:00', leftAt: null, leaveReason: null,
+        accounts: [],
+      }],
+    }));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('Lurker')).toBeTruthy());
+    expect(screen.getByText(/no known account/)).toBeTruthy();
+  });
+
+  // The server omits the field entirely for a non-admin, so there is nothing
+  // for the page to leak, and the panel must not render at all.
+  it('shows no SourceTV panel when the server sent no sourcetv field', async () => {
+    mockApi.match.mockResolvedValue(matchWith({}));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('Match totals')).toBeTruthy());
+    expect(screen.queryByText('SourceTV watchers')).toBeNull();
+  });
+
   it('shows a not-found message instead of blowing up on a bad id', async () => {
     mockApi.match.mockRejectedValue(new Error('404'));
     render(<MatchDetail id="999" me={null} />);

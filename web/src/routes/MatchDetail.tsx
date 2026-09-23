@@ -1,9 +1,10 @@
+import { Fragment } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
-import { Empty, Panel, PageSkeleton } from '../components/bits';
+import { Empty, Panel, PageSkeleton, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StaffChatLog } from './StaffChatLog';
@@ -213,6 +214,58 @@ function ForecastPanel(
         odds, so an even forecast next to a lopsided SR gap is the balancer working.
         {!full && ` Built from ${f.ratedA} v ${f.ratedB} players: a sub who played under half the maps is never rated, so they are not counted here either.`}
       </p>
+    </Panel>
+  );
+}
+
+/**
+ * Every SourceTV spectator on this match, admin only.
+ *
+ * "Same connection as" is evidence, not proof: it names every account whose
+ * recorded connection matches this session's, which is exactly as far as the
+ * server itself is willing to go (see sourcetvSessions.ts). This must never
+ * be worded as the spectator BEING one of those accounts.
+ */
+function SourceTvPanel({ sessions }: { sessions: NonNullable<MatchDetailData['sourcetv']> }) {
+  return (
+    <Panel>
+      <h3>SourceTV watchers <span class="muted">(admin only)</span></h3>
+      {sessions.length === 0
+        ? <Empty>Nobody watched on SourceTV.</Empty>
+        : (
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th><th>Country</th><th>Joined</th><th>Left</th>
+                  <th>Leave reason</th><th>Same connection as</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td>{s.country ?? ''}</td>
+                    <td class="num">{fmtDate(s.joinedAt)}</td>
+                    <td class="num">{s.leftAt ? fmtDate(s.leftAt) : ''}</td>
+                    <td>{s.leaveReason ?? ''}</td>
+                    <td>
+                      same connection as{' '}
+                      {s.accounts.length === 0
+                        ? 'no known account'
+                        : s.accounts.map((a, i) => (
+                          <Fragment key={a.steamid}>
+                            {i > 0 && ', '}
+                            <PlayerLink steamid={a.steamid} name={a.name ?? a.steamid} />
+                          </Fragment>
+                        ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          )}
     </Panel>
   );
 }
@@ -479,6 +532,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
 
       <div class="stack">
         {data.forecast && <ForecastPanel f={data.forecast} winner={match.winner} />}
+        {data.sourcetv && <SourceTvPanel sessions={data.sourcetv} />}
 
         <Panel>
           <h3>Match totals</h3>

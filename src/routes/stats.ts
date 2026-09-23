@@ -24,6 +24,7 @@ import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
 import { listSeasons } from '../seasons.js';
 import { sameName } from '../identity.js';
+import { sessionsForMatch } from '../sourcetvSessions.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -288,9 +289,17 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // non-admin, so the client cannot tell a forecast exists at all.
     const forecast = viewer && isAdminViewer(viewer) ? matchForecast(db, id) : undefined;
 
+    // Who was watching over SourceTV, admin only. Same reasoning as the
+    // forecast above: a spectator is evidence of a connection, never proof of
+    // who was behind it, and that is not something to hand every visitor.
+    // Absent, not an empty array, for anyone else, so the client cannot tell
+    // sessions exist at all.
+    const sourcetv = viewer && isAdminViewer(viewer) ? sessionsForMatch(db, id) : undefined;
+
     return {
       ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS,
       ...(forecast ? { forecast } : {}),
+      ...(sourcetv ? { sourcetv } : {}),
     };
   });
 
