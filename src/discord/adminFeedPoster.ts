@@ -144,9 +144,27 @@ export class AdminFeedPoster {
         };
       }
       case 'cvar_flag': {
+        // Worded by what the plugin did. With the ready gate on, a Low player
+        // cannot ready, so `held` is the common case and nobody has played on
+        // it; `live` means they switched after the round went live.
+        const who = this.name(e.steamid);
+        const match = `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        if (e.act === 'fixed') {
+          return {
+            text: `✅ ${who} changed Effect Detail off Low (\`${e.cvar} ${e.value}\`) and can ready up for match ${match}.`,
+            color: COLOR.account,
+          };
+        }
+        if (e.act === 'held') {
+          return {
+            text: `🔧 ${who} tried to ready up for match ${match} with Effect Detail on Low (\`${e.cvar} ${e.value}\`), `
+              + 'which thins smoke and fire enough to see through. The server took the ready back and is holding ready-up until they change it.',
+            color: COLOR.action,
+          };
+        }
         return {
-          text: `🔧 ${this.name(e.steamid)} is playing match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) `
-            + `with \`${e.cvar} ${e.value}\`, which thins smoke and fire enough to see through (the settings check expects 1 or higher).`,
+          text: `🔧 ${who} is on Effect Detail Low (\`${e.cvar} ${e.value}\`) during live play in match ${match}, `
+            + 'which thins smoke and fire enough to see through. Ready-up blocks it, so they switched after the round went live. Worth a word.',
           color: COLOR.problem,
         };
       }

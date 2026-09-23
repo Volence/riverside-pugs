@@ -40,7 +40,7 @@ export type AdminEvent =
   | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string }
   // A client setting out of bounds (cpu_level 0). Posted once per player per
   // match, and only for a player in a live match.
-  | { kind: 'cvar_flag'; steamid: string; matchId: number; cvar: string; value: number }
+  | { kind: 'cvar_flag'; steamid: string; matchId: number; cvar: string; value: number; act: 'held' | 'fixed' | 'live' }
   // Something Steam says about a player rostered in a live match: a VAC or
   // game ban less than a year old, or a game borrowed through Family Sharing
   // from an account that is banned here. Posted once per player per condition,
