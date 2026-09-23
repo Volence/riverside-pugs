@@ -98,13 +98,16 @@ describe('readVPK', () => {
  */
 function vtf(opts: {
   minor?: number; format: number; w: number; h: number; mips: Uint8Array[];
-  frames?: number; flags?: number; lowRes?: { w: number; h: number };
+  frames?: number; flags?: number; lowRes?: { w: number; h: number; format?: number };
 }): Uint8Array {
   const minor = opts.minor ?? 2;
   const frames = opts.frames ?? 1;
   const resources = minor >= 3;
   const headerSize = resources ? 80 + 16 : 80;
-  const low = opts.lowRes ? new Uint8Array(Math.ceil(opts.lowRes.w / 4) * Math.ceil(opts.lowRes.h / 4) * 8).fill(0xAB) : new Uint8Array(0);
+  // The thumbnail is DXT1 unless told otherwise; an RGBA8888 one is 4 bytes a pixel.
+  const lowFormat = opts.lowRes?.format ?? 13;
+  const lowBytes = opts.lowRes ? (lowFormat === 0 ? opts.lowRes.w * opts.lowRes.h * 4 : Math.ceil(opts.lowRes.w / 4) * Math.ceil(opts.lowRes.h / 4) * 8) : 0;
+  const low = new Uint8Array(lowBytes).fill(0xAB);
   // opts.mips is largest first; the file wants smallest first, each mip once per frame.
   const body: number[] = [...low];
   for (const m of [...opts.mips].reverse()) for (let f = 0; f < frames; f++) body.push(...m);
@@ -120,7 +123,7 @@ function vtf(opts: {
   dv.setUint16(24, frames, true);
   dv.setUint32(52, opts.format, true);
   out[56] = opts.mips.length;
-  dv.setUint32(57, opts.lowRes ? 13 : 0xFFFFFFFF, true);
+  dv.setUint32(57, opts.lowRes ? lowFormat : 0xFFFFFFFF, true);
   out[61] = opts.lowRes?.w ?? 0;
   out[62] = opts.lowRes?.h ?? 0;
   if (minor >= 2) dv.setUint16(63, 1, true);
@@ -215,6 +218,12 @@ describe('decodeVTF', () => {
     const big = new Uint8Array(4 * 4 * 4).fill(200);
     const small = [new Uint8Array(2 * 2 * 4).fill(1), new Uint8Array(4).fill(2)];
     const got = decodeVTF(vtf({ format: 0, w: 4, h: 4, mips: [big, ...small], frames: 2, lowRes: { w: 4, h: 4 } }));
+    expect([...got.rgba]).toEqual([...big]);
+  });
+
+  it('skips a low-res thumbnail by its own format, not always as DXT1', () => {
+    const big = new Uint8Array(2 * 2 * 4).fill(55);
+    const got = decodeVTF(vtf({ format: 0, w: 2, h: 2, mips: [big], lowRes: { w: 4, h: 4, format: 0 } }));
     expect([...got.rgba]).toEqual([...big]);
   });
 

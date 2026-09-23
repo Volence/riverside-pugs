@@ -139,7 +139,10 @@ export function decodeVTF(bytes: Uint8Array): { w: number; h: number; rgba: Uint
     if (found < 0) throw new Error(NOT_VTF);
     start = found;
   } else {
-    const low = lowFormat === -1 || lowW === 0 || lowH === 0 ? 0 : mipBytes(DXT1, lowW, lowH);
+    // The thumbnail is DXT1 in every file Valve's tools write, but its own
+    // format is in the header; a format this reader does not know is sized as DXT1.
+    const known = lowFormat in LAYOUT || lowFormat in BLOCK_BYTES;
+    const low = lowFormat === -1 || lowW === 0 || lowH === 0 ? 0 : mipBytes(known ? lowFormat : DXT1, lowW, lowH);
     start = headerSize + low;
   }
   for (let m = mips - 1; m >= 1; m--) start += mipBytes(format, Math.max(1, w >> m), Math.max(1, h >> m)) * frames * depth;
