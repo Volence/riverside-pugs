@@ -740,4 +740,68 @@ describe('Hud page', () => {
     expect(screen.getByText('Styles')).toBeTruthy();
     expect(screen.getByText('Save your HUD')).toBeTruthy();
   });
+
+  const hiddenRow = (label: string) => screen.getByRole('button', { name: label }).closest('.hud__layer')!.classList.contains('hud__layer--hidden');
+
+  it('opens a menu on right-click for the piece under the pointer, and Hide hides it', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select Teammates']);
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(hiddenRow('Portrait')).toBe(true);
+    expect((screen.getByLabelText('Visible') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('acts on the whole selection when the right-click is on part of it', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    clickAt(canvas, 60, 460, { shiftKey: true });
+    fireEvent.contextMenu(canvas, { clientX: 60, clientY: 460 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
+    expect(hiddenRow('Portrait')).toBe(true);
+    expect(hiddenRow('Health bar')).toBe(true);
+  });
+
+  it('offers Select whole card for a piece in Free', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Select whole card' }));
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+  });
+
+  it('closes the menu with Escape or a press elsewhere, and opens none over empty screen', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Hide' }), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.contextMenu(canvas, { clientX: 426, clientY: 100 });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('hides the selection with Delete or Backspace, one undo step each', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.keyDown(canvas, { key: 'Delete' });
+    expect(hiddenRow('Chat')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Your health' }), { key: 'Backspace' });
+    expect(hiddenRow('Your health')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(hiddenRow('Your health')).toBe(false);
+    expect(hiddenRow('Chat')).toBe(true);
+  });
 });

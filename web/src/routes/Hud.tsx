@@ -20,15 +20,16 @@ import { teamChild } from '../hud/children';
 import {
   elementsTouched, hasOverrides, moveElements, moveCard, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
-  setSelectionVisible, patchChild,
+  setSelectionVisible, patchChild, hideSelection, resetSelection,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
   NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
-  selectionBox, handlesFor, handlePoint, handleAt,
-  type Selection, type Hit, type Mods, type Crumb,
+  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions,
+  type Selection, type Hit, type Mods, type Crumb, type MenuAction,
 } from '../hud/selection';
+import { ContextMenu } from './hud/ContextMenu';
 import { ContextPanel } from './hud/ContextPanel';
 import { LayersPanel } from './hud/LayersPanel';
 import { Toolbar } from './hud/Toolbar';
@@ -205,6 +206,9 @@ const RESIZE_CURSOR: Record<Handle, string> = {
   n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
 };
+const MENU_LABELS: Record<MenuAction, string> = {
+  hide: 'Hide', reset: 'Reset', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
+};
 
 /** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
 function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
@@ -310,6 +314,8 @@ export default function Hud() {
   const [hover, setHover] = useState<{ hit: Hit; ctrl: boolean } | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [marquee, setMarquee] = useState<Box | null>(null);
+  // The right-click menu, where it opened (in the canvas wrapper's pixels) and what it acts on.
+  const [menu, setMenu] = useState<{ x: number; y: number; sel: Selection } | null>(null);
 
   const canvas = useRef<HTMLCanvasElement>(null);
   // The reader's own screenshot for the "My screenshot" backdrop. A ref
@@ -610,12 +616,45 @@ export default function Hud() {
     letGoOfDrag();
   };
 
+  /**
+   * Right-click: a menu for the thing under the pointer. When that thing is
+   * part of the selection the menu acts on the whole selection; otherwise it
+   * selects the thing (the deepest level, as a click would) and acts on it.
+   */
+  const onContextMenu = (e: MouseEvent) => {
+    e.preventDefault();
+    const d = current.current;
+    const { ux, uy } = pointerUnits(e);
+    const hit = hitAt(d, side, cardState, ux, uy);
+    const target = targetOf(d, hit);
+    if (target.kind === 'none') { setMenu(null); return; }
+    const acting = isPicked(d, sel, hit) ? sel : target;
+    setSel(acting);
+    const r = canvas.current!.getBoundingClientRect();
+    setMenu({ x: e.clientX - r.left, y: e.clientY - r.top, sel: acting });
+  };
+
+  const runMenu = (a: MenuAction, s: Selection) => {
+    if (a === 'hide') edit((d) => hideSelection(d, s));
+    else if (a === 'reset') edit((d) => resetSelection(d, s));
+    else if (a === 'selectCard' && s.kind === 'children') setSel({ kind: 'card', card: s.card });
+    else if (a === 'selectTeam') setSel(TEAMMATES);
+  };
+
   // Arrows nudge (Shift by 10), Escape climbs or cancels a drag, Tab and
   // Shift+Tab cycle the side's elements: the editor works without a mouse.
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       if (press.current) { abortDrag(); return; }
       setSel((s) => climb(current.current, s));
+      return;
+    }
+
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (sel.kind === 'none') return;
+      e.preventDefault();
+      const s = sel;
+      edit((d) => hideSelection(d, s));
       return;
     }
 
@@ -820,8 +859,15 @@ export default function Hud() {
               onLostPointerCapture={() => { if (press.current) abortDrag(); }}
               onPointerLeave={() => setHover(null)}
               onKeyDown={onKeyDown}
+              onContextMenu={onContextMenu}
             />
             <Crumbs crumbs={breadcrumb(design, sel)} onSelect={setSel} />
+            {menu && (
+              <ContextMenu
+                x={menu.x} y={menu.y} onClose={() => setMenu(null)}
+                items={menuActions(design, menu.sel).map((a) => ({ label: MENU_LABELS[a], run: () => runMenu(a, menu.sel) }))}
+              />
+            )}
           </div>
         </Panel>
 

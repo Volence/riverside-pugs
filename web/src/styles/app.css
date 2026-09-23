@@ -208,6 +208,16 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__crumbs button { background: none; border: 0; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
 .hud__crumbs button:hover { color: var(--text-bright); text-decoration: underline; }
 
+.hud__menu {
+  position: absolute; z-index: 5; list-style: none; margin: 0; padding: var(--sp-1) 0; min-width: 11rem;
+  background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.hud__menu button {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: var(--sp-1) var(--sp-3); color: var(--text); font: inherit; font-size: var(--fs-dense); cursor: pointer;
+}
+.hud__menu button:hover, .hud__menu button:focus-visible { background: var(--surface); color: var(--text-bright); }
+
 /* The Layers list: one row per element, pieces indented under the
  * Teammates. The name is a button (click selects, Shift+click adds), the eye
  * another; a hidden row is struck through, as the old pills were. */
