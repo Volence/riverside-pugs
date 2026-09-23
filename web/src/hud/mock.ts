@@ -16,8 +16,8 @@ import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
-import { SCREEN_H } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, type CardState } from './render';
+import { SCREEN_H, parseSize } from './units';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, fontFace, PREVIEW_FONT, type CardState } from './render';
 import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
 import { drawWeapons } from './weapons';
@@ -227,6 +227,49 @@ function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.fillRect(r.x, r.y, r.w * 0.5, r.h);
 }
 
+const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
+
+/**
+ * The kill/incap feed. Its rows (recordlabel0..4) are blank in the base
+ * files and filled in by game code, so the preview can only ever show a
+ * sample: two lines at the first two rows' own xpos, ypos, tall, font and
+ * colour, read straight from pzdamagerecordpanel.res through buildTrees, the
+ * same generated tree the download would carry. Both rows are textAlignment
+ * east (right-aligned against the row's own right edge, xpos + wide), and
+ * only the first carries its own red (fgcolor_override "246 5 5 255"); the
+ * second falls back to colourOf's default white, the row's real look until
+ * game code recolours a given line. Clipped to the element, as VGUI clips
+ * the rows to their container.
+ */
+function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
+  const nodes = buildTrees(design)(PZ_RECORD);
+  const lines = [
+    { row: 'recordlabel0', text: 'Mal incapacitated Francis' },
+    { row: 'recordlabel1', text: 'Bill killed a Hunter' },
+  ];
+  clipToRect(ctx, r, () => {
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    for (const { row, text: line } of lines) {
+      const n = kvFind(nodes, [row]);
+      if (!n) continue;
+      const xpos = parseFloat(kvGet(n, 'xpos') ?? '0');
+      const ypos = parseFloat(kvGet(n, 'ypos') ?? '0');
+      const tall = parseFloat(kvGet(n, 'tall') ?? '15');
+      const wide = parseSize(kvGet(n, 'wide') ?? '0', r.w / k);
+      const face = fontFace(design, kvGet(n, 'font') ?? '');
+      const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
+      ctx.font = `${face.bold ? 'bold ' : ''}${Math.round(tall * k)}px ${PREVIEW_FONT}`;
+      ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
+      const y = r.y + (ypos + tall / 2) * k;
+      if (align.includes('east')) { ctx.textAlign = 'right'; ctx.fillText(line, r.x + (xpos + wide) * k, y); }
+      else if (align.includes('center')) { ctx.textAlign = 'center'; ctx.fillText(line, r.x + (xpos + wide / 2) * k, y); }
+      else { ctx.textAlign = 'left'; ctx.fillText(line, r.x + xpos * k, y); }
+    }
+    ctx.restore();
+  });
+}
+
 /**
  * The xHair element by the design's crosshair choice. 'bundle' draws the
  * design's own crosshair, the one the download packs, through drawArt, the
@@ -301,6 +344,7 @@ const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: 
   weaponSelection: paintWeaponSelection,
   chat: paintChat,
   progressBar: paintProgressBar,
+  killNotices: paintKillNotices,
   xhair: paintXhair,
   infectedRow: paintInfectedRow,
   siHealth: paintSiHealth,

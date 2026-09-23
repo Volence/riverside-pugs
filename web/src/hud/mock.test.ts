@@ -216,6 +216,22 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(fills).not.toContain('rgba(210,190,60,0.85)');
   });
 
+  it('draws the kill/incap sample lines right-aligned, clipped to the element, first row red', () => {
+    // The base files leave every recordlabel blank (game code fills them in),
+    // so this is a sample only: two lines at the first two rows' own
+    // position and colour from pzdamagerecordpanel.res.
+    const rects: number[][] = [];
+    const fills: string[] = [];
+    const ctx = fakeCtx(() => {});
+    ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
+    ctx.fillText = ((s: string, _x: number, _y: number) => { fills.push(`${ctx.fillStyle as string}: ${s}`); }) as typeof ctx.fillText;
+    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null);
+    expect(fills).toContain('rgba(246,5,5,1): Mal incapacitated Francis');
+    expect(fills).toContain('rgba(255,255,255,1): Bill killed a Hunter');
+    const r = elementRect(DEFAULT_DESIGN, 'killNotices', DEFAULT_DESIGN.aspect);
+    expect(rects).toContainEqual([r.x, r.y, r.w, r.h]);
+  });
+
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
     const green = artUrl('vgui/healthbar_green')!;
