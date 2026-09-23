@@ -18,6 +18,10 @@ const PATH_RE = /^(?!\/)(?!.*\.\.)[A-Za-z0-9_\-./]{1,200}$/;
  *  without touching the disk. Throws on anything the plugin could not use. */
 export function loadBalanceKnobs(path: string = BALANCE_KNOBS_PATH, raw?: unknown): BalanceKnobs {
   const k = (raw ?? JSON.parse(readFileSync(path, 'utf8'))) as BalanceKnobs;
+  if (!Array.isArray(k.cvars)) throw new Error('balance knobs: cvars must be an array');
+  if (!Array.isArray(k.files)) throw new Error('balance knobs: files must be an array');
+  if (!Array.isArray(k.dirs)) throw new Error('balance knobs: dirs must be an array');
+  if (!Array.isArray(k.versionless)) throw new Error('balance knobs: versionless must be an array');
   for (const c of k.cvars) if (!CVAR_RE.test(c.cvar)) throw new Error(`bad cvar name: ${c.cvar}`);
   for (const f of k.files) if (!PATH_RE.test(f.path)) throw new Error(`bad file path: ${f.path}`);
   for (const d of k.dirs) {

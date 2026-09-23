@@ -15,6 +15,11 @@ describe('balance knobs', () => {
     expect(() => loadBalanceKnobs(undefined, bad)).toThrow(/path/);
   });
 
+  it('rejects a knobs file missing the versionless array', () => {
+    const bad = { cvars: [], files: [], dirs: [] };
+    expect(() => loadBalanceKnobs(undefined, bad)).toThrow(/versionless/);
+  });
+
   it('the checked-in plugin include matches knobs.json', () => {
     const k = loadBalanceKnobs(BALANCE_KNOBS_PATH);
     const onDisk = readFileSync(new URL('../plugin/pug-balance-list.inc', import.meta.url), 'utf8');
