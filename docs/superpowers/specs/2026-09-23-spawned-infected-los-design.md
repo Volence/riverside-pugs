@@ -153,6 +153,17 @@ the league's history does not. Repeat with the survivor playing honestly as the 
 4. Analyzer version 5 (lag tolerance, D, E, F) behind the board minimums; re-measure all rounds.
 5. Calibration session, thresholds set, then the Discord toggle is considered.
 
+## Coordination with other work
+
+Other sessions work in this repo at the same time. Before planning or building, re-check:
+- **`worktree-balance-analytics`** was adding a balance inventory scan and BALANCE lines to
+  `plugin/pug-match.sp` on 2026-09-23 (3f57475), branched before 0.3.7 and still at version
+  0.3.6. Both efforts touch `pug-match.sp` and the plugin version; whichever merges second rebases
+  and takes the next version number.
+- **`clip-min`** worktree holds the uncommitted `CLIP_MIN` edit (section 5).
+- Anything else touching `src/integrity/`, `src/replayFormat.ts` or the sampler in
+  `pug-match.sp`: `git log --since=... --all -- <those paths>` and `git worktree list`.
+
 ## Testing
 
 - Format: encode/decode round trip for v3 and v4; a v3 file still decodes identically after the
