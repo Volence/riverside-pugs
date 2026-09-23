@@ -7,6 +7,9 @@ describe('balance formatting', () => {
     expect(isShareMetric('tank.killed_rate')).toBe(true);
     expect(isShareMetric('weapons.hold.smg')).toBe(true);
     expect(isShareMetric('tank.lifetime_s')).toBe(false);
+    expect(isShareMetric('hunter.skeet_rate')).toBe(false);
+    expect(isShareMetric('smoker.pull_rate')).toBe(false);
+    expect(isShareMetric('smoker.kill_clear_share')).toBe(true);
   });
   it('formats values by unit', () => {
     expect(fmtValue('round.saferoom', 0.234)).toBe('23%');
@@ -19,6 +22,11 @@ describe('balance formatting', () => {
     expect(fmtChange('round.saferoom', { diff: 0.06, rel: 0.26, lo: -0.03, hi: 0.15 })).toEqual({ main: '+6 pts', range: '[-3, +15]' });
     expect(fmtChange('tank.lifetime_s', { diff: 12, rel: 0.12, lo: 2, hi: 23 })).toEqual({ main: '+12%', range: '[+2 s, +23 s]' });
     expect(fmtChange('tank.spawns', { diff: null, rel: null, lo: null, hi: null })).toEqual({ main: 'n/a', range: '' });
+  });
+  it('handles near-zero values without sign', () => {
+    expect(fmtChange('tank.lifetime_s', { diff: -0.2, rel: -0.001, lo: null, hi: null }).main).toBe('0%');
+    expect(fmtChange('tank.spawns', { diff: -0.001, rel: null, lo: null, hi: null }).main).toBe('0');
+    expect(fmtChange('tank.lifetime_s', { diff: 12, rel: 0.12, lo: -0.001, hi: 23 }).range).toBe('[0 s, +23 s]');
   });
   it('reads and writes the comparison in the URL', () => {
     expect(readCompareQuery('', [1, 2, 3])).toEqual({ a: [2], b: [3], origin: 'all', maps: [], phases: 'all', view: 'ranked' });
