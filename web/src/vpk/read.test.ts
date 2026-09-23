@@ -46,6 +46,25 @@ describe('readVPK', () => {
     expect(got.get('materials/vgui/hud/altcrosshair.vtf')).toEqual(new Uint8Array([5]));
   });
 
+  it('reads a non-ASCII name back as the writer wrote it, in UTF-8', () => {
+    const files = [
+      { path: 'resource/ui/café.res', data: enc.encode('A') },
+      { path: 'materials/über/ícono.vtf', data: enc.encode('B') },
+    ];
+    const got = readVPK(encodeVPK(files));
+    for (const f of files) expect(got.get(f.path), f.path).toEqual(f.data);
+  });
+
+  it('reads a name that is not valid UTF-8 as Latin-1, byte for byte', () => {
+    // An old packer on a Windows code page writes é as the one byte E9.
+    const vpk = encodeVPK([{ path: 'resource/cafe.res', data: enc.encode('A') }]);
+    const text = String.fromCharCode(...vpk);
+    const at = text.indexOf('cafe\0') + 3;   // the 'e' of the name "cafe"
+    expect(at).toBeGreaterThan(3);
+    vpk[at] = 0xE9;
+    expect(readVPK(vpk).get('resource/café.res')).toEqual(enc.encode('A'));
+  });
+
   it('joins preload bytes to the rest of the file', () => {
     // Hand-made: one file "a.txt" of 5 bytes, 2 preloaded in the tree and 3 in the data.
     const tree = [...enc.encode('txt\0 \0a\0')];

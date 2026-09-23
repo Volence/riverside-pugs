@@ -38,10 +38,19 @@ export function readVPK(bytes: Uint8Array, split?: Set<string>): Map<string, Uin
   need(treeEnd);
 
   let o = headerSize;
+  // Names are UTF-8, as encodeVPK writes them, so a non-ASCII name this
+  // project packed reads back as the same path. An older packer on a Windows
+  // code page wrote single bytes such as E9 for an e with an accent, which is
+  // not valid UTF-8: such a name is read as Latin-1, one character per byte,
+  // rather than turned into replacement marks that two names could share.
+  const utf8 = new TextDecoder('utf-8', { fatal: true });
+  const latin1 = new TextDecoder('latin1');
   const str = () => {
     const end = bytes.indexOf(0, o);
     if (end < 0 || end >= treeEnd) throw new Error(NOT_VPK);
-    const s = new TextDecoder('latin1').decode(bytes.subarray(o, end));
+    const raw = bytes.subarray(o, end);
+    let s: string;
+    try { s = utf8.decode(raw); } catch { s = latin1.decode(raw); }
     o = end + 1;
     return s;
   };
