@@ -14,8 +14,9 @@ export interface FrameSpec {
   surv?: { x: number; y: number; weapon?: number; state?: number }[];
   /** infected slots 4-7 */
   inf?: { cls: number; state?: number; health?: number }[];
-  witch?: { x: number; y: number }[];
-  tankAi?: boolean;
+  witch?: { x: number; y: number; ref?: number }[];
+  /** true: a live AI tank (PRESENT|ALIVE). 'dead': present but not alive. */
+  tankAi?: boolean | 'dead';
 }
 
 export function frame(s: FrameSpec): Frame {
@@ -31,8 +32,9 @@ export function frame(s: FrameSpec): Frame {
   });
   for (let i = 4; i < 8; i++) players[i].infected = true;
   const entities: EntitySample[] = [];
-  (s.witch ?? []).forEach((w, i) => entities.push({ ref: 100 + i, kind: ENTITY_KIND.WITCH, state: 2, x: w.x, y: w.y, z: 0, health: 1000 }));
-  if (s.tankAi) entities.push({ ref: 200, kind: ENTITY_KIND.TANK_AI, state: STATE.PRESENT | STATE.ALIVE, x: 0, y: 0, z: 0, health: 6000 });
+  (s.witch ?? []).forEach((w, i) => entities.push({ ref: w.ref ?? (100 + i), kind: ENTITY_KIND.WITCH, state: 2, x: w.x, y: w.y, z: 0, health: 1000 }));
+  if (s.tankAi === true) entities.push({ ref: 200, kind: ENTITY_KIND.TANK_AI, state: STATE.PRESENT | STATE.ALIVE, x: 0, y: 0, z: 0, health: 6000 });
+  else if (s.tankAi === 'dead') entities.push({ ref: 200, kind: ENTITY_KIND.TANK_AI, state: STATE.PRESENT, x: 0, y: 0, z: 0, health: 6000 });
   return { tMs: s.tMs, players, entities, offset: 0 };
 }
 

@@ -10,7 +10,7 @@ const TANK_CLS = 5;
 const LAST_FRAME_MS = 100;
 
 export function tankAlive(f: Frame): boolean {
-  if (f.entities.some((e) => e.kind === ENTITY_KIND.TANK_AI)) return true;
+  if (f.entities.some((e) => e.kind === ENTITY_KIND.TANK_AI && (e.state & STATE.ALIVE) !== 0)) return true;
   return f.players.some((p) => p.infected === true && p.cls === TANK_CLS
     && (p.state & STATE.ALIVE) !== 0 && (p.state & STATE.GHOST) === 0);
 }

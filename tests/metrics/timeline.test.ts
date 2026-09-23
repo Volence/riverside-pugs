@@ -29,6 +29,11 @@ describe('buildTimeline', () => {
     expect(buildTimeline(r, []).tank).toEqual([{ from: 1000, to: 3000 }]);
   });
 
+  it('does not count a dead AI tank (present but not alive)', () => {
+    const r = replayOf(frames(0, 3000, (t) => ({ surv: standing4, tankAi: t >= 1000 ? 'dead' : false })));
+    expect(buildTimeline(r, []).tank).toEqual([]);
+  });
+
   it('marks witch-near only within range of a standing survivor', () => {
     const r = replayOf(frames(0, 4000, (t) => ({
       surv: standing4, witch: [{ x: t < 2000 ? 5000 : 500, y: 0 }],
