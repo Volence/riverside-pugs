@@ -373,6 +373,14 @@ describe('buildHud, the chat window (basechat.res)', () => {
       }
     });
 
+    // hudlayout's own HudChat is only a background panel (Probe T4), but game
+    // code opens and shows the chat itself, the same trap hidePass works
+    // around for the teammate card: visible 0 alone may not stay hidden.
+    it(`hard-hides hudlayout's own HudChat panel too, since the game may force it on: ${preset}`, () => {
+      const layoutChat = kvFind(layoutOf(build(design({ preset, elements: { chat: { visible: false } } }))), ['HudChat'])!;
+      expect(['visible', 'wide', 'tall'].map((k) => kvGet(layoutChat, k))).toEqual(['0', '0', '0']);
+    });
+
     it(`agrees with elementRect wherever the chat goes: ${preset}`, () => {
       for (const aspect of ['4:3', '16:9', '16:10'] as const) {
         for (const chat of [{ x: 853 - 320, y: 0 }, { x: 20, y: 300, w: 200, h: 90 }, { w: 400, h: 150 }, { x: 400 }] as ElementOverride[]) {

@@ -132,7 +132,14 @@ function layoutPass(work: Work, design: HudDesign) {
     if (el.id === 'chat') chatWindow(work, moved ? p : { ...p, xpos: kvGet(panel, 'xpos') ?? '0', ypos: kvGet(panel, 'ypos') ?? '0' });
   }
   const chat = design.elements.chat;
-  if (chat?.visible === false) for (const name of ['HudChat', 'HudChatHistory']) hardHide(work.panel(BASECHAT, [name]));
+  if (chat?.visible === false) {
+    // hudlayout's own HudChat is only a background panel (chatWindow's own
+    // doc comment), but game code opens and shows the chat itself, the same
+    // trap hidePass works around for the teammate card: visible 0 alone may
+    // not be enough to keep it hidden.
+    hardHide(work.panel(LAYOUT, ['HudChat']));
+    for (const name of ['HudChat', 'HudChatHistory']) hardHide(work.panel(BASECHAT, [name]));
+  }
 }
 
 /**
