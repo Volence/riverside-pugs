@@ -32,6 +32,7 @@ import { artUrl, normaliseMaterial } from './art';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
+import { canvasFont, fontCell, loadFace, type FontCell } from './fonts';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
 export interface ChildRect { name: string; kind: ChildKind; x: number; y: number; w: number; h: number; visible: boolean }
@@ -120,7 +121,6 @@ const HEALTH_TINT_CHILDREN = new Set(['healthbartexturetop', 'healthbartexturebo
 const CARD_NAMES = ['Francis', 'Louis', 'Zoey'];
 const CARD_PORTRAITS = ['vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_teenangst'];
 const OWN_PORTRAIT = 'vgui/s_panel_namvet';
-export const PREVIEW_FONT = '"Roboto Condensed", "Arial Narrow", sans-serif';
 
 const portraitFor = (opts: DrawOpts) => (opts.card === undefined ? OWN_PORTRAIT : CARD_PORTRAITS[opts.card % CARD_PORTRAITS.length]);
 
@@ -156,20 +156,35 @@ export function childRects(design: HudDesign, panelId: string, origin: PanelBox,
 // --- scheme lookups: a font's size and weight, a named colour ---
 
 /**
- * A font's size and whether it is bold. Stock faces are "Trade Gothic Bold"
- * at weight 0 or 400: the boldness lives in the face itself, not the weight,
- * so a face named Bold counts as bold whatever its weight says. buildTrees
- * skips fontPass, which on the stock preset with Roboto renames both Trade
- * Gothic faces to plain "Roboto Condensed", so that rename is applied here.
+ * A scheme font: its tall, the face it names and the weight it asks for.
+ * buildTrees skips fontPass, which on the stock preset with Roboto renames
+ * both Trade Gothic faces to plain "Roboto Condensed", so that rename is
+ * applied here. Stock faces are "Trade Gothic Bold" at weight 0 or 400: the
+ * boldness lives in the face itself, which the preview draws in the exported
+ * font of that name, so the weight is kept as the file says.
  */
-export function fontFace(design: HudDesign, name: string): { tall: number; bold: boolean } {
+export function fontFace(design: HudDesign, name: string): { tall: number; face: string; weight: number } {
   const fonts = kvFind(buildTrees(design)(SCHEME), ['Fonts', name]);
   const first = fonts && typeof fonts.value !== 'string' ? fonts.value.find((s) => typeof s.value !== 'string') : undefined;
-  if (!first) return { tall: 12, bold: false };
+  if (!first) return { tall: 12, face: '', weight: 0 };
   let face = kvGet(first, 'name') ?? '';
   if (design.font === 'roboto' && /^Trade Gothic( Bold)?$/i.test(face)) face = 'Roboto Condensed';
-  const bold = num(kvGet(first, 'weight')) >= 700 || /\bbold\b/i.test(face);
-  return { tall: num(kvGet(first, 'tall'), 12), bold };
+  return { tall: num(kvGet(first, 'tall'), 12), face, weight: num(kvGet(first, 'weight')) };
+}
+
+/**
+ * Sets the canvas up to draw a scheme font at k canvas pixels to a HUD unit:
+ * its own face at its weight, at the size the game gets for that tall
+ * (fonts.ts), with an alphabetic baseline. Returns the cell in pixels: the
+ * game draws text from the cell's top, so the caller puts the baseline the
+ * ascent below that. Asks for the face too; onAsset redraws once it is in.
+ */
+export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: string, k: number, onAsset?: () => void): FontCell {
+  const f = fontFace(design, name);
+  loadFace(f.face, onAsset);
+  ctx.font = canvasFont(f.face, f.weight, f.tall * k);
+  ctx.textBaseline = 'alphabetic';
+  return fontCell(f.face, f.tall * k);
 }
 
 /** Base files use scheme colour names; the generator never writes one, but the preview has to read them. */
@@ -536,20 +551,21 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, 
   if (n.key.toLowerCase() === 'items') { drawItems(ctx, design, n, r, k, opts); return; }
   const s = sampleText(n, opts);
   if (!s) return;
-  const face = fontFace(design, kvGet(n, 'font') ?? '');
-  const px = face.tall * k;                                          // scheme tall is already scaled by scalePass when the parent was
   ctx.save();
-  ctx.font = `${face.bold ? 'bold ' : ''}${px}px ${PREVIEW_FONT}`;
+  // Scheme tall is already scaled by scalePass when the parent was.
+  const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, opts.onAsset);
   // Down, the game draws a teammate's number in red at the incap health (probe T7).
   const downNumber = opts.state === 'down' && n.key.toLowerCase() === 'healthnumber';
   ctx.fillStyle = colourOf(design, downNumber ? 'HealthHurtRed' : kvGet(n, 'fgcolor_override'));
   const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
-  ctx.textBaseline = 'middle';
   let x = r.x;
   if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + r.w; }
   else if (align.includes('center')) { ctx.textAlign = 'center'; x = r.x + r.w / 2; }
   else ctx.textAlign = 'left';
-  ctx.fillText(s, x, r.y + r.h / 2);
+  // A Label puts its text's cell at the top for north, the bottom for
+  // south, and centres it otherwise; the glyphs hang from the cell's top.
+  const top = align.startsWith('north') ? r.y : align.startsWith('south') ? r.y + r.h - cell.cell : r.y + (r.h - cell.cell) / 2;
+  ctx.fillText(s, x, top + cell.ascent);
   ctx.restore();
 }
 

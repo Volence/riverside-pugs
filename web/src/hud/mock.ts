@@ -17,7 +17,7 @@ import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, fontFace, PREVIEW_FONT, type CardState } from './render';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, type CardState } from './render';
 import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
 import { drawWeapons, type WeaponHeld } from './weapons';
@@ -243,7 +243,7 @@ const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
  * game code recolours a given line. Clipped to the element, as VGUI clips
  * the rows to their container.
  */
-function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number) {
+function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
   const nodes = buildTrees(design)(PZ_RECORD);
   const lines = [
     { row: 'recordlabel0', text: 'Mal incapacitated Francis' },
@@ -251,7 +251,6 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
   ];
   clipToRect(ctx, r, () => {
     ctx.save();
-    ctx.textBaseline = 'middle';
     for (const { row, text: line } of lines) {
       const n = kvFind(nodes, [row]);
       if (!n) continue;
@@ -259,11 +258,12 @@ function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       const ypos = parseFloat(kvGet(n, 'ypos') ?? '0');
       const tall = parseFloat(kvGet(n, 'tall') ?? '15');
       const wide = parseSize(kvGet(n, 'wide') ?? '0', r.w / k);
-      const face = fontFace(design, kvGet(n, 'font') ?? '');
       const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
-      ctx.font = `${face.bold ? 'bold ' : ''}${Math.round(tall * k)}px ${PREVIEW_FONT}`;
+      // The row's font at its own size, its cell centred in the row as a
+      // Label centres it, the glyphs hanging from the cell's top.
+      const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, onAsset);
       ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
-      const y = r.y + (ypos + tall / 2) * k;
+      const y = r.y + ypos * k + (tall * k - cell.cell) / 2 + cell.ascent;
       if (align.includes('east')) { ctx.textAlign = 'right'; ctx.fillText(line, r.x + (xpos + wide) * k, y); }
       else if (align.includes('center')) { ctx.textAlign = 'center'; ctx.fillText(line, r.x + (xpos + wide / 2) * k, y); }
       else { ctx.textAlign = 'left'; ctx.fillText(line, r.x + xpos * k, y); }

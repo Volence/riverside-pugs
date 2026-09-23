@@ -4,6 +4,7 @@ import { _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render'
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
 import { screenW } from './units';
+import { canvasFont, fontCell } from './fonts';
 
 const design = (patch: Partial<HudDesign> = {}): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
 /** One 640-wide unit of the game's box code (ScreenWidth / 640), in HUD units at 16:9. */
@@ -15,10 +16,10 @@ const nearBox = (r: { x: number; y: number; w: number; h: number }, x: number, y
 
 /** A recording 2D context, as render.test.ts has: every call snapshots font, fill, alignment and alpha. */
 function recCtx() {
-  const calls: { m: string; a: unknown[]; font: string; fill: string; align: string; alpha: number; op: string }[] = [];
+  const calls: { m: string; a: unknown[]; font: string; fill: string; align: string; alpha: number; op: string; baseline: string }[] = [];
   const stack: number[] = [];
   const noop = (m: string) => (...a: unknown[]) => {
-    calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, align: ctx.textAlign, alpha: ctx.globalAlpha, op: ctx.globalCompositeOperation });
+    calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, align: ctx.textAlign, alpha: ctx.globalAlpha, op: ctx.globalCompositeOperation, baseline: ctx.textBaseline });
   };
   const ctx = {
     canvas: { width: 853, height: 480 },
@@ -212,14 +213,20 @@ describe('drawWeapons', () => {
     const calls = draw().filter((c) => c.m === 'fillText');
     expect(calls.map((c) => c.a[0])).toEqual(['5', '105', '20']);
     const [clip, reserve, pistol] = calls;
-    expect(clip.font).toMatch(new RegExp(`^bold ${24 * k}px `));
+    // HudAmmoLarge and HudAmmo are Trade Gothic Bold, 24 and 18 tall, weight
+    // 0: drawn in that face, sized from its VDMX by the cell in pixels, each
+    // from the top of its cell, so the baseline is the ascent below it.
+    const large = fontCell('Trade Gothic Bold', 24 * k), small = fontCell('Trade Gothic Bold', 18 * k);
+    expect(clip.font).toBe(canvasFont('Trade Gothic Bold', 0, 24 * k));
+    expect(clip.baseline).toBe('alphabetic');
     expect(clip.align).toBe('right');
-    expect(clip.a.slice(1)).toEqual([origin.x + slots[0].texts[0].x * k, origin.y + (slots[0].texts[0].y + 12) * k]);
+    expect(clip.a.slice(1)).toEqual([origin.x + slots[0].texts[0].x * k, origin.y + slots[0].texts[0].y * k + large.ascent]);
     expect(clip.fill).toBe('rgba(255,255,255,1)');
-    expect(reserve.font).toMatch(new RegExp(`^bold ${18 * k}px `));
+    expect(reserve.font).toBe(canvasFont('Trade Gothic Bold', 0, 18 * k));
     expect(reserve.align).toBe('left');
     expect(reserve.fill).toBe('rgba(128,128,128,1)');
-    expect(pistol.a.slice(1)).toEqual([origin.x + slots[1].texts[0].x * k, origin.y + (slots[1].texts[0].y + 9) * k]);
+    expect(reserve.a.slice(1)).toEqual([origin.x + slots[0].texts[1].x * k, origin.y + slots[0].texts[1].y * k + small.ascent]);
+    expect(pistol.a.slice(1)).toEqual([origin.x + slots[1].texts[0].x * k, origin.y + slots[1].texts[0].y * k + small.ascent]);
   });
 
   it('draws nothing while the art loads, and asks for a redraw', () => {
@@ -296,6 +303,6 @@ describe('the weapon edits in the preview', () => {
     expect(primary.texts.map((t) => t.font)).toEqual(['HudEd_HudAmmoLarge_t30', 'HudEd_HudAmmo_t12']);
     expect(pistol.texts[0].font).toBe('HudEd_HudAmmo_t12');
     const text = drawn(d).filter((c) => c.m === 'fillText');
-    expect(text.map((c) => c.font.match(/(\d+)px/)![1])).toEqual([String(30 * k), String(12 * k), String(12 * k)]);
+    expect(text.map((c) => c.font)).toEqual([30, 12, 12].map((t) => canvasFont('Trade Gothic Bold', 0, t * k)));
   });
 });

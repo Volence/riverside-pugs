@@ -5,6 +5,7 @@ import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
+import { cssFamily, fontCell } from './fonts';
 
 /** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card. */
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
@@ -13,11 +14,11 @@ const text = (files: { path: string; data: Uint8Array }[], path: string) =>
 
 /** A recording 2D context: every method the renderer calls logs its name, and save/restore keep a real alpha stack. */
 function recCtx() {
-  const calls: { m: string; a: unknown[]; font: string; fill: string; op: string; alpha: number }[] = [];
+  const calls: { m: string; a: unknown[]; font: string; fill: string; op: string; alpha: number; baseline: string }[] = [];
   const stack: number[] = [];
   // Each call snapshots ctx.font, ctx.fillStyle, the composite op and the alpha at the moment it was made, so a test can pin how a child was drawn.
   const noop = (m: string) => (...a: unknown[]) => {
-    calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, op: ctx.globalCompositeOperation, alpha: ctx.globalAlpha });
+    calls.push({ m, a, font: ctx.font, fill: ctx.fillStyle, op: ctx.globalCompositeOperation, alpha: ctx.globalAlpha, baseline: ctx.textBaseline });
   };
   const ctx = {
     canvas: { width: 853, height: 480 },
@@ -166,36 +167,46 @@ describe('drawPanel', () => {
     expect(b.calls.some((c) => c.m === 'fill' && c.fill === 'rgba(0,255,0,1)')).toBe(true);
   });
 
-  it('uses the scheme font size for a label, scaled to pixels', () => {
+  it('draws a Trade Gothic label in the exported face, sized by its cell as the game sizes it', () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 2);
-    // HUDHealth is 18 tall in the stock scheme; at k = 2 the canvas font is 36px.
+    // HUDHealth is Trade Gothic Bold, 18 tall, weight 0. At k = 2 its cell is
+    // 36 pixels, which the face's VDMX table makes 29 ppem, 29 of it above
+    // the baseline. Weight 0 is regular: the face itself is the bold one.
     const numberCall = calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!;
-    expect(numberCall.font).toMatch(/^(bold )?36px /);
+    expect(numberCall.font).toBe(`400 29px ${cssFamily('Trade Gothic Bold')}`);
+    // The game draws text from the top of its cell, centred in a west label,
+    // so the baseline sits the ascent below the cell's top.
+    const r = childRects(design({}), 'ownHealth', { x: 0, y: 0 }, 2).find((c) => c.name === 'HealthNumber')!;
+    expect(numberCall.baseline).toBe('alphabetic');
+    expect(numberCall.a[2]).toBe(r.y + (r.h - 36) / 2 + 29);
   });
 
-  it('draws a face named Bold in bold, whatever its weight says', () => {
-    // Stock HUDHealth is "Trade Gothic Bold" at weight 0 and PlayerDisplayName is the same face at 400:
-    // the boldness is in the face, not the weight, so the canvas has to read the name.
-    const own = recCtx();
-    drawPanel(own.ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 1);
-    expect(own.calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.font).toMatch(/^bold /);
+  it('draws the teammate name in its face at the scheme weight', () => {
+    // PlayerDisplayName is Trade Gothic Bold at weight 400, 12 tall.
     const team = recCtx();
-    drawPanel(team.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
-    expect(team.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.font).toMatch(/^bold /);
+    drawPanel(team.ctx, design({}), 'teamColumn', { x: 0, y: 0 }, 2, { card: 1 });
+    expect(team.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.font).toBe(`400 ${fontCell('Trade Gothic Bold', 24).em}px ${cssFamily('Trade Gothic Bold')}`);
+  });
+
+  it('draws in Roboto Condensed on the Modern preset and in the Roboto option, at the scheme weight', () => {
+    // Modern's PlayerDisplayName is Roboto Condensed at weight 700, 12 tall; Roboto has no VDMX, so the em is the cell scaled by winAscent + winDescent.
+    const modern = recCtx();
+    drawPanel(modern.ctx, design({ preset: 'modern' }), 'teamColumn', { x: 0, y: 0 }, 2, { card: 1 });
+    expect(modern.calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.font).toBe(`700 ${fontCell('Roboto Condensed', 24).em}px ${cssFamily('Roboto Condensed')}`);
     // With Roboto on the stock preset, fontPass renames both Trade Gothic faces to plain "Roboto Condensed"
     // at their own weights, so the game draws these regular, and so must the preview.
     const roboto = recCtx();
-    drawPanel(roboto.ctx, design({ font: 'roboto' }), 'ownHealth', { x: 0, y: 0 }, 1);
-    expect(roboto.calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.font).not.toMatch(/^bold /);
+    drawPanel(roboto.ctx, design({ font: 'roboto' }), 'ownHealth', { x: 0, y: 0 }, 2);
+    expect(roboto.calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.font).toBe(`400 ${fontCell('Roboto Condensed', 36).em}px ${cssFamily('Roboto Condensed')}`);
   });
 
   it("draws a scaled parent's label at the scaled size", () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, design({ elements: { ownHealth: { scale: 1.5 } } }), 'ownHealth', { x: 0, y: 0 }, 1);
-    // scalePass wrote HudEd_HUDHealth_150 with tall 27 and pointed the label at it.
+    // scalePass wrote HudEd_HUDHealth_150 with tall 27 and pointed the label at it: a 27 cell.
     const numberCall = calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!;
-    expect(numberCall.font).toMatch(/^(bold )?27px /);
+    expect(numberCall.font).toBe(`400 ${fontCell('Trade Gothic Bold', 27).em}px ${cssFamily('Trade Gothic Bold')}`);
   });
 
   // The missing-art path (hatch and one warning) lives in render.missing.test.ts, which mocks ./art.

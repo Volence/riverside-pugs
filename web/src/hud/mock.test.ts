@@ -9,6 +9,7 @@ import { SCREEN_H } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
 import { PNG_PREFIX } from '../crosshair/model';
 import { _setImageFactory, _resetAssetCache, childRects } from './render';
+import { canvasFont } from './fonts';
 
 /**
  * A minimal stand-in for CanvasRenderingContext2D: happy-dom has no real
@@ -224,11 +225,21 @@ describe('drawHud delegates panels to the renderer', () => {
     const fills: string[] = [];
     const ctx = fakeCtx(() => {});
     ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
-    ctx.fillText = ((s: string, _x: number, _y: number) => { fills.push(`${ctx.fillStyle as string}: ${s}`); }) as typeof ctx.fillText;
+    const fonts: string[] = [];
+    const baselines: string[] = [];
+    ctx.fillText = ((s: string, _x: number, _y: number) => {
+      fills.push(`${ctx.fillStyle as string}: ${s}`);
+      if (s === 'Mal incapacitated Francis' || s === 'Bill killed a Hunter') { fonts.push(ctx.font); baselines.push(ctx.textBaseline); }
+    }) as typeof ctx.fillText;
     drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null);
     expect(fills).toContain('rgba(246,5,5,1): Mal incapacitated Francis');
     expect(fills).toContain('rgba(255,255,255,1): Bill killed a Hunter');
     const r = elementRect(DEFAULT_DESIGN, 'killNotices', DEFAULT_DESIGN.aspect);
+    // Each row's font is Default, Trade Gothic 12 tall at weight 400, drawn in
+    // that face at its cell's size (853 x 480 is one pixel to a HUD unit),
+    // from the top of its cell centred in the row.
+    expect(fonts).toEqual([canvasFont('Trade Gothic', 400, 12), canvasFont('Trade Gothic', 400, 12)]);
+    expect(baselines).toEqual(['alphabetic', 'alphabetic']);
     expect(rects).toContainEqual([r.x, r.y, r.w, r.h]);
   });
 

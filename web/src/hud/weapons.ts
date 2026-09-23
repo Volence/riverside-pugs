@@ -51,7 +51,7 @@ import { screenW } from './units';
 import { buildTrees, pcGet, CLEAR_TEXTURE, WEAPON_BOX_ENTRY, weaponBoxTexture } from './build';
 import { WEAPON_BOX_COLOUR } from './design';
 import { kvFind, type KvNode } from './kv';
-import { artImage, colourOf, fontFace, hatch, isMissing, PREVIEW_FONT, rgbaOf, tinted } from './render';
+import { artImage, colourOf, fontFace, hatch, isMissing, rgbaOf, setFont, tinted } from './render';
 import { EQUIP_ICON_SIZE } from './art/index';
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -320,14 +320,14 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
       ctx.restore();
     } else if (!s.icon.hidden && isMissing(s.icon.name)) hatch(ctx, { name: s.icon.name, kind: 'image', visible: true, ...icon });
 
+    // Each number's y is the top of its font's cell, where the game starts
+    // drawing it, so the baseline is the face's ascent below that.
     for (const t of s.texts) {
-      const face = fontFace(design, t.font);
       ctx.save();
-      ctx.font = `${face.bold ? 'bold ' : ''}${face.tall * k}px ${PREVIEW_FONT}`;
+      const cell = setFont(ctx, design, t.font, k, onAsset);
       ctx.fillStyle = colourOf(design, t.colour ?? undefined);
       ctx.textAlign = t.align;
-      ctx.textBaseline = 'middle';
-      ctx.fillText(t.text, origin.x + t.x * k, origin.y + (t.y + face.tall / 2) * k);
+      ctx.fillText(t.text, origin.x + t.x * k, origin.y + t.y * k + cell.ascent);
       ctx.restore();
     }
   }
