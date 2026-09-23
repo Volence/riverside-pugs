@@ -218,8 +218,8 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
           {g.group === 'Sizes' && <p class="muted hud__note">Item size 0 hides the three item slots.</p>}
         </div>
       ))}
-      <ColourRow label="Reserve" value={w.reserveColor ?? weaponKey(design, 'ReserveAmmoColor')} end={end} onPick={(c) => patch({ reserveColor: c })} />
-      <ColourRow label="Empty item" value={w.inactiveColor ?? weaponKey(design, 'InactiveItemColor')} end={end} onPick={(c) => patch({ inactiveColor: c })} />
+      <ColourRow label="Reserve number" value={w.reserveColor ?? weaponKey(design, 'ReserveAmmoColor')} end={end} onPick={(c) => patch({ reserveColor: c })} />
+      <ColourRow label="Empty item slot" value={w.inactiveColor ?? weaponKey(design, 'InactiveItemColor')} end={end} onPick={(c) => patch({ inactiveColor: c })} />
       <p class="eyebrow hud__note">Boxes</p>
       {boxRow('boxActive', 'Active box')}
       {boxRow('boxInactive', 'Other boxes')}
