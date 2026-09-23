@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.9"
+#define PLUGIN_VERSION "0.3.10"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -762,9 +762,8 @@ int CountAliveSurvivors()
  *  the team lock timer may have flipped g_iPugSide by the time this is called. */
 void EmitRoundEnd(int half, const char[] surv, int score, int alive)
 {
-	// Before anything else: a pending quad is only answerable now, and the
-	// answer has to land in the stats this round's dump will carry.
-	QuadSettle();
+	// The pending quad is settled in Event_RoundEnd, BEFORE g_bRoundEnded
+	// latches, not here: see the comment there.
 	if (surv[0] != '\0')
 	{
 		// map= rides along for the same reason ROUND_START carries it: the
@@ -3489,6 +3488,13 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		}
 		return;
 	}
+	// Settle a pending quad FIRST, while StatsActive() is still true. It used
+	// to be settled in EmitRoundEnd, which runs after the latch below, so
+	// AddStat's StatsActive() gate threw every confirmed quad away: from the
+	// round-end rewrite (836dfec, 2026-09-18) to this fix, not one quad cap
+	// or times_quadded was recorded on any server. It must also precede
+	// EmitRoundStats, so the quad lands in this round's ROUND_STAT delta.
+	QuadSettle();
 	g_bRoundEnded = true;
 	bool second = view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"));
 	int survPug = ObserveSurvivorPugTeam();
