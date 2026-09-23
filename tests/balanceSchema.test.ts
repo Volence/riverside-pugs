@@ -21,6 +21,12 @@ describe('balance schema', () => {
     expect(cols(db, 'matches')).toContain('origin');
   });
 
+  it('indexes match_rounds by patch_id', () => {
+    const db = openDb(':memory:');
+    const indexes = (db.prepare('PRAGMA index_list(match_rounds)').all() as { name: string }[]).map((i) => i.name);
+    expect(indexes).toContain('match_rounds_patch');
+  });
+
   it('backfills origin from the roster source', () => {
     const db = openDb(':memory:');
     db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
