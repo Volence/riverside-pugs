@@ -109,12 +109,49 @@ describe('liveStatusText', () => {
 
   it('falls back to the file state when the phase is live or unknown', () => {
     expect(liveStatusText(true, false, 0, 0, phase({ state: 'live' }), NOW)).toBe('Live, 10s delayed');
-    expect(liveStatusText(true, true, 10, 10, phase({ state: 'live' }), NOW)).toBe('Round over, waiting for the next round');
     expect(liveStatusText(true, true, 10, 10, null, NOW)).toBe('Round over, waiting for the next round');
     expect(liveStatusText(true, true, 5, 10, phase({ state: 'roundover' }), NOW)).toBe('Round over, catching up');
   });
 
   it('says nothing for a saved replay whatever the phase', () => {
     expect(liveStatusText(false, true, 0, 0, phase({ state: 'paused', team: 'a' }), NOW)).toBeNull();
+  });
+});
+
+describe('liveStatusText while the view is behind the round being played', () => {
+  const NOW = 1_700_000_000_000;
+  const phase = (over: Partial<LivePhase>): LivePhase => ({ state: 'live', team: null, limit: 0, leave: false, unready: [], sinceMs: NOW - 5_000, ...over });
+
+  it('says catching up for thirty seconds, then that the view is not available', () => {
+    expect(liveStatusText(true, true, 10, 10, phase({}), NOW, {}, NOW - 5_000)).toBe('Live view is catching up');
+    expect(liveStatusText(true, false, 10, 10, null, NOW, {}, NOW - 29_999)).toBe('Live view is catching up');
+    expect(liveStatusText(true, true, 10, 10, phase({}), NOW, {}, NOW - 30_000))
+      .toBe("Live view isn't available for this server right now");
+  });
+
+  it('treats a live phase over a finished file as behind, timed from the phase', () => {
+    expect(liveStatusText(true, true, 10, 10, phase({ sinceMs: NOW - 5_000 }), NOW)).toBe('Live view is catching up');
+    expect(liveStatusText(true, true, 5, 10, phase({ sinceMs: NOW - 40_000 }), NOW))
+      .toBe("Live view isn't available for this server right now");
+  });
+
+  it('never says Round over while the phase is live', () => {
+    for (const closed of [true, false]) {
+      for (const [t, end] of [[0, 10], [10, 10]]) {
+        for (const behind of [null, NOW - 1_000, NOW - 60_000]) {
+          const text = liveStatusText(true, closed, t, end, phase({}), NOW, {}, behind);
+          expect(text).not.toMatch(/Round over/);
+        }
+      }
+    }
+  });
+
+  it('lets a pause, a ready-up and a load speak over being behind', () => {
+    expect(liveStatusText(true, true, 0, 0, phase({ state: 'paused' }), NOW, {}, NOW - 5_000)).toBe('Paused');
+    expect(liveStatusText(true, true, 0, 0, phase({ state: 'loading' }), NOW, {}, NOW - 5_000)).toBe('Loading the next map');
+  });
+
+  it('still says Round over between rounds', () => {
+    expect(liveStatusText(true, true, 10, 10, phase({ state: 'roundover' }), NOW)).toBe('Round over, waiting for the next round');
   });
 });

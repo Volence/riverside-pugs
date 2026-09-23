@@ -201,3 +201,57 @@ describe('useReplaySource cursor across a live round change', () => {
     expect(result.current.phase).toBeNull();
   });
 });
+
+describe('useReplaySource behind the round being played', () => {
+  const chunk = () => concat([encodeHeader(header()), encodeFrame(emptyFrame(0))]);
+  const SINCE = 1_700_000_000_000;
+
+  it('reports how long the view has been behind when it reads an older round', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) {
+        return jsonResponse({ ordinal: 0, half: 1, closed: true, current: { ordinal: 1, half: 1, sinceMs: SINCE } });
+      }
+      return fileResponse(chunk(), true);
+    }));
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result.current.behindSinceMs).toBe(SINCE);
+  });
+
+  it('is not behind while it reads the round being played', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) {
+        return jsonResponse({ ordinal: 1, half: 1, closed: false, current: { ordinal: 1, half: 1, sinceMs: SINCE } });
+      }
+      return fileResponse(chunk(), false);
+    }));
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result.current.behindSinceMs).toBeNull();
+  });
+
+  it('fetches no bytes and raises no error when the round being played has no file yet, and keeps asking', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url);
+      return jsonResponse({ ordinal: null, half: null, closed: false, current: { ordinal: 0, half: 1, sinceMs: SINCE } });
+    }));
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(0);
+    // A single post-mount state batch (no round to fetch bytes for, so no
+    // second network round trip) only settles the DOM; Preact still defers
+    // flushing the *effect* that copies it into `result.current` to its
+    // usual passive-effect tick, which needs a nonzero fake-timer advance to
+    // fire (unlike the other cases in this file, whose extra fetch round
+    // trip happens to nudge that flush along for free).
+    await vi.advanceTimersByTimeAsync(40);
+    expect(result.current.behindSinceMs).toBe(SINCE);
+    expect(result.current.error).toBeNull();
+    expect(result.current.header).toBeNull();
+    expect(urls.some((u) => u.startsWith('/api/replays/match/'))).toBe(false);
+    const before = urls.length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(urls.length).toBeGreaterThan(before);
+  });
+});
+
