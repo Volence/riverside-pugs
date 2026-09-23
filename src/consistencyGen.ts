@@ -339,11 +339,12 @@ export const GROUPS: Group[] = [
 ];
 
 /** What a plain run writes to l4d_consistency.cfg, the file the servers and the
- *  campaign uploader read. Promoting batch 2 after its gate is moving its numbers
- *  from BATCH2 into here, regenerating, and moving the test pins. */
-export const SHIPPED = [1, 2, 3, 4, 5];
+ *  campaign uploader read. Groups 7 to 15 were batch 2 and were promoted here on
+ *  2026-09-23 after the owner's client gate. The next batch goes in BATCH2 the
+ *  same way: generated beside this list, gated, then moved here. */
+export const SHIPPED = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 export const COMMONS = [6];
-export const BATCH2 = [7, 8, 9, 10, 11, 12, 13, 14, 15];
+export const BATCH2: number[] = [];
 
 /** "1-5,7,9-10" as a sorted list of group numbers. */
 export function parseGroupSpec(spec: string): number[] {
