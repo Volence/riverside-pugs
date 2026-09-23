@@ -5,6 +5,7 @@ import { sweepReplays } from './replayOffload.js';
 import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
 import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
+import { matchActive, runMetricsPass, REAPER_ROUNDS_PER_TICK } from './metrics/job.js';
 import { handleAbandon } from './abandon.js';
 import { AdminFeedPoster } from './discord/adminFeedPoster.js';
 import { TicketSync } from './discord/ticketSync.js';
@@ -1167,6 +1168,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       reapNoShowMatches(deps.db, releaser);
     } catch (err) {
       console.error('[noShow] reaper failed:', err);
+    }
+    // Balance metrics: a couple of rounds per minute, never while a match
+    // is running (decoding a replay blocks the event loop). History is
+    // filled by scripts/backfill-round-metrics.ts.
+    try {
+      if (!matchActive(deps.db)) runMetricsPass(deps.db, deps.config.replayDir, { limit: REAPER_ROUNDS_PER_TICK });
+    } catch (err) {
+      console.error('[metrics] pass failed', err);
     }
   }, 60_000);
   reaper.unref();
