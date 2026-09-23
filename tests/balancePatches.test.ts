@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, recordBalanceSighting } from '../src/balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
@@ -114,5 +114,25 @@ describe('recordBalanceSighting', () => {
     expect(problems).toHaveLength(0);
     const stored = db.prepare('SELECT inventory_json FROM balance_server_state WHERE server_id = 1').get() as { inventory_json: string };
     expect(stored.inventory_json).not.toMatch(/spec_stays/);
+  });
+});
+
+describe('listPatches countedRounds', () => {
+  it('counts only computed rounds of completed, non-voided matches; rounds counts everything', () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO balance_patches (id, name, source, first_seen_at) VALUES (1, 'P', 'detected', '2026-09-01 00:00:00')").run();
+    const match = db.prepare("INSERT INTO matches (id, season_id, state, campaign, voided_at) VALUES (?, 1, ?, 'x', ?)");
+    match.run(1, 'completed', null);
+    match.run(2, 'completed', '2026-09-02 00:00:00');
+    match.run(3, 'live', null);
+    for (const id of [1, 2, 3]) {
+      db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, patch_id) VALUES (?, 0, 1, 'a', 1), (?, 0, 2, 'b', 1)").run(id, id);
+      db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, patch_id, has_replay, has_stats, engine, computed_at)
+        VALUES (?, 0, 1, 1, 0, 0, 'e', 'n'), (?, 0, 2, 1, 0, 0, 'e', 'n')`).run(id, id);
+    }
+    const [p] = listPatches(db);
+    expect(p.rounds).toBe(6);
+    expect(p.countedRounds).toBe(2);
   });
 });
