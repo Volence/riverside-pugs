@@ -4,7 +4,11 @@ import {
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
+  ammoOnly,
 } from './edit';
+import { buildHud, buildTrees } from './build';
+import { weaponSlots } from './weapons';
+import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { DEFAULT_DESIGN, newDesign } from './design';
 import { DEFAULT_STATE } from '../crosshair/draw';
 import type { CrosshairArt } from '../crosshair/model';
@@ -521,5 +525,76 @@ describe('edits for any selection', () => {
     expect(resetSelection(moved, { kind: 'elements', ids: ['chat'] }).elements.chat).toBeUndefined();
     const edited = patchChild(DEFAULT_DESIGN, 'Head', { x: 5 });
     expect(resetSelection(edited, { kind: 'children', names: ['Head'], card: 0 }).children.teamColumn).toBeUndefined();
+  });
+});
+
+describe('the weapon selection', () => {
+  const MODTEX = 'scripts/mod_textures.txt';
+  const fonts = { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } };
+  const fileText = (files: { path: string; data: Uint8Array }[], path: string) =>
+    new TextDecoder('latin1').decode(files.find((f) => f.path === path)!.data);
+  const pcValue = (block: KvNode, key: string) => (block.value as KvNode[])
+    .find((n) => n.key.toLowerCase() === key.toLowerCase() && (!n.cond || n.cond === '[$WIN32]'))?.value;
+
+  // Probe B (2026-09-23), confirmed by the owner in game: "8 128 30" on one
+  // line beside the crosshair, no boxes, no pictures, no item slots.
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`Ammo only writes probe B's keys and repoints (${preset})`, () => {
+      const files = buildHud(ammoOnly({ ...structuredClone(DEFAULT_DESIGN), preset }), fonts);
+      const ws = kvFind(parseKv(fileText(files, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection'])!;
+      const want: Record<string, string> = {
+        xpos: 'c-10', ypos: 'c-12', wide: '100', PrimaryWeaponsYPos: '12',
+        PrimaryWeaponBoxWide: '0', PrimaryWeaponBoxTall: '0', PistolBoxWide: '0', PistolBoxTall: '0',
+        RightSideIndent: '0', PrimaryWeaponAmmoX: '48', ReserveAmmoYPos: '0', IconSize: '0', PrimaryWeaponTall: '20',
+        // Probe B named HudAmmo for the clip; the editor sizes the clip's own font to HudAmmo's 18, the same face.
+        PrimaryAmmoFont: 'HudEd_HudAmmoLarge_t18', PistolAmmoFont: 'HudAmmo',
+      };
+      for (const [k, v] of Object.entries(want)) expect(pcValue(ws, k), k).toBe(v);
+      const cells = kvFind(parseKv(fileText(files, MODTEX))[0].value as KvNode[], ['TextureData'])!.value as KvNode[];
+      for (const n of ['rounded_background_glow', 'rounded_background_noborder', 'icon_equip_pumpshotgun', 'icon_equip_uzi',
+        'icon_equip_dualpistols', 'icon_equip_pistol', 'icon_equip_molotov', 'icon_equip_pills', 'icon_equip_medkit']) {
+        expect(kvGet(kvFind(cells, [n])!, 'file'), n).toBe('vgui/hud/hudeditor/clear');
+      }
+    });
+  }
+
+  it('puts the column beside the crosshair on every aspect', () => {
+    for (const aspect of ['16:9', '16:10', '4:3'] as const) {
+      const ws = kvFind(buildTrees(ammoOnly({ ...structuredClone(DEFAULT_DESIGN), aspect }))('scripts/hudlayout.res'), ['HudWeaponSelection'])!;
+      expect([kvGet(ws, 'xpos'), kvGet(ws, 'ypos')], aspect).toEqual(['c-10', 'c-12']);
+    }
+  });
+
+  it('lays the numbers out where the game drew them: clip, reserve and pistol clip on one line right of the crosshair', () => {
+    const d = ammoOnly(structuredClone(DEFAULT_DESIGN));
+    const r = elementRect(d, 'weaponSelection', d.aspect);
+    const [primary, pistol] = weaponSlots(d, d.aspect, r.w);
+    const cx = 853 / 2, cy = 240;
+    const [clip, reserve] = primary.texts;
+    expect(r.x + clip.x - cx).toBeCloseTo(35.67, 1);        // right edge
+    expect(r.x + reserve.x - cx).toBeCloseTo(40.33, 1);     // left edge
+    expect(r.x + pistol.texts[0].x - cx).toBeCloseTo(86, 1);
+    expect(r.y + clip.y + 9 - cy).toBeCloseTo(0, 6);        // centred on the crosshair
+    expect(pistol.texts[0].y - clip.y).toBeCloseTo(2 * 853 / 640, 6);
+    expect(weaponSlots(d, d.aspect, r.w)).toHaveLength(2);
+  });
+
+  it("keeps the player's colours and visibility, and replaces everything else in one design", () => {
+    const d0 = { ...structuredClone(DEFAULT_DESIGN), elements: { weaponSelection: { visible: false } },
+      weapons: { reserveColor: '1 2 3 255', inactiveColor: '4 5 6 255', pistolBoxW: 90, iconTall: 40 } };
+    const d = ammoOnly(d0);
+    expect(d.elements.weaponSelection.visible).toBe(false);
+    expect(d.weapons).toMatchObject({ reserveColor: '1 2 3 255', inactiveColor: '4 5 6 255', pistolBoxW: 0 });
+    expect(d.weapons?.iconTall).toBeUndefined();
+    expect(d0.weapons.pistolBoxW).toBe(90);
+  });
+
+  it('resets the weapon edits with the element, and counts them as overrides', () => {
+    const d = ammoOnly(structuredClone(DEFAULT_DESIGN));
+    expect(hasOverrides({ ...structuredClone(DEFAULT_DESIGN), weapons: { itemIcons: false } }, null)).toBe(true);
+    const back = resetElement(d, 'weaponSelection');
+    expect(back.weapons).toBeUndefined();
+    expect(back.elements.weaponSelection).toBeUndefined();
+    expect(resetElement(d, 'chat').weapons).toEqual(d.weapons);
   });
 });

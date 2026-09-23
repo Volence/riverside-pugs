@@ -11,7 +11,7 @@
  */
 import {
   clampOverride, clampChild, baseTeam, DEFAULT_DESIGN, newDesign,
-  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box,
+  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box, type WeaponsOverride,
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
@@ -71,6 +71,7 @@ export function hasOverrides(d: HudDesign, saved: CrosshairArt | null): boolean 
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
     || d.hideGameCrosshair === true
+    || d.weapons !== undefined
     || d.crosshair !== fresh.crosshair
     || JSON.stringify(d.xhairArt) !== JSON.stringify(fresh.xhairArt)
     || d.preset !== DEFAULT_DESIGN.preset
@@ -87,7 +88,41 @@ export function resetElement(d: HudDesign, id: string): HudDesign {
   if (fresh) elements[id] = structuredClone(fresh); else delete elements[id];
   const children = { ...d.children };
   delete children[id];
-  return { ...d, elements, children };
+  const out = { ...d, elements, children };
+  // The weapon selection's own keys, boxes and pictures are part of it.
+  if (id === 'weaponSelection') delete out.weapons;
+  return out;
+}
+
+/**
+ * The "Ammo only" look: probe B's values, which the owner saw in game on
+ * 2026-09-23 as "8 128 30" on one line just right of the crosshair. The
+ * panel sits at c-10, c-12 (its 100 wide is both presets' own); the boxes
+ * are 0 and Hidden, every picture is off and IconSize 0 drops the item
+ * slots; the clip ends 48 in from the panel's right, the reserve follows on
+ * the same line and the pistol clip sits at the far end, a fixed two
+ * 640-units lower. Probe B named HudAmmo for the clip; here the clip keeps
+ * its own font at HudAmmo's size, 18, which is the same face.
+ *
+ * One design in, one out, so the page records it as a single undo step. The
+ * player's colours and the element's visibility stay; every other weapon
+ * edit is replaced, so the result is probe B whatever came before. Probe B
+ * also made the panel 60 tall, which the editor cannot write (the element
+ * has no size of its own); the stock 160 only reaches further down, empty.
+ */
+export function ammoOnly(d: HudDesign): HudDesign {
+  const keep: WeaponsOverride = {};
+  if (d.weapons?.reserveColor) keep.reserveColor = d.weapons.reserveColor;
+  if (d.weapons?.inactiveColor) keep.inactiveColor = d.weapons.inactiveColor;
+  const weapons: WeaponsOverride = {
+    ...keep,
+    primaryY: 12, primaryBoxW: 0, primaryBoxH: 0, pistolBoxW: 0, pistolBoxH: 0, indent: 0,
+    ammoX: 48, reserveY: 0, itemSize: 0, clipFont: 18, pistolFont: 18,
+    boxActive: { kind: 'hidden' }, boxInactive: { kind: 'hidden' }, weaponIcons: false, itemIcons: false,
+  };
+  const x = clampOverride('x', screenW(d.aspect) / 2 - 10);
+  const y = clampOverride('y', SCREEN_H / 2 - 12);
+  return { ...d, weapons, elements: { ...d.elements, weaponSelection: { ...d.elements.weaponSelection, x, y } } };
 }
 
 /**
