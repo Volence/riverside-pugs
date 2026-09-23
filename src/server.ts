@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { pruneDemos } from './demoPrune.js';
 import { sweepDemos } from './demoOffload.js';
+import { sweepReplays } from './replayOffload.js';
 import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
 import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
@@ -1188,7 +1189,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // scheduler here and the exact hour does not matter: the window is 90 days.
   // unref so the timer never holds the process open in tests.
   const pruneTimer = setInterval(() => {
-    pruneReplays(deps.db, deps.config.replayDir);
+    pruneReplays(deps.db, deps.config.replayDir, { requireOffloaded: r2 !== null });
     pruneDemos(deps.db, deps.config.demoDir);
   }, 24 * 60 * 60 * 1000);
   pruneTimer.unref();
@@ -1211,6 +1212,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const offloadTimer = setInterval(() => {
       void sweepDemos(deps.db, r2, deps.config.demoDir, { deleteLocal: true })
         .catch((err) => console.error('[demoOffload] sweep failed:', err));
+      void sweepReplays(deps.db, r2, deps.config.replayDir)
+        .catch((err) => console.error('[replayOffload] sweep failed:', err));
     }, 60 * 60 * 1000);
     offloadTimer.unref();
     app.addHook('onClose', async () => { clearInterval(offloadTimer); });
@@ -1224,8 +1227,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // because an escaping throw inside a timer callback would take the process
   // down rather than merely skip a prune.
   const pruneOnBoot = setTimeout(() => {
+    if (r2) {
+      void sweepReplays(deps.db, r2, deps.config.replayDir)
+        .catch((err) => console.error('[replayOffload] sweep failed:', err));
+    }
     try {
-      pruneReplays(deps.db, deps.config.replayDir);
+      pruneReplays(deps.db, deps.config.replayDir, { requireOffloaded: r2 !== null });
       pruneDemos(deps.db, deps.config.demoDir);
     } catch (err) {
       console.error('[replay] startup prune failed:', err);
@@ -1426,7 +1433,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(replayRoutes, {
-    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir,
+    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
