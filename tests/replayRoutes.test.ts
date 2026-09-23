@@ -14,8 +14,18 @@ import {
   encodeHeader, encodeFrame, decodeHeader, VERSION, HEADER_BYTES,
   PLAYER_SLOTS, frameBytes, type ReplayHeader, type Frame,
 } from '../src/replayFormat.js';
+import { prepareForUpload } from '../src/replaySides.js';
+import type { R2Config } from '../src/r2.js';
 
 const TOKEN = 'a'.repeat(32);
+
+const CFG: R2Config = {
+  endpoint: 'https://acct.r2.cloudflarestorage.com',
+  bucket: 'riverside-demos',
+  accessKeyId: 'AKIDEXAMPLE',
+  secretAccessKey: 'SECRETEXAMPLE',
+  publicUrl: 'https://pub-abc.r2.dev',
+};
 
 function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
   return {
@@ -738,5 +748,113 @@ describe('the live directory', () => {
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await liveApp.inject({ url: `/api/replays/match/${id}/0/1` });
     expect(res.rawPayload.length).toBe(HEADER_BYTES + frameBytes(0) * 10);
+  });
+});
+
+describe('GET /api/replays/match/:id/:ordinal/:half from R2', () => {
+  async function appWithR2(store: Map<string, Buffer>, fail = false) {
+    const a = Fastify();
+    const r2Get = async (_cfg: unknown, key: string, from: number) => {
+      if (fail) throw new Error('r2 down');
+      const b = store.get(key);
+      if (!b) return null;
+      return { body: b.subarray(Math.min(from, b.length)), total: b.length };
+    };
+    await a.register(replayRoutes, { db, replayDir: dir, r2: CFG, r2Get: r2Get as never });
+    await a.ready();
+    return a;
+  }
+
+  for (const since of [0, 40, 400, 100000]) {
+    it(`answers exactly as the local file did, since=${since}`, async () => {
+      const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
+      writeRound(name, 20, 3600, true);
+      const id = seedMatchReplay(name, 0, 1, 0, 20);
+      db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(id);
+      const local = await app.inject({ url: `/api/replays/match/${id}/0/1?since=${since}` });
+
+      const bytes = readFileSync(join(dir, name));
+      rmSync(join(dir, name));
+      const key = `replays/${id}/0_1.rpl`;
+      db.prepare('UPDATE match_replays SET r2_key = ? WHERE match_id = ?').run(key, id);
+      const store = new Map([[key, prepareForUpload(bytes, null)]]);
+      const a = await appWithR2(store);
+      const remote = await a.inject({ url: `/api/replays/match/${id}/0/1?since=${since}` });
+      await a.close();
+
+      expect(remote.statusCode).toBe(local.statusCode);
+      expect(remote.rawPayload.equals(local.rawPayload)).toBe(true);
+      for (const h of ['x-replay-next', 'x-replay-closed', 'cache-control', 'content-type', 'content-length']) {
+        expect(remote.headers[h], h).toBe(local.headers[h]);
+      }
+    });
+  }
+
+  it('404s, as for a pruned replay, when R2 fails', async () => {
+    const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
+    writeRound(name, 20, 3600, true);
+    const id = seedMatchReplay(name, 0, 1, 0, 20);
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(id);
+
+    const bytes = readFileSync(join(dir, name));
+    rmSync(join(dir, name));
+    const key = `replays/${id}/0_1.rpl`;
+    db.prepare('UPDATE match_replays SET r2_key = ? WHERE match_id = ?').run(key, id);
+    const store = new Map([[key, prepareForUpload(bytes, null)]]);
+    const a = await appWithR2(store, true);
+    const remote = await a.inject({ url: `/api/replays/match/${id}/0/1` });
+    await a.close();
+
+    expect(remote.statusCode).toBe(404);
+  });
+
+  it('404s when the row has no r2_key and no local file', async () => {
+    const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
+    const id = seedMatchReplay(name, 0, 1, 0, 20);
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(id);
+    // No writeRound call, and r2_key is left NULL: this is what a pruned or
+    // never-uploaded row looks like with R2 configured.
+
+    const a = await appWithR2(new Map());
+    const remote = await a.inject({ url: `/api/replays/match/${id}/0/1` });
+    await a.close();
+
+    expect(remote.statusCode).toBe(404);
+  });
+
+  it('prefers the local file when both exist', async () => {
+    const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
+    writeRound(name, 20, 3600, true);
+    const id = seedMatchReplay(name, 0, 1, 0, 20);
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(id);
+    const local = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+
+    // The local file is left in place. r2_key is set, and the store holds
+    // different bytes, so an answer from the store would fail the comparison.
+    const key = `replays/${id}/0_1.rpl`;
+    db.prepare('UPDATE match_replays SET r2_key = ? WHERE match_id = ?').run(key, id);
+    const wrongBytes = Buffer.alloc(local.rawPayload.length + 100, 7);
+    const store = new Map([[key, wrongBytes]]);
+    const a = await appWithR2(store);
+    const remote = await a.inject({ url: `/api/replays/match/${id}/0/1` });
+    await a.close();
+
+    expect(remote.statusCode).toBe(local.statusCode);
+    expect(remote.rawPayload.equals(local.rawPayload)).toBe(true);
+  });
+
+  it('never consults R2 when r2 is not configured', async () => {
+    // The default `app` from beforeEach has no r2 option at all.
+    const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
+    writeRound(name, 20, 3600, true);
+    const id = seedMatchReplay(name, 0, 1, 0, 20);
+    db.prepare("UPDATE matches SET state = 'completed' WHERE id = ?").run(id);
+
+    rmSync(join(dir, name));
+    const key = `replays/${id}/0_1.rpl`;
+    db.prepare('UPDATE match_replays SET r2_key = ? WHERE match_id = ?').run(key, id);
+
+    const res = await app.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(404);
   });
 });
