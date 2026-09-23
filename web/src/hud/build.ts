@@ -8,7 +8,9 @@
  * already has it and shipping it would only widen what this addon can break.
  */
 import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
-import { baseFile, baseOf, importedFiles, presetOverrides, BASE_PATHS, type BaseKey } from './base';
+import { baseFile, baseOf, baseTree, importedFiles, presetOverrides, BASE_PATHS, type BaseKey } from './base';
+
+export { baseTree };
 import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
@@ -127,7 +129,7 @@ const XHAIR: KvNode = { key: 'xHair', value: [
  * make a chat that only moved 40 units wider than the game's.
  */
 function chatBaseSize(key: BaseKey, W: number): { w: number; h: number } {
-  const chat = kvFind(parseKv(baseFile(key, BASECHAT))[0].value as KvNode[], ['HudChat']);
+  const chat = kvFind(baseTree(key, BASECHAT), ['HudChat']);
   if (!chat) throw new Error(`${BASECHAT}: no panel HudChat`);
   return { w: parseSize(pcGet(chat, 'wide') ?? '0', W), h: parseSize(pcGet(chat, 'tall') ?? '0', SCREEN_H) };
 }
@@ -600,15 +602,6 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
   };
 }
 
-const BASE_TREES = new Map<string, KvNode[]>();
-/** A base file's root children, parsed once per base key and path: the file as the base has it, before any edit. */
-export function baseTree(key: BaseKey, path: string): KvNode[] {
-  const id = `${key}|${path}`;
-  let t = BASE_TREES.get(id);
-  if (!t) { t = parseKv(baseFile(key, path))[0].value as KvNode[]; BASE_TREES.set(id, t); }
-  return t;
-}
-
 /**
  * Whether the base has what the editor needs to offer an element: its
  * hudlayout.res panel and, for the survivor team, all four TeamPlayerN
@@ -630,7 +623,7 @@ export function importedHasXhair(key: BaseKey): boolean {
 
 /** Whether the base's own card file has this child: an addable child it lacks shows as a checkbox. */
 export function baseHasChild(key: BaseKey, name: string): boolean {
-  return kvFind(parseKv(baseFile(key, CARD))[0].value as KvNode[], [name]) !== undefined;
+  return kvFind(baseTree(key, CARD), [name]) !== undefined;
 }
 
 export interface TeamLayout {
@@ -740,8 +733,8 @@ function fixedExtent(token: string | undefined, k: number): number | undefined {
 export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
   const o = design.elements[el.id];
   const k = el.resize === 'scale' ? o?.scale ?? 1 : 1;
-  // Parsed on demand: it is needed only to size a container, and this runs on every canvas repaint.
-  const layoutPanel = () => kvFind(parseKv(baseFile(baseOf(design), LAYOUT))[0].value as KvNode[], [el.key]);
+  // Read on demand from the parsed base: it is needed only to size a container, and this runs on every canvas repaint.
+  const layoutPanel = () => kvFind(baseTree(baseOf(design), LAYOUT), [el.key]);
   if (!el.team?.file) {
     const dir = el.team?.dirs[0] ?? 'row';
     let baseSpacing: number | undefined;
@@ -1055,15 +1048,13 @@ const BOX_CORNER = 16;
  */
 const CLEAR_TEXELS = 16;
 
-const BASE_SCHEMES = new Map<BaseKey, KvNode[]>();
 /**
  * A scheme font's tall in the preset's own file, read without pulling the
  * scheme into the build: asking the Work for it would ship an untouched
  * clientscheme.res.
  */
 function baseFontTall(key: BaseKey, font: string): number | undefined {
-  let t = BASE_SCHEMES.get(key);
-  if (!t) { t = parseKv(baseFile(key, SCHEME))[0].value as KvNode[]; BASE_SCHEMES.set(key, t); }
+  const t = baseTree(key, SCHEME);
   const size = kvFind(t, ['Fonts', font, '1']);
   return size ? num(kvGet(size, 'tall')) : undefined;
 }

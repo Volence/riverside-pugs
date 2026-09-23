@@ -7,9 +7,9 @@
  * trusting its shape. It never throws: a bad field is dropped, a bad design
  * becomes the defaults.
  */
-import { baseFile, baseOf, type Preset, type BaseKey } from './base';
+import { baseOf, baseTree, onUnregister, type Preset, type BaseKey } from './base';
 import type { Aspect } from './units';
-import { parseKv, kvFind, kvGet, type KvNode } from './kv';
+import { kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
 import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
@@ -303,6 +303,7 @@ function importedRef(v: unknown): ImportedRef | undefined {
 const TEAM_FILE = 'resource/ui/hud/teamdisplayhud.res';
 export interface BaseTeam { dir: 'row' | 'column'; pitch: number; card: { w: number; h: number } }
 const BASE_TEAMS = new Map<BaseKey, BaseTeam>();
+onUnregister((key) => { BASE_TEAMS.delete(key); BASE_CONTENT.delete(key); });
 
 /**
  * The survivor team as the preset's own teamdisplayhud.res lays it out: the
@@ -315,7 +316,7 @@ const BASE_TEAMS = new Map<BaseKey, BaseTeam>();
 export function baseTeam(key: BaseKey): BaseTeam {
   const hit = BASE_TEAMS.get(key);
   if (hit) return hit;
-  const tree = parseKv(baseFile(key, TEAM_FILE))[0].value as KvNode[];
+  const tree = baseTree(key, TEAM_FILE);
   const first = kvFind(tree, ['TeamPlayer1']);
   const second = kvFind(tree, ['TeamPlayer2']);
   const n = (p: KvNode | undefined, key: string, d: number) => {
@@ -359,7 +360,7 @@ const BASE_CONTENT = new Map<BaseKey, Box | null>();
 /** The base's own card, fitted with no inside edits: stock 121 x 36, Modern 113 x 26. */
 export function baseContent(key: BaseKey): Box | null {
   if (!BASE_CONTENT.has(key)) {
-    BASE_CONTENT.set(key, contentBox(parseKv(baseFile(key, TEAM_PANEL.file))[0].value as KvNode[]));
+    BASE_CONTENT.set(key, contentBox(baseTree(key, TEAM_PANEL.file)));
   }
   return BASE_CONTENT.get(key)!;
 }

@@ -17,7 +17,7 @@
  * build.ts may import it (art.test.ts walks those imports).
  */
 import { FONT_FILES, FONT_METRICS, type FontMetrics } from './art/index';
-import { baseFile, importedFiles, type BaseKey } from './base';
+import { baseFile, importedFiles, onUnregister, type BaseKey } from './base';
 import { parseKv, kvFind, pcApplies } from './kv';
 import { decodeVfont, isVfont, readFont } from './ttf';
 import regularUrl from './base/fonts/RobotoCondensed-Regular.ttf?url';
@@ -48,6 +48,22 @@ interface FaceFile { url?: string; data?: ArrayBuffer; weight: string }
 const EXTRA_METRICS = new Map<string, FontMetrics>();
 const EXTRA_FILES = new Map<string, FaceFile[]>();
 const IMPORT_FACES = new Map<BaseKey, Map<string, string>>();
+const aliasTag = (key: BaseKey) => `HudImp_${key.slice('imported:'.length, 'imported:'.length + 12)}_`;
+
+// A removed import's faces leave the page: its aliases, their metrics and
+// bytes, and the FontFaces added to document.fonts for them.
+onUnregister((key) => {
+  IMPORT_FACES.delete(key);
+  const tag = aliasTag(key);
+  for (const alias of [...EXTRA_FILES.keys()]) {
+    if (!alias.startsWith(tag)) continue;
+    EXTRA_FILES.delete(alias);
+    EXTRA_METRICS.delete(alias);
+    const load = loads.get(alias);
+    loads.delete(alias);
+    for (const f of load?.faces ?? []) { try { document.fonts.delete(f); } catch { /* no FontFaceSet here */ } }
+  }
+});
 
 /** The alias for a scheme face on an imported HUD, when the upload carries that face. */
 export function importedFace(key: BaseKey, face: string): string | undefined {
@@ -60,7 +76,7 @@ export function importedFace(key: BaseKey, face: string): string | undefined {
 function readImportFaces(key: BaseKey): Map<string, string> {
   const out = new Map<string, string>();
   const files = importedFiles(key)!;
-  const tag = key.slice('imported:'.length, 'imported:'.length + 12);
+  const tag = aliasTag(key);
   const paths = new Set<string>();
   for (const scheme of ['resource/clientscheme.res', 'resource/chatscheme.res']) {
     const root = parseKv(baseFile(key, scheme))[0];
@@ -82,7 +98,7 @@ function readImportFaces(key: BaseKey): Map<string, string> {
     catch { console.warn(`HUD preview: could not read the font ${path} in the imported HUD`); continue; }
     for (const name of info.names) {
       const lower = name.toLowerCase();
-      const alias = out.get(lower) ?? `HudImp_${tag}_${name.replace(/[^A-Za-z0-9]/g, '_')}`;
+      const alias = out.get(lower) ?? `${tag}${name.replace(/[^A-Za-z0-9]/g, '_')}`;
       out.set(lower, alias);
       if (!EXTRA_METRICS.has(alias)) EXTRA_METRICS.set(alias, info.metrics);
       EXTRA_FILES.set(alias, [...(EXTRA_FILES.get(alias) ?? []), { data: ttf.slice().buffer, weight: String(cssWeight(info.weight)) }]);
@@ -159,7 +175,8 @@ const FILES: Record<string, FaceFile[]> = {
   ...Object.fromEntries(Object.entries(FONT_FILES).map(([face, file]) => [face, [{ url: URLS[`./art/${file}`], weight: '400' }]])),
   'Roboto Condensed': [{ url: regularUrl, weight: '400' }, { url: boldUrl, weight: '700' }],
 };
-const loads = new Map<string, { ready: boolean; waiting: Set<() => void> }>();
+/** Each face asked for: whether it is ready, who waits for it, and the FontFaces added for it (so an import's can be taken out). */
+const loads = new Map<string, { ready: boolean; waiting: Set<() => void>; faces: FontFace[] }>();
 
 /**
  * Asks for a face the preview draws, the first time it is drawn, and calls
@@ -175,12 +192,12 @@ export function loadFace(face: string, onAsset?: () => void): void {
   if (!name || !files) return;
   let hit = loads.get(name);
   if (!hit) {
-    const entry = { ready: false, waiting: new Set<() => void>() };
+    const entry = { ready: false, waiting: new Set<() => void>(), faces: [] as FontFace[] };
     loads.set(name, entry);
     hit = entry;
     try {
       const faces = files.filter((f) => f.data || f.url).map((f) => new FontFace(name, f.data ?? `url(${f.url})`, { weight: f.weight }));
-      for (const f of faces) document.fonts.add(f);
+      for (const f of faces) { document.fonts.add(f); entry.faces.push(f); }
       Promise.all(faces.map((f) => f.load())).then(() => {
         entry.ready = true;
         const fns = [...entry.waiting];

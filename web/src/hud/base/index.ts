@@ -14,13 +14,22 @@
  * files (upload.ts's hudId), so what a key names never changes and a cache
  * entry for it stays valid for ever.
  *
- * The imported files live in a synchronous in-memory registry, filled by
- * the page from IndexedDB before it first draws, so baseFile stays
- * synchronous. An import that is not in the registry throws
- * MissingImportError: falling back to stock would draw the wrong HUD and
- * cache it under the import's key.
+ * The imported files live in a synchronous in-memory registry, so baseFile
+ * stays synchronous. The page fills it from IndexedDB when a design names an
+ * import (at load, from a share link, a design file, Undo or the Preset
+ * select), showing the design locked with a "Loading..." banner until it is
+ * in. An import that is not in the registry throws MissingImportError:
+ * falling back to stock would draw the wrong HUD and cache it under the
+ * import's key.
+ *
+ * Removing an import from the registry also drops everything read from it:
+ * an import can be 50 MB, and parsed trees, decoded textures and font bytes
+ * would otherwise stay for the life of the page. Each module that caches by
+ * base key says what to drop through onUnregister, since this module cannot
+ * import them (they all import it).
  */
 import { decodeText } from '../text';
+import { parseKv, type KvNode } from '../kv';
 
 export type Preset = 'stock' | 'modern' | 'imported';
 export type BaseKey = 'stock' | 'modern' | `imported:${string}`;
@@ -41,9 +50,18 @@ export class MissingImportError extends Error {
 }
 
 const IMPORTS = new Map<string, ReadonlyMap<string, Uint8Array>>();
+const FORGET: ((key: BaseKey) => void)[] = [];
 /** Paths are lower case with forward slashes, as upload.ts gives them. */
 export function registerImport(id: string, files: ReadonlyMap<string, Uint8Array>): void { IMPORTS.set(id, files); }
-export function unregisterImport(id: string): void { IMPORTS.delete(id); }
+/** Take an import out of the registry and free everything read from it. */
+export function unregisterImport(id: string): void {
+  IMPORTS.delete(id);
+  const key: BaseKey = `imported:${id}`;
+  for (const k of [...BASE_TREES.keys()]) if (k.startsWith(`${key}|`)) BASE_TREES.delete(k);
+  for (const fn of FORGET) fn(key);
+}
+/** A cache keyed by base key: `fn` drops what it holds for an import when that import is removed. */
+export function onUnregister(fn: (key: BaseKey) => void): void { FORGET.push(fn); }
 export function hasImport(id: string): boolean { return IMPORTS.has(id); }
 
 /** The upload's files for an imported key, null for Stock and Modern. */
@@ -80,4 +98,23 @@ export function baseFile(key: BaseKey, path: string): string {
  */
 export function presetOverrides(key: BaseKey, path: string): boolean {
   return key === 'modern' && at('modern', path) !== undefined;
+}
+
+const BASE_TREES = new Map<string, KvNode[]>();
+/**
+ * A base file's root children, parsed once per base key and path: the file
+ * as the base has it, before any edit. Callers only read it. A file with no
+ * root block fails naming the file; upload.ts refuses such an import, so
+ * this is for one stored before it did.
+ */
+export function baseTree(key: BaseKey, path: string): KvNode[] {
+  const id = `${key}|${path}`;
+  let t = BASE_TREES.get(id);
+  if (!t) {
+    const root = parseKv(baseFile(key, path))[0];
+    if (!root || typeof root.value === 'string') throw new Error(`${path}: no root block`);
+    t = root.value;
+    BASE_TREES.set(id, t);
+  }
+  return t;
 }

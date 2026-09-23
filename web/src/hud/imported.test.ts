@@ -6,7 +6,8 @@ import { parseKv, writeKv, kvFind, kvSet, type KvNode } from './kv';
 import { drawHud, visibleElements } from './mock';
 import { elementById } from './elements';
 import { decodeText } from './text';
-import { sampleHud, latin1, MARKER_PANEL, dropBlock, recordingCtx } from './importFixtures';
+import { sampleHud, latin1, MARKER_PANEL, dropBlock, recordingCtx, fakeCanvas } from './importFixtures';
+import { importedMaterial } from './importArt';
 
 /** sampleHud() as it is, wherever a test needs no file changed. */
 const A = 'a'.repeat(64);
@@ -154,5 +155,39 @@ describe('importedHasXhair', () => {
     registerImport(WITH_XHAIR, sampleHud({ 'scripts/hudlayout.res': withX }));
     expect(importedHasXhair(`imported:${PLAIN}`)).toBe(false);
     expect(importedHasXhair(`imported:${WITH_XHAIR}`)).toBe(true);
+  });
+});
+
+describe('removing an import', () => {
+  const GONE = '3'.repeat(64);
+  afterEach(() => { unregisterImport(GONE); });
+
+  // The same id never names other files in the page (it is their hash), so
+  // re-registering it with other files is only a way to see that nothing
+  // read from the first set is still held.
+  it('forgets every tree, team and card read from it', () => {
+    registerImport(GONE, sampleHud({ [TEAM]: columnTeam() }));
+    const key = `imported:${GONE}` as const;
+    expect(baseTeam(key).dir).toBe('column');
+    expect(baseHasChild(key, 'Name')).toBe(true);
+    expect(baseHasElement(key, elementById('weaponSelection')!)).toBe(true);
+    unregisterImport(GONE);
+
+    const layout = dropBlock(baseFile('stock', 'scripts/hudlayout.res'), 'HudWeaponSelection');
+    const card = dropBlock(baseFile('stock', 'resource/ui/hud/teammatepanel.res'), 'Name');
+    registerImport(GONE, sampleHud({ 'scripts/hudlayout.res': layout, 'resource/ui/hud/teammatepanel.res': card }));
+    expect(baseTeam(key).dir).toBe('row');
+    expect(baseHasChild(key, 'Name')).toBe(false);
+    expect(baseHasElement(key, elementById('weaponSelection')!)).toBe(false);
+  });
+
+  it('forgets the textures decoded from it', () => {
+    const canvas = fakeCanvas().factory;
+    registerImport(GONE, sampleHud());
+    const key = `imported:${GONE}` as const;
+    expect(importedMaterial(key, 'vgui/hud/myart', canvas)).not.toBeNull();
+    unregisterImport(GONE);
+    registerImport(GONE, sampleHud({ 'materials/vgui/hud/myart.vmt': null, 'materials/vgui/hud/myart.vtf': null }));
+    expect(importedMaterial(key, 'vgui/hud/myart', canvas)).toBeNull();
   });
 });

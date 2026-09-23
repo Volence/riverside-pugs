@@ -33,7 +33,7 @@ import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { parseColour } from './textures';
 import { SLOTS } from './slots';
 import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './fonts';
-import { baseOf } from './base';
+import { baseOf, onUnregister } from './base';
 import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear } from './additive';
 
@@ -411,6 +411,8 @@ export function _setCanvasFactory(f: ((w: number, h: number) => HTMLCanvasElemen
 /** A scratch canvas from the same factory tests replace: importArt.ts decodes an imported texture into one. */
 export function scratchCanvas(w: number, h: number): HTMLCanvasElement | null { return canvasFactory(w, h); }
 const tints = new Map<string, CanvasImageSource>();
+// An import's tints are keyed `imported:<id>|...` (drawTexture, weapons.ts), and go with it.
+onUnregister((key) => { for (const id of [...tints.keys()]) if (id.startsWith(`${key}|`)) tints.delete(id); });
 
 /**
  * `key` names the source for the cache: a stock material, or an import's

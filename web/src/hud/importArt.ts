@@ -13,7 +13,7 @@
  * then takes from pak01, so the caller draws that stock texture.
  * Preview only: build.ts never imports this.
  */
-import { importedFiles, type BaseKey } from './base';
+import { importedFiles, onUnregister, type BaseKey } from './base';
 import { parseKv, kvGet } from './kv';
 import { decodeText } from './text';
 import { decodeVTF } from '../vpk/read';
@@ -22,6 +22,7 @@ export interface ImportedArt { src: CanvasImageSource; w: number; h: number; add
 export type ImportedMaterial = ImportedArt | { stock: string; additive: boolean } | null;
 
 const CACHE = new Map<string, ImportedMaterial>();
+onUnregister((key) => { for (const id of [...CACHE.keys()]) if (id.startsWith(`${key}|`)) CACHE.delete(id); });
 const tex = (m: string) => m.trim().replace(/\\/g, '/').toLowerCase().replace(/^materials\//, '').replace(/\.(vtf|vmt)$/, '');
 
 export function importedMaterial(key: BaseKey, material: string, canvas: (w: number, h: number) => HTMLCanvasElement | null): ImportedMaterial {

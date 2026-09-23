@@ -130,6 +130,28 @@ describe('loadFace', () => {
     } finally { unregisterImport(ID); _resetImportFaces(); }
   });
 
+  it('takes an import\'s faces out of the page when the import is removed', () => {
+    setUp();
+    const del = vi.fn();
+    Object.defineProperty(document, 'fonts', { value: { add, delete: del }, configurable: true });
+    const ID = '7'.repeat(64);
+    const scheme = baseFile('stock', 'resource/clientscheme.res').replace(/CustomFontFiles\s*\{/, (m) => `${m}\r\n\t\t"9"\t\t"resource/MyHud.ttf"`);
+    registerImport(ID, sampleHud({ 'resource/clientscheme.res': scheme, 'resource/myhud.ttf': new Uint8Array(readFileSync(join(__dirname, 'art/font-trade-gothic.ttf'))) }));
+    try {
+      const alias = importedFace(`imported:${ID}`, 'trade gothic')!;
+      loadFace(alias);
+      expect(add).toHaveBeenCalledTimes(1);
+      unregisterImport(ID);
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(del.mock.calls[0][0]).toBe(add.mock.calls[0][0]);
+      // Its bytes are gone too: asking for the face again loads nothing.
+      loadFace(alias);
+      expect(add).toHaveBeenCalledTimes(1);
+      registerImport(ID, sampleHud());
+      expect(importedFace(`imported:${ID}`, 'trade gothic')).toBeUndefined();
+    } finally { unregisterImport(ID); _resetImportFaces(); }
+  });
+
   it('draws on in the fallback without FontFace', () => {
     _resetFaces();
     expect(() => loadFace('Trade Gothic', () => {})).not.toThrow();
