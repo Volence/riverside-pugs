@@ -33,13 +33,15 @@ interface Rect { x: number; y: number; w: number; h: number }
 /** What the page asks the canvas to show beyond the design: the teammate card state, a selected child, a selected Free card. */
 export interface HudView { state?: CardState; child?: string | null; card?: number | null }
 
-const inside = (r: Rect, ux: number, uy: number) => ux >= r.x && ux <= r.x + r.w && uy >= r.y && uy <= r.y + r.h;
+/** Whether a point is on a box, edges included. */
+export const inside = (r: Rect, ux: number, uy: number) => ux >= r.x && ux <= r.x + r.w && uy >= r.y && uy <= r.y + r.h;
 
 function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
   return elementRect(design, id, design.aspect);
 }
 
-const TEAM_CARDS = 3;
+/** Card 4 shows only while spectating a full team: never drawn, never a target. */
+export const TEAM_CARDS = 3;
 
 /** Smallest-area element under the point wins, so a small element sitting
  *  inside a larger container (the crosshair inside the whole screen, say)
