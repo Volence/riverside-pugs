@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.7"
+#define PLUGIN_VERSION "0.3.8"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -298,6 +298,7 @@ ConVar g_cvReplayDir;                    // directory, relative to the game dir
 ConVar g_cvReplayMaxMb;                  // per-round byte cap, a runaway bound
 ConVar g_cvReplayAfterEnd;               // 1 = keep recording after the finale ends the match
 ConVar g_cvReplayStandalone;             // 1 = record rounds with no tracked match at all (!mix nights)
+ConVar g_cvReplayLos;                    // 1 = record survivor-to-infected line of sight in frame bytes 6-7
 /** Whether the last standalone round we recorded was on a campaign's first map.
  *  Used to notice the transition INTO a new campaign exactly once, rather than
  *  on both halves of that campaign's opening map. */
@@ -324,6 +325,12 @@ int g_iRplLastKeyMs;
  *  cannot catch one, and the timer repeats, so without this a single bad
  *  netprop read would fill the log ten times a second for the whole match. */
 bool g_bRplSampling;
+// Line of sight, fixed per round at replay open (the header flag must match
+// every frame). Rank of each slot on its side, the numbering frame bytes 6-7
+// use; -1 for none. See src/replayFormat.ts sideRanks, which must agree.
+bool g_bRplLos;
+int g_iRplSurvRank[RPL_SLOTS];
+int g_iRplInfRank[RPL_SLOTS];
 /** Whether m_survivorCharacter exists on this build's send table, resolved
  *  once against a real client rather than assumed.
  *
@@ -389,6 +396,8 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token> [nonce]");
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
+	RegAdminCmd("sm_pug_los", Cmd_Los, ADMFLAG_ROOT, "sm_pug_los <viewer> <target> - line of sight per point, bots allowed; for testing");
+	RegAdminCmd("sm_pug_los_bench", Cmd_LosBench, ADMFLAG_ROOT, "sm_pug_los_bench <count> - time RplCanSee between the first survivor and infected found");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
 	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
 	RegServerCmd("sm_pug_endkick_now", Cmd_EndKickNow, "sm_pug_endkick_now - run the end-of-match kick now, before the backend restarts the box");
@@ -449,6 +458,9 @@ No config exec and no restart: it tracks the game already being played. Implies 
 		FCVAR_NOTIFY);
 	g_cvReplayStandalone = CreateConVar("sm_pug_replay_standalone", "1",
 		"1 = record any round that goes live even with no tracked PUG match, e.g. a !mix night. Recording only; emits nothing to the backend.",
+		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvReplayLos = CreateConVar("sm_pug_replay_los", "1",
+		"1 = record which spawned infected each survivor could see, in every replay frame. Read at round start.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvReplayAfterEnd = CreateConVar("sm_pug_replay_after_end", "1",
 		"1 = keep recording replays after the finale has ended the match. Recording only; no ROUND_START, no scoring.",
@@ -1197,6 +1209,24 @@ void RplOpen()
 	}
 	p = RplU8(p, infectedMask);                // 156: infected slot mask
 	p = RplU8(p, 1);                           // 157: mask is filled
+
+	// Line of sight (158). Ranks follow the mask just written, occupied slots
+	// in slot order, four per side at most: exactly what sideRanks() in
+	// src/replayFormat.ts computes from the header, so a reader needs nothing
+	// but the header to know which bit means which pair.
+	g_bRplLos = g_cvReplayLos.BoolValue;
+	{
+		int ns = 0, ni = 0;
+		for (int slot = 0; slot < RPL_SLOTS; slot++)
+		{
+			g_iRplSurvRank[slot] = -1;
+			g_iRplInfRank[slot] = -1;
+			if (rplSlotRoster[slot] < 0) continue;
+			if (infectedMask & (1 << slot)) { if (ni < 4) g_iRplInfRank[slot] = ni++; }
+			else if (ns < 4) g_iRplSurvRank[slot] = ns++;
+		}
+	}
+	p = RplU8(p, g_bRplLos ? 1 : 0);           // 158: frames carry line of sight
 	while (p < RPL_HEADER_BYTES) p = RplU8(p, 0);
 
 	// Reset BEFORE the write, not after: a failed header write goes straight to
@@ -1434,6 +1464,124 @@ int RplWeaponId(const char[] cls)
 	return 0;
 }
 
+// ---------- line of sight (frame bytes 6-7) ----------
+
+/** Players never block sight here, and neither do common infected: a common
+ *  walking between a survivor and a hunter is not a wall. Everything else the
+ *  mask hits does. */
+public bool RplLosFilter(int ent, int mask, any viewer)
+{
+	if (ent >= 1 && ent <= MaxClients) return false;
+	if (ent > MaxClients && IsValidEntity(ent))
+	{
+		char cls[16];
+		GetEntityClassname(ent, cls, sizeof(cls));
+		if (StrEqual(cls, "infected")) return false;
+	}
+	return true;
+}
+
+bool RplLosClear(const float from[3], const float to[3], int viewer)
+{
+	// MASK_VISIBLE leaves out CONTENTS_WINDOW and CONTENTS_GRATE, so glass,
+	// fences and grates do not block, as they do not block a player's view.
+	TR_TraceRayFilter(from, to, MASK_VISIBLE, RayType_EndPoint, RplLosFilter, viewer);
+	return !TR_DidHit();
+}
+
+/** Visible when any of three points is: eye, chest, feet. Generous on purpose,
+ *  so an infected whose head clears a wall counts as seen and aiming at it can
+ *  never count as aiming through a wall. */
+bool RplCanSee(int viewer, int target)
+{
+	float eye[3], org[3], pt[3];
+	GetClientEyePosition(viewer, eye);
+	GetClientEyePosition(target, pt);
+	if (RplLosClear(eye, pt, viewer)) return true;
+	GetClientAbsOrigin(target, org);
+	pt = org; pt[2] += 36.0;
+	if (RplLosClear(eye, pt, viewer)) return true;
+	pt = org; pt[2] += 8.0;
+	return RplLosClear(eye, pt, viewer);
+}
+
+bool RplLosViewer(int c)
+{
+	return IsPlayerAlive(c) && GetClientTeam(c) == TEAM_SURVIVOR
+		&& !GetEntProp(c, Prop_Send, "m_isIncapacitated")
+		&& !GetEntProp(c, Prop_Send, "m_isHangingFromLedge");
+}
+
+bool RplLosTarget(int c)
+{
+	return IsPlayerAlive(c) && GetClientTeam(c) == TEAM_INFECTED && !RplIsGhost(c)
+		&& GetEntProp(c, Prop_Send, "m_zombieClass") != ZC_TANK;
+}
+
+/** The 16 bits for one frame. slotClient is the sampler's slot to client map
+ *  (0 for an empty slot). */
+int RplLosBits(const int[] slotClient)
+{
+	int bits = 0;
+	for (int s = 0; s < RPL_SLOTS; s++)
+	{
+		int sr = g_iRplSurvRank[s], sc = slotClient[s];
+		if (sr < 0 || sc == 0 || !RplLosViewer(sc)) continue;
+		for (int i = 0; i < RPL_SLOTS; i++)
+		{
+			int ir = g_iRplInfRank[i], ic = slotClient[i];
+			if (ir < 0 || ic == 0 || !RplLosTarget(ic)) continue;
+			if (g_iPinnedBy[sc] == ic) continue;      // pinned: they know where it is
+			if (RplCanSee(sc, ic)) bits |= 1 << (sr * 4 + ir);
+		}
+	}
+	return bits;
+}
+
+public Action Cmd_Los(int client, int args)
+{
+	if (args < 2) { ReplyToCommand(client, "usage: sm_pug_los <viewer> <target>"); return Plugin_Handled; }
+	char a[64], b[64];
+	GetCmdArg(1, a, sizeof(a));
+	GetCmdArg(2, b, sizeof(b));
+	int v = FindTarget(client, a, false, false), t = FindTarget(client, b, false, false);
+	if (v < 1 || t < 1) return Plugin_Handled;
+	float eye[3], org[3], pt[3];
+	GetClientEyePosition(v, eye);
+	GetClientEyePosition(t, pt);
+	bool head = RplLosClear(eye, pt, v);
+	GetClientAbsOrigin(t, org);
+	pt = org; pt[2] += 36.0;
+	bool chest = RplLosClear(eye, pt, v);
+	pt = org; pt[2] += 8.0;
+	bool feet = RplLosClear(eye, pt, v);
+	ReplyToCommand(client, "LOS %N -> %N: head=%d chest=%d feet=%d visible=%d dist=%.0f",
+		v, t, head, chest, feet, head || chest || feet, GetVectorDistance(eye, org));
+	return Plugin_Handled;
+}
+
+public Action Cmd_LosBench(int client, int args)
+{
+	int n = 1000;
+	if (args >= 1) { char s[16]; GetCmdArg(1, s, sizeof(s)); n = StringToInt(s); }
+	if (n < 1) n = 1;
+	int v = 0, t = 0;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || !IsPlayerAlive(c)) continue;
+		if (v == 0 && GetClientTeam(c) == TEAM_SURVIVOR) v = c;
+		if (t == 0 && GetClientTeam(c) == TEAM_INFECTED && !RplIsGhost(c)) t = c;
+	}
+	if (v == 0 || t == 0) { ReplyToCommand(client, "need a living survivor and a spawned infected"); return Plugin_Handled; }
+	int seen = 0;
+	float start = GetEngineTime();
+	for (int i = 0; i < n; i++) if (RplCanSee(v, t)) seen++;
+	float us = (GetEngineTime() - start) * 1000000.0 / float(n);
+	ReplyToCommand(client, "LOSBENCH %N -> %N: %d calls, %.1f us each, visible %d of %d; a full frame is at most 16 calls = %.0f us",
+		v, t, n, us, seen, n, us * 16.0);
+	return Plugin_Handled;
+}
+
 public Action Timer_RplFrame(Handle timer)
 {
 	// Re-entry latch. Only WriteFile failures below report themselves; a native
@@ -1636,7 +1784,7 @@ public Action Timer_RplFrame(Handle timer)
 	// Patch the frame header now that the count is known.
 	RplU32(0, tMs);
 	RplU16(4, entCount);
-	RplU16(6, 0);
+	RplU16(6, g_bRplLos ? RplLosBits(slotClient) : 0);
 
 	// One call for the whole frame. No FlushFile, ever: the page cache serves
 	// a tailing reader on this box, and a 10Hz flush is the most direct way to
