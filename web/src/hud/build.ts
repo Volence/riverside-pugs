@@ -407,9 +407,10 @@ function hidePass(work: Work, design: HudDesign) {
 /**
  * The hard hide hidePass gives a piece, for any block: visible 0, a 0 x 0
  * size, and for an ImagePanel a drawColor with alpha 0 (its RGB kept). The
- * chat window gets it too (layoutPass), since game code shows the chat
- * whatever its visible key says. Sizes are set on every entry the PC reads,
- * so a [$WIN32] value is zeroed as well as a plain one.
+ * chat window gets it too (layoutPass): game code opens and shows the chat
+ * itself, so its visible key alone may not keep it hidden, the same trap as
+ * the splatter. Sizes are set on every entry the PC reads, so a [$WIN32]
+ * value is zeroed as well as a plain one.
  */
 function hardHide(block: KvNode) {
   pcSet(block, 'visible', '0');
