@@ -4,7 +4,8 @@ Export the HUD textures the editor's preview draws, from the owner's own copy of
 pak01, to PNGs under web/src/hud/art/, plus a generated TypeScript index. Also
 the teammate card's item icons, which are not textures but glyphs of the game's
 ToolBox icon font (resource/toolbox.vfont, loose in the install, not in pak01),
-drawn to PNGs the same way.
+drawn to PNGs the same way, and the weapon selection's icons, which are cells of
+one texture (vgui/hud/iconsheet) that scripts/mod_textures.txt cuts out.
 
 Preview only. These files never enter a build: build.ts does not import them and
 a test says so. The list below is the only way a texture gets in here, and the
@@ -15,13 +16,14 @@ page. Run by hand, from the repo root:
 
 Requires the game installed at the Steam path below. Never run this on a server.
 """
-import io, json, math, os, sys
+import io, json, math, os, re, sys
 import vpk
 from PIL import Image, ImageDraw, ImageFont
 from srctools.vtf import VTF
 
 PAK = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/pak01_dir.vpk')
 VFONT = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/resource/toolbox.vfont')
+MOD_TEXTURES = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/scripts/mod_textures.txt')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'art')
 CAP = 1_000_000
 
@@ -59,6 +61,20 @@ GLYPHS = {
     'icon/item/pills': '"',
     'icon/item/molotov': '#',
     'icon/item/pipebomb': '$',
+}
+# The weapon selection's icons: index name -> mod_textures.txt entry. The game's
+# weapon selection (TerrorWeaponSelection.cpp in client.dll) looks these names up
+# with gHUD.GetIcon when its scheme is applied and draws the cell each one cuts
+# from vgui/hud/iconsheet: the primary weapon, the pistol or dual pistols, and
+# the three item slots (molotov or pipe bomb, medkit, pills). Not the ToolBox
+# glyphs the weapon scripts name, which that code never reads. Only the sample
+# loadout the preview shows is exported.
+EQUIP = {
+    'icon/equip/pumpshotgun': 'icon_equip_pumpshotgun',
+    'icon/equip/dualpistols': 'icon_equip_dualpistols',
+    'icon/equip/molotov': 'icon_equip_molotov',
+    'icon/equip/medkit': 'icon_equip_medkit',
+    'icon/equip/pills': 'icon_equip_pills',
 }
 # Every glyph is drawn into the font's whole cell (ascent plus descent) at this
 # many pixels tall, so the preview can scale a PNG to the label's font tall and
@@ -118,6 +134,50 @@ def export_glyphs() -> tuple[dict[str, bytes], dict[str, float], float]:
         print('  %-48s %4dx%-4d %6d bytes  (%r)' % (name, img.width, img.height, len(buf.getvalue()), ch))
     return pngs, advances, round(font.getlength(' ') / cell, 4)
 
+def texture_cells(text: str) -> dict[str, dict[str, str]]:
+    """
+    Every entry of a hud/mod_textures.txt TextureData block: name -> its keys
+    (file, x, y, width, height). The file is flat KeyValues two levels deep, so
+    a small tokenizer is enough; comments are dropped as the game drops them.
+    """
+    toks = re.findall(r'"([^"]*)"|([{}])|([^\s{}"]+)', re.sub(r'//[^\n]*', '', text))
+    words = [a or b or c for a, b, c in toks]
+    cells: dict[str, dict[str, str]] = {}
+    i = words.index('TextureData') + 2                  # past the name and its {
+    while words[i] != '}':
+        name = words[i]; i += 2                          # past the name and its {
+        keys: dict[str, str] = {}
+        while words[i] != '}':
+            keys[words[i].lower()] = words[i + 1]; i += 2
+        cells[name.lower()] = keys; i += 1
+    return cells
+
+def export_equip(pak) -> tuple[dict[str, bytes], dict[str, tuple[int, int]]]:
+    """
+    Each weapon selection icon, cut from its sheet where mod_textures.txt says,
+    at the sheet's own pixels. Returns the PNGs and each cell's size, which the
+    preview needs: the game draws the primary weapon's icon as wide as its
+    cell's shape allows at a fixed height.
+    """
+    cells = texture_cells(open(MOD_TEXTURES, encoding='latin-1').read())
+    sheets: dict[str, Image.Image] = {}
+    pngs: dict[str, bytes] = {}
+    sizes: dict[str, tuple[int, int]] = {}
+    for name, entry in EQUIP.items():
+        c = cells[entry]
+        sheet = c['file'].lower().replace('\\', '/')
+        if sheet not in sheets:
+            sheets[sheet] = VTF.read(io.BytesIO(pak['materials/%s.vtf' % sheet].read())).get().to_PIL().convert('RGBA')
+        x, y, w, h = (int(c[k]) for k in ('x', 'y', 'width', 'height'))
+        img = sheets[sheet].crop((x, y, x + w, y + h))
+        if img.getbbox() is None:
+            sys.exit('refusing: %s (%s) is empty on %s' % (entry, name, sheet))
+        buf = io.BytesIO(); img.save(buf, 'PNG', optimize=True)
+        pngs[name] = buf.getvalue()
+        sizes[name] = (w, h)
+        print('  %-48s %4dx%-4d %6d bytes  (%s)' % (name, w, h, len(buf.getvalue()), entry))
+    return pngs, sizes
+
 def main() -> int:
     pak = vpk.open(PAK)
     # Everything is exported in memory first, so a failure (a missing texture,
@@ -135,7 +195,8 @@ def main() -> int:
         exported[name] = data
         print('  %-48s %4dx%-4d %6d bytes' % (name, img.width, img.height, len(data)))
     glyphs, advances, space = export_glyphs()
-    for name, data in glyphs.items():
+    equip, equip_sizes = export_equip(pak)
+    for name, data in {**glyphs, **equip}.items():
         total += len(data)
         if total > CAP:
             sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, name))
@@ -154,7 +215,8 @@ def main() -> int:
         with open(os.path.join(OUT, fname), 'wb') as f: f.write(data)
         index[name] = fname
     lines = ['// GENERATED by scripts/export-hud-art.py. Do not edit; rerun the script.',
-             '// Material name (lower case, relative to materials/, no extension), or icon/item/* for an item glyph, -> png in this folder.',
+             '// Material name (lower case, relative to materials/, no extension), icon/item/* for an item glyph,',
+             '// or icon/equip/* for a weapon selection icon -> png in this folder.',
              'export const ART: Record<string, string> = {']
     for k in sorted(index): lines.append("  '%s': '%s'," % (k, index[k]))
     lines += ['};', '',
@@ -163,6 +225,10 @@ def main() -> int:
               'export const ICON_ADVANCE: Record<string, number> = {']
     for k in sorted(advances): lines.append("  '%s': %s," % (k, advances[k]))
     lines += ['};', '', 'export const ICON_SPACE = %s;' % space, '',
+              '// Weapon selection icons: each cell\'s width and height on its icon sheet, in texels.',
+              'export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {']
+    for k in sorted(equip_sizes): lines.append("  '%s': [%d, %d]," % (k, *equip_sizes[k]))
+    lines += ['};', '',
               'export const ART_TOTAL_BYTES = %d;' % total, '']
     with open(os.path.join(OUT, 'index.ts'), 'w') as f: f.write('\n'.join(lines))
     print('%d files, %d bytes total' % (len(index), total))

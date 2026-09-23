@@ -8,8 +8,8 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE } from './art/index';
-import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS } from './art';
+import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE, EQUIP_ICON_SIZE } from './art/index';
+import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS, EQUIP_ICONS } from './art';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { SLOTS } from './slots';
@@ -37,6 +37,17 @@ describe('the art index', () => {
       expect(ICON_ADVANCE[m], m).toBeGreaterThan(0);
     }
     expect(ICON_SPACE).toBeGreaterThan(0);
+  });
+  it('covers every weapon selection icon, with its size on the icon sheet, as the preview draws the weapon slots', () => {
+    // The sample loadout: pump shotgun, dual pistols, molotov, medkit, pills.
+    // mod_textures.txt cuts each from vgui/hud/iconsheet: the shotgun 192 x 64, the rest 64 x 64.
+    expect(EQUIP_ICONS).toEqual(['icon/equip/pumpshotgun', 'icon/equip/dualpistols', 'icon/equip/molotov', 'icon/equip/medkit', 'icon/equip/pills']);
+    for (const m of EQUIP_ICONS) {
+      expect(NEEDED_MATERIALS, m).toContain(m);
+      expect(ART[m], m).toBe(m.replace(/\//g, '-') + '.png');
+    }
+    expect(EQUIP_ICON_SIZE['icon/equip/pumpshotgun']).toEqual([192, 64]);
+    for (const m of EQUIP_ICONS.slice(1)) expect(EQUIP_ICON_SIZE[m], m).toEqual([64, 64]);
   });
   it('stays under the size cap', () => {
     expect(ART_TOTAL_BYTES).toBeLessThan(1_000_000);

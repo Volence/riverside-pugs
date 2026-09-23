@@ -38,7 +38,18 @@ export function artUrl(material: string): string | undefined {
  */
 export const ITEM_ICONS: readonly string[] = ['icon/item/medkit', 'icon/item/pills', 'icon/item/molotov', 'icon/item/pipebomb'];
 
-/** Every material the renderer can ask for, and the item icons. art.test.ts holds the index to this list. */
+/**
+ * The weapon selection's icons, the sample loadout the preview shows. The
+ * game's weapon selection draws cells of vgui/hud/iconsheet that
+ * mod_textures.txt names (icon_equip_*), looked up by client.dll, not the
+ * ToolBox glyphs the weapon scripts name; the export script cuts each cell to
+ * a PNG, and EQUIP_ICON_SIZE in the index keeps each cell's size.
+ */
+export const EQUIP_ICONS: readonly string[] = [
+  'icon/equip/pumpshotgun', 'icon/equip/dualpistols', 'icon/equip/molotov', 'icon/equip/medkit', 'icon/equip/pills',
+];
+
+/** Every material the renderer can ask for, and the item and weapon icons. art.test.ts holds the index to this list. */
 export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_biker', 'vgui/s_panel_manager', 'vgui/s_panel_namvet', 'vgui/s_panel_teenangst',
   // Stock names this as the card block's image, which the game never paints (probe T6); kept so the index stays complete.
@@ -53,4 +64,5 @@ export const NEEDED_MATERIALS: readonly string[] = [
   'vgui/s_panel_dead',
   'vgui/s_panel_biker_incap', 'vgui/s_panel_manager_incap', 'vgui/s_panel_namvet_incap', 'vgui/s_panel_teenangst_incap',
   ...ITEM_ICONS,
+  ...EQUIP_ICONS,
 ];
