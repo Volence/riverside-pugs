@@ -1,5 +1,5 @@
 import type { MetricDef, RoundCtx } from '../types.js';
-import { classAt, kind, sideStat, single } from '../kit.js';
+import { classAt, kind, onSide, sideStat, single } from '../kit.js';
 
 const TANK = 5;
 
@@ -35,11 +35,17 @@ export const defs: MetricDef[] = [
     compute: (c) => single(tankCount(c)),
   },
   {
-    id: 'tank.killed_rate', group: 'tank', version: 2,
+    id: 'tank.killed_rate', group: 'tank', version: 3,
     description: 'Share of tanks the survivors killed.',
     compute: (c) => {
       const n = tankCount(c);
-      return n > 0 ? single(kind(c, 'tank_death').length, n) : null;
+      if (n === 0) return null;
+      // `tank_death` also fires with the tank player himself as the actor when
+      // the tank is passed to another player on frustration (plugin/pug-match.sp,
+      // Event_PlayerDeath around line 4034). Only actors on the survivor side
+      // are actual kills.
+      const kills = kind(c, 'tank_death').filter((e) => onSide(c, e.actor, 'survivor')).length;
+      return single(kills, n);
     },
   },
   {

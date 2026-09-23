@@ -35,9 +35,25 @@ describe('tank metrics', () => {
 
   it('counts an AI-only tank from the timeline even without a tank_spawn event', () => {
     const aiTankReplay = replayOf(frames(0, 30_000, (t) => ({ surv: standing4, tankAi: t >= 5000 && t < 25_000 })));
-    const i = input({ replay: aiTankReplay, events: [ev('tank_death', 'i5', 25_000)] });
+    const i = input({ replay: aiTankReplay, events: [ev('tank_death', 's1', 25_000)] });
     expect(run('tank.spawns', i)!.all).toEqual({ num: 1, den: 1 });
     expect(run('tank.killed_rate', i)!.all).toEqual({ num: 1, den: 1 });
+  });
+
+  it('killed_rate counts only tank_death events whose actor is a survivor, not frustration passes', () => {
+    // The plugin also fires tank_death with the tank player himself as the
+    // actor when the tank is passed to another player on frustration
+    // (plugin/pug-match.sp, Event_PlayerDeath around line 4034). That is not
+    // a survivor kill.
+    const passOnly = [ev('tank_spawn', 'i1', 1000), ev('tank_death', 'i1', 5000)];
+    const i = input({ events: passOnly });
+    expect(run('tank.killed_rate', i)!.all).toEqual({ num: 0, den: 1 });
+
+    const passThenKill = [ev('tank_spawn', 'i1', 1000), ev('tank_death', 'i1', 5000),
+      ev('tank_spawn', 'i2', 10_000), ev('tank_death', 's1', 15_000)];
+    const j = input({ events: passThenKill });
+    expect(run('tank.spawns', j)!.all).toEqual({ num: 2, den: 1 });
+    expect(run('tank.killed_rate', j)!.all).toEqual({ num: 1, den: 2 });
   });
 
   it('counts a tank passed between players (no replay) once, not per tank_take', () => {
