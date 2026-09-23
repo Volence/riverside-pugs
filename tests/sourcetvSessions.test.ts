@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { hashIp, recordPlayerNet } from '../src/playerNetworks.js';
-import { recordSourceTv, sessionsForMatch, likelyAccounts } from '../src/sourcetvSessions.js';
+import { recordSourceTv, sessionsForMatch, likelyAccounts, onSourceTv } from '../src/sourcetvSessions.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 const MAIN = '76561198005192652';
 const OTHER = '76561197972484944';
@@ -180,5 +181,97 @@ describe('sourcetv sessions', () => {
       ...db.prepare('SELECT * FROM sourcetv_server_events').all(),
     ]);
     expect(dump).not.toContain('203.0.113.9');
+  });
+});
+
+describe('onSourceTv admin alert', () => {
+  let events: AdminEvent[];
+  let unsub: () => void;
+
+  beforeEach(() => {
+    events = [];
+    unsub = subscribeAdminEvents((e) => events.push(e));
+  });
+  afterEach(() => unsub());
+
+  function roster(matchId: number, steamid: string, team: 'a' | 'b' = 'a'): void {
+    db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)').run(matchId, steamid, team);
+  }
+
+  it('publishes an admin alert when a likely account is rostered in the live match', () => {
+    const serverId = makeServer(db);
+    const matchId = makeMatch(db, serverId);
+    upsertPlayer(db, { steamid: MAIN, name: 'Main', avatar: null }, []);
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' });
+    roster(matchId, MAIN);
+
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 1, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+
+    expect(events).toEqual([
+      { kind: 'sourcetv_watch', matchId, serverId, spectatorName: 'Watcher', steamid: MAIN },
+    ]);
+  });
+
+  it('alerts nobody when the server has no live match', () => {
+    const serverId = makeServer(db);
+    upsertPlayer(db, { steamid: MAIN, name: 'Main', avatar: null }, []);
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' });
+
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 1, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+
+    expect(events).toEqual([]);
+  });
+
+  it('alerts nobody for a likely account that is not rostered in the live match', () => {
+    const serverId = makeServer(db);
+    makeMatch(db, serverId);
+    upsertPlayer(db, { steamid: MAIN, name: 'Main', avatar: null }, []);
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' });
+    // MAIN is never rostered into the live match.
+
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 1, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+
+    expect(events).toEqual([]);
+  });
+
+  it('alerts once per rostered account, saying nothing about a sharer who is not rostered', () => {
+    const serverId = makeServer(db);
+    const matchId = makeMatch(db, serverId);
+    upsertPlayer(db, { steamid: MAIN, name: 'Main', avatar: null }, []);
+    upsertPlayer(db, { steamid: OTHER, name: 'Other', avatar: null }, []);
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' });
+    recordPlayerNet(db, { steamid: OTHER, ip: '203.0.113.9', country: 'US' });
+    roster(matchId, MAIN);
+
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 1, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+
+    expect(events).toEqual([
+      { kind: 'sourcetv_watch', matchId, serverId, spectatorName: 'Watcher', steamid: MAIN },
+    ]);
+  });
+
+  it('never alerts twice for the same session', () => {
+    const serverId = makeServer(db);
+    const matchId = makeMatch(db, serverId);
+    upsertPlayer(db, { steamid: MAIN, name: 'Main', avatar: null }, []);
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' });
+    roster(matchId, MAIN);
+
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'join', slot: 1, ip: '203.0.113.9', country: 'US', name: 'Watcher',
+    });
+    onSourceTv(db, serverId, {
+      kind: 'sourcetv', event: 'leave', slot: 1, reason: 'Disconnect', name: 'Watcher',
+    });
+
+    expect(events).toHaveLength(1);
   });
 });
