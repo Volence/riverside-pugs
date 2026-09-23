@@ -313,6 +313,42 @@ function fitPass(work: Work, design: HudDesign) {
 }
 
 /**
+ * Make a piece the player hid impossible to see, not only switched off.
+ * visible 0 is not enough on its own: a probe on 2026-09-23 showed the game
+ * drawing the stock damage splatter with visible 0 in the file, because game
+ * code calls SetVisible(true) on the pieces it manages (the splatter, and
+ * most likely the Down and Dead pictures and the Voice icon too). It cannot
+ * make a 0 x 0 piece show, nor an ImagePanel whose drawColor alpha is 0, so a
+ * hidden piece is written with all three. The RGB of the drawColor is kept,
+ * the file's own or the player's tint, so only the alpha changes.
+ *
+ * Runs after fitPass, whose fit rule would otherwise write the state art's
+ * square back over the 0 size; the content box never counted a hidden piece
+ * anyway, so the fitted card and its background are the same either way.
+ * Not part of cardWork: the side panel keeps showing a hidden piece's real
+ * size, which is what showing it again restores. Un-hiding writes nothing
+ * here, so the file is exactly the default again.
+ */
+function hidePass(work: Work, design: HudDesign) {
+  for (const [panelId, kids] of Object.entries(design.children)) {
+    const panel = panelChildren(panelId);
+    if (!panel) continue;
+    const nodes = work.tree(panel.file);
+    for (const [name, o] of Object.entries(kids)) {
+      if (o.visible !== false) continue;
+      const block = kvFind(nodes, [name]);
+      if (!block) continue;                            // an addable child that is off is not in the file at all
+      kvSet(block, 'wide', '0');
+      kvSet(block, 'tall', '0');
+      if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
+        const [r, g, b] = (kvGet(block, 'drawColor') ?? '255 255 255 255').split(' ');
+        kvSet(block, 'drawColor', `${r} ${g} ${b} 0`);
+      }
+    }
+  }
+}
+
+/**
  * childPass then fitPass on a scratch Work, once per design object, with the
  * content box taken between the two. teamLayout asks for the fitted size on
  * every repaint and the side panel for a child's numbers, and both must be
@@ -797,6 +833,9 @@ function addonInfo(name: string): string {
  *   stored unscaled numbers and scalePass multiplies them with the rest of
  *   the card file. A HudEd_<font>_t<size> copy it makes is a font leaf that
  *   scalePass then clones again as HudEd_HudEd_<font>_t<size>_<pct>.
+ * - `hidePass` runs after `fitPass`, whose fit rule would write the state
+ *   art's square back over a hidden piece's 0 size, and before `scalePass`,
+ *   which leaves a 0 at 0.
  * - `fitPass` runs after `childPass` (it fits the card around what the edits
  *   left), before `teamPass` (which places and sizes the fitted card, reading
  *   the same box through cardFit) and before `scalePass` (which multiplies
@@ -826,6 +865,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   layoutPass(work, design);
   childPass(work, design);
   fitPass(work, design);
+  hidePass(work, design);
   teamPass(work, design);
   scalePass(work, design);
   fontPass(work, design, assets, extra);
@@ -885,6 +925,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     layoutPass(work, design);
     childPass(work, design);
     fitPass(work, design);
+    hidePass(work, design);
     teamPass(work, design);
     scalePass(work, design);
     stylePass(work, design, {}, discard);

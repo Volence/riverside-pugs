@@ -266,6 +266,16 @@ describe('drawPanel', () => {
     } finally { _setCanvasFactory(null); }
   });
 
+  it('draws nothing for a hidden splatter, now written at size 0 and alpha 0 as well as visible 0', () => {
+    const bg = artUrl('vgui/hud/healthbar_bg_1')!;
+    const d = design({ children: { teamColumn: { BackgroundImage: { visible: false } } } });
+    const r = childRects(d, 'teamColumn', { x: 0, y: 0 }, 1).find((c) => c.name === 'BackgroundImage')!;
+    expect([r.visible, r.w, r.h]).toEqual([false, 0, 0]);
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+    expect(calls.some((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === bg)).toBe(false);
+  });
+
   it('draws the stock teammate splatter faintly, as the game does at full health, and leaves Modern alone', () => {
     // Probe T6: the splatter shrunk to the card was faintly visible at full health. It is drawn, not hidden.
     const bg = artUrl('vgui/hud/healthbar_bg_1')!;

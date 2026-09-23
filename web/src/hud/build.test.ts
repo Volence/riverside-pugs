@@ -38,6 +38,66 @@ describe('buildHud, childPass', () => {
     expect(kvGet(kvFind(got, ['Head'])!, 'visible')).toBe('0');
   });
 
+  // Probe 2026-09-23: game code turned the stock splatter on with visible 0
+  // in the file, so a hidden piece is also written at size 0 and, for an
+  // ImagePanel, at alpha 0, which SetVisible(true) cannot undo.
+  for (const fit of [false, true]) {
+    it(`writes a hidden splatter at size 0 and alpha 0, keeping its tint's RGB${fit ? ', fitted' : ''}`, () => {
+      const elements = fit ? { teamColumn: { fit: true } } : {};
+      const plain = tree(buildHud(design({ elements, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
+      const n = kvFind(plain, ['BackgroundImage'])!;
+      expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall'), kvGet(n, 'drawColor')]).toEqual(['0', '0', '0', '255 255 255 0']);
+      const tinted = tree(buildHud(design({ elements, children: kids({ BackgroundImage: { visible: false, color: '255 255 255 120' } }) })), CARD_FILE);
+      expect(kvGet(kvFind(tinted, ['BackgroundImage'])!, 'drawColor')).toBe('255 255 255 0');
+    });
+
+    it(`writes hidden state art at size 0 even where the fit rule squares it${fit ? ', fitted' : ''}`, () => {
+      const elements = fit ? { teamColumn: { fit: true } } : {};
+      const got = tree(buildHud(design({ elements, children: kids({ Incapacitated: { visible: false }, Dead: { visible: false }, Voice: { visible: false } }) })), CARD_FILE);
+      for (const name of ['Incapacitated', 'Dead', 'Voice']) {
+        const n = kvFind(got, [name])!;
+        expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')], name).toEqual(['0', '0', '0']);
+      }
+      expect(kvGet(kvFind(got, ['Dead'])!, 'drawColor')).toBe('255 255 255 0');
+      expect(kvGet(kvFind(got, ['Voice'])!, 'drawColor')).toBeUndefined();    // a Panel, not an ImagePanel
+    });
+  }
+
+  it('writes a hidden label at size 0 with no drawColor', () => {
+    const got = tree(buildHud(design({ children: kids({ Name: { visible: false } }) })), CARD_FILE);
+    const n = kvFind(got, ['Name'])!;
+    expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall')]).toEqual(['0', '0', '0']);
+    expect(kvGet(n, 'drawColor')).toBeUndefined();
+  });
+
+  it('writes a hidden piece at size 0 after scaling too', () => {
+    const got = tree(buildHud(design({ elements: { teamColumn: { scale: 1.5 } }, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
+    const n = kvFind(got, ['BackgroundImage'])!;
+    expect([kvGet(n, 'wide'), kvGet(n, 'tall')]).toEqual(['0', '0']);
+  });
+
+  it('writes an un-hidden piece exactly as the default', () => {
+    for (const fit of [false, true]) {
+      const elements = fit ? { teamColumn: { fit: true } } : {};
+      const base = buildHud(design({ elements }));
+      for (const name of ['BackgroundImage', 'Name', 'Dead', 'Voice']) {
+        const shown = buildHud(design({ elements, children: kids({ [name]: { visible: true } }) }));
+        const want = tree(base, CARD_FILE);
+        // Stock ships Voice visible 0; showing it writes visible 1 and nothing else.
+        if (name === 'Voice') kvSet(kvFind(want, ['Voice'])!, 'visible', '1');
+        expect(tree(shown, CARD_FILE), `${name} ${fit}`).toEqual(want);
+      }
+    }
+  });
+
+  it('keeps the hidden piece out of the fitted card and the card background', () => {
+    const bg = { panelBg: { kind: 'flat' as const, color: '0 0 0 150' } };
+    const shown = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: bg })), CARD_FILE);
+    const hidden = tree(buildHud(design({ elements: { teamColumn: { fit: true } }, styles: bg, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
+    expect(cardAt(hidden, 'HudEdCardBg')).toEqual(cardAt(shown, 'HudEdCardBg'));
+    expect(cardAt(hidden, 'Head')).toEqual(cardAt(shown, 'Head'));
+  });
+
   it('adds the health number after Name on stock, and removes it on Modern', () => {
     const stock = tree(buildHud(design({ children: kids({ HealthNumber: { on: true } }) })), CARD_FILE);
     const at = stock.findIndex((n) => n.key === 'HealthNumber');
