@@ -27,7 +27,11 @@ export function QuickCheck({ query, row }: { query: CompareQuery; row: CompareRo
   const ch = fmtChange(row.metric, row);
   const detail = d.data;
   const pts = (detail?.trend ?? []).map((p) => ({ t: time(p.endedAt), v: p.value, side: p.side }));
-  const g = trendGeometry(pts, W, H);
+  const boundaryTimes = (detail?.boundaries ?? []).map((b) => time(b.at));
+  // A patch's first_seen_at is usually before its first match, so the x
+  // domain has to widen to cover it or the oldest boundary line draws with
+  // a negative x, off the left edge of the chart.
+  const g = trendGeometry(pts, W, H, 6, boundaryTimes);
   const mean = rolling(pts.map((p) => p.v), TREND_WINDOW);
   const maxBar = Math.max(1e-9, ...(detail?.perMap ?? []).flatMap((m) => [m.a, m.b]));
 

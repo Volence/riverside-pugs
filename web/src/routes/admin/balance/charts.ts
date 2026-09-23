@@ -16,15 +16,23 @@ export function rolling(values: number[], window: number): number[] {
 /** Maps a list of {t, v} points onto a `w` by `h` viewport. Returns null with
  *  fewer than two points, since a single point has no time axis to scale
  *  against. `y` flips so larger values sit higher on the chart, and a flat
- *  series (every point equal) is centred rather than divided by zero. */
+ *  series (every point equal) is centred rather than divided by zero.
+ *
+ *  `extraT` widens the x domain (but never the y domain) beyond the points'
+ *  own min/max. A patch's `first_seen_at` is usually before its first
+ *  match, so without this the oldest patch boundary lands at a negative x
+ *  and draws outside the chart; the caller passes the boundary times here
+ *  so `t0` moves to cover them and every boundary's x stays within
+ *  [0, w]. */
 export function trendGeometry(
   points: { t: number; v: number }[],
   w: number,
   h: number,
   pad = 6,
+  extraT: number[] = [],
 ): { x: (t: number) => number; y: (v: number) => number } | null {
   if (points.length < 2) return null;
-  const ts = points.map((p) => p.t);
+  const ts = points.map((p) => p.t).concat(extraT);
   const vs = points.map((p) => p.v);
   const t0 = Math.min(...ts), t1 = Math.max(...ts);
   const v0 = Math.min(...vs), v1 = Math.max(...vs);

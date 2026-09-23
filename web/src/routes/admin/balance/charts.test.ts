@@ -16,4 +16,9 @@ describe('chart geometry', () => {
     const g = trendGeometry([{ t: 0, v: 1 }, { t: 1, v: 1 }], 100, 50)!;
     expect(g.y(1)).toBe(25);
   });
+  it('widens the x domain with extraT so a boundary before every point still lands in range', () => {
+    const g = trendGeometry([{ t: 100, v: 0 }, { t: 200, v: 1 }], 100, 50, 5, [30])!;
+    expect(g.x(30)).toBe(0);
+    expect(g.x(100)).toBeGreaterThan(0);
+  });
 });
