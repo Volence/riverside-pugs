@@ -295,6 +295,19 @@ describe('Hud page', () => {
       expect(radio(/crosshair addon/i).checked).toBe(true);
     });
 
+    it('says so on the status line when a stored bundle loses its crosshair to empty storage, on load', () => {
+      localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle' }));
+      render(<Hud />);
+      expect(radio(/^none/i).checked).toBe(true);
+      expect(screen.getByText(/no longer saved/i)).toBeTruthy();
+    });
+
+    it('says nothing on the status line when the design never asked for a bundle', () => {
+      render(<Hud />);
+      expect(radio(/^none/i).checked).toBe(true);
+      expect(screen.queryByText(/no longer saved/i)).toBeNull();
+    });
+
     it('turns a bundle with no saved crosshair into none, from storage or a file', async () => {
       localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle' }));
       render(<Hud />);

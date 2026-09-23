@@ -218,6 +218,8 @@ const MENU_LABELS: Record<MenuAction, string> = {
 };
 /** Said on the status line when moving a card takes a Row or Column team into Free. */
 const WENT_FREE = 'Teammates switched to Free layout';
+/** Said on the status line when a stored 'bundle' choice loses its crosshair, below. */
+const BUNDLE_LOST = "This design's crosshair is no longer saved on this browser, so it now shows None.";
 
 /** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
 function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
@@ -324,7 +326,15 @@ export default function Hud() {
   // game; this only changes the picture, never the design or the file.
   const [cardState, setCardState] = useState<CardState>('healthy');
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
-  const [status, setStatus] = useState('');
+  // On load only: a design's own crosshair choice is loaded and coerced
+  // twice (here and in `design`, above), rather than threading the loaded
+  // value through, so the two reads stay obviously in sync with each other.
+  // A stored 'bundle' silently becomes 'none' when this browser's Crosshair
+  // page storage is empty (usableCrosshair); the player never asked for
+  // that, unlike picking Addon or None themselves, so it is worth a word.
+  const [status, setStatus] = useState(() => (
+    loadDesign(() => newDesign(crosshair !== null)).crosshair === 'bundle' && crosshair === null ? BUNDLE_LOST : ''
+  ));
   // Moving cards of a Row or Column team makes it Free (edit.ts's moveCards
   // and freeInPlace do it inside the same edit); say so, since the Layout
   // select that changed is out of sight.
