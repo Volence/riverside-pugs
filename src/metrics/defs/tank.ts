@@ -1,25 +1,49 @@
 import type { MetricDef, RoundCtx } from '../types.js';
-import { classAt, kind, ratioByPhase, sideStat, single } from '../kit.js';
+import { classAt, kind, sideStat, single } from '../kit.js';
 
 const TANK = 5;
-const tanks = (c: RoundCtx) => kind(c, 'tank_spawn').length;
-const perTank = (num: number, c: RoundCtx) => (tanks(c) > 0 ? single(num, tanks(c)) : null);
+
+/** Tanks in the round. With a replay, the timeline's tank-alive intervals
+ *  are the ground truth (an AI tank, or a passed tank, or a repeated
+ *  `tank_spawn` from a frustration pass, all just extend or don't extend
+ *  that interval). Without a replay, walk events in order: `tank_spawn` or
+ *  `tank_take` starts a tank only if one isn't already alive (so a passed
+ *  tank, or a duplicate spawn event, doesn't get double-counted), and
+ *  `tank_death` ends it. */
+export function tankCount(c: RoundCtx): number {
+  if (c.timeline) return c.timeline.tank.length;
+  let n = 0;
+  let alive = false;
+  for (const e of c.events) {
+    if (e.kind === 'tank_spawn' || e.kind === 'tank_take') {
+      if (!alive) { n++; alive = true; }
+    } else if (e.kind === 'tank_death') {
+      alive = false;
+    }
+  }
+  return n;
+}
+
+const perTank = (num: number, c: RoundCtx) => (tankCount(c) > 0 ? single(num, tankCount(c)) : null);
 const byTank = (c: RoundCtx, k: 'incap' | 'death') =>
   kind(c, k).filter((e) => e.target !== null && e.tMs >= 0 && classAt(c, e.target, e.tMs) === TANK);
 
 export const defs: MetricDef[] = [
   {
-    id: 'tank.spawns', group: 'tank', version: 1,
+    id: 'tank.spawns', group: 'tank', version: 2,
     description: 'Tanks per round.',
-    compute: (c) => single(tanks(c)),
+    compute: (c) => single(tankCount(c)),
   },
   {
-    id: 'tank.killed_rate', group: 'tank', version: 1,
+    id: 'tank.killed_rate', group: 'tank', version: 2,
     description: 'Share of tanks the survivors killed.',
-    compute: (c) => ratioByPhase(c, kind(c, 'tank_death'), kind(c, 'tank_spawn')),
+    compute: (c) => {
+      const n = tankCount(c);
+      return n > 0 ? single(kind(c, 'tank_death').length, n) : null;
+    },
   },
   {
-    id: 'tank.lifetime_s', group: 'tank', version: 1,
+    id: 'tank.lifetime_s', group: 'tank', version: 2,
     description: 'Seconds a tank stayed alive, from spawn to death or round end.',
     compute: (c) => {
       const iv = c.timeline?.tank ?? [];
@@ -28,32 +52,32 @@ export const defs: MetricDef[] = [
     },
   },
   {
-    id: 'tank.damage_per_tank', group: 'tank', version: 1,
+    id: 'tank.damage_per_tank', group: 'tank', version: 2,
     description: 'Damage the tank dealt to survivors, per tank.',
     compute: (c) => (c.hasStats ? perTank(sideStat(c, 'infected', 'dmg_as_tank'), c) : null),
   },
   {
-    id: 'tank.punches_per_tank', group: 'tank', version: 1,
+    id: 'tank.punches_per_tank', group: 'tank', version: 2,
     description: 'Tank punches that landed, per tank.',
     compute: (c) => (c.hasStats ? perTank(sideStat(c, 'infected', 'tank_punches'), c) : null),
   },
   {
-    id: 'tank.rocks_per_tank', group: 'tank', version: 1,
+    id: 'tank.rocks_per_tank', group: 'tank', version: 2,
     description: 'Tank rocks that hit a survivor, per tank.',
     compute: (c) => (c.skillDetect ? perTank(sideStat(c, 'infected', 'tank_rocks_landed'), c) : null),
   },
   {
-    id: 'tank.incaps_caused', group: 'tank', version: 1,
+    id: 'tank.incaps_caused', group: 'tank', version: 2,
     description: 'Survivor incaps caused by the tank player, per tank.',
     compute: (c) => perTank(byTank(c, 'incap').length, c),
   },
   {
-    id: 'tank.deaths_caused', group: 'tank', version: 1,
+    id: 'tank.deaths_caused', group: 'tank', version: 2,
     description: 'Survivor deaths caused by the tank player, per tank.',
     compute: (c) => perTank(byTank(c, 'death').length, c),
   },
   {
-    id: 'tank.rock_skeets', group: 'tank', version: 1,
+    id: 'tank.rock_skeets', group: 'tank', version: 2,
     description: 'Tank rocks shot out of the air, per tank.',
     compute: (c) => (c.skillDetect ? perTank(sideStat(c, 'survivor', 'rock_skeets'), c) : null),
   },
