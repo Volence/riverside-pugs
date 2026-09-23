@@ -11,12 +11,13 @@ import {
 } from '../src/replayFormat.js';
 
 const TOKEN = 'c'.repeat(32);
+const STARTED = 1_785_956_274;
 
 function header(over: Partial<ReplayHeader> = {}): ReplayHeader {
   return {
     version: VERSION, token: TOKEN, ordinal: 0, half: 1,
     playerHz: 10, entityHz: 10, map: 'l4d_vs_farm01_hilltop',
-    startedUnix: 1_785_956_274, indexOffset: 0, indexCount: 0, frameCount: 0,
+    startedUnix: STARTED, indexOffset: 0, indexCount: 0, frameCount: 0,
     slots: ['', '', '', '', '', '', '', ''],
     infectedMask: 0,
     sidesKnown: false,
@@ -43,13 +44,17 @@ function roundBytes(n: number, over: Partial<ReplayHeader> = {}): Buffer {
   ]);
 }
 
+/** A batch naming the default round (`STARTED`) unless overridden. When a
+ *  test builds `roundBytes` with a different `startedUnix`, it must pass the
+ *  same value here as `started`: the two are independent fields on purpose,
+ *  the same way the plugin sends them independently. */
 function batch(offset: number, data: Buffer, over: Partial<PushBatch> = {}): PushBatch {
-  return { token: TOKEN, ordinal: 0, half: 1, offset, closed: false, data, final: null, ...over };
+  return { token: TOKEN, ordinal: 0, half: 1, offset, started: STARTED, closed: false, data, final: null, ...over };
 }
 
 function body(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    token: TOKEN, ordinal: 0, half: 1, offset: 0, closed: false,
+    token: TOKEN, ordinal: 0, half: 1, offset: 0, started: STARTED, closed: false,
     data: roundBytes(1).toString('base64'), ...over,
   };
 }
@@ -70,7 +75,7 @@ describe('parsePush', () => {
     const r = parsePush(body());
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.batch).toMatchObject({ token: TOKEN, ordinal: 0, half: 1, offset: 0, closed: false, final: null });
+    expect(r.batch).toMatchObject({ token: TOKEN, ordinal: 0, half: 1, offset: 0, started: STARTED, closed: false, final: null });
     expect(r.batch.data.equals(roundBytes(1))).toBe(true);
   });
 
@@ -81,6 +86,7 @@ describe('parsePush', () => {
       body({ ordinal: -1 }), body({ ordinal: 1.5 }), body({ ordinal: 1000 }),
       body({ half: 3 }), body({ half: '1' }),
       body({ offset: -1 }), body({ offset: 0.5 }),
+      body({ started: -1 }), body({ started: 1.5 }), body({ started: '1000' }), body({ started: undefined }),
       body({ closed: 'yes' }),
       body({ data: 'abc' }), body({ data: 'ab=c' }), body({ data: 42 }),
       body({ data: '' }),
@@ -132,6 +138,14 @@ describe('applyPush', () => {
     expect(statSync(livePath()).size).toBe(1000);
   });
 
+  it('refuses an overlap whose bytes differ from what is on disk, writing nothing', () => {
+    applyPush(liveDir, batch(0, whole.subarray(0, 1000)));
+    const different = Buffer.alloc(500, 0xff);
+    expect(applyPush(liveDir, batch(200, different))).toEqual({ status: 409, length: 1000 });
+    expect(statSync(livePath()).size).toBe(1000);
+    expect(readFileSync(livePath()).equals(whole.subarray(0, 1000))).toBe(true);
+  });
+
   it('answers a batch it already has with the length, without writing', () => {
     applyPush(liveDir, batch(0, whole.subarray(0, 1000)));
     utimesSync(livePath(), 1_000_000, 1_000_000);
@@ -145,6 +159,7 @@ describe('applyPush', () => {
     expect(applyPush(liveDir, batch(0, whole.subarray(0, 100)))).toMatchObject({ status: 400 });
     expect(applyPush(liveDir, batch(0, roundBytes(1, { token: 'd'.repeat(32) })))).toMatchObject({ status: 400 });
     expect(applyPush(liveDir, batch(0, roundBytes(1, { half: 2 })))).toMatchObject({ status: 400 });
+    expect(applyPush(liveDir, batch(0, roundBytes(1, { ordinal: 1 })))).toMatchObject({ status: 400 });
   });
 
   it('writes the index and frame count into the header on close, so the copy equals the finished file', () => {
@@ -179,9 +194,46 @@ describe('applyPush', () => {
   });
 
   it('starts the copy again when the round was restarted under the same name', () => {
-    applyPush(liveDir, batch(0, roundBytes(5, { startedUnix: 1000 })));
+    applyPush(liveDir, batch(0, roundBytes(5, { startedUnix: 1000 }), { started: 1000 }));
     const again = roundBytes(2, { startedUnix: 2000 });
-    expect(applyPush(liveDir, batch(0, again))).toEqual({ status: 200, length: again.length });
+    expect(applyPush(liveDir, batch(0, again, { started: 2000 }))).toEqual({ status: 200, length: again.length });
     expect(readFileSync(livePath()).equals(again)).toBe(true);
+  });
+
+  it('refuses a stale offset-0 batch from an older round, leaving a newer copy untouched', () => {
+    applyPush(liveDir, batch(0, roundBytes(2, { startedUnix: 1000 }), { started: 1000 }));
+    const newRound = roundBytes(2, { startedUnix: 2000 });
+    applyPush(liveDir, batch(0, newRound, { started: 2000 }));
+    // A late offset-0 batch from the OLD round arrives after the NEW round
+    // already replaced the copy: refused, not silently accepted as identical
+    // or, worse, treated as a fresh restart backwards in time.
+    const lateOld = roundBytes(3, { startedUnix: 1000 });
+    expect(applyPush(liveDir, batch(0, lateOld, { started: 1000 })))
+      .toMatchObject({ status: 409, error: 'stale round' });
+    expect(readFileSync(livePath()).equals(newRound)).toBe(true);
+  });
+
+  it('refuses a late non-zero-offset batch from an old round even when its offset equals the new copy\'s length', () => {
+    applyPush(liveDir, batch(0, roundBytes(5, { startedUnix: 1000 }), { started: 1000 }));
+    const newRound = roundBytes(2, { startedUnix: 2000 });
+    applyPush(liveDir, batch(0, newRound, { started: 2000 }));
+    // A stray in-flight batch from the OLD round, claiming an offset that
+    // happens to equal the NEW round's current length. Offset alone cannot
+    // tell the two rounds apart, so this must still be refused.
+    const strayOldBytes = Buffer.from(encodeFrame(emptyFrame(999)));
+    expect(applyPush(liveDir, batch(newRound.length, strayOldBytes, { started: 1000 })))
+      .toMatchObject({ status: 409 });
+    expect(readFileSync(livePath()).equals(newRound)).toBe(true);
+  });
+
+  it('refuses a same-second restart whose bytes differ, even though started matches', () => {
+    const first = roundBytes(5, { startedUnix: 5000 });
+    applyPush(liveDir, batch(0, first, { started: 5000 }));
+    // A genuinely different round starting in the same unix second: started
+    // is unchanged, but the content is not the round already on disk.
+    const second = roundBytes(5, { startedUnix: 5000, map: 'l4d_vs_hospital01_apartment' });
+    expect(applyPush(liveDir, batch(0, second, { started: 5000 })))
+      .toMatchObject({ status: 409 });
+    expect(readFileSync(livePath()).equals(first)).toBe(true);
   });
 });
