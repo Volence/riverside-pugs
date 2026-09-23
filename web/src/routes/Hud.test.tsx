@@ -412,6 +412,54 @@ describe('Hud page', () => {
     expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('resizes the chat box from its right handle and from its left, which moves it', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    // Chat is (10, 275) to (330, 395): its right handle is at (330, 335).
+    dragFrom(canvas, [330, 335], [360, 335]);
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('350');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('10');
+    dragFrom(canvas, [10, 335], [0, 335]);
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('360');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('0');
+  });
+
+  it('scales an element from a corner handle, the opposite corner staying put', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
+    // Your health is (728, 389) to (853, 480); its top-left corner out by half.
+    dragFrom(canvas, [728, 389], [665.5, 343.5]);
+    expect((screen.getByRole('slider', { name: /^Scale/ }) as HTMLInputElement).value).toBe('1.5');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('666');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('344');
+  });
+
+  it('resizes a piece by its side handle, and a portrait by its corner keeping it square', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    // Card 1's health bar runs (37, 457) to (133, 464): its right handle sits between two corners 3.5 away.
+    clickAt(canvas, 60, 460);
+    expect(screen.getByText('Health bar', { selector: 'legend' })).toBeTruthy();
+    dragFrom(canvas, [133, 460.5], [143, 460.5]);
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('106');
+    clickAt(canvas, 24, 454);
+    dragFrom(canvas, [36, 466], [41, 471]);
+    expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('28');
+  });
+
+  it('scales several pieces together by a corner of their box', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    clickAt(canvas, 60, 460, { shiftKey: true });
+    // Portrait and bar together span (13, 443) to (133, 466): drag the bottom-right corner to half size.
+    dragFrom(canvas, [133, 466], [73, 454.5]);
+    fireEvent.click(screen.getByRole('button', { name: 'Portrait' }));
+    expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('12');
+  });
+
   it('in Free, picks a piece of any card in one click, and a drag on another card moves that card', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);

@@ -78,13 +78,6 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
   return best ? best.id : null;
 }
 
-/** Which of the three drawn Free teammate cards is under the point, or null (not Free, or no card there). */
-export function freeCardAt(design: HudDesign, ux: number, uy: number): number | null {
-  if (!isFreeTeam(design)) return null;
-  const i = teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).findIndex((c) => inside(c, ux, uy));
-  return i < 0 ? null : i;
-}
-
 /**
  * The smallest teammate-card child under the point, in whichever of the
  * three drawn cards it falls, or null. A child counts only where the card
@@ -93,18 +86,15 @@ export function freeCardAt(design: HudDesign, ux: number, uy: number): number | 
  * decoration (the splatter, the card background) is never a target, so a
  * click on a card's empty space still means the card. The rects come from
  * the generated tree through childRects, like everything the canvas draws.
- * `only` limits the search to one card: in Free the page reaches children
- * only in the card the player picked, so a press on any other card grabs
- * that card rather than whatever child covers it.
  */
 export function childAt(
-  design: HudDesign, state: CardState, ux: number, uy: number, only?: number,
+  design: HudDesign, state: CardState, ux: number, uy: number,
 ): { name: string; card: number } | null {
   const container = rectFor(design, 'teamColumn');
   if (!container.visible || !inside(container, ux, uy)) return null;
   let best: { name: string; card: number; area: number } | null = null;
   for (const [i, c] of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).entries()) {
-    if ((only !== undefined && i !== only) || !inside(c, ux, uy)) continue;
+    if (!inside(c, ux, uy)) continue;
     for (const r of childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)) {
       const def = teamChild(r.name);
       if (!def || def.role === 'decor' || !r.visible || hiddenInState('teamColumn', r.name, state) || !inside(r, ux, uy)) continue;
@@ -113,20 +103,6 @@ export function childAt(
     }
   }
   return best && { name: best.name, card: best.card };
-}
-
-/**
- * Whether the point is on the selected child's bottom-right resize handle in
- * any drawn card (4 units of slack), or only in card `only`, as childAt.
- */
-export function childCornerAt(design: HudDesign, state: CardState, name: string, ux: number, uy: number, only?: number): boolean {
-  const def = teamChild(name);
-  if (!def || def.box === 'none' || hiddenInState('teamColumn', name, state)) return false;
-  return teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).some((c, i) => {
-    if (only !== undefined && i !== only) return false;
-    const r = childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1).find((x) => x.name === name);
-    return !!r && r.visible && Math.hypot(ux - (r.x + r.w), uy - (r.y + r.h)) <= 4;
-  });
 }
 
 /** Per-viewer convenience only, so the read is guarded like every other

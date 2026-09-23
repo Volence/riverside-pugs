@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { visibleElements, hitTest, drawHud, freeCardAt, childAt, childCornerAt } from './mock';
+import { visibleElements, hitTest, drawHud, childAt } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
@@ -178,13 +178,9 @@ describe('Free teammate cards', () => {
   it('hits each drawn card as the teammates, and not the screen-sized container around them', () => {
     // The fitted cards are drawn (13, 36) in from their slots: card 1 at (21, 136), card 2 at (21, 186).
     expect(hitTest(FREE, 'survivor', 68, 154)).toBe('teamColumn');
-    expect(freeCardAt(FREE, 68, 154)).toBe(0);
-    expect(freeCardAt(FREE, 68, 204)).toBe(1);
     expect(hitTest(FREE, 'survivor', 426, 100)).toBeNull();
     // Card 4 shows only while spectating a full team: not drawn, not a target.
     expect(hitTest(FREE, 'survivor', 460, 478)).toBeNull();
-    expect(freeCardAt(FREE, 460, 478)).toBeNull();
-    expect(freeCardAt(DEFAULT_DESIGN, 73, 459)).toBeNull();           // not Free
   });
 
   it('outlines each card instead of the whole screen when the Free teammates are selected', () => {
@@ -222,14 +218,6 @@ describe('teammate card children on the canvas', () => {
     expect(childAt(DEFAULT_DESIGN, 'down', c.x + 11, c.y + 13)).toEqual({ name: 'Incapacitated', card: 1 });
   });
 
-  it('searches only one card when asked, as the page does in Free', () => {
-    const c = card2();
-    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13, 1)).toEqual({ name: 'Head', card: 1 });
-    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13, 0)).toBeNull();
-    const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
-    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Head', head.x + head.w, head.y + head.h, 0)).toBe(false);
-  });
-
   it('never picks decoration, a hidden child, or anything outside the cards', () => {
     const c = card2();
     // (120, 1) in the card is only the splatter and the Voice icon, which no state draws: decoration and an undrawn state child, so the card itself stays the target.
@@ -237,15 +225,6 @@ describe('teammate card children on the canvas', () => {
     const hidden = { ...DEFAULT_DESIGN, children: { teamColumn: { Head: { visible: false } } } };
     expect(childAt(hidden, 'healthy', c.x + 11, c.y + 13)).toBeNull();
     expect(childAt(DEFAULT_DESIGN, 'healthy', 426, 100)).toBeNull();
-  });
-
-  it("finds a resizable child's corner, and never one that has no size of its own", () => {
-    const c = card2();
-    const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
-    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Head', head.x + head.w, head.y + head.h)).toBe(true);
-    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Head', head.x, head.y)).toBe(false);
-    const items = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Items')!;
-    expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Items', items.x + items.w, items.y + items.h)).toBe(false);
   });
 
   it('outlines a selected piece in every drawn card', () => {

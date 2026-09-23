@@ -16,11 +16,16 @@ import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
 import * as undoStack from '../hud/history';
-import { elementsTouched, hasOverrides, moveElements, moveCard, moveChildren, startsOf, nudgeSelection } from '../hud/edit';
-import { snapMove, unionBox, type Guide, type Snap } from '../hud/guides';
+import { teamChild } from '../hud/children';
+import {
+  elementsTouched, hasOverrides, moveElements, moveCard, moveChildren, startsOf, nudgeSelection,
+  resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
+} from '../hud/edit';
+import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
   NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
+  selectionBox, handlesFor, handlePoint, handleAt,
   type Selection, type Hit, type Mods, type Crumb,
 } from '../hud/selection';
 import { ElementControls, ChildList, ChildControls } from './hud/ContextPanel';
@@ -174,8 +179,8 @@ function StyleRow(
   );
 }
 
-/** A press on the canvas: where it started and what was under it, until it becomes a click or a drag. */
-interface Press { cx: number; cy: number; ux: number; uy: number; mods: Mods; hit: Hit; moved: boolean }
+/** A press on the canvas: where it started, what was under it, and the handle it caught, until it becomes a click or a drag. */
+interface Press { cx: number; cy: number; ux: number; uy: number; mods: Mods; hit: Hit; handle: Handle | null; moved: boolean }
 
 /**
  * What a drag is doing, with where everything started: each pointer move
@@ -186,11 +191,21 @@ type Drag =
   | { kind: 'elements'; ids: string[]; starts: Record<string, Box> }
   | { kind: 'card'; card: number; start: Box }
   | { kind: 'children'; names: string[]; card: number; starts: Record<string, CardChild> }
-  | { kind: 'box' };
+  | { kind: 'box' }
+  | { kind: 'resizeElement'; id: string; handle: Handle; start: Box }
+  | { kind: 'scaleElement'; id: string; handle: Handle; start: Box; scale: number }
+  | { kind: 'resizePiece'; name: string; card: number; handle: Handle; start: CardChild }
+  | { kind: 'scalePieces'; names: string[]; handle: Handle; starts: Record<string, CardChild>; box: Box };
 
 /** A press and release within this many screen pixels is a click; anything further is a drag. */
 const CLICK_PX = 3;
 const NO_SNAP: Snap = { dx: 0, dy: 0, guides: [] };
+/** How near a handle the pointer must be, in screen pixels, whatever the canvas scale. */
+const HANDLE_SLACK_PX = 5;
+const RESIZE_CURSOR: Record<Handle, string> = {
+  n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+  ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
+};
 
 const CARD_STATES: { key: CardState; label: string }[] = [
   { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
@@ -347,9 +362,12 @@ export default function Hud() {
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
     const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl) : NONE;
+    const box = selectionBox(design, sel);
     drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
       state: cardState,
       frames: selectionFrames(design, sel),
+      box,
+      handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
       hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(design, hovered) },
       marquee,
       guides,
@@ -416,6 +434,36 @@ export default function Hud() {
 
   const pointerUnits = (e: { clientX: number; clientY: number }) => toUnits(e, canvas.current!.getBoundingClientRect());
 
+  /** The selection's handle under the point, if any: the nearest within HANDLE_SLACK_PX screen pixels. */
+  const handleUnder = (d: HudDesign, ux: number, uy: number): Handle | null => {
+    const box = selectionBox(d, sel);
+    const c = canvas.current;
+    if (!box || !c) return null;
+    const slack = (HANDLE_SLACK_PX * SCREEN_H) / c.getBoundingClientRect().height;
+    return handleAt(box, handlesFor(d, sel), ux, uy, slack);
+  };
+
+  /** What a handle drag resizes, from where everything is now. */
+  const handleDrag = (handle: Handle, d: HudDesign): Drag | null => {
+    if (sel.kind === 'elements' && sel.ids.length === 1) {
+      const id = sel.ids[0];
+      const { x, y, w, h } = elementRect(d, id, d.aspect);
+      return elementById(id)!.resize === 'free'
+        ? { kind: 'resizeElement', id, handle, start: { x, y, w, h } }
+        : { kind: 'scaleElement', id, handle, start: { x, y, w, h }, scale: d.elements[id]?.scale ?? 1 };
+    }
+    if (sel.kind === 'children') {
+      const starts = startsOf(d, sel.names);
+      if (sel.names.length === 1) {
+        const start = starts[sel.names[0]];
+        return start ? { kind: 'resizePiece', name: sel.names[0], card: sel.card, handle, start } : null;
+      }
+      const box = unionBox(Object.values(starts));
+      return box ? { kind: 'scalePieces', names: sel.names, handle, starts, box } : null;
+    }
+    return null;
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;                            // the right button opens the menu instead
     const c = canvas.current;
@@ -423,7 +471,8 @@ export default function Hud() {
     c.setPointerCapture(e.pointerId);
     endGesture();
     const { ux, uy } = pointerUnits(e);
-    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(current.current, side, cardState, ux, uy), moved: false };
+    const d = current.current;
+    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(d, side, cardState, ux, uy), handle: handleUnder(d, ux, uy), moved: false };
     drag.current = null;
     setHover(null);
   };
@@ -444,25 +493,50 @@ export default function Hud() {
 
   /** The pointer has left the click radius: decide what the drag moves, selecting a section it picks up. */
   const startDrag = (p: Press): Drag | null => {
-    const intent = dragIntent(current.current, sel, p.hit, p.mods);
+    const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle);
     switch (intent.kind) {
       case 'box': return { kind: 'box' };
       case 'move':
         if (intent.sel !== sel) setSel(intent.sel);
         return dragFor(intent.sel, current.current);
-      // Resizing from a handle arrives with Task 12, which has the press look
-      // for handles. Until then dragIntent is never given one, never answers
-      // this, and a resize starts nothing.
-      case 'resize': return null;
+      case 'resize': return handleDrag(intent.handle, current.current);
       case 'none': return null;
     }
   };
 
-  const moveDrag = (d: Drag, p: Press, ux: number, uy: number, alt: boolean) => {
+  const moveDrag = (d: Drag, p: Press, ux: number, uy: number, alt: boolean, shift: boolean) => {
     const dux = ux - p.ux, duy = uy - p.uy;
     const cur = current.current;
     if (d.kind === 'box') {
       setMarquee({ x: Math.min(p.ux, ux), y: Math.min(p.uy, uy), w: Math.abs(ux - p.ux), h: Math.abs(uy - p.uy) });
+      return;
+    }
+    if (d.kind === 'resizeElement') {
+      // A free size snaps the edges the handle drags, unless Alt, or Shift's ratio lock, says not to.
+      const raw = resizeBox(d.start, d.handle, dux, duy, false, 20);
+      const s = alt || shift ? NO_SNAP : snapEdges(raw, d.handle, sectionTargets(cur, side, { kind: 'elements', ids: [d.id] }));
+      setGuides(s.guides);
+      edit((x) => resizeElement(x, d.id, d.start, d.handle, dux + s.dx, duy + s.dy, shift), 'gesture');
+      return;
+    }
+    if (d.kind === 'scaleElement') {
+      edit((x) => scaleElement(x, d.id, { rect: d.start, scale: d.scale }, d.handle, dux, duy), 'gesture');
+      return;
+    }
+    if (d.kind === 'resizePiece') {
+      const f = cardFrame(cur);
+      const dx = dux / f.k, dy = duy / f.k;
+      const snaps = teamChild(d.name)?.box === 'wh' && !alt && !shift;
+      const s = snaps ? snapEdges(resizeBox(d.start, d.handle, dx, dy, false, 1), d.handle, pieceTargets(cur, cardState, [d.name])) : NO_SNAP;
+      const card = teamCardRects(cur, cur.aspect)[d.card];
+      setGuides(s.guides.map((g) => pieceGuideToScreen(g, card, f)));
+      edit((x) => resizeChild(x, d.name, d.start, d.handle, dx + s.dx, dy + s.dy, shift), 'gesture');
+      return;
+    }
+    if (d.kind === 'scalePieces') {
+      const f = cardFrame(cur);
+      const k = cornerFactor(d.box, d.handle, dux / f.k, duy / f.k);
+      edit((x) => scaleChildren(x, d.names, d.starts, anchorOf(d.box, d.handle), k), 'gesture');
       return;
     }
     if (d.kind === 'children') {
@@ -493,7 +567,10 @@ export default function Hud() {
     const { ux, uy } = pointerUnits(e);
     const p = press.current;
     if (!p) {
-      setHover({ hit: hitAt(current.current, side, cardState, ux, uy), ctrl: e.ctrlKey || e.metaKey });
+      const d = current.current;
+      setHover({ hit: hitAt(d, side, cardState, ux, uy), ctrl: e.ctrlKey || e.metaKey });
+      const over = handleUnder(d, ux, uy);
+      if (canvas.current) canvas.current.style.cursor = over ? RESIZE_CURSOR[over] : '';
       return;
     }
     if (!p.moved) {
@@ -501,7 +578,7 @@ export default function Hud() {
       p.moved = true;
       drag.current = startDrag(p);
     }
-    if (drag.current) moveDrag(drag.current, p, ux, uy, e.altKey);
+    if (drag.current) moveDrag(drag.current, p, ux, uy, e.altKey, e.shiftKey);
   };
 
   const onPointerUp = (e: PointerEvent) => {
