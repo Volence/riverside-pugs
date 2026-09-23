@@ -422,20 +422,6 @@ export default function Hud() {
     });
   }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee]);
 
-  // The preview draws labels in Roboto Condensed, the Modern preset's real
-  // font and the closest shipped stand-in for stock's Trade Gothic. Canvas
-  // text only uses a web font once the browser has it, so register the two
-  // faces on mount and redraw when they arrive. happy-dom has no FontFace,
-  // and a browser that refuses is left drawing the fallback stack.
-  useEffect(() => {
-    try {
-      const faces = [new FontFace('Roboto Condensed', `url(${regularUrl})`),
-                     new FontFace('Roboto Condensed', `url(${boldUrl})`, { weight: '700' })];
-      for (const f of faces) document.fonts.add(f);
-      Promise.all(faces.map((f) => f.load())).then(() => setImgTick((t) => t + 1)).catch(() => { /* fallback stack stays */ });
-    } catch { /* no FontFace here: the fallback stack stays */ }
-  }, []);
-
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
   useEffect(() => { setSel((s) => sanitize(design, side, s)); }, [design, side]);

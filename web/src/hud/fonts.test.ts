@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { fontCell, cssFamily, cssWeight, canvasFont } from './fonts';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { fontCell, cssFamily, cssWeight, canvasFont, loadFace, _resetFaces } from './fonts';
 import { FONT_METRICS } from './art/index';
 
 describe('fontCell: a scheme tall in pixels to the size the game draws', () => {
@@ -55,5 +55,63 @@ describe('the CSS face for a scheme face', () => {
 
   it('writes the canvas font from the face, the weight and the cell', () => {
     expect(canvasFont('Trade Gothic Bold', 0, 40)).toBe(`400 32px ${cssFamily('Trade Gothic Bold')}`);
+  });
+});
+
+describe('loadFace', () => {
+  // Stand in for a browser that has FontFace; each face loads when told to.
+  const made: { family: string; source: string; weight?: string; done: () => void }[] = [];
+  class FakeFontFace {
+    weight?: string;
+    private p: Promise<this>;
+    constructor(public family: string, public source: string, d?: { weight?: string }) {
+      this.weight = d?.weight;
+      let done!: () => void;
+      this.p = new Promise((res) => { done = () => res(this); });
+      made.push({ family, source, weight: d?.weight, done });
+    }
+    load() { return this.p; }
+  }
+  const add = vi.fn();
+  const setUp = () => {
+    made.length = 0; add.mockClear(); _resetFaces();
+    vi.stubGlobal('FontFace', FakeFontFace);
+    Object.defineProperty(document, 'fonts', { value: { add }, configurable: true });
+  };
+  afterEach(() => { vi.unstubAllGlobals(); _resetFaces(); });
+
+  it('registers an exported face once, under its own name, and redraws every view that asked once it loads', async () => {
+    setUp();
+    const a = vi.fn(), b = vi.fn();
+    loadFace('Trade Gothic Bold', a);
+    loadFace('trade gothic bold', b);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(made[0]).toMatchObject({ family: 'Trade Gothic Bold', weight: '400' });
+    expect(made[0].source).toMatch(/^url\(.*font-trade-gothic-bold.*\.ttf.*\)$/);
+    expect(a).not.toHaveBeenCalled();
+    made[0].done();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledTimes(1);
+    // Once in, asking again needs no redraw.
+    const c = vi.fn();
+    loadFace('Trade Gothic Bold', c);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(c).not.toHaveBeenCalled();
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers both Roboto Condensed files, regular and bold, and nothing for Windows\' own faces', () => {
+    setUp();
+    loadFace('Roboto Condensed');
+    expect(made.map((f) => [f.family, f.weight])).toEqual([['Roboto Condensed', '400'], ['Roboto Condensed', '700']]);
+    for (const f of made) expect(f.source).toMatch(/RobotoCondensed-(Regular|Bold).*\.ttf/);
+    loadFace('Verdana'); loadFace('Tahoma'); loadFace(''); loadFace('Futurot');
+    expect(made).toHaveLength(2);
+  });
+
+  it('draws on in the fallback without FontFace', () => {
+    _resetFaces();
+    expect(() => loadFace('Trade Gothic', () => {})).not.toThrow();
   });
 });
