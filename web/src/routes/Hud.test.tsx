@@ -114,6 +114,17 @@ describe('Hud page', () => {
     expect(screen.getByLabelText('Name colour')).toBeTruthy();
   });
 
+  it('labels the splatter colour control Tint, not Colour, and offers X, Y, W and H', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Damage splatter' }));
+    expect(screen.getByLabelText('Damage splatter tint')).toBeTruthy();
+    expect(screen.queryByLabelText('Damage splatter colour')).toBeNull();
+    expect(screen.getByLabelText('X')).toBeTruthy();
+    expect(screen.getByLabelText('Y')).toBeTruthy();
+    expect(screen.getByLabelText('W')).toBeTruthy();
+    expect(screen.getByLabelText('H')).toBeTruthy();
+  });
+
   it('hides and shows from the eye in Layers, struck through while hidden', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Hide Chat' }));
@@ -529,6 +540,46 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('28');
   });
 
+  it('selects the splatter from Layers, resizes it by a handle, undoes the resize, then sets a Tint', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    // Layers still works too: every teammate-card row is listed there, splatter included.
+    fireEvent.click(screen.getByRole('button', { name: 'Damage splatter' }));
+    expect(screen.getByText('Damage splatter', { selector: 'legend' })).toBeTruthy();
+    // Card 1's fitted splatter runs (13, 441) to (134, 502): its east handle sits at (134, 471.5).
+    dragFrom(canvas, [134, 471.5], [144, 471.5]);
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('131');
+    undoKey();
+    expect((screen.getByLabelText('W') as HTMLInputElement).value).toBe('121');
+    fireEvent.input(screen.getByLabelText('Damage splatter tint'), { target: { value: '#ff0000' } });
+    fireEvent.change(screen.getByLabelText('Damage splatter tint'));
+    expect((screen.getByLabelText('Damage splatter tint') as HTMLInputElement).value).toBe('#ff0000');
+  });
+
+  it('picks the splatter on the canvas where no other piece is, drags it, and undoes with Ctrl+Z', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    // Card 3 (Zoey) is drawn at (293, 441), 121 x 36: (323, 456) is inside it, in the splatter, but
+    // on none of Head, Health, Name, Status or Items, so a plain click there now picks the splatter,
+    // the lowest-priority piece.
+    clickAt(canvas, 323, 456);
+    expect(screen.getByText('Damage splatter', { selector: 'legend' })).toBeTruthy();
+    const crumbs = () => container.querySelector('.hud__crumbs')!.textContent;
+    expect(crumbs()).toBe('Teammates›Card 3›Damage splatter');
+    // A real piece on the same card still wins: (304, 454) is Zoey's portrait.
+    clickAt(canvas, 304, 454);
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    // Re-pick the splatter and drag it: it moves, not the card.
+    clickAt(canvas, 323, 456);
+    dragFrom(canvas, [323, 456], [333, 466]);
+    expect(screen.getByText('Damage splatter', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('46');
+    undoKey();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('36');
+  });
+
   it('scales several pieces together by a corner of their box', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
@@ -549,7 +600,8 @@ describe('Hud page', () => {
     clickAt(canvas, 160, 450);
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Up to Card 2' })).toBeTruthy();
-    // (133, 442) is on card 1 but on none of its pieces.
+    // (133, 442) is on card 1, on the splatter but no other piece; a drag there is not a click first,
+    // so nothing on card 1 is picked yet and the drag still moves the card, not the splatter.
     dragFrom(canvas, [133, 442], [233, 242]);
     expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('113');
@@ -843,13 +895,15 @@ describe('Hud page', () => {
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Select whole card' }));
     expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
-    // (133, 442) is on card 1 but on none of its pieces: the menu is the card's.
+    // (133, 442) is on card 1, on the splatter but no other piece: with the card already the
+    // selection, isPicked only checks which card was hit, so the menu still acts on the whole card.
     fireEvent.contextMenu(canvas, { clientX: 133, clientY: 442 });
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Select Teammates']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Select Teammates' }));
     expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
-    // A card cannot be hidden alone: Delete on one does nothing.
-    clickAt(canvas, 133, 442);
+    // A card cannot be hidden alone: Delete on one does nothing. Picked from Layers, since a plain
+    // click at (133, 442) now picks the splatter there instead (its own test covers that).
+    fireEvent.click(screen.getByRole('button', { name: 'Card 1' }));
     expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
     fireEvent.keyDown(canvas, { key: 'Delete' });
     expect(hiddenRow('Teammates')).toBe(false);

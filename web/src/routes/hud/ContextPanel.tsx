@@ -259,6 +259,9 @@ export function ChildControls(
     if (Number.isFinite(n)) patch(to(clampChild(key, n)), 'gesture');
   };
   const colour = o.color ?? info.color ?? '255 255 255 255';
+  // A label's colour is its text colour; an image's is a tint over its texture (the splatter, so far),
+  // so the one shared control calls itself by what it means for this child's kind.
+  const colourWord = def.kind === 'image' ? 'Tint' : 'Colour';
   const reset = () => edit((d) => resetChild(d, name));
 
   return (
@@ -307,9 +310,9 @@ export function ChildControls(
       )}
       {def.colour && (
         <div class="hud__stylerow">
-          <span class="hud__stylerow-label">Colour</span>
+          <span class="hud__stylerow-label">{colourWord}</span>
           <input
-            type="color" aria-label={`${def.label} colour`} value={hexOf(colour)}
+            type="color" aria-label={`${def.label} ${colourWord.toLowerCase()}`} value={hexOf(colour)}
             onInput={(e) => patch({ color: withHex(colour, (e.target as HTMLInputElement).value) }, 'gesture')}
             onChange={end}
           />
