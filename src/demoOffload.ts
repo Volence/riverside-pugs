@@ -1,5 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import type { DB } from './db.js';
+import { statSync } from 'node:fs';
 import { resolveDemoPath } from './demos.js';
 import { demoKey, head, put, type R2Config } from './r2.js';
 
@@ -46,6 +47,13 @@ export interface OffloadResult {
 }
 
 const EMPTY: OffloadResult = { uploaded: 0, bytes: 0, skipped: 0, failed: 0 };
+
+/** A demo must sit unchanged this long before it is uploaded. A match can be
+ *  marked over while SourceTV is still recording its map (an abort, or a
+ *  match ended early), and an upload taken then is a truncated copy that the
+ *  sweep never revisits: on 2026-09-23 match 144's demo was in R2 at 1.2 MB
+ *  while the finished file was 41 MB. Same rule and length as replays. */
+export const DEMO_QUIET_MS = 10 * 60 * 1000;
 
 /** The download name a browser should see, matching what the local route
  *  serves today. `playdemo` takes a filename with no extension and the console
@@ -111,6 +119,12 @@ export async function offloadMatchDemos(
     }
 
     if (!found) { out.skipped++; continue; }
+    try {
+      if (Date.now() - statSync(found.path).mtimeMs < DEMO_QUIET_MS) { out.skipped++; continue; }
+    } catch {
+      out.skipped++;
+      continue;
+    }
 
     const key = demoKey(matchId, row.filename);
     try {
