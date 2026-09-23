@@ -78,6 +78,8 @@ export function marks(ids: string[]): string {
 export function isEvidence(item: TimelineItem): boolean {
   if (item.allowed) return false;
   if (item.source === 'drop') return item.kind === 'repeat';
+  // A cvar fix (kind ending _fixed, see cvar.ts) is on the timeline, not evidence.
+  if (item.source === 'cvar') return !item.kind.endsWith('_fixed');
   return item.source === 'input' || item.source === 'lilac'
-    || item.source === 'analyzer' || item.source === 'steam' || item.source === 'cvar';
+    || item.source === 'analyzer' || item.source === 'steam';
 }

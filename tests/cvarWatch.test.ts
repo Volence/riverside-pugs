@@ -45,10 +45,36 @@ describe('cpu_level from l4d_cvarwatch', () => {
     await send(port, `L4DV id=${P} cvar=cpu_level value=0.000000`);
     await settle();
     expect(db.prepare("SELECT source, kind, detail FROM integrity_flags").all())
-      .toEqual([{ source: 'cvar', kind: 'cpu_level', detail: 'value=0' }]);
+      .toEqual([{ source: 'cvar', kind: 'cpu_level', detail: 'value=0 act=live' }]);
     const [item] = playerTimeline(db, P, '76561198000000001');
     expect(item).toMatchObject({ source: 'cvar', kind: 'cpu_level' });
     expect(item.summary).toMatch(/cpu_level 0: low effect detail/);
     expect(isEvidence(item)).toBe(true);
+  });
+
+  it('a hold and the fix a moment later are both kept, and only the hold is evidence', async () => {
+    const port = await freeUdpPort();
+    addServer(db, { name: 'dallas', host: '127.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    app = await buildServer({ config: { ...loadConfig({}), devMode: false, logListenPort: port }, db });
+    await send(port, `L4DV id=${P} cvar=cpu_level value=0.000000 act=held`);
+    await send(port, `L4DV id=${P} cvar=cpu_level value=2.000000 act=fixed`);
+    await settle();
+    expect(db.prepare('SELECT detail FROM integrity_flags ORDER BY id').all())
+      .toEqual([{ detail: 'value=0 act=held' }, { detail: 'value=2 act=fixed' }]);
+    const items = playerTimeline(db, P, '76561198000000001');
+    const held = items.find((i) => i.summary.startsWith('Held'));
+    const fixed = items.find((i) => i.summary.startsWith('Changed'));
+    expect(held?.summary).toMatch(/Held in ready-up for cpu_level 0: low effect detail/);
+    expect(fixed?.summary).toBe('Changed cpu_level to 2 after being held in ready-up.');
+    expect(isEvidence(held!)).toBe(true);
+    expect(isEvidence(fixed!)).toBe(false);
+  });
+
+  it('reads a row from before the act existed as played on it', () => {
+    db.prepare(
+      "INSERT INTO integrity_flags (steamid, source, kind, severity, detail, at) VALUES (?, 'cvar', 'cpu_level', 'suspected', 'value=0', datetime('now'))",
+    ).run(P);
+    const [item] = playerTimeline(db, P, '76561198000000001');
+    expect(item.summary).toMatch(/^Played with cpu_level 0/);
   });
 });

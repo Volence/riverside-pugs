@@ -60,7 +60,7 @@ import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { cheatName, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
+import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
 import { resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { abortCommand, resetMap, problemText } from './matchTeardown.js';
@@ -661,20 +661,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         }
         if (ev.kind === 'cvar_flag') {
           // Evidence only, never on the critical path. Stored in or out of a
-          // match, like a LilAC flag; the admin channel hears about it once per
-          // player per live match, since the plugin reports every connection.
+          // match, like a LilAC flag; the admin channel hears about each act
+          // once per player per live match, since the plugin reports every
+          // connection and every ready-up. The act rides in detail, after the
+          // value, so rows from before it existed read as `live`.
           try {
             const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
-            const seenThisMatch = matchId !== null && deps.db.prepare(
-              "SELECT 1 FROM integrity_flags WHERE source = 'cvar' AND kind = ? AND steamid = ? AND match_id = ? LIMIT 1",
-            ).get(ev.cvar, ev.steamid, matchId) !== undefined;
+            const seenThisMatch = matchId !== null && (deps.db.prepare(
+              "SELECT detail FROM integrity_flags WHERE source = 'cvar' AND kind = ? AND steamid = ? AND match_id = ?",
+            ).all(ev.cvar, ev.steamid, matchId) as { detail: string }[]).some((r) => cvarActOf(r.detail) === ev.act);
+            // Deduped on detail too: a `fixed` a few seconds after a `held` is
+            // the whole story, not a repeat of it.
             const stored = recordIntegrityFlag(deps.db, {
               matchId, serverId, steamid: ev.steamid, source: 'cvar',
-              kind: ev.cvar, severity: 'suspected', detail: `value=${ev.value}`,
-            });
+              kind: ev.cvar, severity: 'suspected', detail: `value=${ev.value} act=${ev.act}`,
+            }, new Date(), { dedupeOnDetail: true });
             if (stored && matchId !== null && !seenThisMatch) {
-              publishAdminEvent({ kind: 'cvar_flag', steamid: ev.steamid, matchId, cvar: ev.cvar, value: ev.value });
+              publishAdminEvent({ kind: 'cvar_flag', steamid: ev.steamid, matchId, cvar: ev.cvar, value: ev.value, act: ev.act });
             }
           } catch (err) {
             console.error('[cvarwatch] failed to record a client setting:', err);
