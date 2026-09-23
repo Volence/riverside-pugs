@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
-import { offloadMatchDemos, sweepDemos, friendlyName, type R2Ops } from '../src/demoOffload.js';
+import { offloadMatchDemos, sweepDemos, friendlyName, DEMO_QUIET_MS, type R2Ops } from '../src/demoOffload.js';
 import { r2FromEnv, encodeKey, demoKey, overviewKey, OVERVIEW_CACHE_CONTROL, signRequest, replayKey, getRange, type R2Config } from '../src/r2.js';
 
 const CFG: R2Config = {
@@ -41,6 +41,9 @@ function fakeOps(over: Partial<R2Ops> & { storedBytes?: (key: string) => number 
   return { ops, calls, stored };
 }
 
+/** Seeded demos are finished recordings: their mtime is put 20 minutes back so
+ *  they clear the quiet period. A test about a demo still being written sets
+ *  its own mtime. */
 function seedMatch(id: number, state: string, maps: number, sizes: number[] = []) {
   db.prepare("INSERT INTO matches (id, season_id, state, campaign, token) VALUES (?, 1, ?, 'dead_air', ?)")
     .run(id, state, TOKEN);
@@ -48,6 +51,8 @@ function seedMatch(id: number, state: string, maps: number, sizes: number[] = []
     const name = `pug_${TOKEN}_${o}_l4d_vs_airport0${o + 1}_x.dem`;
     const bytes = sizes[o] ?? 100;
     writeFileSync(join(dir, name), 'x'.repeat(bytes));
+    const old = (Date.now() - 20 * 60 * 1000) / 1000;
+    utimesSync(join(dir, name), old, old);
     db.prepare('INSERT INTO match_demos (match_id, ordinal, map, filename, bytes) VALUES (?, ?, ?, ?, ?)')
       .run(id, o, `m${o}`, name, bytes);
   }
@@ -152,6 +157,35 @@ describe('offloadMatchDemos', () => {
     // The friendly name travels with the object, which is what makes the
     // redirect usable from the Source console.
     expect(calls.some((c) => c.includes('pug1-1.dem'))).toBe(true);
+  });
+
+  it('does not upload a demo that is still being written, and records nothing', async () => {
+    // Match 144 on 2026-09-23: the match was marked over while SourceTV kept
+    // recording, the demo went up at 1.2 MB and the finished file was 41 MB.
+    seedMatch(1, 'aborted', 1, [100]);
+    const name = `pug_${TOKEN}_0_l4d_vs_airport01_x.dem`;
+    const recent = (Date.now() - 2 * 60 * 1000) / 1000;
+    utimesSync(join(dir, name), recent, recent);
+    const { ops, calls } = fakeOps({ storedBytes: () => 100 });
+
+    const r = await offloadMatchDemos(db, CFG, 1, dir, { deleteLocal: true, ops });
+
+    expect(r).toMatchObject({ uploaded: 0, skipped: 1, failed: 0 });
+    expect(calls).toEqual([]);
+    expect(db.prepare('SELECT r2_key FROM match_demos').get()).toEqual({ r2_key: null });
+    expect(existsSync(join(dir, name))).toBe(true);
+  });
+
+  it('uploads it once it has been quiet for the whole period', async () => {
+    seedMatch(1, 'aborted', 1, [100]);
+    const name = `pug_${TOKEN}_0_l4d_vs_airport01_x.dem`;
+    const quiet = (Date.now() - DEMO_QUIET_MS - 1000) / 1000;
+    utimesSync(join(dir, name), quiet, quiet);
+    const { ops } = fakeOps({ storedBytes: () => 100 });
+
+    const r = await offloadMatchDemos(db, CFG, 1, dir, { deleteLocal: true, ops });
+
+    expect(r).toMatchObject({ uploaded: 1, failed: 0 });
   });
 
   it('keeps the local file and records nothing when the upload throws', async () => {
