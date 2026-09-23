@@ -158,7 +158,7 @@ export type LogEvent =
   // src/playerNetworks.ts. `country` is absent when the GeoIP extension is
   // not loaded, which is normal and not an error.
   | { kind: 'player_net'; steamid: string; ip: string; country: string | null }
-  // SourceTV spectators, from l4d_pugtv.smx: no token and no steamid, since
+  // SourceTV spectators, from l4d_tvwatch.smx: no token and no steamid, since
   // SourceTV clients never authenticate one. `slot` identifies which spectator
   // a join and its later leave belong to. `name` is last on every variant that
   // has one, the same protection MATCH_ROSTER's name= has, and on `leave`
