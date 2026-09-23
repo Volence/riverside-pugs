@@ -153,6 +153,14 @@ function layoutPass(work: Work, design: HudDesign) {
     hardHide(work.panel(LAYOUT, ['HudChat']));
     for (const name of ['HudChat', 'HudChatHistory']) hardHide(work.panel(BASECHAT, [name]));
   }
+  const killNotices = design.elements.killNotices;
+  if (killNotices?.visible === false) {
+    // CHudPZDamageRecordPanel is the game's kill/incap feed: its rows are
+    // filled in by game code, the same trap as the chat window above, so
+    // visible 0 in the file alone may not survive that. hardHide also zeros
+    // its size.
+    hardHide(work.panel(LAYOUT, ['HudPZDamageRecord']));
+  }
 }
 
 /**

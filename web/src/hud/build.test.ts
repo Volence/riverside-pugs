@@ -308,6 +308,30 @@ describe('buildHud, layout', () => {
     expect(text(buildHud(design({})), 'scripts/hudanimations.txt')).toBeUndefined();
   });
 
+  it('free-resizes and moves HudPZDamageRecord, the kill/incap feed', () => {
+    const got = layoutOf(buildHud(design({ elements: { killNotices: { x: 40, y: 40, w: 300, h: 90 } } })));
+    const p = kvFind(got, ['HudPZDamageRecord'])!;
+    expect(kvGet(p, 'xpos')).toBe('40');
+    expect(kvGet(p, 'ypos')).toBe('40');
+    expect(kvGet(p, 'wide')).toBe('300');
+    expect(kvGet(p, 'tall')).toBe('90');
+  });
+
+  // CHudPZDamageRecordPanel is the same trap as the chat window (hardHide's
+  // own doc comment): game code may force it visible again, so hiding it
+  // writes size 0 as well as visible 0.
+  it('hard-hides HudPZDamageRecord: visible 0 and size 0', () => {
+    const got = layoutOf(buildHud(design({ elements: { killNotices: { visible: false } } })));
+    const p = kvFind(got, ['HudPZDamageRecord'])!;
+    expect([kvGet(p, 'visible'), kvGet(p, 'wide'), kvGet(p, 'tall')]).toEqual(['0', '0', '0']);
+  });
+
+  it('leaves HudPZDamageRecord exactly as the base file while killNotices is untouched', () => {
+    const got = kvFind(layoutOf(buildHud(design({}))), ['HudPZDamageRecord'])!;
+    const base = kvFind(parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudPZDamageRecord'])!;
+    expect(got).toEqual(base);
+  });
+
   it('ships every file the modern preset overrides even when nothing is edited', () => {
     const paths = buildHud(design({ preset: 'modern' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }).map((f) => f.path);
     expect(paths).toContain('resource/ui/hud/teammatepanel.res');
