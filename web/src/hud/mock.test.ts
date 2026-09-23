@@ -6,6 +6,7 @@ import { artUrl } from './art';
 import { buildTrees, elementRect, teamCardRects } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
+import { DEFAULT_STATE } from '../crosshair/draw';
 import { _setImageFactory, _resetAssetCache, childRects } from './render';
 
 /**
@@ -75,6 +76,51 @@ describe('drawHud', () => {
     drawHud(ctx, 960, 540, hiddenDesign, 'survivor', 'ownHealth');
 
     expect(cleared).toBe(false);
+  });
+});
+
+describe('drawHud, the crosshair', () => {
+  /** fakeCtx, with every call's arguments recorded as well. */
+  function argsCtx() {
+    const calls: { m: string; a: unknown[] }[] = [];
+    const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+    const ctx = new Proxy(base, {
+      get: (t, k) => (typeof t[k] === 'function'
+        ? (...a: unknown[]) => { calls.push({ m: String(k), a }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+        : t[k]),
+      set: (t, k, v) => { t[k] = v; return true; },
+    });
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
+  }
+  const DOT = { ...DEFAULT_STATE, shape: 'dot' as const, dot: 4, outline: 0 };
+  const at = (d: HudDesign) => elementRect(d, 'xhair', d.aspect);
+  const centred = (calls: { m: string; a: unknown[] }[], d: HudDesign) => calls.some((c) => c.m === 'arc'
+    && Math.abs((c.a[0] as number) - (at(d).x + 13)) < 1e-9 && Math.abs((c.a[1] as number) - (at(d).y + 13)) < 1e-9);
+  const outlined = (calls: { m: string; a: unknown[] }[], d: HudDesign) => calls.some((c) => c.m === 'strokeRect'
+    && c.a[0] === at(d).x && c.a[1] === at(d).y && c.a[2] === 26 && c.a[3] === 26);
+
+  it('draws the bundled crosshair at the xHair rect, as the game would', () => {
+    const d = { ...DEFAULT_DESIGN, crosshair: 'bundle' as const };
+    const { ctx, calls } = argsCtx();
+    drawHud(ctx, 853, 480, d, 'survivor', null, undefined, { crosshair: DOT });
+    expect(centred(calls, d)).toBe(true);
+    expect(outlined(calls, d)).toBe(false);
+  });
+
+  it('draws a neutral placeholder for an addon crosshair, whatever the Crosshair page saved', () => {
+    const d = { ...DEFAULT_DESIGN, crosshair: 'addon' as const };
+    const { ctx, calls } = argsCtx();
+    drawHud(ctx, 853, 480, d, 'survivor', null, undefined, { crosshair: DOT });
+    expect(outlined(calls, d)).toBe(true);
+    expect(centred(calls, d)).toBe(false);
+  });
+
+  it('draws nothing for none', () => {
+    const d = { ...DEFAULT_DESIGN, crosshair: 'none' as const };
+    const { ctx, calls } = argsCtx();
+    drawHud(ctx, 853, 480, d, 'survivor', null, undefined, { crosshair: DOT });
+    expect(outlined(calls, d)).toBe(false);
+    expect(centred(calls, d)).toBe(false);
   });
 });
 
