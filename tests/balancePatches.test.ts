@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
-import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting } from '../src/balancePatches.js';
+import { diffInventories, fingerprintOf, formatDiff, listPatches, recordBalanceSighting, refingerprintPatches } from '../src/balancePatches.js';
 
 const INV = { 'c:z_tank_health': '4000', 'p:l4d_skypounce.smx': '100.aaaa0001', 'p:pug-match.smx': '200.bbbb0001' };
 
@@ -114,6 +114,65 @@ describe('recordBalanceSighting', () => {
     expect(problems).toHaveLength(0);
     const stored = db.prepare('SELECT inventory_json FROM balance_server_state WHERE server_id = 1').get() as { inventory_json: string };
     expect(stored.inventory_json).not.toMatch(/spec_stays/);
+  });
+});
+
+describe('refingerprintPatches', () => {
+  let db: ReturnType<typeof openDb>;
+  let problems: string[];
+  let unsub: () => void;
+  const SPEC = 'l4d2_spec_stays_spec.smx';
+  const withSpec = { ...INV, [`p:${SPEC}`]: '10.aaaa0001' };
+  beforeEach(() => {
+    db = openDb(':memory:');
+    db.prepare("INSERT INTO seasons (name) VALUES ('t')").run();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, token) VALUES (1, 1, 'live', 'x', ?)").run('e'.repeat(32));
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (1, 0, 1, 'a'), (1, 0, 2, 'b')").run();
+    addServer(db, { name: 'dallas', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
+    problems = [];
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+  });
+  afterEach(() => unsub());
+
+  it('collapses patches that differ only by a now-ignored plugin into the older one, once', () => {
+    // Recorded before the plugin was on the ignored list: two patches.
+    const older = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [], now: '2026-09-01 00:00:00' });
+    const newer = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: withSpec, versionless: [], now: '2026-09-02 00:00:00' });
+    expect(newer.newPatch).toBe(true);
+    problems.length = 0;
+
+    const r = refingerprintPatches(db, [], [SPEC]);
+    expect(r.merged).toEqual([{ keep: older.patchId, into: [newer.patchId] }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(new RegExp(`#2 \\(id ${newer.patchId}\\) into #1 \\(id ${older.patchId}\\)`));
+    const fp = (id: number) => (db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(id) as { fingerprint: string | null }).fingerprint;
+    expect(fp(older.patchId)).toBe(fingerprintOf(INV, [], [SPEC]));
+    expect(fp(newer.patchId)).toBeNull();
+    // Rounds already tagged with the merged patch stay tagged.
+    expect(db.prepare('SELECT patch_id FROM match_rounds WHERE half = 2').get()).toEqual({ patch_id: newer.patchId });
+
+    // A second run with the same lists is a no-op.
+    const before = db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all();
+    expect(refingerprintPatches(db, [], [SPEC])).toEqual({ updated: 0, merged: [] });
+    expect(db.prepare('SELECT id, fingerprint FROM balance_patches ORDER BY id').all()).toEqual(before);
+    expect(problems).toHaveLength(1);
+
+    // The next sighting of the unchanged box lands on the keeper, and the
+    // server's state row follows it without an alert.
+    const next = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 2, inventory: withSpec, versionless: [], ignored: [SPEC] });
+    expect(next).toMatchObject({ patchId: older.patchId, newPatch: false, serverChanged: false });
+    expect(db.prepare('SELECT patch_id FROM balance_server_state WHERE server_id = 1').get()).toEqual({ patch_id: older.patchId });
+    expect(problems).toHaveLength(1);
+  });
+
+  it('updates a still-unique fingerprint in place without an alert', () => {
+    const only = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: withSpec, versionless: [] });
+    problems.length = 0;
+    const r = refingerprintPatches(db, [], [SPEC]);
+    expect(r).toEqual({ updated: 1, merged: [] });
+    expect(db.prepare('SELECT fingerprint FROM balance_patches WHERE id = ?').get(only.patchId))
+      .toEqual({ fingerprint: fingerprintOf(withSpec, [], [SPEC]) });
+    expect(problems).toHaveLength(0);
   });
 });
 
