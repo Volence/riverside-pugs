@@ -1,5 +1,5 @@
-import { Fragment } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { Fragment, type ComponentChildren } from 'preact';
+import { useEffect, useRef, useState, useErrorBoundary } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
@@ -23,6 +23,7 @@ import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import { registerImport, unregisterImport, hasImport } from '../hud/base';
 import { readHudUpload, hudId } from '../hud/upload';
+import { importProblem } from '../hud/importCheck';
 import { hudStore, type HudMeta } from '../hud/hudStore';
 import * as undoStack from '../hud/history';
 import { teamChild } from '../hud/children';
@@ -251,6 +252,18 @@ function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection
   );
 }
 
+/**
+ * A side panel that reads the design's base files. What it throws on an
+ * imported HUD the checks missed is handed to onError (the page then locks
+ * the design and says why) instead of taking the whole page down, since
+ * Preact unmounts everything above an uncaught render error. Keyed by the
+ * design's base, so switching to another HUD starts it afresh.
+ */
+function Guard({ onError, children }: { onError: (e: unknown) => void; children: ComponentChildren }) {
+  const [err] = useErrorBoundary(onError);
+  return err ? null : <>{children}</>;
+}
+
 /** A status sentence naming up to three of an upload's left-out paths, or nothing when there are none. */
 function leftOut(paths: string[], lead: string): string {
   const n = paths.length;
@@ -278,20 +291,49 @@ export default function Hud() {
   const [, setHistTick] = useState(0);
   const apply = (next: HudDesign) => { current.current = next; setDesignState(next); };
 
-  // This browser's imports, for the Preset select, and whether the store has
-  // been read yet. `importTick` re-renders when the in-memory registry
-  // changes, since hasImport is not state.
+  // This browser's imports, for the Preset select. `importTick` re-renders
+  // when the in-memory registry changes, since hasImport is not state.
   const [imports, setImports] = useState<HudMeta[]>([]);
-  const [importsRead, setImportsRead] = useState(false);
   const [, setImportTick] = useState(0);
+  // The import whose load from this browser's store has finished, found or
+  // not: until then the banner says Loading rather than Import it again.
+  const [triedLoad, setTriedLoad] = useState<string | null>(null);
+  // An import that threw while the page built or drew it, and what it threw:
+  // the checks (importCheck.ts) should have caught it, but if they did not,
+  // the page locks that design and says why rather than freezing.
+  const [failed, setFailed] = useState<{ id: string; why: string } | null>(null);
   const imp = design.preset === 'imported' ? design.imported : undefined;
-  // The design's imported HUD is not loaded (yet, or at all in this browser):
-  // nothing reads its files, so nothing draws, edits or downloads. Undo,
-  // Redo and the Preset select stay live, so the player can leave it.
-  const locked = imp !== undefined && !hasImport(imp.id);
-  const banner = !locked ? '' : importsRead
-    ? `This design was made on the imported HUD '${imp!.name}'. Import it again to edit or download it.`
-    : `Loading the imported HUD '${imp!.name}'...`;
+  const loaded = imp !== undefined && hasImport(imp.id);
+  // Why the design's import cannot be shown, when it cannot: what the page
+  // caught, or what the checks say (kept per import, so this is a lookup
+  // after the first time).
+  const broken = !loaded ? null : failed?.id === imp.id ? failed.why : importProblem(imp.id);
+  // The design's imported HUD is not loaded (yet, or at all in this browser),
+  // or cannot be shown: nothing reads its files, so nothing draws, edits or
+  // downloads. Undo, Redo and the Preset select stay live, so the player can
+  // leave it.
+  const locked = imp !== undefined && (!loaded || broken !== null);
+  const banner = !locked ? '' : broken !== null
+    ? `The imported HUD '${imp!.name}' cannot be shown: ${broken}. Choose another preset to keep editing, or remove it.`
+    : triedLoad === imp!.id
+      ? `This design was made on the imported HUD '${imp!.name}'. Import it again to edit or download it.`
+      : `Loading the imported HUD '${imp!.name}'...`;
+
+  /**
+   * Something threw while building or drawing the design. On an imported
+   * HUD that is the HUD's doing: lock the design and say why. On Stock or
+   * Modern it is the editor's own bug, and is thrown on as before.
+   */
+  const designFailed = (e: unknown) => {
+    const d = current.current;
+    if (d.preset !== 'imported' || !d.imported) throw e;
+    const id = d.imported.id;
+    setFailed({ id, why: e instanceof Error ? e.message : String(e) });
+  };
+  /** An event handler that reads the base files, with designFailed catching what it throws. */
+  const safely = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => {
+    try { fn(...a); } catch (e) { designFailed(e); }
+  };
 
   /**
    * The page's one way to change the design. A step records the value it
@@ -380,7 +422,14 @@ export default function Hud() {
   // And once an undo, a redo or a cancelled drag has put the team back in
   // Row or Column, the note is no longer true, so it goes. Any other status
   // (a download, an import) is left alone.
-  function dropFreeNote() { setStatus((m) => (m === WENT_FREE && !isFreeTeam(current.current) ? '' : m)); }
+  // An undo can land on a design whose import is not loaded, which cannot
+  // say whether it is free; the note then goes too, since nothing shows.
+  function dropFreeNote() {
+    setStatus((m) => {
+      if (m !== WENT_FREE) return m;
+      try { return isFreeTeam(current.current) ? m : ''; } catch { return ''; }
+    });
+  }
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   // What the pointer is over while nothing is pressed, and whether Ctrl is
   // held: the hover outline shows exactly what a click would pick.
@@ -436,24 +485,33 @@ export default function Hud() {
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
     if (locked) return;
-    const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
-    const box = selectionBox(design, sel);
-    drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
-      state: cardState,
-      held,
-      frames: selectionFrames(design, sel),
-      box,
-      handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
-      hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
-      marquee,
-      guides,
-    });
+    try {
+      const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
+      const box = selectionBox(design, sel);
+      drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
+        state: cardState,
+        held,
+        frames: selectionFrames(design, sel),
+        box,
+        handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
+        hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
+        marquee,
+        guides,
+      });
+    } catch (e) {
+      // A half-drawn HUD is wiped back to the backdrop before the banner says why.
+      drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
+      designFailed(e);
+    }
   }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee, locked]);
 
   // A selection the design or the side no longer has is trimmed or dropped:
   // after an undo, an import, a removed health number, a layout change.
   // A locked design has nothing to select.
-  useEffect(() => { setSel((s) => (locked ? NONE : sanitize(design, side, s))); }, [design, side, locked]);
+  useEffect(() => {
+    if (locked) { setSel(NONE); return; }
+    try { setSel((s) => sanitize(design, side, s)); } catch (e) { designFailed(e); }
+  }, [design, side, locked]);
 
   // Debounced rather than immediate: a drag changes the design on every
   // pointermove, and an undebounced save would run a synchronous
@@ -495,27 +553,32 @@ export default function Hud() {
     // this effect must run exactly once, not on every subsequent edit.
   }, []);
 
-  // Mount only: list this browser's imports, and load the design's own into
-  // the registry before anything reads it. A browser whose storage is
-  // missing or refuses leaves every stored import missing, which the banner
-  // says; an import made in this page session still works from memory.
+  // Mount only: list this browser's imports for the Preset select. A browser
+  // whose storage is missing or refuses lists none; an import made in this
+  // page session is still listed, from memory.
   useEffect(() => {
     let live = true;
-    (async () => {
-      const store = hudStore();
-      try {
-        const list = await store.list();
-        if (live) setImports((l) => [...list, ...l.filter((m) => !list.some((n) => n.id === m.id))]);
-        const d = current.current;
-        if (d.preset === 'imported' && d.imported && !hasImport(d.imported.id)) {
-          const hud = await store.get(d.imported.id);
-          if (hud) registerImport(hud.id, hud.files);
-        }
-      } catch { /* no storage: nothing to load */ }
-      if (live) { setImportsRead(true); setImportTick((t) => t + 1); }
-    })();
+    hudStore().list().then((list) => {
+      if (live) setImports((l) => [...list, ...l.filter((m) => !list.some((n) => n.id === m.id))]);
+    }, () => { /* no storage: nothing to list */ });
     return () => { live = false; };
   }, []);
+
+  // Whenever the design names an import that is not in memory, load it from
+  // this browser's store: at load, and after a share link, a design file,
+  // Undo or Redo brings in a design on it. Only an import the store does not
+  // have leaves the banner asking for it to be imported again.
+  useEffect(() => {
+    if (!imp || hasImport(imp.id)) return;
+    const id = imp.id;
+    let live = true;
+    (async () => {
+      const hud = await hudStore().get(id).catch(() => undefined);
+      if (hud && !hasImport(id)) registerImport(id, hud.files);
+      if (live) { setTriedLoad(id); setImportTick((t) => t + 1); }
+    })();
+    return () => { live = false; };
+  }, [imp?.id, loaded]);
 
   // Mount only: the Crosshair page's Open in the HUD editor button lands
   // here with ?from=crosshair, having just saved its crosshair. It goes into
@@ -829,15 +892,20 @@ export default function Hud() {
       const reset = await askReset(cur);
       edit((d) => withPreset(d, choice, reset));
     } else {
-      if (cur.preset === 'imported' && cur.imported?.id === choice.id) return;
       const meta = imports.find((m) => m.id === choice.id);
       if (!meta) return;
+      // Loaded first, even when the design is on it already: picking the
+      // import is also how a design that opened locked gets it back.
       if (!hasImport(choice.id)) {
         const hud = await hudStore().get(choice.id).catch(() => undefined);
         if (!hud) { setStatus('That imported HUD is no longer in this browser.'); return; }
         registerImport(hud.id, hud.files);
         setImportTick((t) => t + 1);
       }
+      if (cur.preset === 'imported' && cur.imported?.id === choice.id) return;
+      // One stored before the import checks, that the editor cannot show, is not switched onto.
+      const problem = importProblem(choice.id);
+      if (problem) { setStatus(`${meta.name} cannot be shown: ${problem}. Remove it from the Preset select.`); return; }
       const reset = await askReset(cur);
       // Switching back onto an import keeps the design's crosshair: the
       // upload's own texture was offered once, when it was imported.
@@ -860,6 +928,10 @@ export default function Hud() {
       const upload = await readHudUpload(file.name, new Uint8Array(await file.arrayBuffer()));
       const id = await hudId(upload.files);
       registerImport(id, upload.files);
+      // Built and drawn once, off screen, before it is kept: a HUD that
+      // would throw on the page is refused here, and freed again.
+      const problem = importProblem(id);
+      if (problem) { unregisterImport(id); throw new Error(problem); }
       const bytes = [...upload.files.values()].reduce((n, d) => n + d.length, 0);
       const meta: HudMeta = { id, name: upload.name, bytes, added: Date.now(), dropped: upload.dropped };
       let kept = true;
@@ -1015,6 +1087,12 @@ export default function Hud() {
   const pending = hist.current.pending;
   const canUndo = hist.current.past.length > 0 || (pending !== null && pending !== design);
 
+  // Read during render, so a throw here is caught and handed on after it.
+  const fitEmpty = () => {
+    try { return teamLayout(design, elementById('teamColumn')!).fitEmpty; }
+    catch (e) { queueMicrotask(() => designFailed(e)); return false; }
+  };
+
   const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
 
@@ -1024,13 +1102,13 @@ export default function Hud() {
 
       <div class="hud">
         <Panel class="hud__layerpanel">
-          {!locked && <LayersPanel
+          {!locked && <Guard key={imp?.id ?? design.preset} onError={designFailed}><LayersPanel
             design={design} side={side} sel={sel}
             onPick={(t, shift) => setSel((s) => pick(s, t, shift))}
             onVisible={(t, v) => edit((d) => setSelectionVisible(d, t, v))}
             onAdd={(name) => { edit((d) => patchChild(d, name, { on: true })); setSel({ kind: 'children', names: [name], card: 0 }); }}
             onKeyDown={onKeyDown}
-          />}
+          /></Guard>}
         </Panel>
 
         <Panel class="hud__stage">
@@ -1051,7 +1129,14 @@ export default function Hud() {
             onImportFile={(f) => { void importHud(f); }}
             onRemoveImport={(id) => { void removeImport(id); }}
           />
-          {banner && <p class="hud__warn" role="status">{banner}</p>}
+          {banner && (
+            <p class="hud__warn" role="status">
+              {banner}
+              {broken !== null && (
+                <> <button type="button" class="btn btn--ghost btn--sm" onClick={() => { void removeImport(imp!.id); }}>Remove this imported HUD</button></>
+              )}
+            </p>
+          )}
 
           <div class="hud__canvaswrap">
             <canvas
@@ -1059,14 +1144,14 @@ export default function Hud() {
               tabIndex={0}
               class="hud__canvas"
               style={{ aspectRatio: `${screenW(design.aspect)} / ${SCREEN_H}` }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
+              onPointerDown={safely(onPointerDown)}
+              onPointerMove={safely(onPointerMove)}
+              onPointerUp={safely(onPointerUp)}
               onPointerCancel={() => { if (press.current) abortDrag(); }}
               onLostPointerCapture={() => { if (press.current) abortDrag(); }}
               onPointerLeave={() => setHover(null)}
-              onKeyDown={onKeyDown}
-              onContextMenu={onContextMenu}
+              onKeyDown={safely(onKeyDown)}
+              onContextMenu={safely(onContextMenu)}
             />
             <Crumbs crumbs={breadcrumb(sel)} onSelect={setSel} />
             {menu && (
@@ -1079,7 +1164,11 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          {!locked && <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />}
+          {!locked && (
+            <Guard key={imp?.id ?? design.preset} onError={designFailed}>
+              <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
+            </Guard>
+          )}
         </Panel>
       </div>
 
@@ -1159,7 +1248,7 @@ export default function Hud() {
         </div>
 
         {status && <p class="muted hud__status">{status}</p>}
-        {!locked && teamLayout(design, elementById('teamColumn')!).fitEmpty && (
+        {!locked && fitEmpty() && (
           <p class="muted hud__status">Every part of the teammate card is hidden, so it keeps its full size instead of fitting.</p>
         )}
       </Panel>

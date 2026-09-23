@@ -4,8 +4,9 @@
  * An import is up to 50 MB of files, far past what localStorage holds, so it
  * lives in IndexedDB, one record per id (upload.ts's hudId): importing the
  * same HUD twice overwrites one record. The design itself stores only the
- * id and name. The page reads the design's import from here into base's
- * in-memory registry before it first draws.
+ * id and name. Whenever a design names an import that is not in memory, the
+ * page reads it from here into base's in-memory registry, showing the design
+ * locked with a "Loading..." banner until it is in.
  *
  * The backend is injectable: tests, and a browser without IndexedDB (happy-dom,
  * or a private window that refuses it), use memoryStore, which keeps imports
