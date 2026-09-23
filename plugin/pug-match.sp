@@ -352,6 +352,9 @@ int g_iRplFrameNo;
  *  backend recorded. */
 int g_iRplMapSeq;
 int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one call
+/** The live push's identity for the open file (LivePushOpen's answer), or 0
+ *  when the file has none yet. RplClose hands it to LivePushClose. */
+int g_iRplPushRound;
 
 // Live push of the round being recorded. Below the replay globals because it
 // reads g_State; see the include for why everything in it is optional.
@@ -1159,6 +1162,7 @@ void RplOpen()
 	g_bRplSampling = false;                    // a previous round's abort is not this round's
 	g_hRplIndexT.Clear();
 	g_hRplIndexOff.Clear();
+	g_iRplPushRound = 0;                       // a failed write below closes no push round
 
 	if (!WriteFile(g_hReplay, g_iRplBuf, RPL_HEADER_BYTES, 1))
 	{
@@ -1168,7 +1172,7 @@ void RplOpen()
 	}
 	// Only after the header is safely on disk: a failed write goes to RplFail
 	// above and this round is never pushed at all.
-	LivePushOpen(g_sToken, g_iRplMapSeq, g_iHalf, startedUnix);
+	g_iRplPushRound = LivePushOpen(g_sToken, g_iRplMapSeq, g_iHalf, startedUnix);
 	LivePushAppend(g_iRplBuf, RPL_HEADER_BYTES);
 
 	RplResolveSurvivorCharProp();
@@ -1302,8 +1306,9 @@ void RplClose()
 	// The header patches above are not appends, so the push carries their
 	// values and the site writes them into its copy. Only when every write
 	// succeeded; otherwise the copy stays exactly as unpatched as the file.
-	LivePushClose(ok, count > 0 ? indexOffset : 0, count, g_iReplayFrames,
+	LivePushClose(g_iRplPushRound, ok, count > 0 ? indexOffset : 0, count, g_iReplayFrames,
 		indexOffset + count * RPL_INDEX_RECORD);
+	g_iRplPushRound = 0;
 
 	delete g_hReplay;
 	g_hReplay = null;

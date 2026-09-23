@@ -101,6 +101,7 @@ void LivePushMarkOptional()
 	MarkNativeAsOptional("HTTPRequest.Timeout.set");
 	MarkNativeAsOptional("HTTPResponse.Status.get");
 	MarkNativeAsOptional("HTTPResponse.Data.get");
+	MarkNativeAsOptional("HTTPResponse.GetHeader");
 	MarkNativeAsOptional("JSONObject.JSONObject");
 	MarkNativeAsOptional("JSONObject.SetString");
 	MarkNativeAsOptional("JSONObject.SetInt");
@@ -130,8 +131,10 @@ static bool LpRipReady()
 
 /** A round's file was opened and its header written. The header's bytes
  *  follow through LivePushAppend like every other write. `started` is the
- *  startedUnix the header carries at byte 76. */
-void LivePushOpen(const char[] token, int ordinal, int half, int started)
+ *  startedUnix the header carries at byte 76. Returns the round's push
+ *  identity, which the recorder hands back to LivePushClose; never 0, so 0
+ *  can stand for "this file has no push round". */
+int LivePushOpen(const char[] token, int ordinal, int half, int started)
 {
 	g_iLpRound++;
 	g_bLpActive = g_cvLivePush.BoolValue && LpRipReady() && g_State == MS_Live && token[0] != '\0';
@@ -143,6 +146,7 @@ void LivePushOpen(const char[] token, int ordinal, int half, int started)
 	g_iLpOrdinal = ordinal;
 	g_iLpHalf = half;
 	g_iLpStarted = started;
+	return g_iLpRound;
 }
 
 /** Bytes the recorder just wrote to the file, in file order: one byte per
@@ -167,13 +171,17 @@ void LivePushAppend(const int[] bytes, int n)
 	g_iLpEnd += n;
 }
 
-/** The recorder closed the file. `patched` is whether the header now carries
- *  the index and frame count, which the site then writes into its copy so the
- *  two stay byte for byte the same. `fileBytes` is the file's full length,
- *  checked against what went through the ring. */
-void LivePushClose(bool patched, int indexOffset, int indexCount, int frames, int fileBytes)
+/** The recorder closed the file. `round` is what LivePushOpen returned for
+ *  that file (0 when it never got that far, for example a failed header
+ *  write): a close for any round other than the one being pushed is ignored,
+ *  so a new file's failed open cannot touch the previous round's tail.
+ *  `patched` is whether the header now carries the index and frame count,
+ *  which the site then writes into its copy so the two stay byte for byte
+ *  the same. `fileBytes` is the file's full length, checked against what
+ *  went through the ring. */
+void LivePushClose(int round, bool patched, int indexOffset, int indexCount, int frames, int fileBytes)
 {
-	if (!g_bLpActive) return;
+	if (!g_bLpActive || round == 0 || round != g_iLpRound) return;
 	if (patched && fileBytes != g_iLpEnd)
 	{
 		LogError("pug: live push saw %d bytes of a %d byte file; stopped for this round", g_iLpEnd, fileBytes);
@@ -269,6 +277,9 @@ static void LpSend()
  *   507              the live store is full: stop the round.
  *   503, other 5xx,  temporarily unavailable, no connection, timeout: send
  *   408, 429, 0      again from the confirmed offset next second.
+ * A 200 or 409 whose body is not JSON (a wrong URL, a proxy's HTML page) is
+ * also retried. Its Data is never read: HTTPResponse.Data throws a native
+ * error on a body that does not parse.
  */
 public void LpOnReply(HTTPResponse response, any seq, const char[] error)
 {
@@ -280,6 +291,11 @@ public void LpOnReply(HTTPResponse response, any seq, const char[] error)
 	if (g_iLpInFlightRound != g_iLpRound || !g_bLpActive) return;
 
 	int code = view_as<int>(response.Status);
+	if ((code == 200 || code == 409) && !LpReplyIsJson(response))
+	{
+		PugDebug("live push: %d without a JSON body; check sm_pug_live_push_url; retrying", code);
+		return;
+	}
 	if (code == 200)
 	{
 		int length = LpReplyLength(response);
@@ -320,6 +336,15 @@ public void LpOnReply(HTTPResponse response, any seq, const char[] error)
 	// 0 (no connection, timeout), 503 or another 5xx, 408, 429: the next
 	// second resends from the confirmed offset. Nothing is queued.
 	PugDebug("live push: no answer (%d %s); retrying", code, error);
+}
+
+/** Whether the body is declared JSON. ripext lower-cases header names on
+ *  both sides, so the spelling here does not matter. */
+static bool LpReplyIsJson(HTTPResponse response)
+{
+	char type[128];
+	if (!response.GetHeader("Content-Type", type, sizeof(type))) return false;
+	return StrContains(type, "application/json", false) != -1;
 }
 
 static int LpReplyLength(HTTPResponse response)

@@ -3,7 +3,8 @@
 # Absolute unix paths break spcomp under wine -> copy in, compile relative, copy out.
 set -euo pipefail
 cd "$(dirname "$0")"
-SCRIPTING=/home/volence/l4d/Rotoblin-AZMod/SourceCode/scripting-az
+# PUG_SCRIPTING overrides the tree, for testing the build against a scratch copy.
+SCRIPTING=${PUG_SCRIPTING:-/home/volence/l4d/Rotoblin-AZMod/SourceCode/scripting-az}
 cp pug-match.sp "$SCRIPTING/pug-match.sp"
 cp pug-stats.inc "$SCRIPTING/pug-stats.inc"
 cp pug-leave.inc "$SCRIPTING/pug-leave.inc"
@@ -34,17 +35,17 @@ if [ ! -e "$GEOIP_INC" ]; then
 	CLEANUP="$CLEANUP $GEOIP_INC"
 fi
 # REST in Pawn's includes are vendored in plugin/include (1.3.2, the version
-# installed on every server; ripext.inc modified so the plugin never autoloads
-# the extension). Same borrow-and-clean-up rule as above.
-RIPEXT_INC="$SCRIPTING/include/ripext.inc"
-RIPEXT_DIR_MADE=0
-if [ ! -e "$RIPEXT_INC" ]; then
-	[ -d "$SCRIPTING/include/ripext" ] || { mkdir "$SCRIPTING/include/ripext"; RIPEXT_DIR_MADE=1; }
-	cp include/ripext.inc "$RIPEXT_INC"
-	cp include/ripext/http.inc include/ripext/json.inc "$SCRIPTING/include/ripext/"
-	CLEANUP="$CLEANUP $RIPEXT_INC $SCRIPTING/include/ripext/http.inc $SCRIPTING/include/ripext/json.inc"
-fi
-trap 'rm -f '"$CLEANUP"'; [ '"$RIPEXT_DIR_MADE"' = 1 ] && rmdir "'"$SCRIPTING"'/include/ripext" 2>/dev/null; true' EXIT
-(cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -iinclude)
+# installed on every server; ripext.inc MODIFIED to autoload = 0, required = 0
+# so staging this plugin never loads rip.ext). They go into a private,
+# throwaway directory inside the scripting tree that is put FIRST on the
+# include path, so they win over any ripext.inc (upstream or otherwise) that
+# the Rotoblin tree's own include/ may hold, and nothing in that include/ is
+# ever written or deleted. Relative, because absolute unix paths break spcomp
+# under wine.
+VENDOR_DIR=$(mktemp -d "$SCRIPTING/pug-vendor-include.XXXXXX")
+cp -r include/. "$VENDOR_DIR/"
+VENDOR_REL=$(basename "$VENDOR_DIR")
+trap 'rm -f '"$CLEANUP"'; rm -rf "'"$VENDOR_DIR"'"' EXIT
+(cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -i"$VENDOR_REL" -iinclude)
 mv "$SCRIPTING/pug-match.smx" ./pug-match.smx
 echo "built: $(pwd)/pug-match.smx"
