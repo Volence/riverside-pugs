@@ -841,4 +841,18 @@ describe('Hud page', () => {
     const rule = css.slice(css.indexOf('.hud__layername {'), css.indexOf('}', css.indexOf('.hud__layername {')));
     expect(rule).not.toMatch(/ellipsis|nowrap/);
   });
+
+  it('redraws on a hover only when what the pointer is over changes', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    // happy-dom's canvas has no 2D context; the draw effect asks for one once per run.
+    const draws = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
+    fireEvent.pointerMove(canvas, { clientX: 24, clientY: 454, pointerId: 1 });
+    const after = draws.mock.calls.length;
+    expect(after).toBeGreaterThan(0);
+    fireEvent.pointerMove(canvas, { clientX: 25, clientY: 455, pointerId: 1 });
+    expect(draws.mock.calls.length).toBe(after);
+    fireEvent.pointerMove(canvas, { clientX: 60, clientY: 460, pointerId: 1 });
+    expect(draws.mock.calls.length).toBeGreaterThan(after);
+  });
 });

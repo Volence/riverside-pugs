@@ -569,7 +569,11 @@ export default function Hud() {
     const p = press.current;
     if (!p) {
       const d = current.current;
-      setHover({ hit: hitAt(d, side, cardState, ux, uy), ctrl: e.ctrlKey || e.metaKey });
+      // The previous object back when nothing it names changed, so a pointer
+      // wandering over one piece does not redraw the canvas on every move.
+      const hit = hitAt(d, side, cardState, ux, uy), ctrl = e.ctrlKey || e.metaKey;
+      setHover((h) => (h && h.ctrl === ctrl && h.hit.element === hit.element && h.hit.card === hit.card && h.hit.child === hit.child
+        ? h : { hit, ctrl }));
       const over = handleUnder(d, ux, uy);
       if (canvas.current) canvas.current.style.cursor = over ? RESIZE_CURSOR[over] : '';
       return;
