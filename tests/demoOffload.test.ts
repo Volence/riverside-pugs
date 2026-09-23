@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { offloadMatchDemos, sweepDemos, friendlyName, type R2Ops } from '../src/demoOffload.js';
-import { r2FromEnv, encodeKey, demoKey, overviewKey, OVERVIEW_CACHE_CONTROL, signRequest, type R2Config } from '../src/r2.js';
+import { r2FromEnv, encodeKey, demoKey, overviewKey, OVERVIEW_CACHE_CONTROL, signRequest, replayKey, getRange, type R2Config } from '../src/r2.js';
 
 const CFG: R2Config = {
   endpoint: 'https://acct.r2.cloudflarestorage.com',
@@ -347,5 +347,47 @@ describe('overview objects', () => {
 
   it('caches hard, because a name never changes meaning', () => {
     expect(OVERVIEW_CACHE_CONTROL).toContain('immutable');
+  });
+});
+
+describe('replayKey', () => {
+  it('groups by match and names the round, never the token', () => {
+    expect(replayKey(92, 3, 2)).toBe('replays/92/3_2.rpl');
+    expect(replayKey(92, 3, 2)).not.toMatch(/[0-9a-f]{32}/);
+  });
+});
+
+describe('getRange', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  it('asks for the bytes from `from` to the end, signed, and reports the total', async () => {
+    let seen: { url: string; headers: Record<string, string> } | null = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      seen = { url, headers: init.headers as Record<string, string> };
+      return new Response(Buffer.from('world'), { status: 206, headers: { 'content-range': 'bytes 6-10/11' } });
+    }) as typeof fetch;
+    const r = await getRange(CFG, 'replays/1/0_1.rpl', 6);
+    expect(r).toEqual({ body: Buffer.from('world'), total: 11 });
+    expect(seen!.url).toBe('https://acct.r2.cloudflarestorage.com/riverside-demos/replays/1/0_1.rpl');
+    expect(seen!.headers.range).toBe('bytes=6-');
+    expect(seen!.headers.Authorization).toMatch(/SignedHeaders=[^,]*range/);
+  });
+
+  it('answers an offset at or past the end with an empty body and the total', async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 416, headers: { 'content-range': 'bytes */11' } })) as typeof fetch;
+    expect(await getRange(CFG, 'k', 11)).toEqual({ body: Buffer.alloc(0), total: 11 });
+  });
+
+  it('returns null for a missing object and throws on anything else', async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
+    expect(await getRange(CFG, 'k', 0)).toBeNull();
+    globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
+    await expect(getRange(CFG, 'k', 0)).rejects.toThrow(/R2 GET k failed: 500/);
+  });
+
+  it('reads a whole object on a 200 (from 0) and takes the total from content-length', async () => {
+    globalThis.fetch = (async () => new Response(Buffer.from('hello'), { status: 200, headers: { 'content-length': '5' } })) as typeof fetch;
+    expect(await getRange(CFG, 'k', 0)).toEqual({ body: Buffer.from('hello'), total: 5 });
   });
 });

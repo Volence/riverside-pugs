@@ -1001,6 +1001,8 @@ export function openDb(path: string): DB {
   // and the key is what says which copy the download route should serve.
   ensureColumn(db, 'match_demos', 'r2_key', 'TEXT');
   ensureColumn(db, 'match_demos', 'r2_at', 'TEXT');
+  ensureColumn(db, 'match_replays', 'r2_key', 'TEXT');
+  ensureColumn(db, 'match_replays', 'r2_at', 'TEXT');
   ensureColumn(db, 'matches', 'voided_at', 'TEXT');
   ensureColumn(db, 'matches', 'void_reason', 'TEXT');
   // How a campaign VPK reaches this box. 'local' is a filesystem copy, which
