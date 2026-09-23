@@ -1,25 +1,30 @@
+import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel, Tabs } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
 import {
-  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN, baseTeam,
-  type HudDesign, type StyleOverride,
+  loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN,
+  type HudDesign, type StyleOverride, type Box,
 } from '../hud/design';
-import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, packHud, type BuildAssets } from '../hud/build';
-import { teamChild } from '../hud/children';
-import { clampSpan, nudge, elementsTouched, hasOverrides, placeCard, nudgeCard, placeChild, nudgeChild, resizeChild } from '../hud/edit';
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById } from '../hud/elements';
-import { drawHud, hitTest, freeCardAt, childAt, childCornerAt, visibleElements, type Side } from '../hud/mock';
-import { NONE, selectionFrames, type Selection } from '../hud/selection';
+import { elementRect, teamLayout, teamCardRects, cardFrame, packHud, type BuildAssets, type CardChild } from '../hud/build';
+import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
-import { ElementControls, ChildList, ChildControls } from './hud/ContextPanel';
-import { hexOf, alphaPct, withHex, withAlphaPct, endsOn, typedInto, type Edit, type EditMode } from './hud/controls';
 import * as undoStack from '../hud/history';
+import { elementsTouched, hasOverrides, moveElements, moveCard, moveChildren, startsOf, nudgeSelection } from '../hud/edit';
+import { snapMove, unionBox, type Guide, type Snap } from '../hud/guides';
+import {
+  NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, climb, breadcrumb, selectionLabel,
+  sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
+  type Selection, type Hit, type Mods, type Crumb,
+} from '../hud/selection';
+import { ElementControls, ChildList, ChildControls } from './hud/ContextPanel';
+import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
 
@@ -33,18 +38,6 @@ import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
 export function toUnits(e: { clientX: number; clientY: number }, rect: DOMRect): { ux: number; uy: number } {
   const k = SCREEN_H / rect.height;
   return { ux: (e.clientX - rect.left) * k, uy: (e.clientY - rect.top) * k };
-}
-
-/**
- * Snap a dragged position to the near edge (0), the far edge (`extent`) or
- * the centre (`extent / 2`), each within a 4-unit tolerance, so a drag that
- * lands close to a natural position locks onto it instead of leaving the
- * element one unit off. Anything else is left exactly where the pointer put it.
- */
-export function snap(v: number, size: number, extent: number): number {
-  const targets = [0, extent - size, extent / 2 - size / 2];
-  for (const t of targets) if (Math.abs(v - t) <= 4) return t;
-  return v;
 }
 
 /**
@@ -181,16 +174,46 @@ function StyleRow(
   );
 }
 
-type Rect4 = { x: number; y: number; w: number; h: number };
-/** What a pointer-down grabbed: an element (moved or resized), one Free teammate card, or a teammate card child. */
+/** A press on the canvas: where it started and what was under it, until it becomes a click or a drag. */
+interface Press { cx: number; cy: number; ux: number; uy: number; mods: Mods; hit: Hit; moved: boolean }
+
+/**
+ * What a drag is doing, with where everything started: each pointer move
+ * applies the whole delta to the start, so rounding and clamps never drift
+ * over a long drag.
+ */
 type Drag =
-  | { kind: 'element'; id: string; mode: 'move' | 'resize'; startUx: number; startUy: number; startRect: Rect4 }
-  | { kind: 'card'; card: number; startUx: number; startUy: number; startRect: Rect4 }
-  | { kind: 'child'; name: string; mode: 'move' | 'resize'; startUx: number; startUy: number; start: Rect4 };
+  | { kind: 'elements'; ids: string[]; starts: Record<string, Box> }
+  | { kind: 'card'; card: number; start: Box }
+  | { kind: 'children'; names: string[]; card: number; starts: Record<string, CardChild> }
+  | { kind: 'box' };
+
+/** A press and release within this many screen pixels is a click; anything further is a drag. */
+const CLICK_PX = 3;
+const NO_SNAP: Snap = { dx: 0, dy: 0, guides: [] };
 
 const CARD_STATES: { key: CardState; label: string }[] = [
   { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
 ];
+
+/** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
+function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
+  if (!crumbs.length) return null;
+  return (
+    <nav class="hud__crumbs" aria-label="Selection path">
+      {crumbs.map((c, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span aria-hidden="true">›</span>}
+          {i < crumbs.length - 1
+            ? <button type="button" aria-label={`Up to ${c.label}`} onClick={() => onSelect(c.sel)}>{c.label}</button>
+            : <span>{c.label}</span>}
+        </Fragment>
+      ))}
+    </nav>
+  );
+}
+
+const modsOf = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): Mods => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
 
 export default function Hud() {
   const [design, setDesignState] = useState<HudDesign>(loadDesign);
@@ -239,7 +262,11 @@ export default function Hud() {
     hist.current = h;
     if (restore) apply(restore);
   };
+  // Undo or redo mid-drag first lets go of the drag: its moves so far
+  // become a step (so Ctrl+Z takes back the drag itself, and Redo brings it
+  // back), and the pointer, still down, moves nothing more.
   const doUndo = () => {
+    letGoOfDrag();
     endGesture();
     const r = undoStack.undo(hist.current, current.current);
     if (!r) return;
@@ -248,6 +275,7 @@ export default function Hud() {
     setHistTick((t) => t + 1);
   };
   const doRedo = () => {
+    letGoOfDrag();
     endGesture();
     const r = undoStack.redo(hist.current, current.current);
     if (!r) return;
@@ -255,6 +283,36 @@ export default function Hud() {
     apply(r.value);
     setHistTick((t) => t + 1);
   };
+
+  const [side, setSide] = useState<Side>('survivor');
+  const [sel, setSel] = useState<Selection>(NONE);
+  // A new design wholesale (another preset, an import, a share link) keeps
+  // an element selection and climbs a card or pieces to the Teammates.
+  const dropPicks = () => setSel((s) => (s.kind === 'card' || s.kind === 'children' ? TEAMMATES : s));
+  // Which state the teammate cards are previewed in. Game code picks it in
+  // game; this only changes the picture, never the design or the file.
+  const [cardState, setCardState] = useState<CardState>('healthy');
+  const [backdrop, setBackdrop] = useState<Backdrop>('scene');
+  const [status, setStatus] = useState('');
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  // What the pointer is over while nothing is pressed, and whether Ctrl is
+  // held: the hover outline shows exactly what a click would pick.
+  const [hover, setHover] = useState<{ hit: Hit; ctrl: boolean } | null>(null);
+  const [guides, setGuides] = useState<Guide[]>([]);
+  const [marquee, setMarquee] = useState<Box | null>(null);
+
+  const canvas = useRef<HTMLCanvasElement>(null);
+  // The reader's own screenshot for the "My screenshot" backdrop. A ref
+  // rather than state, like Crosshair.tsx's `shot`: it is never rendered
+  // directly, only drawn into the canvas, so a re-render is driven by the
+  // tick counter below instead of by the image itself.
+  const shot = useRef<HTMLImageElement | null>(null);
+  const [imgTick, setImgTick] = useState(0);
+
+  // The press and the drag under way, if any. Refs rather than state: they
+  // change on every pointermove and must never themselves trigger a render.
+  const press = useRef<Press | null>(null);
+  const drag = useRef<Drag | null>(null);
 
   // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (Cmd on macOS), anywhere on
   // the page but inside a typing box, where the browser's own undo applies.
@@ -269,38 +327,10 @@ export default function Hud() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const [side, setSide] = useState<Side>('survivor');
-  const [selected, setSelected] = useState<string | null>(null);
-  // In Free, the teammate card the canvas or the card list picked.
-  const [selectedCard, setSelectedCard] = useState<number | null>(null);
-  // The teammate card child picked in the list or on the canvas: the second selection level.
-  const [selectedChild, setSelectedChild] = useState<string | null>(null);
-  // Selecting an element (or nothing) always drops a picked card and child.
-  const selectEl = (id: string | null) => { setSelected(id); setSelectedCard(null); setSelectedChild(null); };
-  // A whole new design (another preset, an import, a share link) drops them too.
-  const dropPicks = () => { setSelectedCard(null); setSelectedChild(null); };
-  // Which state the teammate cards are previewed in. Game code picks it in
-  // game; this only changes the picture, never the design or the file.
-  const [cardState, setCardState] = useState<CardState>('healthy');
-  const [backdrop, setBackdrop] = useState<Backdrop>('scene');
-  const [status, setStatus] = useState('');
-  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
-
-  const canvas = useRef<HTMLCanvasElement>(null);
-  // The reader's own screenshot for the "My screenshot" backdrop. A ref
-  // rather than state, like Crosshair.tsx's `shot`: it is never rendered
-  // directly, only drawn into the canvas, so a re-render is driven by the
-  // tick counter below instead of by the image itself.
-  const shot = useRef<HTMLImageElement | null>(null);
-  const [imgTick, setImgTick] = useState(0);
-
-  // Which element a pointer-down grabbed, and whether it is moving or
-  // resizing it; null between drags. A ref rather than state because it
-  // changes every pointermove and must never itself trigger a re-render.
-  const drag = useRef<Drag | null>(null);
 
   // One effect draws everything, so the canvas can never disagree with the
-  // design it is supposed to be showing.
+  // design it is supposed to be showing, and every outline in it comes from
+  // selection.ts's measurements of the generated trees.
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;
@@ -316,12 +346,15 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
-    // The page still keeps three picks; they map onto one Selection for drawing.
-    const picked: Selection = selectedChild ? { kind: 'children', names: [selectedChild], card: selectedCard ?? 0 }
-      : selectedCard !== null ? { kind: 'card', card: selectedCard }
-        : selected ? { kind: 'elements', ids: [selected] } : NONE;
-    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1), { state: cardState, frames: selectionFrames(design, picked) });
-  }, [design, side, selected, backdrop, imgTick, cardState, selectedCard, selectedChild]);
+    const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl) : NONE;
+    drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
+      state: cardState,
+      frames: selectionFrames(design, sel),
+      hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(design, hovered) },
+      marquee,
+      guides,
+    });
+  }, [design, side, sel, backdrop, imgTick, cardState, hover, guides, marquee]);
 
   // The preview draws labels in Roboto Condensed, the Modern preset's real
   // font and the closest shipped stand-in for stock's Trade Gothic. Canvas
@@ -337,15 +370,9 @@ export default function Hud() {
     } catch { /* no FontFace here: the fallback stack stays */ }
   }, []);
 
-  // A pick the design no longer has is dropped: a child that stopped existing
-  // (the health number unticked while selected) or a card once the team
-  // left Free. The side panel falls back to the teammates meanwhile, so it
-  // is never blank for the render in between.
-  const childShown = selected === 'teamColumn' && selectedChild && cardChild(design, selectedChild) ? selectedChild : null;
-  useEffect(() => {
-    if (selectedChild && !cardChild(design, selectedChild)) setSelectedChild(null);
-    if (selectedCard !== null && !isFreeTeam(design)) setSelectedCard(null);
-  }, [design]);
+  // A selection the design or the side no longer has is trimmed or dropped:
+  // after an undo, an import, a removed health number, a layout change.
+  useEffect(() => { setSel((s) => sanitize(design, side, s)); }, [design, side]);
 
   // Debounced rather than immediate: a drag changes the design on every
   // pointermove, and an undebounced save would run a synchronous
@@ -371,14 +398,14 @@ export default function Hud() {
       if (!decoded) {
         setStatus('That link is damaged.');
       } else {
-        let load = true;
+        let apply = true;
         if (hasOverrides(design)) {
-          load = await confirm({
+          apply = await confirm({
             title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
           });
         }
-        if (!cancelled && load) { edit(() => decoded); dropPicks(); }
+        if (!cancelled && apply) { edit(() => decoded); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
     })();
@@ -387,143 +414,147 @@ export default function Hud() {
     // this effect must run exactly once, not on every subsequent edit.
   }, []);
 
-  const pointerUnits = (e: PointerEvent) => {
-    const c = canvas.current!;
-    return toUnits(e, c.getBoundingClientRect());
-  };
+  const pointerUnits = (e: { clientX: number; clientY: number }) => toUnits(e, canvas.current!.getBoundingClientRect());
 
   const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;                            // the right button opens the menu instead
     const c = canvas.current;
     if (!c) return;
     c.setPointerCapture(e.pointerId);
+    endGesture();
     const { ux, uy } = pointerUnits(e);
-    // Second level: inside the selected teammates, a child under the pointer
-    // is picked before the panel, and the picked child's corner resizes it.
-    // Free has three levels: the teammates, then one card, then its children.
-    // A fitted card is almost all children, so a press on any card but the
-    // picked one picks and drags that card, and only the picked card's
-    // children are reachable. Row and Column reach children in every card.
-    if (selected === 'teamColumn') {
-      const free = isFreeTeam(design);
-      if (free) {
-        const card = freeCardAt(design, ux, uy);
-        if (card !== null && card !== selectedCard) {
-          setSelectedCard(card);
-          setSelectedChild(null);
-          drag.current = { kind: 'card', card, startUx: ux, startUy: uy, startRect: teamCardRects(design, design.aspect)[card] };
-          return;
-        }
-      }
-      const only = free ? selectedCard ?? undefined : undefined;
-      const reach = !free || selectedCard !== null;
-      if (reach && selectedChild && childCornerAt(design, cardState, selectedChild, ux, uy, only)) {
-        const start = cardChild(design, selectedChild);
-        if (start) { drag.current = { kind: 'child', name: selectedChild, mode: 'resize', startUx: ux, startUy: uy, start }; return; }
-      }
-      const child = reach ? childAt(design, cardState, ux, uy, only) : null;
-      if (child) {
-        setSelectedChild(child.name);
-        const start = cardChild(design, child.name);
-        drag.current = start && teamChild(child.name)?.move
-          ? { kind: 'child', name: child.name, mode: 'move', startUx: ux, startUy: uy, start } : null;
-        return;
-      }
+    press.current = { cx: e.clientX, cy: e.clientY, ux, uy, mods: modsOf(e), hit: hitAt(current.current, side, cardState, ux, uy), moved: false };
+    drag.current = null;
+    setHover(null);
+  };
+
+  /** What a drag of this selection starts from: every position read back from the generator. */
+  const dragFor = (s: Selection, d: HudDesign): Drag | null => {
+    switch (s.kind) {
+      case 'elements':
+        return { kind: 'elements', ids: s.ids, starts: Object.fromEntries(s.ids.map((id) => {
+          const { x, y, w, h } = elementRect(d, id, d.aspect);
+          return [id, { x, y, w, h }];
+        })) };
+      case 'card': return { kind: 'card', card: s.card, start: teamCardRects(d, d.aspect)[s.card] };
+      case 'children': return { kind: 'children', names: s.names, card: s.card, starts: startsOf(d, s.names) };
+      default: return null;
     }
-    const hit = hitTest(design, side, ux, uy);
-    if (!hit) {
-      selectEl(null);
-      drag.current = null;
+  };
+
+  /** The pointer has left the click radius: decide what the drag moves, selecting a section it picks up. */
+  const startDrag = (p: Press): Drag | null => {
+    const intent = dragIntent(current.current, sel, p.hit, p.mods);
+    switch (intent.kind) {
+      case 'box': return { kind: 'box' };
+      case 'move':
+        if (intent.sel !== sel) setSel(intent.sel);
+        return dragFor(intent.sel, current.current);
+      // Resizing from a handle arrives with Task 12, which has the press look
+      // for handles. Until then dragIntent is never given one, never answers
+      // this, and a resize starts nothing.
+      case 'resize': return null;
+      case 'none': return null;
+    }
+  };
+
+  const moveDrag = (d: Drag, p: Press, ux: number, uy: number, alt: boolean) => {
+    const dux = ux - p.ux, duy = uy - p.uy;
+    const cur = current.current;
+    if (d.kind === 'box') {
+      setMarquee({ x: Math.min(p.ux, ux), y: Math.min(p.uy, uy), w: Math.abs(ux - p.ux), h: Math.abs(uy - p.uy) });
       return;
     }
-    selectEl(hit);
-    if (hit === 'teamColumn' && isFreeTeam(design)) {
-      // In Free each card is its own target, and dragging it moves only that card.
-      const card = freeCardAt(design, ux, uy);
-      setSelectedCard(card);
-      drag.current = card === null ? null
-        : { kind: 'card', card, startUx: ux, startUy: uy, startRect: teamCardRects(design, design.aspect)[card] };
+    if (d.kind === 'children') {
+      // Pieces are stored unscaled in the card file's unfitted frame: the
+      // pointer delta is divided by the scale, the snap is found in that
+      // frame, and its guides are drawn where the pieces are drawn.
+      const f = cardFrame(cur);
+      const dx = dux / f.k, dy = duy / f.k;
+      const start = unionBox(Object.values(d.starts));
+      if (!start) return;
+      const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dx, y: start.y + dy }, pieceTargets(cur, cardState, d.names));
+      const card = teamCardRects(cur, cur.aspect)[d.card];
+      setGuides(s.guides.map((g) => pieceGuideToScreen(g, card, f)));
+      edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy), 'gesture');
       return;
     }
-    const el = elementById(hit)!;
-    const rect = elementRect(design, hit, design.aspect);
-    const nearCorner = Math.hypot(ux - (rect.x + rect.w), uy - (rect.y + rect.h)) <= 6;
-    if (el.resize === 'free' && nearCorner) {
-      drag.current = { kind: 'element', id: hit, mode: 'resize', startUx: ux, startUy: uy, startRect: rect };
-    } else if (el.move) {
-      drag.current = { kind: 'element', id: hit, mode: 'move', startUx: ux, startUy: uy, startRect: rect };
-    } else {
-      drag.current = null;
-    }
+    const moving: Selection = d.kind === 'card' ? { kind: 'card', card: d.card } : { kind: 'elements', ids: d.ids };
+    const start = d.kind === 'card' ? d.start : unionBox(Object.values(d.starts));
+    if (!start) return;
+    const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dux, y: start.y + duy }, sectionTargets(cur, side, moving));
+    setGuides(s.guides);
+    edit((x) => (d.kind === 'card'
+      ? moveCard(x, d.card, d.start, dux + s.dx, duy + s.dy)
+      : moveElements(x, d.ids, d.starts, dux + s.dx, duy + s.dy)), 'gesture');
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
     const { ux, uy } = pointerUnits(e);
-    const dux = ux - d.startUx;
-    const duy = uy - d.startUy;
-    const extentW = screenW(design.aspect);
-
-    if (d.kind === 'child') {
-      // Pointer units are screen units; the stored numbers are unscaled.
-      const scale = design.elements.teamColumn?.scale ?? 1;
-      const parent = baseTeam(design.preset).card;
-      const s = d.start;
-      edit((cur) => (d.mode === 'resize'
-        ? resizeChild(cur, d.name, { ...s, visible: true }, 'se', dux / scale, duy / scale)
-        : placeChild(cur, d.name, snap(s.x + dux / scale, s.w, parent.w), snap(s.y + duy / scale, s.h, parent.h))), 'gesture');
+    const p = press.current;
+    if (!p) {
+      setHover({ hit: hitAt(current.current, side, cardState, ux, uy), ctrl: e.ctrlKey || e.metaKey });
       return;
     }
-
-    if (d.kind === 'card') {
-      const r = d.startRect;
-      edit((cur) => placeCard(cur, d.card,
-        clampSpan(snap(r.x + dux, r.w, extentW), r.w, extentW, 8),
-        clampSpan(snap(r.y + duy, r.h, SCREEN_H), r.h, SCREEN_H, 8)), 'gesture');
-      return;
+    if (!p.moved) {
+      if (Math.hypot(e.clientX - p.cx, e.clientY - p.cy) <= CLICK_PX) return;
+      p.moved = true;
+      drag.current = startDrag(p);
     }
-    edit((cur) => {
-      const old = cur.elements[d.id] ?? {};
-      if (d.mode === 'resize') {
-        const w = Math.max(20, d.startRect.w + dux);
-        const h = Math.max(20, d.startRect.h + duy);
-        return { ...cur, elements: { ...cur.elements, [d.id]: { ...old, w, h } } };
-      }
-      const x = clampSpan(snap(d.startRect.x + dux, d.startRect.w, extentW), d.startRect.w, extentW, 8);
-      const y = clampSpan(snap(d.startRect.y + duy, d.startRect.h, SCREEN_H), d.startRect.h, SCREEN_H, 8);
-      return { ...cur, elements: { ...cur.elements, [d.id]: { ...old, x, y } } };
-    }, 'gesture');
+    if (drag.current) moveDrag(drag.current, p, ux, uy, e.altKey);
   };
 
   const onPointerUp = (e: PointerEvent) => {
+    const p = press.current, d = drag.current;
+    // Cleared before the capture is released, so the lostpointercapture that
+    // release fires is not mistaken for a drag lost mid-way.
+    press.current = null;
+    drag.current = null;
     const c = canvas.current;
     if (c && c.hasPointerCapture(e.pointerId)) c.releasePointerCapture(e.pointerId);
-    drag.current = null;
+    setGuides([]);
+    setMarquee(null);
+    if (!p) return;
+    if (!p.moved) { setSel((s) => clickSelect(current.current, s, p.hit, p.mods)); return; }
+    if (d?.kind === 'box') {
+      const { ux, uy } = pointerUnits(e);
+      setSel(boxSelect(current.current, side, cardState, { x: p.ux, y: p.uy }, { x: ux, y: uy }));
+      return;
+    }
     endGesture();
   };
 
-  // Arrows nudge, Escape deselects, Tab/Shift+Tab cycle the current side's
-  // elements: the whole editor stays usable without a mouse.
+  /** Forget the press and drag under way, and clear what they drew. */
+  function letGoOfDrag() {
+    press.current = null;
+    drag.current = null;
+    setGuides([]);
+    setMarquee(null);
+  }
+
+  /** A drag that cannot finish (Escape, a cancelled or lost pointer) puts the design back and records nothing. */
+  const abortDrag = () => {
+    if (drag.current && drag.current.kind !== 'box') cancelGesture();
+    letGoOfDrag();
+  };
+
+  // Arrows nudge (Shift by 10), Escape climbs or cancels a drag, Tab and
+  // Shift+Tab cycle the side's elements: the editor works without a mouse.
   const onKeyDown = (e: KeyboardEvent) => {
-    // Escape steps up one level: a child or a picked card to the teammates, the teammates to nothing.
     if (e.key === 'Escape') {
-      if (drag.current) { cancelGesture(); drag.current = null; return; }
-      if (selectedChild) setSelectedChild(null);
-      else if (selectedCard !== null) setSelectedCard(null);
-      else selectEl(null);
+      if (press.current) { abortDrag(); return; }
+      setSel((s) => climb(current.current, s));
       return;
     }
 
-    if (e.key === 'Tab') {
+    if (e.key === 'Tab' && e.target === canvas.current) {
       e.preventDefault();
       const list = visibleElements(side).map((el) => el.id);
       if (list.length === 0) return;
       const forward = !e.shiftKey;
-      if (!selected) { selectEl(forward ? list[0] : list[list.length - 1]); return; }
-      const idx = list.indexOf(selected);
-      const base = idx === -1 ? (forward ? -1 : 0) : idx;
-      const next = (base + (forward ? 1 : -1) + list.length) % list.length;
-      selectEl(list[next]);
+      const at = sel.kind === 'elements' && sel.ids.length === 1 ? list.indexOf(sel.ids[0]) : -1;
+      const next = at === -1 ? (forward ? 0 : list.length - 1) : (at + (forward ? 1 : -1) + list.length) % list.length;
+      setSel({ kind: 'elements', ids: [list[next]] });
       return;
     }
 
@@ -532,17 +563,10 @@ export default function Hud() {
       ArrowUp: [0, -amount], ArrowDown: [0, amount], ArrowLeft: [-amount, 0], ArrowRight: [amount, 0],
     };
     const delta = deltas[e.key];
-    if (!delta) return;
+    if (!delta || sel.kind === 'none') return;
     e.preventDefault();
-    // Which selection this nudge moves: a run of nudges on the same one is one undo step.
-    const key = [selected, selectedCard, selectedChild].join(':');
-    if (selected === 'teamColumn' && selectedChild) {
-      const name = selectedChild;
-      edit((d) => nudgeChild(d, name, delta[0], delta[1]), { nudge: key });
-    } else if (selected === 'teamColumn' && selectedCard !== null && isFreeTeam(design)) {
-      const card = selectedCard;
-      edit((d) => nudgeCard(d, card, delta[0], delta[1]), { nudge: key });
-    } else if (selected) edit((d) => nudge(d, selected, delta[0], delta[1]), { nudge: key });
+    const s = sel;
+    edit((d) => nudgeSelection(d, s, delta[0], delta[1]), { nudge: selectionKey(s) });
   };
 
   /** Switching preset keeps whatever moves the reader made, but they were
@@ -675,6 +699,8 @@ export default function Hud() {
   const sideElements = visibleElements(side);
   const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
+  const teamPicked = sel.kind === 'card' || sel.kind === 'children' || (sel.kind === 'elements' && sel.ids.length === 1 && sel.ids[0] === 'teamColumn');
+  const oneChild = sel.kind === 'children' && sel.names.length === 1 ? sel.names[0] : null;
 
   return (
     <div class="page page--wide">
@@ -695,6 +721,7 @@ export default function Hud() {
             >
               ↷ Redo
             </button>
+
             <label>
               Preset{' '}
               <select
@@ -709,7 +736,7 @@ export default function Hud() {
             <Tabs
               tabs={[{ key: 'survivor', label: 'Survivor' }, { key: 'infected', label: 'Infected' }]}
               active={side}
-              onSelect={(k) => { setSide(k as Side); selectEl(null); }}
+              onSelect={(k) => { setSide(k as Side); setSel(NONE); }}
             />
 
             {side === 'survivor' && (
@@ -762,27 +789,34 @@ export default function Hud() {
             {design.preset === 'modern' && <span class="muted hud__note">Modern already uses Roboto Condensed.</span>}
           </div>
 
-          <canvas
-            ref={canvas}
-            tabIndex={0}
-            class="hud__canvas"
-            style={{ aspectRatio: `${screenW(design.aspect)} / ${SCREEN_H}` }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onKeyDown={onKeyDown}
-          />
+          <div class="hud__canvaswrap">
+            <canvas
+              ref={canvas}
+              tabIndex={0}
+              class="hud__canvas"
+              style={{ aspectRatio: `${screenW(design.aspect)} / ${SCREEN_H}` }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={() => { if (press.current) abortDrag(); }}
+              onLostPointerCapture={() => { if (press.current) abortDrag(); }}
+              onPointerLeave={() => setHover(null)}
+              onKeyDown={onKeyDown}
+            />
+            <Crumbs crumbs={breadcrumb(design, sel)} onSelect={setSel} />
+          </div>
 
           {/* The only way to reach an element that is hidden or off screen. */}
           <div class="hud__list">
             {sideElements.map((el) => {
               const visible = elementRect(design, el.id, design.aspect).visible;
+              const active = sel.kind === 'elements' && sel.ids.includes(el.id);
               return (
                 <button
                   key={el.id}
                   type="button"
-                  class={`hud__pill${el.id === selected ? ' is-active' : ''}${visible ? '' : ' hud__pill--hidden'}`}
-                  onClick={() => selectEl(el.id)}
+                  class={`hud__pill${active ? ' is-active' : ''}${visible ? '' : ' hud__pill--hidden'}`}
+                  onClick={(e) => setSel((s) => pick(s, { kind: 'elements', ids: [el.id] }, e.shiftKey))}
                 >
                   {el.label}
                 </button>
@@ -792,13 +826,18 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          {childShown
-            ? <ChildControls design={design} edit={edit} end={endGesture} name={childShown} onBack={() => setSelectedChild(null)} />
-            : selected
-              ? <ElementControls design={design} edit={edit} end={endGesture} id={selected} />
-              : <p class="muted">Select an element on the canvas or in the list below it.</p>}
-          {selected === 'teamColumn' && (
-            <ChildList design={design} edit={edit} selectedChild={selectedChild} onPick={setSelectedChild} />
+          {oneChild
+            ? <ChildControls design={design} edit={edit} end={endGesture} name={oneChild} onBack={() => setSel(TEAMMATES)} />
+            : sel.kind === 'elements' && sel.ids.length === 1
+              ? <ElementControls design={design} edit={edit} end={endGesture} id={sel.ids[0]} />
+              : sel.kind === 'card'
+                ? <ElementControls design={design} edit={edit} end={endGesture} id="teamColumn" />
+                : <p class="muted">Select an element on the canvas or in the list below it.</p>}
+          {teamPicked && (
+            <ChildList
+              design={design} edit={edit} selectedChild={oneChild}
+              onPick={(name) => setSel({ kind: 'children', names: [name], card: sel.kind === 'children' || sel.kind === 'card' ? sel.card : 0 })}
+            />
           )}
         </Panel>
       </div>

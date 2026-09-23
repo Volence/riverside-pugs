@@ -193,6 +193,17 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
  * itself comes from an inline style: it tracks the design's own aspect, not a
  * fixed one. */
 .hud__canvas { display: block; width: 100%; touch-action: none; border: 1px solid var(--border); background: #000; }
+/* The canvas and what floats over it: the breadcrumb at its corner and,
+ * later, the right-click menu. */
+.hud__canvaswrap { position: relative; }
+.hud__crumbs {
+  position: absolute; left: var(--sp-2); top: var(--sp-2);
+  display: flex; align-items: center; gap: var(--sp-1);
+  padding: 2px var(--sp-2); background: rgba(0, 0, 0, 0.65);
+  font-size: var(--fs-dense); color: var(--text-bright);
+}
+.hud__crumbs button { background: none; border: 0; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
+.hud__crumbs button:hover { color: var(--text-bright); text-decoration: underline; }
 
 .hud__list { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
 .hud__pill {

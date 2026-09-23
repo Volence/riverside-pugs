@@ -1,16 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
-import { snap, toUnits } from './Hud';
+import { toUnits } from './Hud';
 import Hud from './Hud';
-
-describe('snap', () => {
-  it('snaps edges and centre, and otherwise leaves the value alone', () => {
-    expect(snap(3, 100, 853)).toBe(0);
-    expect(snap(750, 100, 853)).toBe(753);
-    expect(snap(375, 100, 853)).toBe(376.5);
-    expect(snap(200, 100, 853)).toBe(200);
-  });
-});
 
 describe('toUnits', () => {
   it('converts a pointer position to HUD units', () => {
@@ -34,6 +25,25 @@ afterEach(() => {
   // against it. Restoring here happens either way.
   vi.restoreAllMocks();
 });
+
+/** happy-dom lays nothing out: a 1:1 box makes client pixels HUD units. */
+const unitCanvas = (container: Element) => {
+  const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  return canvas;
+};
+type Keys = { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean };
+/** A press and release on one spot: a click. */
+const clickAt = (canvas: HTMLElement, x: number, y: number, keys: Keys = {}) => {
+  fireEvent.pointerDown(canvas, { clientX: x, clientY: y, pointerId: 1, ...keys });
+  fireEvent.pointerUp(canvas, { clientX: x, clientY: y, pointerId: 1, ...keys });
+};
+/** A drag, with Alt held unless told otherwise, so the numbers are the pointer's and not a snap's. */
+const dragFrom = (canvas: HTMLElement, from: [number, number], to: [number, number], keys: Keys = { altKey: true }) => {
+  fireEvent.pointerDown(canvas, { clientX: from[0], clientY: from[1], pointerId: 1, ...keys });
+  fireEvent.pointerMove(canvas, { clientX: to[0], clientY: to[1], pointerId: 1, ...keys });
+  fireEvent.pointerUp(canvas, { clientX: to[0], clientY: to[1], pointerId: 1, ...keys });
+};
 
 /* Shallow on purpose, like routes.test.tsx: happy-dom's canvas 2D context is
  * a stub (getContext returns null), so the draw effect is a no-op here and
@@ -340,68 +350,118 @@ describe('Hud page', () => {
     }
   });
 
-  it('drags a Free teammate card on the canvas', () => {
+  // The stock fitted row: card 1 at (13, 441), its portrait (13, 443) to (36, 466).
+  it('picks a piece in one click, shows its path, and climbs back up with Escape', () => {
     const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Up to Teammates' })).toBeTruthy();
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(screen.getByText(/select an element/i)).toBeTruthy();
+  });
+
+  it('picks one level up with Ctrl+click, and from the breadcrumb', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454, { ctrlKey: true });
+    expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
+    clickAt(canvas, 24, 454);
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Up to Teammates' }));
+    expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
+  });
+
+  it('moves the whole team when a drag starts on a piece not yet picked', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    dragFrom(canvas, [24, 454], [24, 404]);
+    expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('355');
+  });
+
+  it('moves just the picked piece when the drag starts on it', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    dragFrom(canvas, [24, 454], [34, 454]);
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('38');
+  });
+
+  it('snaps a moving piece to the others unless Alt is held', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    // Moved 10 right the portrait's centre is 2.5 short of the health bar's left edge (37), so it snaps there.
+    dragFrom(canvas, [24, 454], [34, 454], {});
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('26');
+  });
+
+  it('cancels a drag with Escape, putting everything back and recording nothing', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    fireEvent.pointerDown(canvas, { clientX: 24, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 44, clientY: 454, pointerId: 1, altKey: true });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('33');
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('in Free, picks a piece of any card in one click, and a drag on another card moves that card', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
-    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    // happy-dom lays nothing out: give the canvas a 1:1 box so client pixels are HUD units.
-    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
-    // Card 1 sits at (13, 441), 121 x 36. (133, 442) is on the card but on no
-    // child (only the splatter, which is decoration), so even with the
-    // teammates already selected this grabs the card, not a child.
-    fireEvent.pointerDown(canvas, { clientX: 133, clientY: 442, pointerId: 1 });
-    fireEvent.pointerMove(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
-    fireEvent.pointerUp(canvas, { clientX: 233, clientY: 242, pointerId: 1 });
+    // Card 2 sits at (153, 441); (160, 450) is its portrait.
+    clickAt(canvas, 160, 450);
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Up to Card 2' })).toBeTruthy();
+    // (133, 442) is on card 1 but on none of its pieces.
+    dragFrom(canvas, [133, 442], [233, 242]);
+    // The side panel's own card note arrives with Task 15; the breadcrumb names the card meanwhile.
+    expect(screen.getByText('Card 1', { selector: '.hud__crumbs span' })).toBeTruthy();
     expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
     expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('241');
   });
 
-  it('in Free, drags an unselected card even over its children, and reaches children only in the selected card', () => {
+  it('clears the selection with a click on empty screen', () => {
     const { container } = render(<Hud />);
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
-    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
-    // Card 2 sits at (153, 441); (160, 450) is on its portrait. The card is
-    // not the selected one, so the press picks and drags the card.
-    fireEvent.pointerDown(canvas, { clientX: 160, clientY: 450, pointerId: 1 });
-    fireEvent.pointerMove(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
-    fireEvent.pointerUp(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
-    expect((screen.getByLabelText('Card 2 X') as HTMLInputElement).value).toBe('253');
-    expect((screen.getByLabelText('Card 2 Y') as HTMLInputElement).value).toBe('241');
-    // Inside the selected card, the same spot is its portrait.
-    fireEvent.pointerDown(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
-    fireEvent.pointerUp(canvas, { clientX: 260, clientY: 250, pointerId: 1 });
-    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
-    // A press on another card's portrait picks that card instead.
-    fireEvent.pointerDown(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
-    fireEvent.pointerUp(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
-    expect(screen.queryByText('Portrait', { selector: 'legend' })).toBeNull();
-    // Card 1 is now the picked one: the same press reaches its portrait.
-    fireEvent.pointerDown(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
-    fireEvent.pointerUp(canvas, { clientX: 20, clientY: 450, pointerId: 1 });
-    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    clickAt(canvas, 426, 100);
+    expect(screen.getByText(/select an element/i)).toBeTruthy();
   });
 
-  it('picks a child inside the selected teammates on the canvas, drags it, and steps back up with Escape', () => {
+  it('cancels a drag the browser takes away, recording nothing', () => {
     const { container } = render(<Hud />);
-    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
-    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    // Card 1 at (13, 441); the fitted Head is (0, 2, 23, 23) inside it, so its centre is (24.5, 454.5).
-    fireEvent.pointerDown(canvas, { clientX: 24, clientY: 454, pointerId: 1 });
-    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
-    fireEvent.pointerMove(canvas, { clientX: 34, clientY: 454, pointerId: 1 });
-    fireEvent.pointerUp(canvas, { clientX: 34, clientY: 454, pointerId: 1 });
-    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
-    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('38');
-    fireEvent.keyDown(canvas, { key: 'ArrowRight' });
-    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('24');
-    fireEvent.keyDown(canvas, { key: 'Escape' });
-    expect(screen.getByText('Reset this element')).toBeTruthy();
-    fireEvent.keyDown(canvas, { key: 'Escape' });
-    expect(screen.getByText(/select an element/i)).toBeTruthy();
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    fireEvent.pointerDown(canvas, { clientX: 24, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 44, clientY: 454, pointerId: 1, altKey: true });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('33');
+    fireEvent.pointerCancel(canvas, { pointerId: 1 });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('undoes a drag still under way with Ctrl+Z, and the pointer moves nothing after it', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    fireEvent.pointerDown(canvas, { clientX: 24, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 44, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    fireEvent.pointerMove(canvas, { clientX: 54, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.pointerUp(canvas, { clientX: 54, clientY: 454, pointerId: 1, altKey: true });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('33');
   });
 
   it('offers the Healthy, Down and Dead preview on the survivor side only', () => {
@@ -498,7 +558,7 @@ describe('Hud page', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
     canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 853, height: 480, right: 853, bottom: 480, x: 0, y: 0, toJSON() {} }) as DOMRect;
-    // Alt keeps snapping out of it (it arrives with the selection model), so the numbers are the pointer's.
+    // Alt keeps snapping out of it, so the numbers are the pointer's.
     fireEvent.pointerDown(canvas, { clientX: 133, clientY: 442, pointerId: 1, altKey: true });
     fireEvent.pointerMove(canvas, { clientX: 183, clientY: 342, pointerId: 1, altKey: true });
     fireEvent.pointerMove(canvas, { clientX: 233, clientY: 242, pointerId: 1, altKey: true });
