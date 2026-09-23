@@ -69,11 +69,12 @@ describe('group selection', () => {
     expect(() => parseGroupSpec('5-1')).toThrow();
   });
 
-  it('ships groups 1 to 5 unless told otherwise', () => {
+  it('ships the shipped groups unless told otherwise', () => {
+    expect(SHIPPED).toEqual([1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     expect(selectGroups({})).toEqual(SHIPPED);
-    expect(selectGroups({ commons: true })).toEqual([...SHIPPED, 6]);
+    expect(selectGroups({ commons: true })).toEqual([...SHIPPED, 6].sort((a, b) => a - b));
     expect(selectGroups({ batch2: true })).toEqual([...SHIPPED, ...BATCH2]);
-    expect(selectGroups({ batch2: true, without: '15' })).toEqual([...SHIPPED, ...BATCH2.filter((n) => n !== 15)]);
+    expect(selectGroups({ without: '15' })).toEqual(SHIPPED.filter((n) => n !== 15));
     expect(selectGroups({ groups: '1,16' })).toEqual([1, 16]);
   });
 

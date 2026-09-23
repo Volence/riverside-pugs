@@ -12,9 +12,9 @@
  * docs/superpowers/specs/2026-09-19-file-consistency-phase2-design.md.
  *
  * Usage:
- *   npx tsx scripts/gen-consistency-list.ts                    # groups 1 to 5, the shipped list
+ *   npx tsx scripts/gen-consistency-list.ts                    # the shipped list, groups 1 to 5 and 7 to 15
  *   npx tsx scripts/gen-consistency-list.ts --commons          # also group 6
- *   npx tsx scripts/gen-consistency-list.ts --batch2           # also groups 7 to 15, to l4d_consistency.batch2.cfg
+ *   npx tsx scripts/gen-consistency-list.ts --batch2           # also the BATCH2 groups (none since 7 to 15 were promoted 2026-09-23), to l4d_consistency.batch2.cfg
  *   npx tsx scripts/gen-consistency-list.ts --batch2 --without 15
  *   npx tsx scripts/gen-consistency-list.ts --groups 1-5,16 --out /tmp/probe.cfg
  *   npx tsx scripts/gen-consistency-list.ts --game /path/to/left4dead

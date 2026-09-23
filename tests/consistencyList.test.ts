@@ -30,10 +30,10 @@ describe('loadConsistencyList', () => {
   it('loads the committed list from the repo, relative to src/', () => {
     const list = loadConsistencyList();
     expect(list).not.toBeNull();
-    // Groups 1 to 5 as committed in 1b4b5fb on 2026-09-19, which dropped the sound
-    // manifest. A deliberate regeneration (group 6, a game update) changes this
-    // number; update it then.
-    expect(list!.length).toBe(651);
+    // Groups 1 to 5 (651, committed 1b4b5fb on 2026-09-19) plus groups 7 to 15
+    // (880), promoted 2026-09-23. A deliberate regeneration (group 6, a game
+    // update) changes this number; update it then.
+    expect(list!.length).toBe(1531);
     expect(list).toContain('materials/models/infected/hunter/hunter_01.vmt');
     expect(list).toContain('scripts/game_sounds_weapons.txt');
     expect(list!.every((p) => !p.startsWith('#') && p.trim() === p && p !== '')).toBe(true);
@@ -71,18 +71,14 @@ describe('loadConsistencyList', () => {
   });
 });
 
-// Batch 2 is generated beside the shipped list and is NOT what the servers or the
-// uploader read: it waits on the owner's two-population client gate (see the
-// spec). Promoting it is `gen-consistency-list.ts --batch2 --out` onto the
-// shipped file, and these pins move in the same commit.
-describe('the batch 2 list', () => {
-  const BATCH2_CFG = join(CONSISTENCY_CFG, '..', 'l4d_consistency.batch2.cfg');
-  const shipped = loadConsistencyList()!;
-  const batch2 = loadConsistencyList(BATCH2_CFG)!;
+// Groups 7 to 15 were batch 2, generated beside the shipped list until the
+// owner's two-population client gate passed on 2026-09-23 and they were promoted.
+describe('the shipped list, groups 1 to 5 and the promoted batch 2', () => {
+  const BATCH2_CFG = CONSISTENCY_CFG;
+  const batch2 = loadConsistencyList()!;
 
-  it('is the shipped list, in order, and then groups 7 to 15', () => {
-    expect(batch2.slice(0, shipped.length)).toEqual(shipped);
-    // 4 + 4 + 28 + 1 + 246 + 296 + 6 + 9 + 286 new paths, as generated 2026-09-21.
+  it('holds groups 1 to 5 and then 7 to 15, in that order', () => {
+    // 4 + 4 + 28 + 1 + 246 + 296 + 6 + 9 + 286 on top of the 651, as generated 2026-09-21.
     expect(batch2.length).toBe(651 + 880);
     const headers = readFileSync(BATCH2_CFG, 'utf8').split('\n').filter((l) => l.startsWith('# group '));
     expect(headers.map((h) => Number(/^# group (\d+):/.exec(h)![1]))).toEqual([1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15]);

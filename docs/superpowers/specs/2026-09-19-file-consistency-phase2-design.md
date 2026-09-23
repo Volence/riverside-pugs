@@ -5,7 +5,8 @@ probes and the pure-whitelist spike done the same evening; nothing else built.
 
 Update 2026-09-21: groups 1 to 5 are live on all four servers. Batch 2 (groups 7 to 15, 880
 more paths) is generated beside the shipped list and is NOT live; see "Batch 2" for what it
-holds. Update 2026-09-23: batch 2 passed the owner's client gate (see "The batch 2 gate").
+holds. Update 2026-09-23: batch 2 passed the owner's client gate (see "The batch 2 gate") and
+was promoted into the shipped list, 1,531 paths.
 
 Related: `2026-09-18-file-consistency-design.md` (Phase 1, the mechanism, PASSED for
 materials and sounds), `2026-09-17-integrity-design.md` (the replay analyzer, a different
@@ -204,7 +205,7 @@ and the file name lands in the disconnect reason. It does not work for this prob
 - A force-listed file drops the client at signon, before pure ever runs, so the two cannot be
   combined to get attribution for the same file.
 
-## Batch 2: groups 7 to 15 (880 files), generated 2026-09-21, NOT live
+## Batch 2: groups 7 to 15 (880 files), generated 2026-09-21, promoted 2026-09-23
 
 The 2026-09-21 integrity audit (items 16 to 18) made the point that decides this batch:
 **anything unforced can be overridden from a search path put first in `gameinfo.txt`**, which

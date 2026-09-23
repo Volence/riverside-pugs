@@ -43,8 +43,8 @@ also not needed.)
   and emits the `L4DC SIGNON_DROP` line.
 - `configs/l4d_consistency.cfg` the enforced list. GENERATED and committed; never
   edited by hand.
-- `configs/l4d_consistency.batch2.cfg` the shipped list plus groups 7 to 15. Generated
-  and committed, read by NOTHING until it is promoted (see Batch 2).
+- `configs/l4d_consistency.batch2.cfg` exists only while a batch is waiting on its gate:
+  the shipped list plus the `BATCH2` groups, read by nothing. None right now.
 - `../src/consistencyGen.ts` the rules, and the checks a generated list has to pass.
 - `../scripts/gen-consistency-list.ts` the generator's command line, with `--overlay`
   and `--verify`.
@@ -140,9 +140,9 @@ comment, and a `# group N: title` comment opens a group, which is what
 `sm_consistency_status` reports per. **No wildcards at runtime**: a glob that
 matches nothing is a silent zero, and a generated file is diffable.
 
-    npx tsx scripts/gen-consistency-list.ts                     # groups 1 to 5 (651 paths)
+    npx tsx scripts/gen-consistency-list.ts                     # groups 1 to 5 and 7 to 15 (1531 paths)
     npx tsx scripts/gen-consistency-list.ts --commons           # also group 6, common infected
-    npx tsx scripts/gen-consistency-list.ts --batch2            # also groups 7 to 15 (1531), to l4d_consistency.batch2.cfg
+    npx tsx scripts/gen-consistency-list.ts --batch2            # also the BATCH2 groups (none now), to l4d_consistency.batch2.cfg
     npx tsx scripts/gen-consistency-list.ts --batch2 --without 15
     npx tsx scripts/gen-consistency-list.ts --groups 1-5,7-16 --out /tmp/probe.cfg
     npx tsx scripts/gen-consistency-list.ts --game /path/to/left4dead
@@ -213,8 +213,9 @@ stock client and a client with dlc4, a custom HUD and campaign VPKs both connect
 survived map changes, and each new group rejected a modified file. The gate's procedure
 and full results are kept privately, not in this repository.
 
-Until it is promoted nothing reads `l4d_consistency.batch2.cfg`. Promoting it is moving the
-group numbers from `BATCH2` to `SHIPPED` in `src/consistencyGen.ts` and regenerating.
+Promoted 2026-09-23: groups 7 to 15 moved from `BATCH2` to `SHIPPED` in
+`src/consistencyGen.ts`, so a plain run now writes all 1,531 paths to `l4d_consistency.cfg`.
+The next batch follows the same path: generated beside the list, gated, then promoted.
 
 ## Installing
 
@@ -386,5 +387,5 @@ own rollout, after groups 1 to 5 have survived real matches.
 - Batch 2 (2026-09-21): rules, checks and `l4d_consistency.batch2.cfg` built, verified
   against the owner's real client install (1,531 files, 0 differ, 0 missing), 0
   overlay collisions. Client gate PASSED 2026-09-23; about 0.7 s more per map load
-  than the shipped list on the owner's machine. NOT live until promoted.
+  than the old list on the owner's machine. Promoted 2026-09-23.
 - Groups 1 to 5 have been live on all four servers since 2026-09-20.
