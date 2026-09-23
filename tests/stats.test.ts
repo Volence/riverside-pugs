@@ -10,6 +10,7 @@ import type { Dump } from '../src/dumpParse.js';
 import { statDef, STAT_DEFS } from '../src/statKeys.js';
 import { getSetting, setSetting } from '../src/settings.js';
 import { banPlayer } from '../src/admin/players.js';
+import { hashIp, recordPlayerNet } from '../src/playerNetworks.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -454,6 +455,42 @@ describe('stats routes', () => {
     expect(Array.isArray(body.statDefs)).toBe(true);
     const skeets = body.statDefs.find((d: { key: string }) => d.key === 'skeets');
     expect(skeets.direction).toBe('high_good');
+  });
+
+  // Every SourceTV spectator is on record for admins, but a spectator never
+  // authenticates, so the same match page must not leak it to a player: that
+  // would let a rostered player learn who else was watching, or worse, out
+  // an admin's own alt as a lurker.
+  it('sends SourceTV sessions to an admin viewer only, never as an empty key to anyone else', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    const serverId = Number(
+      db.prepare(
+        "INSERT INTO servers (name, host, port, rcon_port, rcon_password) VALUES ('Dallas','h',1,1,'p')",
+      ).run().lastInsertRowid,
+    );
+    recordPlayerNet(db, { steamid: IDS[1], ip: '203.0.113.9', country: 'US' });
+    db.prepare(
+      `INSERT INTO sourcetv_sessions (server_id, match_id, slot, name, ip_hash, country, joined_at, left_at, leave_reason)
+       VALUES (?, ?, 1, 'Watcher', ?, 'US', '2026-09-11 00:00:00', '2026-09-11 00:10:00', 'Disconnect')`,
+    ).run(serverId, matchId, hashIp(db, '203.0.113.9'));
+
+    // Anonymous: no key at all, not an empty array.
+    const anon = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}` })).json();
+    expect('sourcetv' in anon).toBe(false);
+
+    // Signed in, but not an admin: same as anonymous.
+    const plain = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect('sourcetv' in plain).toBe(false);
+
+    // An admin gets the sessions, with the matched account riding along.
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ME);
+    const admin = (await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, cookies })).json();
+    expect(admin.sourcetv).toHaveLength(1);
+    expect(admin.sourcetv[0]).toMatchObject({
+      name: 'Watcher', country: 'US', leaveReason: 'Disconnect',
+      joinedAt: '2026-09-11 00:00:00', leftAt: '2026-09-11 00:10:00',
+      accounts: [{ steamid: IDS[1], name: 'p1' }],
+    });
   });
 
   describe('stat visibility', () => {
