@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.6"
+#define PLUGIN_VERSION "0.3.7"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -531,6 +531,8 @@ No config exec and no restart: it tracks the game already being played. Implies 
 		LogMessage("pug-match: event 'choke_start' does not exist on this engine; tongue_clears cannot be distinguished and will not be counted.");
 	if (!HookEventEx("player_say", Event_PlayerSay))
 		LogError("pug: player_say not hooked; chat will not be captured");
+	if (!HookEventEx("player_changename", Event_PlayerChangeName))
+		LogError("pug: player_changename not hooked; renames will not reach the conduct alerts");
 
 	// Persistent repeating timers (no TIMER_FLAG_NO_MAPCHANGE, since they must survive changelevel).
 	CreateTimer(30.0, Timer_Heartbeat, _, TIMER_REPEAT);
@@ -818,6 +820,47 @@ void SanitizeChat(char[] text, int maxlen)
 	text[w] = '\0';
 }
 
+/** Conduct alerts (src/conductFlags.ts on the backend).
+ *
+ *  PUGSAY carries every human's chat and PUGNAME every human's name, on
+ *  connect and on each rename, whether or not a match is tracked. Token-less
+ *  like PUGNET, so the marker opens the line where no player text can reach,
+ *  and the player's text is LAST so nothing typed into it can overwrite the
+ *  steamid in front of it. That ordering is why these exist at all: the
+ *  engine's own say and "changed name" lines put the player-controlled name
+ *  FIRST, and a name can be built to look like somebody else's steamid. */
+void EmitConductSay(int client, Event event)
+{
+	if (!IsClientInGame(client) || IsFakeClient(client)) return;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	char text[256];
+	event.GetString("text", text, sizeof(text));
+	SanitizeChat(text, sizeof(text));
+	if (text[0] == '\0') return;
+	PugLog("PUGSAY steamid=%s team=%d msg=%s", id, GetClientTeam(client), text);
+}
+
+void EmitConductName(const char[] id, const char[] event, const char[] rawName)
+{
+	char nm[256];
+	strcopy(nm, sizeof(nm), rawName);
+	SanitizeChat(nm, sizeof(nm));
+	if (nm[0] == '\0') return;
+	PugLog("PUGNAME steamid=%s event=%s name=%s", id, event, nm);
+}
+
+public void Event_PlayerChangeName(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	char newName[MAX_NAME_LENGTH];
+	event.GetString("newname", newName, sizeof(newName));
+	EmitConductName(id, "change", newName);
+}
+
 /** Chat is captured for any tracked match, NOT gated on StatsActive().
  *
  *  That gate exists to keep counters from moving between rounds and during
@@ -830,9 +873,14 @@ void SanitizeChat(char[] text, int maxlen)
  *  spectator or admin must never appear in the match record. */
 public void Event_PlayerSay(Event event, const char[] name, bool dontBroadcast)
 {
-	if (g_State == MS_None) return;
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	if (client < 1 || client > MaxClients) return;
+
+	// Every human's chat for the conduct alerts, match or not, roster or not,
+	// BEFORE the gates below. See EmitConductSay.
+	EmitConductSay(client, event);
+
+	if (g_State == MS_None) return;
 	int slot = g_iClientRoster[client];
 	if (slot < 0) return;
 
@@ -2703,7 +2751,13 @@ public void OnClientPostAdminCheck(int client)
 	//
 	// The backend never stores the address; it keeps an HMAC of it. See
 	// src/playerNetworks.ts.
-	if (haveId) EmitClientNet(client, id);
+	if (haveId)
+	{
+		EmitClientNet(client, id);
+		char nm[MAX_NAME_LENGTH];
+		GetClientName(client, nm, sizeof(nm));
+		EmitConductName(id, "connect", nm);
+	}
 
 	if (g_State == MS_None) return;
 	if (!haveId)
@@ -2957,6 +3011,14 @@ public void OnMapStart()
 	RplClose();
 
 	GetCurrentMap(g_sCurrentMap, sizeof(g_sCurrentMap));
+	// A self-started match that is still waiting for its first go-live takes
+	// its campaign from the map it will actually be played on. Without this,
+	// !load_4v4p followed by a changelevel kept the OLD map as the campaign,
+	// and the "campaign changed" check below ended the match the moment its
+	// second map loaded (match 144, 2026-09-23: loaded on Dead Air, played on
+	// I Hate Mountains, ended after one map).
+	if (g_State == MS_Pending && g_bSelfStarted)
+		strcopy(g_sCampaign, sizeof(g_sCampaign), g_sCurrentMap);
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;

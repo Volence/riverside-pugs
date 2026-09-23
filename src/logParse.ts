@@ -152,7 +152,13 @@ export type LogEvent =
   // address is used to compute a hash and is never stored; see
   // src/playerNetworks.ts. `country` is absent when the GeoIP extension is
   // not loaded, which is normal and not an error.
-  | { kind: 'player_net'; steamid: string; ip: string; country: string | null };
+  | { kind: 'player_net'; steamid: string; ip: string; country: string | null }
+  // Every chat line and every name, from every human on the box, in a match
+  // or not, for the conduct alerts (src/conductFlags.ts). The rostered-only
+  // CHAT line above still feeds the match chat log; these feed nothing else.
+  // `team` is the game's team number: 1 spectator, 2 survivors, 3 infected.
+  | { kind: 'say'; steamid: string; team: number | null; message: string }
+  | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -356,6 +362,30 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
       kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals,
       wire, serverSpan, holds,
     };
+  }
+
+  // Chat and names for the conduct alerts. The text is LAST and every other
+  // field is read from the slice BEFORE it, the CHAT treatment, so a message
+  // or a name with "steamid=..." typed into it cannot move the line onto
+  // another account. That is the whole reason these come from the plugin
+  // rather than from the engine's own say and "changed name" lines, whose
+  // player-controlled name comes FIRST and can be built to look like someone
+  // else's <uid><steamid><team>.
+  if (body.startsWith('PUGSAY ') || body.startsWith('PUGNAME ')) {
+    const say = body.startsWith('PUGSAY ');
+    const marker = say ? ' msg=' : ' name=';
+    const at = body.indexOf(marker);
+    if (at < 0) return null;
+    const head = kv(body.slice(0, at).split(/\s+/).slice(1));
+    const text = body.slice(at + marker.length);
+    const steamid = steamId64Of(head.steamid ?? '');
+    if (!steamid || !text.trim()) return null;
+    if (say) {
+      const team = intOf(head.team);
+      return { kind: 'say', steamid, team: team !== null && team >= 0 && team <= 3 ? team : null, message: text };
+    }
+    if (head.event !== 'connect' && head.event !== 'change') return null;
+    return { kind: 'name', steamid, event: head.event, name: text.slice(0, 128) };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the

@@ -50,6 +50,7 @@ import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
+import { handleConduct } from './conductFlags.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
 import { renewSession } from './session.js';
@@ -733,6 +734,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             }
           } catch (err) {
             console.error('[inputstats] failed to record an input burst:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'say' || ev.kind === 'name') {
+          // Conduct alerts. Never on the critical path: a failure here must
+          // not take down the listener that also carries match_end.
+          try {
+            handleConduct(deps.db, ev, serverOf(source, meta));
+          } catch (err) {
+            console.error('[conduct] failed to check a line:', err);
           }
           return;
         }

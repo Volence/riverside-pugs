@@ -44,6 +44,13 @@ export function arrivedSince(items: readonly TimelineItem[], since: string | nul
     parts.push(`Steam: ${[...new Set(steam.map((i) => STEAM_KIND[i.kind] ?? i.kind))].join(', ')}`);
   }
   if (by('drop').length > 0) parts.push('repeated connect drops');
+  const conduct = by('conduct');
+  if (conduct.length > 0) {
+    const chat = conduct.filter((i) => i.kind === 'chat').length;
+    const names = conduct.length - chat;
+    const what = [chat ? plural(chat, 'chat line') : '', names ? plural(names, 'name') : ''].filter(Boolean);
+    parts.push(`slurs: ${what.join(', ')}`);
+  }
 
   return parts.join(' · ');
 }

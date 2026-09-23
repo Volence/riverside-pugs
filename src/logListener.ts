@@ -77,7 +77,7 @@ export class LogListener {
         // unconditionally: nothing below may ever see an event without a token.
         if (ev.kind === 'signon_drop' || ev.kind === 'entered' || ev.kind === 'player_net'
             || ev.kind === 'input_burst' || ev.kind === 'input_cap' || ev.kind === 'lilac_flag'
-            || ev.kind === 'cvar_flag') {
+            || ev.kind === 'cvar_flag' || ev.kind === 'say' || ev.kind === 'name') {
           if (fromGameServer()) this.onEvent(ev, rinfo.address, meta);
           return;
         }

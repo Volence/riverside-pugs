@@ -168,6 +168,24 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'conduct_flag': {
+        // Quoted exactly, as inline code so Discord renders nothing inside it:
+        // an admin judging a slur needs the letters the player typed.
+        const quoted = '`' + e.text.replace(/`/g, "'").slice(0, 200) + '`';
+        const server = e.serverId === null ? null : (this.deps.db.prepare('SELECT name FROM servers WHERE id = ?')
+          .get(e.serverId) as { name: string } | undefined)?.name ?? null;
+        const where = [
+          e.matchId ? `in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '',
+          server ? `on ${server}` : '',
+        ].filter(Boolean).join(' ');
+        const what = e.slurs.join(', ');
+        return {
+          text: e.where === 'chat'
+            ? `🗯️ ${this.name(e.steamid)} typed ${quoted} in chat${where ? ' ' + where : ''} (${what}). [File](${this.file(e.steamid)})`
+            : `🏷️ ${this.name(e.steamid)} is using the name ${quoted}${where ? ' ' + where : ''} (${what}). [File](${this.file(e.steamid)})`,
+          color: COLOR.problem,
+        };
+      }
       case 'steam_signal': {
         // Context, worded as context. A ban in some other game is not a ban
         // in this one, and a borrowed library is how siblings share a PC.
