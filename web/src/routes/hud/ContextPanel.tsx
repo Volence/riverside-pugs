@@ -136,7 +136,7 @@ const WEAPON_ROWS: { group: string; rows: { field: WeaponNumKey | 'clipFont' | '
     { field: 'itemSize', label: 'Item size', min: 0, max: 200 },
   ] },
   { group: 'Ammo numbers', rows: [
-    { field: 'ammoX', label: 'Numbers from right', min: -200, max: 200 },
+    { field: 'ammoX', label: 'Numbers in from box edge', min: -200, max: 200 },
     { field: 'reserveY', label: 'Reserve lower by', min: -200, max: 200 },
     { field: 'clipFont', label: 'Clip text size', min: 6, max: 64 },
     { field: 'pistolFont', label: 'Reserve and pistol text size', min: 6, max: 64 },
@@ -178,7 +178,24 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
   const value = (field: WeaponNumKey | 'clipFont' | 'pistolFont') => {
     if (field === 'clipFont') return fontFace(design, weaponKey(design, 'PrimaryAmmoFont')).tall;
     if (field === 'pistolFont') return fontFace(design, weaponKey(design, 'PistolAmmoFont')).tall;
-    return Math.round(parseFloat(weaponKey(design, WEAPON_KEYS[field].key)) || 0);
+    const n = (f: WeaponNumKey) => Math.round(parseFloat(weaponKey(design, WEAPON_KEYS[f].key)) || 0);
+    // The game measures PrimaryWeaponAmmoX from the panel's right edge and the
+    // boxes from RightSideIndent, so a bare AmmoX leaves the numbers behind
+    // when the inset moves the boxes (the owner's in-game test, 2026-09-23).
+    // The box shows the numbers' distance in from the boxes' edge instead.
+    return field === 'ammoX' ? n('ammoX') - n('indent') : n(field);
+  };
+  /**
+   * One row's change. The inset carries the ammo numbers with it, and the
+   * numbers' row counts from the inset, so the numbers stay where the player
+   * put them against the boxes; the file still gets the game's own keys.
+   */
+  const setRow = (field: WeaponNumKey | 'clipFont' | 'pistolFont', v: number) => {
+    if (field === 'indent') {
+      const indent = clampWeapon('indent', v);
+      patch({ indent, ammoX: clampWeapon('ammoX', value('ammoX') + indent) });
+    } else if (field === 'ammoX') patch({ ammoX: clampWeapon('ammoX', v + value('indent')) });
+    else patch({ [field]: clampWeapon(field, v) });
   };
   const boxRow = (box: 'boxActive' | 'boxInactive', label: string) => {
     const s = w[box];
@@ -212,7 +229,7 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
           {g.rows.map((r) => (
             <SliderNum
               key={r.field} label={r.label} value={value(r.field)} min={r.min} max={r.max} onEnd={end}
-              onInput={(n) => patch({ [r.field]: clampWeapon(r.field, n) })}
+              onInput={(n) => setRow(r.field, n)}
             />
           ))}
           {g.group === 'Sizes' && <p class="muted hud__note">Item size 0 hides the three item slots.</p>}

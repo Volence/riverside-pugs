@@ -1418,8 +1418,8 @@ describe('Hud page', () => {
       expect(screen.getByRole('button', { name: 'Ammo only' })).toBeTruthy();
       expect([
         'Inset from right', 'Start height', 'Gun box W', 'Gun box H', 'Pistol box W', 'Pistol box H', 'Gun picture height',
-        'Item size', 'Numbers from right', 'Reserve lower by', 'Clip text size', 'Reserve and pistol text size',
-      ].map((n) => box(n).value)).toEqual(['10', '10', '53', '24', '53', '24', '20', '24', '38', '5', '24', '18']);
+        'Item size', 'Numbers in from box edge', 'Reserve lower by', 'Clip text size', 'Reserve and pistol text size',
+      ].map((n) => box(n).value)).toEqual(['10', '10', '53', '24', '53', '24', '20', '24', '28', '5', '24', '18']);
       expect(slider('Gun box W').value).toBe('53');
       expect((screen.getByRole('checkbox', { name: 'Weapon pictures' }) as HTMLInputElement).checked).toBe(true);
       expect((screen.getByRole('checkbox', { name: 'Item pictures' }) as HTMLInputElement).checked).toBe(true);
@@ -1431,13 +1431,13 @@ describe('Hud page', () => {
       render(<Hud />);
       pick();
       fireEvent.click(screen.getByRole('button', { name: 'Ammo only' }));
-      expect(box('Numbers from right').value).toBe('48');
+      expect(box('Numbers in from box edge').value).toBe('48');
       expect(box('Item size').value).toBe('0');
       expect((screen.getByRole('combobox', { name: 'Active box' }) as HTMLSelectElement).value).toBe('hidden');
       expect((screen.getByRole('checkbox', { name: 'Weapon pictures' }) as HTMLInputElement).checked).toBe(false);
       expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('417');
       fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-      expect(box('Numbers from right').value).toBe('38');
+      expect(box('Numbers in from box edge').value).toBe('28');
       expect((screen.getByRole('combobox', { name: 'Active box' }) as HTMLSelectElement).value).toBe('stock');
       expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('755');
     });
@@ -1448,14 +1448,33 @@ describe('Hud page', () => {
       fireEvent.input(slider('Gun box W'), { target: { value: '80' } });
       fireEvent.change(slider('Gun box W'));
       expect(box('Gun box W').value).toBe('80');
-      fireEvent.input(box('Numbers from right'), { target: { value: '999' } });
-      fireEvent.blur(box('Numbers from right'));
-      expect(box('Numbers from right').value).toBe('200');
+      fireEvent.input(box('Numbers in from box edge'), { target: { value: '999' } });
+      fireEvent.blur(box('Numbers in from box edge'));
+      // The file's PrimaryWeaponAmmoX caps at 200; the row counts from the inset of 10.
+      expect(box('Numbers in from box edge').value).toBe('190');
       fireEvent.input(box('Clip text size'), { target: { value: '' } });
       expect(box('Clip text size').value).toBe('');
       fireEvent.blur(box('Clip text size'));
       fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-      expect(box('Numbers from right').value).toBe('38');
+      expect(box('Numbers in from box edge').value).toBe('28');
+    });
+
+    it('keeps the ammo numbers with the boxes when the inset changes', () => {
+      render(<Hud />);
+      pick();
+      fireEvent.input(box('Inset from right'), { target: { value: '40' } });
+      fireEvent.blur(box('Inset from right'));
+      // The game measures PrimaryWeaponAmmoX from the panel's edge, not the box's, so
+      // the editor moves it with the inset: 38 + 30 in the file, still 28 in from the box.
+      expect(box('Numbers in from box edge').value).toBe('28');
+      fireEvent.input(box('Numbers in from box edge'), { target: { value: '20' } });
+      fireEvent.blur(box('Numbers in from box edge'));
+      expect(box('Inset from right').value).toBe('40');
+      expect(box('Numbers in from box edge').value).toBe('20');
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(box('Inset from right').value).toBe('10');
+      expect(box('Numbers in from box edge').value).toBe('28');
     });
 
     it('lets a number box be typed one digit at a time, clamping only when typing ends', () => {
