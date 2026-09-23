@@ -38,6 +38,8 @@ export interface HudUpload { name: string; files: Map<string, Uint8Array>; dropp
 const LAYOUT = 'scripts/hudlayout.res';
 const isZip = (b: Uint8Array) => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b;
 const fail = (why: string): never => { throw new Error(why); };
+/** A gameinfo.txt at any depth: never a HUD file (see the header). */
+const isGameinfo = (p: string) => p === 'gameinfo.txt' || p.endsWith('/gameinfo.txt');
 const total = (m: Map<string, Uint8Array>) => [...m.values()].reduce((n, d) => n + d.length, 0);
 
 /** Files a Mac, Windows or git leaves in a folder it zips, by lower-cased file name. */
@@ -154,15 +156,23 @@ export async function readHudUpload(fileName: string, bytes: Uint8Array): Promis
   if (bytes.length > MAX_HUD_BYTES) fail(IMPORT_ERRORS.tooBig);
   let entries: Map<string, Uint8Array>;
   const original = new Map<string, string>();                  // lower-cased path -> the name as the zip spells it
+  const twins: string[] = [];
   if (isVpk(bytes)) entries = vpkFiles(bytes);
   else if (isZip(bytes)) {
     let raw: Map<string, Uint8Array>;
     try { raw = await readZip(bytes, MAX_HUD_BYTES); }
     catch (e) { return fail(e instanceof ZipTooBig ? IMPORT_ERRORS.tooBig : IMPORT_ERRORS.unreadable); }
     entries = new Map();
-    for (const [name, data] of raw) { const p = name.toLowerCase(); entries.set(p, data); original.set(p, name); }
+    // The game looks paths up without regard to case, so two entries whose
+    // names differ only by case are one file to it: the first is kept and
+    // the other is listed as left out, rather than one silently winning.
+    for (const [name, data] of raw) {
+      const p = name.toLowerCase();
+      if (entries.has(p)) { twins.push(name); continue; }
+      entries.set(p, data); original.set(p, name);
+    }
   } else return fail(IMPORT_ERRORS.unreadable);
-  const dropped: string[] = [];
+  const dropped: string[] = [...twins];
   dropUnwanted(entries, dropped, original);
 
   const root = hudRoot([...entries.keys()]);
@@ -186,7 +196,7 @@ export async function readHudUpload(fileName: string, bytes: Uint8Array): Promis
   for (const [p, data] of entries) {
     const inRoot = p.startsWith(root);
     const rel = inRoot ? p.slice(root.length) : p;
-    if (!inRoot || rel === 'gameinfo.txt' || rel.endsWith('/gameinfo.txt')) { dropped.push(original.get(p) ?? p); continue; }
+    if (!inRoot || isGameinfo(rel)) { dropped.push(original.get(p) ?? p); continue; }
     files.set(rel, data);
   }
   return finish(nameOf(fileName, root), files, dropped);
@@ -194,7 +204,7 @@ export async function readHudUpload(fileName: string, bytes: Uint8Array): Promis
 
 function finish(name: string, files: Map<string, Uint8Array>, dropped: string[]): HudUpload {
   dropUnwanted(files, dropped);                                  // again, for a VPK found inside a zip
-  for (const p of [...files.keys()]) if (p === 'gameinfo.txt' || p.endsWith('/gameinfo.txt')) { files.delete(p); dropped.push(p); }
+  for (const p of [...files.keys()]) if (isGameinfo(p)) { files.delete(p); dropped.push(p); }
   checkFiles(files);
   return { name, files, dropped: dropped.sort() };
 }

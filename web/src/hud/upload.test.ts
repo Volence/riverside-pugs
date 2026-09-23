@@ -85,6 +85,17 @@ describe('readHudUpload', () => {
     expect(got.dropped).toEqual(['README.txt']);
   });
 
+  it('keeps the first of two zip entries whose names differ only by case, and says it left the other out', async () => {
+    const files = sampleHud();
+    const zip = await zipOf([
+      ...under('edgehud/', files),
+      { path: 'edgehud/scripts/hudlayout.res', data: latin1('"x" { }') },
+    ]);
+    const got = await readHudUpload('edgehud.zip', zip);
+    expect(got.files.get('scripts/hudlayout.res')).toEqual(files.get('scripts/hudlayout.res'));
+    expect(got.dropped).toEqual(['edgehud/scripts/hudlayout.res']);
+  });
+
   it('says a file without scripts/hudlayout.res is not a HUD', async () => {
     const vpk = encodeVPK([{ path: 'materials/vgui/hud/x.vtf', data: new Uint8Array(4) }]);
     await expect(readHudUpload('x.vpk', vpk)).rejects.toThrow(IMPORT_ERRORS.notHud);
