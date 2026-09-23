@@ -7,6 +7,7 @@
  * sound. `over` replaces a file, adds one, or (null) removes one.
  */
 import { baseFile } from './base';
+import { parseKv, writeKv, type KvNode } from './kv';
 
 export const latin1 = (s: string): Uint8Array => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 export const MARKER_PANEL = 'HudImpMarker';
@@ -42,3 +43,31 @@ export function sampleHud(over: Record<string, string | Uint8Array | null> = {})
 }
 
 export const asList = (files: Map<string, Uint8Array>) => [...files].map(([path, data]) => ({ path, data }));
+
+/** A .res file's text without one top-level block of its root: a HUD that lacks or renamed a panel. */
+export function dropBlock(text: string, name: string): string {
+  const t = parseKv(text);
+  t[0].value = (t[0].value as KvNode[]).filter((n) => n.key.toLowerCase() !== name.toLowerCase());
+  return writeKv(t);
+}
+
+/**
+ * A canvas context that records every method call with the font and
+ * composite operation current at the time. `canvas` has no size, so
+ * render.ts's paintAdditive takes its 'lighter' fallback.
+ */
+export function recordingCtx() {
+  const calls: { m: string; a: unknown[]; font: string; gco: string }[] = [];
+  const state: Record<string, unknown> = {
+    fillStyle: '', strokeStyle: '', font: '', textAlign: 'left', textBaseline: 'alphabetic', globalAlpha: 1,
+    globalCompositeOperation: 'source-over', lineWidth: 1, canvas: {},
+  };
+  const ctx = new Proxy(state, {
+    get: (t, k) => (typeof k === 'string' && k in t ? t[k] : (...a: unknown[]) => {
+      calls.push({ m: String(k), a, font: String(t.font), gco: String(t.globalCompositeOperation) });
+      return k === 'measureText' ? { width: 10 } : undefined;
+    }),
+    set: (t, k, v) => { t[k as string] = v; return true; },
+  }) as unknown as CanvasRenderingContext2D;
+  return { ctx, calls };
+}

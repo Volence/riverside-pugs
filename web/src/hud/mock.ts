@@ -14,7 +14,8 @@
 import type { Box, HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement } from './build';
+import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize } from './units';
 import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type CardState } from './render';
@@ -24,8 +25,15 @@ import { drawWeapons, type WeaponHeld } from './weapons';
 
 export type Side = 'survivor' | 'infected';
 
-export function visibleElements(side: Side): HudElement[] {
-  return ELEMENTS.filter((e) => e.side === side || e.side === 'both');
+/**
+ * The elements the side shows, for this design: an imported HUD that lacks
+ * or renamed an element's panel does not offer it, so no control, outline or
+ * hit test reaches a panel the file does not have. Stock and Modern offer
+ * every one.
+ */
+export function visibleElements(side: Side, design: HudDesign): HudElement[] {
+  const key = baseOf(design);
+  return ELEMENTS.filter((e) => (e.side === side || e.side === 'both') && baseHasElement(key, e));
 }
 
 /** What a painter is handed: a box in canvas pixels. Whether the element is
@@ -69,7 +77,7 @@ export const TEAM_CARDS = 3;
  *  there the three drawn cards are the targets instead of the container. */
 export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): string | null {
   let best: { id: string; area: number } | null = null;
-  for (const el of visibleElements(side)) {
+  for (const el of visibleElements(side, design)) {
     const r = rectFor(design, el.id);
     if (!r.visible) continue;
     const targets = el.id === 'teamColumn' && isFreeTeam(design) ? teamCardRects(design, design.aspect).slice(0, TEAM_CARDS) : [r];
@@ -481,7 +489,7 @@ export function drawHud(
   // player can see what they are editing; every outline comes from `view`.
   const picked: readonly string[] = selected === null ? [] : typeof selected === 'string' ? [selected] : selected;
 
-  for (const el of visibleElements(side)) {
+  for (const el of visibleElements(side, design)) {
     const u = rectFor(design, el.id);
     const hidden = !u.visible;
     if (hidden && !picked.includes(el.id)) continue;

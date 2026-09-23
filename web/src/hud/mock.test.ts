@@ -41,8 +41,8 @@ beforeEach(() => { _resetAssetCache(); });
 
 describe('visibleElements', () => {
   it('splits by side and shares the "both" elements', () => {
-    const s = visibleElements('survivor').map((e) => e.id);
-    const i = visibleElements('infected').map((e) => e.id);
+    const s = visibleElements('survivor', DEFAULT_DESIGN).map((e) => e.id);
+    const i = visibleElements('infected', DEFAULT_DESIGN).map((e) => e.id);
     expect(s).toContain('ownHealth'); expect(s).not.toContain('abilityRing');
     expect(i).toContain('abilityRing'); expect(i).not.toContain('ownHealth');
     expect(s).toContain('chat'); expect(i).toContain('chat');

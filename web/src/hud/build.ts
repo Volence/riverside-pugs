@@ -73,6 +73,20 @@ class Work {
     if (!p) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
+  /** Whether this build is on an imported HUD. */
+  get imported(): boolean { return this.key.startsWith('imported:'); }
+  /**
+   * A panel an edit lands on, when the base has it. An imported HUD may lack
+   * or rename a panel the editor models (the spec's "When the upload lacks an
+   * expected piece"): its controls are hidden and a stored edit for it has
+   * nothing to land on, so it is skipped. Stock and Modern have every panel,
+   * so there a missing one is still a bug and fails loudly, as panel() does.
+   */
+  optional(path: string, keys: string[]): KvNode | undefined {
+    const p = kvFind(this.tree(path), keys);
+    if (!p && !this.imported) throw new Error(`${path}: no panel ${keys.join('/')}`);
+    return p;
+  }
   text(path: string): string { return this.texts.get(path) ?? baseFile(this.key, path); }
   setText(path: string, s: string) { this.texts.set(path, s); }
   /**
@@ -144,11 +158,14 @@ function layoutPass(work: Work, design: HudDesign) {
 
   // Probe T2: the engine crosshair honours never_draw, so a player with an
   // image crosshair can hide the game's own one underneath it.
-  if (design.hideGameCrosshair) kvSet(work.panel(LAYOUT, ['HudCrosshair']), 'never_draw', '1');
+  if (design.hideGameCrosshair) { const c = work.optional(LAYOUT, ['HudCrosshair']); if (c) kvSet(c, 'never_draw', '1'); }
 
   for (const el of ELEMENTS) {
     const o = design.elements[el.id];
-    if (!o || el.id === 'xhair') continue;
+    // An element the base lacks is skipped whole: an imported HUD that has
+    // no panel for it offers no control for it, so a stored edit (from
+    // before the switch) has nothing to land on.
+    if (!o || el.id === 'xhair' || !baseHasElement(work.key, el)) continue;
     const panel = work.panel(LAYOUT, [el.key]);
     if (o.visible !== undefined) kvSet(panel, 'visible', o.visible ? '1' : '0');
     const moved = el.move && (o.x !== undefined || o.y !== undefined);
@@ -165,16 +182,16 @@ function layoutPass(work: Work, design: HudDesign) {
     if (el.id === 'chat') chatWindow(work, moved ? p : { ...p, xpos: kvGet(panel, 'xpos') ?? '0', ypos: kvGet(panel, 'ypos') ?? '0' });
   }
   const chat = design.elements.chat;
-  if (chat?.visible === false) {
+  if (chat?.visible === false && baseHasElement(work.key, elementById('chat')!)) {
     // hudlayout's own HudChat is only a background panel (chatWindow's own
     // doc comment), but game code opens and shows the chat itself, the same
     // trap hidePass works around for the teammate card: visible 0 alone may
     // not be enough to keep it hidden.
     hardHide(work.panel(LAYOUT, ['HudChat']));
-    for (const name of ['HudChat', 'HudChatHistory']) hardHide(work.panel(BASECHAT, [name]));
+    for (const name of ['HudChat', 'HudChatHistory']) { const p = work.optional(BASECHAT, [name]); if (p) hardHide(p); }
   }
   const killNotices = design.elements.killNotices;
-  if (killNotices?.visible === false) {
+  if (killNotices?.visible === false && baseHasElement(work.key, elementById('killNotices')!)) {
     // CHudPZDamageRecordPanel is the game's kill/incap feed: its rows are
     // filled in by game code, the same trap as the chat window above, so
     // visible 0 in the file alone may not survive that. hardHide also zeros
@@ -217,7 +234,8 @@ export function pcSet(block: KvNode, key: string, value: string) {
  * hides.
  */
 function chatWindow(work: Work, p: { xpos: string; ypos: string; w: number; h: number }) {
-  const chat = work.panel(BASECHAT, ['HudChat']);
+  const chat = work.optional(BASECHAT, ['HudChat']);
+  if (!chat) return;
   const baseW = num(pcGet(chat, 'wide')), baseH = num(pcGet(chat, 'tall'));
   const w = Math.round(p.w), h = Math.round(p.h);
   pcSet(chat, 'xpos', p.xpos);
@@ -267,13 +285,16 @@ function childPass(work: Work, design: HudDesign) {
         if (o.on === true && !block) {
           const after = def.addable.after.toLowerCase();
           const at = nodes.findIndex((n) => n.key.toLowerCase() === after);
-          if (at < 0) throw new Error(`${panel.file}: no ${def.addable.after} to add ${name} after`);
+          // An imported card may lack the sibling an addable child goes after
+          // (or the child itself, below): the side panel offers no such
+          // child there, so a stored edit for it is skipped, not a failure.
+          if (at < 0) { if (work.imported) continue; throw new Error(`${panel.file}: no ${def.addable.after} to add ${name} after`); }
           block = structuredClone(def.addable.template);
           nodes.splice(at + 1, 0, block);
         }
         if (!block) continue;
       }
-      if (!block) throw new Error(`${panel.file}: no child ${name}`);
+      if (!block) { if (work.imported) continue; throw new Error(`${panel.file}: no child ${name}`); }
       applyChild(work, panel.file, def, block, o);
     }
   }
@@ -578,6 +599,29 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
   };
 }
 
+const BASE_TREES = new Map<string, KvNode[]>();
+/** A base file's root children, parsed once per base key and path: the file as the base has it, before any edit. */
+export function baseTree(key: BaseKey, path: string): KvNode[] {
+  const id = `${key}|${path}`;
+  let t = BASE_TREES.get(id);
+  if (!t) { t = parseKv(baseFile(key, path))[0].value as KvNode[]; BASE_TREES.set(id, t); }
+  return t;
+}
+
+/**
+ * Whether the base has what the editor needs to offer an element: its
+ * hudlayout.res panel and, for the survivor team, all four TeamPlayerN
+ * cards. Always true on Stock and Modern. The crosshair is always offered:
+ * layoutPass adds its panel whenever the design has one.
+ */
+export function baseHasElement(key: BaseKey, el: HudElement): boolean {
+  if (el.id === 'xhair') return true;
+  if (!kvFind(baseTree(key, LAYOUT), [el.key])) return false;
+  if (!el.team?.file) return true;
+  const team = baseTree(key, el.team.file);
+  return [1, 2, 3, 4].every((n) => kvFind(team, [`TeamPlayer${n}`]) !== undefined);
+}
+
 /** Whether the base's own card file has this child: an addable child it lacks shows as a checkbox. */
 export function baseHasChild(key: BaseKey, name: string): boolean {
   return kvFind(parseKv(baseFile(key, CARD))[0].value as KvNode[], [name]) !== undefined;
@@ -805,7 +849,7 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
 function teamPass(work: Work, design: HudDesign) {
   for (const el of ELEMENTS) {
     const o = design.elements[el.id];
-    if (!el.team || !teamWrites(el, o)) continue;
+    if (!el.team || !teamWrites(el, o) || !baseHasElement(work.key, el)) continue;
     const team = el.team;
     const t = teamLayout(design, el);
     const container = work.panel(LAYOUT, [el.key]);
@@ -889,7 +933,7 @@ function useFontCopy(work: Work, leaf: KvNode, tag: string, tall: (t: number) =>
 function scalePass(work: Work, design: HudDesign) {
   for (const el of ELEMENTS) {
     const k = design.elements[el.id]?.scale;
-    if (el.resize !== 'scale' || k === undefined || k === 1) continue;
+    if (el.resize !== 'scale' || k === undefined || k === 1 || !baseHasElement(work.key, el)) continue;
     const tag = String(Math.round(k * 100));
     const fontLeaves: KvNode[] = [];
     // teamPass owns a team-file element's container size and the file that
@@ -968,7 +1012,7 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
     for (const name of names) {
       out.push({ path: `materials/${name}.vtf`, data: vtf }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
     }
-    for (const t of slot.targets) kvSet(work.panel(t.file, t.path), t.key, `hud/hudeditor/${slot.id.toLowerCase()}`);
+    for (const t of slot.targets) { const p = work.optional(t.file, t.path); if (p) kvSet(p, t.key, `hud/hudeditor/${slot.id.toLowerCase()}`); }
   }
 }
 
@@ -1038,7 +1082,8 @@ function baseFontTall(key: BaseKey, font: string): number | undefined {
 function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
   const w = design.weapons;
   if (!w) return;
-  const panel = work.panel(LAYOUT, ['HudWeaponSelection']);
+  const panel = work.optional(LAYOUT, ['HudWeaponSelection']);
+  if (!panel) return;
   for (const [field, { key }] of Object.entries(WEAPON_KEYS) as [WeaponNumKey, { key: string }][]) {
     const v = w[field];
     if (v !== undefined) pcSet(panel, key, String(Math.round(v)));
@@ -1072,7 +1117,7 @@ function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
   const cells = work.panel(MODTEX, ['TextureData']);
   for (const [entry, file] of repoint) {
     const e = kvFind(cells.value as KvNode[], [entry]);
-    if (!e) throw new Error(`${MODTEX}: no ${entry}`);
+    if (!e) { if (work.imported) continue; throw new Error(`${MODTEX}: no ${entry}`); }
     kvSet(e, 'file', file);
   }
   if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) {

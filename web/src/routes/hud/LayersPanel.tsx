@@ -79,7 +79,7 @@ export function LayersPanel(
   return (
     <nav class="hud__layers" aria-label="Layers" onKeyDown={onKeyDown}>
       <p class="eyebrow">{side === 'survivor' ? 'Survivor HUD' : 'Infected HUD'}</p>
-      {visibleElements(side).map((el) => {
+      {visibleElements(side, design).map((el) => {
         const target: Selection = { kind: 'elements', ids: [el.id] };
         return (
           <div key={el.id}>

@@ -204,7 +204,7 @@ export function boxSelect(design: HudDesign, side: Side, state: CardState, a: { 
       return names.length ? { kind: 'children', names, card } : NONE;
     }
   }
-  const ids = visibleElements(side)
+  const ids = visibleElements(side, design)
     .filter((el) => elementRect(design, el.id, design.aspect).visible && sectionRects(design, el.id).some((r) => touches(r, box)))
     .map((el) => el.id);
   return ids.length ? { kind: 'elements', ids } : NONE;
@@ -216,7 +216,7 @@ export function selectAll(design: HudDesign, side: Side, state: CardState, sel: 
     const names = drawnPieces(design, state);
     return names.length ? { kind: 'children', names, card: sel.card } : sel;
   }
-  const ids = visibleElements(side).filter((el) => elementRect(design, el.id, design.aspect).visible).map((el) => el.id);
+  const ids = visibleElements(side, design).filter((el) => elementRect(design, el.id, design.aspect).visible).map((el) => el.id);
   return ids.length ? { kind: 'elements', ids } : NONE;
 }
 
@@ -258,7 +258,7 @@ export function selectionLabel(sel: Selection): string {
  * when nothing changed, so the page's state update is a no-op.
  */
 export function sanitize(design: HudDesign, side: Side, sel: Selection): Selection {
-  const onSide = (id: string) => visibleElements(side).some((e) => e.id === id);
+  const onSide = (id: string) => visibleElements(side, design).some((e) => e.id === id);
   switch (sel.kind) {
     case 'none': return sel;
     case 'elements': {
@@ -411,7 +411,7 @@ export function pieceTargets(design: HudDesign, state: CardState, moving: string
 /** What moving elements or cards snap to, in screen units: the screen, and every other visible thing of the side. */
 export function sectionTargets(design: HudDesign, side: Side, sel: Selection): Box[] {
   const out: Box[] = [{ x: 0, y: 0, w: screenW(design.aspect), h: SCREEN_H }];
-  for (const el of visibleElements(side)) {
+  for (const el of visibleElements(side, design)) {
     if (sel.kind === 'elements' && sel.ids.includes(el.id)) continue;
     if (!elementRect(design, el.id, design.aspect).visible) continue;
     const rects = sectionRects(design, el.id);

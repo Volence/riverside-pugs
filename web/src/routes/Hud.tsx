@@ -727,7 +727,7 @@ export default function Hud() {
 
     if (e.key === 'Tab' && e.target === canvas.current) {
       e.preventDefault();
-      const list = visibleElements(side).map((el) => el.id);
+      const list = visibleElements(side, design).map((el) => el.id);
       if (list.length === 0) return;
       const forward = !e.shiftKey;
       const at = sel.kind === 'elements' && sel.ids.length === 1 ? list.indexOf(sel.ids[0]) : -1;
