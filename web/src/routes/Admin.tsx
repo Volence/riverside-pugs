@@ -10,6 +10,7 @@ import { AdminTicket } from './admin/AdminTicket';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
 import { AdminSeasons } from './admin/AdminSeasons';
+import { AdminPatches } from './admin/AdminPatches';
 import { AdminCampaigns } from './admin/AdminCampaigns';
 import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
@@ -121,6 +122,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'setup' && r.section === 'seasons' && <AdminSeasons />}
         {r.desk === 'setup' && r.section === 'settings' && <AdminSettings />}
         {r.desk === 'setup' && r.section === 'audit' && <AdminAudit />}
+        {r.desk === 'setup' && r.section === 'patches' && <AdminPatches />}
         {/* A desk that does not exist, or a section of one that does not.
             Either way the panel says so rather than showing an empty page. */}
         {r.section === 'unknown' && <NoSuchPage />}

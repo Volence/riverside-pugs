@@ -830,6 +830,17 @@ export interface AuditEntry {
   targetName: string | null; detail: Record<string, unknown>; createdAt: string;
 }
 
+export interface PatchSummary {
+  id: number; number: number; name: string | null; notes: string;
+  source: 'announced' | 'detected' | 'historical'; firstSeenAt: string; reviewed: boolean; rounds: number;
+  servers: { serverId: number; name: string; lastSeenAt: string }[];
+}
+export interface PatchDetail extends PatchSummary {
+  inputs: Record<string, string> | null;
+  diffVsPrevious: { added: string[]; removed: string[]; changed: { key: string; from: string; to: string }[] } | null;
+}
+export interface DriftRow { serverId: number; name: string; patchId: number; since: string; differsFrom: { name: string; diff: string }[] }
+
 /** These mirror the DB rows exactly, because the admin campaigns route
  *  returns them unshaped. */
 export interface AdminChapter {
@@ -1321,6 +1332,11 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/maps-to-play`, { maps }),
   deleteCampaign: (slug: string) =>
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
+  balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),
+  balancePatch: (id: number, signal?: AbortSignal) => get<PatchDetail>(`/api/admin/balance/patches/${id}`, signal),
+  balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
+  editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
+    post(`/api/admin/balance/patches/${id}`, body),
 };
 
 /** A second of a round: which map of the match, which half, how far in. */
