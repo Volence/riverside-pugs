@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db.js';
-import { compareSides, metricDetail } from '../../src/metrics/compare/compare.js';
+import { compareSides, metricDetail, moreMatchesFor, type MoreMatchesRow } from '../../src/metrics/compare/compare.js';
 import { ENGINE } from '../../src/metrics/registry.js';
 
 /** Patch 1: 40 matches, saferoom 20%. Patch 2: 40 matches, saferoom 80%.
@@ -20,7 +20,15 @@ function setup(nA = 40, nB = 40) {
       for (const half of [1, 2]) {
         ctx.run(id, half, patch, ENGINE);
         row.run(id, half, 'round.saferoom', 'all', (i * 2 + half) % safeEvery === 0 ? 1 : 0, 1);
-        row.run(id, half, 'tank.spawns', 'all', 1, 1);
+        // Noisy, with a small bump on side B: no clear change (noise at 40
+        // vs 40, too early with a finite estimate at 20 vs 20), and the
+        // bootstrap has something to draw, so a perturbed random stream shows.
+        row.run(id, half, 'tank.spawns', 'all', (i + half) % 3 === 0 || (patch === 2 && i % 7 === 0) ? 2 : 1, 1);
+        // Sub-phase rows, so a phases=split run has a second BH family with
+        // real data in it (tank: a clear shift; witch: noisy, no shift).
+        row.run(id, half, 'round.saferoom', 'tank', (i * 2 + half) % safeEvery === 0 ? 1 : 0, 1);
+        row.run(id, half, 'tank.spawns', 'tank', 1, 1);
+        row.run(id, half, 'round.saferoom', 'witch', (i + half) % 3 === 0 ? 1 : 0, 1);
       }
     }
   };
@@ -77,8 +85,41 @@ describe('compareSides', () => {
     const r = compareSides(setup(5, 5), A, B, { phases: 'all', reps: 400 });
     const tank = r.rows.find((x) => x.metric === 'tank.spawns')!;
     expect(tank.verdict).toBe('too_early');
+    // Not significant: a finite estimate against its BH cutoff, well above 1.
+    expect(tank.moreMatches).toBeGreaterThan(1);
     const safe = r.rows.find((x) => x.metric === 'round.saferoom')!;
-    expect(safe.verdict).not.toBe('noise');
+    expect(safe.verdict).toBe('too_early');
+    // Passes BH but side A (a finished patch) is under the 10-match minimum
+    // and cannot grow: no estimate.
+    expect(safe.moreMatches).toBeNull();
+  });
+
+  it('asks only for the B matches missing from the minimum once a row passes BH', () => {
+    const r = compareSides(setup(12, 5), A, B, { phases: 'all', reps: 400 });
+    const safe = r.rows.find((x) => x.metric === 'round.saferoom')!;
+    expect(safe.verdict).toBe('too_early');
+    expect(safe.moreMatches).toBe(5);
+  });
+
+  it('shows the skill banner when team rating mismatch differs, even though halves swap sides', () => {
+    const db = setup();
+    // Side A: 27 vs 23 on half 1, 23 vs 27 on half 2 (teams swap sides), so
+    // the signed survivor-minus-infected gap averages 0 but the mismatch is 4.
+    db.prepare(`UPDATE round_metric_context SET surv_mu = CASE half WHEN 1 THEN 27 ELSE 23 END,
+      inf_mu = CASE half WHEN 1 THEN 23 ELSE 27 END WHERE patch_id = 1`).run();
+    const r = compareSides(db, A, B, { phases: 'all', reps: 50 });
+    expect(r.a.meanGap).toBe(4);
+    expect(r.b.meanGap).toBe(0);
+    expect(r.banners.skill).toMatch(/mean team rating mismatch 4\.0 vs 0\.0/);
+  });
+
+  it('flags a row with data on both sides but no shared map', () => {
+    const db = setup();
+    db.prepare("UPDATE round_metric_context SET map = 'mapB' WHERE patch_id = 2").run();
+    const r = compareSides(db, A, B, { phases: 'all', reps: 50 });
+    const safe = r.rows.find((x) => x.metric === 'round.saferoom')!;
+    expect(safe).toMatchObject({ noSharedMaps: true, verdict: 'no_data', excludedMaps: ['mapA', 'mapB'] });
+    expect(compareSides(setup(), A, B, { phases: 'all', reps: 50 }).rows.every((x) => !x.noSharedMaps)).toBe(true);
   });
 
   it('is reproducible with the default seed', () => {
@@ -109,17 +150,78 @@ describe('compareSides', () => {
     expect(real[1].rel).not.toBeNull();
   });
 
-  it('keeps whole-round rows identical whether or not sub-phases are requested', () => {
-    const db = setup();
+  it.each([[40, 40], [20, 20]])('keeps whole-round rows identical whether or not sub-phases are requested (%i vs %i matches)', (nA, nB) => {
+    // 20 vs 20 leaves tank.spawns too early, so its moreMatches depends on
+    // its rank within its BH family and would move if the families merged.
+    const db = setup(nA, nB);
+    if (nA === 20) {
+      const tank = compareSides(db, A, B, { phases: 'all', reps: 300 }).rows.find((row) => row.metric === 'tank.spawns')!;
+      expect(tank.verdict).toBe('too_early');
+      expect(tank.moreMatches).not.toBeNull();
+    }
     const whole = compareSides(db, A, B, { phases: 'all', reps: 300 });
     const split = compareSides(db, A, B, { phases: 'split', reps: 300 });
+    // The fixture must give the split run real sub-phase rows, or this test
+    // could not notice a sub-phase family leaking into the whole-round one.
+    const sub = split.rows.filter((row) => row.phase !== 'all');
+    expect(sub.map((row) => `${row.metric}|${row.phase}`).sort())
+      .toEqual(['round.saferoom|tank', 'round.saferoom|witch', 'tank.spawns|tank']);
+    expect(sub.every((row) => row.p !== null)).toBe(true);
     const splitWhole = split.rows.filter((row) => row.phase === 'all');
-    expect(splitWhole.map((row) => [row.metric, row.lo, row.hi, row.p, row.verdict]))
-      .toEqual(whole.rows.map((row) => [row.metric, row.lo, row.hi, row.p, row.verdict]));
+    expect(splitWhole.map((row) => [row.metric, row.lo, row.hi, row.p, row.verdict, row.moreMatches]))
+      .toEqual(whole.rows.map((row) => [row.metric, row.lo, row.hi, row.p, row.verdict, row.moreMatches]));
+  });
+});
+
+describe('moreMatchesFor', () => {
+  const quiet = (p: number): MoreMatchesRow => ({
+    p, significant: false, verdict: 'too_early', diff: 0.01, seA: 0.05, seB: 0.05, nA: 20, nB: 20,
+  });
+
+  it('targets the row\'s own BH cutoff, not a plain 95% interval', () => {
+    // 40 rows; the strongest has p 0.004 and its 95% interval already
+    // excludes zero, but at rank 1 of 40 BH needs p <= 0.0025. The old
+    // estimate said "1 more match"; the right target is z for alpha 0.0025.
+    const family = [
+      { p: 0.004, significant: false, verdict: 'too_early' as const, diff: 0.1, seA: 0.02, seB: 0.04, nA: 27, nB: 18 },
+      ...Array.from({ length: 39 }, () => quiet(0.5)),
+    ];
+    const more = moreMatchesFor(family, 1000);
+    expect(more[0]).not.toBe(1);
+    expect(more[0]).toBe(24);
+  });
+
+  it('gives no estimate when the cutoff is below what the bootstrap can resolve', () => {
+    // Rank 1 of 60 needs alpha 0.00167, under 2 / 1001.
+    const family = [
+      { p: 0.004, significant: false, verdict: 'too_early' as const, diff: 0.1, seA: 0.02, seB: 0.04, nA: 27, nB: 18 },
+      ...Array.from({ length: 59 }, () => quiet(0.5)),
+    ];
+    expect(moreMatchesFor(family, 1000)[0]).toBeNull();
+  });
+
+  it('for a row that passed BH, asks for the B matches the minimum still needs', () => {
+    const passed = (nA: number, nB: number): MoreMatchesRow => ({
+      p: 0.001, significant: true, verdict: 'too_early', diff: 0.3, seA: 0.01, seB: 0.01, nA, nB,
+    });
+    expect(moreMatchesFor([passed(12, 4)], 1000)).toEqual([6]);
+    expect(moreMatchesFor([passed(9, 40)], 1000)).toEqual([null]);
+  });
+
+  it('is null for rows that are not too early', () => {
+    expect(moreMatchesFor([{ ...quiet(0.5), verdict: 'noise' }], 1000)).toEqual([null]);
   });
 });
 
 describe('metricDetail', () => {
+  it('pools each selected patch on its own', () => {
+    const d = metricDetail(setup(), 'round.saferoom', 'all', { ...A, patchIds: [1, 2] }, B);
+    expect(d.perPatch).toEqual([
+      { patchId: 1, label: 'Old', value: 0.2, matches: 40 },
+      { patchId: 2, label: 'New', value: 1, matches: 40 },
+    ]);
+  });
+
   it('returns a time-ordered trend, per-map bars and side B examples', () => {
     const d = metricDetail(setup(), 'round.saferoom', 'all', A, B);
     expect(d.trend).toHaveLength(80);

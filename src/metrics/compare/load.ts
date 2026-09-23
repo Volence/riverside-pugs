@@ -1,4 +1,5 @@
 import type { DB } from '../../db.js';
+import { FAILED_SUFFIX } from '../job.js';
 import { ENGINE } from '../registry.js';
 import type { Phase } from '../types.js';
 import type { MatchSample } from './stats.js';
@@ -28,8 +29,8 @@ export function loadSide(db: DB, q: SideQuery, phases: Phase[]): SideData {
   const s = db.prepare(`
     SELECT COUNT(DISTINCT c.match_id) AS matches, COUNT(*) AS rounds,
            AVG(CASE WHEN c.surv_mu IS NOT NULL AND c.inf_mu IS NOT NULL THEN (c.surv_mu + c.inf_mu) / 2 END) AS meanMu,
-           AVG(CASE WHEN c.surv_mu IS NOT NULL AND c.inf_mu IS NOT NULL THEN c.surv_mu - c.inf_mu END) AS meanGap,
-           SUM(CASE WHEN c.engine != ? THEN 1 ELSE 0 END) AS older
+           AVG(CASE WHEN c.surv_mu IS NOT NULL AND c.inf_mu IS NOT NULL THEN ABS(c.surv_mu - c.inf_mu) END) AS meanGap,
+           SUM(CASE WHEN c.engine != ? AND c.engine NOT LIKE '%${FAILED_SUFFIX}' THEN 1 ELSE 0 END) AS older
     FROM round_metric_context c JOIN matches m ON m.id = c.match_id
     WHERE ${f.sql}`).get(ENGINE, ...f.params) as
     { matches: number; rounds: number; meanMu: number | null; meanGap: number | null; older: number | null };
