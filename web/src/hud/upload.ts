@@ -16,8 +16,8 @@
  * later inside the canvas draw.
  */
 import { vpkPathProblem } from '../vpk';
-import { readVPK } from '../vpk/read';
-import { readZip, ZipTooBig } from '../vpk/unzip';
+import { readVPK, isVpk } from '../vpk/read';
+import { readZip, ZipTooBig, UNREADABLE } from '../vpk/unzip';
 import { parseKv } from './kv';
 import { BASE_PATHS } from './base';
 import { decodeText } from './text';
@@ -27,13 +27,12 @@ export const MAX_HUD_BYTES = 50 * 1024 * 1024;
 export const IMPORT_ERRORS = {
   notHud: 'This file has no scripts/hudlayout.res, so it is not a HUD',
   tooBig: 'This HUD is over 50 MB',
-  unreadable: 'Could not read this file as a VPK or zip',
+  unreadable: UNREADABLE,
 } as const;
 
 export interface HudUpload { name: string; files: Map<string, Uint8Array>; dropped: string[] }
 
 const LAYOUT = 'scripts/hudlayout.res';
-const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12 && b[2] === 0xaa && b[3] === 0x55;
 const isZip = (b: Uint8Array) => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b;
 const fail = (why: string): never => { throw new Error(why); };
 const total = (m: Map<string, Uint8Array>) => [...m.values()].reduce((n, d) => n + d.length, 0);

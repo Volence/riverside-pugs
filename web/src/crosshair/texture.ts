@@ -11,7 +11,7 @@
 import { TEX } from './draw';
 import { drawArt, type CrosshairArt } from './model';
 import { crosshairPixels } from './saved';
-import { readVPK, decodeVTF } from '../vpk/read';
+import { readVPK, decodeVTF, isVpk } from '../vpk/read';
 
 /** Where a crosshair addon keeps its texture: the image the xHair element shows. */
 export const XHAIR_TEXTURE = 'materials/vgui/hud/altcrosshair.vtf';
@@ -80,8 +80,6 @@ export function importedCrosshair(files: ReadonlyMap<string, Uint8Array>): Cross
   if (!tex) return null;
   try { return vtfArt(tex); } catch { return null; }
 }
-
-const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12 && b[2] === 0xAA && b[3] === 0x55;
 
 /**
  * A crosshair from a player's file: any crosshair addon's .vpk (its

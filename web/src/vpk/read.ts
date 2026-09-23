@@ -11,6 +11,9 @@
  */
 
 const NOT_VPK = 'That is not a .vpk file the site can read.';
+
+/** Whether the bytes start with a VPK's signature (0x55AA1234, little-endian). */
+export const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12 && b[2] === 0xaa && b[3] === 0x55;
 const NOT_VTF = 'That crosshair is not a texture the site can read.';
 
 /**

@@ -34,7 +34,8 @@ export interface BuildAssets {
   crosshair?: Uint8ClampedArray;
 }
 
-const enc = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);   // latin-1, as the game reads it
+/** A generated text file's bytes: latin-1, as the game reads it. */
+const enc = (s: string) => encodeText(s, 'latin1');
 const LAYOUT = 'scripts/hudlayout.res';
 const ANIMS = 'scripts/hudanimations.txt';
 const SCHEME = 'resource/clientscheme.res';
