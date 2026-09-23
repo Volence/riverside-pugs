@@ -47,4 +47,16 @@ describe('roundInProgress', () => {
     db.prepare("UPDATE match_rounds SET ended_at = datetime('now')").run();
     expect(roundInProgress(db, id)).toBeNull();
   });
+
+  // noShow.ts and the lost-dump path in server.ts both abort a match without
+  // clearing match_live, on purpose, because every other reader filters on
+  // matches.state = 'live'. If roundInProgress trusted the phase alone, a
+  // match that died mid-round would report that round as current forever.
+  it('is null once the match is aborted, even with a stuck live phase and an unended round', () => {
+    round(0, 1, false);
+    recordPhase(db, TOKEN, phase('live'));
+    expect(roundInProgress(db, id)).toMatchObject({ ordinal: 0, half: 1 });
+    db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?").run(id);
+    expect(roundInProgress(db, id)).toBeNull();
+  });
 });

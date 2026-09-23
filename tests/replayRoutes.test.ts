@@ -180,6 +180,25 @@ describe('GET /api/replays/live/match/:id', () => {
     recordPhase(db, TOKEN, { ...livePhase(), state: 'roundover' });
     expect((await app.inject({ url: `/api/replays/live/match/${id}` })).json().current).toBeNull();
   });
+
+  // noShow.ts and the lost-dump path in server.ts abort a match without
+  // clearing match_live on purpose, so an aborted match can keep phase 'live'
+  // and an unended round row forever. Without the match-state check this
+  // route would report that stale round as current, and 200 instead of 404
+  // when it never got a file at all.
+  it('gives no current round and 404s an aborted match with a stuck live phase', async () => {
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
+    ).run(TOKEN);
+    const id = (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
+    // Set while the match is still 'live', mirroring the orphaned match_live
+    // rows noShow.ts and server.ts leave behind on purpose.
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?").run(id);
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 describe('GET /api/replays/file/:name', () => {
