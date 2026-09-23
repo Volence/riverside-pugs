@@ -14,7 +14,7 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'Do I need to change any settings?',
-    a: <>One thing: your rates. Riverside runs at 100 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download>autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
+    a: <>One thing: your rates. Riverside runs at 100 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
   },
   {
     q: 'What launch options should I use?',
@@ -121,7 +121,7 @@ export function HowToPlay({ session }: { session: Session }) {
           </p>
           <ol class="howto">
             <li>
-              <a href="/autoexec.cfg" download><strong>Download autoexec.cfg</strong></a>
+              <a href="/autoexec.cfg" download="autoexec.cfg"><strong>Download autoexec.cfg</strong></a>
             </li>
             <li>
               Put it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. On Windows
