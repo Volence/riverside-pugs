@@ -25,11 +25,11 @@ export function clampSpan(v: number, size: number, extent: number, min: number):
 
 /**
  * Move an element by (dx, dy), starting from its base position the first
- * time it is touched. Goes through `elementRect`, the same function the
- * canvas and the generator use, so a nudge before any drag starts from
- * exactly where the element is drawn. An element the game places itself
- * cannot move, so it is returned unchanged, `===` and all, which is what
- * lets a caller skip a re-render when nothing happened.
+ * time it is touched. Starts from `elementRect`, the same function the
+ * canvas and the generator use, so every nudge starts from exactly where
+ * the element is drawn. An element the game places itself cannot move, so
+ * it is returned unchanged, `===` and all, which is what lets a caller skip
+ * a re-render when nothing happened.
  *
  * Runs the result through the same `clampSpan` a drag uses, at the same
  * 8-unit floor, so repeated arrow presses cannot walk an element arbitrarily
@@ -42,11 +42,14 @@ export function nudge(design: HudDesign, id: string, dx: number, dy: number): Hu
   const el = elementById(id);
   // In Free each card places itself: the element's own position would move nothing.
   if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
+  // From where the element is drawn, not the stored x and y: a team the
+  // on-screen clamp holds at the edge is drawn there whatever it stores, and
+  // a press back from the edge must move it at once.
   const o = design.elements[id];
   const base = elementRect(design, id, design.aspect);
   const extentW = screenW(design.aspect);
-  const x = clampSpan((o?.x ?? base.x) + dx, base.w, extentW, 8);
-  const y = clampSpan((o?.y ?? base.y) + dy, base.h, SCREEN_H, 8);
+  const x = clampSpan(base.x + dx, base.w, extentW, 8);
+  const y = clampSpan(base.y + dy, base.h, SCREEN_H, 8);
   return { ...design, elements: { ...design.elements, [id]: { ...o, x, y } } };
 }
 

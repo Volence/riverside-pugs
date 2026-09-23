@@ -312,6 +312,23 @@ function cardFit(design: HudDesign): Box | null {
   return cardWork(design).box;
 }
 
+/** How a teammate-card child's stored numbers land on screen. */
+export interface CardFrame { shift: { x: number; y: number }; k: number }
+
+/**
+ * The frame the generator draws a teammate-card child in: fitPass shifts
+ * every child by the content box's top-left (when fitted), then scalePass
+ * multiplies by the element's scale. A child stored at (x, y) is drawn in
+ * card c at (c.x + (x - shift.x) * k, c.y + (y - shift.y) * k). The page
+ * uses it to turn a pointer delta into stored units and to draw a piece's
+ * snap guides where the piece is drawn, from the generator's own numbers.
+ */
+export function cardFrame(design: HudDesign): CardFrame {
+  const { box } = cardWork(design);
+  const shift = design.elements.teamColumn?.fit && box ? { x: box.x, y: box.y } : { x: 0, y: 0 };
+  return { shift, k: design.elements.teamColumn?.scale ?? 1 };
+}
+
 export interface CardChild { x: number; y: number; w: number; h: number; visible: boolean; fontTall?: number; color?: string }
 
 /**
@@ -392,6 +409,21 @@ export interface TeamLayout {
 export function growBack(start: number, size: number, baseSize: number, extent: number, far: boolean): number {
   if (!far) return start;
   return Math.max(0, Math.min(start - Math.max(0, size - baseSize), extent - size));
+}
+
+/**
+ * Where a team container starts along one axis so the whole team is on
+ * screen: no further than `extent - reach`, which puts the team's far edge
+ * on the screen's, and never before 0. `reach` is how far into the
+ * container the drawn team extends, not the container's own size: stock's
+ * container is 100 tall at r75 and so already hangs 25 off the bottom in the
+ * untouched file, while its cards stop well short of that. Measuring the
+ * cards is what keeps an untouched or unscaled design exactly where the
+ * preset puts it, while a scaled Row, or a moved team switched to Column,
+ * comes back on screen.
+ */
+export function keepOnScreen(start: number, reach: number, extent: number): number {
+  return Math.max(0, Math.min(start, extent - reach));
 }
 
 /**
@@ -516,6 +548,32 @@ export function teamLayout(design: HudDesign, el: HudElement): TeamLayout {
     const far = !/^f/i.test(axis.size.trim()) && (/^r/i.test(tok) || start + baseSize > (axis.extent * 2) / 3);
     const at = growBack(start, axis.grown, baseSize, axis.extent, far);
     if (at !== start) out.at = { [axis.pos]: formatPos(at, axis.grown, axis.extent) };
+  }
+  // The whole team stays on screen, in both axes, after scaling and layout.
+  // Along the direction the team reaches three pitches plus one card past its
+  // offset; across it, one card. A fitted card is the content, so that is
+  // the offset plus the card; an unfitted card reaches as far as its content
+  // does, scaled, since the rest of the file card draws nothing. The start is
+  // where teamPass would otherwise write the container: grown back, moved by
+  // the player, or the file's own. Moving it is one more `at`, so the file,
+  // elementRect and teamCardRects follow it together.
+  const content = box ?? cardFit(design);
+  const reach = (a: 'x' | 'y') => {
+    const wh = a === 'x' ? 'w' : 'h';
+    const pitches = (dir === 'row') === (a === 'x') ? spacing * 3 : 0;
+    const last = box ? offset[a] + card[wh] : content ? (content[a] + content[wh]) * k : card[wh];
+    return pitches + last;
+  };
+  for (const a of ['x', 'y'] as const) {
+    const pos = a === 'x' ? 'xpos' : 'ypos';
+    const extent = a === 'x' ? screenW(design.aspect) : SCREEN_H;
+    const grown = out.at?.[pos];
+    const start = grown !== undefined ? parsePos(grown, extent)
+      : el.move && o?.[a] !== undefined ? o[a]! : parsePos(kvGet(panel, pos) ?? '0', extent);
+    const kept = keepOnScreen(start, reach(a), extent);
+    if (Math.round(kept) !== Math.round(start)) {
+      out.at = { ...out.at, [pos]: formatPos(kept, a === 'x' ? out.container.w : out.container.h, extent) };
+    }
   }
   return out;
 }

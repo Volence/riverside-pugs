@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack } from './build';
+import { buildHud, elementRect, teamLayout, packHud, buildTrees, cardChild, baseHasChild, teamCardRects, isFreeTeam, growBack, keepOnScreen, cardFrame } from './build';
 import { parsePos, screenW } from './units';
 import { DEFAULT_DESIGN, validateDesign, type HudDesign, type ElementOverride } from './design';
 import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
@@ -387,9 +387,11 @@ describe('a team container anchored to the far edge grows back toward it', () =>
     for (const c of teamCardRects(d, '16:9')) expect(c.y + c.h).toBeLessThanOrEqual(480);
   });
 
-  it('leaves a Row where it was, and a moved team where the player put it', () => {
+  it('leaves a Row where it was along the screen, lifts it just enough to end on it, and leaves a moved team where the player put it', () => {
+    // Fitted, gap 30, scale 1.5: the cards reach 108 into a container at r75,
+    // so the container lifts to r108 and the cards end on the bottom edge.
     const row = kvFind(layoutOf(buildHud(design({ elements: { teamColumn: { fit: true, gap: 30, scale: 1.5 } } }))), ['CHudTeamDisplay'])!;
-    expect([kvGet(row, 'xpos'), kvGet(row, 'ypos')]).toEqual(['0', 'r75']);
+    expect([kvGet(row, 'xpos'), kvGet(row, 'ypos')]).toEqual(['0', 'r108']);
     const moved = design({ elements: { teamColumn: { fit: true, dir: 'column', gap: 4, x: 8, y: 100 } } });
     expect(elementRect(moved, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 100 });
     // Moving it across only (the X box alone) leaves the column growing up from the bottom.
@@ -412,6 +414,59 @@ describe('a team container anchored to the far edge grows back toward it', () =>
     expect(growBack(405, 192, 100, 480, false)).toBe(405);         // anchored to the near edge: grows away from it
     expect(growBack(700, 900, 100, 853, true)).toBe(0);            // taller than the screen: its start stays on it
     expect(growBack(600, 400, 200, 853, true)).toBe(400);          // a right-anchored row grows left the same way
+  });
+});
+
+describe('the whole team stays on screen', () => {
+  it('lifts a scaled Row off the bottom edge so its cards end on the screen', () => {
+    const d = design({ elements: { teamColumn: { fit: true, scale: 1.25 } } });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 390 });
+    expect(teamCardRects(d, '16:9')[0]).toMatchObject({ y: 435, h: 45 });
+    expect(kvGet(kvFind(layoutOf(buildHud(d)), ['CHudTeamDisplay'])!, 'ypos')).toBe('r90');
+  });
+
+  it('keeps a moved team switched to Column on screen', () => {
+    // 237 tall at y 300 would end at 537: it comes up to 243, the last card ending on the edge.
+    const d = design({ elements: { teamColumn: { fit: true, dir: 'column', x: 500, y: 300 } } });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 500, y: 243, h: 237 });
+    const last = teamCardRects(d, '16:9')[3];
+    expect(last.y + last.h).toBe(480);
+  });
+
+  it('brings a team moved past the top and left edges back to 0', () => {
+    const d = design({ elements: { teamColumn: { fit: true, x: -50, y: -20 } } });
+    expect(elementRect(d, 'teamColumn', '16:9')).toMatchObject({ x: 0, y: 0 });
+    const c = kvFind(layoutOf(buildHud(d)), ['CHudTeamDisplay'])!;
+    expect([kvGet(c, 'xpos'), kvGet(c, 'ypos')]).toEqual(['0', '0']);
+  });
+
+  it('leaves an unscaled team exactly where the preset puts it, fitted or not', () => {
+    // Stock's own container hangs 25 off the bottom, but its cards do not: nothing moves.
+    expect(elementRect(DEFAULT_DESIGN, 'teamColumn', '16:9')).toMatchObject({ y: 405 });
+    expect(teamCardRects(DEFAULT_DESIGN, '16:9')[0]).toMatchObject({ x: 13, y: 441 });
+    expect(elementRect(design({ elements: { teamColumn: { gap: 30 } } }), 'teamColumn', '16:9')).toMatchObject({ y: 405 });
+    const modern = design({ preset: 'modern', elements: { teamColumn: { fit: true } } });
+    expect(elementRect(modern, 'teamColumn', '16:9')).toMatchObject({ x: 8, y: 332 });
+  });
+
+  it('clamps a start so the reach ends on the screen, never before 0', () => {
+    expect(keepOnScreen(405, 90, 480)).toBe(390);
+    expect(keepOnScreen(405, 72, 480)).toBe(405);
+    expect(keepOnScreen(-20, 72, 480)).toBe(0);
+    expect(keepOnScreen(300, 900, 853)).toBe(0);
+  });
+});
+
+describe('cardFrame', () => {
+  it("reports the frame a child's stored numbers are drawn in, the one the generator used", () => {
+    expect(cardFrame(DEFAULT_DESIGN)).toEqual({ shift: { x: 13, y: 36 }, k: 1 });
+    expect(cardFrame(design({ elements: { teamColumn: { scale: 1.5 } } }))).toEqual({ shift: { x: 0, y: 0 }, k: 1.5 });
+    const c = teamCardRects(DEFAULT_DESIGN, '16:9')[1];
+    const f = cardFrame(DEFAULT_DESIGN);
+    const info = cardChild(DEFAULT_DESIGN, 'Head')!;
+    const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
+    expect(head.x).toBe(c.x + (info.x - f.shift.x) * f.k);
+    expect(head.y).toBe(c.y + (info.y - f.shift.y) * f.k);
   });
 });
 

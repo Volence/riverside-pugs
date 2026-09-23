@@ -4,7 +4,7 @@ import {
   placeChild, nudgeChild, resizeChild, resetChild,
 } from './edit';
 import { DEFAULT_DESIGN } from './design';
-import { teamCardRects } from './build';
+import { teamCardRects, elementRect } from './build';
 
 describe('nudge', () => {
   it('starts from the base position the first time', () => {
@@ -31,6 +31,14 @@ describe('nudge', () => {
     let d = DEFAULT_DESIGN;
     for (let i = 0; i < 200; i++) d = nudge(d, 'ownHealth', 10, 10);
     expect(d.elements.ownHealth).toEqual({ x: 853 - 8, y: 480 - 8 });
+  });
+
+  it('nudges a team from where it is drawn, so a press back from the edge moves it at once', () => {
+    let d = DEFAULT_DESIGN;
+    for (let i = 0; i < 5; i++) d = nudge(d, 'teamColumn', -1, 0);
+    expect(elementRect(d, 'teamColumn', d.aspect).x).toBe(0);
+    d = nudge(d, 'teamColumn', 1, 0);
+    expect(elementRect(d, 'teamColumn', d.aspect).x).toBe(1);
   });
 });
 
