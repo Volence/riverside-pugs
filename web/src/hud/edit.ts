@@ -11,12 +11,13 @@
  */
 import {
   clampOverride, clampChild, baseTeam, DEFAULT_DESIGN,
-  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride,
+  type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type Box,
 } from './design';
 import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
-import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild } from './build';
+import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, type CardChild } from './build';
 import { teamChild } from './children';
+import { unionBox, type Handle } from './guides';
 
 /** Keeps at least `min` units of a span on screen, whichever side it drifts to. */
 export function clampSpan(v: number, size: number, extent: number, min: number): number {
@@ -198,4 +199,134 @@ export function resetChild(d: HudDesign, name: string): HudDesign {
   const children: HudDesign['children'] = { ...d.children, teamColumn: kids };
   if (Object.keys(kids).length === 0) delete children.teamColumn;
   return { ...d, children };
+}
+
+// --- several pieces of the teammate card at once ---
+
+/** Where each named piece is now, in the unfitted frame: what a gesture starts from. Pieces the file lacks are left out. */
+export function startsOf(design: HudDesign, names: string[]): Record<string, CardChild> {
+  const out: Record<string, CardChild> = {};
+  for (const n of names) {
+    const c = cardChild(design, n);
+    if (c) out[n] = c;
+  }
+  return out;
+}
+
+/**
+ * Move pieces by (dx, dy) from where a gesture started them, unscaled units.
+ * The delta is clamped once for the whole group, against the unfitted card
+ * (the Phase 1 drag clamp), so the pieces keep their spacing when the group
+ * meets an edge instead of piling up against it one by one. Pieces that
+ * cannot move (the splatter) are skipped.
+ */
+export function moveChildren(
+  design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number,
+): HudDesign {
+  const p = baseTeam(design.preset).card;
+  const list = names.filter((n) => teamChild(n)?.move && starts[n]);
+  if (!list.length) return design;
+  const cx = Math.min(Math.min(...list.map((n) => p.w - starts[n].w - starts[n].x)), Math.max(Math.max(...list.map((n) => -starts[n].x)), dx));
+  const cy = Math.min(Math.min(...list.map((n) => p.h - starts[n].h - starts[n].y)), Math.max(Math.max(...list.map((n) => -starts[n].y)), dy));
+  let d = design;
+  for (const n of list) d = placeChild(d, n, starts[n].x + cx, starts[n].y + cy);
+  return d;
+}
+
+/** The group X and Y boxes: put the pieces' box at (x, y), moving all of them. */
+export function placeChildren(design: HudDesign, names: string[], x: number, y: number): HudDesign {
+  const starts = startsOf(design, names);
+  const box = unionBox(Object.values(starts));
+  return box ? moveChildren(design, names, starts, x - box.x, y - box.y) : design;
+}
+
+/**
+ * One proportional factor from a corner drag: the box's new width or height
+ * over its old, whichever changed more, never below 0.05 so a drag past the
+ * opposite corner cannot flip or vanish the selection.
+ */
+export function cornerFactor(start: Box, handle: Handle, dx: number, dy: number): number {
+  const sx = handle.includes('w') ? -dx : dx;
+  const sy = handle.includes('n') ? -dy : dy;
+  const fx = (start.w + sx) / (start.w || 1);
+  const fy = (start.h + sy) / (start.h || 1);
+  return Math.max(0.05, Math.abs(fx - 1) >= Math.abs(fy - 1) ? fx : fy);
+}
+
+/** The point that stays put while a handle drags: the corner (or side) opposite it. */
+export function anchorOf(box: Box, handle: Handle): { x: number; y: number } {
+  return { x: handle.includes('w') ? box.x + box.w : box.x, y: handle.includes('n') ? box.y + box.h : box.y };
+}
+
+/**
+ * Scale pieces by `f` about `anchor`, from where the gesture started them:
+ * positions and sizes both, so the group grows or shrinks as one. Square art
+ * stays square; a label scales its text size with its box, and the item
+ * icons (no box of their own) scale their icon size. Each size is capped to
+ * the unfitted card first and each position then clamped inside it, as
+ * placeChild does, so any factor leaves a valid design.
+ */
+export function scaleChildren(
+  design: HudDesign, names: string[], starts: Record<string, CardChild>, anchor: { x: number; y: number }, f: number,
+): HudDesign {
+  const p = baseTeam(design.preset).card;
+  let d = design;
+  for (const n of names) {
+    const def = teamChild(n);
+    const s = starts[n];
+    if (!def || !s) continue;
+    const patch: Partial<ChildOverride> = {};
+    let w = s.w, h = s.h;
+    if (def.box === 'square') {
+      w = h = Math.min(p.w, p.h, Math.max(1, Math.round(s.w * f)));
+    } else if (def.box === 'wh') {
+      w = Math.min(p.w, Math.max(1, Math.round(s.w * f)));
+      h = Math.min(p.h, Math.max(1, Math.round(s.h * f)));
+    }
+    if (def.box !== 'none') { patch.w = clampChild('w', w); patch.h = clampChild('h', h); }
+    if (def.font && s.fontTall !== undefined) patch.fontSize = clampChild('fontSize', Math.round(s.fontTall * f));
+    if (def.move) {
+      const x = anchor.x + (s.x - anchor.x) * f, y = anchor.y + (s.y - anchor.y) * f;
+      patch.x = clampChild('x', Math.round(Math.min(Math.max(0, p.w - w), Math.max(0, x))));
+      patch.y = clampChild('y', Math.round(Math.min(Math.max(0, p.h - h), Math.max(0, y))));
+    }
+    d = patchChild(d, n, patch);
+  }
+  return d;
+}
+
+export type Align = 'left' | 'centre' | 'right' | 'top' | 'middle' | 'bottom';
+
+/** Where `r` goes to line up with `box` one way; the other axis stays. */
+export function alignedAt(r: Box, box: Box, how: Align): { x: number; y: number } {
+  switch (how) {
+    case 'left': return { x: box.x, y: r.y };
+    case 'centre': return { x: box.x + box.w / 2 - r.w / 2, y: r.y };
+    case 'right': return { x: box.x + box.w - r.w, y: r.y };
+    case 'top': return { x: r.x, y: box.y };
+    case 'middle': return { x: r.x, y: box.y + box.h / 2 - r.h / 2 };
+    case 'bottom': return { x: r.x, y: box.y + box.h - r.h };
+  }
+}
+
+/** Align pieces against the box around them, through placeChild's clamp. */
+export function alignChildren(design: HudDesign, names: string[], how: Align): HudDesign {
+  const starts = startsOf(design, names);
+  const box = unionBox(Object.values(starts));
+  if (!box) return design;
+  let d = design;
+  for (const [n, s] of Object.entries(starts)) {
+    if (!teamChild(n)?.move) continue;
+    const at = alignedAt(s, box, how);
+    d = placeChild(d, n, at.x, at.y);
+  }
+  return d;
+}
+
+export function setChildrenVisible(design: HudDesign, names: string[], visible: boolean): HudDesign {
+  return names.reduce((d, n) => patchChild(d, n, { visible }), design);
+}
+
+export function resetChildren(design: HudDesign, names: string[]): HudDesign {
+  return names.reduce((d, n) => resetChild(d, n), design);
 }

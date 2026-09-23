@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   nudge, nudgeCard, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
   placeChild, nudgeChild, resizeChild, resetChild,
+  startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
 } from './edit';
 import { DEFAULT_DESIGN } from './design';
-import { teamCardRects, elementRect } from './build';
+import { teamCardRects, elementRect, cardChild } from './build';
 
 describe('nudge', () => {
   it('starts from the base position the first time', () => {
@@ -141,5 +142,95 @@ describe('resetChild', () => {
     expect(resetChild(resetChild(once, 'Head'), 'HealthNumber').children.teamColumn).toEqual({ HealthNumber: { on: true } });
     // The last edit gone: no empty teamColumn map is left behind.
     expect(resetChild(patchChild(DEFAULT_DESIGN, 'Head', { x: 5 }), 'Head').children.teamColumn).toBeUndefined();
+  });
+});
+
+describe('moving several pieces', () => {
+  // Stock, fitted: Head (13, 38, 23 x 23), Health (37, 52, 96 x 7), in the unfitted 150 x 150 card.
+  const both = ['Head', 'Health'];
+
+  it('moves every piece by the same amount', () => {
+    const d = moveChildren(DEFAULT_DESIGN, both, startsOf(DEFAULT_DESIGN, both), 5, -2);
+    expect(d.children.teamColumn).toEqual({ Head: { x: 18, y: 36 }, Health: { x: 42, y: 50 } });
+  });
+
+  it('clamps the group as one, so the pieces keep their spacing at the card edge', () => {
+    const s = startsOf(DEFAULT_DESIGN, both);
+    expect(moveChildren(DEFAULT_DESIGN, both, s, -100, -100).children.teamColumn).toEqual({ Head: { x: 0, y: 0 }, Health: { x: 24, y: 14 } });
+    // The health bar reaches the right edge first: 150 - 96 - 37 = 17 is all the room there is.
+    expect(moveChildren(DEFAULT_DESIGN, both, s, 100, 0).children.teamColumn).toEqual({ Head: { x: 30, y: 38 }, Health: { x: 54, y: 52 } });
+  });
+
+  it('places the group by its box', () => {
+    const d = placeChildren(DEFAULT_DESIGN, both, 20, 40);
+    expect(d.children.teamColumn).toEqual({ Head: { x: 20, y: 40 }, Health: { x: 44, y: 54 } });
+  });
+
+  it('never moves a piece that cannot move', () => {
+    const d = moveChildren(DEFAULT_DESIGN, ['BackgroundImage'], startsOf(DEFAULT_DESIGN, ['BackgroundImage']), 5, 5);
+    expect(d).toBe(DEFAULT_DESIGN);
+  });
+});
+
+describe('scaling several pieces', () => {
+  const names = ['Head', 'Health', 'Name'];
+
+  it('scales positions and sizes about the anchor, square stays square, fonts scale', () => {
+    const d = scaleChildren(DEFAULT_DESIGN, names, startsOf(DEFAULT_DESIGN, names), { x: 13, y: 38 }, 0.5);
+    expect(d.children.teamColumn).toEqual({
+      Head: { w: 12, h: 12, x: 13, y: 38 },
+      Health: { w: 48, h: 4, x: 25, y: 45 },
+      Name: { w: 60, h: 6, fontSize: 6, x: 13, y: 49 },
+    });
+  });
+
+  it('scales the item icons by their size', () => {
+    const d = scaleChildren(DEFAULT_DESIGN, ['Items'], startsOf(DEFAULT_DESIGN, ['Items']), { x: 39, y: 36 }, 1.5);
+    expect(d.children.teamColumn!.Items).toEqual({ fontSize: 27, x: 39, y: 36 });
+  });
+
+  it('keeps every piece inside the unfitted card however far it scales', () => {
+    const d = scaleChildren(DEFAULT_DESIGN, ['Head', 'Health'], startsOf(DEFAULT_DESIGN, ['Head', 'Health']), { x: 13, y: 38 }, 2);
+    for (const n of ['Head', 'Health']) {
+      const c = cardChild(d, n)!;
+      expect(c.x, n).toBeGreaterThanOrEqual(0);
+      expect(c.x + c.w, n).toBeLessThanOrEqual(150);
+      expect(c.y + c.h, n).toBeLessThanOrEqual(150);
+    }
+    expect(d.children.teamColumn!.Head).toMatchObject({ w: 46, h: 46 });
+    expect(d.children.teamColumn!.Health).toEqual({ w: 150, h: 14, x: 0, y: 66 });
+  });
+
+  it('turns a corner drag into one factor, the larger change winning', () => {
+    const box = { x: 0, y: 0, w: 100, h: 50 };
+    expect(cornerFactor(box, 'se', 50, 0)).toBe(1.5);
+    expect(cornerFactor(box, 'nw', -50, 0)).toBe(1.5);
+    expect(cornerFactor(box, 'se', 10, 20)).toBe(1.4);
+    expect(cornerFactor(box, 'se', -1000, 0)).toBe(0.05);
+    expect(anchorOf(box, 'se')).toEqual({ x: 0, y: 0 });
+    expect(anchorOf(box, 'nw')).toEqual({ x: 100, y: 50 });
+  });
+});
+
+describe('aligning several pieces', () => {
+  // Head spans x 13..36, y 38..61; Status x 64..134, y 38..50. Their box: x 13..134, y 38..61.
+  const two = ['Head', 'Status'];
+  const at = (how: Parameters<typeof alignChildren>[2]) => alignChildren(DEFAULT_DESIGN, two, how).children.teamColumn;
+
+  it('aligns six ways against the group box', () => {
+    expect(at('left')).toEqual({ Head: { x: 13, y: 38 }, Status: { x: 13, y: 38 } });
+    expect(at('right')).toEqual({ Head: { x: 111, y: 38 }, Status: { x: 64, y: 38 } });
+    expect(at('centre')).toEqual({ Head: { x: 62, y: 38 }, Status: { x: 39, y: 38 } });
+    expect(at('top')).toEqual({ Head: { x: 13, y: 38 }, Status: { x: 64, y: 38 } });
+    expect(at('middle')).toEqual({ Head: { x: 13, y: 38 }, Status: { x: 64, y: 44 } });
+    expect(at('bottom')).toEqual({ Head: { x: 13, y: 38 }, Status: { x: 64, y: 49 } });
+  });
+});
+
+describe('visibility and reset for several pieces', () => {
+  it('hides and shows them all, and resets them all', () => {
+    const hidden = setChildrenVisible(DEFAULT_DESIGN, ['Head', 'Name'], false);
+    expect(hidden.children.teamColumn).toEqual({ Head: { visible: false }, Name: { visible: false } });
+    expect(resetChildren(hidden, ['Head', 'Name']).children.teamColumn).toBeUndefined();
   });
 });
