@@ -14,6 +14,7 @@ import { elementById } from './elements';
 import { SLOTS } from './slots';
 import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
+import { readArt, type CrosshairArt } from '../crosshair/model';
 
 export type TeamDir = 'row' | 'column' | 'free';
 /**
@@ -71,10 +72,12 @@ export interface ChildOverride {
 export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; color?: string }
 export interface UploadedImage { w: number; h: number; png: string }
 /**
- * Where the crosshair comes from. 'bundle' ships the xHair element plus the
- * player's own crosshair from the Crosshair page as its texture; 'addon'
- * ships only the element, for a crosshair addon to supply the texture;
- * 'none' ships no element, so the game's own crosshair is all there is.
+ * Where the crosshair comes from. 'bundle' (Custom, in the editor) ships the
+ * xHair element plus the design's own `xhairArt` as its texture; 'none'
+ * (Game default) ships no element, so the game's own crosshair is all there
+ * is. 'addon' ships only the element, for a separate crosshair addon to
+ * supply the texture: it is legacy, kept so a design saved with it builds
+ * the same file, and offered only while a design has it.
  */
 export type CrosshairChoice = 'bundle' | 'addon' | 'none';
 export interface HudDesign {
@@ -85,6 +88,12 @@ export interface HudDesign {
   aspect: Aspect;
   font: 'preset' | 'roboto';
   crosshair: CrosshairChoice;
+  /**
+   * The crosshair this HUD carries, built or an image: what a 'bundle'
+   * draws and packs. Kept while the choice is something else, so going
+   * back to Custom brings it back. A 'bundle' always has one (usableCrosshair).
+   */
+  xhairArt?: CrosshairArt;
   elements: Record<string, ElementOverride>;
   styles: Record<string, StyleOverride>;
   images: Record<string, UploadedImage>;
@@ -105,26 +114,30 @@ export const DEFAULT_DESIGN: HudDesign = {
 };
 
 /**
- * A design made from nothing. DEFAULT_DESIGN stays static; whether a
- * crosshair is saved on the Crosshair page is the page's to know (it lives
- * in this browser's storage), so the page says, and a new design bundles
- * that crosshair when there is one.
+ * A design made from nothing. DEFAULT_DESIGN stays static; the crosshair
+ * saved on the Crosshair page lives in this browser's storage, so the page
+ * reads it and passes it in, and a new design carries a copy of it. From
+ * then on the design is self-contained: a share link or an exported file
+ * takes the crosshair with it.
  */
-export function newDesign(hasSavedCrosshair: boolean): HudDesign {
+export function newDesign(saved: CrosshairArt | null): HudDesign {
   const d = structuredClone(DEFAULT_DESIGN);
-  if (hasSavedCrosshair) d.crosshair = 'bundle';
+  if (saved) { d.crosshair = 'bundle'; d.xhairArt = structuredClone(saved); }
   return d;
 }
 
 /**
- * A design the page can build: a 'bundle' needs a crosshair saved on the
- * Crosshair page in this browser, so without one it becomes 'none', which
- * ships no xHair element to show the missing-texture checker. The page runs
- * every design it takes in (storage, a share link, an imported file)
- * through this, since a design can come from a browser that had one.
+ * A design the page can build: a 'bundle' needs a crosshair. A design
+ * saved before the design carried its own (it bundled the Crosshair page's
+ * saved one at download time) adopts the one saved in this browser, once,
+ * since from then on it has its own. With nothing saved either it becomes
+ * 'none', which ships no xHair element to show the missing-texture checker.
+ * The page runs every design it takes in (storage, a share link, an
+ * imported file) through this.
  */
-export function usableCrosshair(d: HudDesign, hasSavedCrosshair: boolean): HudDesign {
-  return d.crosshair === 'bundle' && !hasSavedCrosshair ? { ...d, crosshair: 'none' } : d;
+export function usableCrosshair(d: HudDesign, saved: CrosshairArt | null): HudDesign {
+  if (d.crosshair !== 'bundle' || d.xhairArt) return d;
+  return saved ? { ...d, xhairArt: structuredClone(saved) } : { ...d, crosshair: 'none' };
 }
 
 const ID = /^[A-Za-z][A-Za-z0-9]{0,31}$/;
@@ -354,6 +367,8 @@ export function validateDesign(raw: unknown): HudDesign {
   // it becomes 'addon'. The boolean is read here and never kept.
   d.crosshair = oneOf(raw.crosshair, ['bundle', 'addon', 'none'] as const, raw.xhair === false ? 'none' : 'addon');
   if (raw.hideGameCrosshair === true) d.hideGameCrosshair = true;
+  const art = readArt(raw.xhairArt);
+  if (art) d.xhairArt = art;
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
     // An element the registry no longer has (the kill feed, say) has nothing to apply to.
     if (!ID.test(id) || !elementById(id)) continue;
@@ -408,7 +423,11 @@ async function pipe(bytes: Uint8Array, stream: CompressionStream | Decompression
 const toUrl = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromUrl = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 
-/** Images never go in a link: one upload is bigger than any chat client will carry. */
+/**
+ * Images never go in a link: one upload is bigger than any chat client will
+ * carry. The crosshair does: a built one is a few numbers, and an uploaded
+ * one is stored as the 128-pixel texture it becomes, a few kilobytes.
+ */
 export async function encodeShare(d: HudDesign): Promise<string> {
   const json = JSON.stringify({ ...d, images: {} });
   return toUrl(await pipe(new TextEncoder().encode(json), new CompressionStream('deflate-raw')));

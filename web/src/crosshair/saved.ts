@@ -12,7 +12,7 @@
  * entry, a field of the wrong type, or the image shape with no image.
  */
 import { PX_AT_1080, TEX, drawCrosshair, type CrosshairState } from './draw';
-import { readArt, readState, type CrosshairArt } from './art';
+import { readArt, readState, type CrosshairArt } from './model';
 
 export const CROSSHAIR_KEY = 'xhair';
 export const CROSSHAIR_IMAGE_KEY = 'xhairImage';

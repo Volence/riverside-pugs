@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readState, readArt, fitSquare, drawArt, LIMITS, PNG_PREFIX } from './art';
+import { readState, readArt, fitSquare, drawArt, LIMITS, PNG_PREFIX } from './model';
 import { DEFAULT_STATE, PX_AT_1080 } from './draw';
 import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from '../hud/limits';
 

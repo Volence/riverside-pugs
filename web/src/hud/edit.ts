@@ -19,6 +19,7 @@ import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, type Car
 import { teamChild } from './children';
 import { unionBox, CORNERS, type Handle } from './guides';
 import { elementFrame, type Selection } from './selection';
+import type { CrosshairArt } from '../crosshair/model';
 
 /** Keeps at least `min` units of a span on screen, whichever side it drifts to. */
 export function clampSpan(v: number, size: number, extent: number, min: number): number {
@@ -57,19 +58,21 @@ export function elementsTouched(d: HudDesign): boolean {
 
 /** Whether a design holds anything beyond the untouched defaults: decides
  *  whether loading a share link needs to ask first rather than silently
- *  overwriting whatever a reader already had going. `hasSavedCrosshair` is
- *  this browser's own (the Crosshair page's storage), since a fresh design
- *  on one that has a crosshair saved already starts 'bundle' (newDesign),
- *  not the static default 'none': measuring against that fixed default
- *  would both ask to replace a reader's untouched, auto-bundled design and
- *  miss it when they deliberately turned the bundle back off. */
-export function hasOverrides(d: HudDesign, hasSavedCrosshair: boolean): boolean {
+ *  overwriting whatever a reader already had going. `saved` is this
+ *  browser's own crosshair (the Crosshair page's storage), since a fresh
+ *  design on one that has a crosshair saved already starts carrying it
+ *  (newDesign), not the static default 'none': measuring against that fixed
+ *  default would both ask to replace a reader's untouched design and miss
+ *  it when they deliberately turned their crosshair off or changed it. */
+export function hasOverrides(d: HudDesign, saved: CrosshairArt | null): boolean {
+  const fresh = newDesign(saved);
   return elementsTouched(d)
     || Object.keys(d.children).length > 0
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
     || d.hideGameCrosshair === true
-    || d.crosshair !== newDesign(hasSavedCrosshair).crosshair
+    || d.crosshair !== fresh.crosshair
+    || JSON.stringify(d.xhairArt) !== JSON.stringify(fresh.xhairArt)
     || d.preset !== DEFAULT_DESIGN.preset
     || d.aspect !== DEFAULT_DESIGN.aspect
     || d.font !== DEFAULT_DESIGN.font

@@ -2,6 +2,12 @@
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_DESIGN, validateDesign, newDesign, usableCrosshair, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
+import { DEFAULT_STATE } from '../crosshair/draw';
+import { PNG_PREFIX, type CrosshairArt } from '../crosshair/model';
+
+/** A crosshair saved on the Crosshair page, and one a design carries. */
+const SAVED: CrosshairArt = { kind: 'built', state: { ...DEFAULT_STATE, shape: 'dot', dot: 3 } };
+const OWN: CrosshairArt = { kind: 'image', png: PNG_PREFIX + 'AAAA', w: 64, h: 64 };
 
 describe('validateDesign', () => {
   it('returns the defaults for junk', () => {
@@ -65,20 +71,38 @@ describe('validateDesign', () => {
     expect('xhair' in DEFAULT_DESIGN).toBe(false);
   });
 
-  it('starts a new design bundling the saved crosshair when there is one, else with none', () => {
+  it('starts a new design carrying the crosshair saved on the Crosshair page when there is one, else with none', () => {
     expect(DEFAULT_DESIGN.crosshair).toBe('none');
-    expect(newDesign(true)).toEqual({ ...DEFAULT_DESIGN, crosshair: 'bundle' });
-    expect(newDesign(false)).toEqual(DEFAULT_DESIGN);
-    expect(newDesign(true)).not.toBe(DEFAULT_DESIGN);
+    expect('xhairArt' in DEFAULT_DESIGN).toBe(false);
+    expect(newDesign(SAVED)).toEqual({ ...DEFAULT_DESIGN, crosshair: 'bundle', xhairArt: SAVED });
+    expect(newDesign(null)).toEqual(DEFAULT_DESIGN);
+    expect(newDesign(null)).not.toBe(DEFAULT_DESIGN);
+    // A copy: editing the design's crosshair never reaches the saved one.
+    expect(newDesign(SAVED).xhairArt).not.toBe(SAVED);
   });
 
-  it('turns a bundle into none when this browser has no crosshair to bundle, and leaves the rest alone', () => {
-    const bundle = { ...DEFAULT_DESIGN, crosshair: 'bundle' as const };
-    expect(usableCrosshair(bundle, true)).toBe(bundle);
-    expect(usableCrosshair(bundle, false)).toEqual({ ...bundle, crosshair: 'none' });
+  it('gives a bundle with no crosshair of its own the saved one, once, or else makes it none', () => {
+    const bare = { ...DEFAULT_DESIGN, crosshair: 'bundle' as const };
+    expect(usableCrosshair(bare, SAVED)).toEqual({ ...bare, xhairArt: SAVED });
+    expect(usableCrosshair(bare, null)).toEqual({ ...bare, crosshair: 'none' });
+    // Its own crosshair wins over whatever is saved.
+    const own = { ...bare, xhairArt: OWN };
+    expect(usableCrosshair(own, SAVED)).toBe(own);
+    expect(usableCrosshair(own, null)).toBe(own);
     for (const c of ['addon', 'none'] as const) {
       const d = { ...DEFAULT_DESIGN, crosshair: c };
-      expect(usableCrosshair(d, false)).toBe(d);
+      expect(usableCrosshair(d, SAVED)).toBe(d);
+      expect(usableCrosshair(d, null)).toBe(d);
+    }
+  });
+
+  it("keeps a valid crosshair and drops one the builder or an upload could not have made", () => {
+    expect(validateDesign({ v: 1, crosshair: 'bundle', xhairArt: SAVED }).xhairArt).toEqual(SAVED);
+    expect(validateDesign({ v: 1, crosshair: 'bundle', xhairArt: OWN }).xhairArt).toEqual(OWN);
+    // Clamped to the builder's own slider range, like any other number.
+    expect(validateDesign({ v: 1, xhairArt: { kind: 'built', state: { len: 500 } } }).xhairArt).toEqual({ kind: 'built', state: { ...DEFAULT_STATE, len: 30 } });
+    for (const bad of [{ kind: 'built', state: { shape: 'image' } }, { ...OWN, w: 513 }, { ...OWN, png: 'data:text/html,hi' }, 'x']) {
+      expect('xhairArt' in validateDesign({ v: 1, xhairArt: bad }), JSON.stringify(bad)).toBe(false);
     }
   });
 
@@ -247,5 +271,12 @@ describe('share links', () => {
   it('carries the teammate card children through a share link', async () => {
     const d = validateDesign({ v: 1, children: { teamColumn: { HealthNumber: { on: true }, Items: { y: 20 } } } });
     expect((await decodeShare(await encodeShare(d)))!.children).toEqual(d.children);
+  });
+
+  it('carries the crosshair through a share link, built or image, so the link is the whole HUD', async () => {
+    for (const art of [SAVED, OWN]) {
+      const d = validateDesign({ v: 1, crosshair: 'bundle', xhairArt: art });
+      expect((await decodeShare(await encodeShare(d)))!.xhairArt).toEqual(art);
+    }
   });
 });

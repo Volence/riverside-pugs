@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { savedCrosshair, savedArt, saveImage, crosshairPixels, CROSSHAIR_IMAGE_KEY } from './saved';
-import { PNG_PREFIX } from './art';
+import { PNG_PREFIX } from './model';
 import { DEFAULT_STATE, PX_AT_1080, TEX } from './draw';
 
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });

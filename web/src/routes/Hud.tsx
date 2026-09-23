@@ -4,7 +4,8 @@ import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, TEX, type Backdrop, type CrosshairState } from '../crosshair/draw';
-import { savedCrosshair, crosshairPixels } from '../crosshair/saved';
+import { savedArt, crosshairPixels } from '../crosshair/saved';
+import type { CrosshairArt } from '../crosshair/model';
 import {
   loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN, newDesign, usableCrosshair,
   type HudDesign, type StyleOverride, type Box,
@@ -241,13 +242,15 @@ function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection
 const modsOf = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): Mods => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
 
 export default function Hud() {
-  // The crosshair saved on the Crosshair page, read once: the preview draws
-  // it and a 'bundle' download packs it, so both use this one copy. It also
-  // decides a new design's crosshair, and whether a 'bundle' is buildable.
-  const [crosshair] = useState<CrosshairState | null>(savedCrosshair);
+  // The crosshair saved on the Crosshair page, read once: a new design
+  // carries a copy of it, and a design saved before designs carried their
+  // own adopts it (usableCrosshair). From then on the design's own
+  // `xhairArt` is the one crosshair the preview draws and the download packs.
+  const [saved] = useState<CrosshairArt | null>(savedArt);
   const [design, setDesignState] = useState<HudDesign>(
-    () => usableCrosshair(loadDesign(() => newDesign(crosshair !== null)), crosshair !== null),
+    () => usableCrosshair(loadDesign(() => newDesign(saved)), saved),
   );
+  const crosshair = design.xhairArt?.kind === 'built' ? design.xhairArt.state : null;
   // The design as of the last edit, read synchronously: two edits in one
   // event (a gesture's end, then a step) must each see the other's result,
   // which a state value only shows on the next render.
@@ -333,7 +336,7 @@ export default function Hud() {
   // page storage is empty (usableCrosshair); the player never asked for
   // that, unlike picking Addon or None themselves, so it is worth a word.
   const [status, setStatus] = useState(() => (
-    loadDesign(() => newDesign(crosshair !== null)).crosshair === 'bundle' && crosshair === null ? BUNDLE_LOST : ''
+    (() => { const d = loadDesign(() => newDesign(saved)); return d.crosshair === 'bundle' && !d.xhairArt && !saved; })() ? BUNDLE_LOST : ''
   ));
   // Moving cards of a Row or Column team makes it Free (edit.ts's moveCards
   // and freeInPlace do it inside the same edit); say so, since the Layout
@@ -454,13 +457,13 @@ export default function Hud() {
         setStatus('That link is damaged.');
       } else {
         let apply = true;
-        if (hasOverrides(design, crosshair !== null)) {
+        if (hasOverrides(design, saved)) {
           apply = await confirm({
             title: 'Load the HUD design from this link? It will replace the one saved on this browser.',
             confirmLabel: 'Load link', cancelLabel: 'Keep mine',
           });
         }
-        if (!cancelled && apply) { edit(() => usableCrosshair(decoded, crosshair !== null)); dropPicks(); }
+        if (!cancelled && apply) { edit(() => usableCrosshair(decoded, saved)); dropPicks(); }
       }
       if (!cancelled) history.replaceState(null, '', location.pathname + location.search);
     })();
@@ -855,7 +858,7 @@ export default function Hud() {
     if (!f) return;
     try {
       const text = await f.text();
-      const next = usableCrosshair(validateDesign(JSON.parse(text)), crosshair !== null);
+      const next = usableCrosshair(validateDesign(JSON.parse(text)), saved);
       edit(() => next);
       dropPicks();
       setStatus(`Imported ${next.name}.`);

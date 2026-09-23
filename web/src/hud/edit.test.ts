@@ -6,6 +6,8 @@ import {
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
 } from './edit';
 import { DEFAULT_DESIGN, newDesign } from './design';
+import { DEFAULT_STATE } from '../crosshair/draw';
+import type { CrosshairArt } from '../crosshair/model';
 import { formatPos, parsePos } from './units';
 import { teamCardRects, elementRect, cardChild, isFreeTeam } from './build';
 import { elementFrame } from './selection';
@@ -61,30 +63,33 @@ describe('what counts as an edit', () => {
   // "has edits": a share link must not ask to replace an untouched design.
   it('treats a fresh design as untouched and a moved element as an edit', () => {
     expect(elementsTouched(DEFAULT_DESIGN)).toBe(false);
-    expect(hasOverrides(DEFAULT_DESIGN, false)).toBe(false);
+    expect(hasOverrides(DEFAULT_DESIGN, null)).toBe(false);
     const moved = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { x: 5 } } };
     expect(elementsTouched(moved)).toBe(true);
-    expect(hasOverrides({ ...DEFAULT_DESIGN, hideGameCrosshair: true }, false)).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, hideGameCrosshair: true }, null)).toBe(true);
   });
 
   // A design whose only change is picking a crosshair (the default is
   // 'none') still has to ask before a share link replaces it, or a reader
   // who only set up a bundled or addon crosshair loses it silently.
   it('counts a non-default crosshair choice as an override too', () => {
-    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'addon' }, false)).toBe(true);
-    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'bundle' }, false)).toBe(true);
-    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'none' }, false)).toBe(false);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'addon' }, null)).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'bundle' }, null)).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'none' }, null)).toBe(false);
   });
 
-  // The baseline crosshair choice is this browser's, not always 'none': a
-  // reader with a crosshair saved on the Crosshair page gets a 'bundle'
-  // fresh design (newDesign(true)), so that has to read as untouched too,
-  // and deliberately turning it off (their own edit) has to count.
-  it("measures the crosshair choice against this browser's own fresh baseline, not always none", () => {
-    expect(hasOverrides(newDesign(true), true)).toBe(false);
-    expect(hasOverrides({ ...newDesign(true), crosshair: 'none' }, true)).toBe(true);
-    // Unaffected: no saved crosshair still means the baseline is 'none'.
-    expect(hasOverrides(newDesign(false), false)).toBe(false);
+  // The baseline crosshair is this browser's, not always 'none': a reader
+  // with a crosshair saved on the Crosshair page gets a fresh design
+  // carrying it (newDesign), so that has to read as untouched too, and
+  // deliberately turning it off, or changing it, has to count.
+  it("measures the crosshair against this browser's own fresh baseline, not always none", () => {
+    const saved: CrosshairArt = { kind: 'built', state: DEFAULT_STATE };
+    expect(hasOverrides(newDesign(saved), saved)).toBe(false);
+    expect(hasOverrides({ ...newDesign(saved), crosshair: 'none' }, saved)).toBe(true);
+    expect(hasOverrides({ ...newDesign(saved), xhairArt: { kind: 'built', state: { ...DEFAULT_STATE, len: 9 } } }, saved)).toBe(true);
+    // Unaffected: no saved crosshair still means the baseline is 'none', with no crosshair.
+    expect(hasOverrides(newDesign(null), null)).toBe(false);
+    expect(hasOverrides({ ...newDesign(null), xhairArt: saved }, null)).toBe(true);
   });
 
   it('resets an element to what a fresh design has for it', () => {
@@ -134,7 +139,7 @@ describe('patchChild', () => {
     const b = patchChild(a, 'Head', { x: 5 });
     expect(b.children.teamColumn).toEqual({ Head: { w: 30, h: 30, x: 5 } });
     expect(resetElement(b, 'teamColumn').children.teamColumn).toBeUndefined();
-    expect(hasOverrides(b, false)).toBe(true);
+    expect(hasOverrides(b, null)).toBe(true);
   });
 });
 
