@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db.js';
 import { pendingRounds, runMetricsPass } from '../../src/metrics/job.js';
 import { ENGINE } from '../../src/metrics/registry.js';
+import type { RoundKey } from '../../src/metrics/types.js';
 
 function setup() {
   const db = openDb(':memory:');
@@ -48,5 +49,34 @@ describe('metrics job', () => {
 
   it('respects the limit', () => {
     expect(pendingRounds(setup(), { engine: ENGINE, replayWaitMin: 30, limit: 1, now: NOW })).toHaveLength(1);
+  });
+
+  it('records a poisoned round as failed, still computes the rest of the batch, and only retries after an engine bump', () => {
+    const db = setup();
+    const boom = new Error('boom');
+    const load = (key: RoundKey) => { if (key.half === 1) throw boom; return null; };
+    const errSpy = { calls: 0 };
+    const origError = console.error;
+    console.error = ((...args: unknown[]) => { errSpy.calls++; }) as typeof console.error;
+    let result: { computed: number; failed: number };
+    try {
+      result = runMetricsPass(db, '', { limit: 10, now: NOW, load });
+    } finally {
+      console.error = origError;
+    }
+    expect(result!).toEqual({ computed: 1, failed: 1 });
+    expect(errSpy.calls).toBe(1);
+    expect(pendingRounds(db, { engine: ENGINE, replayWaitMin: 30, limit: 10, now: NOW })).toEqual([]);
+    expect(pendingRounds(db, { engine: ENGINE + ',new.metric:1', replayWaitMin: 30, limit: 10, now: NOW })).toHaveLength(2);
+  });
+
+  it('picks up a round with a replay row once, and does not retry it every tick when decoding keeps failing', () => {
+    const db = setup();
+    runMetricsPass(db, '', { limit: 10, now: NOW, load: () => null });
+    db.prepare("INSERT INTO match_replays (match_id, ordinal, half, filename, bytes, frames, sample_hz) VALUES (1, 0, 2, 'f', 1, 1, 10)").run();
+    expect(pendingRounds(db, { engine: ENGINE, replayWaitMin: 30, limit: 10, now: NOW }).map((k) => k.half)).toEqual([2]);
+    const r2 = runMetricsPass(db, '', { limit: 10, now: NOW, load: () => null });
+    expect(r2).toEqual({ computed: 1, failed: 0 });
+    expect(pendingRounds(db, { engine: ENGINE, replayWaitMin: 30, limit: 10, now: NOW })).toEqual([]);
   });
 });

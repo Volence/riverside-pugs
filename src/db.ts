@@ -1198,6 +1198,9 @@ export function openDb(path: string): DB {
       PRIMARY KEY (match_id, ordinal, half)
     );
   `);
+  // A round already seen with a replay row does not need to be re-flagged as
+  // "replay arrived" every tick just because decoding it keeps failing.
+  ensureColumn(db, 'round_metric_context', 'replay_seen', 'INTEGER NOT NULL DEFAULT 0');
 
   seed(db);
   return db;

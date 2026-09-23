@@ -53,4 +53,10 @@ describe('decodeRoundReplay', () => {
     const future = header({ version: VERSION + 1 });
     expect(decodeRoundReplay(bytes(future, [frame(0), frame(100)]), () => null)).toBeNull();
   });
+
+  it('falls back to EOF, without throwing, when indexOffset points past the end of the buffer', () => {
+    const h = header({ indexOffset: 999_999, indexCount: 1 });
+    const r = decodeRoundReplay(bytes(h, [frame(0), frame(100)]), () => null);
+    expect(r?.frames.map((f) => f.tMs)).toEqual([0, 100]);
+  });
 });
