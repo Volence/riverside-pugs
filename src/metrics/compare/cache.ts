@@ -21,6 +21,7 @@ export function memo<T>(key: string, compute: () => T): T {
 const IDS_RE = /^\d{1,9}(,\d{1,9}){0,99}$/;
 const MAP_RE = /^[A-Za-z0-9_()\- ]{1,64}$/;
 const ORIGINS: Origin[] = ['all', 'queue', 'in_game'];
+const MAX_PATCH_IDS = 20;
 
 /** Validates and parses the a/b/origin/maps query params shared by the
  *  compare and metric-detail routes. Returns an error message string on any
@@ -29,6 +30,7 @@ export function parseSideParams(q: Record<string, unknown>): { a: SideQuery; b: 
   const ids = (v: unknown) => (typeof v === 'string' && IDS_RE.test(v) ? v.split(',').map(Number) : null);
   const a = ids(q.a), b = ids(q.b);
   if (!a || !b) return 'a and b must be comma-separated patch ids';
+  if (a.length > MAX_PATCH_IDS || b.length > MAX_PATCH_IDS) return 'at most 20 patches per side';
   const origin = (q.origin ?? 'all') as Origin;
   if (!ORIGINS.includes(origin)) return 'origin must be all, queue or in_game';
   let maps: string[] | null = null;

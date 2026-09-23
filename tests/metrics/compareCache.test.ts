@@ -29,4 +29,11 @@ describe('compare cache', () => {
     expect(typeof parseSideParams({ a: '1;DROP', b: '2' })).toBe('string');
     expect(typeof parseSideParams({ a: '1', b: '2', origin: 'pub' })).toBe('string');
   });
+
+  it('caps each side at 20 patch ids', () => {
+    const a21 = Array.from({ length: 21 }, (_, i) => i + 1).join(',');
+    expect(parseSideParams({ a: a21, b: '1' })).toBe('at most 20 patches per side');
+    const a20 = Array.from({ length: 20 }, (_, i) => i + 1).join(',');
+    expect(parseSideParams({ a: a20, b: '1' })).toMatchObject({ a: { patchIds: expect.any(Array) } });
+  });
 });
