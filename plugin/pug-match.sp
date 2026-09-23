@@ -1538,7 +1538,10 @@ int RplLosBits(const int[] slotClient)
 		{
 			int ir = g_iRplInfRank[i], ic = slotClient[i];
 			if (ir < 0 || ic == 0 || !RplLosTarget(ic)) continue;
-			if (g_iPinnedBy[sc] == ic) continue;      // pinned: they know where it is
+			// The survivor this infected is pinning obviously knows where it is,
+			// so the pair counts as seen; recording it as 0 would look exactly
+			// like "hidden", the direction that could wrongly flag a teammate.
+			if (g_iPinnedBy[sc] == ic) { bits |= 1 << (sr * 4 + ir); continue; }
 			if (RplCanSee(sc, ic)) bits |= 1 << (sr * 4 + ir);
 		}
 	}
@@ -1572,6 +1575,7 @@ public Action Cmd_LosBench(int client, int args)
 	int n = 1000;
 	if (args >= 1) { char s[16]; GetCmdArg(1, s, sizeof(s)); n = StringToInt(s); }
 	if (n < 1) n = 1;
+	if (n > 100000) n = 100000;
 	int v = 0, t = 0;
 	for (int c = 1; c <= MaxClients; c++)
 	{
