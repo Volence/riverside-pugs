@@ -15,7 +15,7 @@
 #include <readyup>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "0.3.5"
+#define PLUGIN_VERSION "0.3.6"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -353,6 +353,10 @@ int g_iRplFrameNo;
 int g_iRplMapSeq;
 int g_iRplBuf[RPL_FRAME_MAX];            // one byte per cell, written in one call
 
+// Live push of the round being recorded. Below the replay globals because it
+// reads g_State; see the include for why everything in it is optional.
+#include "pug-livepush.inc"
+
 // Staging knobs. Both default to production behaviour; they exist so the plugin
 // can be exercised on a test instance without eight people in the server.
 ConVar g_cvMinOrient;                    // rostered players needed to move the orientation mapping
@@ -449,6 +453,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	g_cvReplayMaxMb = CreateConVar("sm_pug_replay_max_mb", "64",
 		"Per-round replay size cap in MB. A runaway bound, not a budget: a full round is 10 to 15 MB.",
 		FCVAR_NOTIFY, true, 1.0, true, 512.0);
+	LivePushInit();
 
 	g_hRplEnts = new ArrayList();
 	g_hRplIndexT = new ArrayList();
@@ -546,11 +551,13 @@ No config exec and no restart: it tracks the game already being played. Implies 
 public void OnLibraryAdded(const char[] name)
 {
 	if (StrEqual(name, "readyup")) g_bReadyUpAvailable = true;
+	LivePushLibrary(name, true);
 }
 
 public void OnLibraryRemoved(const char[] name)
 {
 	if (StrEqual(name, "readyup")) g_bReadyUpAvailable = false;
+	LivePushLibrary(name, false);
 }
 
 /** Plugin unload/reload: close whatever replay is open rather than leaving it
@@ -1053,7 +1060,9 @@ void RplOpen()
 	p = RplU16(p, 0);                          // reserved, pads token to 12
 	p = RplStr(p, g_sToken, 32);
 	p = RplStr(p, g_sCurrentMap, 32);
-	p = RplU32(p, GetTime());
+	// Kept: the live push names the round by this same value.
+	int startedUnix = GetTime();
+	p = RplU32(p, startedUnix);
 	p = RplU32(p, 0);                          // indexOffset, patched at close
 	p = RplU32(p, 0);                          // indexCount, patched at close
 	// Which roster entries get the eight slots the format carries.
@@ -1157,6 +1166,10 @@ void RplOpen()
 		RplFail();
 		return;
 	}
+	// Only after the header is safely on disk: a failed write goes to RplFail
+	// above and this round is never pushed at all.
+	LivePushOpen(g_sToken, g_iRplMapSeq, g_iHalf, startedUnix);
+	LivePushAppend(g_iRplBuf, RPL_HEADER_BYTES);
 
 	RplResolveSurvivorCharProp();
 
@@ -1259,12 +1272,17 @@ void RplClose()
 			if (p + RPL_INDEX_RECORD > RPL_FRAME_MAX)
 			{
 				if (!WriteFile(g_hReplay, g_iRplBuf, p, 1)) { ok = false; break; }
+				LivePushAppend(g_iRplBuf, p);
 				p = 0;
 			}
 			p = RplU32(p, g_hRplIndexT.Get(i));
 			p = RplU32(p, g_hRplIndexOff.Get(i));
 		}
-		if (ok && p > 0 && !WriteFile(g_hReplay, g_iRplBuf, p, 1)) ok = false;
+		if (ok && p > 0)
+		{
+			if (!WriteFile(g_hReplay, g_iRplBuf, p, 1)) ok = false;
+			else LivePushAppend(g_iRplBuf, p);
+		}
 	}
 
 	if (ok)
@@ -1281,6 +1299,11 @@ void RplClose()
 		}
 	}
 	if (!ok) LogError("pug: replay close incomplete; the file is still playable, seeking will be slow");
+	// The header patches above are not appends, so the push carries their
+	// values and the site writes them into its copy. Only when every write
+	// succeeded; otherwise the copy stays exactly as unpatched as the file.
+	LivePushClose(ok, count > 0 ? indexOffset : 0, count, g_iReplayFrames,
+		indexOffset + count * RPL_INDEX_RECORD);
 
 	delete g_hReplay;
 	g_hReplay = null;
@@ -1574,6 +1597,7 @@ public Action Timer_RplFrame(Handle timer)
 	}
 	g_iReplayFrames++;
 	g_iReplayBytes += p;
+	LivePushAppend(g_iRplBuf, p);
 
 	// The plugin's half of the disk protection. SourceMod exposes no
 	// disk-free-space native, so the backend owns the real free-space floor
@@ -2407,6 +2431,7 @@ public Action Cmd_Status(int args)
 		g_iHalfScoreA, g_iHalfScoreB, g_bPendingFinalize ? 1 : 0, g_bReadyUpAvailable ? 1 : 0);
 	DumpLine("STATUS selfStarted=%d teamLock=%d recordDemos=%d",
 		g_bSelfStarted ? 1 : 0, TeamLockActive() ? 1 : 0, g_cvRecordDemos.BoolValue ? 1 : 0);
+	LivePushStatus();
 
 	int straight, inverted;
 	OrientationVote(straight, inverted);

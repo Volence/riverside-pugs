@@ -13,12 +13,13 @@ cp pug-pause.inc "$SCRIPTING/pug-pause.inc"
 # them when they are compiled.
 cp pug-logauth.inc "$SCRIPTING/pug-logauth.inc"
 cp pug-hmac.inc "$SCRIPTING/pug-hmac.inc"
+cp pug-livepush.inc "$SCRIPTING/pug-livepush.inc"
 # include/l4d2_skill_detect.inc is shared with other plugins that build against
 # the same Rotoblin tree, so only copy it in (and only trap-delete it) when it
 # is not already there. Otherwise a build here would overwrite a real copy and
 # then the trap would delete it out from under whatever put it there.
 SKILL_DETECT_INC="$SCRIPTING/include/l4d2_skill_detect.inc"
-CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc"
+CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc $SCRIPTING/pug-livepush.inc"
 if [ ! -e "$SKILL_DETECT_INC" ]; then
 	cp /home/volence/l4d/L4D1_2-Plugins/l4d2_skill_detect/scripting/include/l4d2_skill_detect.inc "$SKILL_DETECT_INC"
 	CLEANUP="$CLEANUP $SKILL_DETECT_INC"
@@ -32,7 +33,18 @@ if [ ! -e "$GEOIP_INC" ]; then
 	cp /home/volence/l4d1-ds/server/left4dead/addons/sourcemod/scripting/include/geoip.inc "$GEOIP_INC"
 	CLEANUP="$CLEANUP $GEOIP_INC"
 fi
-trap 'rm -f '"$CLEANUP" EXIT
+# REST in Pawn's includes are vendored in plugin/include (1.3.2, the version
+# installed on every server; ripext.inc modified so the plugin never autoloads
+# the extension). Same borrow-and-clean-up rule as above.
+RIPEXT_INC="$SCRIPTING/include/ripext.inc"
+RIPEXT_DIR_MADE=0
+if [ ! -e "$RIPEXT_INC" ]; then
+	[ -d "$SCRIPTING/include/ripext" ] || { mkdir "$SCRIPTING/include/ripext"; RIPEXT_DIR_MADE=1; }
+	cp include/ripext.inc "$RIPEXT_INC"
+	cp include/ripext/http.inc include/ripext/json.inc "$SCRIPTING/include/ripext/"
+	CLEANUP="$CLEANUP $RIPEXT_INC $SCRIPTING/include/ripext/http.inc $SCRIPTING/include/ripext/json.inc"
+fi
+trap 'rm -f '"$CLEANUP"'; [ '"$RIPEXT_DIR_MADE"' = 1 ] && rmdir "'"$SCRIPTING"'/include/ripext" 2>/dev/null; true' EXIT
 (cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -iinclude)
 mv "$SCRIPTING/pug-match.smx" ./pug-match.smx
 echo "built: $(pwd)/pug-match.smx"
