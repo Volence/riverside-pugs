@@ -843,6 +843,25 @@ describe('GET /api/replays/match/:id/:ordinal/:half from R2', () => {
     expect(remote.rawPayload.equals(local.rawPayload)).toBe(true);
   });
 
+  it('404s a live match whose row has an r2_key and no local file, without ever calling R2', async () => {
+    const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
+    // No writeRound call: no local file, live or finished.
+    const id = seedMatchReplay(name, 0, 1, 0, 20); // seeds the match as 'live'
+    const key = `replays/${id}/0_1.rpl`;
+    db.prepare('UPDATE match_replays SET r2_key = ? WHERE match_id = ?').run(key, id);
+
+    let calls = 0;
+    const a = Fastify();
+    const r2Get = async () => { calls++; return null; };
+    await a.register(replayRoutes, { db, replayDir: dir, r2: CFG, r2Get: r2Get as never });
+    await a.ready();
+    const remote = await a.inject({ url: `/api/replays/match/${id}/0/1` });
+    await a.close();
+
+    expect(remote.statusCode).toBe(404);
+    expect(calls).toBe(0);
+  });
+
   it('never consults R2 when r2 is not configured', async () => {
     // The default `app` from beforeEach has no r2 option at all.
     const name = `pug_${'c'.repeat(32)}_0_1.rpl`;
