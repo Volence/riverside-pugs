@@ -13,12 +13,23 @@ export const TREND_WINDOW = 10;
 export const PER_MAP_MIN_ROUNDS = 5;
 const ORDER: Verdict[] = ['real', 'too_early', 'noise', 'no_data'];
 
+/** 32-bit FNV-1a. Used only to turn a "metric|phase" key into a per-row
+ *  seed offset, not for anything security-sensitive. */
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
 export function compareSides(db: DB, a: SideQuery, b: SideQuery,
   opts: { phases: 'all' | 'split'; reps?: number; seed?: number }): CompareResult {
   const t0 = Date.now();
   const phases: Phase[] = opts.phases === 'split' ? ['all', ...SUB_PHASES] : ['all'];
   const da = loadSide(db, a, phases), db2 = loadSide(db, b, phases);
-  const rand = mulberry32(opts.seed ?? SEED);
+  const seed = opts.seed ?? SEED;
   const reps = opts.reps ?? REPS;
 
   const rows: CompareRow[] = [];
@@ -31,6 +42,12 @@ export function compareSides(db: DB, a: SideQuery, b: SideQuery,
     const w = mapWeights(sa, shared);
     const va = shared.length ? weightedValue(sa, w) : null;
     const vb = shared.length ? weightedValue(sb, w) : null;
+    // Each row gets its own PRNG stream (seeded from the whole-round seed plus
+    // a hash of its own metric+phase) so splitting whole-round metrics out by
+    // sub-phase can never perturb another row's bootstrap draws: a row's lo,
+    // hi and p depend only on its own data, not on which other rows or phases
+    // happen to be requested alongside it.
+    const rand = mulberry32((seed ^ fnv1a(`${m.id}|${phase}`)) >>> 0);
     const boot = va !== null && vb !== null ? bootstrapDiff(sa, sb, w, reps, rand) : null;
     const diff = va !== null && vb !== null ? vb - va : null;
     rows.push({
@@ -40,13 +57,27 @@ export function compareSides(db: DB, a: SideQuery, b: SideQuery,
       excludedMaps: excluded,
     });
   }
-  const sig = benjaminiHochberg(rows.map((r) => r.p), FDR);
+  // Benjamini-Hochberg runs as two separate families: whole-round rows
+  // (phase 'all') and sub-phase rows. Otherwise turning phase splitting on
+  // would change the whole-round p-value cutoffs (more rows in the same
+  // family shifts everyone's rank), and a whole-round verdict would flip
+  // depending on whether the sub-phase breakdown was also requested.
+  const allIdx: number[] = [], subIdx: number[] = [];
+  rows.forEach((r, i) => (r.phase === 'all' ? allIdx : subIdx).push(i));
+  const sigAll = benjaminiHochberg(allIdx.map((i) => rows[i].p), FDR);
+  const sigSub = benjaminiHochberg(subIdx.map((i) => rows[i].p), FDR);
+  const sig = new Array<boolean>(rows.length).fill(false);
+  allIdx.forEach((idx, k) => { sig[idx] = sigAll[k]; });
+  subIdx.forEach((idx, k) => { sig[idx] = sigSub[k]; });
   rows.forEach((r, i) => {
     r.verdict = verdictOf({ hasData: r.p !== null, significant: sig[i], nA: r.nA, nB: r.nB });
     if (r.verdict !== 'too_early') r.moreMatches = null;
   });
+  // Among real rows, a null rel (side A was 0, so no relative change is
+  // defined) sorts first, ahead of every finite-rel real row.
+  const relKey = (r: CompareRow) => (r.verdict === 'real' && r.rel === null ? Infinity : Math.abs(r.rel ?? 0));
   rows.sort((x, y) => ORDER.indexOf(x.verdict) - ORDER.indexOf(y.verdict)
-    || Math.abs(y.rel ?? 0) - Math.abs(x.rel ?? 0)
+    || relKey(y) - relKey(x)
     || Math.abs(y.diff ?? 0) - Math.abs(x.diff ?? 0)
     || x.metric.localeCompare(y.metric) || x.phase.localeCompare(y.phase));
 
@@ -55,9 +86,12 @@ export function compareSides(db: DB, a: SideQuery, b: SideQuery,
   const sa = da.summary, sb = db2.summary;
   const muDiff = sa.meanMu !== null && sb.meanMu !== null ? Math.abs(sa.meanMu - sb.meanMu) : 0;
   const gapDiff = sa.meanGap !== null && sb.meanGap !== null ? Math.abs(sa.meanGap - sb.meanGap) : 0;
-  const skill = muDiff > SKILL_BANNER_MU || gapDiff > SKILL_BANNER_MU
-    ? `Team ratings differ between the sides (mean rating ${sa.meanMu?.toFixed(1)} vs ${sb.meanMu?.toFixed(1)}, survivor minus infected gap ${sa.meanGap?.toFixed(1)} vs ${sb.meanGap?.toFixed(1)}); part of any change may be the players, not the patch.`
-    : null;
+  const oneSideMissingRatings = (sa.meanMu === null) !== (sb.meanMu === null);
+  const skill = oneSideMissingRatings
+    ? 'Ratings are unavailable for one side, so the skill check could not run.'
+    : muDiff > SKILL_BANNER_MU || gapDiff > SKILL_BANNER_MU
+      ? `Team ratings differ between the sides (mean rating ${sa.meanMu?.toFixed(1)} vs ${sb.meanMu?.toFixed(1)}, survivor minus infected gap ${sa.meanGap?.toFixed(1)} vs ${sb.meanGap?.toFixed(1)}); part of any change may be the players, not the patch.`
+      : null;
   return {
     a: sa, b: sb, rows, counts,
     banners: { skill, approximate: sa.historical || sb.historical },
@@ -104,7 +138,7 @@ export function metricDetail(db: DB, metric: string, phase: Phase, a: SideQuery,
       JOIN round_metric_context c ON c.match_id = rm.match_id AND c.ordinal = rm.ordinal AND c.half = rm.half
       JOIN matches m ON m.id = rm.match_id
       WHERE ${fb.sql} AND rm.metric = ? AND rm.phase = ? AND rm.den > 0
-      ORDER BY value`).all(...fb.params, metric, phase) as ExampleRound[];
+      ORDER BY value, rm.match_id DESC, rm.ordinal, rm.half`).all(...fb.params, metric, phase) as ExampleRound[];
   const picks = [...bRounds.slice(-3).reverse(), ...bRounds.slice(0, 2)];
   const seen = new Set<string>();
   const examples = picks.filter((e) => {
