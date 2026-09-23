@@ -297,10 +297,14 @@ export function startsOf(design: HudDesign, names: string[]): Record<string, Car
  * Move pieces by (dx, dy) from where a gesture started them, unscaled units.
  * The delta is clamped once for the whole group, against the unfitted card
  * (the Phase 1 drag clamp), so the pieces keep their spacing when the group
- * meets an edge instead of piling up against it one by one. A piece that
- * cannot move, or has nothing to start from (an addable child not yet in the
- * file), is skipped; every registered piece can move today, the splatter
- * included, but the guard stays for a future decor-only one.
+ * meets an edge instead of piling up against it one by one. A name missing
+ * from the registry, or with nothing to start from (an addable child not
+ * yet in the file), is skipped. Every registered piece moves today, so
+ * `teamChild(n)?.move` here currently means exactly "is `n` registered",
+ * the same live case build.ts's childPass guards against with its own "not
+ * an editable child" check; `?.move` stays rather than a plain existence
+ * check only so a future non-movable child would not need this filter
+ * touched again.
  */
 export function moveChildren(
   design: HudDesign, names: string[], starts: Record<string, CardChild>, dx: number, dy: number,

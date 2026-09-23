@@ -375,9 +375,14 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
   const size = font ? kvFind(work.tree(SCHEME), ['Fonts', font, '1']) : undefined;
   const tall = size ? parseFloat(kvGet(size, 'tall') ?? '') : NaN;
   const def = teamChild(name);
-  // Read regardless of the child's own colour flag, as this did before the
-  // image/label split: HealthNumber has no colour control (the game colours
-  // it by health) but its raw fgcolor_override is still reported here.
+  // Reads by kind whenever the name is registered, regardless of that
+  // child's own colour flag: HealthNumber has no colour control (the game
+  // colours it by health) but its raw fgcolor_override is still reported
+  // here, as this did before the image/label split. A name outside the
+  // registry (cardChild takes any node the file has, not only registered
+  // ones) now always reports no colour, unlike before the split, when it
+  // read raw fgcolor_override off whatever node it found; nothing in this
+  // codebase passes such a name in today, so nothing depends on that.
   const raw = def ? kvGet(n, colourKey(def)) : undefined;
   return {
     x: num(kvGet(n, 'xpos')) + shift.x, y: num(kvGet(n, 'ypos')) + shift.y,
