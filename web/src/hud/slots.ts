@@ -5,9 +5,11 @@
  * `targets` are pointed at it, because an addon cannot replace a texture that
  * ships in pak01. `stockNames` are the pak01 names themselves; they are only
  * written in advanced mode, where the VPK mounts ahead of pak01. A slot with
- * no targets (the weapon boxes and the incapacitated and dead panels, which
- * game code names directly) has no normal-mode route at all, so it must be
- * advancedOnly. There are no health bar slots: the game draws bar fills in
+ * no targets (the incapacitated and dead panels, which game code names
+ * directly) has no normal-mode route at all, so it must be advancedOnly. The
+ * weapon boxes were slots like that until probe B (2026-09-23) showed that
+ * repointing mod_textures.txt restyles them from a normal addon: they are
+ * the weapon selection's own setting now (HudDesign.weapons). There are no health bar slots: the game draws bar fills in
  * code and never reads the healthbar_* textures (probe T8).
  */
 export interface StyleSlot {
@@ -32,10 +34,6 @@ const CARD_BG = { file: 'resource/ui/hud/teammatepanel.res', path: ['HudEdCardBg
 export const SLOTS: StyleSlot[] = [
   { id: 'panelBg', label: 'Survivor panel background', advancedOnly: false, size: { w: 32, h: 32 },
     targets: [CARD_BG], stockNames: [], defaultColor: '0 0 0 140' },
-  { id: 'weaponBoxActive', label: 'Active weapon box', advancedOnly: true, size: { w: 32, h: 32 },
-    targets: [], stockNames: ['vgui/hud/scalablepanel_bgmidgrey_glow'], defaultColor: '40 40 40 215' },
-  { id: 'weaponBoxInactive', label: 'Other weapon boxes', advancedOnly: true, size: { w: 32, h: 32 },
-    targets: [], stockNames: ['vgui/hud/scalablepanel_bgmidgrey'], defaultColor: '0 0 0 130' },
   { id: 'incapPanel', label: 'Incapacitated panel', advancedOnly: true, size: { w: 256, h: 256 },
     targets: [], stockNames: ['biker', 'manager', 'namvet', 'teenangst'].map((c) => `vgui/s_panel_${c}_incap`),
     defaultColor: '95 22 22 205' },

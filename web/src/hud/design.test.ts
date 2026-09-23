@@ -290,3 +290,62 @@ describe('share links', () => {
     }
   });
 });
+
+describe('validateDesign, the weapon selection', () => {
+  it('keeps each weapon key clamped to the range the generator writes, and drops junk', () => {
+    const d = validateDesign({ v: 1, weapons: {
+      primaryY: 999, indent: -999, primaryBoxW: 250, primaryBoxH: -5, pistolBoxW: 40, pistolBoxH: 12.4,
+      iconTall: 20, itemSize: 0, ammoX: 48, reserveY: -3, clipFont: 2, pistolFont: 90,
+      reserveColor: '255 0 255 255', inactiveColor: '0 255 0 999', evil: 1, weaponIcons: 'no', itemIcons: false,
+    } });
+    expect(d.weapons).toEqual({
+      primaryY: 200, indent: -200, primaryBoxW: 200, primaryBoxH: 0, pistolBoxW: 40, pistolBoxH: 12.4,
+      iconTall: 20, itemSize: 0, ammoX: 48, reserveY: -3, clipFont: 6, pistolFont: 64,
+      reserveColor: '255 0 255 255', itemIcons: false,
+    });
+  });
+
+  it('keeps the box styles it can write, a colour only where one draws, and nothing for stock', () => {
+    const d = validateDesign({ v: 1, weapons: {
+      boxActive: { kind: 'rounded', color: '10 20 30 200' }, boxInactive: { kind: 'hidden', color: '1 2 3 4' },
+    } });
+    expect(d.weapons).toEqual({ boxActive: { kind: 'rounded', color: '10 20 30 200' }, boxInactive: { kind: 'hidden' } });
+    expect(validateDesign({ v: 1, weapons: { boxActive: { kind: 'stock' }, boxInactive: { kind: 'image' } } }).weapons).toBeUndefined();
+  });
+
+  it('leaves an untouched design without weapons, so its download is unchanged', () => {
+    expect(validateDesign({ v: 1 }).weapons).toBeUndefined();
+    expect(validateDesign({ v: 1, weapons: {} }).weapons).toBeUndefined();
+    expect(DEFAULT_DESIGN.weapons).toBeUndefined();
+  });
+
+  // The old Advanced-only weaponBoxActive/Inactive slots overwrote the pak01 box
+  // textures by name, which only an advanced (gameinfo.txt) install could do.
+  // Their styles move to the new setting, which works from a normal addon.
+  it('moves the old advanced weapon box styles to the new box setting, with their old default colours', () => {
+    const d = validateDesign({ v: 1, advanced: true, styles: {
+      weaponBoxActive: { kind: 'rounded', color: '9 9 9 99' }, weaponBoxInactive: { kind: 'flat' }, panelBg: { kind: 'flat' },
+    } });
+    expect(d.weapons).toEqual({ boxActive: { kind: 'rounded', color: '9 9 9 99' }, boxInactive: { kind: 'flat', color: '0 0 0 130' } });
+    expect(Object.keys(d.styles)).toEqual(['panelBg']);
+  });
+
+  it('drops the old weapon box styles of a design not in advanced mode, which never shipped them', () => {
+    const d = validateDesign({ v: 1, styles: { weaponBoxActive: { kind: 'flat' } }, images: { weaponBoxActive: { w: 1, h: 1, png: 'AAAA' } } });
+    expect(d.weapons).toBeUndefined();
+    expect(d.styles).toEqual({});
+    expect(d.images).toEqual({});
+  });
+
+  it('prefers a new box setting over an old slot, and drops an old image style it cannot carry', () => {
+    const d = validateDesign({ v: 1, advanced: true,
+      styles: { weaponBoxActive: { kind: 'flat' }, weaponBoxInactive: { kind: 'image' } },
+      weapons: { boxActive: { kind: 'hidden' } } });
+    expect(d.weapons).toEqual({ boxActive: { kind: 'hidden' } });
+  });
+
+  it('carries the weapons through a share link', async () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), weapons: { ammoX: 48, weaponIcons: false, boxActive: { kind: 'hidden' as const } } };
+    expect((await decodeShare(await encodeShare(d)))?.weapons).toEqual(d.weapons);
+  });
+});

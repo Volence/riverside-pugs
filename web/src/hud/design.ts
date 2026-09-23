@@ -70,6 +70,63 @@ export interface ChildOverride {
   on?: boolean;
 }
 export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; color?: string }
+
+/**
+ * The weapon selection's boxes, the active slot's and the rest: as the game
+ * draws them, not at all, or a generated flat or rounded texture in a colour.
+ * Written by repointing mod_textures.txt's rounded_background_glow and
+ * rounded_background_noborder, which works from a normal addon (probe B,
+ * 2026-09-23). No 'stock' is ever stored: absent means stock.
+ */
+export interface WeaponBoxStyle { kind: 'hidden' | 'flat' | 'rounded'; color?: string }
+/** Box colours when a flat or rounded box carries none: the old Advanced weapon box slots' defaults. */
+export const WEAPON_BOX_COLOUR = { boxActive: '40 40 40 215', boxInactive: '0 0 0 130' } as const;
+
+/**
+ * The HudWeaponSelection keys the game's paint reads (weapons.ts's header,
+ * from client.dll, and the owner's probes of 2026-09-23), one field each.
+ * `size` fields are 0..200, `offset` fields -200..200. The generator writes
+ * each present field into that key; the preview reads the key back.
+ */
+export const WEAPON_KEYS = {
+  primaryY: { key: 'PrimaryWeaponsYPos', range: 'offset' },
+  indent: { key: 'RightSideIndent', range: 'offset' },
+  primaryBoxW: { key: 'PrimaryWeaponBoxWide', range: 'size' },
+  primaryBoxH: { key: 'PrimaryWeaponBoxTall', range: 'size' },
+  pistolBoxW: { key: 'PistolBoxWide', range: 'size' },
+  pistolBoxH: { key: 'PistolBoxTall', range: 'size' },
+  iconTall: { key: 'PrimaryWeaponTall', range: 'size' },
+  itemSize: { key: 'IconSize', range: 'size' },
+  ammoX: { key: 'PrimaryWeaponAmmoX', range: 'offset' },
+  reserveY: { key: 'ReserveAmmoYPos', range: 'offset' },
+} as const;
+export type WeaponNumKey = keyof typeof WEAPON_KEYS;
+const WEAPON_RANGES = { size: [0, 200], offset: [-200, 200], font: [6, 64] } as const;
+
+/** The same clamp validateDesign applies, for the weapon number boxes and sliders. */
+export function clampWeapon(key: WeaponNumKey | 'clipFont' | 'pistolFont', value: number): number {
+  const [lo, hi] = WEAPON_RANGES[key === 'clipFont' || key === 'pistolFont' ? 'font' : WEAPON_KEYS[key].range];
+  return Math.min(hi, Math.max(lo, value));
+}
+
+/**
+ * The player's weapon selection edits. Every field is optional and absent
+ * means the preset's own value, so a design that never touched the weapons
+ * builds exactly the files it did before.
+ */
+export type WeaponsOverride = { [K in WeaponNumKey]?: number } & {
+  /** The clip number's size: a HudEd_ copy of PrimaryAmmoFont at this tall. */
+  clipFont?: number;
+  /** The reserve and pistol clip size: a HudEd_ copy of PistolAmmoFont (HudAmmo) at this tall. */
+  pistolFont?: number;
+  /** Raw "r g b a": ReserveAmmoColor and InactiveItemColor. */
+  reserveColor?: string; inactiveColor?: string;
+  boxActive?: WeaponBoxStyle; boxInactive?: WeaponBoxStyle;
+  /** false hides the gun and pistol pictures; absent or true draws them. */
+  weaponIcons?: boolean;
+  /** false hides the throwable, medkit and pills pictures. */
+  itemIcons?: boolean;
+};
 export interface UploadedImage { w: number; h: number; png: string }
 /**
  * Where the crosshair comes from. 'bundle' (Custom, in the editor) ships the
@@ -101,6 +158,8 @@ export interface HudDesign {
   children: Record<string, Record<string, ChildOverride>>;
   /** Write never_draw on HudCrosshair so an image crosshair can replace the game's own (probe T2). */
   hideGameCrosshair?: boolean;
+  /** The weapon selection's own keys, boxes and icons. Absent means the preset's. */
+  weapons?: WeaponsOverride;
 }
 
 /**
@@ -350,6 +409,43 @@ function element(id: string, raw: unknown, preset: Preset): ElementOverride {
   return out;
 }
 
+function boxStyle(v: unknown): WeaponBoxStyle | undefined {
+  if (!isObj(v) || (v.kind !== 'hidden' && v.kind !== 'flat' && v.kind !== 'rounded')) return undefined;
+  const out: WeaponBoxStyle = { kind: v.kind };
+  const c = colour(v.color);
+  if (c && v.kind !== 'hidden') out.color = c;
+  return out;
+}
+
+/**
+ * The weapon edits, rebuilt field by field, or nothing when none survive.
+ * An advanced design's old weaponBoxActive/Inactive style (the slots that
+ * overwrote the pak01 box textures by name) becomes the matching box
+ * setting, carrying the colour it drew with; a new setting wins over it, and
+ * an uploaded image, which the new setting cannot carry, is dropped. A design
+ * not in advanced mode never shipped those styles, so they are dropped too.
+ */
+function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean): WeaponsOverride | undefined {
+  const w = isObj(raw) ? raw : {};
+  const out: WeaponsOverride = {};
+  for (const k of [...Object.keys(WEAPON_KEYS), 'clipFont', 'pistolFont'] as (WeaponNumKey | 'clipFont' | 'pistolFont')[]) {
+    const v = w[k];
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = clampWeapon(k, v);
+  }
+  const rc = colour(w.reserveColor); if (rc) out.reserveColor = rc;
+  const ic = colour(w.inactiveColor); if (ic) out.inactiveColor = ic;
+  const old = advanced && isObj(oldStyles) ? oldStyles : {};
+  for (const [box, slot] of [['boxActive', 'weaponBoxActive'], ['boxInactive', 'weaponBoxInactive']] as const) {
+    const style = boxStyle(w[box]);
+    const was = old[slot];
+    if (style) out[box] = style;
+    else if (isObj(was) && (was.kind === 'flat' || was.kind === 'rounded')) out[box] = { kind: was.kind, color: colour(was.color) ?? WEAPON_BOX_COLOUR[box] };
+  }
+  if (typeof w.weaponIcons === 'boolean') out.weaponIcons = w.weaponIcons;
+  if (typeof w.itemIcons === 'boolean') out.itemIcons = w.itemIcons;
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function validateDesign(raw: unknown): HudDesign {
   if (!isObj(raw) || raw.v !== 1) return structuredClone(DEFAULT_DESIGN);
   const d: HudDesign = structuredClone(DEFAULT_DESIGN);
@@ -392,6 +488,8 @@ export function validateDesign(raw: unknown): HudDesign {
     if (!/^[A-Za-z0-9+/=]+$/.test(png)) continue;
     d.images[id] = { w, h, png };
   }
+  const weapons = weaponsOf(raw.weapons, raw.styles, d.advanced);
+  if (weapons) d.weapons = weapons;
   const team = isObj(raw.children) ? raw.children[TEAM_PANEL.panelId] : undefined;
   if (isObj(team)) {
     const kids: Record<string, ChildOverride> = {};

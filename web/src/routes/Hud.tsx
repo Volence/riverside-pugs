@@ -979,7 +979,7 @@ export default function Hud() {
           {design.advanced ? 'Turn off advanced mode' : 'Turn on advanced mode'}
         </button>
         <p class="muted hud__note">
-          Advanced mode also restyles the incapacitated and dead panels and the weapon boxes. The game only allows
+          Advanced mode also restyles the incapacitated and dead panels. The game only allows
           that from a folder you add to gameinfo.txt, so the download becomes a zip with instructions.
         </p>
 
