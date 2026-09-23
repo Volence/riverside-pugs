@@ -157,7 +157,12 @@ void BalanceScanStatic()
 	while (MorePlugins(it))
 	{
 		Handle pl = ReadPlugin(it);
-		if (GetPluginStatus(pl) != Plugin_Running) continue;
+		// A plugin that failed to load (a missing extension, say) can come
+		// back as a null handle, and every plugin native reads null as "the
+		// calling plugin": it would be listed as a running pug-match.smx.
+		// Seen on a local srcds with nine failed plugins: nine extra
+		// p:pug-match.smx items on the BALANCE lines.
+		if (pl == null || GetPluginStatus(pl) != Plugin_Running) continue;
 		GetPluginFilename(pl, name, sizeof(name));
 		BuildPath(Path_SM, path, sizeof(path), "plugins/%s", name);
 		if (BalFileValue(path, value, sizeof(value))) BalPush("p", name, value);
