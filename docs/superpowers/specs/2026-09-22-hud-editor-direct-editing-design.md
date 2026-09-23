@@ -50,31 +50,48 @@ A selection is one of:
 type Selection =
   | { kind: 'none' }
   | { kind: 'elements'; ids: string[] }                 // one or more elements, same side
-  | { kind: 'card'; card: number }                      // one Free teammate card
+  | { kind: 'cards'; cards: number[] }                  // one or more teammate cards, sorted, no repeats
   | { kind: 'children'; names: string[]; card: number } // pieces of the teammate card; card = the card clicked in (for display)
 ```
+
+The survivor Teammates nest three levels deep in every layout (Row, Column and Free): the
+Teammates element, then a card, then a piece. Cards 1 to 3 are the ones the preview draws; card 4
+shows only while spectating a full team, so it is a level only in Free, where Layers lists it.
 
 The pure module `selection.ts` decides what a pointer gesture means, so the page holds no hit
 logic of its own. Everything it measures comes from the generator's trees (`elementRect`,
 `teamCardRects`, `childRects`), as Phase 1 requires.
 
-- **Hover** outlines what a click would pick and shows its name in a small label.
+- **Hover** outlines what a click would pick and shows its name in a small label; with Ctrl held
+  it outlines what a Ctrl+click would pick (a card, over one of its pieces).
 - **Click** (press and release within 3 screen pixels) picks the deepest thing under the pointer:
-  a teammate card piece if the pointer is on one that is drawn in the current state, else a Free
-  card (in Free), else the element. **Ctrl+click** picks one level up (the element or card
-  instead of the piece). **Shift+click** adds or removes the item at the same level as the
-  current selection (pieces with pieces of the teammate card, elements with elements); at a
-  different level it starts a new selection.
-- **Drag** started on something that is part of the selection moves the selection. A drag started
-  on something not selected moves the outermost section there (the element, or in Free the card)
-  and selects it. No key is needed to move a section.
+  a teammate card piece if the pointer is on one that is drawn in the current state, else the card,
+  else the element. **Ctrl+click** picks one level up: a piece's card; the Teammates from a card's
+  empty space, or when that card is already the selection, so repeated Ctrl+clicks walk up.
+  **Shift+click** adds or removes the item at the same level as the current selection (pieces
+  with pieces of the teammate card, cards with cards, elements with elements); at a different level
+  it starts a new selection. While cards are picked, Shift+click (or Ctrl+Shift+click) anywhere on
+  a card, a piece included, is lifted to that card, so it adds or removes the card.
+- **Drag** started on something that is part of the selection moves the selection: picked pieces,
+  every picked card together (keeping their spacing), or the Row or Column Teammates as one. A
+  drag started on something not selected moves only the card under the pointer, in any layout,
+  and selects it; off the cards it moves the element there. No key is needed to move a card or a
+  section.
+- **Moving a card of a Row or Column team** (a drag, the arrows, or its X and Y boxes) first
+  switches the Teammates to Free, seeding all four card positions from where the cards are drawn,
+  so the cards not moving stay put. The switch and the move are one undo step, and the status line
+  says "Teammates switched to Free layout" until an undo, redo or cancelled drag puts the team back
+  in Row or Column. (Free positions use the element anchor tokens; on the 853-wide 16:9 screen a
+  card in the middle third can only land on a half unit, so card 3 of the stock row moves half a
+  unit on the switch, as it always has from the Layout select.)
 - **Shift+drag** on the canvas draws a box. If the box starts inside a teammate card it picks every
   drawn piece of that card it touches; otherwise every element of the current side it touches.
 - **Ctrl+A**: with pieces picked, every drawn piece of the teammate card; otherwise every visible
   element of the current side.
-- **Escape** climbs one level (pieces, then card or element, then none). The **breadcrumb** at
-  the canvas corner shows the path (`Teammates › Card 2 › Health bar`, or `Teammates › 3
-  pieces`); clicking a segment selects that level.
+- **Escape** climbs one level (pieces, then their card, then the Teammates, then none; an element,
+  then none). The **breadcrumb** at the canvas corner shows the path (`Teammates › Card 2 › Health
+  bar`, `Teammates › Card 3`, `Teammates › 2 cards`, or `Teammates › Card 1 › 3 pieces`); clicking a
+  segment selects that level.
 - Pieces are edited in the one teammate card file, so picking a piece in any card outlines it in
   every card (Phase 1 behaviour, kept).
 
@@ -87,7 +104,7 @@ Handles sit on the selection's bounding box. What they do depends on what is sel
 | Element with `resize: 'free'` | 8 (sides and corners) | Width and height, as the current corner drag |
 | Element with `resize: 'scale'` | 4 corners | Scale, proportional, from the opposite corner; clamped to the existing 0.5..2 |
 | Element with `resize: 'none'` | none | |
-| Free card | none (cards share one size) | |
+| Cards | none (cards share one size) | |
 | One piece, box `wh` | 8 | Width and height |
 | One piece, box `square` | 4 corners | Size, ratio locked |
 | One piece, box `none` with a font (Items) | 4 corners | Icon size, proportional |
@@ -118,7 +135,8 @@ replaced by it.
 Left of the canvas, for the current side: every element as a row, in registry order, with an eye
 toggle (visible) and the label; hidden rows are struck through. `Teammates` expands to its pieces
 from the child registry, drawn state children marked as "shown when down/dead", and the addable
-Health number as a `＋ Health number` row that adds it. In Free, `Teammates` also lists Card 1..4.
+Health number as a `＋ Health number` row that adds it. `Teammates` also lists Card 1..3 in every
+layout, and Card 4 in Free.
 Click selects, Shift+click adds, following the same rules as the canvas. The pill rows under the
 canvas and the children list in the side panel are removed.
 
@@ -130,7 +148,8 @@ canvas and the children list in the side panel are removed.
 - **Context panel** on the right shows only what the selection can do:
   - nothing: a short hint, then Styles and Save and share (as today);
   - one element: its existing controls (the Phase 1 `ElementControls`, including Teammates layout);
-  - one Free card: Card X and Y;
+  - one card: Card X and Y (in Row or Column a typed value switches the team to Free, one step);
+  - several cards: group X and Y (moving all, from their box) and Align against their box;
   - one piece: the Phase 1 `ChildControls`;
   - several pieces: group X and Y (moving all), Align (left, centre, right, top, middle, bottom,
     against the group's box), Visible for all, Reset all;
@@ -138,7 +157,8 @@ canvas and the children list in the side panel are removed.
   Styles and Save stay reachable below in every case.
 - **Right-click** on the canvas opens a small menu for the thing under the pointer: Hide, Reset,
   and Select whole card / Select Teammates where they apply. **Delete** or **Backspace** hides the
-  selection (visible false for elements and pieces; a Free card cannot be hidden alone).
+  selection (visible false for elements and pieces; a card cannot be hidden alone, so a card's menu
+  offers only Select Teammates and Delete on cards does nothing).
 - **Arrow keys** nudge the selection by 1 unit, Shift by 10, through the same clamps.
 
 ## Known issue folded in
@@ -160,9 +180,10 @@ growing it:
   breadcrumb path (pure, over `buildTrees` geometry).
 - `web/src/hud/guides.ts`: snapping and guide lines (pure).
 - `web/src/hud/edit.ts`: the pure design edits the page applies: the Phase 1 helpers moved out of
-  `Hud.tsx` (`nudge`, `placeCard`, `nudgeCard`, `patchChild`, `placeChild`, `nudgeChild`,
+  `Hud.tsx` (`nudge`, `placeCard`, `patchChild`, `placeChild`, `nudgeChild`,
   `resizeChild`, `withTeamDir`, `resetElement`, ...) plus the new group edits (`moveChildren`,
-  `scaleChildren`, `alignChildren`, `alignElements`, `scaleElement`, `hideSelection`).
+  `scaleChildren`, `alignChildren`, `alignElements`, `scaleElement`, `hideSelection`) and the card
+  edits (`freeInPlace`, `cardBoxes`, `moveCards`, `nudgeCards`, `placeCards`, `alignCards`).
 - `web/src/routes/hud/Toolbar.tsx`, `LayersPanel.tsx`, `ContextPanel.tsx`, `ContextMenu.tsx`:
   presentational components.
 - `web/src/routes/Hud.tsx`: state (design, history, selection, hover, drag), wiring and layout.
@@ -192,8 +213,8 @@ growing it:
   on-screen clamp.
 - Page: Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y and the buttons; one drag is one undo step; a slider drag
   is one step; typing in a number box does not trigger the editor's undo; click picks a piece in
-  one click; drag on an unpicked card moves the team; Shift+click multi-select then drag moves
-  both; a handle drag resizes; the Layers list selects and hides; right-click menu; Delete hides.
+  one click; drag on an unpicked card in Row moves only that card and goes Free, one undo step;
+  Shift+click multi-select (pieces or cards) then drag moves both; a handle drag resizes; the Layers list selects and hides; right-click menu; Delete hides.
 - Preview equals file: every existing parity test still passes; hover, handles and guides are
   drawn from the same rects.
 - Browser pass by the controller on the running page, then the owner.
