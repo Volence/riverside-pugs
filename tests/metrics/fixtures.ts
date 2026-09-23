@@ -58,7 +58,7 @@ export function input(over: Partial<RoundInput> = {}): RoundInput {
   SURV.forEach((p) => teamOf.set(p, 'a'));
   INF.forEach((p) => teamOf.set(p, 'b'));
   return {
-    key: { matchId: 1, ordinal: 0, half: 1 }, survTeam: 'a', reliable: true, ended: true,
+    key: { matchId: 1, ordinal: 0, half: 1 }, startedAt: '2026-09-20 12:00:00', survTeam: 'a', reliable: true, ended: true,
     score: 400, survivorsAlive: 2, events: [], marks: [], stats: new Map(), hasStats: false,
     skillDetect: false, teamOf, replay: null, ...over,
   };
