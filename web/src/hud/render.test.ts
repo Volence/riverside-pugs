@@ -631,6 +631,17 @@ describe('paintAdditive', () => {
     expect([...put[0].data]).toEqual([180, 174, 164, 255, 135, 126, 110, 255]);
   });
 
+  it('never reads pixels from a context without a canvas of known size, as the page tests stub one', () => {
+    // Hud.test.tsx's stub answers every getImageData with one shared buffer;
+    // adding onto it in place spoiled the crosshair texture the download packs.
+    const { ctx, calls } = recCtx();
+    const read = vi.fn(() => ({ data: new Uint8ClampedArray(4) }));
+    Object.assign(ctx, { getImageData: read, canvas: () => undefined });
+    paintAdditive(ctx, { x: 0, y: 0, w: 5, h: 5 }, (c) => c.fillText('8', 0, 0));
+    expect(read).not.toHaveBeenCalled();
+    expect(calls.find((c) => c.m === 'fillText')!.op).toBe('lighter');
+  });
+
   it("falls back to the canvas's own 'lighter' sum where pixels cannot be read, and puts the composite back", () => {
     const { ctx, calls } = recCtx();
     paintAdditive(ctx, { x: 0, y: 0, w: 5, h: 5 }, (c) => c.fillText('8', 0, 0));

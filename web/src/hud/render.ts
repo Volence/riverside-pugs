@@ -203,7 +203,8 @@ export function setFont(ctx: CanvasRenderingContext2D, design: HudDesign, name: 
  * but still reads as additive.
  */
 export function paintAdditive(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }, paint: (c: CanvasRenderingContext2D) => void): void {
-  const readable = typeof ctx.getImageData === 'function' && !!ctx.canvas;
+  // A real 2D context: pixels it can read and a canvas of known size (a test stub may have neither).
+  const readable = typeof ctx.getImageData === 'function' && Number.isFinite(ctx.canvas?.width) && Number.isFinite(ctx.canvas?.height);
   const x0 = Math.max(0, Math.floor(box.x)), y0 = Math.max(0, Math.floor(box.y));
   const x1 = readable ? Math.min(ctx.canvas.width, Math.ceil(box.x + box.w)) : 0;
   const y1 = readable ? Math.min(ctx.canvas.height, Math.ceil(box.y + box.h)) : 0;
