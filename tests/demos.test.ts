@@ -93,6 +93,54 @@ describe('recordMatchDemos', () => {
   it('records nothing and does not throw when there are no demos', () => {
     expect(recordMatchDemos(db, 1, TOKEN, dir)).toBe(0);
   });
+
+  // Two files can share an ordinal: warm-up before a campaign change, the tail
+  // of a map transition, an empty recording. On 2026-09-23 matches 76, 93 and
+  // 144 each had their row flip between such a pair after the upload, keeping
+  // the other file's r2_key. The real recording is always the larger one.
+  const row = () => db.prepare('SELECT filename, bytes, r2_key, r2_at FROM match_demos WHERE match_id = 1 AND ordinal = 0').get() as
+    { filename: string; bytes: number; r2_key: string | null; r2_at: string | null };
+
+  it('keeps the larger file when two share an ordinal, whatever the directory order', () => {
+    touch(`pug_${TOKEN}_0_l4d_vs_airport01_greenhouse.dem`, 100);
+    touch(`pug_${TOKEN}_0_l4d_ihm01_forest.dem`, 900);
+    expect(recordMatchDemos(db, 1, TOKEN, dir)).toBe(1);
+    expect(row().filename).toBe(`pug_${TOKEN}_0_l4d_ihm01_forest.dem`);
+  });
+
+  it('never replaces an uploaded row with a different, smaller file', () => {
+    touch(`pug_${TOKEN}_0_l4d_vs_stadium1_apartment.dem`, 900);
+    recordMatchDemos(db, 1, TOKEN, dir);
+    db.prepare("UPDATE match_demos SET r2_key = 'demos/1/x', r2_at = datetime('now')").run();
+    rmSync(join(dir, `pug_${TOKEN}_0_l4d_vs_stadium1_apartment.dem`));   // reclaimed after upload
+    touch(`pug_${TOKEN}_0_l4d_vs_airport01_greenhouse.dem`, 100);        // an empty later recording
+
+    recordMatchDemos(db, 1, TOKEN, dir);
+
+    expect(row()).toMatchObject({ filename: `pug_${TOKEN}_0_l4d_vs_stadium1_apartment.dem`, bytes: 900, r2_key: 'demos/1/x' });
+  });
+
+  it('clears the key when the row moves to a different, larger file, so that file gets uploaded', () => {
+    touch(`pug_${TOKEN}_0_l4d_vs_airport01_greenhouse.dem`, 100);
+    recordMatchDemos(db, 1, TOKEN, dir);
+    db.prepare("UPDATE match_demos SET r2_key = 'demos/1/x', r2_at = datetime('now')").run();
+    touch(`pug_${TOKEN}_0_l4d_ihm01_forest.dem`, 900);
+
+    recordMatchDemos(db, 1, TOKEN, dir);
+
+    expect(row()).toEqual({ filename: `pug_${TOKEN}_0_l4d_ihm01_forest.dem`, bytes: 900, r2_key: null, r2_at: null });
+  });
+
+  it('keeps the key when the same file only grows', () => {
+    touch(`pug_${TOKEN}_0_l4d_vs_hospital01_apartment.dem`, 100);
+    recordMatchDemos(db, 1, TOKEN, dir);
+    db.prepare("UPDATE match_demos SET r2_key = 'demos/1/x', r2_at = datetime('now')").run();
+    touch(`pug_${TOKEN}_0_l4d_vs_hospital01_apartment.dem`, 500);
+
+    recordMatchDemos(db, 1, TOKEN, dir);
+
+    expect(row()).toMatchObject({ bytes: 500, r2_key: 'demos/1/x' });
+  });
 });
 
 describe('resolveDemoPath', () => {
