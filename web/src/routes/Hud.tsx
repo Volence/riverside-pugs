@@ -21,7 +21,7 @@ import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
-import { registerImport, unregisterImport, hasImport } from '../hud/base';
+import { registerImport, unregisterImport, hasImport, importedFiles, baseOf } from '../hud/base';
 import { readHudUpload, hudId } from '../hud/upload';
 import { importProblem } from '../hud/importCheck';
 import { hudStore, type HudMeta } from '../hud/hudStore';
@@ -104,10 +104,17 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   const assets: BuildAssets = {};
   // A bundled crosshair's texture, drawn from the design's own crosshair as
   // the preview draws it (a built one exactly as the Crosshair page
-  // exports it). Without it the generator refuses the build.
+  // exports it). Without it the generator refuses the build. An imported
+  // HUD's own crosshair that the player left as the import made it ships as
+  // the upload's own files instead (build.ts's ownCrosshair).
   if (design.crosshair === 'bundle' && design.xhairArt) {
-    const px = await artPixels(design.xhairArt);
-    if (px && px.length === TEX * TEX * 4) assets.crosshair = px;
+    const layer = importedFiles(baseOf(design));
+    const own = layer ? importedCrosshair(layer) : null;
+    if (own && JSON.stringify(own) === JSON.stringify(design.xhairArt)) assets.ownCrosshair = true;
+    else {
+      const px = await artPixels(design.xhairArt);
+      if (px && px.length === TEX * TEX * 4) assets.crosshair = px;
+    }
   }
   const entries = Object.entries(design.images);
   if (entries.length) {

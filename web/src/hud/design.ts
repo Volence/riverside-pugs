@@ -136,8 +136,9 @@ export interface UploadedImage { w: number; h: number; png: string }
 /**
  * Where the crosshair comes from. 'bundle' (Custom, in the editor) ships the
  * xHair element plus the design's own `xhairArt` as its texture; 'none'
- * (Game default) ships no element, so the game's own crosshair is all there
- * is. 'addon' ships only the element, for a separate crosshair addon to
+ * (Game default) ships no element of the editor's, so the game's own
+ * crosshair is all there is (an imported HUD's own xHair element is its
+ * author's, and stays as the upload has it). 'addon' ships only the element, for a separate crosshair addon to
  * supply the texture: it is legacy, kept so a design saved with it builds
  * the same file, and offered only while a design has it.
  */

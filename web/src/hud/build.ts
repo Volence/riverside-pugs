@@ -34,6 +34,13 @@ export interface BuildAssets {
   fonts?: { regular: Uint8Array; bold: Uint8Array };
   images?: Record<string, Uint8ClampedArray>;
   crosshair?: Uint8ClampedArray;
+  /**
+   * The design's crosshair is still the imported HUD's own altcrosshair
+   * texture, exactly as the import made it (the page compares the two). The
+   * upload's own texture files then ship untouched instead of a copy
+   * redrawn at TEX, so a download with no edits is the upload byte for byte.
+   */
+  ownCrosshair?: boolean;
 }
 
 /** A generated text file's bytes: latin-1, as the game reads it. */
@@ -157,7 +164,10 @@ function layoutPass(work: Work, design: HudDesign) {
   const has = kvFind(layout, ['xHair']);
   const wants = design.crosshair !== 'none';
   if (wants && !has) layout.unshift(structuredClone(XHAIR));
-  if (!wants && has) layout.splice(layout.indexOf(has), 1);
+  // Game default takes out the xHair element Modern ships. An imported HUD's
+  // own xHair is part of the HUD and stays as the upload has it (spec,
+  // "Crosshair"): there Game default only means the editor adds none.
+  if (!wants && has && !work.imported) layout.splice(layout.indexOf(has), 1);
 
   // Probe T2: the engine crosshair honours never_draw, so a player with an
   // image crosshair can hide the game's own one underneath it.
@@ -1136,12 +1146,16 @@ function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
  */
 function crosshairPass(design: HudDesign, assets: BuildAssets, out: VpkFile[]) {
   if (design.crosshair !== 'bundle') return;
+  if (assets.ownCrosshair && importedFiles(baseOf(design))?.has(OWN_XHAIR)) return;
   const px = assets.crosshair;
   if (!px || px.length !== TEX * TEX * 4) {
     throw new Error("This HUD's crosshair could not be drawn. Select Custom crosshair and pick it again, or choose Game default.");
   }
   out.push(...crosshairFiles(TEX, TEX, px));
 }
+
+/** Where an imported HUD keeps its own crosshair texture, the one crosshairFiles writes. */
+const OWN_XHAIR = 'materials/vgui/hud/altcrosshair.vtf';
 
 function addonInfo(name: string): string {
   return `"AddonInfo"\n{\n\taddonSteamAppID\t\t500\n\taddontitle\t\t"${name.replace(/"/g, '')}"\n\taddonversion\t\t1.0\n\taddontagline\t\t"Custom HUD (riversidepug.com)"\n\taddonauthor\t\t"HUD editor"\n\taddonDescription\t\t"Custom HUD layout."\n}\n`;

@@ -74,10 +74,12 @@ export function hasLayoutEdits(d: HudDesign): boolean {
  * or a reset, starts with none, so the HUD shows exactly as its author made
  * it (not even the default fitted teammates). Fonts are the HUD's own. The
  * crosshair: the upload's own altcrosshair texture becomes a bundled image
- * crosshair (`art`); with no texture but an xHair element in its layout
- * (`hasXhair`), a design on the game's crosshair becomes 'addon', so
- * layoutPass keeps the HUD's element instead of removing it; otherwise the
- * player's own choice stands.
+ * crosshair (`art`), which downloads as the upload's own files for as long
+ * as the player leaves it (build.ts's ownCrosshair); with no texture but an
+ * xHair element in its layout (`hasXhair`), the HUD was made to show a
+ * crosshair addon's texture, so a design on the game's crosshair becomes
+ * 'addon', which says so; otherwise the player's own choice stands. The
+ * HUD's own xHair element is kept whichever it is.
  */
 export function withImport(d: HudDesign, ref: ImportedRef, o: { art: CrosshairArt | null; hasXhair: boolean; reset: boolean }): HudDesign {
   const keep = !o.reset && hasLayoutEdits(d);

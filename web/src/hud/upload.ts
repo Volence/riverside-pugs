@@ -121,7 +121,7 @@ const SHAPES: { path: string; blocks: string[]; required?: string[] }[] = [
  * the new HUD once, off screen (importCheck.ts), which catches whatever a
  * list like this one misses.
  */
-function checkFiles(files: Map<string, Uint8Array>) {
+function checkFiles(files: ReadonlyMap<string, Uint8Array>) {
   const roots = new Map<string, KvNode[]>();
   for (const path of BASE_PATHS) {
     const data = files.get(path);
@@ -143,6 +143,11 @@ function checkFiles(files: Map<string, Uint8Array>) {
       }
     }
   }
+}
+
+/** checkFiles's refusal as a value: null for files the editor can walk, else the one-line reason naming the file. */
+export function fileProblem(files: ReadonlyMap<string, Uint8Array>): string | null {
+  try { checkFiles(files); return null; } catch (e) { return (e as Error).message; }
 }
 
 export async function readHudUpload(fileName: string, bytes: Uint8Array): Promise<HudUpload> {

@@ -7,6 +7,7 @@ import { decodeText } from './text';
 import { readVPK } from '../vpk/read';
 import { parsePos, screenW, SCREEN_H } from './units';
 import { sampleHud, latin1, MARKER_PANEL } from './importFixtures';
+import { TEX } from '../crosshair/draw';
 
 /**
  * An id is its files' content hash, so the base caches (baseTeam, the parsed
@@ -94,5 +95,39 @@ describe('downloading an imported HUD', () => {
     const d = imported(sampleHud());
     const vpk = readVPK(packHud(d).bytes);
     expect(new Map([...vpk])).toEqual(byPath(buildHud(d)));
+  });
+});
+
+describe("an imported HUD's own crosshair", () => {
+  const withXhair = () => sampleHud({
+    'scripts/hudlayout.res': decodeText(sampleHud().get('scripts/hudlayout.res')!).text
+      .replace(/\}\s*$/, '\t"xHair"\r\n\t{\r\n\t\t"fieldName" "xHair"\r\n\t\t"image" "hud/altcrosshair"\r\n\t}\r\n}\r\n'),
+    'materials/vgui/hud/altcrosshair.vtf': new Uint8Array([0x56, 0x54, 0x46, 0, 9, 9, 9]),
+    'materials/vgui/hud/altcrosshair.vmt': latin1('"UnlitGeneric" { "$basetexture" "vgui/hud/altcrosshair" }'),
+  });
+  const PX = new Uint8ClampedArray(TEX * TEX * 4);
+
+  it("keeps the HUD's own xHair element on Game default: the editor adds no crosshair, and removes none", () => {
+    const files = withXhair();
+    const out = byPath(buildHud(imported(files)));
+    expect(out.get('scripts/hudlayout.res')).toEqual(files.get('scripts/hudlayout.res'));
+  });
+
+  it("ships the HUD's own crosshair files byte for byte while the crosshair is still the HUD's own", () => {
+    const files = withXhair();
+    const report: BuildReport = { replaced: [] };
+    const d = imported(files, { crosshair: 'bundle', xhairArt: { kind: 'built', state: {} } });
+    const out = byPath(buildHud(d, { crosshair: PX, ownCrosshair: true }, report));
+    for (const [path, data] of files) expect(out.get(path), path).toEqual(data);
+    expect(report.replaced).toEqual([]);
+  });
+
+  it('writes the crosshair the player made over the HUD\'s own, and says so', () => {
+    const files = withXhair();
+    const report: BuildReport = { replaced: [] };
+    const d = imported(files, { crosshair: 'bundle', xhairArt: { kind: 'built', state: {} } });
+    const out = byPath(buildHud(d, { crosshair: PX }, report));
+    expect(out.get('materials/vgui/hud/altcrosshair.vtf')).not.toEqual(files.get('materials/vgui/hud/altcrosshair.vtf'));
+    expect(report.replaced).toEqual(['materials/vgui/hud/altcrosshair.vmt', 'materials/vgui/hud/altcrosshair.vtf']);
   });
 });
