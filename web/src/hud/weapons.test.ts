@@ -192,9 +192,17 @@ describe('drawWeapons', () => {
   });
 
   it('draws nothing while the art loads, and asks for a redraw', () => {
-    _setImageFactory((url) => ({ src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null }) as unknown as HTMLImageElement);
+    const pending: HTMLImageElement[] = [];
+    _setImageFactory((url) => {
+      const img = { src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null } as unknown as HTMLImageElement;
+      pending.push(img);
+      return img;
+    });
     const { ctx, calls } = recCtx();
-    drawWeapons(ctx, design(), origin, k, 100);
+    let redraws = 0;
+    drawWeapons(ctx, design(), origin, k, 100, () => { redraws++; });
     expect(calls.filter((c) => c.m === 'drawImage')).toHaveLength(0);
+    pending[0].onload!();
+    expect(redraws).toBe(1);
   });
 });
