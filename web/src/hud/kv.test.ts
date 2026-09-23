@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseKv, writeKv, kvFind, kvGet, kvSet } from './kv';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies } from './kv';
 import { BASE_PATHS, baseFile } from './base';
 
 describe('parseKv', () => {
@@ -57,5 +57,27 @@ describe('kvFind, kvGet, kvSet', () => {
     kvSet(panel, 'visible', '0');
     expect(writeKv(t)).toContain('"xpos"\t\t"8"');
     expect((panel.value as unknown[]).length).toBe(3);
+  });
+});
+
+describe('platform conditionals, as the Windows English client reads them', () => {
+  it('keeps the lines the PC game keeps and drops the rest', () => {
+    for (const c of [undefined, '[$WIN32]', '[$WINDOWS]', '[$ENGLISH]', '[!$X360]', '[!$OSX]', '[$WIN32 && $ENGLISH]', '[$OSX || $WINDOWS]']) {
+      expect(pcApplies(c), String(c)).toBe(true);
+    }
+    for (const c of ['[$X360]', '[$OSX]', '[$LINUX]', '[$POSIX]', '[$!ENGLISH]', '[!$ENGLISH]', '[!$WIN32]', '[$WIN32 && $X360]']) {
+      expect(pcApplies(c), c).toBe(false);
+    }
+  });
+
+  // localplayerpanel.res gives the health number's xpos as 39 [$OSX] then 36 [$WINDOWS]:
+  // the game on the PC reads 36, and an edit has to land on that line, not beside it.
+  it('reads and writes the line the PC applies, leaving the other platforms alone', () => {
+    const [root] = parseKv('"A" { "xpos" "39" [$OSX] "xpos" "36" [$WINDOWS] "tall" "9" [$X360] }');
+    expect(kvGet(root, 'xpos')).toBe('36');
+    expect(kvGet(root, 'tall')).toBeUndefined();
+    kvSet(root, 'xpos', '50');
+    kvSet(root, 'tall', '12');
+    expect(writeKv([root]).replace(/\s+/g, ' ')).toContain('"xpos" "39" [$OSX] "xpos" "50" [$WINDOWS] "tall" "9" [$X360] "tall" "12"');
   });
 });

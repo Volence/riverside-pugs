@@ -9,7 +9,7 @@
  */
 import { encodeVTF, encodeVPK, encodeZip, type VpkFile } from '../vpk';
 import { baseFile, presetOverrides, BASE_PATHS, type Preset } from './base';
-import { parseKv, writeKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
@@ -168,14 +168,15 @@ function layoutPass(work: Work, design: HudDesign) {
 }
 
 /**
- * The entries of a key the PC reads: the plain one and the [$WIN32] one.
- * basechat.res gives several keys a second value for the console ([$X360]),
- * which the PC ignores and which is left exactly as it was.
+ * The entries of a key the PC reads: the plain one and any whose conditional
+ * holds on the PC ([$WIN32], [$WINDOWS], kv.ts's pcApplies). basechat.res
+ * gives several keys a second value for the console ([$X360]), and some
+ * files a Mac one ([$OSX]); the PC ignores those, and they are left exactly
+ * as they were.
  */
 function pcEntries(block: KvNode, key: string): KvNode[] {
   if (typeof block.value === 'string') throw new Error(`KeyValues: ${block.key} is not a block`);
-  return block.value.filter((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string'
-    && (!n.cond || n.cond.toUpperCase() === '[$WIN32]'));
+  return block.value.filter((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string' && pcApplies(n.cond));
 }
 export function pcGet(block: KvNode, key: string): string | undefined { return pcEntries(block, key)[0]?.value as string | undefined; }
 /** Set every entry the PC reads; with none, add a plain one, never overwriting a console-only ([$X360]) entry. */

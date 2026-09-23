@@ -95,14 +95,47 @@ export function kvFind(nodes: KvNode[], path: string[]): KvNode | undefined {
   return hit;
 }
 
+/**
+ * The symbols a conditional can name that hold on the game the editor
+ * targets: L4D1 on Windows (it runs under Proton on Linux, still the Windows
+ * build), in English. Everything else ($X360, $OSX, $LINUX, $POSIX) is false.
+ */
+const PC_SYMBOLS = new Set(['WIN32', 'WINDOWS', 'ENGLISH']);
+
+/**
+ * Whether the PC game keeps a line with this conditional. Base files carry
+ * one value per platform side by side, e.g. localplayerpanel.res's health
+ * number has "xpos" "39" [$OSX] then "xpos" "36" [$WINDOWS]; the game drops
+ * the lines whose conditional is false before anything reads the panel, so
+ * the editor must read and write the one that is left, or the preview shows
+ * the Mac value and an edit lands on a line the game never sees.
+ *
+ * A term is $NAME or !$NAME; terms join with && or ||, && binding tighter.
+ * Valve's own files also write [$!ENGLISH]: the engine reads that as the
+ * unknown symbol "!ENGLISH", which is false, so it is false here too.
+ */
+export function pcApplies(cond: string | undefined): boolean {
+  if (!cond) return true;
+  const body = cond.trim().replace(/^\[|\]$/g, '');
+  return body.split('||').some((any) => any.split('&&').every((term) => {
+    const t = term.trim();
+    const not = t.startsWith('!');
+    const name = (not ? t.slice(1) : t).trim().replace(/^\$/, '').toUpperCase();
+    return PC_SYMBOLS.has(name) !== not;
+  }));
+}
+
+/** A value line the PC game reads: a string, under a conditional that holds there. */
+const pcLine = (c: KvNode, key: string) => same(c.key, key) && typeof c.value === 'string' && pcApplies(c.cond);
+
 export function kvGet(block: KvNode, key: string): string | undefined {
   if (typeof block.value === 'string') return undefined;
-  const n = block.value.find((c) => same(c.key, key) && typeof c.value === 'string');
+  const n = block.value.find((c) => pcLine(c, key));
   return n ? (n.value as string) : undefined;
 }
 
 export function kvSet(block: KvNode, key: string, value: string): void {
   if (typeof block.value === 'string') throw new Error(`KeyValues: ${block.key} is not a block`);
-  const n = block.value.find((c) => same(c.key, key) && typeof c.value === 'string');
+  const n = block.value.find((c) => pcLine(c, key));
   if (n) n.value = value; else block.value.push({ key, value });
 }
