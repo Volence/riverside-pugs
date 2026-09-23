@@ -351,7 +351,7 @@ export async function replayRoutes(
    */
   function liveRoundFor(
     matchId: number, ordinal: string, half: string, nowMs: number,
-  ): ReturnType<typeof resolveByName> {
+  ): ReturnType<typeof resolveFurther> {
     const ord = Number(ordinal);
     const hf = Number(half);
     if (!Number.isInteger(matchId)) return null;

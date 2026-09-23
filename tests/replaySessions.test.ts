@@ -212,4 +212,21 @@ describe('the live directory', () => {
     expect(resolveFurther(dir, live, name, NOW)?.path).toBe(join(live, name));
     expect(resolveFurther(dir, '', name, NOW)?.path).toBe(join(dir, name));
   });
+
+  // An aborted round and its restart reuse the same filename. A pull job can
+  // land the aborted round's (older, longer) file in the replay directory
+  // after the live copy was already truncated and restarted for the new,
+  // shorter round. Byte count alone would keep serving the stale round; the
+  // newer startedUnix must win regardless of length.
+  it('a newer round wins over an older, longer one on the other side', () => {
+    const older = header({ startedUnix: 1_785_956_000 });
+    const newer = header({ startedUnix: 1_785_957_000 });
+    writeIn(dir, name, older, 20);
+    writeIn(live, name, newer, 2);
+
+    const session = listSessions(dir, NOW, undefined, live).find((s) => s.token === TOKEN_A);
+    expect(session?.files[0].startedUnix).toBe(newer.startedUnix);
+
+    expect(resolveFurther(dir, live, name, NOW)?.info.startedUnix).toBe(newer.startedUnix);
+  });
 });
