@@ -98,6 +98,14 @@ describe('the teammate layout helpers', () => {
     expect(placeCard(free, 2, 5000, -900).elements.teamColumn!.slots![2]).toEqual({ x: 1000, y: -200 });
     expect(placeCard(DEFAULT_DESIGN, 0, 5, 5)).toBe(DEFAULT_DESIGN);           // not Free: nothing to place
   });
+
+  it('rounds a placed card to whole units, even from the fractional pointer position a real drag gives', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    const slot = placeCard(free, 0, 347.00003062599535, 328.9999846870023).elements.teamColumn!.slots![0];
+    expect(slot).toEqual({ x: 334, y: 293 });
+    expect(Number.isInteger(slot.x)).toBe(true);
+    expect(Number.isInteger(slot.y)).toBe(true);
+  });
 });
 
 describe('patchChild', () => {
@@ -336,6 +344,14 @@ describe('element edits', () => {
     const starts = { 0: teamCardRects(free, free.aspect)[0] };
     expect(teamCardRects(moveCards(free, [0], starts, 100, -200), free.aspect)[0]).toMatchObject({ x: 113, y: 241 });
     expect(teamCardRects(moveCards(free, [0], starts, -5000, 0), free.aspect)[0].x).toBe(8 - 121);
+  });
+
+  it('rounds a moved Free card to whole units too, since it stores through placeCard', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    const starts = { 0: teamCardRects(free, free.aspect)[0] };
+    const slot = moveCards(free, [0], starts, 34.00003062599535, -112.0000153129977).elements.teamColumn!.slots![0];
+    expect(Number.isInteger(slot.x)).toBe(true);
+    expect(Number.isInteger(slot.y)).toBe(true);
   });
 
   // The default design lays its cards out in a Row, which stores one

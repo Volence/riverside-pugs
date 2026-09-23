@@ -138,13 +138,17 @@ export function cardBoxes(design: HudDesign): Box[] {
 
 /**
  * Draw one Free card's top-left at (x, y): its slot becomes that less the fit
- * offset, clamped through the same table as an element's position.
+ * offset, rounded to whole units (a drag's pointer position is a fractional
+ * screen pixel divided back into HUD units, and a slot is stored, unlike a
+ * gesture's live delta, so it has to land on a whole one, the same as any
+ * other stored position), then clamped through the same table as an
+ * element's position.
  */
 export function placeCard(design: HudDesign, card: number, x: number, y: number): HudDesign {
   const o = design.elements.teamColumn;
   if (!o?.slots || !o.slots[card]) return design;
   const off = cardOffset(design);
-  const at = { x: clampOverride('x', x - off.x), y: clampOverride('y', y - off.y) };
+  const at = { x: clampOverride('x', Math.round(x - off.x)), y: clampOverride('y', Math.round(y - off.y)) };
   const slots = o.slots.map((s, i) => (i === card ? at : s));
   return { ...design, elements: { ...design.elements, teamColumn: { ...o, slots } } };
 }
