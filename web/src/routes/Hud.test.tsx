@@ -804,4 +804,25 @@ describe('Hud page', () => {
     expect(hiddenRow('Your health')).toBe(false);
     expect(hiddenRow('Chat')).toBe(true);
   });
+
+  // The on-screen team clamp can draw (and write) the team away from its
+  // stored X and Y, so the Teammates' boxes read where the team is drawn.
+  it('shows the Teammates where the clamp draws them, and places a typed value there', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    const x = () => screen.getByLabelText('X') as HTMLInputElement;
+    const y = () => screen.getByLabelText('Y') as HTMLInputElement;
+    fireEvent.input(x(), { target: { value: '600' } });
+    fireEvent.blur(x());
+    fireEvent.input(y(), { target: { value: '300' } });
+    fireEvent.blur(y());
+    expect(x().value).toBe('299');
+    expect(y().value).toBe('300');
+    // Scaled up, the wider team is drawn further left still.
+    fireEvent.input(screen.getByRole('slider', { name: /^Scale/ }), { target: { value: '1.5' } });
+    expect(x().value).toBe('22');
+    // A typed value inside the reach lands where it is typed.
+    fireEvent.input(x(), { target: { value: '10' } });
+    expect(x().value).toBe('10');
+  });
 });

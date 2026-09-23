@@ -10,7 +10,7 @@ import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, cardChild, baseHasChild } from '../../hud/build';
 import { teamChild } from '../../hud/children';
 import {
-  cardOffset, withTeamDir, placeCard, patchChild, resetElement, resetChild,
+  cardOffset, withTeamDir, placeCard, placeElement, patchChild, resetElement, resetChild,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
@@ -134,6 +134,24 @@ export function ElementControls(
     { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), ...p } } }
   ), mode);
   const reset = () => edit((d) => resetElement(d, id));
+  // A team's on-screen clamp can draw it away from its stored X and Y (a
+  // team moved past the right edge, or scaled up there), so its boxes show
+  // where it is drawn, and a typed value is placed as a drag would place it:
+  // placeElement, then the clamp. The other axis keeps what it stores (read
+  // from where it is drawn only when nothing is stored), so typing one box
+  // never shifts the other by the half unit a right-anchored token rounds to.
+  // Anything else shows and patches what it stores.
+  const team = !!el.team;
+  const setPos = (key: 'x' | 'y', e: Event) => {
+    if (!team) { patchNum(patch, e, key, (n) => ({ [key]: n })); return; }
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(n)) return;
+    edit((d) => {
+      const r = elementRect(d, id, d.aspect);
+      const s = d.elements[id] ?? {};
+      return placeElement(d, id, key === 'x' ? n : s.x ?? r.x, key === 'y' ? n : s.y ?? r.y);
+    }, 'gesture');
+  };
 
   return (
     <Field legend={el.label}>
@@ -179,11 +197,11 @@ export function ElementControls(
         <div class="hud__row2">
           <label class="hud__field">
             <span>X</span>
-            <input type="number" value={Math.round(o.x ?? rect.x)} onInput={(e) => patchNum(patch, e, 'x', (x) => ({ x }))} {...endsOn(end)} />
+            <input type="number" value={Math.round(team ? rect.x : o.x ?? rect.x)} onInput={(e) => setPos('x', e)} {...endsOn(end)} />
           </label>
           <label class="hud__field">
             <span>Y</span>
-            <input type="number" value={Math.round(o.y ?? rect.y)} onInput={(e) => patchNum(patch, e, 'y', (y) => ({ y }))} {...endsOn(end)} />
+            <input type="number" value={Math.round(team ? rect.y : o.y ?? rect.y)} onInput={(e) => setPos('y', e)} {...endsOn(end)} />
           </label>
         </div>
       )}
