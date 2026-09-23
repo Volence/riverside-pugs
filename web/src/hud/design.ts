@@ -13,6 +13,7 @@ import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { elementById } from './elements';
 import { SLOTS } from './slots';
 import { TEAM_PANEL, CONTENT_CHILDREN, type ChildDef } from './children';
+import { MAX_IMAGE_B64, MAX_IMAGE_SIDE } from './limits';
 
 export type TeamDir = 'row' | 'column' | 'free';
 /**
@@ -126,8 +127,6 @@ export function usableCrosshair(d: HudDesign, hasSavedCrosshair: boolean): HudDe
   return d.crosshair === 'bundle' && !hasSavedCrosshair ? { ...d, crosshair: 'none' } : d;
 }
 
-const MAX_IMAGE_SIDE = 512;
-const MAX_IMAGE_B64 = 1_400_000;          // about 1 MB decoded
 const ID = /^[A-Za-z][A-Za-z0-9]{0,31}$/;
 const COLOUR = /^(\d{1,3}) (\d{1,3}) (\d{1,3}) (\d{1,3})$/;
 

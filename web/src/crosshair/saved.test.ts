@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { savedCrosshair, crosshairPixels } from './saved';
+import { savedCrosshair, savedArt, saveImage, crosshairPixels, CROSSHAIR_IMAGE_KEY } from './saved';
+import { PNG_PREFIX } from './art';
 import { DEFAULT_STATE, PX_AT_1080, TEX } from './draw';
 
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
@@ -14,7 +15,7 @@ describe('savedCrosshair', () => {
     expect(savedCrosshair()).toBeNull();
     for (const raw of ['{', '"x"', 'null', '[]', JSON.stringify({ shape: 'laser' }), JSON.stringify({ color: 'red' }),
       JSON.stringify({ len: 'long' }), JSON.stringify({ alpha: null }), JSON.stringify({ round: 'yes' }),
-      // An imported image is never saved, only its shape name, so there is nothing to draw.
+      // The image shape is savedArt's to read: savedCrosshair is the drawn shapes only.
       JSON.stringify({ shape: 'image' })]) {
       localStorage.setItem('xhair', raw);
       expect(savedCrosshair(), raw).toBeNull();
@@ -24,6 +25,41 @@ describe('savedCrosshair', () => {
   it('is null when storage throws', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
     expect(savedCrosshair()).toBeNull();
+  });
+});
+
+describe('savedArt', () => {
+  const IMAGE = { png: PNG_PREFIX + 'AAAA', w: 128, h: 128 };
+
+  it('is the saved builder crosshair as built art', () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'dot', dot: 3 }));
+    expect(savedArt()).toEqual({ kind: 'built', state: { ...DEFAULT_STATE, shape: 'dot', dot: 3 } });
+  });
+
+  it('is the saved image when the page is on its image shape', () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'image' }));
+    expect(savedArt()).toBeNull();
+    saveImage(IMAGE);
+    expect(JSON.parse(localStorage.getItem(CROSSHAIR_IMAGE_KEY)!)).toEqual(IMAGE);
+    expect(savedArt()).toEqual({ kind: 'image', ...IMAGE });
+    // A saved image is not used while the page is on a drawn shape.
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'cross' }));
+    expect(savedArt()?.kind).toBe('built');
+  });
+
+  it('is null for a broken image entry, or when storage throws', () => {
+    localStorage.setItem('xhair', JSON.stringify({ shape: 'image' }));
+    for (const raw of ['{', JSON.stringify({ ...IMAGE, w: 9999 }), JSON.stringify({ ...IMAGE, png: 'x' })]) {
+      localStorage.setItem(CROSSHAIR_IMAGE_KEY, raw);
+      expect(savedArt(), raw).toBeNull();
+    }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+    expect(savedArt()).toBeNull();
+  });
+
+  it('saves nothing, quietly, when storage throws', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('full'); });
+    expect(() => saveImage(IMAGE)).not.toThrow();
   });
 });
 

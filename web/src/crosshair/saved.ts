@@ -1,38 +1,51 @@
 /**
  * The crosshair the Crosshair page saved in this browser, and its texture
- * pixels, for the HUD editor to bundle into a HUD download.
+ * pixels.
  *
  * The Crosshair page keeps its state in localStorage `xhair` (its own
- * loadState). The HUD page only offers to bundle a crosshair it can draw
- * exactly as that page would export it, so anything it cannot is treated as
- * no crosshair at all: a missing or unreadable entry, a field of the wrong
- * type, or the imported-image shape, whose image is never saved.
+ * loadState), and on its image shape the imported image, already drawn as
+ * the texture it exports, in `xhairImage`. The HUD editor copies it into a
+ * brand new design, or into the design it is opened on from that page's
+ * Open in the HUD editor button, and from then on the design carries its
+ * own crosshair. Anything that could not be drawn exactly as that page
+ * would export it counts as no crosshair at all: a missing or unreadable
+ * entry, a field of the wrong type, or the image shape with no image.
  */
-import { DEFAULT_STATE, PX_AT_1080, TEX, drawCrosshair, type CrosshairState, type Shape } from './draw';
+import { PX_AT_1080, TEX, drawCrosshair, type CrosshairState } from './draw';
+import { readArt, readState, type CrosshairArt } from './art';
 
 export const CROSSHAIR_KEY = 'xhair';
+export const CROSSHAIR_IMAGE_KEY = 'xhairImage';
 
-const DRAWN: readonly Shape[] = ['cross', 'crossdot', 't', 'dot', 'circle', 'circledot'];
-const NUMBERS = ['len', 'thick', 'gap', 'dot', 'radius', 'alpha', 'outline', 'oalpha'] as const;
-
-/** Per-viewer convenience only, so the read is guarded: a private window or blocked site data makes it throw. */
-export function savedCrosshair(): CrosshairState | null {
-  let raw: unknown;
+/** Per-viewer convenience only, so every access is guarded: a private window or blocked site data makes it throw. */
+function readJson(key: string): unknown {
   try {
-    const s = localStorage.getItem(CROSSHAIR_KEY);
-    if (!s) return null;
-    raw = JSON.parse(s);
+    const s = localStorage.getItem(key);
+    return s ? JSON.parse(s) : null;
   } catch {
     return null;
   }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const s: CrosshairState = { ...DEFAULT_STATE, ...(raw as Partial<CrosshairState>) };
-  if (!DRAWN.includes(s.shape)) return null;
-  if (!NUMBERS.every((k) => typeof s[k] === 'number' && Number.isFinite(s[k]))) return null;
-  if (typeof s.round !== 'boolean' || typeof s.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(s.color)) return null;
-  const out = { ...DEFAULT_STATE };
-  for (const k of Object.keys(DEFAULT_STATE) as (keyof CrosshairState)[]) (out as Record<string, unknown>)[k] = s[k];
-  return out;
+}
+
+/** The page's drawn crosshair, over its defaults, or null (the image shape included). */
+export function savedCrosshair(): CrosshairState | null {
+  return readState(readJson(CROSSHAIR_KEY));
+}
+
+/** Whatever the page would export: its drawn crosshair, or on its image shape the saved image. */
+export function savedArt(): CrosshairArt | null {
+  const raw = readJson(CROSSHAIR_KEY);
+  if (typeof raw === 'object' && raw !== null && (raw as { shape?: unknown }).shape === 'image') {
+    const img = readJson(CROSSHAIR_IMAGE_KEY);
+    return typeof img === 'object' && img !== null ? readArt({ ...img, kind: 'image' }) : null;
+  }
+  const state = readState(raw);
+  return state ? { kind: 'built', state } : null;
+}
+
+/** Keep the page's imported image, as its texture PNG, for savedArt. */
+export function saveImage(img: { png: string; w: number; h: number }): void {
+  try { localStorage.setItem(CROSSHAIR_IMAGE_KEY, JSON.stringify(img)); } catch { /* a convenience, not worth surfacing */ }
 }
 
 /**
