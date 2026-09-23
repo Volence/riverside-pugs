@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   benjaminiHochberg, bootstrapDiff, mapWeights, matchesNeeded, mulberry32, quantile,
-  sharedMaps, verdictOf, weightedValue, type MatchSample,
+  sharedMaps, verdictOf, weightedDiff, weightedValue, type MatchSample,
 } from '../../src/metrics/compare/stats.js';
 
 const m = (entries: [string, number, number][]): MatchSample =>
@@ -61,15 +61,74 @@ describe('compare statistics', () => {
     expect(bootstrapDiff([], [m([['x', 1, 1]])], new Map([['x', 1]]), 10, mulberry32(1))).toBeNull();
   });
 
+  it('bootstrap floors p at 1 / (reps + 1)', () => {
+    const hi = Array.from({ length: 40 }, () => m([['x', 8, 10]]));
+    const lo = Array.from({ length: 40 }, () => m([['x', 2, 10]]));
+    const w = new Map([['x', 1]]);
+    const reps = 50;
+    const r = bootstrapDiff(lo, hi, w, reps, mulberry32(7))!;
+    expect(r.p).toBeGreaterThanOrEqual(1 / (reps + 1));
+  });
+
+  it('weightedDiff only uses maps present on both sides, paired per replicate', () => {
+    const w = new Map([['x', 0.5], ['y', 0.5]]);
+    const a = [m([['x', 1, 2], ['y', 2, 4]])];
+    const b = [m([['x', 3, 4]])];
+    // y is absent from b, so only x counts: weight renormalizes to 1 on x alone.
+    expect(weightedDiff(a, b, w)).toBeCloseTo(0.75 - 0.5);
+    expect(weightedDiff(a, [], w)).toBeNull();
+  });
+
+  it('bootstrap does not over-reject under the null when one side is map-sparse', () => {
+    // Regression for the map-mix bias: weightedValue used to renormalize each
+    // side's resample separately, so when side B has few matches per map, a
+    // map could drop out of B's resample but not A's, biasing the diff even
+    // though every map has the same rate on both sides (a true null). Mirrors
+    // the reviewer's sim2/sim3 scripts: A has 60 matches evenly split over 12
+    // maps, B has 30 matches concentrated on one map (19) with 1 each on the
+    // other 11, so B is far more likely to drop a map from a resample than A.
+    const SIMS = 150;
+    const REPS = 300;
+    const rate = (i: number) => (i === 0 ? 0.9 : 0.2);
+    const binom = (n: number, p: number, rand: () => number) => {
+      let k = 0;
+      for (let i = 0; i < n; i++) if (rand() < p) k++;
+      return k;
+    };
+    let rejections = 0;
+    for (let s = 0; s < SIMS; s++) {
+      const gen = mulberry32(1000 + s);
+      const a: MatchSample[] = Array.from({ length: 60 }, (_, k) => {
+        const i = k % 12;
+        return m([[`m${i}`, binom(8, rate(i), gen), 8]]);
+      });
+      const b: MatchSample[] = [];
+      for (let k = 0; k < 30; k++) {
+        const i = k < 19 ? 0 : k - 18;
+        b.push(m([[`m${i}`, binom(8, rate(i), gen), 8]]));
+      }
+      const { shared } = sharedMaps(a, b);
+      const w = mapWeights(a, shared);
+      const r = bootstrapDiff(a, b, w, REPS, mulberry32(2000 + s))!;
+      if (r.p < 0.05) rejections++;
+    }
+    expect(rejections / SIMS).toBeLessThan(0.12);
+  });
+
   it('Benjamini-Hochberg at 10%', () => {
     expect(benjaminiHochberg([0.01, 0.04, 0.2, null], 0.1)).toEqual([true, true, false, false]);
     expect(benjaminiHochberg([0.08, 0.09, 0.5], 0.1)).toEqual([false, false, false]);
   });
 
-  it('matches needed scales with (z * se / diff)^2', () => {
-    expect(matchesNeeded(0.1, 0.1, 20)).toBe(Math.ceil(20 * (1.96 ** 2) - 20));
-    expect(matchesNeeded(0, 0.1, 20)).toBeNull();
-    expect(matchesNeeded(1, 0.01, 20)).toBe(0);
+  it('matches needed pays down only the target variance seA has not already used', () => {
+    // diff is zero: no interval will ever exclude it.
+    expect(matchesNeeded(0, 0.1, 0.05, 20)).toBeNull();
+    // seA alone already meets the target variance: more B matches cannot help.
+    expect(matchesNeeded(0.1, 0.1, 0.05, 20)).toBeNull();
+    // normal case: seA leaves headroom, B needs many more matches to fill it.
+    expect(matchesNeeded(0.1, 0.02, 0.15, 20)).toBe(185);
+    // B already has more than enough matches for its share: floored at 1, not 0.
+    expect(matchesNeeded(1, 0.01, 0.01, 20)).toBe(1);
   });
 
   it('verdicts follow the thresholds', () => {
