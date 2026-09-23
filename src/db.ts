@@ -1202,6 +1202,36 @@ export function openDb(path: string): DB {
   // "replay arrived" every tick just because decoding it keeps failing.
   ensureColumn(db, 'round_metric_context', 'replay_seen', 'INTEGER NOT NULL DEFAULT 0');
 
+  // Every SourceTV spectator on record, for admins. The raw address is never
+  // stored here either: ip_hash is the same salted HMAC as player_networks,
+  // so a spectator's connection can be matched against the accounts that
+  // played from it without ever holding the address itself.
+  // See src/sourcetvSessions.ts.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sourcetv_sessions (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id    INTEGER NOT NULL,
+      match_id     INTEGER REFERENCES matches(id),
+      slot         INTEGER NOT NULL,
+      name         TEXT NOT NULL,
+      ip_hash      TEXT NOT NULL,
+      country      TEXT,
+      joined_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      left_at      TEXT,
+      leave_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stv_match ON sourcetv_sessions(match_id);
+    CREATE INDEX IF NOT EXISTS idx_stv_open ON sourcetv_sessions(server_id, slot) WHERE left_at IS NULL;
+  `);
+  // start/stop of the SourceTV relay itself, so a run of dropped sessions can
+  // be told apart from the relay simply not running.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sourcetv_server_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL,
+      event TEXT NOT NULL CHECK (event IN ('start','stop')), at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   seed(db);
   return db;
 }
