@@ -10,6 +10,7 @@ import {
   decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET } from '../replayFormat.js';
 import { applyPush, errCode, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
 import { infectedMaskForHeader, rewriteHead } from '../replaySides.js';
+import { getRange, type R2Config } from '../r2.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -177,6 +178,33 @@ function sendSlice(
 }
 
 /**
+ * A finished replay that only R2 still holds, answered exactly as sendSlice
+ * answers the same closed file from disk: same headers, same bytes, token
+ * blanked, side mask stamped by the same rewrite. The object is already
+ * blanked and stamped at upload, so the rewrite is a safety net here.
+ */
+async function sendR2Slice(
+  reply: FastifyReply, cfg: R2Config, get: typeof getRange, key: string, since: number,
+  mask: (head: Buffer) => number | null,
+): Promise<FastifyReply> {
+  // Same `since` handling as sendSlice: NaN, negative and fractional values
+  // come from malformed requests and must not error.
+  const from = Number.isFinite(since) && since > 0 ? Math.floor(since) : 0;
+  const got = await get(cfg, key, from);
+  if (!got) return reply.code(404).send({ error: 'no such replay' });
+  const start = Math.min(from, got.total);
+  const body = Buffer.from(got.body);
+  const m = start === 0 && body.length >= HEADER_BYTES ? mask(body.subarray(0, HEADER_BYTES)) : null;
+  rewriteHead(body, start, m);
+  reply.header('Content-Type', 'application/octet-stream');
+  reply.header('Cache-Control', 'no-store');
+  reply.header('X-Replay-Next', String(got.total));
+  reply.header('X-Replay-Closed', '1');
+  reply.header('Content-Length', String(body.length));
+  return reply.send(body);
+}
+
+/**
  * Which roster slots are infected in one round of a match, as the header's
  * version 3 side mask, or null when the answer is not knowable.
  *
@@ -225,9 +253,10 @@ export function servesCurrentRound(fileStartedUnix: number | null, currentSinceM
 }
 
 export async function replayRoutes(
-  app: FastifyInstance, opts: { db: DB; replayDir: string; liveDir?: string },
+  app: FastifyInstance,
+  opts: { db: DB; replayDir: string; liveDir?: string; r2?: R2Config | null; r2Get?: typeof getRange },
 ): Promise<void> {
-  const { db, replayDir, liveDir = '' } = opts;
+  const { db, replayDir, liveDir = '', r2 = null, r2Get = getRange } = opts;
 
   /**
    * Live replay bytes from a game server, about once a second per match.
@@ -359,6 +388,25 @@ export async function replayRoutes(
     const found = row
       ? resolveFurther(replayDir, liveDir, row.filename, now)
       : liveRoundFor(Number(id), ordinal, half, now);
+    // A local copy always wins over R2: this only runs when neither the
+    // replay directory nor the live directory holds the round, and the query
+    // below requires a finished match, so a live round can never reach here.
+    if (!found && r2) {
+      const keyRow = db.prepare(
+        `SELECT r.r2_key AS key FROM match_replays r JOIN matches m ON m.id = r.match_id
+          WHERE r.match_id = ? AND r.ordinal = ? AND r.half = ?
+            AND r.r2_key IS NOT NULL AND m.state IN ('completed', 'aborted')`,
+      ).get(Number(id), Number(ordinal), Number(half)) as { key: string } | undefined;
+      if (keyRow) {
+        try {
+          return await sendR2Slice(reply, r2, r2Get, keyRow.key, Number(since ?? 0),
+            (head) => infectedMaskForHeader(db, head, Number(id), Number(ordinal), Number(half)));
+        } catch (err) {
+          console.error('[replays] R2 read failed:', (err as Error).message);
+          return reply.code(404).send({ error: 'no such replay' });
+        }
+      }
+    }
     if (!found) return reply.code(404).send({ error: 'no such replay' });
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now,
       infectedMaskFor(db, found.path, Number(id), Number(ordinal), Number(half)));
