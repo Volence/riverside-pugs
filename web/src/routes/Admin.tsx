@@ -3,7 +3,7 @@ import { useLocation } from 'preact-iso';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { DESKS, PEOPLE_TABS, SETUP_TABS, legacyRedirect, parseAdminPath, ticketUrl } from './admin/adminRoutes';
+import { BALANCE_TABS, DESKS, PEOPLE_TABS, SETUP_TABS, legacyRedirect, parseAdminPath, ticketUrl } from './admin/adminRoutes';
 import { AdminLive } from './admin/AdminLive';
 import { AdminTickets } from './admin/AdminTickets';
 import { AdminTicket } from './admin/AdminTicket';
@@ -11,6 +11,7 @@ import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
 import { AdminSeasons } from './admin/AdminSeasons';
 import { AdminPatches } from './admin/AdminPatches';
+import { Compare } from './admin/balance/Compare';
 import { AdminCampaigns } from './admin/AdminCampaigns';
 import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
@@ -87,7 +88,7 @@ export function Admin({ session }: { session: Session }) {
 
   const me = session.me.steamid;
   const r = parseAdminPath(path, { isAdmin });
-  const sections = r.desk === 'people' ? PEOPLE_TABS : r.desk === 'setup' ? SETUP_TABS : [];
+  const sections = r.desk === 'people' ? PEOPLE_TABS : r.desk === 'setup' ? SETUP_TABS : r.desk === 'balance' ? BALANCE_TABS : [];
   // A file belongs under Players and a ticket under Tickets, so the strip
   // keeps a highlight while you are inside one.
   const activeSection = r.section === 'file' ? 'search' : r.section === 'ticket' ? 'tickets' : r.section;
@@ -122,7 +123,8 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'setup' && r.section === 'seasons' && <AdminSeasons />}
         {r.desk === 'setup' && r.section === 'settings' && <AdminSettings />}
         {r.desk === 'setup' && r.section === 'audit' && <AdminAudit />}
-        {r.desk === 'setup' && r.section === 'patches' && <AdminPatches />}
+        {r.desk === 'balance' && r.section === 'compare' && <Compare />}
+        {r.desk === 'balance' && r.section === 'patches' && <AdminPatches />}
         {/* A desk that does not exist, or a section of one that does not.
             Either way the panel says so rather than showing an empty page. */}
         {r.section === 'unknown' && <NoSuchPage />}

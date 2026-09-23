@@ -34,8 +34,15 @@ describe('the panel URL parser', () => {
     expect(parseAdminPath('/admin/setup/campaigns', asAdmin)).toEqual({ desk: 'setup', section: 'campaigns', param: null });
   });
 
-  it('parses the patches setup tab', () => {
-    expect(parseAdminPath('/admin/setup/patches', asAdmin)).toEqual({ desk: 'setup', section: 'patches', param: null });
+  it('parses the balance desk', () => {
+    expect(parseAdminPath('/admin/balance', asAdmin)).toEqual({ desk: 'balance', section: 'compare', param: null });
+    expect(parseAdminPath('/admin/balance/patches', asAdmin)).toEqual({ desk: 'balance', section: 'patches', param: null });
+    expect(parseAdminPath('/admin/balance/nope', asAdmin)).toMatchObject({ desk: 'balance', section: 'unknown' });
+    expect(parseAdminPath('/admin/balance', { isAdmin: false })).toMatchObject({ desk: 'people' });
+  });
+
+  it('redirects the old patches page', () => {
+    expect(legacyRedirect('/admin/setup/patches', '', true)).toBe('/admin/balance/patches');
   });
 
   it('gives a moderator the People desk whatever the URL says', () => {
@@ -74,6 +81,7 @@ describe('the panel URL parser', () => {
       '/admin', '/admin/live', '/admin/people', '/admin/people/review', '/admin/people/bans',
       '/admin/people/tickets', '/admin/people/tickets/12', '/admin/people/76561199000000001',
       '/admin/setup', '/admin/setup/settings', '/admin/setup/audit',
+      '/admin/balance', '/admin/balance/patches',
     ]) expect(matched(url), url).toBe(true);
     expect(matched('/bans')).toBe(false);
   });
