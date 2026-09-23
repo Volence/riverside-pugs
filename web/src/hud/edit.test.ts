@@ -6,6 +6,7 @@ import {
   placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
 } from './edit';
 import { DEFAULT_DESIGN } from './design';
+import { formatPos, parsePos } from './units';
 import { teamCardRects, elementRect, cardChild, isFreeTeam } from './build';
 import { elementFrame } from './selection';
 
@@ -166,6 +167,24 @@ describe('moving a teammate card child', () => {
 // 293). That half unit is the file's own, and the Layout select's switch to
 // Free has always had it, so card 3 is compared to within it here.
 const within = (got: number, want: number) => expect(Math.abs(got - want)).toBeLessThanOrEqual(0.5);
+
+describe('where a Free card in the middle third can land', () => {
+  // Why card 3 cannot be seeded to land exactly: on the 853-wide 16:9
+  // screen a centre token is a whole number from 426.5, so every card in the
+  // middle third lands on a half unit whatever its slot holds. The cards in
+  // the left third (1 and 2 of the stock row) are exact, unrounded.
+  it('lands on a half unit through the centre token, and exactly through a left one', () => {
+    expect(parsePos(formatPos(293, 121, 853), 853)).toBe(293.5);
+    expect(parsePos(formatPos(292.5, 121, 853), 853)).toBe(292.5);
+    expect(parsePos(formatPos(153, 121, 853), 853)).toBe(153);
+    const before = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect);
+    const free = freeInPlace(DEFAULT_DESIGN);
+    const after = teamCardRects(free, free.aspect);
+    expect(after[0].x).toBe(before[0].x);
+    expect(after[1].x).toBe(before[1].x);
+    expect(after[2].x - before[2].x).toBe(0.5);
+  });
+});
 
 describe('nudgeCards', () => {
   it('moves a Free card from its slot and keeps 8 units of it on screen, like a drag', () => {
