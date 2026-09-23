@@ -500,6 +500,21 @@ describe('Hud page', () => {
       expect((screen.getByRole('radio', { name: /game default/i }) as HTMLInputElement).checked).toBe(true);
     });
 
+    it('says Undo brings back the crosshair the design had, only when it had a different one', () => {
+      localStorage.setItem('xhair', JSON.stringify(SAVED));
+      localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'bundle', xhairArt: { kind: 'built', state: { shape: 'dot' } } }));
+      history.replaceState(null, '', '/hud?from=crosshair');
+      render(<Hud />);
+      expect(screen.getByText(/is in this HUD now/)).toBeTruthy();
+      expect(screen.getByText(/Undo brings back the one it had/)).toBeTruthy();
+      cleanup();
+      localStorage.setItem('hud', JSON.stringify({ v: 1, crosshair: 'none' }));
+      history.replaceState(null, '', '/hud?from=crosshair');
+      render(<Hud />);
+      expect(screen.getByText(/is in this HUD now/)).toBeTruthy();
+      expect(screen.queryByText(/Undo brings back/)).toBeNull();
+    });
+
     it("brings the page's imported image too", () => {
       localStorage.setItem('xhair', JSON.stringify({ shape: 'image' }));
       localStorage.setItem('xhairImage', JSON.stringify({ png: 'data:image/png;base64,UE5H', w: TEX, h: TEX }));

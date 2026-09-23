@@ -489,9 +489,12 @@ export default function Hud() {
     const rest = q.toString();
     history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash);
     if (!saved) { setStatus('No crosshair was saved on the Crosshair page, so there was nothing to bring in.'); return; }
+    // A design that had a crosshair of its own loses it to this one, so say how to get it back.
+    const had = current.current.xhairArt;
+    const replaced = had !== undefined && JSON.stringify(had) !== JSON.stringify(saved);
     edit((d) => ({ ...d, crosshair: 'bundle', xhairArt: structuredClone(saved) }));
     setSel({ kind: 'elements', ids: ['xhair'] });
-    setStatus(FROM_PAGE);
+    setStatus(replaced ? `${FROM_PAGE} Undo brings back the one it had.` : FROM_PAGE);
   }, []);
 
   const pointerUnits = (e: { clientX: number; clientY: number }) => toUnits(e, canvas.current!.getBoundingClientRect());
