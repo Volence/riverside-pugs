@@ -68,6 +68,13 @@ Loose on disk, loaded by the client (dll path present), not in `base/`:
 `scripts/hudanimations_manifest.txt` is named by the client (dll) but no such file exists on
 disk; an addon could add one to load extra animation files (**inferred**, untested).
 
+**Update 2026-09-23:** the `scripts/weapon_*.txt` row above is wrong. Disassembly of the PC
+weapon selection paint (`TerrorWeaponSelection::PaintInternal`, `client.dll` 0x10245af0) found
+it never reads those `TextureData` font glyphs: `ApplySchemeSettings` calls `gHUD.GetIcon` for
+`icon_equip_*` names, cells of `vgui/hud/iconsheet` cut by `scripts/mod_textures.txt` (the row
+above this one). See the correction on the weapon selection row of A.1, gap-table item 11, and
+hard-limit C.10 below.
+
 ## A. Inventory
 
 Units are HUD units, 480 tall. "Editor today" means v1 plus Plan 1 as built. Keys common to every
@@ -134,6 +141,20 @@ listed in D) are not repeated per row.
 | **Leaving area warning** `CHudLeavingAreaWarning` | 10,c26 200x14; `leavingareawarning.res` `Warning` red label | Place, colours, font | When | Not listed |
 | **Holdout timer** `CHudHoldoutTimer` | survival only; `hudholdouttimer.res` | Everything positional | | Not listed (low value in versus) |
 | **Scope, blood, zoom** `CHudScope`, `CHudBlood` | full-screen overlays | Hide | Art is textures | Not listed |
+
+**Update 2026-09-23:** the **Weapon selection** row above is wrong in two places, per a
+disassembly of `TerrorWeaponSelection::PaintInternal` (`client.dll` 0x10245af0, called from the
+`Panel::Paint` vtable entry at 0x10246390). The PC paint reads only `PrimaryWeaponsYPos`,
+`PrimaryWeaponBoxWide`/`Tall`, `PrimaryWeaponTall`, `PrimaryWeaponAmmoX`, `ReserveAmmoYPos`,
+`PistolBoxWide`/`Tall`, `RightSideIndent`, `IconSize`, `PrimaryAmmoFont`, `PistolAmmoFont`,
+`ReserveAmmoColor`, `InactiveItemColor` (plus the panel's own `wide`); `LargeBoxWide`/`Tall`,
+`SmallBoxWide`/`Tall`, `BoxGap`, `BoxDirection`, `Ammo1`/`Ammo2XPos`/`YPos`, `IconXPos`/`YPos`,
+`SelectionNumber*`, `TextYPos` and `MaxSlots` are registered but never read, so files decide
+none of them. And the icons are not font glyphs at all: `ApplySchemeSettings` calls
+`gHUD.GetIcon` for `icon_equip_*` names, cells of `vgui/hud/iconsheet` cut by
+`scripts/mod_textures.txt`; the `scripts/weapon_*.txt` glyphs go unread. The boxes are
+`rounded_background_glow`/`_noborder` as this row already said. See
+`web/src/hud/weapons.ts` for the full layout this now drives in the preview.
 
 ### A.2 Infected side
 
@@ -222,6 +243,16 @@ or a new file), L (new model plus preview plus UI). "P2" = the Plan 2 design alr
 | 34 | zpos / layer order per child and per element | `zpos` | Low | S | No |
 | 35 | Item pickup fly-in path and speed, or disable | `hudanimations.txt` `StartItemPickup1..3` | Low | S | No |
 
+**Update 2026-09-23:** item 11's "Files / keys" column overstates what the paint reads. Gap,
+direction, and the icon/number/ammo offsets it names (`BoxGap`, `BoxDirection`, `Ammo1`/`Ammo2`,
+`IconXPos`/`YPos`, `SelectionNumber*`, `TextYPos`) are registered but never read (see the A.1
+correction above); what a file can actually move is the narrower "360 mode" set:
+`PrimaryWeaponsYPos`, `PrimaryWeaponBoxWide`/`Tall`, `PrimaryWeaponTall`, `PrimaryWeaponAmmoX`,
+`ReserveAmmoYPos`, `PistolBoxWide`/`Tall`, `RightSideIndent`, `IconSize`, `PrimaryAmmoFont`,
+`PistolAmmoFont`, `ReserveAmmoColor`, `InactiveItemColor`, plus the panel's own `wide`. This is
+now built (`web/src/hud/weapons.ts`), so the value/cost columns are moot for that part; box
+restyle in normal mode (item 12) is still open.
+
 ## C. Hard limits (say so in the UI)
 
 1. **Different contents per teammate.** One `TeammatePanel.res` is loaded for every card (a single
@@ -251,6 +282,10 @@ or a new file), L (new model plus preview plus UI). "P2" = the Plan 2 design alr
     of the ToolBox font named in `scripts/weapon_*.txt`; those are gameplay scripts, so an icon
     pack through them is out (and would risk the server's file consistency list if it ever grew
     to cover `scripts/`).
+    **Update 2026-09-23:** the icon claim was wrong. Disassembly found the paint never reads
+    those `scripts/weapon_*.txt` glyphs; it draws `icon_equip_*` cells of `vgui/hud/iconsheet`
+    (cut by `scripts/mod_textures.txt`) instead. The rest of this limit still holds: which
+    weapon occupies which slot is code's choice.
 11. **Overhead names and glows.** 3D, code-placed; height and glow colours are cvars
     (`hud_targetid_name_height*`, `cl_glow_*`), not files.
 12. **Stock crosshair look.** `cl_crosshair_*` cvars. The HUD can host an image crosshair
