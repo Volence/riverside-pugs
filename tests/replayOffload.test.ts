@@ -9,7 +9,7 @@ import {
   encodeHeader, encodeFrame, VERSION, PLAYER_SLOTS, SIDES_FLAG_OFFSET,
   type ReplayHeader, type Frame,
 } from '../src/replayFormat.js';
-import { offloadReplay, sweepReplays, REPLAY_QUIET_MS } from '../src/replayOffload.js';
+import { offloadReplay, sweepReplays, REPLAY_QUIET_MS, validateBackupFile } from '../src/replayOffload.js';
 import type { R2Ops } from '../src/demoOffload.js';
 import type { R2Config } from '../src/r2.js';
 
@@ -331,6 +331,45 @@ describe('sweepReplays', () => {
 describe('REPLAY_QUIET_MS', () => {
   it('is ten minutes', () => {
     expect(REPLAY_QUIET_MS).toBe(10 * 60 * 1000);
+  });
+});
+
+describe('validateBackupFile', () => {
+  it('accepts a closed file whose size matches the row', () => {
+    const path = writeReplayFile(`pug_${tok(30)}_0_1.rpl`, 3);
+    const size = statSync(path).size;
+    expect(validateBackupFile(path, size)).toEqual({ ok: true });
+  });
+
+  it('rejects a file that is missing', () => {
+    const r = validateBackupFile(join(dir, 'nope.rpl'), 100);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/not found/);
+  });
+
+  it('rejects a file whose size does not match the row', () => {
+    const path = writeReplayFile(`pug_${tok(31)}_0_1.rpl`, 3);
+    const size = statSync(path).size;
+    const r = validateBackupFile(path, size + 1);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/size/);
+  });
+
+  it('rejects a never-closed file (frameCount 0), even if the size matches', () => {
+    const path = writeReplayFile(`pug_${tok(32)}_0_1.rpl`, 0);
+    const size = statSync(path).size;
+    const r = validateBackupFile(path, size);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/never closed/);
+  });
+
+  it('rejects a file whose header does not decode', () => {
+    const path = join(dir, `pug_${tok(33)}_0_1.rpl`);
+    const garbage = Buffer.alloc(200, 7); // wrong magic, decodeHeader fails
+    writeFileSync(path, garbage);
+    const r = validateBackupFile(path, garbage.length);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/header/);
   });
 });
 
