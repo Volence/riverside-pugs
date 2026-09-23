@@ -75,21 +75,69 @@ const copies = (ticketId: number) => {
   return t.live().filter((m) => m.channelId === post && (m.payload.embeds[0]?.title ?? '').startsWith('From the reporter'));
 };
 
+/** Every relay copy on a ticket's forum post, reporter's and staff's, in post order. */
+const allCopies = (ticketId: number) => {
+  const post = staffThread(db, ticketId)?.thread_id;
+  return t.live().filter((m) => m.channelId === post && /^From the (reporter|moderators), /.test(m.payload.embeds[0]?.title ?? ''));
+};
+
 describe('the relay onto the forum post', () => {
-  it('copies what the reporter writes, headed with their name, and not what staff write', async () => {
+  it('copies the whole conversation: the reporter headed as the reporter, staff as the moderators', async () => {
     const c = await chatAbout();
     await chats.join(c.ticketId, MOD);
     t.userPost(c.chat, { authorId: D(R1), authorName: 'Reporter Name', content: 'he did it again' });
     t.userPost(c.chat, { authorId: D(MOD), authorName: 'A Mod', content: 'thanks, looking now' });
     await settle();
-    const got = copies(c.ticketId);
-    expect(got).toHaveLength(1);
-    expect(got[0].payload.embeds[0].title).toBe('From the reporter, Reporter Name');
-    expect(got[0].payload.embeds[0].description).toBe('he did it again');
-    expect(got[0].payload.mentionUserIds).toEqual([]);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM relay_messages').get()).toEqual({ n: 1 });
+    const got = allCopies(c.ticketId);
+    expect(got.map((m) => [m.payload.embeds[0].title, m.payload.embeds[0].description])).toEqual([
+      ['From the reporter, Reporter Name', 'he did it again'],
+      ['From the moderators, A Mod', 'thanks, looking now'],
+    ]);
+    expect(got.every((m) => (m.payload.mentionUserIds ?? []).length === 0)).toBe(true);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM relay_messages').get()).toEqual({ n: 2 });
+    // A full pass after that copies nothing twice.
     await sync.reconcile();
-    expect(copies(c.ticketId)).toHaveLength(1);
+    expect(allCopies(c.ticketId)).toHaveLength(2);
+  });
+
+  it('a staff reply removed on the site takes its copy with it', async () => {
+    const c = await chatAbout();
+    await chats.join(c.ticketId, MOD);
+    const s = t.userPost(c.chat, { authorId: D(MOD), authorName: 'A Mod', content: 'oops wrong chat' });
+    await settle();
+    expect(allCopies(c.ticketId)).toHaveLength(1);
+    const row = messageByDiscordId(db, s.id)!;
+    expect(removeMessage(db, join(root, 'files'), c.ticketId, row.id, ADMIN, 'wrong chat')).toMatchObject({ ok: true });
+    await mirror.sweepRemovals();
+    await settle();
+    expect(allCopies(c.ticketId)).toEqual([]);
+  });
+
+  it('rebuilds the post in order when a message older than a copy has none yet (staff replies from before this change)', async () => {
+    const c = await chatAbout();
+    await chats.join(c.ticketId, MOD);
+    t.userPost(c.chat, { authorId: D(R1), authorName: 'Reporter Name', content: 'one' });
+    await settle();
+    const s = t.userPost(c.chat, { authorId: D(MOD), authorName: 'A Mod', content: 'two' });
+    await settle();
+    t.userPost(c.chat, { authorId: D(R1), authorName: 'Reporter Name', content: 'three' });
+    await settle();
+    // The state production is in: the staff reply was never copied.
+    const staffCopy = db.prepare('SELECT relay_thread_id, relay_message_id FROM relay_messages WHERE source_message_id = ?').get(s.id) as { relay_thread_id: string; relay_message_id: string };
+    await t.remove(staffCopy.relay_thread_id, staffCopy.relay_message_id);
+    db.prepare('DELETE FROM relay_messages WHERE source_message_id = ?').run(s.id);
+    expect(allCopies(c.ticketId).map((m) => m.payload.embeds[0].description)).toEqual(['one', 'three']);
+    await sync.reconcileTicket(c.ticketId);
+    await settle();
+    expect(allCopies(c.ticketId).map((m) => m.payload.embeds[0].description)).toEqual(['one', 'two', 'three']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM relay_messages').get()).toEqual({ n: 3 });
+    // And a second pass leaves it alone.
+    const before = t.messages.length;
+    await sync.reconcileTicket(c.ticketId);
+    await settle();
+    expect(t.messages.length).toBe(before);
+    await sync.reconcile();
+    expect(allCopies(c.ticketId)).toHaveLength(3);
   });
 
   it('an edit edits the copy; a delete in Discord deletes it', async () => {
