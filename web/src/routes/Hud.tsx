@@ -276,7 +276,7 @@ export default function Hud() {
   const cancelGesture = () => {
     const { h, restore } = undoStack.cancel(hist.current);
     hist.current = h;
-    if (restore) apply(restore);
+    if (restore) { apply(restore); dropFreeNote(); }
   };
   // Undo or redo mid-drag first lets go of the drag: its moves so far
   // become a step (so Ctrl+Z takes back the drag itself, and Redo brings it
@@ -288,6 +288,7 @@ export default function Hud() {
     if (!r) return;
     hist.current = r.h;
     apply(r.value);
+    dropFreeNote();
     setHistTick((t) => t + 1);
   };
   const doRedo = () => {
@@ -297,6 +298,7 @@ export default function Hud() {
     if (!r) return;
     hist.current = r.h;
     apply(r.value);
+    dropFreeNote();
     setHistTick((t) => t + 1);
   };
 
@@ -314,6 +316,10 @@ export default function Hud() {
   // and freeInPlace do it inside the same edit); say so, since the Layout
   // select that changed is out of sight.
   const noteFree = () => { if (!isFreeTeam(current.current)) setStatus(WENT_FREE); };
+  // And once an undo, a redo or a cancelled drag has put the team back in
+  // Row or Column, the note is no longer true, so it goes. Any other status
+  // (a download, an import) is left alone.
+  function dropFreeNote() { setStatus((m) => (m === WENT_FREE && !isFreeTeam(current.current) ? '' : m)); }
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   // What the pointer is over while nothing is pressed, and whether Ctrl is
   // held: the hover outline shows exactly what a click would pick.

@@ -424,8 +424,18 @@ describe('Hud page', () => {
   it('moves two cards picked with Ctrl+click and Shift+click together', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
+    const crumbs = () => container.querySelector('.hud__crumbs')!.textContent;
+    // Ctrl+Shift+click on a portrait adds its card too, and takes it away again.
+    clickAt(canvas, 304, 454, { ctrlKey: true });
+    expect(crumbs()).toBe('Teammates›Card 3');
+    clickAt(canvas, 164, 454, { ctrlKey: true, shiftKey: true });
+    expect(crumbs()).toBe('Teammates›2 cards');
+    clickAt(canvas, 164, 454, { ctrlKey: true, shiftKey: true });
+    expect(crumbs()).toBe('Teammates›Card 3');
+    // A plain Shift+click on a portrait, with a card picked, adds that portrait's card.
     clickAt(canvas, 24, 454, { ctrlKey: true });
     clickAt(canvas, 164, 454, { shiftKey: true });
+    expect(crumbs()).toBe('Teammates›2 cards');
     expect(screen.getByText('2 cards', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByText('2 cards', { selector: '.hud__crumbs span' })).toBeTruthy();
     dragFrom(canvas, [164, 454], [174, 434]);
@@ -964,6 +974,28 @@ describe('Hud page', () => {
     fireEvent.contextMenu(canvas, { clientX: 30, clientY: 300 });
     fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Hide' }), { key: 'Escape' });
     expect(document.activeElement).toBe(canvas);
+  });
+
+  it('clears the Free note once an undo, a redo back out or a cancelled drag leaves the team in Row', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    const note = () => screen.queryByText('Teammates switched to Free layout');
+    dragFrom(canvas, [304, 454], [354, 354]);
+    expect(note()).toBeTruthy();
+    undoKey();
+    expect(note()).toBeNull();
+    // Redo brings Free back; the note is not needed for it, and a second undo leaves it clear.
+    undoKey({ shiftKey: true });
+    undoKey();
+    expect(note()).toBeNull();
+    // A drag cancelled with Escape puts the Row back, and the note goes with it.
+    fireEvent.pointerDown(canvas, { clientX: 304, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 354, clientY: 354, pointerId: 1, altKey: true });
+    expect(note()).toBeTruthy();
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(note()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
   });
 
   it('nudges a card picked in Row with the arrows, going Free, one undo step for the run', () => {
