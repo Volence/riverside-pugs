@@ -8,6 +8,12 @@ export type PhaseState = typeof PHASE_STATES[number];
 /** Client settings l4d_cvarwatch reports. Anything else on an L4DV line is refused. */
 export const WATCHED_CVARS = ['cpu_level'] as const;
 export type WatchedCvar = typeof WATCHED_CVARS[number];
+/** What l4d_cvarwatch did about it. `held`: the ready gate took their ready
+ *  back. `fixed`: a held player changed the setting. `live`: seen out of
+ *  bounds with the gate not in play, which is a live round. A 0.1.0 plugin
+ *  sends no act; it only ever reported, so it reads as `live`. */
+export const CVAR_ACTS = ['held', 'fixed', 'live'] as const;
+export type CvarAct = typeof CVAR_ACTS[number];
 
 export interface Phase {
   state: PhaseState;
@@ -124,7 +130,7 @@ export type LogEvent =
   // A client setting that matters for fairness, from l4d_cvarwatch.smx: once
   // per connection, only when the value is out of bounds. Only cpu_level so
   // far (0 thins smoke, fire and the boomer cloud enough to see through).
-  | { kind: 'cvar_flag'; steamid: string; cvar: WatchedCvar; value: number }
+  | { kind: 'cvar_flag'; steamid: string; cvar: WatchedCvar; value: number; act: CvarAct }
   | {
       kind: 'input_burst'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; weapon: string;
       groundTicks: number; airPresses: number; serverTick: number; clientTick: number; intervals: number[];
@@ -297,7 +303,9 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     const steamid = steamId64Of(f.id ?? '');
     if (!steamid || !(WATCHED_CVARS as readonly string[]).includes(f.cvar ?? '')) return null;
     if (!/^-?\d{1,6}(\.\d{1,6})?$/.test(f.value ?? '')) return null;
-    return { kind: 'cvar_flag', steamid, cvar: f.cvar as WatchedCvar, value: Number(f.value) };
+    const act = f.act ?? 'live';
+    if (!(CVAR_ACTS as readonly string[]).includes(act)) return null;
+    return { kind: 'cvar_flag', steamid, cvar: f.cvar as WatchedCvar, value: Number(f.value), act: act as CvarAct };
   }
 
   // Input bursts from l4d_inputstats.smx. Same anchoring as SIGNON_DROP and for

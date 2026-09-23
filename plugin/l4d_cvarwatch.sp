@@ -9,7 +9,13 @@
  * the same shape as the LilAC reporter.
  *
  * Reporting: once per connection per setting, so a player sitting on
- * cpu_level 0 all night is one line, not one every poll.
+ * cpu_level 0 all night is one line, not one every poll. Each line says what
+ * happened, so the site can word it:
+ *   act=held   the ready gate took their ready back (once per ready-up)
+ *   act=fixed  a held player then set Effect Detail to Medium or High
+ *   act=live   seen on Low with the gate not in play: a live round, or the
+ *              gate off. The only way onto a live round on Low once the gate
+ *              is on is to switch after going live, or an admin force start.
  *
  * Ready gate (l4d_cvarwatch_gate): during ready-up, a player on a team with
  * cpu_level 0 cannot stay ready. That is the whole enforcement. Nobody is
@@ -48,8 +54,9 @@ bool g_bReported[MAXPLAYERS + 1];
 int g_iUserId[MAXPLAYERS + 1];
 /** Last cpu_level the client answered with, or -1.0 while unknown. */
 float g_fCpuLevel[MAXPLAYERS + 1];
-/** Whether the lobby has been told this player is holding ready-up, this ready-up. */
-bool g_bAnnounced[MAXPLAYERS + 1];
+/** Whether the gate has held this player, this ready-up. Also means the lobby
+ *  was told and the site has an act=held line. */
+bool g_bHeld[MAXPLAYERS + 1];
 float g_fLastNag[MAXPLAYERS + 1];
 int g_iTicks;
 
@@ -99,7 +106,7 @@ void ResetClient(int client, int uid)
 	g_iUserId[client] = uid;
 	g_bReported[client] = false;
 	g_fCpuLevel[client] = -1.0;
-	g_bAnnounced[client] = false;
+	g_bHeld[client] = false;
 	g_fLastNag[client] = 0.0;
 }
 
@@ -125,7 +132,7 @@ public Action Timer_Poll(Handle timer)
 	if (ready != g_bReadyUp)
 	{
 		g_bReadyUp = ready;
-		for (int c = 1; c <= MaxClients; c++) g_bAnnounced[c] = false;
+		for (int c = 1; c <= MaxClients; c++) g_bHeld[c] = false;
 	}
 
 	g_iTicks++;
@@ -152,15 +159,34 @@ public void OnCpuLevel(QueryCookie cookie, int client, ConVarQueryResult result,
 	if (result != ConVarQuery_Okay) return;
 	if (!IsClientInGame(client) || GetClientUserId(client) != uid) return;
 	g_fCpuLevel[client] = StringToFloat(value);
-	if (!IsLow(client)) return;
+	if (!IsLow(client))
+	{
+		if (g_bHeld[client])
+		{
+			g_bHeld[client] = false;
+			Report(client, "cpu_level", value, "fixed");
+		}
+		return;
+	}
 
+	// While the gate is in play it does the talking (act=held), and only if
+	// they actually try to ready; sitting in ready-up on Low harms nobody.
+	if (Gating(client)) { Gate(client); return; }
+
+	// A spectator on Low sees nothing they could not already, and the site
+	// would word it as playing. Left unreported so it fires once they join.
+	if (GetClientTeam(client) <= TEAM_SPECTATOR) return;
 	if (g_cvEnabled.BoolValue && !g_bReported[client])
 	{
-		Report(client, "cpu_level", value);
+		Report(client, "cpu_level", value, "live");
 		g_bReported[client] = true;
 	}
-	// Catches a player who readied on Medium and then switched to Low.
-	Gate(client);
+}
+
+/** Whether the ready gate governs this player right now. */
+bool Gating(int client)
+{
+	return g_cvGate.BoolValue && InReadyUp() && GetClientTeam(client) > TEAM_SPECTATOR;
 }
 
 public Action OnReadyAttempt(int client, const char[] command, int argc)
@@ -184,8 +210,7 @@ public void Frame_Gate(int uid)
  *  one who is not ready, so ordinary chat during ready-up draws no reminder. */
 void Gate(int client)
 {
-	if (!g_cvGate.BoolValue || !InReadyUp() || !IsLow(client)) return;
-	if (!IsHumanPlayer(client) || GetClientTeam(client) <= TEAM_SPECTATOR) return;
+	if (!IsHumanPlayer(client) || !IsLow(client) || !Gating(client)) return;
 	if (!IsReady(client)) return;
 
 	FakeClientCommand(client, "sm_unready");
@@ -197,10 +222,13 @@ void Gate(int client)
 		PrintHintText(client, "You can't ready up with Effect Detail on Low.\nOptions > Video > Advanced > Effect Detail: Medium or High");
 		PrintToChat(client, "\x04[PUG]\x01 Effect Detail is on \x04Low\x01, which lets you see through smoke. Set Options > Video > Advanced > Effect Detail to Medium or High, then ready up.");
 	}
-	if (!g_bAnnounced[client])
+	if (!g_bHeld[client])
 	{
-		g_bAnnounced[client] = true;
+		g_bHeld[client] = true;
 		PrintToChatAll("\x04[PUG]\x01 %N can't ready up until their Effect Detail is Medium or High.", client);
+		char value[16];
+		FloatToString(g_fCpuLevel[client], value, sizeof(value));
+		Report(client, "cpu_level", value, "held");
 	}
 }
 
@@ -210,11 +238,11 @@ void Gate(int client)
  * player. The value is the client's own string, but the backend accepts only
  * a plain number, so nothing free-text reaches it.
  */
-void Report(int client, const char[] cvar, const char[] value)
+void Report(int client, const char[] cvar, const char[] value, const char[] act)
 {
 	char id[32];
 	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) {
 		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
 	}
-	PugLog("L4DV id=%s cvar=%s value=%s", id, cvar, value);
+	PugLog("L4DV id=%s cvar=%s value=%s act=%s", id, cvar, value, act);
 }
