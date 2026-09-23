@@ -75,10 +75,29 @@ export function recordMatchDemos(
     found = found.filter((d) => d.ordinal !== newest);
   }
   if (found.length === 0) return 0;
+  // Two files can share an ordinal: warm-up before a campaign change, the tail
+  // of a map transition, an empty recording. The real recording is the larger
+  // one, so keep that and drop the rest before touching the table. Without
+  // this the row followed whichever file the directory listed last.
+  const byOrdinal = new Map<number, DemoFile>();
+  for (const d of found) {
+    const cur = byOrdinal.get(d.ordinal);
+    if (!cur || d.bytes > cur.bytes) byOrdinal.set(d.ordinal, d);
+  }
+  found = [...byOrdinal.values()];
+  // The same file only ever grows its row. A different file replaces the row
+  // only when it is larger, and then the row's R2 key belongs to the file it
+  // is replacing, so the key is cleared and the new file is uploaded in its
+  // turn. On 2026-09-23 matches 76, 93 and 144 each had a row flip to another
+  // file while keeping the old file's key, so the row described one recording
+  // and the download served another.
   const ins = db.prepare(
     `INSERT INTO match_demos (match_id, ordinal, map, filename, bytes) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (match_id, ordinal) DO UPDATE SET
-       map = excluded.map, filename = excluded.filename, bytes = excluded.bytes`,
+       map = excluded.map, filename = excluded.filename, bytes = excluded.bytes,
+       r2_key = CASE WHEN match_demos.filename = excluded.filename THEN match_demos.r2_key END,
+       r2_at = CASE WHEN match_demos.filename = excluded.filename THEN match_demos.r2_at END
+     WHERE match_demos.filename = excluded.filename OR excluded.bytes > match_demos.bytes`,
   );
   db.transaction(() => {
     for (const d of found) ins.run(matchId, d.ordinal, d.map, d.filename, d.bytes);
