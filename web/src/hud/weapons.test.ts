@@ -192,9 +192,9 @@ describe('drawWeapons', () => {
   });
 
   it('draws nothing while the art loads, and asks for a redraw', () => {
-    const pending: HTMLImageElement[] = [];
+    const pending: (HTMLImageElement & { onload: (() => void) | null })[] = [];
     _setImageFactory((url) => {
-      const img = { src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null } as unknown as HTMLImageElement;
+      const img = { src: url, complete: false, naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null } as unknown as HTMLImageElement & { onload: (() => void) | null };
       pending.push(img);
       return img;
     });
