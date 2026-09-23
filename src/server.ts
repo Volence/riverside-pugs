@@ -80,7 +80,12 @@ import {
   recordRoundStart, recordRoundEnd,
   reapOrphanedMatches,
   recordPhase,
+  currentOrdinal,
 } from './liveView.js';
+import { BalanceAssembler } from './balanceAssembler.js';
+import { loadBalanceKnobs } from './balanceKnobs.js';
+import { recordBalanceSighting } from './balancePatches.js';
+import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines } from './roundStatLines.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
@@ -620,6 +625,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // address (Riverside #3 and #4).
       const serverOf = (source: string, meta: LogMeta): number | null =>
         meta.serverId ?? resolveServerBySource(deps.db, source, feedHost, meta.port);
+      const balanceAssembler = new BalanceAssembler();
+      const balanceKnobs = loadBalanceKnobs();
+      const liveMatchRow = (token: string) =>
+        deps.db.prepare("SELECT id, server_id FROM matches WHERE token = ? AND state = 'live'")
+          .get(token) as { id: number; server_id: number | null } | undefined;
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -890,7 +900,38 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
           else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
-          else if (ev.kind === 'round_start') recordRoundStart(deps.db, ev.token, ev);
+          else if (ev.kind === 'round_start') {
+            recordRoundStart(deps.db, ev.token, ev);
+            // A replayed half re-sends ROUND_START, and its per-round stats
+            // and markers belong to the PREVIOUS attempt, so clear them now
+            // that the round row (and its ordinal) is settled.
+            const rs = liveMatchRow(ev.token);
+            if (rs) resetRoundLines(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
+          }
+          else if (ev.kind === 'balance_part') {
+            balanceAssembler.part(ev.token, ev.half, ev.part, ev.items);
+            return; // nothing visible changed yet; no broadcast
+          }
+          else if (ev.kind === 'balance_end') {
+            const inv = balanceAssembler.end(ev.token, ev.half, ev.parts, ev.items);
+            const m = liveMatchRow(ev.token);
+            if (!inv || !m) return;
+            // The match knows its server; the source address is the fallback
+            // (Riverside #3 and #4 share one IP, see resolveServerBySource).
+            recordBalanceSighting(deps.db, {
+              matchId: m.id, serverId: m.server_id ?? serverOf(source, meta), half: ev.half,
+              inventory: inv, versionless: balanceKnobs.versionless,
+            });
+            return;
+          }
+          else if (ev.kind === 'round_stat' || ev.kind === 'round_stats_end' || ev.kind === 'round_mark') {
+            const m = liveMatchRow(ev.token);
+            if (!m) return;
+            if (ev.kind === 'round_stat') recordRoundStat(deps.db, m.id, ev);
+            else if (ev.kind === 'round_stats_end') recordRoundStatsEnd(deps.db, m.id, ev);
+            else recordRoundMark(deps.db, m.id, ev);
+            return;
+          }
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);
             // A round just closed, so the plugin has finished its replay file.
