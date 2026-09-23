@@ -197,11 +197,15 @@ function chatWindow(work: Work, p: { xpos: string; ypos: string; w: number; h: n
   pcSet(chat, 'tall', String(h));
   if (baseW > 0 && baseH > 0 && (w !== baseW || h !== baseH)) {
     const sx = w / baseW, sy = h / baseH;
+    // wide and tall are never let round down to 0: the game's size-0
+    // semantics (probe on 2026-09-23, hidePass below) would hide a shrunk
+    // child outright, which a resize never asked for.
     for (const child of work.tree(BASECHAT)) {
       if (child.key === 'HudChat' || typeof child.value === 'string') continue;
-      for (const [key, k] of [['xpos', sx], ['ypos', sy], ['wide', sx], ['tall', sy]] as const) {
+      for (const [key, k, isSize] of [['xpos', sx, false], ['ypos', sy, false], ['wide', sx, true], ['tall', sy, true]] as const) {
         if (pcGet(child, key) === undefined) continue;
-        pcSet(child, key, String(Math.round(num(pcGet(child, key)) * k)));
+        const v = Math.round(num(pcGet(child, key)) * k);
+        pcSet(child, key, String(isSize ? Math.max(1, v) : v));
       }
     }
   }

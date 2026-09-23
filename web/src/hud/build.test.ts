@@ -382,6 +382,17 @@ describe('buildHud, the chat window (basechat.res)', () => {
       expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(keyState, k))).toEqual(['20', '4', '600', '24']);
     });
 
+    // ChatInputLine's base tall is 2: shrinking the box to a fifth or less
+    // rounds that to 0, which is the game's own "hidden" size (hidePass,
+    // hardHide). A shrink never asked to hide it, so wide and tall are
+    // clamped to at least 1; xpos and ypos are free to land on 0.
+    it(`never rounds a scaled child's wide or tall down to 0: ${preset}`, () => {
+      const nodes = chatOf(build(design({ preset, elements: { chat: { w: 280, h: 20 } } })), preset);
+      const input = kvFind(nodes, ['ChatInputLine'])!;
+      expect(pc(input, 'tall')).toBe('1');
+      expect(Number(pc(input, 'wide'))).toBeGreaterThan(0);
+    });
+
     it(`hides the chat window by size as well as visible 0: ${preset}`, () => {
       const nodes = chatOf(build(design({ preset, elements: { chat: { visible: false } } })), preset);
       for (const name of ['HudChat', 'HudChatHistory']) {
