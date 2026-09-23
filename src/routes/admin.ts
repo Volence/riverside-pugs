@@ -783,9 +783,11 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (typeof sides === 'string') return reply.code(400).send({ error: sides });
     const phases = q.phases === 'split' ? 'split' : 'all';
     const key = `compare|${JSON.stringify(sides)}|${phases}`;
-    const result = memo(key, () => compareSides(db, sides.a, sides.b, { phases }));
-    if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
-    return result;
+    return memo(key, () => {
+      const result = compareSides(db, sides.a, sides.b, { phases });
+      if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
+      return result;
+    });
   });
 
   app.get('/api/admin/balance/metric', async (req, reply) => {
