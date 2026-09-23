@@ -70,6 +70,15 @@ export function recordSourceTv(
   }
 
   // start or stop.
+  if (ev.event === 'start') {
+    // A crashed server sends no stop and no leaves, so every row this
+    // listener still thinks is open on this server is stale the moment
+    // SourceTV comes back up. Close them before recording the start itself.
+    db.prepare(
+      `UPDATE sourcetv_sessions SET left_at = ?, leave_reason = 'SourceTV restarted'
+        WHERE server_id = ? AND left_at IS NULL`,
+    ).run(now, serverId);
+  }
   db.prepare('INSERT INTO sourcetv_server_events (server_id, event, at) VALUES (?, ?, ?)')
     .run(serverId, ev.event, now);
   if (ev.event === 'stop') {
@@ -110,10 +119,16 @@ export function sessionsForMatch(db: DB, matchId: number): SourceTvSession[] {
 
 /**
  * Wired into src/server.ts next to player_net. Records the session and, on a
- * join into a live match, alerts admins about any rostered player sharing
+ * join into a live match, alerts admins about any rostered players sharing
  * that connection. Never on the critical path: recordSourceTv already
  * happened by the time this looks for accounts to alert on, so a failure
  * here never loses the session row.
+ *
+ * At most one post per match per hashed connection, never one per rejoin:
+ * spectators are dropped and reconnect at every map change, and this alert
+ * says nothing new the second time it happens on the same connection in the
+ * same match. All matched players go in a single post rather than one post
+ * each, since the connection is one thing sharing itself.
  */
 export function onSourceTv(db: DB, serverId: number, ev: SourceTvEvent): void {
   const { opened } = recordSourceTv(db, serverId, ev);
@@ -126,10 +141,20 @@ export function onSourceTv(db: DB, serverId: number, ev: SourceTvEvent): void {
 
   const matchId = row.matchId;
   const inMatch = db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?');
-  for (const account of likelyAccounts(db, row.ipHash)) {
-    if (!inMatch.get(matchId, account.steamid)) continue;
-    publishAdminEvent({
-      kind: 'sourcetv_watch', matchId, serverId, spectatorName: row.name, steamid: account.steamid,
-    });
-  }
+  const steamids = likelyAccounts(db, row.ipHash)
+    .map((a) => a.steamid)
+    .filter((steamid) => inMatch.get(matchId, steamid));
+  if (steamids.length === 0) return;
+
+  // An earlier session in this same match, on any slot, already carried this
+  // connection: the alert already went out for it (or found nobody worth
+  // reporting, which the roster will not have changed since).
+  const already = db.prepare(
+    'SELECT 1 FROM sourcetv_sessions WHERE match_id = ? AND ip_hash = ? AND id < ?',
+  ).get(matchId, row.ipHash, opened);
+  if (already) return;
+
+  publishAdminEvent({
+    kind: 'sourcetv_watch', matchId, serverId, spectatorName: row.name, steamids,
+  });
 }
