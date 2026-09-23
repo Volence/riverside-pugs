@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import {
-  DEFAULT_STATE, PRESETS, PX_AT_1080, RES_SCALE, SWATCHES, TEX,
+  DEFAULT_STATE, PX_AT_1080, RES_SCALE, TEX,
   drawBackdrop, drawCrosshair,
-  type Backdrop, type CrosshairState, type Res, type Shape,
+  type Backdrop, type CrosshairState, type Res,
 } from '../crosshair/draw';
+import { CrosshairBuilder, Field } from '../crosshair/Builder';
 import { buildVPK } from '../crosshair/vpk';
 import { CROSSHAIR_KEY, crosshairPixels } from '../crosshair/saved';
 import HUDLAYOUT from '../crosshair/hudlayout.res?raw';
@@ -23,11 +24,6 @@ function loadState(): CrosshairState {
   }
 }
 
-const SHAPES: [Shape, string][] = [
-  ['cross', 'Cross'], ['crossdot', 'Cross + dot'], ['t', 'T'],
-  ['dot', 'Dot'], ['circle', 'Circle'], ['circledot', 'Circle + dot'],
-  ['image', 'Imported image'],
-];
 const BACKDROPS: [Backdrop, string][] = [
   ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'],
   ['grey', 'Grey'], ['shot', 'My screenshot'],
@@ -36,32 +32,6 @@ const RESOLUTIONS: [Res, string][] = [
   ['1080', '1920 x 1080'], ['1440', '2560 x 1440'],
   ['2160', '3840 x 2160'], ['768', '1366 x 768'],
 ];
-
-/** One labelled slider with a live readout. */
-function Slider(
-  { label, value, min, max, step, onInput }:
-  { label: string; value: number; min: number; max: number; step: number; onInput: (n: number) => void },
-) {
-  return (
-    <label class="xh__row">
-      <span>{label}</span>
-      <input
-        type="range" min={min} max={max} step={step} value={value}
-        onInput={(e) => onInput(parseFloat((e.target as HTMLInputElement).value))}
-      />
-      <output class="num">{value}</output>
-    </label>
-  );
-}
-
-function Field({ legend, children }: { legend: string; children: preact.ComponentChildren }) {
-  return (
-    <fieldset class="xh__group">
-      <legend class="eyebrow">{legend}</legend>
-      {children}
-    </fieldset>
-  );
-}
 
 export function Crosshair() {
   const [state, setState] = useState<CrosshairState>(loadState);
@@ -150,75 +120,13 @@ export function Crosshair() {
     setStatus(`Saved ${safe}.vpk (${(vpk.length / 1024).toFixed(0)} KB). Put it in left4dead/addons/ and restart the game.`);
   };
 
-  const showArms = ['cross', 'crossdot', 't'].includes(state.shape);
-  const showDot = ['dot', 'crossdot', 'circledot'].includes(state.shape);
-  const showCircle = ['circle', 'circledot'].includes(state.shape);
-
   return (
     <div class="page page--wide">
       <PageHeader eyebrow="Tool" title="Crosshair Maker" />
 
       <div class="xh">
         <Panel class="xh__controls">
-          <Field legend="Presets">
-            <div class="xh__presets">
-              {Object.entries(PRESETS).map(([label, p]) => (
-                <button key={label} class="btn btn--ghost btn--sm" onClick={() => set(p)}>{label}</button>
-              ))}
-            </div>
-          </Field>
-
-          <Field legend="Shape">
-            <label class="xh__row">
-              <span>Shape</span>
-              <select
-                value={state.shape}
-                onChange={(e) => set({ shape: (e.target as HTMLSelectElement).value as Shape })}
-              >
-                {SHAPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-              <span />
-            </label>
-            {showArms && <Slider label="Length" value={state.len} min={0} max={30} step={0.5} onInput={(len) => set({ len })} />}
-            {(showArms || showCircle) && <Slider label="Thickness" value={state.thick} min={0.5} max={10} step={0.5} onInput={(thick) => set({ thick })} />}
-            {showArms && <Slider label="Gap" value={state.gap} min={0} max={30} step={0.5} onInput={(gap) => set({ gap })} />}
-            {showDot && <Slider label="Dot size" value={state.dot} min={0.5} max={16} step={0.5} onInput={(dot) => set({ dot })} />}
-            {showCircle && <Slider label="Radius" value={state.radius} min={1} max={40} step={0.5} onInput={(radius) => set({ radius })} />}
-            {showArms && (
-              <label class="xh__check">
-                <input
-                  type="checkbox" checked={state.round}
-                  onChange={(e) => set({ round: (e.target as HTMLInputElement).checked })}
-                />
-                <span>Rounded ends</span>
-              </label>
-            )}
-          </Field>
-
-          <Field legend="Colour">
-            <label class="xh__row">
-              <span>Colour</span>
-              <input
-                type="color" value={state.color}
-                onInput={(e) => set({ color: (e.target as HTMLInputElement).value })}
-              />
-              <span />
-            </label>
-            <div class="xh__swatches">
-              {SWATCHES.map((c) => (
-                <button
-                  key={c} class="xh__swatch" style={{ background: c }}
-                  title={c} aria-label={c} onClick={() => set({ color: c })}
-                />
-              ))}
-            </div>
-            <Slider label="Opacity" value={state.alpha} min={10} max={100} step={1} onInput={(alpha) => set({ alpha })} />
-          </Field>
-
-          <Field legend="Outline">
-            <Slider label="Width" value={state.outline} min={0} max={4} step={0.5} onInput={(outline) => set({ outline })} />
-            <Slider label="Opacity" value={state.oalpha} min={0} max={100} step={1} onInput={(oalpha) => set({ oalpha })} />
-          </Field>
+          <CrosshairBuilder state={state} set={(p) => set(p)} withImage />
 
           <Field legend="Import">
             <label class="xh__file">
