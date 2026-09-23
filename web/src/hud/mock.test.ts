@@ -218,12 +218,26 @@ describe('teammate card children on the canvas', () => {
     expect(childAt(DEFAULT_DESIGN, 'down', c.x + 11, c.y + 13)).toEqual({ name: 'Incapacitated', card: 1 });
   });
 
-  it('never picks decoration, a hidden child, or anything outside the cards', () => {
+  it('picks the splatter, the lowest-priority piece, where no other piece is', () => {
     const c = card2();
-    // (120, 1) in the card is only the splatter and the Voice icon, which no state draws: decoration and an undrawn state child, so the card itself stays the target.
-    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 120, c.y + 1)).toBeNull();
-    const hidden = { ...DEFAULT_DESIGN, children: { teamColumn: { Head: { visible: false } } } };
-    expect(childAt(hidden, 'healthy', c.x + 11, c.y + 13)).toBeNull();
+    // (120, 1) in the card is only the splatter and the Voice icon, which no state draws in
+    // healthy: the splatter is the lowest-priority target there, so it wins over nothing.
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 120, c.y + 1)).toEqual({ name: 'BackgroundImage', card: 1 });
+    // A real piece drawn on top of the splatter still wins.
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13)).toEqual({ name: 'Head', card: 1 });
+  });
+
+  it('never picks a hidden child, decoration that is hidden too, or anything outside the cards', () => {
+    const c = card2();
+    // Hiding the portrait alone still leaves the splatter under it, the new lowest-priority target.
+    const hiddenHead = { ...DEFAULT_DESIGN, children: { teamColumn: { Head: { visible: false } } } };
+    expect(childAt(hiddenHead, 'healthy', c.x + 11, c.y + 13)).toEqual({ name: 'BackgroundImage', card: 1 });
+    // Hiding both leaves nothing there.
+    const hiddenBoth = { ...DEFAULT_DESIGN, children: { teamColumn: { Head: { visible: false }, BackgroundImage: { visible: false } } } };
+    expect(childAt(hiddenBoth, 'healthy', c.x + 11, c.y + 13)).toBeNull();
+    // With the splatter itself hidden, its own spot has nothing left to pick.
+    const noSplatter = { ...DEFAULT_DESIGN, children: { teamColumn: { BackgroundImage: { visible: false } } } };
+    expect(childAt(noSplatter, 'healthy', c.x + 120, c.y + 1)).toBeNull();
     expect(childAt(DEFAULT_DESIGN, 'healthy', 426, 100)).toBeNull();
   });
 

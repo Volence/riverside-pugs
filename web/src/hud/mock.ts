@@ -82,9 +82,13 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
  * The smallest teammate-card child under the point, in whichever of the
  * three drawn cards it falls, or null. A child counts only where the card
  * and the container both let it show (VGUI clips to both), only when the
- * preview draws it in `state`, and only when the registry lists it:
- * decoration (the splatter, the card background) is never a target, so a
- * click on a card's empty space still means the card. The rects come from
+ * preview draws it in `state`, and only when the registry lists it. Decor
+ * (the splatter, the card background) is the lowest priority: a real piece
+ * on top always wins, but where no real piece is under the point, a decor
+ * piece there is picked instead of leaving the point to mean the card, so
+ * the splatter is reachable by a plain click, not only from Layers. The
+ * card background is never a target either way, since it carries no
+ * registry entry (`teamChild` returns nothing for it). The rects come from
  * the generated tree through childRects, like everything the canvas draws.
  */
 export function childAt(
@@ -93,16 +97,19 @@ export function childAt(
   const container = rectFor(design, 'teamColumn');
   if (!container.visible || !inside(container, ux, uy)) return null;
   let best: { name: string; card: number; area: number } | null = null;
+  let decor: { name: string; card: number; area: number } | null = null;
   for (const [i, c] of teamCardRects(design, design.aspect).slice(0, TEAM_CARDS).entries()) {
     if (!inside(c, ux, uy)) continue;
     for (const r of childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)) {
       const def = teamChild(r.name);
-      if (!def || def.role === 'decor' || !r.visible || hiddenInState('teamColumn', r.name, state) || !inside(r, ux, uy)) continue;
+      if (!def || !r.visible || hiddenInState('teamColumn', r.name, state) || !inside(r, ux, uy)) continue;
       const area = r.w * r.h;
+      if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: r.name, card: i, area }; continue; }
       if (!best || area < best.area) best = { name: r.name, card: i, area };
     }
   }
-  return best && { name: best.name, card: best.card };
+  const hit = best ?? decor;
+  return hit && { name: hit.name, card: hit.card };
 }
 
 /** Per-viewer convenience only, so the read is guarded like every other

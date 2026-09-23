@@ -163,7 +163,9 @@ export function dragIntent(design: HudDesign, sel: Selection, hit: Hit, mods: Mo
 /**
  * The teammate-card pieces the preview draws in `state`, in registry order:
  * the file has them, they are visible, the state shows them, and they are
- * not decoration (the splatter and the card background are never targets).
+ * not decoration. Used for a box-select, Ctrl+A and a moving piece's snap
+ * targets, none of which the splatter joins; a plain click is different
+ * (mock.ts's childAt), and does pick the splatter where no other piece is.
  */
 export function drawnPieces(design: HudDesign, state: CardState): string[] {
   return TEAM_PANEL.children.filter((def) => {

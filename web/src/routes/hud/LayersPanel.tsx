@@ -4,7 +4,9 @@
  * hidden. The Teammates expand to their cards (the three drawn, and in
  * Free the fourth, which shows only while spectating) and to every piece
  * of the teammate card from the child registry, splatter included, which
- * makes this the one way to reach a hidden, tiny or state-only piece. Click
+ * makes this the one way to reach a hidden, tiny or state-only piece (the
+ * splatter itself is also reachable on the canvas now, where no other piece
+ * covers it; mock.ts's childAt). Click
  * selects and Shift+click adds, by the same rule as the canvas
  * (selection.ts's pick), and it takes the canvas's keys (arrows, Delete,
  * Escape, Ctrl+A) while a row has focus.

@@ -17,10 +17,11 @@ const shift: Mods = { shift: true, ctrl: false };
 const ctrl: Mods = { shift: false, ctrl: true };
 // Card 2 of the fitted stock row is drawn at (153, 441), 121 x 36. Its
 // portrait covers (153, 443) to (176, 466), its health bar (177, 457) to
-// (273, 464); (273, 442) is on the card but on no piece (only the splatter).
+// (273, 464); (273, 442) is on the card but on no other piece, only the
+// splatter, the lowest-priority target there.
 const HEAD2 = { x: 164, y: 454 };
 const HEALTH2 = { x: 200, y: 460 };
-const EMPTY2 = { x: 273, y: 442 };
+const SPLATTER2 = { x: 273, y: 442 };
 // Card 1's portrait, and a point in the stock container between cards 1 and 2 (on no card).
 const HEAD1 = { x: 24, y: 454 };
 const GAP12 = { x: 143, y: 450 };
@@ -36,21 +37,31 @@ describe('click', () => {
     expect(click(D, NONE, HEAD2, plain, 'down')).toEqual({ kind: 'children', names: ['Incapacitated'], card: 1 });
   });
 
-  it('picks the card where no piece is, the element where no card is, and nothing on empty screen', () => {
-    expect(click(D, NONE, EMPTY2)).toEqual({ kind: 'cards', cards: [1] });
+  it('picks the splatter, the lowest-priority piece, where no other piece is', () => {
+    expect(click(D, NONE, SPLATTER2)).toEqual({ kind: 'children', names: ['BackgroundImage'], card: 1 });
+    // A real piece drawn on top of it still wins.
+    expect(click(D, NONE, HEAD2)).toEqual({ kind: 'children', names: ['Head'], card: 1 });
+  });
+
+  it('picks the card itself only where nothing at all is drawn there, not even the splatter', () => {
+    const noSplatter = patchChild(D, 'BackgroundImage', { visible: false });
+    expect(click(noSplatter, NONE, SPLATTER2)).toEqual({ kind: 'cards', cards: [1] });
+  });
+
+  it('picks the element where no card is, and nothing on empty screen', () => {
     expect(click(D, NONE, GAP12)).toEqual(TEAMMATES);
     expect(click(D, NONE, { x: 780, y: 430 })).toEqual({ kind: 'elements', ids: ['ownHealth'] });
     expect(click(D, TEAMMATES, { x: 426, y: 100 })).toEqual(NONE);
   });
 
   it('reports the card under the pointer in Row as in Free', () => {
-    expect(hitAt(D, 'survivor', 'healthy', EMPTY2.x, EMPTY2.y)).toEqual({ element: 'teamColumn', card: 1, child: null });
+    expect(hitAt(D, 'survivor', 'healthy', SPLATTER2.x, SPLATTER2.y)).toEqual({ element: 'teamColumn', card: 1, child: 'BackgroundImage' });
     expect(hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y)).toEqual({ element: 'teamColumn', card: 1, child: 'Head' });
     expect(hitAt(D, 'survivor', 'healthy', GAP12.x, GAP12.y)).toEqual({ element: 'teamColumn', card: null, child: null });
   });
 
-  it('picks a Free card where no piece is', () => {
-    expect(click(FREE, NONE, EMPTY2)).toEqual({ kind: 'cards', cards: [1] });
+  it('picks a Free card the same way as Row: a piece if one is there, else the splatter', () => {
+    expect(click(FREE, NONE, SPLATTER2)).toEqual({ kind: 'children', names: ['BackgroundImage'], card: 1 });
     expect(click(FREE, NONE, HEAD2)).toEqual({ kind: 'children', names: ['Head'], card: 1 });
   });
 
@@ -58,10 +69,12 @@ describe('click', () => {
     const card2: Selection = { kind: 'cards', cards: [1] };
     expect(click(D, NONE, HEAD2, ctrl)).toEqual(card2);
     expect(click(D, card2, HEAD2, ctrl)).toEqual(TEAMMATES);
-    expect(click(D, NONE, EMPTY2, ctrl)).toEqual(TEAMMATES);
+    // The splatter climbs like any other piece: first its card, then the Teammates.
+    expect(click(D, NONE, SPLATTER2, ctrl)).toEqual(card2);
+    expect(click(D, card2, SPLATTER2, ctrl)).toEqual(TEAMMATES);
     expect(click(FREE, NONE, HEAD2, ctrl)).toEqual(card2);
     expect(click(FREE, card2, HEAD2, ctrl)).toEqual(TEAMMATES);
-    expect(click(FREE, NONE, EMPTY2, ctrl)).toEqual(TEAMMATES);
+    expect(click(FREE, NONE, SPLATTER2, ctrl)).toEqual(card2);
     // Another card picked is not this card: Ctrl still picks this one.
     expect(click(D, { kind: 'cards', cards: [0] }, HEAD2, ctrl)).toEqual(card2);
   });
@@ -70,7 +83,8 @@ describe('click', () => {
     const card2: Selection = { kind: 'cards', cards: [1] };
     const both = click(D, card2, HEAD1, shift);
     expect(both).toEqual({ kind: 'cards', cards: [0, 1] });
-    expect(click(D, both, EMPTY2, shift)).toEqual({ kind: 'cards', cards: [0] });
+    // Shift on any part of a picked card, splatter included, lifts the target to that card.
+    expect(click(D, both, SPLATTER2, shift)).toEqual({ kind: 'cards', cards: [0] });
     expect(click(D, { kind: 'cards', cards: [0] }, HEAD1, shift)).toEqual(NONE);
     // Off the cards Shift starts again at the level the click picks.
     expect(click(D, both, { x: 780, y: 430 }, shift)).toEqual({ kind: 'elements', ids: ['ownHealth'] });
@@ -124,6 +138,18 @@ describe('drag', () => {
     const sel: Selection = { kind: 'children', names: ['Head', 'Health'], card: 0 };
     const hit = hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y);
     expect(dragIntent(D, sel, hit, plain)).toEqual({ kind: 'move', sel });
+  });
+
+  it('moves the splatter once it is picked, and its own handles resize it', () => {
+    const splatter: Selection = { kind: 'children', names: ['BackgroundImage'], card: 1 };
+    const hit = hitAt(D, 'survivor', 'healthy', SPLATTER2.x, SPLATTER2.y);
+    expect(isPicked(D, splatter, hit)).toBe(true);
+    expect(dragIntent(D, splatter, hit, plain)).toEqual({ kind: 'move', sel: splatter });
+    // A wh piece takes all eight handles, the splatter included.
+    expect(handlesFor(D, splatter)).toHaveLength(8);
+    expect(dragIntent(D, splatter, hit, plain, 'se')).toEqual({ kind: 'resize', handle: 'se' });
+    // Not yet picked, the same spot still moves the card under it instead.
+    expect(dragIntent(D, NONE, hit, plain)).toEqual({ kind: 'move', sel: { kind: 'cards', cards: [1] } });
   });
 
   it('draws a box with Shift, and does nothing from empty screen', () => {
