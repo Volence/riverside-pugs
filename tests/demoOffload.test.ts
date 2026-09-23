@@ -390,4 +390,50 @@ describe('getRange', () => {
     globalThis.fetch = (async () => new Response(Buffer.from('hello'), { status: 200, headers: { 'content-length': '5' } })) as typeof fetch;
     expect(await getRange(CFG, 'k', 0)).toEqual({ body: Buffer.from('hello'), total: 5 });
   });
+
+  // New minor 1 from the final review: on a 416 without a Content-Range
+  // header, `total` used to become 0 rather than the object's real size.
+  it('falls back to a HEAD for the total when a 416 carries no Content-Range', async () => {
+    let headCalls = 0;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'HEAD') {
+        headCalls++;
+        return new Response(null, { status: 200, headers: { 'content-length': '11' } });
+      }
+      return new Response(null, { status: 416 }); // no content-range header at all
+    }) as typeof fetch;
+    expect(await getRange(CFG, 'k', 999)).toEqual({ body: Buffer.alloc(0), total: 11 });
+    expect(headCalls).toBe(1);
+  });
+
+  it('does not fall back to HEAD when the 416 does carry Content-Range', async () => {
+    let headCalls = 0;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'HEAD') { headCalls++; return new Response(null, { status: 200 }); }
+      return new Response(null, { status: 416, headers: { 'content-range': 'bytes */11' } });
+    }) as typeof fetch;
+    expect(await getRange(CFG, 'k', 999)).toEqual({ body: Buffer.alloc(0), total: 11 });
+    expect(headCalls).toBe(0);
+  });
+
+  it('throws when the 416 fallback HEAD also fails, rather than lying about the total', async () => {
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      if (init.method === 'HEAD') return new Response(null, { status: 500 });
+      return new Response(null, { status: 416 });
+    }) as typeof fetch;
+    await expect(getRange(CFG, 'k', 999)).rejects.toThrow();
+  });
+
+  // New minor 2: a hung R2 connection must not hold a viewer request open
+  // forever. Only getRange gets this; put and head are shared with demos and
+  // out of scope for this branch.
+  it('bounds its fetch with a timeout signal', async () => {
+    let seenSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      seenSignal = init.signal as AbortSignal | undefined;
+      return new Response(Buffer.from('hello'), { status: 200, headers: { 'content-length': '5' } });
+    }) as typeof fetch;
+    await getRange(CFG, 'k', 0);
+    expect(seenSignal).toBeInstanceOf(AbortSignal);
+  });
 });
