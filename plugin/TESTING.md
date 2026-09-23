@@ -775,3 +775,133 @@ Rotoblin must be loaded. Over RCON:
    kick and no map change (the routine post-report path is unchanged).
 
 `sm_addban` cannot be tested here: on a LAN server it is a silent no-op.
+
+## Balance inventory verification
+
+Run 2026-09-23 on the isolated local instance `/home/volence/l4d1-ds-skyprobe/server`
+(port 27045, `-insecure`, `sv_lan 1`, 127.0.0.1 only), never on a live box. That
+instance already carries the full stripper tree (`addons/stripper/Roto-AZMod/maps`,
+139 files, 4.1 MB, 138 of them `.cfg`), which is larger than the 59 files in
+`deploy/overrides`, so the timing below is a worst case, not a flattering one.
+
+### Setup
+
+Modelled on `plugin/skypounce/rig/run.sh roto`: replace the instance's plugins dir
+with a copy of the shared install's (`/home/volence/l4d1-ds/server/.../plugins`),
+drop in the fresh `pug-match.smx`, then start srcds with its stdin on a FIFO so
+console commands can be fed to it:
+
+    ./build.sh
+    mkfifo fifo
+    ( exec 3<>fifo; timeout 1500 ./srcds_run -console -game left4dead -ip 127.0.0.1 \
+        -port 27045 -tickrate 100 -maxplayers 8 -norestart -insecure -nomaster \
+        +sv_lan 1 +mp_gamemode versus +exec server +sv_logecho 1 \
+        +map l4d_hospital01_apartment <&3 > console.log 2>&1 )
+    echo 'sm_pug_debug 1' > fifo      # and so on for every command below
+
+Check first that nothing already listens on the port
+(`pgrep -f "srcds_linux.*-port 27045"`), and send `quit` when done.
+
+### 1. Scan cost
+
+`sm_pug_debug 1` is set after boot, so the boot scan itself is not logged. A
+reload builds a fresh plugin with an empty cache and rescans at once, which is
+the same cold scan the first map pays:
+
+    sm_pug_debug 1
+    sm plugins reload pug-match          # cold: logs "balance scan: N items in X ms"
+    changelevel l4d_hospital02_subway    # warm
+    changelevel l4d_hospital03_sewers    # warm
+    changelevel l4d_hospital01_apartment # warm
+
+Gate: cold under 250 ms, warm under 20 ms.
+
+| Build | Cold (first map) | Warm (later maps) |
+|---|---|---|
+| Before the fix | 134.6 ms | 78.1, 78.9, 76.3 ms |
+| After the fix | 149.9, 138.1, 136.6, 136.9, 135.5, 135.4, 134.5 ms; one outlier 256.9 ms | 1.2 to 1.3 ms every map |
+
+Before the fix `BalScanDir` refolded every stripper config's bytes at every map
+start. It now folds each file's cached `size.hash8` (from `BalFileValue`, cached
+by path, size and mtime), keeping the `count.hash8` output and sorted-name order.
+The directory hash VALUES changed once with that fix. The single 256.9 ms cold
+sample came from the first reload in a run while the host's load average was
+climbing to 10 (other workloads on the machine); the six samples right after it,
+in the same process, were 134 to 137 ms.
+
+### 2. Wire output
+
+A backend-shaped match with a fake roster, bots on the survivor side, and
+readyup's own force start:
+
+    exec pug_match
+    sm_pug_debug 1
+    sm_pug_min_orient 1
+    sm_pug_match 999 testtoken3 l4d_hospital01_apartment
+    sm_pug_roster "76561198000000001:a"   # ... through 76561198000000008, 5-8 on b
+    changelevel l4d_hospital01_apartment
+    sb_add                               # x4: with no human, no survivor bots exist, and
+                                         # sm_forcestart does nothing until they do
+    sm_forcestart                        # l4dready's admin force start, runs as root from the console
+    director_force_panic_event           # needs sv_cheats 1, which this instance's server.cfg sets
+    a4d_spawn_infected hunter            # all4dead; plain z_spawn from the console places nothing
+    sm_slay @survivors                   # ends the round
+
+In a shell, write the roster ids as `${i}:a`, not `$i:a`: zsh reads `$i:a` as a
+path modifier.
+
+Checked against the captured lines:
+
+- 20 `BALANCE` parts plus `BALANCE_END half=1 parts=20 items=289`. Longest
+  captured line 615 bytes with the 10-character test token and no signature;
+  a 32-hex token adds 22 bytes, so under 700 either way. The items across the
+  parts count to exactly 289, with no duplicate keys.
+- All 43 cvars from `balance/knobs.json` appear: 41 as `c:`, and
+  `x:l4d_skypounce_enable=missing`, `x:l4d_skypounce_mode=missing` (skypounce is
+  not loaded here).
+- `p:pug-match.smx=...` once, the 7 `f:` files, and
+  `d:addons/stripper/Roto-AZMod/maps=138.<hash8>`.
+- `ROUND_MARK half=1 kind=panic t=25800` after the forced panic.
+- `ROUND_STATS_END half=1 players=8 sd=1` then `ROUND_END` after the slay.
+  No `ROUND_STAT` line: every rostered id is fake and never connects, and only
+  nonzero values go out.
+- A second go-live on half 2 sent `BALANCE_END half=2 parts=20 items=298`
+  on the pre-fix build, the same inventory as half 1.
+- Weapon names, with a temporary `PugDebug` in `player_hurt`, `player_death`
+  and `infected_death` for bot survivors (reverted, never committed):
+  `player_hurt` carries `pumpshotgun` and `smg`, `player_death` carries
+  `pumpshotgun`, the held weapon for common kills is `weapon_pumpshotgun`,
+  `weapon_smg`, `weapon_pistol`. `WpnIndex` mapped every one to its own key,
+  none to `other`, so it needed no fix.
+
+A bug this found and fixed: `ReadPlugin` hands back a null handle for a plugin
+that failed to load, and plugin natives read null as the calling plugin, so each
+of the nine plugins failing on missing extensions here (GeoIP, CollisionHook,
+Actions) was listed as another `p:pug-match.smx`: 298 items before, 289 after.
+
+### 3. Backend parser round trip
+
+Captured lines, with the token swapped for 32 hex characters (the parser requires
+one), fed through `parseLogDatagram(framed(line))` in a throwaway test: BALANCE
+part 0 and part 19 gave `balance_part`, `BALANCE_END` gave `balance_end` with
+items 289, `ROUND_MARK` gave `round_mark`, `ROUND_STATS_END` gave
+`round_stats_end`. All 20 parts parsed back to 289 items in total.
+
+### Pending for the owner (needs people in game)
+
+`ROUND_STAT` with `w_<weapon>_sidmg` keys cannot be produced alone: SI damage is
+credited only to a rostered, connected survivor and only against a
+player-controlled (not bot) SI. On the local test server, or staged per section 0:
+
+1. Two people connect. Configure a match that rosters both (`sm_pug_match 999
+   <32 hex> no_mercy`, then `sm_pug_roster "<id>:a"` and `"<id>:b"`),
+   `sm_pug_min_orient 1`, `sm_pug_debug 1`.
+2. Go live (`sm_forcestart`). The survivor shoots the infected player's SI with
+   two or more weapons (pumpshotgun and a tier 2, a molotov if you can) and kills
+   at least one.
+3. End the round. Expect a `ROUND_STAT half=1 steamid=<survivor> ...` line with
+   `w_pumpshotgun_sidmg=`, `w_pumpshotgun_sikill=` and the other weapon's keys,
+   and no damage filed under `w_other_*` unless a weapon outside the list was used.
+   The `w_*_sidmg` values should sum to the line's `sidmg=`.
+4. Optional: trigger a car alarm or a crescendo button on a real map and see
+   `ROUND_MARK kind=panic` from a natural panic, not a forced one.
