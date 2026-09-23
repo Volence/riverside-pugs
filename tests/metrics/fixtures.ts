@@ -45,10 +45,13 @@ export function frames(from: number, to: number, spec: (t: number) => Omit<Frame
   return out;
 }
 
-export function replayOf(fs: Frame[]): RoundReplay {
+/** Default slot table: survivors s1-s4 in slots 0-3, infected i1-i4 in 4-7. */
+export const SLOTS = [...SURV, ...INF];
+
+export function replayOf(fs: Frame[], slots: string[] = SLOTS): RoundReplay {
   let d = 0;
   for (let i = 0; i + 1 < fs.length; i++) d += Math.min(fs[i + 1].tMs - fs[i].tMs, 1000);
-  return { frames: fs, durationMs: d + 100 };
+  return { frames: fs, durationMs: d + 100, slots };
 }
 
 export const standing4 = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 }];

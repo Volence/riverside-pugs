@@ -34,7 +34,7 @@ export function decodeRoundReplay(buf: Uint8Array, fallbackMask: () => number | 
     durationMs += Math.min(frames[i + 1].tMs - frames[i].tMs, FRAME_DT_CAP_MS);
   }
   durationMs += Math.round(1000 / (h.playerHz > 0 ? h.playerHz : 10));
-  return { frames, durationMs };
+  return { frames, durationMs, slots: h.slots };
 }
 
 /** The round's replay from disk, or null when there is none, it was pruned,

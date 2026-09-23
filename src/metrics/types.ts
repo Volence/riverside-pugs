@@ -25,6 +25,8 @@ export interface RoundReplay {
   frames: Frame[];
   /** Unpaused playing time covered by the frames. */
   durationMs: number;
+  /** Header slot table: the steamid64 in each player slot, '' when empty. */
+  slots: string[];
 }
 
 export interface RoundInput {

@@ -30,6 +30,7 @@ describe('decodeRoundReplay', () => {
     expect(r.frames[0].players[1].infected).toBe(true);
     expect(r.frames[0].players[0].infected).toBe(false);
     expect(r.durationMs).toBe(300);
+    expect(r.slots).toEqual(['1', '2', '', '', '', '', '', '']);
   });
 
   it('caps a gap in the file at one second', () => {
