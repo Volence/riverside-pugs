@@ -27,7 +27,7 @@ export function AdminPatches() {
 
   const openDetail = (p: PatchSummary) => {
     setName(p.name ?? '');
-    void adminApi.balancePatch(p.id).then(setOpen);
+    void run(() => adminApi.balancePatch(p.id).then(setOpen));
   };
 
   return (
@@ -56,7 +56,7 @@ export function AdminPatches() {
                     <td>{fmtTime(p.firstSeenAt)}</td>
                     <td>{p.rounds}</td>
                     <td>{p.servers.map((s) => s.name).join(', ')}</td>
-                    <td><button class="btn" type="button" onClick={() => openDetail(p)}>Details</button></td>
+                    <td><button class="btn" type="button" disabled={busy} onClick={() => openDetail(p)}>Details</button></td>
                   </tr>
                 ))}
               </tbody>

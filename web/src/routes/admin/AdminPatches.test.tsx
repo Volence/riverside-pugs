@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
-import type { DriftRow, PatchDetail, PatchSummary } from '../../api';
+import { ApiError, type DriftRow, type PatchDetail, type PatchSummary } from '../../api';
 
 const { mockAdmin } = vi.hoisted(() => ({
   mockAdmin: { balancePatches: vi.fn(), balanceDrift: vi.fn(), balancePatch: vi.fn(), editBalancePatch: vi.fn() },
@@ -70,5 +70,32 @@ describe('AdminPatches', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save and mark reviewed' }));
 
     await waitFor(() => expect(mockAdmin.editBalancePatch).toHaveBeenCalledWith(2, { name: 'Fall patch', reviewed: true }));
+  });
+
+  // A failed Details fetch used to be an unhandled promise rejection (no
+  // .catch on the bare adminApi.balancePatch(...).then(setOpen)) and the
+  // button silently did nothing. It must instead surface through the same
+  // error banner the save action uses, with nothing left unhandled.
+  it('shows an error when the Details fetch fails, with nothing unhandled', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: PromiseRejectionEvent) => unhandled.push(e.reason);
+    window.addEventListener('unhandledrejection', onUnhandled);
+
+    mockAdmin.balancePatches.mockResolvedValue({ patches });
+    mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
+    mockAdmin.balancePatch.mockRejectedValue(new ApiError(404, 'no such patch'));
+
+    render(<AdminPatches />);
+    await waitFor(() => expect(screen.getByText('Unnamed patch 2')).toBeTruthy());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Details' })[1]);
+
+    expect(await screen.findByText('no such patch')).toBeTruthy();
+    expect(screen.queryByLabelText('Patch name')).toBeNull();
+
+    // Flush any microtask that would still be settling.
+    await new Promise((r) => setTimeout(r, 0));
+    window.removeEventListener('unhandledrejection', onUnhandled);
+    expect(unhandled).toEqual([]);
   });
 });
