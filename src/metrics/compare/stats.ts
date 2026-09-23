@@ -89,38 +89,111 @@ export function weightedDiff(a: MatchSample[], b: MatchSample[], weights: Map<st
   return wsum > 0 ? v / wsum : null;
 }
 
-function resample(side: MatchSample[], rand: () => number): MatchSample[] {
-  const out: MatchSample[] = new Array(side.length);
-  for (let i = 0; i < side.length; i++) out[i] = side[Math.floor(rand() * side.length)];
-  return out;
-}
-
 function stdev(xs: number[]): number {
   if (xs.length < 2) return 0;
   const mean = xs.reduce((s, x) => s + x, 0) / xs.length;
   return Math.sqrt(xs.reduce((s, x) => s + (x - mean) ** 2, 0) / (xs.length - 1));
 }
 
+interface PackedSide {
+  /** offset[i]..offset[i+1) is match i's slice of idx/num/den. Length n + 1. */
+  offset: Int32Array;
+  /** Map index (into the weighted-maps list) for each packed entry. */
+  idx: Int32Array;
+  num: Float64Array;
+  den: Float64Array;
+  n: number;
+}
+
+/** Packs one side's per-match, per-map sums into a CSR-style layout: only
+ *  the (map, num, den) entries a match actually has, addressed by `offset`.
+ *  A bootstrap replicate can then sum a resampled match's row with plain
+ *  array arithmetic and no Map lookups, and without paying for the maps
+ *  that match never touched (most matches cover only a few of the maps in
+ *  play across a whole comparison). */
+function packSide(side: MatchSample[], mapIndex: Map<string, number>): PackedSide {
+  const n = side.length;
+  const offset = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    let c = 0;
+    for (const map of side[i].keys()) if (mapIndex.has(map)) c++;
+    offset[i + 1] = offset[i] + c;
+  }
+  const total = offset[n];
+  const idx = new Int32Array(total);
+  const num = new Float64Array(total);
+  const den = new Float64Array(total);
+  for (let i = 0; i < n; i++) {
+    let p = offset[i];
+    for (const [map, v] of side[i]) {
+      const j = mapIndex.get(map);
+      if (j === undefined) continue;
+      idx[p] = j; num[p] = v.num; den[p] = v.den; p++;
+    }
+  }
+  return { offset, idx, num, den, n };
+}
+
 /** Bootstrap of B minus A by resampling whole matches on each side. Uses the
- *  paired weightedDiff (not weightedValue(b) - weightedValue(a)) for every
- *  replicate so a map dropped from one side's resample but not the other's
- *  cannot bias the difference. seA/seB are each side's own replicate spread,
- *  used by matchesNeeded to see how much of the uncertainty A already fixes. */
+ *  paired weightedDiff (not weightedValue(b) - weightedValue(a)) semantics
+ *  for every replicate so a map dropped from one side's resample but not the
+ *  other's cannot bias the difference. seA/seB are each side's own replicate
+ *  spread, used by matchesNeeded to see how much of the uncertainty A already
+ *  fixes.
+ *
+ *  Restricted up front to the positively-weighted maps and packed into flat
+ *  typed arrays in CSR form (packSide: one contiguous slice of map/num/den
+ *  per match, addressed by `offset`), so the reps loop only touches the
+ *  entries a resampled match actually has and does plain array arithmetic:
+ *  no Map allocation or lookup per replicate. That is what made this the hot
+ *  path at match counts in the hundreds. */
 export function bootstrapDiff(a: MatchSample[], b: MatchSample[], weights: Map<string, number>,
   reps: number, rand: () => number): { lo: number; hi: number; p: number; se: number; seA: number; seB: number } | null {
   if (a.length === 0 || b.length === 0) return null;
+  const mapKeys = [...weights].filter(([, w]) => w > 0).map(([k]) => k);
+  const M = mapKeys.length;
+  if (M === 0) return null;
+  const w = new Float64Array(M);
+  const mapIndex = new Map<string, number>();
+  mapKeys.forEach((k, i) => { w[i] = weights.get(k)!; mapIndex.set(k, i); });
+
+  const pa = packSide(a, mapIndex), pb = packSide(b, mapIndex);
+  const sumNumA = new Float64Array(M), sumDenA = new Float64Array(M);
+  const sumNumB = new Float64Array(M), sumDenB = new Float64Array(M);
+
   const diffs: number[] = [];
   const vas: number[] = [];
   const vbs: number[] = [];
   for (let r = 0; r < reps; r++) {
-    const ra = resample(a, rand);
-    const rb = resample(b, rand);
-    const va = weightedValue(ra, weights);
-    const vb = weightedValue(rb, weights);
-    if (va !== null) vas.push(va);
-    if (vb !== null) vbs.push(vb);
-    const d = weightedDiff(ra, rb, weights);
-    if (d !== null) diffs.push(d);
+    sumNumA.fill(0); sumDenA.fill(0);
+    for (let i = 0; i < pa.n; i++) {
+      const m = Math.floor(rand() * pa.n);
+      for (let e = pa.offset[m], end = pa.offset[m + 1]; e < end; e++) {
+        const j = pa.idx[e];
+        sumNumA[j] += pa.num[e]; sumDenA[j] += pa.den[e];
+      }
+    }
+    sumNumB.fill(0); sumDenB.fill(0);
+    for (let i = 0; i < pb.n; i++) {
+      const m = Math.floor(rand() * pb.n);
+      for (let e = pb.offset[m], end = pb.offset[m + 1]; e < end; e++) {
+        const j = pb.idx[e];
+        sumNumB[j] += pb.num[e]; sumDenB[j] += pb.den[e];
+      }
+    }
+
+    let va = 0, vaW = 0, vb = 0, vbW = 0, d = 0, dW = 0;
+    for (let j = 0; j < M; j++) {
+      const hasA = sumDenA[j] > 0, hasB = sumDenB[j] > 0;
+      const rateA = hasA ? sumNumA[j] / sumDenA[j] : 0;
+      const rateB = hasB ? sumNumB[j] / sumDenB[j] : 0;
+      if (hasA) { va += w[j] * rateA; vaW += w[j]; }
+      if (hasB) { vb += w[j] * rateB; vbW += w[j]; }
+      if (hasA && hasB) { d += w[j] * (rateB - rateA); dW += w[j]; }
+    }
+    if (vaW > 0) vas.push(va / vaW);
+    if (vbW > 0) vbs.push(vb / vbW);
+    if (dW > 0) diffs.push(d / dW);
   }
   if (diffs.length < 2) return null;
   diffs.sort((x, y) => x - y);
