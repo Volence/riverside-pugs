@@ -14,7 +14,10 @@ import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Asp
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
-import { baseTeam, contentBox, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir } from './design';
+import {
+  baseTeam, contentBox, WEAPON_KEYS, WEAPON_BOX_COLOUR, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir,
+  type WeaponNumKey,
+} from './design';
 import { panelChildren, teamChild, TEAM_PANEL, type ChildDef } from './children';
 import { crosshairFiles } from '../crosshair/vpk';
 import { TEX } from '../crosshair/draw';
@@ -37,6 +40,7 @@ const SCHEME = 'resource/clientscheme.res';
 const CHATSCHEME = 'resource/chatscheme.res';
 const BASECHAT = 'resource/ui/basechat.res';
 const CARD = TEAM_PANEL.file;
+const MODTEX = 'scripts/mod_textures.txt';
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
 
@@ -924,7 +928,8 @@ function fontPass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFi
  * `materials/vgui/hud/hudeditor/` and the .res `image` keys that show it are
  * repointed there. In advanced mode the VPK mounts ahead of pak01, so the
  * stock names are written too and nothing needs repointing for a slot with
- * no `targets` (the weapon boxes and the state panels, which game code names directly).
+ * no `targets` (the state panels, which game code names directly). The
+ * weapon boxes are not slots: weaponsPass restyles them through mod_textures.txt.
  */
 function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkFile[]) {
   for (const slot of SLOTS) {
@@ -947,6 +952,115 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
       out.push({ path: `materials/${name}.vtf`, data: vtf }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
     }
     for (const t of slot.targets) kvSet(work.panel(t.file, t.path), t.key, `hud/hudeditor/${slot.id.toLowerCase()}`);
+  }
+}
+
+/**
+ * The weapon selection's material names in mod_textures.txt, and the
+ * textures the editor points them at, all under vgui/hud/hudeditor/.
+ *
+ * The paint draws its boxes with rounded_background_glow (the active slot)
+ * and rounded_background_noborder (the rest), and its pictures with the
+ * icon_equip_* cells client.dll asks for by name (weapons.ts's header).
+ * WEAPON_ICONS is every gun the primary and pistol slots can hold, so hiding
+ * the pictures hides whatever the player carries, not only the preview's
+ * pump shotgun; icon_equip_machinegun is the hunting rifle. The flashlight
+ * cells are not the weapon selection's and are left alone.
+ */
+export const WEAPON_BOX_ENTRY = { boxActive: 'rounded_background_glow', boxInactive: 'rounded_background_noborder' } as const;
+export const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
+  'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
+export const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+export const CLEAR_TEXTURE = 'vgui/hud/hudeditor/clear';
+export const weaponBoxTexture = (box: 'boxActive' | 'boxInactive') => `vgui/hud/hudeditor/weapon${box.toLowerCase()}`;
+/**
+ * The stock box art is a 128-texel square the game nine-slices with
+ * 16-texel corners, and the mod_textures.txt entry keeps its 0 0 128 128
+ * rect, so a generated box is the same size: its corners land in the cells
+ * the game keeps square, and a rounded box's radius is exactly one corner.
+ */
+const BOX_TEXELS = 128;
+const BOX_CORNER = 16;
+/**
+ * Fully transparent. The VTF clamps S and T, and every texel is clear, so
+ * any cell rect an entry keeps (the icon sheet's go up to 512) reads nothing
+ * but clear: probe B's 512-texel clear texture was belt and braces.
+ */
+const CLEAR_TEXELS = 16;
+
+const BASE_SCHEMES = new Map<Preset, KvNode[]>();
+/**
+ * A scheme font's tall in the preset's own file, read without pulling the
+ * scheme into the build: asking the Work for it would ship an untouched
+ * clientscheme.res.
+ */
+function baseFontTall(preset: Preset, font: string): number | undefined {
+  let t = BASE_SCHEMES.get(preset);
+  if (!t) { t = parseKv(baseFile(preset, SCHEME))[0].value as KvNode[]; BASE_SCHEMES.set(preset, t); }
+  const size = kvFind(t, ['Fonts', font, '1']);
+  return size ? num(kvGet(size, 'tall')) : undefined;
+}
+
+/**
+ * The player's weapon selection edits (HudDesign.weapons).
+ *
+ * Each number goes into the HudWeaponSelection key the paint reads, on
+ * every entry the PC reads (pcSet), so the console's [$X360] values stay as
+ * they were. A text size points PrimaryAmmoFont or PistolAmmoFont at a
+ * HudEd_<font>_t<size> copy of the font it names, the same copies a child's
+ * text size makes; neither preset gives PistolAmmoFont, so it is added,
+ * starting from the dll's own default, HudAmmo. A size that is the font's
+ * own tall names the font itself, so no copy ships for it.
+ *
+ * Boxes and pictures are restyled in scripts/mod_textures.txt, which no
+ * preset ships and which the game reads from an addon (probe B,
+ * 2026-09-23): the named entries are repointed at generated textures and
+ * everything else, each entry's cell rect included, is the game's own file.
+ * The file ships only when a box or a picture is not stock.
+ */
+function weaponsPass(work: Work, design: HudDesign, out: VpkFile[]) {
+  const w = design.weapons;
+  if (!w) return;
+  const panel = work.panel(LAYOUT, ['HudWeaponSelection']);
+  for (const [field, { key }] of Object.entries(WEAPON_KEYS) as [WeaponNumKey, { key: string }][]) {
+    const v = w[field];
+    if (v !== undefined) pcSet(panel, key, String(Math.round(v)));
+  }
+  if (w.reserveColor) pcSet(panel, 'ReserveAmmoColor', w.reserveColor);
+  if (w.inactiveColor) pcSet(panel, 'InactiveItemColor', w.inactiveColor);
+  for (const [field, key, dllDefault] of [['clipFont', 'PrimaryAmmoFont', 'FrameTitle'], ['pistolFont', 'PistolAmmoFont', 'HudAmmo']] as const) {
+    const size = w[field];
+    if (size === undefined) continue;
+    let leaves = pcEntries(panel, key);
+    if (!leaves.length) { pcSet(panel, key, dllDefault); leaves = pcEntries(panel, key); }
+    const tall = Math.round(size);
+    if (baseFontTall(work.preset, leaves[0].value as string) === tall) continue;
+    for (const leaf of leaves) useFontCopy(work, leaf, `t${tall}`, () => tall);
+  }
+
+  const repoint: [string, string][] = [];
+  for (const box of ['boxActive', 'boxInactive'] as const) {
+    const s = w[box];
+    if (!s) continue;
+    if (s.kind === 'hidden') { repoint.push([WEAPON_BOX_ENTRY[box], CLEAR_TEXTURE]); continue; }
+    const colour = s.color ?? WEAPON_BOX_COLOUR[box];
+    const rgba = s.kind === 'rounded' ? roundedTexture(BOX_TEXELS, BOX_TEXELS, colour, BOX_CORNER) : flatTexture(BOX_TEXELS, BOX_TEXELS, colour);
+    const name = weaponBoxTexture(box);
+    out.push({ path: `materials/${name}.vtf`, data: encodeVTF(BOX_TEXELS, BOX_TEXELS, rgba) }, { path: `materials/${name}.vmt`, data: enc(vmtFor(name)) });
+    repoint.push([WEAPON_BOX_ENTRY[box], name]);
+  }
+  if (w.weaponIcons === false) for (const n of WEAPON_ICONS) repoint.push([n, CLEAR_TEXTURE]);
+  if (w.itemIcons === false) for (const n of ITEM_ICONS) repoint.push([n, CLEAR_TEXTURE]);
+  if (!repoint.length) return;
+  const cells = work.panel(MODTEX, ['TextureData']);
+  for (const [entry, file] of repoint) {
+    const e = kvFind(cells.value as KvNode[], [entry]);
+    if (!e) throw new Error(`${MODTEX}: no ${entry}`);
+    kvSet(e, 'file', file);
+  }
+  if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) {
+    out.push({ path: `materials/${CLEAR_TEXTURE}.vtf`, data: encodeVTF(CLEAR_TEXELS, CLEAR_TEXELS, new Uint8ClampedArray(CLEAR_TEXELS * CLEAR_TEXELS * 4)) },
+      { path: `materials/${CLEAR_TEXTURE}.vmt`, data: enc(vmtFor(CLEAR_TEXTURE)) });
   }
 }
 
@@ -1006,6 +1120,11 @@ function addonInfo(name: string): string {
  * - `layoutPass` only moves, hides and free-resizes panels. No team element
  *   is free-resize, so it never writes a container size teamPass then reads.
  * - `stylePass` only repoints image keys, which no other pass looks at.
+ * - `weaponsPass` writes only HudWeaponSelection, which no other pass
+ *   touches (it is neither a team nor a scaled element), mod_textures.txt,
+ *   which only it opens, and HudEd_<font>_t<size> copies in the scheme,
+ *   through the same shared font map as childPass, so it is order independent
+ *   of childPass, scalePass and fontPass for the reasons given for those.
  * - `crosshairPass` only adds the texture files for the xHair element
  *   `layoutPass` wrote; it reads no tree.
  */
@@ -1013,6 +1132,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   const work = new Work(design.preset);
   const extra: VpkFile[] = [];
   layoutPass(work, design);
+  weaponsPass(work, design, extra);
   childPass(work, design);
   fitPass(work, design);
   hidePass(work, design);
@@ -1075,6 +1195,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     work = new Work(design.preset);
     const discard: VpkFile[] = [];
     layoutPass(work, design);
+    weaponsPass(work, design, discard);
     childPass(work, design);
     fitPass(work, design);
     hidePass(work, design);

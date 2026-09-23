@@ -117,7 +117,9 @@ describe('the art boundary', () => {
     for (const advanced of [false, true]) {
       it(`a ${preset} build ${advanced ? 'in advanced mode ' : ''}emits no exported texture`, () => {
         // A bundled crosshair too: its texture is the player's own, drawn on the Crosshair page.
-        const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset, advanced, styles: everySlot, crosshair: 'bundle' };
+        // And every weapon box style and hidden picture, which ship generated textures of their own.
+        const weapons = { boxActive: { kind: 'rounded' as const }, boxInactive: { kind: 'hidden' as const }, weaponIcons: false, itemIcons: false };
+        const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset, advanced, styles: everySlot, crosshair: 'bundle', weapons };
         const allowed = new Set(advanced ? SLOTS.flatMap((s) => s.stockNames) : []);
         const materials = buildHud(d, { fonts, crosshair: new Uint8ClampedArray(TEX * TEX * 4) }).map((f) => f.path).filter((p) => p.startsWith('materials/'));
         expect(materials.length).toBeGreaterThan(0);

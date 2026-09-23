@@ -1281,3 +1281,118 @@ describe('cardChild', () => {
     expect(baseHasChild('modern', 'HealthNumber')).toBe(true);
   });
 });
+
+describe('buildHud, the weapon selection', () => {
+  const FONTS = { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } };
+  const MODTEX = 'scripts/mod_textures.txt';
+  const weaponsOf = (files: { path: string; data: Uint8Array }[]) => kvFind(layoutOf(files), ['HudWeaponSelection'])!;
+  const pc = (block: KvNode, key: string) => (block.value as KvNode[])
+    .filter((n) => n.key.toLowerCase() === key.toLowerCase() && (!n.cond || n.cond.toUpperCase() === '[$WIN32]'))
+    .map((n) => n.value);
+  const entries = (files: { path: string; data: Uint8Array }[]) =>
+    kvFind(parseKv(text(files, MODTEX)!)[0].value as KvNode[], ['TextureData'])!.value as KvNode[];
+  const fileOf = (nodes: KvNode[], name: string) => kvGet(kvFind(nodes, [name])!, 'file');
+  const BASE_ENTRIES = kvFind(parseKv(baseFile('stock', MODTEX))[0].value as KvNode[], ['TextureData'])!.value as KvNode[];
+  const WEAPON_ICONS = ['icon_equip_pumpshotgun', 'icon_equip_uzi', 'icon_equip_autoshotgun', 'icon_equip_rifle',
+    'icon_equip_machinegun', 'icon_equip_dualpistols', 'icon_equip_pistol'];
+  const ITEM_ICONS = ['icon_equip_molotov', 'icon_equip_pipebomb', 'icon_equip_medkit', 'icon_equip_pills'];
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`writes each key the game reads into HudWeaponSelection, rounded, once per PC entry (${preset})`, () => {
+      const weapons = { primaryY: 12, indent: 0, primaryBoxW: 0, primaryBoxH: 0.4, pistolBoxW: 40, pistolBoxH: 30,
+        iconTall: 22, itemSize: 0, ammoX: 48, reserveY: -2, reserveColor: '255 0 255 255', inactiveColor: '0 255 0 255' };
+      const ws = weaponsOf(buildHud(design({ preset, weapons }), FONTS));
+      expect([
+        'PrimaryWeaponsYPos', 'RightSideIndent', 'PrimaryWeaponBoxWide', 'PrimaryWeaponBoxTall', 'PistolBoxWide', 'PistolBoxTall',
+        'PrimaryWeaponTall', 'IconSize', 'PrimaryWeaponAmmoX', 'ReserveAmmoYPos', 'ReserveAmmoColor', 'InactiveItemColor',
+      ].map((k) => pc(ws, k))).toEqual([['12'], ['0'], ['0'], ['0'], ['40'], ['30'], ['22'], ['0'], ['48'], ['-2'], ['255 0 255 255'], ['0 255 0 255']]);
+      // The console's own InactiveItemColor is left as it was.
+      expect((ws.value as KvNode[]).find((n) => n.cond === '[$X360]' && n.key === 'InactiveItemColor')?.value).toBe('55 55 55 255');
+    });
+  }
+
+  it('changes nothing for a design that never touched the weapons', () => {
+    for (const preset of ['stock', 'modern'] as const) {
+      const files = buildHud(design({ preset }), FONTS);
+      expect(files.map((f) => f.path).filter((p) => p === MODTEX || p.includes('hudeditor'))).toEqual([]);
+      const base = kvFind(parseKv(baseFile(preset, 'scripts/hudlayout.res'))[0].value as KvNode[], ['HudWeaponSelection']);
+      if (text(files, 'scripts/hudlayout.res')) expect(weaponsOf(files)).toEqual(base);
+    }
+  });
+
+  it('sizes the clip through a HudEd_ copy of its font, and the reserve through one of HudAmmo', () => {
+    const files = buildHud(design({ weapons: { clipFont: 18, pistolFont: 30 } }));
+    const ws = weaponsOf(files);
+    expect(pc(ws, 'PrimaryAmmoFont')).toEqual(['HudEd_HudAmmoLarge_t18']);
+    expect(pc(ws, 'PistolAmmoFont')).toEqual(['HudEd_HudAmmo_t30']);
+    const fonts = kvFind(tree(files, SCHEME_FILE), ['Fonts'])!;
+    expect(kvGet(kvFind(fonts.value as KvNode[], ['HudEd_HudAmmoLarge_t18', '1'])!, 'tall')).toBe('18');
+    expect(kvGet(kvFind(fonts.value as KvNode[], ['HudEd_HudAmmo_t30', '1'])!, 'tall')).toBe('30');
+  });
+
+  it("writes the base font itself for a size that is that font's own, with no copy", () => {
+    const files = buildHud(design({ weapons: { clipFont: 24, pistolFont: 18 } }));
+    expect(pc(weaponsOf(files), 'PrimaryAmmoFont')).toEqual(['HudAmmoLarge']);
+    expect(pc(weaponsOf(files), 'PistolAmmoFont')).toEqual(['HudAmmo']);
+    expect(text(files, SCHEME_FILE)).toBeUndefined();
+  });
+
+  it('ships no mod_textures.txt for number edits alone, nor for stock boxes with icons on', () => {
+    const files = buildHud(design({ weapons: { ammoX: 40, weaponIcons: true, itemIcons: true } }));
+    expect(text(files, MODTEX)).toBeUndefined();
+  });
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`hides a box by repointing its mod_textures.txt entry to a clear texture, the rest as the game has it (${preset})`, () => {
+      const files = buildHud(design({ preset, weapons: { boxActive: { kind: 'hidden' } } }), FONTS);
+      const got = entries(files);
+      expect(fileOf(got, 'rounded_background_glow')).toBe('vgui/hud/hudeditor/clear');
+      // Everything else, the rect of the repointed entry included, is the game's own file.
+      const want = structuredClone(BASE_ENTRIES);
+      kvSet(kvFind(want, ['rounded_background_glow'])!, 'file', 'vgui/hud/hudeditor/clear');
+      expect(got).toEqual(want);
+      const clear = files.find((f) => f.path === 'materials/vgui/hud/hudeditor/clear.vtf')!;
+      expect(decodeVTF(clear.data).rgba.every((v) => v === 0)).toBe(true);
+      expect(text(files, 'materials/vgui/hud/hudeditor/clear.vmt')).toContain('vgui/hud/hudeditor/clear');
+    });
+  }
+
+  it('draws a flat or rounded box from a generated 128-texel texture, the size of the art it replaces', () => {
+    const files = buildHud(design({ weapons: {
+      boxActive: { kind: 'flat', color: '10 20 30 200' }, boxInactive: { kind: 'rounded' },
+    } }));
+    const got = entries(files);
+    expect(fileOf(got, 'rounded_background_glow')).toBe('vgui/hud/hudeditor/weaponboxactive');
+    expect(fileOf(got, 'rounded_background_noborder')).toBe('vgui/hud/hudeditor/weaponboxinactive');
+    const active = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/weaponboxactive.vtf')!.data);
+    expect([active.w, active.h, ...active.rgba.slice(0, 4)]).toEqual([128, 128, 10, 20, 30, 200]);
+    const inactive = decodeVTF(files.find((f) => f.path === 'materials/vgui/hud/hudeditor/weaponboxinactive.vtf')!.data);
+    // The default inactive colour, its corner cut round and its middle solid.
+    expect([inactive.w, ...inactive.rgba.slice(0, 4)]).toEqual([128, 0, 0, 0, 0]);
+    const mid = (64 * 128 + 64) * 4;
+    expect([...inactive.rgba.slice(mid, mid + 4)]).toEqual([0, 0, 0, 130]);
+    expect(files.some((f) => f.path.endsWith('/clear.vtf'))).toBe(false);
+  });
+
+  it('hides every gun picture the paint can draw, and every item picture, each on its own switch', () => {
+    const guns = entries(buildHud(design({ weapons: { weaponIcons: false } })));
+    for (const n of WEAPON_ICONS) expect(fileOf(guns, n), n).toBe('vgui/hud/hudeditor/clear');
+    for (const n of ITEM_ICONS) expect(fileOf(guns, n), n).toBe('vgui/hud/iconsheet');
+    const items = entries(buildHud(design({ weapons: { itemIcons: false } })));
+    for (const n of ITEM_ICONS) expect(fileOf(items, n), n).toBe('vgui/hud/hudeditor/clear');
+    for (const n of WEAPON_ICONS) expect(fileOf(items, n), n).toBe('vgui/hud/iconsheet');
+    // The flashlight icons are not the weapon selection's.
+    expect(fileOf(items, 'icon_equip_flashlight')).toBe('vgui/hud/iconsheet');
+  });
+
+  it('ships the clear texture once however many entries use it', () => {
+    const files = buildHud(design({ weapons: { weaponIcons: false, itemIcons: false, boxActive: { kind: 'hidden' }, boxInactive: { kind: 'hidden' } } }));
+    expect(files.filter((f) => f.path === 'materials/vgui/hud/hudeditor/clear.vtf')).toHaveLength(1);
+    expect(new Set(files.map((f) => f.path)).size).toBe(files.length);
+  });
+
+  it('gives the preview the same mod_textures.txt the download carries', () => {
+    const d = design({ weapons: { boxInactive: { kind: 'hidden' }, weaponIcons: false } });
+    expect(buildTrees(d)(MODTEX)).toEqual(parseKv(text(buildHud(d), MODTEX)!)[0].value);
+  });
+});
