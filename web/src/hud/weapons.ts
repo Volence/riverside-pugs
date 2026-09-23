@@ -310,7 +310,8 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
   for (const s of weaponSlots(design, design.aspect, panelWide, held)) {
     const frame = px(s.frame);
     const ownBox = key && s.art ? importedMaterial(key, s.art, scratchCanvas) : null;
-    const box = s.art ? artImage(ownBox && 'stock' in ownBox ? ownBox.stock : s.art, onAsset) : undefined;
+    // The upload's .vmt may point at a texture it does not carry; the game then draws the stock one it names.
+    const box = s.art && !(ownBox && 'src' in ownBox) ? artImage(ownBox && 'stock' in ownBox ? ownBox.stock : s.art, onAsset) : undefined;
     if (s.fill) {
       // The generated texture is the colour edge to edge, its corners cut
       // round by one 16-texel corner for Rounded, nine-sliced over the frame
