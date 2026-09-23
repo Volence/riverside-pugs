@@ -158,6 +158,16 @@ export type LogEvent =
   // src/playerNetworks.ts. `country` is absent when the GeoIP extension is
   // not loaded, which is normal and not an error.
   | { kind: 'player_net'; steamid: string; ip: string; country: string | null }
+  // SourceTV spectators, from l4d_pugtv.smx: no token and no steamid, since
+  // SourceTV clients never authenticate one. `slot` identifies which spectator
+  // a join and its later leave belong to. `name` is last on every variant that
+  // has one, the same protection MATCH_ROSTER's name= has, and on `leave`
+  // `reason` (the engine's own disconnect text) sits between `reason=` and the
+  // first ` name=` for the same reason. `start`/`stop` carry nothing
+  // player-controlled at all.
+  | { kind: 'sourcetv'; event: 'join'; slot: number; ip: string; country: string | null; name: string }
+  | { kind: 'sourcetv'; event: 'leave'; slot: number; reason: string; name: string }
+  | { kind: 'sourcetv'; event: 'start' | 'stop' }
   // Every chat line and every name, from every human on the box, in a match
   // or not, for the conduct alerts (src/conductFlags.ts). The rostered-only
   // CHAT line above still feeds the match chat log; these feed nothing else.
@@ -414,6 +424,42 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (!steamid || !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
     const cc = (rest.cc ?? '').toUpperCase();
     return { kind: 'player_net', steamid, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null };
+  }
+
+  // SourceTV spectators. Same protection as PUGNET and for the same reason:
+  // no token, so the marker must be the first thing after the engine's stamp.
+  if (body.startsWith('PUGTV ')) {
+    const rest = body.slice('PUGTV '.length);
+    const nameAt = rest.indexOf(' name=');
+    // start/stop have no name= at all: nothing player-controlled on the line.
+    if (nameAt < 0) {
+      const head = kv(rest.split(/\s+/));
+      return head.event === 'start' || head.event === 'stop' ? { kind: 'sourcetv', event: head.event } : null;
+    }
+    const head = rest.slice(0, nameAt);
+    const name = rest.slice(nameAt + ' name='.length).trim().slice(0, 128);
+    if (!name) return null;
+    const reasonAt = head.indexOf('reason=');
+    if (reasonAt >= 0) {
+      // `reason` is free text (the engine's own disconnect string), so, exactly
+      // like MATCH_ROSTER's name=, `event` and `slot` are read from the slice
+      // BEFORE reason= only: kv() is last-wins, and a reason containing a
+      // "slot=" token must not be able to overwrite the real slot.
+      const fields = kv(head.slice(0, reasonAt).split(/\s+/));
+      const slot = intOf(fields.slot);
+      if (fields.event !== 'leave' || slot === null || slot < 0 || slot > 255) return null;
+      const reason = head.slice(reasonAt + 'reason='.length).trim().slice(0, 128);
+      return { kind: 'sourcetv', event: 'leave', slot, reason, name };
+    }
+    // join: nothing before name= is free text (ip, cc and slot are the
+    // plugin's own values), so kv() over the whole head is safe here.
+    const fields = kv(head.split(/\s+/));
+    const slot = intOf(fields.slot);
+    const ip = fields.ip ?? '';
+    if (fields.event !== 'join' || slot === null || slot < 0 || slot > 255) return null;
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return null;
+    const cc = (fields.cc ?? '').toUpperCase();
+    return { kind: 'sourcetv', event: 'join', slot, ip, country: /^[A-Z]{2}$/.test(cc) ? cc : null, name };
   }
 
   const entered = ENTERED_RE.exec(body);
