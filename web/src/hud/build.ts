@@ -35,6 +35,7 @@ const LAYOUT = 'scripts/hudlayout.res';
 const ANIMS = 'scripts/hudanimations.txt';
 const SCHEME = 'resource/clientscheme.res';
 const CHATSCHEME = 'resource/chatscheme.res';
+const BASECHAT = 'resource/ui/basechat.res';
 const CARD = TEAM_PANEL.file;
 const POSITIONAL = ['xpos', 'ypos', 'wide', 'tall'];
 const num = (v: string | undefined) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : 0; };
@@ -126,6 +127,55 @@ function layoutPass(work: Work, design: HudDesign) {
     if (el.id === 'chat' && moved) {
       // Three animation events hard-code the chat position and would snap a moved chat box back.
       work.setText(ANIMS, work.text(ANIMS).replace(/(Animate\s+HudChat\s+Position\s+")[^"]*(")/g, `$1${p.xpos} ${p.ypos}$2`));
+    }
+    // Resized in place, the chat keeps hudlayout's own tokens, as elementRect does.
+    if (el.id === 'chat') chatWindow(work, moved ? p : { ...p, xpos: kvGet(panel, 'xpos') ?? '0', ypos: kvGet(panel, 'ypos') ?? '0' });
+  }
+  const chat = design.elements.chat;
+  if (chat?.visible === false) for (const name of ['HudChat', 'HudChatHistory']) hardHide(work.panel(BASECHAT, [name]));
+}
+
+/**
+ * The entries of a key the PC reads: the plain one and the [$WIN32] one.
+ * basechat.res gives several keys a second value for the console ([$X360]),
+ * which the PC ignores and which is left exactly as it was.
+ */
+function pcEntries(block: KvNode, key: string): KvNode[] {
+  if (typeof block.value === 'string') throw new Error(`KeyValues: ${block.key} is not a block`);
+  return block.value.filter((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string'
+    && (!n.cond || n.cond.toUpperCase() === '[$WIN32]'));
+}
+const pcGet = (block: KvNode, key: string) => pcEntries(block, key)[0]?.value as string | undefined;
+function pcSet(block: KvNode, key: string, value: string) {
+  const hits = pcEntries(block, key);
+  if (hits.length) for (const n of hits) n.value = value; else kvSet(block, key, value);
+}
+
+/**
+ * The chat window itself. Probe T4 showed the box you type into and its
+ * history are placed and sized by basechat.res's HudChat, not by
+ * hudlayout.res's, which is only a background panel the animation file
+ * places. So a moved or resized chat writes the same tokens and size here as
+ * it does to hudlayout, which is also the rect elementRect reports and the
+ * preview draws. The history keeps the share of the box it has in the base
+ * file (stock and Modern both: 10, 17, 260 x 75 in a 280 x 120 box), so a
+ * bigger box shows more lines rather than the same few in a corner. The
+ * file is untouched, and so not shipped on stock, until the chat moves,
+ * resizes or hides.
+ */
+function chatWindow(work: Work, p: { xpos: string; ypos: string; w: number; h: number }) {
+  const chat = work.panel(BASECHAT, ['HudChat']);
+  const history = work.panel(BASECHAT, ['HudChatHistory']);
+  const baseW = num(pcGet(chat, 'wide')), baseH = num(pcGet(chat, 'tall'));
+  const w = Math.round(p.w), h = Math.round(p.h);
+  pcSet(chat, 'xpos', p.xpos);
+  pcSet(chat, 'ypos', p.ypos);
+  pcSet(chat, 'wide', String(w));
+  pcSet(chat, 'tall', String(h));
+  if (baseW > 0 && baseH > 0 && (w !== baseW || h !== baseH)) {
+    const sx = w / baseW, sy = h / baseH;
+    for (const [key, k] of [['xpos', sx], ['ypos', sy], ['wide', sx], ['tall', sy]] as const) {
+      pcSet(history, key, String(Math.round(num(pcGet(history, key)) * k)));
     }
   }
 }
@@ -349,13 +399,25 @@ function hidePass(work: Work, design: HudDesign) {
       if (o.visible !== false) continue;
       const block = kvFind(nodes, [name]);
       if (!block) continue;                            // an addable child that is off is not in the file at all
-      kvSet(block, 'wide', '0');
-      kvSet(block, 'tall', '0');
-      if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
-        const [r, g, b] = (kvGet(block, 'drawColor') ?? '255 255 255 255').split(' ');
-        kvSet(block, 'drawColor', `${r} ${g} ${b} 0`);
-      }
+      hardHide(block);
     }
+  }
+}
+
+/**
+ * The hard hide hidePass gives a piece, for any block: visible 0, a 0 x 0
+ * size, and for an ImagePanel a drawColor with alpha 0 (its RGB kept). The
+ * chat window gets it too (layoutPass), since game code shows the chat
+ * whatever its visible key says. Sizes are set on every entry the PC reads,
+ * so a [$WIN32] value is zeroed as well as a plain one.
+ */
+function hardHide(block: KvNode) {
+  pcSet(block, 'visible', '0');
+  pcSet(block, 'wide', '0');
+  pcSet(block, 'tall', '0');
+  if ((kvGet(block, 'ControlName') ?? '').toLowerCase() === 'imagepanel') {
+    const [r, g, b] = (kvGet(block, 'drawColor') ?? '255 255 255 255').split(' ');
+    kvSet(block, 'drawColor', `${r} ${g} ${b} 0`);
   }
 }
 

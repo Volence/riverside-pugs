@@ -320,6 +320,83 @@ describe('buildHud, layout', () => {
   });
 });
 
+describe('buildHud, the chat window (basechat.res)', () => {
+  // Probe T4: the chat window you type into and its history are placed and
+  // sized by basechat.res's HudChat; hudlayout's HudChat is only a background
+  // panel. So a moved chat has to be written to both.
+  const CHAT = 'resource/ui/basechat.res';
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  const build = (d: HudDesign) => buildHud(d, { fonts });
+  /** The value the PC reads: the entry with no platform conditional, or the [$WIN32] one. */
+  const pc = (block: KvNode, key: string) => (block.value as KvNode[])
+    .find((n) => n.key.toLowerCase() === key.toLowerCase() && typeof n.value === 'string' && (!n.cond || n.cond === '[$WIN32]'))?.value as string | undefined;
+  const console360 = (block: KvNode) => (block.value as KvNode[]).filter((n) => n.cond === '[$X360]');
+  const chatOf = (files: { path: string; data: Uint8Array }[], preset: 'stock' | 'modern') => tree(files, CHAT, preset);
+
+  for (const preset of ['stock', 'modern'] as const) {
+    it(`writes a moved chat's position and size into basechat.res too: ${preset}`, () => {
+      // Top right, as the owner placed it: hudlayout's HudChat went to r320 0 and the chat window stayed put.
+      const d = design({ preset, elements: { chat: { x: 853 - 320, y: 0 } } });
+      const files = build(d);
+      expect(text(files, CHAT), preset).toBeDefined();
+      const layoutChat = kvFind(layoutOf(files), ['HudChat'])!;
+      const base = kvFind(parseKv(baseFile(preset, CHAT))[0].value as KvNode[], ['HudChat'])!;
+      const chat = kvFind(chatOf(files, preset), ['HudChat'])!;
+      expect(pc(chat, 'xpos')).toBe(kvGet(layoutChat, 'xpos'));
+      expect(pc(chat, 'ypos')).toBe(kvGet(layoutChat, 'ypos'));
+      expect(pc(chat, 'xpos')).toBe('r320');
+      expect(pc(chat, 'ypos')).toBe('0');
+      const r = elementRect(d, 'chat', d.aspect);
+      expect(pc(chat, 'wide')).toBe(String(Math.round(r.w)));
+      expect(pc(chat, 'tall')).toBe(String(Math.round(r.h)));
+      // The console lines ride along untouched.
+      expect(console360(chat)).toEqual(console360(base));
+    });
+
+    it(`scales HudChatHistory with a resized chat, keeping its share of the box: ${preset}`, () => {
+      const files = build(design({ preset, elements: { chat: { x: 10, y: 200, w: 560, h: 240 } } }));
+      const nodes = chatOf(files, preset);
+      const chat = kvFind(nodes, ['HudChat'])!;
+      expect([pc(chat, 'wide'), pc(chat, 'tall')]).toEqual(['560', '240']);
+      // The base box is 280 x 120 with the history at 10, 17, 260 x 75: twice the size is twice each number.
+      const history = kvFind(nodes, ['HudChatHistory'])!;
+      expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(history, k))).toEqual(['20', '34', '520', '150']);
+      const base = kvFind(parseKv(baseFile(preset, CHAT))[0].value as KvNode[], ['HudChatHistory'])!;
+      expect(console360(history)).toEqual(console360(base));
+    });
+
+    it(`hides the chat window by size as well as visible 0: ${preset}`, () => {
+      const nodes = chatOf(build(design({ preset, elements: { chat: { visible: false } } })), preset);
+      for (const name of ['HudChat', 'HudChatHistory']) {
+        const b = kvFind(nodes, [name])!;
+        expect(['visible', 'wide', 'tall'].map((k) => pc(b, k)), name).toEqual(['0', '0', '0']);
+      }
+    });
+
+    it(`agrees with elementRect wherever the chat goes: ${preset}`, () => {
+      for (const aspect of ['4:3', '16:9', '16:10'] as const) {
+        for (const chat of [{ x: 853 - 320, y: 0 }, { x: 20, y: 300, w: 200, h: 90 }, { w: 400, h: 150 }, { x: 400 }] as ElementOverride[]) {
+          const d = design({ preset, aspect, elements: { chat } });
+          const c = kvFind(chatOf(build(d), preset), ['HudChat'])!;
+          const r = elementRect(d, 'chat', aspect);
+          const got = { x: parsePos(pc(c, 'xpos')!, screenW(aspect)), y: parsePos(pc(c, 'ypos')!, 480), w: Number(pc(c, 'wide')), h: Number(pc(c, 'tall')) };
+          expect(got, `${aspect} ${JSON.stringify(chat)}`).toEqual({ x: r.x, y: r.y, w: Math.round(r.w), h: Math.round(r.h) });
+        }
+      }
+    });
+  }
+
+  it('ships no basechat.res on stock while the chat is untouched', () => {
+    expect(text(build(design({})), CHAT)).toBeUndefined();
+    expect(text(build(design({ elements: { targetId: { visible: false }, chat: { visible: true } } })), CHAT)).toBeUndefined();
+  });
+
+  it("ships Modern's own basechat.res unchanged while the chat is untouched", () => {
+    const got = text(build(design({ preset: 'modern' })), CHAT)!;
+    expect(parseKv(got)).toEqual(parseKv(baseFile('modern', CHAT)));
+  });
+});
+
 describe('elementRect', () => {
   it('reads the base position at the asked aspect', () => {
     expect(elementRect(design({}), 'ownHealth', '16:9')).toMatchObject({ x: 728, y: 389, visible: true });
