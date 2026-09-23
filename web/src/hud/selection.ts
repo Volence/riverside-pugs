@@ -317,7 +317,11 @@ function pieceFrame(design: HudDesign, r: ChildRect): Box {
   const c = cardChild(design, r.name);
   if (!c) return plain(r);
   const k = cardFrame(design).k;
-  return { x: r.x, y: r.y, w: c.w * k, h: c.h * k };
+  // scalePass (build.ts's scaleToken) rounds every positional value it
+  // writes, wide and tall included; matching that rounding here, not just
+  // the factor, is what keeps a hidden piece's frame equal to the very same
+  // piece's own frame while visible, at a scale that is not a whole number.
+  return { x: r.x, y: r.y, w: Math.round(c.w * k), h: Math.round(c.h * k) };
 }
 
 /** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, each picked card, a piece in every card. */

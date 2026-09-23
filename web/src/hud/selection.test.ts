@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_DESIGN, type HudDesign, type Box } from './design';
-import { teamCardRects, cardFrame, cardChild } from './build';
+import { teamCardRects, cardFrame } from './build';
 import { childRects, type CardState } from './render';
 import { withTeamDir, patchChild } from './edit';
 import {
@@ -288,13 +288,21 @@ describe('what the canvas draws for a selection', () => {
     const zeroedIn = (c: Box) => childRects(hidden, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'BackgroundImage')!;
     for (const c of cards) expect([zeroedIn(c).w, zeroedIn(c).h]).toEqual([0, 0]);   // pins the trap this fix works around
 
-    // The fitted splatter is card.w wide (the fit rule in fitStateArt), not
-    // 0: cardChild reads it from cardWork, which never runs hidePass.
-    const real = cardChild(hidden, 'BackgroundImage')!;
-    expect(real.w).toBeGreaterThan(0);
-    expect(real.h).toBeGreaterThan(0);
+    // Non-circular: hiding a piece must not change the frame it reports,
+    // only whether it draws. At a team scale other than 1 (so a fix that
+    // forgot to scale cardChild's unscaled real size would show up), a
+    // hidden piece's frame has to equal that very piece's own frame while
+    // visible, found the ordinary way (childRects on an untouched design),
+    // not by asking cardChild what the fix itself would use.
+    const scaled = { ...D, elements: { ...D.elements, teamColumn: { ...D.elements.teamColumn, scale: 1.5 } } };
+    const scaledHidden = patchChild(scaled, 'BackgroundImage', { visible: false });
+    const visibleFrame = selectionFrames(scaled, { kind: 'children', names: ['BackgroundImage'], card: 0 });
+    const hiddenFrame = selectionFrames(scaledHidden, { kind: 'children', names: ['BackgroundImage'], card: 0 });
+    expect(visibleFrame[0].w).toBeGreaterThan(0);
+    expect(visibleFrame[0].h).toBeGreaterThan(0);
+    expect(hiddenFrame).toEqual(visibleFrame);
+
     const frames = selectionFrames(hidden, { kind: 'children', names: ['BackgroundImage'], card: 0 });
-    expect(frames).toEqual(cards.map((c) => ({ x: zeroedIn(c).x, y: zeroedIn(c).y, w: real.w, h: real.h })));
     expect(selectionBox(hidden, { kind: 'children', names: ['BackgroundImage'], card: 0 })).toEqual(frames[0]);
   });
 
