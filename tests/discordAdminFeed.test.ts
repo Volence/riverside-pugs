@@ -44,6 +44,22 @@ const settled = async () => { await sync.idle(); await feed.idle(); };
 const inFeed = () => t.live().filter((m) => m.channelId === 'admins');
 
 describe('admin feed', () => {
+  it('a note shows its text, quoted and escaped, but not when the note is about staff', async () => {
+    logAdmin(db, ADMIN, 'note', IDS[2], { text: 'went afk twice\nsaid sorry after **no ping** @everyone' });
+    await settled();
+    const line = JSON.stringify(inFeed()[0]?.payload);
+    expect(line).toContain('added a note on');
+    expect(line).toContain('went afk twice');
+    expect(line).toContain('said sorry after');
+    expect(line).not.toContain('**no ping**');
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[3]);
+    logAdmin(db, ADMIN, 'note', IDS[3], { text: 'secret about a mod' });
+    await settled();
+    const staff = JSON.stringify(inFeed()[1]?.payload);
+    expect(staff).toContain('added a note on');
+    expect(staff).not.toContain('secret about a mod');
+  });
+
   it('with no forum set, posts one plain line for a new ticket and another for a further report, never naming the reporter', async () => {
     const a = fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId }, { adminSteamIds: [] }) as { ticketId: number };
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });
@@ -226,6 +242,23 @@ describe('admin feed', () => {
     logAdmin(db, ADMIN, 'setting', 'invite_code', { changed: true });
     await feed.idle();
     expect(text(0)).toMatch(/changed the invite_code setting/i);
+  });
+
+  it('cpu_level is worded by what the server did, not as someone playing on it', async () => {
+    const line = (i: number) => t.live()[i].payload.embeds[0].description ?? '';
+    publishAdminEvent({ kind: 'cvar_flag', steamid: IDS[2], matchId, cvar: 'cpu_level', value: 0, act: 'held' });
+    publishAdminEvent({ kind: 'cvar_flag', steamid: IDS[2], matchId, cvar: 'cpu_level', value: 2, act: 'fixed' });
+    publishAdminEvent({ kind: 'cvar_flag', steamid: IDS[3], matchId, cvar: 'cpu_level', value: 0, act: 'live' });
+    await feed.idle();
+    expect(line(0)).toContain('**player2**');
+    expect(line(0)).toContain('tried to ready up');
+    expect(line(0)).toContain('holding ready-up until they change it');
+    expect(line(0)).not.toContain('is playing');
+    expect(line(1)).toContain('changed Effect Detail off Low');
+    expect(line(1)).toContain('`cpu_level 2`');
+    expect(line(2)).toContain('during live play');
+    expect(line(2)).toContain('switched after the round went live');
+    for (const i of [0, 1, 2]) expect(line(i)).toContain(`[#${matchId}](https://pug.test/match/${matchId})`);
   });
 
   it('a recent ban elsewhere is worded as context and links the match', async () => {

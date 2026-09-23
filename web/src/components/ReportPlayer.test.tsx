@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 const { mockApi } = vi.hoisted(() => ({
-  mockApi: { reportEligibility: vi.fn(), report: vi.fn(), fileReport: vi.fn(), myReports: vi.fn() },
+  mockApi: { reportEligibility: vi.fn(), report: vi.fn(), fileReport: vi.fn(), myReports: vi.fn(), reportChat: vi.fn() },
 }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -97,5 +97,19 @@ describe('MyReports', () => {
     const { container } = render(<MyReports />);
     await waitFor(() => expect(mockApi.myReports).toHaveBeenCalled());
     expect(container.textContent).toBe('');
+  });
+
+  it('offers a chat on an open report and shows the link it gets back, or the reason it cannot', async () => {
+    mockApi.myReports.mockResolvedValue({ reports: [
+      { id: 3, targetId: '7', targetDiscordId: null, targetName: 'Walls', category: 'cheating', matchId: null, createdAt: '2026-09-21T10:00:00.000Z', status: 'open' },
+      { id: 4, targetId: '8', targetDiscordId: null, targetName: 'Gone', category: 'afk', matchId: null, createdAt: '2026-09-20T10:00:00.000Z', status: 'closed' },
+    ] });
+    mockApi.reportChat.mockResolvedValue({ ok: true, url: 'https://discord.com/channels/g1/5' });
+    render(<MyReports />);
+    const buttons = await screen.findAllByRole('button', { name: 'Chat with the moderators' });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(mockApi.reportChat).toHaveBeenCalledWith(3));
+    expect((await screen.findByText('Open the chat in Discord')).getAttribute('href')).toBe('https://discord.com/channels/g1/5');
   });
 });

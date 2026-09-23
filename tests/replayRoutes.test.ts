@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, createReadStream } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, createReadStream, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -9,6 +9,7 @@ import { buildServer } from '../src/server.js';
 import { loadConfig } from '../src/config.js';
 import { stubOrchestrator } from './helpers.js';
 import { recordPhase } from '../src/liveView.js';
+import type { Phase } from '../src/logParse.js';
 import {
   encodeHeader, encodeFrame, decodeHeader, VERSION, HEADER_BYTES,
   PLAYER_SLOTS, frameBytes, type ReplayHeader, type Frame,
@@ -60,7 +61,7 @@ afterEach(async () => {
  *  one frame per second, so the delay cutoff is easy to reason about. */
 function writeRound(
   name: string, frames: number, startedSecondsAgo: number, closed: boolean,
-  version = VERSION,
+  version = VERSION, into = dir,
 ): void {
   const parts: Uint8Array[] = [
     encodeHeader(header({
@@ -70,7 +71,7 @@ function writeRound(
     })),
   ];
   for (let i = 0; i < frames; i++) parts.push(encodeFrame(emptyFrame(i * 1000)));
-  const path = join(dir, name);
+  const path = join(into, name);
   writeFileSync(path, Buffer.concat(parts));
   const secs = Date.now() / 1000;
   utimesSync(path, secs, secs);
@@ -111,7 +112,7 @@ describe('GET /api/replays/live/match/:id', () => {
     writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 60, false);
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
-    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null });
+    expect(res.json()).toEqual({ ordinal: 1, half: 1, closed: false, phase: null, current: null, servingCurrent: false });
     expect(res.payload).not.toContain(TOKEN);
     expect(res.payload).not.toContain('.rpl');
   });
@@ -141,6 +142,82 @@ describe('GET /api/replays/live/match/:id', () => {
 
   it('404s a match with no replay on disk', async () => {
     const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  const livePhase = (): Phase => ({ state: 'live', team: null, limit: 0, leave: false, unready: [] });
+  function startRound(matchId: number, ordinal: number, half: number): void {
+    db.prepare(
+      `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, started_at)
+       VALUES (?, ?, ?, 'a', datetime('now', '-5 seconds'))`,
+    ).run(matchId, ordinal, half);
+  }
+
+  it('says which round is being played when the file it serves is an older one', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 1, 1);
+    const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
+    expect(body).toMatchObject({ ordinal: 0, half: 1, closed: true, current: { ordinal: 1, half: 1 }, servingCurrent: false });
+    expect(typeof body.current.sinceMs).toBe('number');
+  });
+
+  // The site's ordinal counts match_live_maps rows, one per MAP_RESULT
+  // datagram. Lose one and the round row reads ordinal 0 while the plugin's
+  // file is ordinal 1. The file started after the round did, so it is the
+  // round being played whatever the ordinals say.
+  it('treats the served file as current by start time when a lost MAP_RESULT leaves the ordinals apart', async () => {
+    writeRound(`pug_${TOKEN}_1_1.rpl`, 5, 3, false);
+    const id = seedMatchReplay(`pug_${TOKEN}_1_1.rpl`, 1, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
+    expect(body).toMatchObject({ ordinal: 1, half: 1, current: { ordinal: 0, half: 1 }, servingCurrent: true });
+  });
+
+  it('does not treat an older round\'s file as current even when the ordinals agree', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    const body = (await app.inject({ url: `/api/replays/live/match/${id}` })).json();
+    expect(body).toMatchObject({ ordinal: 0, half: 1, current: { ordinal: 0, half: 1 }, servingCurrent: false });
+  });
+
+  it('answers with no round, not 404, when the round being played has no file yet', async () => {
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    const res = await app.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ordinal: null, half: null, closed: false, current: { ordinal: 0, half: 1 }, servingCurrent: false });
+    expect(res.payload).not.toContain(TOKEN);
+  });
+
+  it('reports no current round between rounds', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    recordPhase(db, TOKEN, { ...livePhase(), state: 'roundover' });
+    expect((await app.inject({ url: `/api/replays/live/match/${id}` })).json().current).toBeNull();
+  });
+
+  // noShow.ts and the lost-dump path in server.ts abort a match without
+  // clearing match_live on purpose, so an aborted match can keep phase 'live'
+  // and an unended round row forever. Without the match-state check this
+  // route would report that stale round as current, and 200 instead of 404
+  // when it never got a file at all.
+  it('gives no current round and 404s an aborted match with a stuck live phase', async () => {
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`,
+    ).run(TOKEN);
+    const id = (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
+    // Set while the match is still 'live', mirroring the orphaned match_live
+    // rows noShow.ts and server.ts leave behind on purpose.
+    recordPhase(db, TOKEN, livePhase());
+    startRound(id, 0, 1);
+    db.prepare("UPDATE matches SET state = 'aborted', ended_at = datetime('now') WHERE id = ?").run(id);
     const res = await app.inject({ url: `/api/replays/live/match/${id}` });
     expect(res.statusCode).toBe(404);
   });
@@ -616,5 +693,50 @@ describe('replayRoutes registration on the real server', () => {
     const res = await real.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
     expect(res.statusCode).toBe(200);
     await real.close();
+  });
+});
+
+describe('the live directory', () => {
+  let liveDir: string;
+  let liveApp: ReturnType<typeof Fastify>;
+  beforeEach(async () => {
+    liveDir = join(dir, 'live');
+    mkdirSync(liveDir);
+    liveApp = Fastify();
+    await liveApp.register(replayRoutes, { db, replayDir: dir, liveDir });
+    await liveApp.ready();
+  });
+  afterEach(async () => { await liveApp.close(); });
+
+  function seedLiveMatch(): number {
+    db.prepare(`INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`).run(TOKEN);
+    return (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
+  }
+
+  it('names a round that only the live directory has', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true, VERSION, liveDir);
+    const id = seedLiveMatch();
+    const res = await liveApp.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ordinal: 0, half: 1, closed: true });
+  });
+
+  it('serves the round in progress from the live directory, cut off and without the token', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 15, 15, false, VERSION, liveDir);
+    const id = seedLiveMatch();
+    const res = await liveApp.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-replay-closed']).toBe('0');
+    expect(res.rawPayload.length).toBeGreaterThanOrEqual(HEADER_BYTES);
+    expect(res.rawPayload.length).toBeLessThan(HEADER_BYTES + frameBytes(0) * 15);
+    expect(res.rawPayload.includes(TOKEN)).toBe(false);
+  });
+
+  it('serves whichever copy is further along, even when a match_replays row exists', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 10, 600, true, VERSION, liveDir);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await liveApp.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.rawPayload.length).toBe(HEADER_BYTES + frameBytes(0) * 10);
   });
 });

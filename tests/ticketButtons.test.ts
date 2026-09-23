@@ -109,7 +109,7 @@ describe('Close', () => {
   it('the button opens a modal and changes nothing; only that button is said to open one', async () => {
     const r = await press(MOD, `t:${normal}:close`);
     expect(r.modal).toMatchObject({ customId: `t:${normal}:close`, title: `Close ticket #${normal}` });
-    expect(r.modal!.fields.map((f) => [f.kind, f.id])).toEqual([['select', 'outcome'], ['text', 'note']]);
+    expect(r.modal!.fields.map((f) => [f.kind, f.id])).toEqual([['select', 'outcome'], ['text', 'note'], ['select', 'tell']]);
     expect(row(normal)).toMatchObject({ status: 'open' });
     expect(opensTicketModal(`t:${normal}:close`)).toBe(true);
     expect(opensTicketModal(`t:${normal}:claim`)).toBe(false);

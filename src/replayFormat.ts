@@ -75,6 +75,12 @@ const MAP_BYTES = 32;
  *  `discoverMatchReplays`, reads the file on disk directly. */
 export const TOKEN_OFFSET: number = OFF.token;
 
+/** Header fields the live push reads or patches. The writer patches the
+ *  index fields and the frame count when it closes a file. */
+export const STARTED_UNIX_OFFSET: number = OFF.startedUnix;
+export const INDEX_OFFSET_OFFSET: number = OFF.indexOffset;
+export const FRAME_COUNT_OFFSET: number = OFF.frameCount;
+
 /** Player and entity state bits. A slot with state 0 is not occupied at all,
  *  which is distinct from a dead player: dead is PRESENT set and ALIVE clear. */
 export const STATE = {

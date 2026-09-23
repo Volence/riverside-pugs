@@ -4,18 +4,22 @@ import { playerByDiscordId } from '../players.js';
 import { inGoodStanding } from '../standing.js';
 import { claimTicket, closeTicket } from '../tickets/actions.js';
 import { canSeeTicket, getTicketRow, hasStaffFlag, ticketIsQuiet, type TicketRow } from '../tickets/store.js';
+import { reporterLabel, reporterThreadsOf } from '../tickets/reporterChat.js';
 import { closeModal } from './ticketCard.js';
+import type { ReporterChats } from './reporterChats.js';
 import type { BotInteraction, InteractionReply } from './transport.js';
 
 export interface TicketButtonDeps {
   db: DB;
   publicUrl: string;
+  chats?: () => ReporterChats | null;
 }
 
-const say = (content: string): InteractionReply => ({
+const say = (content: string, components: InteractionReply['payload']['components'] = []): InteractionReply => ({
   ephemeral: true,
-  payload: { content, embeds: [], components: [], mentionUserIds: [] },
+  payload: { content, embeds: [], components, mentionUserIds: [] },
 });
+const link = (content: string, url: string, label: string) => say(content, [[{ kind: 'link', url, label }]]);
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const STAFF_ONLY = 'Staff only.';
@@ -60,12 +64,16 @@ function resolve(
 export async function handleTicketButton(
   deps: TicketButtonDeps, i: Extract<BotInteraction, { kind: 'button' }>,
 ): Promise<InteractionReply> {
-  const m = /^t:(\d+):(claim|close)$/.exec(i.customId);
+  const m = /^t:(\d+):(claim|close|contact|join|endchat)(?::(\d+))?$/.exec(i.customId);
   if (!m) return say('That button no longer does anything.');
   const id = Number(m[1]);
   const who = resolve(deps, i.userId, id);
   if ('reply' in who) return who.reply;
   const { me, ticket } = who;
+
+  if (m[2] === 'contact' || m[2] === 'join' || m[2] === 'endchat') {
+    return chatAction(deps, m[2], ticket, me, m[3] === undefined ? null : Number(m[3]));
+  }
 
   if (m[2] === 'close') {
     if (ticket.status !== 'open') return say('This ticket is already closed.');
@@ -82,6 +90,68 @@ export async function handleTicketButton(
   return say(claim ? `You claimed ticket #${id}.` : `You released ticket #${id}.`);
 }
 
+/** The reporter-chat buttons on the staff post. Each calls what the site's
+ *  route calls, and is audited the same way, quietly per ticketIsQuiet. */
+async function chatAction(
+  deps: TicketButtonDeps, action: 'contact' | 'join' | 'endchat', ticket: TicketRow, me: string, extra: number | null,
+): Promise<InteractionReply> {
+  const { db } = deps;
+  const chats = deps.chats?.() ?? null;
+  if (!chats) return say('Reporter chats are not available right now. Try again in a few minutes.');
+  const quiet = ticketIsQuiet(db, ticket);
+  const clip = (s: string) => s.slice(0, 80);
+
+  if (action === 'contact') {
+    let reportId = extra;
+    if (reportId === null) {
+      // One button per reporter, not per report.
+      const reporters = db.prepare(
+        `SELECT MIN(r.id) AS id, r.reporter_id, r.reporter_discord_id FROM ticket_reports r
+         WHERE r.ticket_id = ? GROUP BY COALESCE(r.reporter_id, 'd:' || r.reporter_discord_id) ORDER BY MIN(r.id)`,
+      ).all(ticket.id) as { id: number; reporter_id: string | null; reporter_discord_id: string | null }[];
+      if (reporters.length === 0) return say('Nobody reported this ticket: it was opened by staff.');
+      if (reporters.length > 1) {
+        const buttons = reporters.slice(0, 20).map((r) => ({
+          kind: 'button' as const, customId: `t:${ticket.id}:contact:${r.id}`, style: 'secondary' as const,
+          label: clip(reporterLabel(db, ticket.id, { reporterId: r.reporter_id, reporterDiscordId: r.reporter_discord_id })),
+        }));
+        const rows = [];
+        for (let i = 0; i < buttons.length; i += 5) rows.push(buttons.slice(i, i + 5));
+        return say('Which reporter?', rows);
+      }
+      reportId = reporters[0].id;
+    }
+    const r = await chats.contact(ticket.id, reportId, me);
+    if (!r.ok) return say(capitalise(r.error));
+    logAdmin(db, me, 'ticket_contact', ticket.id, { reportId, via: 'discord' }, { quiet });
+    return link('The chat with the reporter is open.', r.url, 'Open the chat');
+  }
+
+  if (action === 'join') {
+    const r = await chats.join(ticket.id, me);
+    if (!r.ok) return say(capitalise(r.error));
+    logAdmin(db, me, 'ticket_chat_join', ticket.id, { via: 'discord' }, { quiet });
+    return link('You are in the reporter chat.', r.url, 'Open the chat');
+  }
+
+  let threadRowId = extra;
+  if (threadRowId === null) {
+    const open = reporterThreadsOf(db, ticket.id, 'open');
+    if (open.length === 0) return say('There is no open reporter chat on this ticket.');
+    if (open.length > 1) {
+      return say('Which chat?', [open.slice(0, 5).map((th) => ({
+        kind: 'button' as const, customId: `t:${ticket.id}:endchat:${th.id}`, style: 'secondary' as const,
+        label: clip(reporterLabel(db, ticket.id, { reporterId: th.reporter_id, reporterDiscordId: th.reporter_discord_id })),
+      }))]);
+    }
+    threadRowId = open[0].id;
+  }
+  const r = await chats.end(ticket.id, threadRowId, me);
+  if (!r.ok) return say(capitalise(r.error));
+  logAdmin(db, me, 'ticket_chat_end', ticket.id, { threadRowId, via: 'discord' }, { quiet });
+  return say('The reporter chat has ended.');
+}
+
 export async function handleTicketModal(
   deps: TicketButtonDeps, i: Extract<BotInteraction, { kind: 'modal' }>,
 ): Promise<InteractionReply> {
@@ -90,7 +160,7 @@ export async function handleTicketModal(
   const id = Number(m[1]);
   const who = resolve(deps, i.userId, id);
   if ('reply' in who) return who.reply;
-  const r = closeTicket(deps.db, id, who.me, i.fields.outcome, i.fields.note ?? '');
+  const r = closeTicket(deps.db, id, who.me, i.fields.outcome, i.fields.note ?? '', i.fields.tell !== 'no');
   if (!r.ok) return say(capitalise(r.error));
   // The note is internal and stays out of the audit detail, as on the site.
   logAdmin(deps.db, who.me, 'ticket_close', id, { outcome: i.fields.outcome, via: 'discord' }, { quiet: ticketIsQuiet(deps.db, who.ticket) });

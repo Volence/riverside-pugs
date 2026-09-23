@@ -9,6 +9,7 @@ export interface ThreadRow {
   ticket_id: number;
   kind: 'staff' | 'reporter';
   reporter_id: string | null;
+  reporter_discord_id: string | null;
   channel_id: string;
   thread_id: string;
   state: ThreadState;
@@ -31,12 +32,12 @@ export function threadByDiscordId(db: DB, threadId: string): ThreadRow | undefin
 
 export function insertThread(db: DB, t: {
   ticketId: number; kind: 'staff' | 'reporter'; surface: ThreadSurface; channelId: string; threadId: string;
-  reporterId?: string | null; cardMessageId?: string | null; cardHash?: string;
+  reporterId?: string | null; reporterDiscordId?: string | null; cardMessageId?: string | null; cardHash?: string;
 }, now = new Date()): ThreadRow {
   db.prepare(
-    `INSERT INTO ticket_threads (ticket_id, kind, reporter_id, channel_id, thread_id, created_at, surface, card_message_id, card_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(t.ticketId, t.kind, t.reporterId ?? null, t.channelId, t.threadId, now.toISOString(), t.surface, t.cardMessageId ?? null, t.cardHash ?? '');
+    `INSERT INTO ticket_threads (ticket_id, kind, reporter_id, reporter_discord_id, channel_id, thread_id, created_at, surface, card_message_id, card_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(t.ticketId, t.kind, t.reporterId ?? null, t.reporterDiscordId ?? null, t.channelId, t.threadId, now.toISOString(), t.surface, t.cardMessageId ?? null, t.cardHash ?? '');
   return threadByDiscordId(db, t.threadId)!;
 }
 

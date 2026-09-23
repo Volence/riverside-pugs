@@ -5,6 +5,7 @@ import type { AttachmentRow, MessageRow } from './messages.js';
 import { REPORTER_KEY_SQL } from './person.js';
 import { canSeeTicket, getTicketRow } from './store.js';
 import { staffThread, surfaceFor } from './threads.js';
+import { reporterLabel, reporterThreadsOf } from './reporterChat.js';
 import { sanctionsFor, type SanctionRow } from './discordSanctions.js';
 
 /** The visibility rule as SQL, for lists. Must say exactly what canSeeTicket
@@ -152,12 +153,20 @@ export function ticketDetail(db: DB, id: number, viewer: string, opts: { guildId
     surface: thread?.surface ?? where.surface,
     url: thread && opts.guildId ? `https://discord.com/channels/${opts.guildId}/${thread.thread_id}` : null,
   };
+  // Reporter chats, for the ticket page's own section. The name is the
+  // reporter's; staff may see who reported (they see the reports already).
+  const reporterChats = reporterThreadsOf(db, id).map((th) => ({
+    id: th.id,
+    reporterName: reporterLabel(db, id, { reporterId: th.reporter_id, reporterDiscordId: th.reporter_discord_id }),
+    state: th.state === 'open' ? 'open' as const : 'ended' as const,
+    url: opts.guildId ? `https://discord.com/channels/${opts.guildId}/${th.thread_id}` : null,
+  }));
   return {
     ticket: {
       ...toSummary(s), outcomeNote: s.outcome_note, openedBy: s.opened_by, openedByName: s.opened_name,
       closedBy: s.closed_by, closedByName: s.closed_name,
     },
-    reports, events, bans, discordSanctions, access, accessCandidates, discussion, messages,
+    reports, events, bans, discordSanctions, access, accessCandidates, discussion, messages, reporterChats,
     viewer: { isAdmin, banCapMinutes: isAdmin ? null : Number(getSetting(db, 'ticket_mod_ban_max_minutes') ?? '10080') },
   };
 }

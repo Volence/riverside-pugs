@@ -3,6 +3,7 @@ import { insertBan } from '../admin/players.js';
 import { publishBanChange } from '../banEvents.js';
 import { getSetting } from '../settings.js';
 import { personKey, targetOf } from './person.js';
+import { queueCloseNotices } from './reporterChat.js';
 import { addTicketEvent, canSeeTicket, getTicketRow, hasStaffFlag, seedAccess, type TicketRow } from './store.js';
 import { publishTicketSignal } from './signals.js';
 
@@ -84,16 +85,23 @@ export function addAccess(db: DB, id: number, by: string, steamid: string): Acti
   return told(id, OK);
 }
 
-export function closeTicket(db: DB, id: number, by: string, outcome: unknown, note: unknown): ActionResult {
+/**
+ * Close with an outcome and an internal note. `tellReporters` (the site's
+ * tick, on by default, and the Discord form's select) queues one neutral DM
+ * per reporter, sent by the bot once the ticket's chats have ended.
+ */
+export function closeTicket(db: DB, id: number, by: string, outcome: unknown, note: unknown, tellReporters = true): ActionResult {
   const t = visible(db, id, by);
   if (!t) return fail(404, 'no such ticket');
   if (typeof outcome !== 'string' || !(TICKET_OUTCOMES as readonly string[]).includes(outcome)) return fail(400, 'pick an outcome');
   if (t.status !== 'open') return fail(409, 'the ticket is already closed');
   const text = typeof note === 'string' ? note.trim().slice(0, 1000) : '';
+  const now = new Date();
   db.transaction(() => {
     db.prepare("UPDATE tickets SET status = 'closed', outcome = ?, outcome_note = ?, closed_at = ?, closed_by = ? WHERE id = ?")
-      .run(outcome, text, new Date().toISOString(), by, id);
-    addTicketEvent(db, id, by, 'closed', { outcome, note: text });
+      .run(outcome, text, now.toISOString(), by, id);
+    addTicketEvent(db, id, by, 'closed', { outcome, note: text, told: tellReporters }, now);
+    if (tellReporters) queueCloseNotices(db, id, now);
   })();
   return told(id, OK);
 }

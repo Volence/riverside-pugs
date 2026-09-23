@@ -31,9 +31,15 @@ export const eventText = (e: TicketEvent): string => {
       ? `${who} banned them from the Discord: ${String(e.detail.reason ?? '')}`
       : `${who} timed them out in Discord for ${fmtMinutes(Number(e.detail.minutes))}: ${String(e.detail.reason ?? '')}`;
     case 'discord_sanction_lifted': return `${who} lifted the Discord ${e.detail.kind === 'ban' ? 'ban' : 'timeout'}`;
+    case 'reporter_chat': return e.detail.by === 'staff' ? `${who} opened a chat with a reporter`
+      : e.detail.reopened ? 'The reporter reopened their chat' : 'The reporter opened a chat with the moderators';
+    case 'reporter_chat_joined': return `${who} joined the reporter chat`;
+    case 'reporter_chat_ended': return e.actorId ? `${who} ended a reporter chat` : 'A reporter chat ended when the ticket closed';
     case 'removed': return e.detail.mirrored === false
       ? `${who} deleted a message in Discord that had not been copied here`
-      : `${who} removed a message for good${Number(e.detail.files) > 0 ? `, with ${Number(e.detail.files)} file${Number(e.detail.files) === 1 ? '' : 's'}` : ''}`;
+      : Number(e.detail.count) > 1
+        ? `${who} removed ${Number(e.detail.count)} messages for good${Number(e.detail.files) > 0 ? `, with ${Number(e.detail.files)} file${Number(e.detail.files) === 1 ? '' : 's'}` : ''}`
+        : `${who} removed a message for good${Number(e.detail.files) > 0 ? `, with ${Number(e.detail.files)} file${Number(e.detail.files) === 1 ? '' : 's'}` : ''}`;
     default: return `${who}: ${e.kind.replace(/_/g, ' ')}`;
   }
 };

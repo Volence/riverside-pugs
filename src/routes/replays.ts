@@ -2,12 +2,13 @@ import { readFileSync, createReadStream, openSync, readSync, closeSync } from 'n
 import { PassThrough, pipeline, type Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
-import { currentFileFor, resolveByName, type ReplayFileInfo } from '../replaySessions.js';
-import { phaseFor } from '../liveView.js';
+import { currentFileFor, resolveByName, resolveFurther, type ReplayFileInfo } from '../replaySessions.js';
+import { phaseFor, roundInProgress } from '../liveView.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
   decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET, INFECTED_MASK_OFFSET, SIDES_FLAG_OFFSET } from '../replayFormat.js';
+import { applyPush, errCode, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -221,11 +222,76 @@ export function infectedMaskFor(
   return mask;
 }
 
-export async function replayRoutes(
-  app: FastifyInstance, opts: { db: DB; replayDir: string },
-): Promise<void> {
-  const { db, replayDir } = opts;
+/** How much earlier than the round row's `started_at` a file's own header
+ *  may say it began and still count as that round. The two clocks are the
+ *  game server's and the site's, and the round row is stamped when the
+ *  ROUND_START datagram lands, so a small skew either way is normal. A real
+ *  previous round began minutes before the current one, far outside this. */
+export const SAME_ROUND_SLACK_MS = 60_000;
 
+/**
+ * Whether the file being served is the round being played, by round identity.
+ *
+ * Not by (ordinal, half): the site's ordinal counts match_live_maps rows, one
+ * per MAP_RESULT datagram, so a single lost MAP_RESULT leaves it a map behind
+ * the ordinal in the plugin's file name for the rest of the match, and every
+ * round would then read as behind. The header's `startedUnix` (seconds) and
+ * the round row's `started_at` (ms here) do not depend on that count: the
+ * served file is the current round when it started no earlier than
+ * `SAME_ROUND_SLACK_MS` before the round did. False with no file or no round
+ * in progress.
+ */
+export function servesCurrentRound(fileStartedUnix: number | null, currentSinceMs: number | null): boolean {
+  if (fileStartedUnix === null || currentSinceMs === null) return false;
+  return fileStartedUnix * 1000 >= currentSinceMs - SAME_ROUND_SLACK_MS;
+}
+
+export async function replayRoutes(
+  app: FastifyInstance, opts: { db: DB; replayDir: string; liveDir?: string },
+): Promise<void> {
+  const { db, replayDir, liveDir = '' } = opts;
+
+  /**
+   * Live replay bytes from a game server, about once a second per match.
+   *
+   * The match's token is the credential: it is secret, it only travels over
+   * HTTPS (or stays inside the Dallas box), and only a match in the 'live'
+   * state accepts data. An unknown, finished or aborted token gets the same
+   * 404 so the answer says nothing about which tokens exist. The reply is a
+   * length or an error and never names a file. See src/replayPush.ts for the
+   * offset rule that keeps the live copy an exact prefix of the real file.
+   */
+  app.post('/api/replays/push', { bodyLimit: PUSH_BODY_LIMIT }, async (req, reply) => {
+    if (!liveDir) return reply.code(404).send({ error: 'live push is not configured' });
+    const parsed = parsePush(req.body);
+    if (!parsed.ok) return reply.code(parsed.status).send({ error: parsed.error });
+    const live = db
+      .prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+      .get(parsed.batch.token) as { id: number } | undefined;
+    if (!live) return reply.code(404).send({ error: 'no live match for that token' });
+    let result;
+    try {
+      result = applyPush(liveDir, parsed.batch);
+    } catch (err) {
+      // A filesystem failure here (EACCES, ENOSPC, EISDIR, ...) carries the
+      // live file's path in its message, and that path is
+      // `pug_<token>_<ordinal>_<half>.rpl`: the match token, on its way to a
+      // log line, is exactly what the token-never-leaves-the-server-side rule
+      // exists to stop. Log only the error code and the match id, never the
+      // error itself or its message, and answer with a fixed body that names
+      // neither the token nor a path.
+      const code = errCode(err);
+      console.error('[replays] push failed for match', live.id, 'code:', code);
+      return reply.code(503).send({ error: 'live push is unavailable right now' });
+    }
+    if (result.status === 400 || result.status === 507) return reply.code(result.status).send({ error: result.error });
+    // A 409 carries its reason when there is one ('stale round'), so the
+    // plugin can tell a round the site will never take from a plain gap.
+    if (result.status === 409 && result.error) {
+      return reply.code(409).send({ length: result.length, error: result.error });
+    }
+    return reply.code(result.status).send({ length: result.length });
+  });
 
   /**
    * Which round of a match is being recorded right now, addressed by match id.
@@ -241,6 +307,12 @@ export async function replayRoutes(
    * `/api/replays/match/:id/:ordinal/:half`, which resolves the filename
    * server-side. A match id is already public: it is in the URL of every
    * match page.
+   *
+   * `current` is the round being played (`roundInProgress`), which may be
+   * newer than the round served; with no file yet the ordinal and half are
+   * null. `servingCurrent` says whether the served file IS that round, judged
+   * by start time (see `servesCurrentRound`) so the client does no clock
+   * math and a lost MAP_RESULT cannot make every round look behind.
    */
   app.get('/api/replays/live/match/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -248,12 +320,25 @@ export async function replayRoutes(
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(Number(id)) as { token: string | null } | undefined;
     if (!row?.token) return reply.code(404).send({ error: 'no replay for that match' });
-    const info = currentFileFor(replayDir, row.token, Date.now(), db);
-    if (!info) return reply.code(404).send({ error: 'no replay for that match' });
+    const matchId = Number(id);
+    const info = currentFileFor(replayDir, row.token, Date.now(), db, undefined, liveDir);
+    // The round the plugin says is being played. When it is not the round
+    // whose bytes are served (the push is behind, or off on that server), the
+    // viewer says so rather than presenting an older finished file as the
+    // current round.
+    const current = roundInProgress(db, matchId);
+    if (!info && !current) return reply.code(404).send({ error: 'no replay for that match' });
     // The game's phase rides along: this is polled once a second already, and
     // it is what lets the viewer say "paused" or "readying up" while no frames
     // are arriving, instead of showing a frozen frame with no explanation.
-    return { ordinal: info.ordinal, half: info.half, closed: info.closed, phase: phaseFor(db, Number(id)) };
+    return {
+      ordinal: info?.ordinal ?? null,
+      half: info?.half ?? null,
+      closed: info?.closed ?? false,
+      phase: phaseFor(db, matchId),
+      current,
+      servingCurrent: servesCurrentRound(info?.startedUnix ?? null, current?.sinceMs ?? null),
+    };
   });
 
   /** The same answer for a standalone session, addressed by its own token.
@@ -294,7 +379,7 @@ export async function replayRoutes(
     // path directly, because that is what knows whether the file is still
     // being written. A match's current map is live too.
     const found = row
-      ? resolveByName(replayDir, row.filename, now)
+      ? resolveFurther(replayDir, liveDir, row.filename, now)
       : liveRoundFor(Number(id), ordinal, half, now);
     if (!found) return reply.code(404).send({ error: 'no such replay' });
     return sendSlice(reply, found.path, found.info, Number(since ?? 0), now,
@@ -314,7 +399,7 @@ export async function replayRoutes(
    */
   function liveRoundFor(
     matchId: number, ordinal: string, half: string, nowMs: number,
-  ): ReturnType<typeof resolveByName> {
+  ): ReturnType<typeof resolveFurther> {
     const ord = Number(ordinal);
     const hf = Number(half);
     if (!Number.isInteger(matchId)) return null;
@@ -324,7 +409,7 @@ export async function replayRoutes(
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(matchId) as { token: string | null } | undefined;
     if (!row?.token) return null;
-    return resolveByName(replayDir, `pug_${row.token}_${ord}_${hf}.rpl`, nowMs);
+    return resolveFurther(replayDir, liveDir, `pug_${row.token}_${ord}_${hf}.rpl`, nowMs);
   }
 
   /**

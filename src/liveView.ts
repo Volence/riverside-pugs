@@ -407,6 +407,44 @@ export function phaseFor(db: DB, matchId: number): LivePhase | null {
   };
 }
 
+/** The round the plugin says is being played. See roundInProgress. */
+export interface RoundInProgress { ordinal: number; half: number; sinceMs: number }
+
+/**
+ * The round being played right now, or null between rounds.
+ *
+ * The newest round row, only while it has started and not ended, only while
+ * the reported phase is live or paused, and only while the match itself is
+ * still state 'live'. The phase check bounds a lost ROUND_END datagram to at
+ * most thirty seconds, but only for as long as the server keeps reporting: a
+ * match that dies mid-round (see noShow.ts and the lost-dump path in
+ * server.ts, both of which leave match_live in place on purpose) stops
+ * getting heartbeats yet keeps whatever phase it last reported forever, so
+ * the match-state check is what actually closes the window once the match is
+ * marked aborted. The live viewer compares this with the round whose bytes
+ * it is reading, which is how the page knows it is behind.
+ */
+export function roundInProgress(db: DB, matchId: number): RoundInProgress | null {
+  const phase = phaseFor(db, matchId);
+  if (!phase || (phase.state !== 'live' && phase.state !== 'paused')) return null;
+  const row = db
+    .prepare(
+      `SELECT r.ordinal, r.half, r.started_at, r.ended_at
+         FROM match_rounds r
+         JOIN matches m ON m.id = r.match_id
+        WHERE r.match_id = ? AND m.state = 'live'
+        ORDER BY r.ordinal DESC, r.half DESC LIMIT 1`,
+    )
+    .get(matchId) as { ordinal: number; half: number; started_at: string | null; ended_at: string | null } | undefined;
+  if (!row || row.started_at === null || row.ended_at !== null) return null;
+  // A restarted half gets no new row here: recordRoundStart inserts with ON
+  // CONFLICT DO NOTHING, so the existing (match_id, ordinal, half) row is left
+  // as whatever it already was. If that row was already ended, this reports
+  // no round in progress until the next round genuinely starts, which is
+  // failing safe rather than reporting a round that may already be stale.
+  return { ordinal: row.ordinal, half: row.half, sinceMs: sqliteToMs(row.started_at) };
+}
+
 /** Every pause of a match, oldest first. Survives clearLive on purpose. */
 export function pausesFor(db: DB, matchId: number): MatchPause[] {
   const rows = db

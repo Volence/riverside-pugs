@@ -6,6 +6,20 @@
  * djsTransport.ts imports discord.js, and it translates these types 1:1.
  */
 
+/**
+ * Thrown by ThreadOps.addMember when Discord refuses because the user is not
+ * a member of the guild: the one rejection a caller may need to tell apart
+ * from "Discord is having a moment" (a rate limit, a missing permission, a
+ * 5xx). Anything else addMember throws is that other kind of failure and
+ * must not be read as a membership answer.
+ */
+export class NotInGuildError extends Error {
+  constructor(message = 'Unknown Member') {
+    super(message);
+    this.name = 'NotInGuildError';
+  }
+}
+
 export interface EmbedField { name: string; value: string; inline?: boolean }
 
 export interface Embed {
@@ -236,7 +250,9 @@ export interface ThreadOps {
    * Throws when the channel is not a forum.
    */
   listThreads(channelId: string): Promise<{ threadId: string; ownerId: string | null }[]>;
-  /** Rejects for someone who is not in the server. */
+  /** Rejects with NotInGuildError for someone who is not in the server. Any
+   *  other rejection is a Discord problem (a rate limit, a missing
+   *  permission, a 5xx), not a membership answer, and must not be read as one. */
   addMember(threadId: string, userId: string): Promise<void>;
   removeMember(threadId: string, userId: string): Promise<void>;
   /** Everyone in the thread but the bot; null when the thread is gone. */
