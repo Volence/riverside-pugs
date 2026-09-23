@@ -10,7 +10,9 @@ describe('openDb', () => {
       .all()
       .map((r: any) => r.name);
     expect(names).toEqual([
-      'admin_actions', 'bans', 'campaign_play_rules',
+      'admin_actions',
+      'balance_patch_servers', 'balance_patches', 'balance_server_state',
+      'bans', 'campaign_play_rules',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
       'endorsements',
@@ -20,7 +22,7 @@ describe('openDb', () => {
       'match_chat', 'match_demos', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps',
       'match_pauses', 'match_player_stats', 'match_players', 'match_presence',
-      'match_readyup_players', 'match_readyups', 'match_replays', 'match_rounds',
+      'match_readyup_players', 'match_readyups', 'match_replays', 'match_round_marks', 'match_round_stats', 'match_rounds',
       'matches', 'matchmaker_state',
       'penalties', 'pending_reports', 'player_aliases', 'player_links', 'player_networks', 'player_notes', 'player_ratings',
       'player_reviews', 'player_steam_signals', 'players',

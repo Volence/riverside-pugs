@@ -73,6 +73,9 @@ const PLAIN: [table: string, column: string][] = [
 const KEYED: [table: string, column: string][] = [
   ['match_live_players', 'player_id'],
   ['match_live_map_stats', 'player_id'],
+  // Per-round deltas (balance analytics). Two accounts in one round is the
+  // alt-account case itself; the survivor's row is kept, as for the rows above.
+  ['match_round_stats', 'player_id'],
   ['match_readyup_players', 'player_id'],
   // Live scratch, like the rows above: if both accounts somehow have a row in
   // one match, the survivor's is as good as the one dropped.

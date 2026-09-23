@@ -804,6 +804,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   endorse_title_min_games: '10',
 };
 
+/** A match whose roster came from the site was made by the queue; anything
+ *  else was started in game. Idempotent: only fills NULLs. */
+export const ORIGIN_BACKFILL_SQL = `UPDATE matches SET origin = CASE
+    WHEN EXISTS (SELECT 1 FROM match_players mp WHERE mp.match_id = matches.id AND mp.source = 'web')
+    THEN 'queue' ELSE 'in_game' END
+  WHERE origin IS NULL`;
+
 /** Add a column if the table lacks it. No-op when already present. */
 function ensureColumn(db: DB, table: string, column: string, ddl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -1105,6 +1112,56 @@ export function openDb(path: string): DB {
   // NULL until something has asked: the setup path learns it for free from the
   // reply to the hold ceiling cvar, and an action learns it from its own answer.
   ensureColumn(db, 'matches', 'leave_control', 'INTEGER');
+
+  // Balance analytics, piece 1: which config each round ran on.
+  // docs/superpowers/specs/2026-09-23-balance-analytics-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS balance_patches (
+      id            INTEGER PRIMARY KEY,
+      fingerprint   TEXT UNIQUE,
+      name          TEXT,
+      notes         TEXT NOT NULL DEFAULT '',
+      source        TEXT NOT NULL CHECK (source IN ('announced','detected','historical')),
+      inputs_json   TEXT,
+      first_seen_at TEXT NOT NULL,
+      reviewed      INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS balance_patch_servers (
+      patch_id      INTEGER NOT NULL REFERENCES balance_patches(id),
+      server_id     INTEGER NOT NULL,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at  TEXT NOT NULL,
+      PRIMARY KEY (patch_id, server_id)
+    );
+    CREATE TABLE IF NOT EXISTS balance_server_state (
+      server_id      INTEGER PRIMARY KEY,
+      patch_id       INTEGER NOT NULL REFERENCES balance_patches(id),
+      inventory_json TEXT NOT NULL,
+      since          TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS match_round_stats (
+      match_id  INTEGER NOT NULL REFERENCES matches(id),
+      ordinal   INTEGER NOT NULL,
+      half      INTEGER NOT NULL,
+      player_id TEXT    NOT NULL,
+      stat      TEXT    NOT NULL,
+      value     INTEGER NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, player_id, stat)
+    );
+    CREATE TABLE IF NOT EXISTS match_round_marks (
+      match_id INTEGER NOT NULL REFERENCES matches(id),
+      ordinal  INTEGER NOT NULL,
+      half     INTEGER NOT NULL,
+      kind     TEXT    NOT NULL,
+      t_ms     INTEGER NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, kind, t_ms)
+    );
+  `);
+  ensureColumn(db, 'match_rounds', 'patch_id', 'INTEGER REFERENCES balance_patches(id)');
+  ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
+  ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
+  ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
+  db.prepare(ORIGIN_BACKFILL_SQL).run();
 
   seed(db);
   return db;
