@@ -36,6 +36,10 @@ import { LEAVE_ACTIONS, LEAVE_ADD_MAX_S, leaveCommand, parseLeaveReply, type Lea
 import { buildLiveBoard, type VoiceLookup } from '../admin/liveBoard.js';
 import { redactSecrets } from '../redact.js';
 import { editPatch, listPatches, patchDetail, serverDrift } from '../balancePatches.js';
+import { compareSides, metricDetail } from '../metrics/compare/compare.js';
+import { memo, parseSideParams } from '../metrics/compare/cache.js';
+import { METRICS } from '../metrics/registry.js';
+import { SUB_PHASES, type Phase } from '../metrics/types.js';
 
 export interface AdminRouteOpts {
   db: DB;
@@ -770,6 +774,30 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   app.get('/api/admin/balance/drift', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
     return { servers: serverDrift(db) };
+  });
+
+  app.get('/api/admin/balance/compare', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const q = req.query as Record<string, unknown>;
+    const sides = parseSideParams(q);
+    if (typeof sides === 'string') return reply.code(400).send({ error: sides });
+    const phases = q.phases === 'split' ? 'split' : 'all';
+    const key = `compare|${JSON.stringify(sides)}|${phases}`;
+    const result = memo(key, () => compareSides(db, sides.a, sides.b, { phases }));
+    if (result.ms > 2000) console.warn(`[balance] compare took ${result.ms} ms for ${key}`);
+    return result;
+  });
+
+  app.get('/api/admin/balance/metric', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const q = req.query as Record<string, unknown>;
+    const sides = parseSideParams(q);
+    if (typeof sides === 'string') return reply.code(400).send({ error: sides });
+    const metric = typeof q.metric === 'string' ? q.metric : '';
+    if (!METRICS.some((m) => m.id === metric)) return reply.code(400).send({ error: 'unknown metric' });
+    const phase = q.phase as Phase;
+    if (!(['all', ...SUB_PHASES] as string[]).includes(String(phase))) return reply.code(400).send({ error: 'unknown phase' });
+    return memo(`metric|${metric}|${phase}|${JSON.stringify(sides)}`, () => metricDetail(db, metric, phase, sides.a, sides.b));
   });
 
   app.post('/api/admin/balance/patches/:id', async (req, reply) => {

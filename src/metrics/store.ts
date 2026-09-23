@@ -25,6 +25,10 @@ export function roundContext(db: DB, key: RoundKey): RoundContext {
   };
 }
 
+let generation = 0;
+/** Bumped after every metrics write so cached comparisons know to recompute. */
+export function metricsGeneration(): number { return generation; }
+
 export function writeRoundMetrics(db: DB, key: RoundKey, rows: MetricRow[],
   meta: { hasReplay: boolean; hasStats: boolean; replaySeen: boolean; engine: string; now?: string }): void {
   const now = meta.now ?? new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -43,4 +47,5 @@ export function writeRoundMetrics(db: DB, key: RoundKey, rows: MetricRow[],
       .run(key.matchId, key.ordinal, key.half, ctx.map, ctx.origin, ctx.serverId, ctx.patchId, ctx.survMu, ctx.infMu,
         meta.hasReplay ? 1 : 0, meta.hasStats ? 1 : 0, meta.replaySeen ? 1 : 0, meta.engine, now);
   })();
+  generation++;
 }
