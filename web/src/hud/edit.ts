@@ -203,7 +203,13 @@ export function resizeChild(
   }
   if (def.box === 'square') {
     if (!CORNERS.includes(handle)) return design;
-    const grow = Math.max(handle.includes('w') ? -dx : dx, handle.includes('n') ? -dy : dy);
+    // The delta with the larger absolute value wins, as cornerFactor picks its
+    // axis: a straight-in drag on one axis alone (the other delta 0) must
+    // still shrink the piece, which Math.max of the two signed deltas would
+    // miss whenever the moving one is negative.
+    const sx = handle.includes('w') ? -dx : dx;
+    const sy = handle.includes('n') ? -dy : dy;
+    const grow = Math.abs(sx) >= Math.abs(sy) ? sx : sy;
     const room = Math.min(handle.includes('w') ? start.x + start.w : p.w - start.x, handle.includes('n') ? start.y + start.h : p.h - start.y);
     const side = clampChild('w', Math.round(Math.min(Math.max(1, room), Math.max(1, start.w + grow))));
     const patch: Partial<ChildOverride> = { w: side, h: side };
@@ -437,6 +443,12 @@ export function scaleElement(
  * Resize a free-size element (the chat box) by any handle from where the
  * gesture started it, 20 units at least as the Phase 1 corner drag had it,
  * through the validator's ranges. A left or top handle moves the origin.
+ *
+ * A left or top handle's opposite edge must stay put even when the range
+ * (not the 20-unit minimum resizeBox already clamped) is what catches the
+ * dragged one: the stationary edge is read off the unclamped box first, the
+ * moving edge is clamped to its own range, and the size is then the gap
+ * between them, the same order resizeChild uses for the unfitted card.
  */
 export function resizeElement(
   design: HudDesign, id: string, start: Box, handle: Handle, dx: number, dy: number, keepRatio = false,
@@ -444,9 +456,21 @@ export function resizeElement(
   const el = elementById(id);
   if (!el || el.resize !== 'free') return design;
   const b = resizeBox(start, handle, dx, dy, keepRatio, 20);
-  const next: ElementOverride = { ...(design.elements[id] ?? {}), w: clampOverride('w', b.w), h: clampOverride('h', b.h) };
-  if (handle.includes('w')) next.x = clampOverride('x', b.x);
-  if (handle.includes('n')) next.y = clampOverride('y', b.y);
+  const next: ElementOverride = { ...(design.elements[id] ?? {}) };
+  if (handle.includes('w')) {
+    const right = b.x + b.w;
+    next.x = clampOverride('x', b.x);
+    next.w = clampOverride('w', right - next.x);
+  } else {
+    next.w = clampOverride('w', b.w);
+  }
+  if (handle.includes('n')) {
+    const bottom = b.y + b.h;
+    next.y = clampOverride('y', b.y);
+    next.h = clampOverride('h', bottom - next.y);
+  } else {
+    next.h = clampOverride('h', b.h);
+  }
   return { ...design, elements: { ...design.elements, [id]: next } };
 }
 

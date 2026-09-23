@@ -129,6 +129,13 @@ describe('moving a teammate card child', () => {
     expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'se', -48, 0).children.teamColumn!.Health).toEqual({ w: 48, h: 7 });
   });
 
+  it('shrinks a square piece dragged straight in on one axis, not just along the diagonal', () => {
+    // A signed Math.max of the two deltas would see max(0, -5) = 0 and never shrink; the larger
+    // magnitude, here the vertical one, must win even though it is the negative of the two.
+    const head = { x: 13, y: 38, w: 23, h: 23, visible: true };
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'se', 0, -5).children.teamColumn!.Head).toEqual({ w: 18, h: 18 });
+  });
+
   it('resizes from any handle, the opposite edge staying put', () => {
     const head = { x: 13, y: 38, w: 23, h: 23, visible: true };
     const health = { x: 37, y: 52, w: 96, h: 7, visible: true };
@@ -317,6 +324,14 @@ describe('element edits', () => {
     expect(resizeElement(DEFAULT_DESIGN, 'chat', chat, 'e', -400, 0).elements.chat).toEqual({ w: 20, h: 120 });
     expect(resizeElement(DEFAULT_DESIGN, 'chat', chat, 'e', 32, 0, true).elements.chat).toEqual({ w: 352, h: 132 });
     expect(resizeElement(DEFAULT_DESIGN, 'ownHealth', chat, 'e', 10, 0)).toBe(DEFAULT_DESIGN);
+  });
+
+  it('keeps the opposite edge put when the range clamp, not just the 20-unit minimum, catches the dragged edge', () => {
+    // Dragging the left handle far enough left pushes x past the validator's -200 floor while the
+    // width itself (620) is nowhere near its own cap: x and w must still agree that the right edge,
+    // start.x + start.w = 330, never moves.
+    const chat = { x: 10, y: 275, w: 320, h: 120 };
+    expect(resizeElement(DEFAULT_DESIGN, 'chat', chat, 'w', -300, 0).elements.chat).toEqual({ x: -200, w: 530, h: 120 });
   });
 
   it('computes a resized box with the opposite edge fixed', () => {
