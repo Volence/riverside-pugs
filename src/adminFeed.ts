@@ -60,14 +60,16 @@ export type AdminEvent =
       | { what: 'recent_ban'; vacBans: number; gameBans: number; daysSinceLastBan: number }
       | { what: 'banned_lender'; lenderId: string };
   }
-  // A SourceTV spectator joined from the same connection (hashed IP) as a
-  // player rostered in the match live on that server. Published once, right
-  // after the join that opened the spectator's session, per steamid that
-  // matches: never for a spectator matching nobody, and never for a match
-  // that spectator is not rostered in. Evidence a connection is shared, not a
-  // claim the spectator is that player: a household or a LAN cafe looks the
-  // same as one person watching their own game.
-  | { kind: 'sourcetv_watch'; matchId: number; serverId: number; spectatorName: string; steamid: string };
+  // A SourceTV spectator joined from the same connection (hashed IP) as one
+  // or more players rostered in the match live on that server. Published at
+  // most once per match per hashed connection: not for a spectator matching
+  // nobody, not for a match that spectator is not rostered in, and not again
+  // for a later reconnect on the same connection in the same match (a
+  // spectator is dropped and reconnects at every map change). `steamids`
+  // carries every matched player in one post. Evidence a connection is
+  // shared, not a claim the spectator is any of them: a household or a LAN
+  // cafe looks the same as one person watching their own game.
+  | { kind: 'sourcetv_watch'; matchId: number; serverId: number; spectatorName: string; steamids: string[] };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {

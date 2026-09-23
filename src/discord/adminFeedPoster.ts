@@ -10,6 +10,13 @@ import type { BotInteraction, BotTransport, InteractionReply } from './transport
 
 const COLOR = { report: 0xde4e40, action: 0xc9a45c, penalty: 0x8a7f73, account: 0x45b39c, problem: 0xde4e40 };
 
+/** "A", "A and B", or "A, B and C", for naming every matched player in one line. */
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 /**
  * Posts the admin feed to the private admin channel.
  *
@@ -212,11 +219,14 @@ export class AdminFeedPoster {
       case 'sourcetv_watch': {
         // Worded as a connection match, never as an identity claim: a shared
         // household or a LAN cafe looks exactly like one person spectating
-        // their own game.
+        // their own game. One post names every matched player rather than
+        // one post each, since it is the connection that is shared.
         const match = `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        const who = joinNames(e.steamids.map((id) => this.name(id)));
+        const verb = e.steamids.length > 1 ? 'are' : 'is';
         return {
           text: `📡 SourceTV spectator **${escapeName(e.spectatorName)}** is on the same connection as `
-            + `${this.name(e.steamid)}, who is playing match ${match}. Same connection is evidence, not proof.`,
+            + `${who}, who ${verb} playing match ${match}. Same connection is evidence, not proof.`,
           color: COLOR.problem,
         };
       }
