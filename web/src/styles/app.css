@@ -1231,6 +1231,56 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .replay__sprocket--l { border-right: 1px solid #0b0908; }
 .replay__sprocket--r { border-left: 1px solid #0b0908; }
 .replay__stage { position: relative; width: 100%; touch-action: pan-y; cursor: grab; }
+
+/* Portrait maps (aspect under PORTRAIT_ASPECT in Viewer.tsx). Stacked by
+   default, in the landscape layout's own order: the side column dissolves
+   and each slot's `order` interleaves it with the frame again. The widths
+   come in as custom properties from portraitVars. */
+.replay__main { display: flex; flex-direction: column; gap: var(--sp-3); }
+.replay__side { display: contents; }
+.replay__slot { min-width: 0; }
+.replay__slot--filters { order: -1; }
+.replay__slot--rail { order: 1; }
+.replay__slot--controls { order: 2; }
+.replay__slot--hud { order: 3; }
+.replay--portrait .replay__stage { max-width: var(--stacked-max-w); }
+/* Room for the column: the stage beside it takes nearly the whole viewport
+   height instead of STAGE_MAX_VH, and the frame's track shrinks (never
+   below zero) when the page is narrower than the stage wants. */
+@media (min-width: 1000px) {
+  .replay__main {
+    display: grid;
+    grid-template-columns: minmax(0, var(--side-frame-w)) var(--side-col-w);
+    justify-content: center;
+    align-items: start;
+    gap: var(--sp-4);
+    /* Wider than the page when the viewport has the room, centred on it by
+       the negative margin. Kept inside the page, the column's 336px came out
+       of a stage the 1120px page already capped, and on a tall screen the
+       map ended up SMALLER than stacked (airport03 at 1920x1300: 684px wide
+       against 754). The margins beside the page are exactly the empty space
+       the layout exists to use. 64px under 100vw keeps a gutter either side
+       and room for a scrollbar, so the page never scrolls sideways. Not a
+       transform: that would make this the containing block for anything
+       position: fixed inside it. */
+    --main-w: min(calc(100vw - 64px), calc(var(--side-frame-w) + var(--side-col-w) + var(--sp-4)));
+    width: var(--main-w);
+    margin-left: calc((100% - var(--main-w)) / 2);
+  }
+  .replay__side { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+  .replay--portrait .replay__stage { max-width: var(--side-max-w); }
+  /* In the column, DOM order: the controls first, where they cannot be
+     pushed about by a rail that grows as the round plays. */
+  .replay__side > .replay__slot { order: 0; }
+  .replay__side .replay__rail { max-height: 24rem; }
+  /* A row's label beside its first card wraps the rest under it, ragged;
+     in a column this narrow the label goes on its own line instead. */
+  .replay__side .hud-row { flex-direction: column; align-items: stretch; }
+  .replay__side .hud-row__label { align-self: flex-start; min-width: 0; }
+  /* .hudp's 10rem flex-basis is a WIDTH in a row; in a column it would be a
+     10rem height. */
+  .replay__side .hudp { flex: none; }
+}
 .replay__stage.is-dragging { cursor: grabbing; }
 .replay__sep { width: 1px; height: 20px; background: var(--border); margin: 0 var(--sp-1); }
 .replay__canvas { display: block; width: 100%; height: 100%; background: var(--bg); }

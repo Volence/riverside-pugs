@@ -39,6 +39,55 @@ import { bookmarkSeekMs, type TimelineEntry } from './timeline';
  */
 const STAGE_MAX_VH = 78;
 
+/**
+ * Below this aspect the map is laid out with the controls BESIDE it.
+ *
+ * Stacked, a map's width is capped at STAGE_MAX_VH of the viewport height
+ * times its aspect, so a portrait map on a 1080p screen (about 955px of
+ * viewport) came out a narrow column with the page's sides empty: caves 440px
+ * wide in a 1018px frame, airport03 and farm04 about 553. Beside the column
+ * the stage is capped by nearly the whole viewport height instead, and the
+ * layout widens past the page into the side margins to fit it (see
+ * `.replay__main` in app.css), so a portrait map always gets bigger.
+ *
+ * Why 1.0: this is the owner's call for portrait maps, and 1.0 is where the
+ * shipped maps split with room to spare. The 22 overviews have nothing
+ * between hospital03 at 0.92 and hospital01 at 1.05, so no map sits near the
+ * line and rounding in a future capture cannot flip one. The four below it
+ * (caves 0.59, airport03 0.74, farm04 0.74, hospital03 0.92) are the maps
+ * that were leaving most of the page empty; a square or wider map already
+ * fills most of the 1018px frame stacked, and keeps that layout exactly.
+ */
+export const PORTRAIT_ASPECT = 1.0;
+
+/** The events/controls column beside a portrait map. */
+const SIDE_COL_W = 320;
+/** Viewport height the side-layout stage leaves free, top and bottom. */
+const SIDE_STAGE_GUTTER = 32;
+/** The two sprocket bands and their seams, which share the frame's width. */
+const SPROCKETS_W = 54;
+
+export function isPortraitAspect(aspect: number): boolean {
+  return aspect < PORTRAIT_ASPECT;
+}
+
+/**
+ * The CSS custom properties a portrait map's layout reads (see
+ * `.replay--portrait` in app.css). Both widths are handed over and the
+ * stylesheet picks one, because which layout applies is a media query: a
+ * window too narrow for the side column falls back to the stacked layout,
+ * and the stacked stage is capped exactly as a landscape map's is.
+ */
+export function portraitVars(aspect: number): Record<string, string> {
+  const side = `calc((100vh - ${SIDE_STAGE_GUTTER}px) * ${aspect})`;
+  return {
+    '--stacked-max-w': `min(${canvasForAspect(aspect).width}px, calc(${STAGE_MAX_VH}vh * ${aspect}))`,
+    '--side-max-w': side,
+    '--side-frame-w': `calc(${side} + ${SPROCKETS_W}px)`,
+    '--side-col-w': `${SIDE_COL_W}px`,
+  };
+}
+
 /** The camera theater opens with when the viewer was sitting at fit and
  *  free (spec 7.1: a close camera, follow on by default). A camera the
  *  viewer had already set up is kept as it is. */
@@ -185,13 +234,19 @@ export function Viewer(
    */
   const aspect = useMemo(() => mapAspect(header), [header?.map]);
   const { size, ref: stageRef } = useCanvasSize(aspect, theater);
-  const stageStyle = useMemo(() => ({
-    // A single number, not a `w / h` pair, so the layout box and the backing
-    // store are computed from the identical value and the browser has nothing
-    // left to letterbox.
-    aspectRatio: String(aspect),
-    maxWidth: `min(${canvasForAspect(aspect).width}px, calc(${STAGE_MAX_VH}vh * ${aspect}))`,
-  }), [aspect]);
+  const portrait = isPortraitAspect(aspect);
+  const stageStyle = useMemo(() => (portrait
+    // The width cap comes from the stylesheet here, which picks the side or
+    // the stacked one by viewport width; see portraitVars.
+    ? { aspectRatio: String(aspect) }
+    : {
+      // A single number, not a `w / h` pair, so the layout box and the backing
+      // store are computed from the identical value and the browser has nothing
+      // left to letterbox.
+      aspectRatio: String(aspect),
+      maxWidth: `min(${canvasForAspect(aspect).width}px, calc(${STAGE_MAX_VH}vh * ${aspect}))`,
+    }), [aspect, portrait]);
+  const mainStyle = useMemo(() => (portrait ? portraitVars(aspect) : undefined), [aspect, portrait]);
 
   const { transform, view, backdrop } = useMapLayer(header, frames, livePlayers, size);
 
@@ -470,26 +525,54 @@ export function Viewer(
     );
   }
 
+  const frame = (
+    <div class="replay__frame">
+      <div key="l" class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
+      {canvas}
+      <div key="r" class="replay__sprocket replay__sprocket--r" aria-hidden="true" />
+    </div>
+  );
+
+  const hud = (
+    <HudStrip
+      players={livePlayers}
+      header={header}
+      names={names}
+      showHp={toggles.hp}
+      showGuns={toggles.guns}
+    />
+  );
+
+  if (portrait) {
+    // A portrait map: the controls, events and panels go in a column beside
+    // the stage, in the side space a portrait map leaves empty. On a window
+    // too narrow for that the column dissolves (display: contents) and each
+    // slot's `order` puts the pieces back in the stacked layout's order.
+    return (
+      <div class={`${rootClass} replay--portrait`} ref={rootRef}>
+        <div class="replay__main" style={mainStyle}>
+          {frame}
+          <div class="replay__side">
+            <div class="replay__slot replay__slot--controls">{controls}</div>
+            {filters && <div class="replay__slot replay__slot--filters">{filters}</div>}
+            {rail && <div class="replay__slot replay__slot--rail">{rail}</div>}
+            <div class="replay__slot replay__slot--hud">{hud}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div class={rootClass} ref={rootRef}>
       {filters}
-      <div class="replay__frame">
-        <div key="l" class="replay__sprocket replay__sprocket--l" aria-hidden="true" />
-        {canvas}
-        <div key="r" class="replay__sprocket replay__sprocket--r" aria-hidden="true" />
-      </div>
+      {frame}
 
       {rail}
 
       {controls}
 
-      <HudStrip
-        players={livePlayers}
-        header={header}
-        names={names}
-        showHp={toggles.hp}
-        showGuns={toggles.guns}
-      />
+      {hud}
     </div>
   );
 }
