@@ -1458,6 +1458,23 @@ describe('Hud page', () => {
       expect(box('Numbers from right').value).toBe('38');
     });
 
+    it('lets a number box be typed one digit at a time, clamping only when typing ends', () => {
+      render(<Hud />);
+      pick();
+      // "1" alone is under the minimum of 6; it must stay "1" so "12" can be typed.
+      fireEvent.input(box('Clip text size'), { target: { value: '1' } });
+      expect(box('Clip text size').value).toBe('1');
+      fireEvent.input(box('Clip text size'), { target: { value: '12' } });
+      expect(box('Clip text size').value).toBe('12');
+      fireEvent.blur(box('Clip text size'));
+      expect(box('Clip text size').value).toBe('12');
+      expect(slider('Clip text size').value).toBe('12');
+      // A value left under the minimum snaps to it when typing ends.
+      fireEvent.input(box('Clip text size'), { target: { value: '2' } });
+      fireEvent.keyDown(box('Clip text size'), { key: 'Enter' });
+      expect(box('Clip text size').value).toBe('6');
+    });
+
     it('offers a colour only for a flat or rounded box', () => {
       render(<Hud />);
       pick();

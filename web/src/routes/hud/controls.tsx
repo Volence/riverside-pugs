@@ -5,6 +5,7 @@
  * opacity slider need.
  */
 import type { ComponentChildren } from 'preact';
+import { useState } from 'preact/hooks';
 import { clampOverride, type HudDesign, type ElementOverride, type RangeKey } from '../../hud/design';
 
 /**
@@ -62,15 +63,33 @@ export function SliderNum(
   { label, value, min, max, onInput, onEnd }:
   { label: string; value: number; min: number; max: number; onInput: (n: number) => void; onEnd: () => void },
 ) {
-  const typed = (e: Event) => {
+  // What the box shows while it is being typed into. A value on its way to
+  // an in-range one can pass outside the range ("1" on the way to "12" when
+  // the minimum is 6), so the box keeps the typed text and only an in-range
+  // number reaches the design; clamping waits for blur or Enter, else the
+  // box would snap "1" to "6" and the "2" would make "62".
+  const [draft, setDraft] = useState<string | null>(null);
+  const slid = (e: Event) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
     if (Number.isFinite(n)) onInput(n);
+  };
+  const typed = (e: Event) => {
+    const text = (e.target as HTMLInputElement).value;
+    setDraft(text);
+    const n = parseFloat(text);
+    if (Number.isFinite(n) && n >= min && n <= max) onInput(n);
+  };
+  const done = () => {
+    const n = draft === null ? NaN : parseFloat(draft);
+    if (Number.isFinite(n)) onInput(Math.min(max, Math.max(min, n)));
+    setDraft(null);
+    onEnd();
   };
   return (
     <div class="hud__row hud__row--num">
       <span>{label}</span>
-      <input type="range" aria-label={label} min={min} max={max} step={1} value={value} onInput={typed} onChange={onEnd} />
-      <input type="number" aria-label={label} min={min} max={max} value={value} onInput={typed} {...endsOn(onEnd)} />
+      <input type="range" aria-label={label} min={min} max={max} step={1} value={value} onInput={slid} onChange={onEnd} />
+      <input type="number" aria-label={label} min={min} max={max} value={draft ?? value} onInput={typed} {...endsOn(done)} />
     </div>
   );
 }
