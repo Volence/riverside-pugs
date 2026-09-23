@@ -1167,6 +1167,38 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
   db.prepare(ORIGIN_BACKFILL_SQL).run();
 
+  // Balance analytics piece 2: per-round metrics, one row per metric per phase.
+  // docs/superpowers/specs/2026-09-23-balance-analytics-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS round_metrics (
+      match_id INTEGER NOT NULL REFERENCES matches(id),
+      ordinal  INTEGER NOT NULL,
+      half     INTEGER NOT NULL,
+      metric   TEXT    NOT NULL,
+      phase    TEXT    NOT NULL CHECK (phase IN ('all','tank','witch','event','normal')),
+      num      REAL    NOT NULL,
+      den      REAL    NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half, metric, phase)
+    );
+    CREATE INDEX IF NOT EXISTS round_metrics_metric ON round_metrics(metric, phase);
+    CREATE TABLE IF NOT EXISTS round_metric_context (
+      match_id    INTEGER NOT NULL REFERENCES matches(id),
+      ordinal     INTEGER NOT NULL,
+      half        INTEGER NOT NULL,
+      map         TEXT,
+      origin      TEXT,
+      server_id   INTEGER,
+      patch_id    INTEGER,
+      surv_mu     REAL,
+      inf_mu      REAL,
+      has_replay  INTEGER NOT NULL,
+      has_stats   INTEGER NOT NULL,
+      engine      TEXT    NOT NULL,
+      computed_at TEXT    NOT NULL,
+      PRIMARY KEY (match_id, ordinal, half)
+    );
+  `);
+
   seed(db);
   return db;
 }
