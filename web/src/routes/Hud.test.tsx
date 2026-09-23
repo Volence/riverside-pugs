@@ -817,7 +817,8 @@ describe('Hud page', () => {
     expect(screen.getByText('5 pieces in the teammate card', { selector: 'legend' })).toBeTruthy();
     clickAt(canvas, 426, 100);
     fireEvent.keyDown(canvas, { key: 'a', ctrlKey: true });
-    expect(screen.getByText('7 elements', { selector: 'legend' })).toBeTruthy();
+    // Six: with no crosshair saved on the Crosshair page, a new design has crosshair 'none', and no xHair to select.
+    expect(screen.getByText('6 elements', { selector: 'legend' })).toBeTruthy();
   });
 
   it('aligns several pieces, and hides them all', () => {

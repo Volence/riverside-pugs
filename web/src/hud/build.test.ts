@@ -6,6 +6,8 @@ import { parseKv, kvFind, kvGet, kvSet, type KvNode } from './kv';
 import { baseFile } from './base';
 import { elementById } from './elements';
 import { PANEL_FILE, childRects } from './render';
+import { crosshairFiles } from '../crosshair/vpk';
+import { TEX } from '../crosshair/draw';
 
 const text = (files: { path: string; data: Uint8Array }[], path: string) => {
   const f = files.find((x) => x.path === path);
@@ -15,6 +17,8 @@ const layoutOf = (files: { path: string; data: Uint8Array }[]) =>
   parseKv(text(files, 'scripts/hudlayout.res')!)[0].value as KvNode[];
 /** An untouched design: no element overrides, not even DEFAULT_DESIGN's fitted teammate card, which has its own tests. */
 const design = (patch: Partial<HudDesign>): HudDesign => ({ ...structuredClone(DEFAULT_DESIGN), elements: {}, ...patch });
+/** A crosshair texture's pixels, as the page hands them over: TEX x TEX RGBA. */
+const PIXELS = new Uint8ClampedArray(TEX * TEX * 4).map((_, i) => (i * 31) & 0xff);
 const CARD_FILE = 'resource/ui/hud/teammatepanel.res';
 const TEAM_FILE = 'resource/ui/hud/teamdisplayhud.res';
 const SCHEME_FILE = 'resource/clientscheme.res';
@@ -43,7 +47,7 @@ describe('buildHud, childPass', () => {
   // ImagePanel, at alpha 0, which SetVisible(true) cannot undo.
   for (const fit of [false, true]) {
     it(`writes a hidden splatter at size 0 and alpha 0, keeping its tint's RGB${fit ? ', fitted' : ''}`, () => {
-      const elements = fit ? { teamColumn: { fit: true } } : {};
+      const elements: Record<string, ElementOverride> = fit ? { teamColumn: { fit: true } } : {};
       const plain = tree(buildHud(design({ elements, children: kids({ BackgroundImage: { visible: false } }) })), CARD_FILE);
       const n = kvFind(plain, ['BackgroundImage'])!;
       expect([kvGet(n, 'visible'), kvGet(n, 'wide'), kvGet(n, 'tall'), kvGet(n, 'drawColor')]).toEqual(['0', '0', '0', '255 255 255 0']);
@@ -52,7 +56,7 @@ describe('buildHud, childPass', () => {
     });
 
     it(`writes hidden state art at size 0 even where the fit rule squares it${fit ? ', fitted' : ''}`, () => {
-      const elements = fit ? { teamColumn: { fit: true } } : {};
+      const elements: Record<string, ElementOverride> = fit ? { teamColumn: { fit: true } } : {};
       const got = tree(buildHud(design({ elements, children: kids({ Incapacitated: { visible: false }, Dead: { visible: false }, Voice: { visible: false } }) })), CARD_FILE);
       for (const name of ['Incapacitated', 'Dead', 'Voice']) {
         const n = kvFind(got, [name])!;
@@ -78,7 +82,7 @@ describe('buildHud, childPass', () => {
 
   it('writes an un-hidden piece exactly as the default', () => {
     for (const fit of [false, true]) {
-      const elements = fit ? { teamColumn: { fit: true } } : {};
+      const elements: Record<string, ElementOverride> = fit ? { teamColumn: { fit: true } } : {};
       const base = buildHud(design({ elements }));
       for (const name of ['BackgroundImage', 'Name', 'Dead', 'Voice']) {
         const shown = buildHud(design({ elements, children: kids({ [name]: { visible: true } }) }));
@@ -208,8 +212,8 @@ describe('buildHud, childPass', () => {
 });
 
 describe('buildHud, layout', () => {
-  it('ships stock hudlayout plus the xHair element for an empty design', () => {
-    const files = buildHud(design({}));
+  it('ships stock hudlayout plus the xHair element for a design that wants one', () => {
+    const files = buildHud(design({ crosshair: 'addon' }));
     const got = layoutOf(files);
     const stock = parseKv(baseFile('stock', 'scripts/hudlayout.res'))[0].value as KvNode[];
     expect(got.filter((n) => n.key !== 'xHair')).toEqual(stock);
@@ -219,13 +223,37 @@ describe('buildHud, layout', () => {
     expect(files.map((f) => f.path)).toContain('addoninfo.txt');
   });
 
-  it('leaves xHair out when the player has no crosshair addon', () => {
-    expect(kvFind(layoutOf(buildHud(design({ xhair: false }))), ['xHair'])).toBeUndefined();
+  it('leaves xHair out when the crosshair choice is none, on either preset', () => {
+    expect(kvFind(layoutOf(buildHud(design({ crosshair: 'none' }))), ['xHair'])).toBeUndefined();
+    const modern = layoutOf(buildHud(design({ preset: 'modern', crosshair: 'none' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }));
+    expect(modern.filter((n) => n.key.toLowerCase() === 'xhair')).toEqual([]);
   });
 
   it('does not duplicate xHair on the modern preset, which already has it', () => {
-    const got = layoutOf(buildHud(design({ preset: 'modern' }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } }));
-    expect(got.filter((n) => n.key.toLowerCase() === 'xhair').length).toBe(1);
+    for (const crosshair of ['addon', 'bundle'] as const) {
+      const got = layoutOf(buildHud(design({ preset: 'modern', crosshair }), { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) }, crosshair: PIXELS }));
+      expect(got.filter((n) => n.key.toLowerCase() === 'xhair').length).toBe(1);
+    }
+  });
+
+  it('ships the crosshair texture only when bundling, the Crosshair page\'s own bytes', () => {
+    const paths = (files: { path: string }[]) => files.map((f) => f.path).filter((p) => p.includes('altcrosshair'));
+    expect(paths(buildHud(design({ crosshair: 'addon' }), { crosshair: PIXELS }))).toEqual([]);
+    expect(paths(buildHud(design({ crosshair: 'none' }), { crosshair: PIXELS }))).toEqual([]);
+    const files = buildHud(design({ crosshair: 'bundle' }), { crosshair: PIXELS });
+    expect(kvGet(kvFind(layoutOf(files), ['xHair'])!, 'image')).toBe('hud/altcrosshair');
+    const want = crosshairFiles(TEX, TEX, PIXELS);
+    expect(files.filter((f) => f.path.includes('altcrosshair'))).toEqual(want);
+  });
+
+  it('fails a bundled crosshair with no pixels rather than ship the missing-texture checker', () => {
+    expect(() => buildHud(design({ crosshair: 'bundle' }))).toThrow(/Crosshair page/);
+  });
+
+  it('reports the crosshair element visible unless the choice is none', () => {
+    expect(elementRect(design({ crosshair: 'bundle' }), 'xhair', '16:9').visible).toBe(true);
+    expect(elementRect(design({ crosshair: 'addon' }), 'xhair', '16:9').visible).toBe(true);
+    expect(elementRect(design({ crosshair: 'none' }), 'xhair', '16:9').visible).toBe(false);
   });
 
   // Probe T2: never_draw on HudCrosshair hides the engine crosshair for both teams.

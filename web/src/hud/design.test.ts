@@ -1,7 +1,7 @@
 // @vitest-environment node
 // CompressionStream is a Node and browser global; happy-dom does not provide it.
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DESIGN, validateDesign, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
+import { DEFAULT_DESIGN, validateDesign, newDesign, encodeShare, decodeShare, safeName, clampOverride, clampChild, baseTeam } from './design';
 
 describe('validateDesign', () => {
   it('returns the defaults for junk', () => {
@@ -47,6 +47,29 @@ describe('validateDesign', () => {
   it('drops overrides for elements the editor no longer has', () => {
     const d = validateDesign({ v: 1, elements: { killFeed: { visible: false }, chat: { x: 5 } } });
     expect(d.elements).toEqual({ chat: { x: 5 } });
+  });
+
+  it('reads the crosshair choice, migrating the old xhair boolean', () => {
+    for (const c of ['bundle', 'addon', 'none'] as const) {
+      expect(validateDesign({ v: 1, crosshair: c }).crosshair).toBe(c);
+      expect(validateDesign({ v: 1, crosshair: c, xhair: c === 'none' }).crosshair, 'crosshair wins over xhair').toBe(c);
+    }
+    // A design saved before the choice existed keeps writing xHair, as it did.
+    expect(validateDesign({ v: 1, xhair: true }).crosshair).toBe('addon');
+    expect(validateDesign({ v: 1 }).crosshair).toBe('addon');
+    expect(validateDesign({ v: 1, xhair: false }).crosshair).toBe('none');
+    expect(validateDesign({ v: 1, crosshair: 'laser', xhair: false }).crosshair).toBe('none');
+    expect(validateDesign({ v: 1, crosshair: 'laser' }).crosshair).toBe('addon');
+    // One source of truth: the old boolean is read, never kept.
+    expect('xhair' in validateDesign({ v: 1, xhair: true })).toBe(false);
+    expect('xhair' in DEFAULT_DESIGN).toBe(false);
+  });
+
+  it('starts a new design bundling the saved crosshair when there is one, else with none', () => {
+    expect(DEFAULT_DESIGN.crosshair).toBe('none');
+    expect(newDesign(true)).toEqual({ ...DEFAULT_DESIGN, crosshair: 'bundle' });
+    expect(newDesign(false)).toEqual(DEFAULT_DESIGN);
+    expect(newDesign(true)).not.toBe(DEFAULT_DESIGN);
   });
 
   it('keeps hideGameCrosshair only when it is true', () => {

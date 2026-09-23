@@ -69,6 +69,13 @@ export interface ChildOverride {
 }
 export interface StyleOverride { kind: 'stock' | 'flat' | 'rounded' | 'image'; color?: string }
 export interface UploadedImage { w: number; h: number; png: string }
+/**
+ * Where the crosshair comes from. 'bundle' ships the xHair element plus the
+ * player's own crosshair from the Crosshair page as its texture; 'addon'
+ * ships only the element, for a crosshair addon to supply the texture;
+ * 'none' ships no element, so the game's own crosshair is all there is.
+ */
+export type CrosshairChoice = 'bundle' | 'addon' | 'none';
 export interface HudDesign {
   v: 1;
   name: string;
@@ -76,7 +83,7 @@ export interface HudDesign {
   advanced: boolean;
   aspect: Aspect;
   font: 'preset' | 'roboto';
-  xhair: boolean;
+  crosshair: CrosshairChoice;
   elements: Record<string, ElementOverride>;
   styles: Record<string, StyleOverride>;
   images: Record<string, UploadedImage>;
@@ -93,8 +100,20 @@ export interface HudDesign {
  */
 export const DEFAULT_DESIGN: HudDesign = {
   v: 1, name: 'my_hud', preset: 'stock', advanced: false, aspect: '16:9', font: 'preset',
-  xhair: true, elements: { teamColumn: { fit: true } }, styles: {}, images: {}, children: {},
+  crosshair: 'none', elements: { teamColumn: { fit: true } }, styles: {}, images: {}, children: {},
 };
+
+/**
+ * A design made from nothing. DEFAULT_DESIGN stays static; whether a
+ * crosshair is saved on the Crosshair page is the page's to know (it lives
+ * in this browser's storage), so the page says, and a new design bundles
+ * that crosshair when there is one.
+ */
+export function newDesign(hasSavedCrosshair: boolean): HudDesign {
+  const d = structuredClone(DEFAULT_DESIGN);
+  if (hasSavedCrosshair) d.crosshair = 'bundle';
+  return d;
+}
 
 const MAX_IMAGE_SIDE = 512;
 const MAX_IMAGE_B64 = 1_400_000;          // about 1 MB decoded
@@ -320,7 +339,10 @@ export function validateDesign(raw: unknown): HudDesign {
   d.aspect = oneOf(raw.aspect, ['16:9', '16:10', '4:3'] as const, '16:9');
   d.font = oneOf(raw.font, ['preset', 'roboto'] as const, 'preset');
   d.advanced = raw.advanced === true;
-  d.xhair = raw.xhair !== false;
+  // Designs saved before the choice carry the `xhair` boolean, where absent
+  // meant true: true kept writing the xHair element for a crosshair addon, so
+  // it becomes 'addon'. The boolean is read here and never kept.
+  d.crosshair = oneOf(raw.crosshair, ['bundle', 'addon', 'none'] as const, raw.xhair === false ? 'none' : 'addon');
   if (raw.hideGameCrosshair === true) d.hideGameCrosshair = true;
   if (isObj(raw.elements)) for (const [id, v] of Object.entries(raw.elements)) {
     // An element the registry no longer has (the kill feed, say) has nothing to apply to.
@@ -360,9 +382,10 @@ export function validateDesign(raw: unknown): HudDesign {
 }
 
 const KEY = 'hud';
-export function loadDesign(): HudDesign {
-  try { const raw = localStorage.getItem(KEY); return validateDesign(raw ? JSON.parse(raw) : null); }
-  catch { return structuredClone(DEFAULT_DESIGN); }
+/** The saved design, or `fresh()` when there is none this browser can read. */
+export function loadDesign(fresh: () => HudDesign = () => structuredClone(DEFAULT_DESIGN)): HudDesign {
+  try { const raw = localStorage.getItem(KEY); return raw ? validateDesign(JSON.parse(raw)) : fresh(); }
+  catch { return fresh(); }
 }
 export function saveDesign(d: HudDesign): void {
   try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* a convenience, not worth surfacing */ }

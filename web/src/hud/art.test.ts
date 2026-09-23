@@ -13,6 +13,7 @@ import { artUrl, normaliseMaterial, NEEDED_MATERIALS } from './art';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { SLOTS } from './slots';
+import { TEX } from '../crosshair/draw';
 
 describe('normaliseMaterial', () => {
   it('resolves .res image values the way VGUI does, relative to materials/vgui', () => {
@@ -72,7 +73,8 @@ describe('the art boundary', () => {
   });
 
   it('walks every module build.ts reaches', () => {
-    expect(modules).toEqual(['../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
+    // The crosshair modules draw and pack the player's own crosshair, never Valve's art.
+    expect(modules).toEqual(['../crosshair/draw.ts', '../crosshair/vpk.ts', '../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
       'kv.ts', 'slots.ts', 'textures.ts', 'units.ts']);
   });
 
@@ -94,9 +96,10 @@ describe('the art boundary', () => {
   for (const preset of ['stock', 'modern'] as const) {
     for (const advanced of [false, true]) {
       it(`a ${preset} build ${advanced ? 'in advanced mode ' : ''}emits no exported texture`, () => {
-        const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset, advanced, styles: everySlot };
+        // A bundled crosshair too: its texture is the player's own, drawn on the Crosshair page.
+        const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset, advanced, styles: everySlot, crosshair: 'bundle' };
         const allowed = new Set(advanced ? SLOTS.flatMap((s) => s.stockNames) : []);
-        const materials = buildHud(d, { fonts }).map((f) => f.path).filter((p) => p.startsWith('materials/'));
+        const materials = buildHud(d, { fonts, crosshair: new Uint8ClampedArray(TEX * TEX * 4) }).map((f) => f.path).filter((p) => p.startsWith('materials/'));
         expect(materials.length).toBeGreaterThan(0);
         for (const p of materials) {
           const name = p.slice('materials/'.length).replace(/\.(vtf|vmt)$/, '');

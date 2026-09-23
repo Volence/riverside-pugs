@@ -183,8 +183,11 @@ describe('box and Ctrl+A', () => {
     const piece: Selection = { kind: 'children', names: ['Head'], card: 1 };
     expect(selectAll(D, 'survivor', 'healthy', piece)).toEqual({ kind: 'children', names: ['Head', 'Health', 'Name', 'Items', 'Status'], card: 1 });
     expect(selectAll(D, 'survivor', 'down', piece)).toEqual({ kind: 'children', names: ['Health', 'Name', 'Items', 'Status', 'Incapacitated'], card: 1 });
-    expect(selectAll(D, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
+    expect(selectAll({ ...D, crosshair: 'addon' }, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
       ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'targetId', 'progressBar', 'xhair'] });
+    // With crosshair 'none' there is no xHair element to select.
+    expect(selectAll(D, 'survivor', 'healthy', NONE)).toEqual({ kind: 'elements',
+      ids: ['ownHealth', 'teamColumn', 'weaponSelection', 'chat', 'targetId', 'progressBar'] });
   });
 
   it('never counts a hidden piece or decoration as drawn', () => {

@@ -54,7 +54,7 @@ describe('hitTest', () => {
     expect(hitTest(DEFAULT_DESIGN, 'survivor', 426, 100)).toBeNull();
   });
   it('prefers the smaller of two overlapping elements', () => {
-    expect(hitTest(DEFAULT_DESIGN, 'survivor', 426, 240)).toBe('xhair');
+    expect(hitTest({ ...DEFAULT_DESIGN, crosshair: 'addon' }, 'survivor', 426, 240)).toBe('xhair');
   });
   it('skips hidden elements', () => {
     const d = { ...DEFAULT_DESIGN, elements: { ownHealth: { visible: false } } };

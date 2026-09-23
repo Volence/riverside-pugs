@@ -16,9 +16,19 @@ import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
 import { baseTeam, contentBox, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir } from './design';
 import { panelChildren, teamChild, TEAM_PANEL, type ChildDef } from './children';
+import { crosshairFiles } from '../crosshair/vpk';
+import { TEX } from '../crosshair/draw';
 
-/** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
-export interface BuildAssets { fonts?: { regular: Uint8Array; bold: Uint8Array }; images?: Record<string, Uint8ClampedArray> }
+/**
+ * Uploaded images and fonts, already decoded, keyed by slot id, and for a
+ * bundled crosshair the Crosshair page's texture pixels (TEX x TEX RGBA,
+ * from crosshairPixels), which the page reads from this browser's storage.
+ */
+export interface BuildAssets {
+  fonts?: { regular: Uint8Array; bold: Uint8Array };
+  images?: Record<string, Uint8ClampedArray>;
+  crosshair?: Uint8ClampedArray;
+}
 
 const enc = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);   // latin-1, as the game reads it
 const LAYOUT = 'scripts/hudlayout.res';
@@ -94,8 +104,9 @@ function placed(o: ElementOverride, base: { x: number; y: number; w: number; h: 
 function layoutPass(work: Work, design: HudDesign) {
   const layout = work.tree(LAYOUT);
   const has = kvFind(layout, ['xHair']);
-  if (design.xhair && !has) layout.unshift(structuredClone(XHAIR));
-  if (!design.xhair && has) layout.splice(layout.indexOf(has), 1);
+  const wants = design.crosshair !== 'none';
+  if (wants && !has) layout.unshift(structuredClone(XHAIR));
+  if (!wants && has) layout.splice(layout.indexOf(has), 1);
 
   // Probe T2: the engine crosshair honours never_draw, so a player with an
   // image crosshair can hide the game's own one underneath it.
@@ -822,6 +833,25 @@ function stylePass(work: Work, design: HudDesign, assets: BuildAssets, out: VpkF
   }
 }
 
+/**
+ * A bundled crosshair's texture and material, the Crosshair page's own
+ * files (crosshairFiles), so the xHair element layoutPass wrote has
+ * something to show. vgui/hud/altcrosshair is in no pak01: an xHair with
+ * nothing behind it draws the magenta and black missing-texture checker,
+ * which is what a HUD without its crosshair addon showed in game on
+ * 2026-09-23. So a bundle with no pixels fails the build, like missing
+ * fonts, rather than ship that. Like fontPass it only adds files, so
+ * buildTrees skips it.
+ */
+function crosshairPass(design: HudDesign, assets: BuildAssets, out: VpkFile[]) {
+  if (design.crosshair !== 'bundle') return;
+  const px = assets.crosshair;
+  if (!px || px.length !== TEX * TEX * 4) {
+    throw new Error('The crosshair from the Crosshair page was not found. Make one there, or pick another Crosshair option.');
+  }
+  out.push(...crosshairFiles(TEX, TEX, px));
+}
+
 function addonInfo(name: string): string {
   return `"AddonInfo"\n{\n\taddonSteamAppID\t\t500\n\taddontitle\t\t"${name.replace(/"/g, '')}"\n\taddonversion\t\t1.0\n\taddontagline\t\t"Custom HUD (riversidepug.com)"\n\taddonauthor\t\t"HUD editor"\n\taddonDescription\t\t"Custom HUD layout."\n}\n`;
 }
@@ -858,6 +888,8 @@ function addonInfo(name: string): string {
  * - `layoutPass` only moves, hides and free-resizes panels. No team element
  *   is free-resize, so it never writes a container size teamPass then reads.
  * - `stylePass` only repoints image keys, which no other pass looks at.
+ * - `crosshairPass` only adds the texture files for the xHair element
+ *   `layoutPass` wrote; it reads no tree.
  */
 export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[] {
   const work = new Work(design.preset);
@@ -870,6 +902,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}): VpkFile[]
   scalePass(work, design);
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
+  crosshairPass(design, assets, extra);
   return [...work.files(), ...extra, { path: 'addoninfo.txt', data: enc(addonInfo(design.name)) }];
 }
 
@@ -912,8 +945,9 @@ export function packHud(design: HudDesign, assets: BuildAssets = {}) {
  * design gives exactly that, and lets an abandoned design be collected.
  *
  * fontPass is skipped. It only renames faces and demands the ttf bytes, and
- * the preview draws every label in Roboto Condensed regardless. buildHud is
- * unchanged and still runs all six passes.
+ * the preview draws every label in Roboto Condensed regardless. So is
+ * crosshairPass, which only adds texture files and demands the crosshair's
+ * pixels. buildHud still runs every pass.
  */
 const BUILD_TREES = new WeakMap<HudDesign, Work>();
 
@@ -940,7 +974,7 @@ export function elementRect(design: HudDesign, id: string, aspect: Aspect) {
   if (!el) throw new Error(`No HUD element ${id}`);
   const work = new Work(design.preset);
   const o = design.elements[id] ?? {};
-  if (id === 'xhair') return { x: screenW(aspect) / 2 - 13, y: SCREEN_H / 2 - 13, w: 26, h: 26, visible: design.xhair };
+  if (id === 'xhair') return { x: screenW(aspect) / 2 - 13, y: SCREEN_H / 2 - 13, w: 26, h: 26, visible: design.crosshair !== 'none' };
   const panel = work.panel(LAYOUT, [el.key]);
   const base = baseRect(panel, el, design.preset, design.aspect);
   const p = placed(o, base, el, design.aspect);
