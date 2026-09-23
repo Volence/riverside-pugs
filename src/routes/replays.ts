@@ -3,7 +3,7 @@ import { PassThrough, pipeline, type Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import { currentFileFor, resolveByName, resolveFurther, type ReplayFileInfo } from '../replaySessions.js';
-import { phaseFor } from '../liveView.js';
+import { phaseFor, roundInProgress } from '../liveView.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
@@ -278,6 +278,10 @@ export async function replayRoutes(
    * `/api/replays/match/:id/:ordinal/:half`, which resolves the filename
    * server-side. A match id is already public: it is in the URL of every
    * match page.
+   *
+   * `current` is the round being played (`roundInProgress`), which may be
+   * newer than the round served; with no file yet the ordinal and half are
+   * null.
    */
   app.get('/api/replays/live/match/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -285,12 +289,24 @@ export async function replayRoutes(
       .prepare('SELECT token FROM matches WHERE id = ?')
       .get(Number(id)) as { token: string | null } | undefined;
     if (!row?.token) return reply.code(404).send({ error: 'no replay for that match' });
+    const matchId = Number(id);
     const info = currentFileFor(replayDir, row.token, Date.now(), db, undefined, liveDir);
-    if (!info) return reply.code(404).send({ error: 'no replay for that match' });
+    // The round the plugin says is being played. When it is not the round
+    // whose bytes are served (the push is behind, or off on that server), the
+    // viewer says so rather than presenting an older finished file as the
+    // current round.
+    const current = roundInProgress(db, matchId);
+    if (!info && !current) return reply.code(404).send({ error: 'no replay for that match' });
     // The game's phase rides along: this is polled once a second already, and
     // it is what lets the viewer say "paused" or "readying up" while no frames
     // are arriving, instead of showing a frozen frame with no explanation.
-    return { ordinal: info.ordinal, half: info.half, closed: info.closed, phase: phaseFor(db, Number(id)) };
+    return {
+      ordinal: info?.ordinal ?? null,
+      half: info?.half ?? null,
+      closed: info?.closed ?? false,
+      phase: phaseFor(db, matchId),
+      current,
+    };
   });
 
   /** The same answer for a standalone session, addressed by its own token.
