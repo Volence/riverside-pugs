@@ -1629,6 +1629,9 @@ body.is-theater { overflow: hidden; }
 .balance-side { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 12rem; overflow-y: auto; }
 .balance-banner { border-left: 3px solid var(--rating); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); }
 .balance-check { padding: var(--sp-3); background: var(--surface-2); }
+.balance-map { margin-top: var(--sp-3); }
+.balance-map__row { margin-bottom: var(--sp-3); font-size: var(--fs-dense); }
+.balance-map__row .bar__track { margin-bottom: 3px; }
 
 .admin-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
 .admin-ban { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
