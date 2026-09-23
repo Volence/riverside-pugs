@@ -38,6 +38,7 @@ describe('the CSS face for a scheme face', () => {
     expect(cssFamily('Trade Gothic')).toMatch(/^"Trade Gothic", /);
     expect(cssFamily('Trade Gothic Bold')).toMatch(/^"Trade Gothic Bold", /);
     expect(cssFamily('trade gothic bold')).toMatch(/^"Trade Gothic Bold", /);
+    expect(cssFamily('ToolBox')).toMatch(/^"ToolBox", /);
     expect(cssFamily('Roboto Condensed')).toMatch(/^"Roboto Condensed", /);
     expect(cssFamily('Verdana')).toMatch(/^Verdana, .*sans-serif$/);
     expect(cssFamily('Tahoma')).toMatch(/^Tahoma, .*sans-serif$/);

@@ -506,7 +506,6 @@ function sampleText(n: KvNode, opts: DrawOpts): string {
   if (t === '%HealthNumber%') return opts.state === 'down' ? '299' : '100';   // down, the number is the incap health (probe T7)
   const lname = n.key.toLowerCase();
   if (t === '' && (lname === 'name' || lname === 'namelabel')) return opts.card === undefined ? 'Bill' : CARD_NAMES[opts.card % CARD_NAMES.length];
-  if (lname === 'healthicon') return '+';                          // the real glyph lives in a Valve icon font
   return t;
 }
 

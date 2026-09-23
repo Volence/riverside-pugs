@@ -163,6 +163,15 @@ describe('drawPanel', () => {
     }
   });
 
+  it('writes the own health icon as the file does, a "," in the ToolBox icon face, which is the game\'s "+"', () => {
+    // localplayerpanel.res: HealthIcon, labelText ",", font L4D_Icons (ToolBox, 16 tall, additive).
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({}), 'ownHealth', { x: 0, y: 0 }, 2);
+    const icon = calls.find((c) => c.m === 'fillText' && c.a[0] !== '100')!;
+    expect(icon.a[0]).toBe(',');
+    expect(icon.font).toBe(`400 ${fontCell('ToolBox', 32).em}px ${cssFamily('ToolBox')}`);
+  });
+
   it("colours a teammate's health number by health too, over the Modern file's White", () => {
     // The same panel class draws the teammate card (TeammatePanel.res); the
     // owner's Modern screenshot shows the numbers green, not the file's White.

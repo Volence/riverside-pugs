@@ -53,11 +53,13 @@ describe('the art index', () => {
     // tg.vfont's full name is "Trade Gothic" (its family is "TradeGothic");
     // tgb.vfont's family and full name are both "Trade Gothic Bold". GDI
     // matches a face by either, so these are the names the scheme uses.
-    expect(FONT_FILES).toEqual({ 'Trade Gothic': 'font-trade-gothic.ttf', 'Trade Gothic Bold': 'font-trade-gothic-bold.ttf' });
+    // ToolBox (toolbox.vfont) is the icon face of L4D_Icons: the own health
+    // panel's HealthIcon writes "," in it, which is the game's "+".
+    expect(FONT_FILES).toEqual({ 'Trade Gothic': 'font-trade-gothic.ttf', 'Trade Gothic Bold': 'font-trade-gothic-bold.ttf', ToolBox: 'font-toolbox.ttf' });
     for (const file of Object.values(FONT_FILES)) expect(existsSync(resolve(fileURLToPath(new URL('./art/', import.meta.url)), file)), file).toBe(true);
   });
   it('has the metrics of every face a scheme names, so no font is parsed at runtime', () => {
-    for (const face of ['Trade Gothic', 'Trade Gothic Bold', 'Roboto Condensed', 'Verdana', 'Tahoma', 'Arial']) {
+    for (const face of ['Trade Gothic', 'Trade Gothic Bold', 'ToolBox', 'Roboto Condensed', 'Verdana', 'Tahoma', 'Arial']) {
       const m = FONT_METRICS[face];
       expect(m, face).toBeDefined();
       expect(m.unitsPerEm, face).toBeGreaterThan(0);
@@ -121,8 +123,8 @@ describe('the art boundary', () => {
   });
 
   // The exported fonts are Valve's too. A download carries the player's own
-  // choice of Roboto Condensed and never a byte of Trade Gothic: no emitted
-  // file is named like one, and none holds the same bytes.
+  // choice of Roboto Condensed and never a byte of Trade Gothic or ToolBox:
+  // no emitted file is named like one, and none holds the same bytes.
   const exportedFonts = Object.values(FONT_FILES).map((f) => new Uint8Array(readFileSync(resolve(here, 'art', f))));
   const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
   for (const preset of ['stock', 'modern'] as const) {
@@ -134,9 +136,9 @@ describe('the art boundary', () => {
         };
         const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset, font };
         const files = buildHud(d, { fonts: realFonts });
-        expect(exportedFonts.length).toBe(2);
+        expect(exportedFonts.length).toBe(3);
         for (const f of files) {
-          expect(f.path.toLowerCase(), f.path).not.toMatch(/trade.?gothic|font-trade|\.vfont$/);
+          expect(f.path.toLowerCase(), f.path).not.toMatch(/trade.?gothic|font-trade|font-toolbox|\.vfont$/);
           for (const x of exportedFonts) expect(same(f.data, x), f.path).toBe(false);
         }
       });

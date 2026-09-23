@@ -56,15 +56,16 @@ export function fontCell(face: string, tallPx: number): FontCell {
 }
 
 /**
- * The CSS font-family for a scheme face. The stock faces are the exported
- * fonts and Roboto Condensed the preset's own file, each registered under its
- * own name (loadFace); Windows' faces are asked for by name, with the nearest
+ * The CSS font-family for a scheme face. The stock faces (the two Trade
+ * Gothics and the ToolBox icon face) are the exported fonts and Roboto
+ * Condensed the preset's own file, each registered under its own name
+ * (loadFace); Windows' faces are asked for by name, with the nearest
  * common stand-ins after them for a viewer without them.
  */
 export function cssFamily(face: string): string {
   const name = known(face);
+  if (name && name in FONT_FILES) return `"${name}", ${FALLBACK_STACK}`;   // an exported face: Trade Gothic, its bold, ToolBox
   switch (name) {
-    case 'Trade Gothic': case 'Trade Gothic Bold': return `"${name}", ${FALLBACK_STACK}`;
     case 'Roboto Condensed': return FALLBACK_STACK;
     case 'Verdana': return 'Verdana, "DejaVu Sans", "Bitstream Vera Sans", sans-serif';
     case 'Tahoma': return 'Tahoma, Verdana, "DejaVu Sans", sans-serif';

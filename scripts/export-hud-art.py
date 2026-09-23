@@ -84,13 +84,16 @@ EQUIP = {
     'icon/equip/medkit': 'icon_equip_medkit',
     'icon/equip/pills': 'icon_equip_pills',
 }
-# The stock HUD's text faces: the name clientscheme.res gives each -> its vfont
+# The stock HUD's faces: the name clientscheme.res gives each -> its vfont
 # in the install and the file it is written to here. The name must be the one
 # inside the font (its full name, which GDI matches as well as the family), or
 # the scheme would not find it in game either; export_fonts checks that.
 FONTS = {
     'Trade Gothic': ('tg.vfont', 'font-trade-gothic.ttf'),
     'Trade Gothic Bold': ('tgb.vfont', 'font-trade-gothic-bold.ttf'),
+    # The icon face of L4D_Icons and its sizes: the own health panel's
+    # HealthIcon label writes "," in it, which the face draws as the "+".
+    'ToolBox': ('toolbox.vfont', 'font-toolbox.ttf'),
 }
 # Faces the schemes name that are not in the install: Windows' own. Their
 # metrics (unitsPerEm, usWinAscent, usWinDescent) are the Windows fonts'
