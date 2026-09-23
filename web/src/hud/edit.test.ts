@@ -152,8 +152,8 @@ describe('moving a teammate card child', () => {
 
   it('nudges from where the child is now', () => {
     expect(nudgeChild(DEFAULT_DESIGN, 'Head', 1, 0).children.teamColumn!.Head).toEqual({ x: 14, y: 38 });
-    // The down picture starts where the fit rule drew it: (13, 36) in the unfitted frame.
-    expect(nudgeChild(DEFAULT_DESIGN, 'Incapacitated', 0, 1).children.teamColumn!.Incapacitated).toEqual({ x: 13, y: 37 });
+    // The down picture starts where the fit rule drew it: (13, 9) in the unfitted frame.
+    expect(nudgeChild(DEFAULT_DESIGN, 'Incapacitated', 0, 1).children.teamColumn!.Incapacitated).toEqual({ x: 13, y: 10 });
   });
 
   it('resizes square art keeping it square, and anything else freely, inside the card', () => {

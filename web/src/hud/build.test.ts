@@ -1162,16 +1162,20 @@ describe('buildHud, fit', () => {
     expect(cardAt(tree(files, CARD_FILE), 'HealthNumber').slice(0, 2)).toEqual(['127', '24']);
   });
 
-  it('squares the state art at the card height and fits the splatter to the card width', () => {
+  it('squares the state art at the card width, its band centred on the card, and fits the splatter to the card width', () => {
     const stock = tree(buildHud(fitted()), CARD_FILE);
-    expect(cardAt(stock, 'Incapacitated')).toEqual(['0', '0', '36', '36']);
-    expect(cardAt(stock, 'Dead')).toEqual(['0', '0', '36', '36']);
+    // Card 121 x 36: the square is 121 wide, and the band (texture y ~95 of
+    // 256) centres on y 18, so the square's own top lands at 18 - 95/256*121
+    // = -27; the card clips everything outside its own 0..36.
+    expect(cardAt(stock, 'Incapacitated')).toEqual(['0', '-27', '121', '121']);
+    expect(cardAt(stock, 'Dead')).toEqual(['0', '-27', '121', '121']);
     expect(cardAt(stock, 'Voice')).toEqual(['105', '0', '16', '16']);
     expect(cardAt(stock, 'BackgroundImage')).toEqual(['0', '0', '121', '61']);
     const modern = tree(buildHud(fitted('modern'), { fonts }), CARD_FILE, 'modern');
-    // Modern's own Incapacitated is 88 x 31 and Dead 120 x 31: the fit rule is what makes them square.
-    expect(cardAt(modern, 'Incapacitated')).toEqual(['0', '0', '26', '26']);
-    expect(cardAt(modern, 'Dead')).toEqual(['0', '0', '26', '26']);
+    // Modern's own card is 113 x 26: the square is 113 wide, band centred on
+    // y 13, top at 13 - 95/256*113 = -29.
+    expect(cardAt(modern, 'Incapacitated')).toEqual(['0', '-29', '113', '113']);
+    expect(cardAt(modern, 'Dead')).toEqual(['0', '-29', '113', '113']);
     expect(cardAt(modern, 'Voice')).toEqual(['97', '0', '16', '16']);
     expect(cardAt(modern, 'BackgroundImage')).toEqual(['0', '0', '113', '57']);
     // Modern's own fill background covers the fitted card, like the splatter, so a grown card stays covered.
@@ -1229,7 +1233,8 @@ describe('cardChild', () => {
   });
 
   it('reports the state art where the fit rule put it, so a drag starts where the preview draws it', () => {
-    expect(cardChild(fitted(), 'Incapacitated')).toMatchObject({ x: 13, y: 36, w: 36, h: 36 });
+    // Fitted frame (0, -27, 121, 121) plus the content box's own (13, 36) shift.
+    expect(cardChild(fitted(), 'Incapacitated')).toMatchObject({ x: 13, y: 9, w: 121, h: 121 });
     expect(cardChild(design({}), 'Incapacitated')).toMatchObject({ x: 10, y: 4, w: 96, h: 96 });
   });
 

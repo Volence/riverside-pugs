@@ -301,9 +301,8 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
 
 /**
  * Square the state art and fit the splatter, after the shift (the spec's
- * aspect rule). Incapacitated and Dead become squares of the card height at
- * the Head's x and y 0; Voice a square of min(height, 16) at the right edge;
- * the splatter keeps its 2:1 shape at the card width, clipped by the card.
+ * aspect rule). Voice is a square of min(height, 16) at the right edge; the
+ * splatter keeps its 2:1 shape at the card width, clipped by the card.
  * Modern's ModBg, the fill that paints its whole card, covers the fitted
  * card exactly, so a card that grew past the file's still has a background
  * all the way across. A state picture the player moved or sized keeps those
@@ -311,24 +310,40 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
  * fitted frame; the splatter follows the same rule field by field (it is a
  * wh piece, not square art, so its x, y, w and h each keep the player's own
  * value where there is one, and take the fit rule's only where there is not).
+ *
+ * Incapacitated and Dead (s_panel_*_incap, s_panel_dead) are 256 x 256
+ * textures whose visible art is a wide strip, its red/black band centred at
+ * texture y ~95 of 256 (the owner's in-game screenshot, 2026-09-23: on an
+ * unfitted card the game draws these at 96 x 96 and the strip spans the
+ * card). Squaring at the card height, as this used to, left only a sliver of
+ * that strip on screen. Squaring at the card WIDTH instead, at x 0, with the
+ * band's own centre landing on the card's vertical centre, spans the strip
+ * across the card the way the unfitted HUD does; the square runs above and
+ * below the card, and the card clips those empty rows.
  */
 function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card: { w: number; h: number }) {
   const at = (name: string) => kvFind(nodes, [name]);
-  const head = at('Head');
-  const headX = head ? num(kvGet(head, 'xpos')) : 0;
-  const place = (name: string, side: number, x: number) => {
+  const square = (name: string, side: number) => {
     const n = at(name);
-    if (!n) return;
+    if (!n) return undefined;
     const e = edits[name] ?? {};
-    const s = String(Math.round(e.w ?? side));
-    kvSet(n, 'wide', s); kvSet(n, 'tall', s);
-    if (e.x === undefined) kvSet(n, 'xpos', String(x));
-    if (e.y === undefined) kvSet(n, 'ypos', '0');
+    const s = e.w ?? side;
+    kvSet(n, 'wide', String(Math.round(s))); kvSet(n, 'tall', String(Math.round(s)));
+    return { n, e, s };
   };
-  place('Incapacitated', card.h, headX);
-  place('Dead', card.h, headX);
+  const BAND_CENTRE = 95 / 256;
+  for (const name of ['Incapacitated', 'Dead']) {
+    const piece = square(name, card.w);
+    if (!piece) continue;
+    if (piece.e.x === undefined) kvSet(piece.n, 'xpos', '0');
+    if (piece.e.y === undefined) kvSet(piece.n, 'ypos', String(Math.round(card.h / 2 - BAND_CENTRE * piece.s)));
+  }
   const voice = Math.min(card.h, 16);
-  place('Voice', voice, card.w - (edits.Voice?.w ?? voice));
+  const voicePiece = square('Voice', voice);
+  if (voicePiece) {
+    if (voicePiece.e.x === undefined) kvSet(voicePiece.n, 'xpos', String(Math.round(card.w - voicePiece.s)));
+    if (voicePiece.e.y === undefined) kvSet(voicePiece.n, 'ypos', '0');
+  }
   const splatter = at('BackgroundImage');
   if (splatter) {
     const e = edits.BackgroundImage ?? {};

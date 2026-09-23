@@ -386,8 +386,9 @@ describe('the teammate card states', () => {
   it("Down draws the character's incap art square at the card height, a red bar and 299 in red, and no portrait", () => {
     const { ctx, calls } = recCtx();
     drawPanel(ctx, fitted({ teamColumn: { HealthNumber: { on: true } } }), 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'down' });
-    // Stock fitted: a 36-unit square at the card's top-left (the Head's x, which fit moved to 0), at k = 2.
-    expect(imageAt(calls, artUrl('vgui/s_panel_manager_incap')!)!.a.slice(1)).toEqual([10, 20, 72, 72]);
+    // Stock fitted: a 121-unit square (the card's own width) at x 0, y -27
+    // (the band centred on the card), at k = 2: 10 + 0, 20 + -27*2, 242, 242.
+    expect(imageAt(calls, artUrl('vgui/s_panel_manager_incap')!)!.a.slice(1)).toEqual([10, -34, 242, 242]);
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
     expect(srcs(calls)).toContain(artUrl('vgui/healthbar_red'));
     expect(srcs(calls)).not.toContain(artUrl('vgui/healthbar_green'));
@@ -400,7 +401,7 @@ describe('the teammate card states', () => {
     const items = childRects(d, 'teamColumn', { x: 10, y: 20 }, 2).find((c) => c.name === 'Items')!;
     const { ctx, calls } = recCtx();
     drawPanel(ctx, d, 'teamColumn', { x: 10, y: 20 }, 2, { card: 1, state: 'dead' });
-    expect(imageAt(calls, artUrl('vgui/s_panel_dead')!)!.a.slice(1)).toEqual([10, 20, 72, 72]);
+    expect(imageAt(calls, artUrl('vgui/s_panel_dead')!)!.a.slice(1)).toEqual([10, -34, 242, 242]);
     expect(srcs(calls).some((s) => /healthbar_(green|red)/.test(s))).toBe(false);
     expect(srcs(calls)).not.toContain(artUrl('vgui/s_panel_manager'));
     expect(calls.some((c) => c.m === 'fillText' && (c.a[0] === '100' || c.a[0] === '299'))).toBe(false);
