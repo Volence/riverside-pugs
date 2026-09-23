@@ -1,0 +1,107 @@
+/**
+ * The Layers list, left of the canvas: every element of the current side in
+ * registry order, with an eye that shows or hides it, struck through while
+ * hidden. The Teammates expand to their cards (in Free) and to every piece
+ * of the teammate card from the child registry, splatter included, which
+ * makes this the one way to reach a hidden, tiny or state-only piece. Click
+ * selects and Shift+click adds, by the same rule as the canvas
+ * (selection.ts's pick), and it takes the canvas's keys (arrows, Delete,
+ * Escape, Ctrl+A) while a row has focus.
+ */
+import type { HudDesign } from '../../hud/design';
+import { elementRect, cardChild, isFreeTeam } from '../../hud/build';
+import { TEAM_PANEL } from '../../hud/children';
+import { visibleElements, type Side } from '../../hud/mock';
+import type { Selection } from '../../hud/selection';
+
+/** State pieces the game shows only sometimes, and when. */
+const WHEN: Record<string, string> = { Incapacitated: 'shown when down', Dead: 'shown when dead', Voice: 'shown when talking' };
+
+/** Whether one row's target is part of the selection. */
+function isIn(sel: Selection, target: Selection): boolean {
+  if (sel.kind === 'elements' && target.kind === 'elements') return sel.ids.includes(target.ids[0]);
+  if (sel.kind === 'card' && target.kind === 'card') return sel.card === target.card;
+  if (sel.kind === 'children' && target.kind === 'children') return sel.names.includes(target.names[0]);
+  return false;
+}
+
+function Eye({ hidden }: { hidden: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" fill="none" stroke="currentColor" stroke-width="1.3" />
+      <circle cx="8" cy="8" r="2" fill="currentColor" />
+      {hidden && <path d="M2 14L14 2" stroke="currentColor" stroke-width="1.5" />}
+    </svg>
+  );
+}
+
+function Row(
+  { label, depth, active, hidden, note, onPick, onEye }: {
+    label: string; depth: 0 | 1; active: boolean; hidden: boolean; note?: string;
+    onPick: (shift: boolean) => void; onEye?: (visible: boolean) => void;
+  },
+) {
+  return (
+    <div class={`hud__layer hud__layer--d${depth}${active ? ' is-active' : ''}${hidden ? ' hud__layer--hidden' : ''}`}>
+      <button type="button" class="hud__layername" onClick={(e) => onPick(e.shiftKey)}>{label}</button>
+      {note && <span class="hud__layernote">{note}</span>}
+      {onEye && (
+        <button type="button" class="hud__eye" aria-label={`${hidden ? 'Show' : 'Hide'} ${label}`} onClick={() => onEye(hidden)}>
+          <Eye hidden={hidden} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function LayersPanel(
+  { design, side, sel, onPick, onVisible, onAdd, onKeyDown }: {
+    design: HudDesign; side: Side; sel: Selection;
+    onPick: (target: Selection, shift: boolean) => void;
+    onVisible: (target: Selection, visible: boolean) => void;
+    onAdd: (name: string) => void;
+    onKeyDown: (e: KeyboardEvent) => void;
+  },
+) {
+  // A piece picked here keeps the card the selection was in, for the handles and the breadcrumb.
+  const card = sel.kind === 'children' || sel.kind === 'card' ? sel.card : 0;
+  const free = isFreeTeam(design);
+  return (
+    <nav class="hud__layers" aria-label="Layers" onKeyDown={onKeyDown}>
+      <p class="eyebrow">{side === 'survivor' ? 'Survivor HUD' : 'Infected HUD'}</p>
+      {visibleElements(side).map((el) => {
+        const target: Selection = { kind: 'elements', ids: [el.id] };
+        return (
+          <div key={el.id}>
+            <Row
+              label={el.label} depth={0} active={isIn(sel, target)} hidden={!elementRect(design, el.id, design.aspect).visible}
+              onPick={(shift) => onPick(target, shift)}
+              onEye={el.props.includes('visible') ? (v) => onVisible(target, v) : undefined}
+            />
+            {el.id === 'teamColumn' && free && [0, 1, 2, 3].map((i) => {
+              const t: Selection = { kind: 'card', card: i };
+              return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
+            })}
+            {el.id === 'teamColumn' && TEAM_PANEL.children.map((def) => {
+              const info = cardChild(design, def.name);
+              if (!info) {
+                return def.addable ? (
+                  <div key={def.name} class="hud__layer hud__layer--d1">
+                    <button type="button" class="hud__layername hud__layeradd" onClick={() => onAdd(def.name)}>{`＋ ${def.label}`}</button>
+                  </div>
+                ) : null;
+              }
+              const t: Selection = { kind: 'children', names: [def.name], card };
+              return (
+                <Row
+                  key={def.name} label={def.label} depth={1} active={isIn(sel, t)} hidden={!info.visible} note={WHEN[def.name]}
+                  onPick={(shift) => onPick(t, shift)} onEye={(v) => onVisible(t, v)}
+                />
+              );
+            })}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}

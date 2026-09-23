@@ -20,6 +20,7 @@ import { teamChild } from '../hud/children';
 import {
   elementsTouched, hasOverrides, moveElements, moveCard, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
+  setSelectionVisible, patchChild,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
@@ -28,7 +29,8 @@ import {
   selectionBox, handlesFor, handlePoint, handleAt,
   type Selection, type Hit, type Mods, type Crumb,
 } from '../hud/selection';
-import { ElementControls, ChildList, ChildControls, PiecesControls, ElementsControls } from './hud/ContextPanel';
+import { ElementControls, ChildControls, PiecesControls, ElementsControls } from './hud/ContextPanel';
+import { LayersPanel } from './hud/LayersPanel';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
@@ -779,10 +781,8 @@ export default function Hud() {
     }
   };
 
-  const sideElements = visibleElements(side);
   const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
-  const teamPicked = sel.kind === 'card' || sel.kind === 'children' || (sel.kind === 'elements' && sel.ids.length === 1 && sel.ids[0] === 'teamColumn');
   const oneChild = sel.kind === 'children' && sel.names.length === 1 ? sel.names[0] : null;
 
   return (
@@ -790,6 +790,16 @@ export default function Hud() {
       <PageHeader eyebrow="Tool" title="HUD Editor" />
 
       <div class="hud">
+        <Panel class="hud__layerpanel">
+          <LayersPanel
+            design={design} side={side} sel={sel}
+            onPick={(t, shift) => setSel((s) => pick(s, t, shift))}
+            onVisible={(t, v) => edit((d) => setSelectionVisible(d, t, v))}
+            onAdd={(name) => { edit((d) => patchChild(d, name, { on: true })); setSel({ kind: 'children', names: [name], card: 0 }); }}
+            onKeyDown={onKeyDown}
+          />
+        </Panel>
+
         <Panel class="hud__stage">
           <div class="hud__toolbar">
             <button
@@ -888,24 +898,6 @@ export default function Hud() {
             />
             <Crumbs crumbs={breadcrumb(design, sel)} onSelect={setSel} />
           </div>
-
-          {/* The only way to reach an element that is hidden or off screen. */}
-          <div class="hud__list">
-            {sideElements.map((el) => {
-              const visible = elementRect(design, el.id, design.aspect).visible;
-              const active = sel.kind === 'elements' && sel.ids.includes(el.id);
-              return (
-                <button
-                  key={el.id}
-                  type="button"
-                  class={`hud__pill${active ? ' is-active' : ''}${visible ? '' : ' hud__pill--hidden'}`}
-                  onClick={(e) => setSel((s) => pick(s, { kind: 'elements', ids: [el.id] }, e.shiftKey))}
-                >
-                  {el.label}
-                </button>
-              );
-            })}
-          </div>
         </Panel>
 
         <Panel class="hud__side">
@@ -919,13 +911,7 @@ export default function Hud() {
                   ? <PiecesControls design={design} edit={edit} end={endGesture} names={sel.names} />
                   : sel.kind === 'elements'
                     ? <ElementsControls design={design} edit={edit} ids={sel.ids} />
-                    : <p class="muted">Select an element on the canvas or in the list below it.</p>}
-          {teamPicked && (
-            <ChildList
-              design={design} edit={edit} selectedChild={oneChild}
-              onPick={(name) => setSel({ kind: 'children', names: [name], card: sel.kind === 'children' || sel.kind === 'card' ? sel.card : 0 })}
-            />
-          )}
+                    : <p class="muted">Select an element on the canvas or in Layers.</p>}
         </Panel>
       </div>
 

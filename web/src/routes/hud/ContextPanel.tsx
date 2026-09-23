@@ -8,7 +8,7 @@ import {
 } from '../../hud/design';
 import { elementById, type HudElement } from '../../hud/elements';
 import { elementRect, teamLayout, cardChild, baseHasChild } from '../../hud/build';
-import { TEAM_PANEL, teamChild } from '../../hud/children';
+import { teamChild } from '../../hud/children';
 import {
   cardOffset, withTeamDir, placeCard, patchChild, resetElement, resetChild,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
@@ -218,48 +218,6 @@ export function ElementControls(
 }
 
 /**
- * The teammate card's insides: one pill per registry child, struck through
- * when hidden, and the only way to reach a hidden or tiny one, as the
- * element list is for elements. A child the preset's file lacks (the stock
- * health number) is a checkbox that adds it; once added it gets a pill too.
- */
-export function ChildList(
-  { design, edit, selectedChild, onPick }: {
-    design: HudDesign; edit: Edit; selectedChild: string | null; onPick: (name: string) => void;
-  },
-) {
-  return (
-    <Field legend="Inside the card">
-      <div class="hud__list">
-        {TEAM_PANEL.children.map((def) => {
-          const info = cardChild(design, def.name);
-          if (!info) return null;                              // an addable child that is off: its checkbox is below
-          return (
-            <button
-              key={def.name} type="button"
-              class={`hud__pill${def.name === selectedChild ? ' is-active' : ''}${info.visible ? '' : ' hud__pill--hidden'}`}
-              onClick={() => onPick(def.name)}
-            >
-              {def.label}
-            </button>
-          );
-        })}
-      </div>
-      {TEAM_PANEL.children.filter((def) => def.addable && !baseHasChild(design.preset, def.name)).map((def) => (
-        <label key={def.name} class="hud__check">
-          <input
-            type="checkbox" checked={design.children.teamColumn?.[def.name]?.on === true}
-            onChange={(e) => { const on = (e.target as HTMLInputElement).checked; edit((d) => patchChild(d, def.name, { on })); }}
-          />
-          <span>{def.label}</span>
-        </label>
-      ))}
-      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
-    </Field>
-  );
-}
-
-/**
  * The controls for one child of the teammate card, built only from its
  * registry entry. Numbers are unscaled units in the card file's own frame
  * (what a ChildOverride stores), read back through cardChild so a child
@@ -343,7 +301,13 @@ export function ChildControls(
           />
         </div>
       )}
+      <p class="muted hud__note">Edits inside a card apply to every teammate's card.</p>
       {def.note && <p class="muted hud__note">{def.note}</p>}
+      {def.addable && !baseHasChild(design.preset, name) && (
+        <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={() => edit((d) => patchChild(d, name, { on: false }))}>
+          {`Remove the ${def.label.toLowerCase()}`}
+        </button>
+      )}
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={reset}>Reset this child</button>
       <button type="button" class="btn btn--ghost btn--sm hud__reset" onClick={onBack}>Back to Teammates</button>
     </Field>

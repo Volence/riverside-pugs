@@ -182,7 +182,7 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 /* ---------- HUD editor ---------- */
 
-.hud { display: grid; grid-template-columns: 1fr 320px; gap: var(--sp-4); align-items: start; }
+.hud { display: grid; grid-template-columns: 190px minmax(0, 1fr) 320px; gap: var(--sp-4); align-items: start; }
 
 .hud__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
 .hud__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
@@ -220,6 +220,25 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 /* A hidden element is still reachable, but struck through so the list also
  * doubles as a visibility summary at a glance. */
 .hud__pill--hidden { text-decoration: line-through; }
+
+/* The Layers list: one row per element, pieces indented under the
+ * Teammates. The name is a button (click selects, Shift+click adds), the eye
+ * another; a hidden row is struck through, as the old pills were. */
+.hud__layers .eyebrow { margin-bottom: var(--sp-2); }
+.hud__layer { display: flex; align-items: center; gap: var(--sp-1); padding: 1px var(--sp-1); }
+.hud__layer--d1 { padding-left: var(--sp-4); }
+.hud__layer.is-active { background: var(--accent); }
+.hud__layername {
+  flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 2px 0;
+  color: var(--text); font: inherit; font-size: var(--fs-dense); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hud__layer.is-active .hud__layername { color: #fff; }
+.hud__layer--hidden .hud__layername { text-decoration: line-through; color: var(--text-muted); }
+.hud__layernote { font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
+.hud__layeradd { color: var(--text-muted); }
+.hud__eye { background: none; border: 0; padding: 2px; color: var(--text-muted); cursor: pointer; line-height: 0; }
+.hud__eye:hover { color: var(--text-bright); }
 
 .hud__group { border: 1px solid var(--border); padding: var(--sp-3) var(--sp-4) var(--sp-4); margin: 0; min-inline-size: 0; max-width: 100%; }
 .hud__group legend { padding: 0 var(--sp-2); }
@@ -297,6 +316,11 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .hud__sharebar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
 
 .hud__status { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+
+@media (max-width: 1200px) {
+  .hud { grid-template-columns: minmax(0, 1fr) 320px; }
+  .hud__layerpanel { grid-column: 1 / -1; }
+}
 
 @media (max-width: 900px) {
   .hud { grid-template-columns: 1fr; }

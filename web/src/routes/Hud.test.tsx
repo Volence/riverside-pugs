@@ -50,31 +50,26 @@ const dragFrom = (canvas: HTMLElement, from: [number, number], to: [number, numb
  * there is nothing to assert about pixels. This just pins that the shell
  * renders and that picking a side changes which elements are offered. */
 describe('Hud page', () => {
-  it('lists the teammate card children and adds the health number on stock', () => {
+  it('lists the teammate card pieces in Layers, and adds the health number on stock', () => {
     render(<Hud />);
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     for (const label of ['Portrait', 'Health bar', 'Name', 'Item icons', 'Status text', 'Damage splatter', 'Down picture', 'Dead picture', 'Voice icon']) {
       expect(screen.getByRole('button', { name: label }), label).toBeTruthy();
     }
+    expect(screen.getByText('shown when down')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Health number' })).toBeNull();
-    const add = screen.getByLabelText('Health number') as HTMLInputElement;
-    expect(add.checked).toBe(false);
-    fireEvent.click(add);
+    fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
     expect(screen.getByRole('button', { name: 'Health number' })).toBeTruthy();
+    expect(screen.getByText('Health number', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByText("Edits inside a card apply to every teammate's card.")).toBeTruthy();
   });
 
-  it('steps back to the teammates when the selected child stops existing', () => {
+  it('steps back to the teammates when the selected piece is removed', () => {
     render(<Hud />);
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.click(screen.getByLabelText('Health number'));
-    fireEvent.click(screen.getByRole('button', { name: 'Health number' }));
+    fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
     expect(screen.getByText('Reset this child')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('Health number'));               // untick it while selected
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the health number' }));
     expect(screen.getByText('Reset this element')).toBeTruthy();
-    // Ticking it again does not bring back the old selection.
-    fireEvent.click(screen.getByLabelText('Health number'));
-    expect(screen.getByText('Reset this element')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '＋ Health number' })).toBeTruthy();
   });
 
   it('drops a picked child when the preset changes', async () => {
@@ -88,13 +83,10 @@ describe('Hud page', () => {
 
   it('keeps an added health number added when its child is reset', () => {
     render(<Hud />);
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.click(screen.getByLabelText('Health number'));
-    fireEvent.click(screen.getByRole('button', { name: 'Health number' }));
+    fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
     fireEvent.input(screen.getByLabelText('X'), { target: { value: '90' } });
     fireEvent.click(screen.getByText('Reset this child'));
     // The move is gone and the number is still there: back at the template's x 103.
-    expect((screen.getByLabelText('Health number') as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole('button', { name: 'Health number' })).toBeTruthy();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('103');
   });
@@ -112,14 +104,36 @@ describe('Hud page', () => {
 
   it('offers no colour for the health number and says why, and a colour for the name', () => {
     render(<Hud />);
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.click(screen.getByLabelText('Health number'));
-    fireEvent.click(screen.getByRole('button', { name: 'Health number' }));
+    fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
     expect(screen.getByText('The game colours this by health.')).toBeTruthy();
     expect(screen.queryByLabelText('Health number colour')).toBeNull();
     expect(screen.getByLabelText('Text size')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Name' }));
     expect(screen.getByLabelText('Name colour')).toBeTruthy();
+  });
+
+  it('hides and shows from the eye in Layers, struck through while hidden', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Chat' }));
+    const row = () => screen.getByRole('button', { name: 'Chat' }).closest('.hud__layer')!;
+    expect(row().classList.contains('hud__layer--hidden')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Chat' }));
+    expect(row().classList.contains('hud__layer--hidden')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Portrait' }));
+    expect(screen.getByRole('button', { name: 'Portrait' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true);
+  });
+
+  it('selects from Layers, Shift+click adding, and lists the Free cards', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Your health' }), { shiftKey: true });
+    expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Card 2' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Card 2' }));
+    // The side panel's own card note arrives with Task 15; the breadcrumb names the card meanwhile.
+    expect(screen.getByText('Card 2', { selector: '.hud__crumbs span' })).toBeTruthy();
   });
 
   it("snaps a child's X box to its cap, and goes back to the teammates", () => {
