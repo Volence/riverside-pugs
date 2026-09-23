@@ -15,7 +15,7 @@ import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
 import { flatTexture, roundedTexture, vmtFor } from './textures';
 import { baseTeam, contentBox, type Box, type HudDesign, type ElementOverride, type ChildOverride, type TeamDir } from './design';
-import { panelChildren, TEAM_PANEL, type ChildDef } from './children';
+import { panelChildren, teamChild, TEAM_PANEL, type ChildDef } from './children';
 
 /** Uploaded images and fonts, already decoded, keyed by slot id. Tasks 8 and 9 read these; Task 7 does not. */
 export interface BuildAssets { fonts?: { regular: Uint8Array; bold: Uint8Array }; images?: Record<string, Uint8ClampedArray> }
@@ -158,15 +158,35 @@ function childPass(work: Work, design: HudDesign) {
   }
 }
 
+/**
+ * Which key a child's colour override becomes: an image's is a tint the
+ * ImagePanel multiplies its texture by (drawColor, the key the stock
+ * infected card's own frame already carries), a label's is its text colour
+ * (fgcolor_override). Read by both the writer (applyChild) and the reader
+ * (cardChild), so the two can never disagree about which key a child's
+ * colour lives in.
+ */
+function colourKey(def: ChildDef): 'drawColor' | 'fgcolor_override' {
+  return def.kind === 'image' ? 'drawColor' : 'fgcolor_override';
+}
+
+/**
+ * There is no "cannot move" guard here any more (there was, through the
+ * splatter, until it became a wh piece): every registered child moves
+ * today, so nothing can reach it, and childOverride (design.ts) still only
+ * ever sets x or y for a child whose registry entry has `move`, so a
+ * validated design can never carry a move on one that cannot take it. If a
+ * future child ever ships with `move: false`, this guard comes back with
+ * it, alongside a real registry entry to test it against.
+ */
 function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: ChildOverride) {
   if (o.color !== undefined && !def.colour) throw new Error(`${file}: ${def.name} takes no colour`);
   if (o.fontSize !== undefined && !def.font) throw new Error(`${file}: ${def.name} takes no text size`);
   if ((o.w !== undefined || o.h !== undefined) && def.box === 'none') throw new Error(`${file}: ${def.name} takes no size`);
-  if ((o.x !== undefined || o.y !== undefined) && !def.move) throw new Error(`${file}: ${def.name} cannot move`);
   if (o.visible !== undefined) kvSet(block, 'visible', o.visible ? '1' : '0');
   const set = (key: string, v: number | undefined) => { if (v !== undefined) kvSet(block, key, String(Math.round(v))); };
   set('xpos', o.x); set('ypos', o.y); set('wide', o.w); set('tall', o.h);
-  if (o.color !== undefined) kvSet(block, 'fgcolor_override', o.color);
+  if (o.color !== undefined) kvSet(block, colourKey(def), o.color);
   if (o.fontSize !== undefined) {
     const leaf = typeof block.value === 'string' ? undefined
       : block.value.find((n) => n.key.toLowerCase() === 'font' && typeof n.value === 'string');
@@ -196,7 +216,9 @@ function applyChild(work: Work, file: string, def: ChildDef, block: KvNode, o: C
  * card exactly, so a card that grew past the file's still has a background
  * all the way across. A state picture the player moved or sized keeps those
  * fields, which childPass already wrote and the shift already moved into the
- * fitted frame.
+ * fitted frame; the splatter follows the same rule field by field (it is a
+ * wh piece, not square art, so its x, y, w and h each keep the player's own
+ * value where there is one, and take the fit rule's only where there is not).
  */
 function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card: { w: number; h: number }) {
   const at = (name: string) => kvFind(nodes, [name]);
@@ -217,8 +239,11 @@ function fitStateArt(nodes: KvNode[], edits: Record<string, ChildOverride>, card
   place('Voice', voice, card.w - (edits.Voice?.w ?? voice));
   const splatter = at('BackgroundImage');
   if (splatter) {
-    kvSet(splatter, 'xpos', '0'); kvSet(splatter, 'ypos', '0');
-    kvSet(splatter, 'wide', String(card.w)); kvSet(splatter, 'tall', String(Math.round(card.w / 2)));
+    const e = edits.BackgroundImage ?? {};
+    if (e.x === undefined) kvSet(splatter, 'xpos', '0');
+    if (e.y === undefined) kvSet(splatter, 'ypos', '0');
+    if (e.w === undefined) kvSet(splatter, 'wide', String(card.w));
+    if (e.h === undefined) kvSet(splatter, 'tall', String(Math.round(card.w / 2)));
   }
   const fill = at('ModBg');
   if (fill) {
@@ -349,7 +374,11 @@ export function cardChild(design: HudDesign, name: string): CardChild | null {
   const font = kvGet(n, 'font');
   const size = font ? kvFind(work.tree(SCHEME), ['Fonts', font, '1']) : undefined;
   const tall = size ? parseFloat(kvGet(size, 'tall') ?? '') : NaN;
-  const raw = kvGet(n, 'fgcolor_override');
+  const def = teamChild(name);
+  // Read regardless of the child's own colour flag, as this did before the
+  // image/label split: HealthNumber has no colour control (the game colours
+  // it by health) but its raw fgcolor_override is still reported here.
+  const raw = def ? kvGet(n, colourKey(def)) : undefined;
   return {
     x: num(kvGet(n, 'xpos')) + shift.x, y: num(kvGet(n, 'ypos')) + shift.y,
     w: num(kvGet(n, 'wide')), h: num(kvGet(n, 'tall')),

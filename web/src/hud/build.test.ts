@@ -121,11 +121,29 @@ describe('buildHud, childPass', () => {
       .toThrow(/teammatepanel\.res: Head takes no text size/);
     expect(() => buildHud(design({ children: kids({ Nope: { x: 1 } }) })))
       .toThrow(/teammatepanel\.res: Nope is not an editable child/);
-    // D2: a wrong-kind edit fails the same way for size and position.
-    expect(() => buildHud(design({ children: kids({ BackgroundImage: { w: 10, h: 10 } }) })))
-      .toThrow(/teammatepanel\.res: BackgroundImage takes no size/);
-    expect(() => buildHud(design({ children: kids({ BackgroundImage: { x: 1, y: 1 } }) })))
-      .toThrow(/teammatepanel\.res: BackgroundImage cannot move/);
+    // D2: a wrong-kind edit fails the same way for size and colour. The splatter now takes both, and
+    // move, so these use Items (no size box, an icon row sized by its font) and Head (an image with
+    // no tint flag) instead. There is no move guard to test any more: every registered child moves
+    // today, so applyChild dropped that guard rather than keep it unreachable (see its own comment).
+    expect(() => buildHud(design({ children: kids({ Items: { w: 10, h: 10 } }) })))
+      .toThrow(/teammatepanel\.res: Items takes no size/);
+    expect(() => buildHud(design({ children: kids({ Head: { color: '1 2 3 4' } }) })))
+      .toThrow(/teammatepanel\.res: Head takes no colour/);
+  });
+
+  it('writes an image tint as drawColor and a label tint as fgcolor_override', () => {
+    const card = tree(buildHud(design({ children: kids({
+      BackgroundImage: { color: '64 64 64 200' }, Name: { color: '10 20 30 255' },
+    }) })), CARD_FILE);
+    expect(kvGet(kvFind(card, ['BackgroundImage'])!, 'drawColor')).toBe('64 64 64 200');
+    expect(kvGet(kvFind(card, ['BackgroundImage'])!, 'fgcolor_override')).toBeUndefined();
+    expect(kvGet(kvFind(card, ['Name'])!, 'fgcolor_override')).toBe('10 20 30 255');
+    expect(kvGet(kvFind(card, ['Name'])!, 'drawColor')).toBeUndefined();
+  });
+
+  it('moves and resizes the splatter like any wh piece', () => {
+    const files = buildHud(design({ children: kids({ BackgroundImage: { x: 5, y: 6, w: 80, h: 40 } }) }));
+    expect(cardAt(tree(files, CARD_FILE), 'BackgroundImage')).toEqual(['5', '6', '80', '40']);
   });
 });
 
@@ -932,6 +950,17 @@ describe('buildHud, fit', () => {
     expect(cardAt(tree(files, CARD_FILE), 'Incapacitated')).toEqual(['37', '4', '30', '30']);
   });
 
+  it('keeps a moved and sized splatter where the player put it, the shift already moving it into the fitted frame', () => {
+    const files = buildHud(fitted('stock', { teamColumn: { BackgroundImage: { x: 50, y: 10, w: 80, h: 40 } } }));
+    expect(cardAt(tree(files, CARD_FILE), 'BackgroundImage')).toEqual(['37', '-26', '80', '40']);
+  });
+
+  it('lets the fit rule fill in only the fields the player left alone on the splatter', () => {
+    // Only w is the player's; x, y and h still follow the fit rule (the card's top-left, width / 2).
+    const files = buildHud(fitted('stock', { teamColumn: { BackgroundImage: { w: 80 } } }));
+    expect(cardAt(tree(files, CARD_FILE), 'BackgroundImage')).toEqual(['0', '0', '80', '61']);
+  });
+
   it('keeps the full card and says so when every content child is hidden', () => {
     const hidden = Object.fromEntries(['Head', 'Health', 'Name', 'Items', 'Status'].map((n) => [n, { visible: false }]));
     const d = fitted('stock', { teamColumn: hidden });
@@ -969,6 +998,12 @@ describe('cardChild', () => {
       .toMatchObject({ x: 103, y: 60, w: 30, h: 12, fontTall: 12, color: '255 255 255 255' });
     expect(cardChild(fitted({ teamColumn: { Name: { fontSize: 14 } } }), 'Name')!.fontTall).toBe(14);
     expect(cardChild(fitted(), 'Name')!.color).toBeUndefined();                  // "White" is a scheme name, not raw
+  });
+
+  it("reports the splatter's tint from drawColor, not fgcolor_override", () => {
+    expect(cardChild(fitted(), 'BackgroundImage')!.color).toBeUndefined();       // stock ships no drawColor
+    expect(cardChild(fitted({ teamColumn: { BackgroundImage: { color: '64 64 64 200' } } }), 'BackgroundImage'))
+      .toMatchObject({ color: '64 64 64 200' });
   });
 
   it('knows which children a preset file has', () => {

@@ -283,6 +283,29 @@ describe('drawPanel', () => {
     expect(modern.calls.some((c) => c.m === 'fillRect')).toBe(true);
   });
 
+  it('tints the splatter from the design tree, the faint 0.35 composing with the tint alpha', () => {
+    // The splatter is now editable: a player's drawColor override on BackgroundImage goes through the
+    // same tint path as the stock infected card's frame, and SPLATTER_ALPHA is still the preview's
+    // stand-in for the game's faint look on top of it, not a replacement for it.
+    const scratch = recCtx();
+    const made: { width: number; height: number }[] = [];
+    _setCanvasFactory((w, h) => {
+      const c = { width: w, height: h, getContext: () => scratch.ctx } as unknown as HTMLCanvasElement;
+      made.push(c);
+      return c;
+    });
+    try {
+      const d = design({ children: { teamColumn: { BackgroundImage: { color: '200 20 20 255' } } } });
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1, { card: 0 });
+      const multiply = scratch.calls.find((c) => c.m === 'fillRect' && c.op === 'multiply');
+      expect(multiply?.fill).toBe('rgb(200,20,20)');
+      const splatter = calls.find((c) => c.m === 'drawImage' && c.a[0] === made[0]);
+      expect(splatter).toBeTruthy();
+      expect(splatter!.alpha).toBeCloseTo(0.35);
+    } finally { _setCanvasFactory(null); }
+  });
+
   it('tints the own-health scratch overlays with the health colour, matching the in-game screenshot at full health', () => {
     // Stock localplayerpanel.res's HealthbarTextureTop/Bottom (detail_scratches_top_1/bottom_1) carry no
     // drawColor of their own, but the owner's screenshot at full health shows them the same bright green

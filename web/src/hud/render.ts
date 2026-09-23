@@ -89,6 +89,12 @@ const DEAD_NAME_ALPHA = 0.5;
  * card's own infected_healthbar_bg_1 background, the Hunter card's
  * pz_healthbar frame, or the Modern preset (whose teammate card paints its
  * backgrounds with fillcolor and ships BackgroundImage as visible 0).
+ *
+ * The splatter is now an editable piece with its own drawColor tint
+ * (drawImageChild's own drawColor branch, below): SPLATTER_ALPHA multiplies
+ * on top of that tint's own alpha rather than standing in for it, so a
+ * player's chosen colour still shows only at the game's faint strength, the
+ * same way the tint and this alpha compose on the stock infected card.
  */
 const SPLATTER_ALPHA = 0.35;
 
