@@ -7,8 +7,9 @@ import { phaseFor, roundInProgress } from '../liveView.js';
 import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
-  decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET, INFECTED_MASK_OFFSET, SIDES_FLAG_OFFSET } from '../replayFormat.js';
+  decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET } from '../replayFormat.js';
 import { applyPush, errCode, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
+import { infectedMaskForHeader, rewriteHead } from '../replaySides.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -155,19 +156,12 @@ function sendSlice(
   if (start < rewriteEnd) {
     const headEnd = Math.min(cutoff, rewriteEnd);
     const head = readRange(path, start, headEnd);
-    const zeroFrom = Math.max(start, TOKEN_OFFSET) - start;
-    const zeroTo = Math.min(headEnd, TOKEN_END) - start;
-    if (zeroTo > zeroFrom) head.fill(0, zeroFrom, Math.min(zeroTo, head.length));
     // Older files (and a version 3 writer that could not resolve a side) say
     // nothing about which slots are infected. For a replay of a known match
     // the answer is in the database, so it is written into the header on the
     // wire: roster team plus the round's survivor side. A file that already
     // carries a mask keeps it; the writer saw the real teams.
-    if (infectedMask !== null && start === 0 && head.length >= HEADER_BYTES
-      && head[SIDES_FLAG_OFFSET] !== 1) {
-      head[INFECTED_MASK_OFFSET] = infectedMask & 0xff;
-      head[SIDES_FLAG_OFFSET] = 1;
-    }
+    rewriteHead(head, start, infectedMask);
     if (headEnd >= cutoff) return reply.send(head);
 
     // Header first, then the rest of the slice as a stream, so a closed file
@@ -197,29 +191,13 @@ function sendSlice(
 export function infectedMaskFor(
   db: DB, path: string, matchId: number, ordinal: number, half: number,
 ): number | null {
-  const round = db.prepare(
-    'SELECT surv_team FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?',
-  ).get(matchId, ordinal, half) as { surv_team: 'a' | 'b' } | undefined;
-  if (!round) return null;
-  const team = new Map(
-    (db.prepare('SELECT player_id, team FROM match_players WHERE match_id = ?')
-      .all(matchId) as { player_id: string; team: 'a' | 'b' }[])
-      .map((r) => [r.player_id, r.team] as const),
-  );
   let head: Buffer;
   try {
     head = readRange(path, 0, HEADER_BYTES);
   } catch {
     return null;
   }
-  const h = decodeHeader(head);
-  if (!h) return null;
-  let mask = 0;
-  for (let slot = 0; slot < h.slots.length; slot++) {
-    const t = team.get(h.slots[slot]);
-    if (t !== undefined && t !== round.surv_team) mask |= 1 << slot;
-  }
-  return mask;
+  return infectedMaskForHeader(db, head, matchId, ordinal, half);
 }
 
 /** How much earlier than the round row's `started_at` a file's own header
