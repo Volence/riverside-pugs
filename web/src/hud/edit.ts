@@ -64,6 +64,7 @@ export function hasOverrides(d: HudDesign): boolean {
     || Object.keys(d.styles).length > 0
     || Object.keys(d.images).length > 0
     || d.hideGameCrosshair === true
+    || d.crosshair !== DEFAULT_DESIGN.crosshair
     || d.preset !== DEFAULT_DESIGN.preset
     || d.aspect !== DEFAULT_DESIGN.aspect
     || d.font !== DEFAULT_DESIGN.font

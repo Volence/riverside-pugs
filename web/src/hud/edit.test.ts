@@ -67,6 +67,15 @@ describe('what counts as an edit', () => {
     expect(hasOverrides({ ...DEFAULT_DESIGN, hideGameCrosshair: true })).toBe(true);
   });
 
+  // A design whose only change is picking a crosshair (the default is
+  // 'none') still has to ask before a share link replaces it, or a reader
+  // who only set up a bundled or addon crosshair loses it silently.
+  it('counts a non-default crosshair choice as an override too', () => {
+    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'addon' })).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'bundle' })).toBe(true);
+    expect(hasOverrides({ ...DEFAULT_DESIGN, crosshair: 'none' })).toBe(false);
+  });
+
   it('resets an element to what a fresh design has for it', () => {
     const d = { ...DEFAULT_DESIGN, elements: { teamColumn: { gap: 40 }, chat: { x: 5 } } };
     expect(resetElement(d, 'teamColumn').elements.teamColumn).toEqual({ fit: true });
