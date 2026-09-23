@@ -209,6 +209,17 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'sourcetv_watch': {
+        // Worded as a connection match, never as an identity claim: a shared
+        // household or a LAN cafe looks exactly like one person spectating
+        // their own game.
+        const match = `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        return {
+          text: `📡 SourceTV spectator **${escapeName(e.spectatorName)}** is on the same connection as `
+            + `${this.name(e.steamid)}, who is playing match ${match}. Same connection is evidence, not proof.`,
+          color: COLOR.problem,
+        };
+      }
       case 'signon_drop': {
         // Known players get the full identity (both worlds); an unknown
         // steamid has never signed in and has no account to look up, so an

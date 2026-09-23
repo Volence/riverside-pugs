@@ -238,6 +238,38 @@ describe('admin feed', () => {
     expect(t.live()).toHaveLength(0);
   });
 
+  it('a SourceTV spectator on the same connection as a rostered player names both, links the match, and never claims the spectator IS the player', async () => {
+    publishAdminEvent({
+      kind: 'sourcetv_watch', matchId, serverId: 1, spectatorName: 'Watcher', steamid: IDS[2],
+    });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('**Watcher**');
+    expect(line).toContain('**player2**');
+    expect(line).toContain('same connection');
+    expect(line).toContain('evidence, not proof');
+    expect(line).toContain(`https://pug.test/match/${matchId}`);
+    expect(line).not.toMatch(/is player2/i);
+  });
+
+  it('SourceTV watch alerts ride the problems toggle', async () => {
+    setSetting(db, 'admin_feed_problems', '0');
+    publishAdminEvent({
+      kind: 'sourcetv_watch', matchId, serverId: 1, spectatorName: 'Watcher', steamid: IDS[2],
+    });
+    await feed.idle();
+    expect(t.live()).toHaveLength(0);
+  });
+
+  it('escapes a SourceTV spectator name, which the engine hands over unauthenticated', async () => {
+    publishAdminEvent({
+      kind: 'sourcetv_watch', matchId, serverId: 1, spectatorName: '*evil*', steamid: IDS[2],
+    });
+    await feed.idle();
+    const line = t.live()[0].payload.embeds[0].description ?? '';
+    expect(line).toContain('\\*evil\\*');
+  });
+
   it('a secret setting change never shows its value', async () => {
     logAdmin(db, ADMIN, 'setting', 'invite_code', { changed: true });
     await feed.idle();

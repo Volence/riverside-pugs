@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import type { LogEvent } from './logParse.js';
 import { hashIp } from './playerNetworks.js';
+import { publishAdminEvent } from './adminFeed.js';
 
 /**
  * Who watched, from which connection, and when.
@@ -108,9 +109,27 @@ export function sessionsForMatch(db: DB, matchId: number): SourceTvSession[] {
 }
 
 /**
- * Wired into src/server.ts next to player_net. Records the session and (Task
- * 3) posts the admin alert. Never on the critical path.
+ * Wired into src/server.ts next to player_net. Records the session and, on a
+ * join into a live match, alerts admins about any rostered player sharing
+ * that connection. Never on the critical path: recordSourceTv already
+ * happened by the time this looks for accounts to alert on, so a failure
+ * here never loses the session row.
  */
 export function onSourceTv(db: DB, serverId: number, ev: SourceTvEvent): void {
-  recordSourceTv(db, serverId, ev);
+  const { opened } = recordSourceTv(db, serverId, ev);
+  if (opened === undefined) return;
+
+  const row = db.prepare(
+    'SELECT match_id AS matchId, ip_hash AS ipHash, name FROM sourcetv_sessions WHERE id = ?',
+  ).get(opened) as { matchId: number | null; ipHash: string; name: string } | undefined;
+  if (!row || row.matchId === null) return;
+
+  const matchId = row.matchId;
+  const inMatch = db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?');
+  for (const account of likelyAccounts(db, row.ipHash)) {
+    if (!inMatch.get(matchId, account.steamid)) continue;
+    publishAdminEvent({
+      kind: 'sourcetv_watch', matchId, serverId, spectatorName: row.name, steamid: account.steamid,
+    });
+  }
 }

@@ -59,7 +59,15 @@ export type AdminEvent =
     signal:
       | { what: 'recent_ban'; vacBans: number; gameBans: number; daysSinceLastBan: number }
       | { what: 'banned_lender'; lenderId: string };
-  };
+  }
+  // A SourceTV spectator joined from the same connection (hashed IP) as a
+  // player rostered in the match live on that server. Published once, right
+  // after the join that opened the spectator's session, per steamid that
+  // matches: never for a spectator matching nobody, and never for a match
+  // that spectator is not rostered in. Evidence a connection is shared, not a
+  // claim the spectator is that player: a household or a LAN cafe looks the
+  // same as one person watching their own game.
+  | { kind: 'sourcetv_watch'; matchId: number; serverId: number; spectatorName: string; steamid: string };
 
 /** The settings toggle that silences each kind in the admin channel. */
 export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
@@ -76,6 +84,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   conduct_flag: 'admin_feed_conduct',
   lilac_flag: 'admin_feed_problems',
   steam_signal: 'admin_feed_problems',
+  sourcetv_watch: 'admin_feed_problems',
 };
 
 type Listener = (e: AdminEvent) => void;
