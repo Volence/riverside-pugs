@@ -34,6 +34,7 @@ function renderAt(search = '') {
   history.replaceState(null, '', `/admin/balance${search}`);
   mockAdmin.balancePatches.mockResolvedValue({ patches });
   mockAdmin.balanceCompare.mockResolvedValue(result);
+  mockAdmin.balanceMetric.mockResolvedValue({ metric: 'x', phase: 'all', trend: [], boundaries: [], perMap: [], examples: [] });
   return render(<LocationProvider><Compare /></LocationProvider>);
 }
 
@@ -108,12 +109,15 @@ describe('Compare', () => {
     await waitFor(() => expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('any'));
   });
 
-  it('opens the quick check stub on Enter', async () => {
+  it('opens the quick check on Enter', async () => {
     renderAt();
     await waitFor(() => screen.getByText('hunter.skeet_rate description'));
     const tr = screen.getByText('hunter.skeet_rate description').closest('tr')!;
     fireEvent.keyDown(tr, { key: 'Enter' });
-    expect(screen.getByText('Quick check')).toBeTruthy();
+    await waitFor(() => expect(mockAdmin.balanceMetric).toHaveBeenCalledWith(
+      expect.anything(), 'hunter.skeet_rate', 'all', expect.anything(),
+    ));
+    expect(document.querySelector('.balance-check')).toBeTruthy();
   });
 
   it('shows the older-metric-definition note on a side with older engine rounds', async () => {
