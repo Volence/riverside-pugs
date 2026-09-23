@@ -85,7 +85,7 @@ import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
-import { pruneLiveFiles } from './replayPush.js';
+import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { statsRoutes } from './routes/stats.js';
@@ -1120,11 +1120,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // superseded as soon as the pull job lands its final file, and the live
   // directory should not hold a day of rounds for nothing.
   const livePruneTimer = setInterval(() => {
-    try {
-      pruneLiveFiles(deps.db, deps.config.replayLiveDir, deps.config.replayDir, Date.now());
-    } catch (err) {
-      console.error('[replay] live file prune failed:', err);
-    }
+    pruneLiveFilesSafely(deps.db, deps.config.replayLiveDir, deps.config.replayDir, Date.now());
   }, 10 * 60 * 1000);
   livePruneTimer.unref();
 

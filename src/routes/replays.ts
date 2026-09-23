@@ -8,7 +8,7 @@ import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
   decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET, INFECTED_MASK_OFFSET, SIDES_FLAG_OFFSET } from '../replayFormat.js';
-import { applyPush, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
+import { applyPush, errCode, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -256,11 +256,16 @@ export async function replayRoutes(
       // exists to stop. Log only the error code and the match id, never the
       // error itself or its message, and answer with a fixed body that names
       // neither the token nor a path.
-      const code = (err as NodeJS.ErrnoException).code ?? 'unknown';
+      const code = errCode(err);
       console.error('[replays] push failed for match', live.id, 'code:', code);
       return reply.code(503).send({ error: 'live push is unavailable right now' });
     }
     if (result.status === 400 || result.status === 507) return reply.code(result.status).send({ error: result.error });
+    // A 409 carries its reason when there is one ('stale round'), so the
+    // plugin can tell a round the site will never take from a plain gap.
+    if (result.status === 409 && result.error) {
+      return reply.code(409).send({ length: result.length, error: result.error });
+    }
     return reply.code(result.status).send({ length: result.length });
   });
 

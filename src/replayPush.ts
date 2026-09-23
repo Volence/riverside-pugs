@@ -289,13 +289,37 @@ export function applyPush(
   return { status: 200, length: end };
 }
 
+/**
+ * What may be logged about a filesystem or database failure in this pipeline:
+ * the errno code, else the error's class name. Never the message, which for a
+ * filesystem error names the path, and every live path contains the token.
+ */
+export function errCode(err: unknown): string {
+  return (err as NodeJS.ErrnoException | null)?.code ?? (err as Error | null)?.name ?? 'unknown';
+}
+
+/**
+ * `pruneLiveFiles` for a timer: whatever it throws (a closed database, say) is
+ * logged as `errCode` and swallowed, so the timer keeps running.
+ */
+export function pruneLiveFilesSafely(db: DB, liveDir: string, replayDir: string, nowMs: number): void {
+  try {
+    pruneLiveFiles(db, liveDir, replayDir, nowMs);
+  } catch (err) {
+    console.error('[replay] live file prune failed:', errCode(err));
+  }
+}
+
 const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
 
 /** A live file untouched this long is deleted whatever its match is doing. */
 export const LIVE_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** The header's own `startedUnix`, or null when the file is too short to hold
- *  one or its magic does not match. Only ever used to compare a live copy
+ *  one. The magic is not checked: both files compared here were written by
+ *  this pipeline (a pushed copy whose first batch passed `decodeHeader`, or
+ *  a pulled final file), so the bytes at STARTED_UNIX_OFFSET are read as they
+ *  are. Only ever used to compare a live copy
  *  against a same-named file in the replay directory: the file name alone
  *  does not identify a round (see the module doc comment on `applyPush`), so
  *  a byte-count comparison alone is not enough to call one the successor of
@@ -367,7 +391,9 @@ export function pruneLiveFiles(db: DB, liveDir: string, replayDir: string, nowMs
       unlinkSync(path);
       removed++;
     } catch (err) {
-      console.error('[replay] could not delete a live file:', (err as Error).message);
+      // Never the message: an unlink error's message carries the path, and
+      // the path is pug_<token>_<ordinal>_<half>.rpl.
+      console.error('[replay] could not delete a live file:', errCode(err));
     }
   }
   return removed;
