@@ -50,6 +50,13 @@ describe('pace metrics', () => {
     expect(run('pace.si_damage_per_min', input({ replay }))).toBeNull();
   });
 
+  it('SI damage per minute never goes negative when the drain stat outruns the damage stat', () => {
+    const out = run('pace.si_damage_per_min', input({
+      replay, hasStats: true, stats: stats([['i1', 'damage_as_si', 100], ['i1', 'dmg_to_incapped', 250]]),
+    }))!;
+    expect(out.all!.num).toBe(0);
+  });
+
   it('friendly fire per minute is weighted by damage', () => {
     const out = run('pace.ff_per_min', input({ replay, events: [ev('ff', 's1', 1000, 's2', 40)] }))!;
     expect(out.all!.num).toBe(40);

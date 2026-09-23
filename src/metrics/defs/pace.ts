@@ -6,12 +6,14 @@ import { liveSurvivors } from '../timeline.js';
 
 export const defs: MetricDef[] = [
   {
-    id: 'pace.si_damage_per_min', group: 'pace', version: 2,
+    id: 'pace.si_damage_per_min', group: 'pace', version: 3,
     description: 'Damage special infected dealt to standing survivors per playing minute.',
     compute: (c) => {
       if (!c.hasStats || !c.timeline) return null;
       const m = c.timeline.minutes('all');
-      const dmg = sideStat(c, 'infected', 'damage_as_si') - sideStat(c, 'infected', 'dmg_to_incapped');
+      // Clamped at 0: the two stats are counted separately by the plugin and
+      // can disagree on a round, which must not give a negative rate.
+      const dmg = Math.max(0, sideStat(c, 'infected', 'damage_as_si') - sideStat(c, 'infected', 'dmg_to_incapped'));
       return m > 0 ? { all: { num: dmg, den: m } } : null;
     },
   },
