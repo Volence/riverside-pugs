@@ -6,9 +6,14 @@ the teammate card's item icons, which are not textures but glyphs of the game's
 ToolBox icon font (resource/toolbox.vfont, loose in the install, not in pak01),
 drawn to PNGs the same way, and the weapon selection's icons, which are cells of
 one texture (vgui/hud/iconsheet) that scripts/mod_textures.txt cuts out.
+And the stock HUD's two text faces, Trade Gothic and Trade Gothic Bold
+(resource/tg.vfont and tgb.vfont, loose in the install), decoded to TrueType so
+the preview draws labels in the game's own letters, with a small table of each
+face's metrics so the preview sizes text as the game does without parsing a
+font at runtime.
 
 Preview only. These files never enter a build: build.ts does not import them and
-a test says so. The list below is the only way a texture gets in here, and the
+a test says so, and another that no download holds a byte of the fonts. The list below is the only way a texture gets in here, and the
 script refuses to write more than 1 MB in total so a mistake cannot bloat the
 page. Run by hand, from the repo root:
 
@@ -16,13 +21,15 @@ page. Run by hand, from the repo root:
 
 Requires the game installed at the Steam path below. Never run this on a server.
 """
-import io, json, math, os, re, sys
+import io, json, math, os, re, struct, sys
 import vpk
 from PIL import Image, ImageDraw, ImageFont
 from srctools.vtf import VTF
 
 PAK = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/pak01_dir.vpk')
 VFONT = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/resource/toolbox.vfont')
+RESOURCE = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/resource')
+ROBOTO = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'base', 'fonts', 'RobotoCondensed-Regular.ttf')
 MOD_TEXTURES = os.path.expanduser('~/.steam/steam/steamapps/common/left 4 dead/left4dead/scripts/mod_textures.txt')
 OUT = os.path.join(os.path.dirname(__file__), '..', 'web', 'src', 'hud', 'art')
 CAP = 1_000_000
@@ -77,6 +84,24 @@ EQUIP = {
     'icon/equip/medkit': 'icon_equip_medkit',
     'icon/equip/pills': 'icon_equip_pills',
 }
+# The stock HUD's text faces: the name clientscheme.res gives each -> its vfont
+# in the install and the file it is written to here. The name must be the one
+# inside the font (its full name, which GDI matches as well as the family), or
+# the scheme would not find it in game either; export_fonts checks that.
+FONTS = {
+    'Trade Gothic': ('tg.vfont', 'font-trade-gothic.ttf'),
+    'Trade Gothic Bold': ('tgb.vfont', 'font-trade-gothic-bold.ttf'),
+}
+# Faces the schemes name that are not in the install: Windows' own. Their
+# metrics (unitsPerEm, usWinAscent, usWinDescent) are the Windows fonts'
+# published values; the preview draws them in the viewer's own copy, or a
+# fallback, and only needs these to size the text as the game would.
+SYSTEM_METRICS = {
+    'Verdana': (2048, 2059, 430),
+    'Tahoma': (2048, 2049, 423),
+    'Arial': (2048, 1854, 434),
+}
+
 # Every glyph is drawn into the font's whole cell (ascent plus descent) at this
 # many pixels tall, so the preview can scale a PNG to the label's font tall and
 # have the glyph sit where the font puts it inside that height.
@@ -134,6 +159,76 @@ def export_glyphs() -> tuple[dict[str, bytes], dict[str, float], float]:
         advances[name] = round(adv / cell, 4)
         print('  %-48s %4dx%-4d %6d bytes  (%r)' % (name, img.width, img.height, len(buf.getvalue()), ch))
     return pngs, advances, round(font.getlength(' ') / cell, 4)
+
+def sfnt_tables(ttf: bytes) -> dict[str, bytes]:
+    """A TrueType file's tables by tag, from its table directory."""
+    count = struct.unpack('>H', ttf[4:6])[0]
+    tables: dict[str, bytes] = {}
+    for i in range(count):
+        tag, _sum, off, length = struct.unpack('>4sIII', ttf[12 + 16 * i:28 + 16 * i])
+        tables[tag.decode('latin-1')] = ttf[off:off + length]
+    return tables
+
+def font_names(ttf: bytes) -> set[str]:
+    """The Windows family (name id 1) and full (id 4) names in a font."""
+    t = sfnt_tables(ttf)['name']
+    _fmt, count, strings = struct.unpack('>HHH', t[:6])
+    out: set[str] = set()
+    for i in range(count):
+        pid, _eid, _lid, nid, length, off = struct.unpack('>HHHHHH', t[6 + 12 * i:18 + 12 * i])
+        if pid == 3 and nid in (1, 4):
+            out.add(t[strings + off:strings + off + length].decode('utf-16-be'))
+    return out
+
+def font_metrics(ttf: bytes) -> dict:
+    """
+    What the preview needs to size text as GDI does: unitsPerEm (head),
+    usWinAscent and usWinDescent (OS/2), and the VDMX table's rows when the
+    font has one. VGUI's tall is a cell height, and for a cell height GDI
+    picks the largest ppem whose VDMX yMax - yMin fits it, taking the cell's
+    ascent and descent from that row; only a font without VDMX falls back to
+    scaling the em by winAscent + winDescent. Only the 1:1 ratio group is
+    kept, the one a square-pixel screen uses; rows are flattened to
+    [ppem, yMax, yMin, ...].
+    """
+    t = sfnt_tables(ttf)
+    upem = struct.unpack('>H', t['head'][18:20])[0]
+    win_ascent, win_descent = struct.unpack('>HH', t['OS/2'][74:78])
+    m: dict = {'unitsPerEm': upem, 'winAscent': win_ascent, 'winDescent': win_descent}
+    v = t.get('VDMX')
+    if v:
+        _ver, _recs, ratios = struct.unpack('>HHH', v[:6])
+        for i in range(ratios):
+            charset, x, y0, y1 = struct.unpack('>BBBB', v[6 + 4 * i:10 + 4 * i])
+            if (x, y0, y1) == (0, 0, 0) or x == 1 and y0 <= 1 <= y1:
+                off = struct.unpack('>H', v[6 + 4 * ratios + 2 * i:8 + 4 * ratios + 2 * i])[0]
+                n = struct.unpack('>H', v[off:off + 2])[0]
+                rows = [struct.unpack('>Hhh', v[off + 4 + 6 * j:off + 10 + 6 * j]) for j in range(n)]
+                m['vdmx'] = [x for row in rows for x in row]
+                break
+    return m
+
+def export_fonts() -> tuple[dict[str, bytes], dict[str, str], dict[str, dict]]:
+    """
+    The stock faces as TrueType files, their file names, and the metrics of
+    every face a scheme names: the stock two, Roboto Condensed (the Modern
+    preset's, the file the build already ships) and Windows' own.
+    """
+    files: dict[str, bytes] = {}
+    names: dict[str, str] = {}
+    metrics: dict[str, dict] = {}
+    for face, (vfont, fname) in FONTS.items():
+        ttf = decode_vfont(open(os.path.join(RESOURCE, vfont), 'rb').read())
+        if face not in font_names(ttf):
+            sys.exit('refusing: %s is named %s inside, not %r' % (vfont, sorted(font_names(ttf)), face))
+        files[fname] = ttf
+        names[face] = fname
+        metrics[face] = font_metrics(ttf)
+        print('  %-48s %6d bytes  (%s, %s)' % (fname, len(ttf), vfont, 'VDMX' if 'vdmx' in metrics[face] else 'no VDMX'))
+    metrics['Roboto Condensed'] = font_metrics(open(ROBOTO, 'rb').read())
+    for face, (upem, asc, desc) in SYSTEM_METRICS.items():
+        metrics[face] = {'unitsPerEm': upem, 'winAscent': asc, 'winDescent': desc}
+    return files, names, metrics
 
 def texture_cells(text: str) -> dict[str, dict[str, str]]:
     """
@@ -202,14 +297,21 @@ def main() -> int:
         if total > CAP:
             sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, name))
         exported[name] = data
-    # art.ts bundles every PNG in the folder (import.meta.glob), not just the
-    # ones the index names, so a PNG left over from an older list would ship
-    # to the page and could push it past the cap. The folder is cleared of
-    # PNGs before the new set is written.
+    font_files, font_names_, metrics = export_fonts()
+    for fname, data in font_files.items():
+        total += len(data)
+        if total > CAP:
+            sys.exit('refusing: total exceeds %d bytes at %s' % (CAP, fname))
+    # art.ts bundles every PNG and TTF in the folder (import.meta.glob), not
+    # just the ones the index names, so a file left over from an older list
+    # would ship to the page and could push it past the cap. The folder is
+    # cleared of both before the new set is written.
     os.makedirs(OUT, exist_ok=True)
     for old in os.listdir(OUT):
-        if old.lower().endswith('.png'):
+        if old.lower().endswith(('.png', '.ttf')):
             os.remove(os.path.join(OUT, old))
+    for fname, data in font_files.items():
+        with open(os.path.join(OUT, fname), 'wb') as f: f.write(data)
     index: dict[str, str] = {}
     for name, data in exported.items():
         fname = name.replace('/', '-') + '.png'
@@ -230,9 +332,22 @@ def main() -> int:
               'export const EQUIP_ICON_SIZE: Record<string, [number, number]> = {']
     for k in sorted(equip_sizes): lines.append("  '%s': [%d, %d]," % (k, *equip_sizes[k]))
     lines += ['};', '',
+              '// The stock text faces: the name clientscheme.res gives each -> its TrueType file in this folder.',
+              'export const FONT_FILES: Record<string, string> = {']
+    for k in sorted(font_names_): lines.append("  '%s': '%s'," % (k, font_names_[k]))
+    lines += ['};', '',
+              '// Every face a scheme names: unitsPerEm, usWinAscent and usWinDescent, and the VDMX rows',
+              '// (ppem, yMax, yMin, flattened) for a face that has them. fonts.ts turns a cell height into a size.',
+              'export interface FontMetrics { unitsPerEm: number; winAscent: number; winDescent: number; vdmx?: number[] }',
+              'export const FONT_METRICS: Record<string, FontMetrics> = {']
+    for k in sorted(metrics):
+        m = metrics[k]
+        vd = (', vdmx: [%s]' % ','.join(str(x) for x in m['vdmx'])) if 'vdmx' in m else ''
+        lines.append("  '%s': { unitsPerEm: %d, winAscent: %d, winDescent: %d%s }," % (k, m['unitsPerEm'], m['winAscent'], m['winDescent'], vd))
+    lines += ['};', '',
               'export const ART_TOTAL_BYTES = %d;' % total, '']
     with open(os.path.join(OUT, 'index.ts'), 'w') as f: f.write('\n'.join(lines))
-    print('%d files, %d bytes total' % (len(index), total))
+    print('%d files, %d bytes total' % (len(index) + len(font_files), total))
     return 0
 
 if __name__ == '__main__':

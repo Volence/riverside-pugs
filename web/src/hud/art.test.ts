@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE, EQUIP_ICON_SIZE } from './art/index';
+import { ART, ART_TOTAL_BYTES, ICON_ADVANCE, ICON_SPACE, EQUIP_ICON_SIZE, FONT_FILES, FONT_METRICS } from './art/index';
 import { artUrl, normaliseMaterial, NEEDED_MATERIALS, ITEM_ICONS, EQUIP_ICONS } from './art';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
@@ -48,6 +48,28 @@ describe('the art index', () => {
     }
     expect(EQUIP_ICON_SIZE['icon/equip/pumpshotgun']).toEqual([192, 64]);
     for (const m of EQUIP_ICONS.slice(1)) expect(EQUIP_ICON_SIZE[m], m).toEqual([64, 64]);
+  });
+  it('lists the stock fonts, decoded from the game\'s vfonts, under the names clientscheme.res gives them', () => {
+    // tg.vfont's full name is "Trade Gothic" (its family is "TradeGothic");
+    // tgb.vfont's family and full name are both "Trade Gothic Bold". GDI
+    // matches a face by either, so these are the names the scheme uses.
+    expect(FONT_FILES).toEqual({ 'Trade Gothic': 'font-trade-gothic.ttf', 'Trade Gothic Bold': 'font-trade-gothic-bold.ttf' });
+    for (const file of Object.values(FONT_FILES)) expect(existsSync(resolve(fileURLToPath(new URL('./art/', import.meta.url)), file)), file).toBe(true);
+  });
+  it('has the metrics of every face a scheme names, so no font is parsed at runtime', () => {
+    for (const face of ['Trade Gothic', 'Trade Gothic Bold', 'Roboto Condensed', 'Verdana', 'Tahoma', 'Arial']) {
+      const m = FONT_METRICS[face];
+      expect(m, face).toBeDefined();
+      expect(m.unitsPerEm, face).toBeGreaterThan(0);
+      expect(m.winAscent + m.winDescent, face).toBeGreaterThan(m.unitsPerEm);
+    }
+    // The stock faces carry a VDMX table, which GDI reads to choose the
+    // size for a cell height: rows of ppem, yMax, yMin. Trade Gothic Bold at
+    // 32 ppem is 32 up and 8 down, a 40-pixel cell (probe: HudAmmo at 1080p).
+    const vdmx = FONT_METRICS['Trade Gothic Bold'].vdmx!;
+    const at32 = vdmx.findIndex((_, i) => i % 3 === 0 && vdmx[i] === 32);
+    expect(vdmx.slice(at32, at32 + 3)).toEqual([32, 32, -8]);
+    expect(FONT_METRICS['Roboto Condensed'].vdmx).toBeUndefined();
   });
   it('stays under the size cap', () => {
     expect(ART_TOTAL_BYTES).toBeLessThan(1_000_000);
@@ -97,6 +119,29 @@ describe('the art boundary', () => {
     expect(modules).toEqual(['../crosshair/draw.ts', '../crosshair/model.ts', '../crosshair/vpk.ts', '../vpk/index.ts', '../vpk/zip.ts', 'base/index.ts', 'build.ts', 'children.ts', 'design.ts', 'elements.ts',
       'kv.ts', 'limits.ts', 'slots.ts', 'textures.ts', 'units.ts']);
   });
+
+  // The exported fonts are Valve's too. A download carries the player's own
+  // choice of Roboto Condensed and never a byte of Trade Gothic: no emitted
+  // file is named like one, and none holds the same bytes.
+  const exportedFonts = Object.values(FONT_FILES).map((f) => new Uint8Array(readFileSync(resolve(here, 'art', f))));
+  const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+  for (const preset of ['stock', 'modern'] as const) {
+    for (const font of ['preset', 'roboto'] as const) {
+      it(`a ${preset} download in the ${font} font never contains an exported font`, () => {
+        const realFonts = {
+          regular: new Uint8Array(readFileSync(resolve(here, 'base/fonts/RobotoCondensed-Regular.ttf'))),
+          bold: new Uint8Array(readFileSync(resolve(here, 'base/fonts/RobotoCondensed-Bold.ttf'))),
+        };
+        const d: HudDesign = { ...structuredClone(DEFAULT_DESIGN), preset, font };
+        const files = buildHud(d, { fonts: realFonts });
+        expect(exportedFonts.length).toBe(2);
+        for (const f of files) {
+          expect(f.path.toLowerCase(), f.path).not.toMatch(/trade.?gothic|font-trade|\.vfont$/);
+          for (const x of exportedFonts) expect(same(f.data, x), f.path).toBe(false);
+        }
+      });
+    }
+  }
 
   for (const f of modules) {
     it(`${f} never references the art`, () => {
