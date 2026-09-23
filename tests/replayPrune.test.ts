@@ -210,6 +210,47 @@ describe('planPrune', () => {
   });
 });
 
+describe('with R2 configured (requireOffloaded)', () => {
+  const markOffloaded = (filename: string) => db.prepare(
+    `UPDATE match_replays SET r2_key = 'replays/k', r2_at = datetime('now') WHERE filename = ?`,
+  ).run(filename);
+
+  it('never selects a replay that has no r2_key, by window or by floor', () => {
+    // two old rows past the retention window, one with r2_key, one without; free bytes below the floor
+    const OFFLOADED_NAME = seedReplay(120, 1, 5e9);
+    const notOffloaded = seedReplay(120, 2, 5e9);
+    markOffloaded(OFFLOADED_NAME);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const plan = planPrune(db, dir, new Date(), 90, 0, 10e9, { requireOffloaded: true });
+    warn.mockRestore();
+    expect(plan.map((c) => c.filename)).toEqual([OFFLOADED_NAME]);
+    expect(plan.map((c) => c.filename)).not.toContain(notOffloaded);
+  });
+
+  it('still selects offloaded replays for the floor, oldest first', () => {
+    // All three rows are inside the retention window (not old enough to be
+    // selected by age), all offloaded, and free space is below the floor, so
+    // only the floor sweep can select them, oldest first, exactly as the
+    // non-R2 floor sweep test above does.
+    const first = seedReplay(30, 1, 5e9);
+    const second = seedReplay(20, 2, 5e9);
+    const third = seedReplay(10, 3, 5e9);
+    [first, second, third].forEach(markOffloaded);
+    const plan = planPrune(db, dir, new Date(), 90, 1e9, 10e9, { requireOffloaded: true });
+    expect(plan.map((c) => c.filename)).toEqual([first, second]);
+  });
+
+  it('behaves exactly as before without the option', () => {
+    // Same fixture as the first test: one offloaded row, one not, both past
+    // the retention window. With no opts, r2_key is irrelevant and both go.
+    const offloaded = seedReplay(120, 1, 5e9);
+    const notOffloaded = seedReplay(120, 2, 5e9);
+    markOffloaded(offloaded);
+    const plan = planPrune(db, dir, new Date(), 90, 500e9, 10e9);
+    expect(plan.map((c) => c.filename).sort()).toEqual([notOffloaded, offloaded].sort());
+  });
+});
+
 describe('prunePlan', () => {
   it('deletes the files and marks the rows, keeping the rows themselves', () => {
     const name = seedReplay(120, 1);
