@@ -628,6 +628,9 @@ export default function Hud() {
    */
   const onContextMenu = (e: MouseEvent) => {
     e.preventDefault();
+    // A right-click in the middle of a left press or drag would reselect
+    // under the drag and open a menu over it; the drag goes on instead.
+    if (press.current) return;
     const d = current.current;
     const { ux, uy } = pointerUnits(e);
     const hit = hitAt(d, side, cardState, ux, uy);

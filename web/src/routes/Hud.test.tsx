@@ -867,4 +867,17 @@ describe('Hud page', () => {
     fireEvent.click(undoBtn());
     expect(x().value).toBe('10');
   });
+
+  it('ignores a right-click while a left drag is under way', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454);
+    fireEvent.pointerDown(canvas, { clientX: 24, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.pointerMove(canvas, { clientX: 34, clientY: 454, pointerId: 1, altKey: true });
+    fireEvent.contextMenu(canvas, { clientX: 30, clientY: 300 });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.pointerUp(canvas, { clientX: 34, clientY: 454, pointerId: 1, altKey: true });
+    expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
+  });
 });
