@@ -18,7 +18,7 @@ import { elementById } from './elements';
 import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, type CardChild } from './build';
 import { teamChild } from './children';
 import { unionBox, CORNERS, type Handle } from './guides';
-import type { Selection } from './selection';
+import { elementFrame, type Selection } from './selection';
 
 /** Keeps at least `min` units of a span on screen, whichever side it drifts to. */
 export function clampSpan(v: number, size: number, extent: number, min: number): number {
@@ -420,10 +420,13 @@ export function alignElements(design: HudDesign, ids: string[], how: Align): Hud
 /**
  * Scale an element by a corner handle: one proportional factor from the
  * drag, applied to the scale the gesture started at, rounded to 0.01 and
- * clamped to the validator's 0.5..2. The opposite corner stays put, so a
- * left or top corner also moves the element by the size it gained, read
- * back from elementRect at the new scale. A right or bottom corner leaves
- * the position alone, so an element still on its file anchor keeps it.
+ * clamped to the validator's 0.5..2. `start.rect` is the element's frame
+ * (selection.ts's elementFrame, where its handles sit), and the frame's
+ * opposite corner stays put: a left or top corner moves the element by the
+ * size it gained, read back from the generator at the new scale. A right or
+ * bottom corner leaves an element's position alone, so one still on its file
+ * anchor keeps it; only the Teammates, whose frame slides as it scales,
+ * move from one.
  */
 export function scaleElement(
   design: HudDesign, id: string, start: { rect: Box; scale: number }, handle: Handle, dx: number, dy: number,
@@ -433,10 +436,17 @@ export function scaleElement(
   const o = design.elements[id] ?? {};
   const scale = clampOverride('scale', Math.round(start.scale * cornerFactor(start.rect, handle, dx, dy) * 100) / 100);
   const next: HudDesign = { ...design, elements: { ...design.elements, [id]: { ...o, scale } } };
-  if (!handle.includes('w') && !handle.includes('n')) return next;
-  const r = elementRect(next, id, next.aspect);
+  // Where the opposite corner of the frame went at the new scale, measured
+  // back from the generator: an element's own corner moves only by what it
+  // grew, but the Teammates' cards scale about their container's origin, so
+  // their frame slides even from a right or bottom corner.
+  const f = elementFrame(next, id);
   const a = anchorOf(start.rect, handle);
-  return placeElement(next, id, handle.includes('w') ? a.x - r.w : start.rect.x, handle.includes('n') ? a.y - r.h : start.rect.y);
+  const sx = a.x - (handle.includes('w') ? f.x + f.w : f.x);
+  const sy = a.y - (handle.includes('n') ? f.y + f.h : f.y);
+  if (Math.abs(sx) < 0.5 && Math.abs(sy) < 0.5) return next;
+  const r = elementRect(next, id, next.aspect);
+  return placeElement(next, id, r.x + sx, r.y + sy);
 }
 
 /**

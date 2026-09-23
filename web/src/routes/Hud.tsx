@@ -26,7 +26,7 @@ import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } fro
 import {
   NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
-  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions,
+  selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions, elementFrame,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
 } from '../hud/selection';
 import { ContextMenu } from './hud/ContextMenu';
@@ -449,9 +449,10 @@ export default function Hud() {
     if (sel.kind === 'elements' && sel.ids.length === 1) {
       const id = sel.ids[0];
       const { x, y, w, h } = elementRect(d, id, d.aspect);
+      // A corner scales from the frame the handles sit on (the Teammates' drawn cards), so the corner follows the pointer.
       return elementById(id)!.resize === 'free'
         ? { kind: 'resizeElement', id, handle, start: { x, y, w, h } }
-        : { kind: 'scaleElement', id, handle, start: { x, y, w, h }, scale: d.elements[id]?.scale ?? 1 };
+        : { kind: 'scaleElement', id, handle, start: elementFrame(d, id), scale: d.elements[id]?.scale ?? 1 };
     }
     if (sel.kind === 'children') {
       const starts = startsOf(d, sel.names);

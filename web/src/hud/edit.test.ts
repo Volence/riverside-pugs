@@ -7,6 +7,7 @@ import {
 } from './edit';
 import { DEFAULT_DESIGN } from './design';
 import { teamCardRects, elementRect, cardChild } from './build';
+import { elementFrame } from './selection';
 
 describe('nudge', () => {
   it('starts from the base position the first time', () => {
@@ -305,6 +306,22 @@ describe('element edits', () => {
     expect(left.elements.progressBar).toEqual({ x: 10, y: 250 });
     const top = alignElements(DEFAULT_DESIGN, ['chat', 'progressBar'], 'top');
     expect(top.elements.chat).toEqual({ x: 10, y: 250 });
+  });
+
+  // The Teammates' handles sit on their drawn cards, not on the container
+  // (which starts left of card 1 and hangs off the bottom), so the factor
+  // and the corner that stays put are both the cards'.
+  // Moved off the left edge first, where the on-screen clamp would stop the
+  // container going the 3 units left the cards' corner needs.
+  it('scales the Teammates from a corner of their drawn cards, the opposite corner staying put', () => {
+    const D = placeElement(DEFAULT_DESIGN, 'teamColumn', 100, 405);
+    const frame = elementFrame(D, 'teamColumn');
+    const next = scaleElement(D, 'teamColumn', { rect: frame, scale: 1 }, 'ne', frame.w * 0.2, 0);
+    expect(next.elements.teamColumn?.scale).toBe(1.2);
+    const after = elementFrame(next, 'teamColumn');
+    expect(Math.abs(after.x - frame.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.y + after.h - (frame.y + frame.h))).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.w - frame.w * 1.2)).toBeLessThanOrEqual(1);
   });
 
   it('scales an element by a corner, proportionally, from the opposite corner, clamped 0.5 to 2', () => {

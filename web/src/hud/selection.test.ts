@@ -6,8 +6,9 @@ import { withTeamDir, patchChild } from './edit';
 import {
   NONE, TEAMMATES, hitAt, targetOf, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handleAt, pieceTargets, sectionTargets,
-  pieceGuideToScreen, menuActions, drawnPieces, type Selection, type Mods,
+  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, type Selection, type Mods,
 } from './selection';
+import { unionBox } from './guides';
 
 const D = DEFAULT_DESIGN;
 const FREE = withTeamDir(DEFAULT_DESIGN, 'free');
@@ -165,6 +166,22 @@ describe('what the canvas draws for a selection', () => {
 
   it('frames the Free teammates as their three cards, not the screen', () => {
     expect(selectionFrames(FREE, TEAMMATES)).toEqual(teamCardRects(FREE, FREE.aspect).slice(0, 3));
+  });
+
+  // Stock's container hangs 25 units off the bottom of the screen at r75,
+  // so the Teammates are framed by the three cards the preview draws.
+  it('frames the Teammates by their drawn cards, on screen, with every corner handle on screen', () => {
+    const cards = teamCardRects(D, D.aspect).slice(0, 3);
+    const box = selectionBox(D, TEAMMATES)!;
+    expect(box).toEqual(unionBox(cards.map(({ x, y, w, h }) => ({ x, y, w, h }))));
+    expect(box.y + box.h).toBeLessThanOrEqual(480);
+    for (const h of handlesFor(D, TEAMMATES)) {
+      const p = handlePoint(box, h);
+      expect(p.y, h).toBeLessThanOrEqual(480);
+      expect(p.y, h).toBeGreaterThanOrEqual(0);
+    }
+    expect(elementFrame(D, 'teamColumn')).toEqual(box);
+    expect(elementFrame(D, 'chat')).toEqual(selectionBox(D, { kind: 'elements', ids: ['chat'] }));
   });
 
   it("boxes several pieces in the card they were picked in", () => {

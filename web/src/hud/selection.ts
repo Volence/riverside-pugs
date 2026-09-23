@@ -249,11 +249,24 @@ export function selectedIds(sel: Selection): string[] {
   return sel.kind === 'none' ? [] : ['teamColumn'];
 }
 
-/** One outline per selected thing as drawn: an element's rect, the Free Teammates' cards, a card, a piece in every card. */
+/**
+ * The box one element is drawn in, what its outline and corner handles sit
+ * on. Outside Free the Teammates are framed by their drawn cards, not their
+ * container: stock's container starts left of card 1 and is 100 tall at
+ * r75, so it hangs 25 units off the bottom of the screen with its handles.
+ * In Free this is the screen, which has no handles. Anything else is its
+ * own rect.
+ */
+export function elementFrame(design: HudDesign, id: string): Box {
+  if (id === 'teamColumn' && !isFreeTeam(design)) return unionBox(drawnCards(design))!;
+  return plain(elementRect(design, id, design.aspect));
+}
+
+/** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, a card, a piece in every card. */
 export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
   switch (sel.kind) {
     case 'none': return [];
-    case 'elements': return sel.ids.flatMap((id) => sectionRects(design, id));
+    case 'elements': return sel.ids.flatMap((id) => (id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [elementFrame(design, id)]));
     case 'card': return [plain(teamCardRects(design, design.aspect)[sel.card])];
     case 'children':
       return drawnCards(design).flatMap((c) => childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)
