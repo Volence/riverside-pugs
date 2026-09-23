@@ -227,6 +227,17 @@ describe('teammate card children on the canvas', () => {
     expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 11, c.y + 13)).toEqual({ name: 'Head', card: 1 });
   });
 
+  it('skips the blank Status text and picks the splatter under it', () => {
+    const c = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect)[2];
+    // (105, 6) in the card is Status text's own box (top right), but its labelText is blank in
+    // every preview state: it is skipped as a hit target, and the splatter under it wins instead
+    // of the point meaning nothing there, which used to pick an invisible label.
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 105, c.y + 6)).toEqual({ name: 'BackgroundImage', card: 2 });
+    // A label that does draw something is still hit on its whole box, not just its drawn text: a
+    // short name leaves most of Name's 120-wide box blank, and a click there still picks Name.
+    expect(childAt(DEFAULT_DESIGN, 'healthy', c.x + 112, c.y + 30)).toEqual({ name: 'Name', card: 2 });
+  });
+
   it('never picks a hidden child, decoration that is hidden too, or anything outside the cards', () => {
     const c = card2();
     // Hiding the portrait alone still leaves the splatter under it, the new lowest-priority target.

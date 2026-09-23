@@ -16,7 +16,7 @@ import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { drawPanel, childRects, hiddenInState, type CardState } from './render';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, type CardState } from './render';
 import { DEFAULT_STATE, drawCrosshair, type CrosshairState } from '../crosshair/draw';
 import { teamChild } from './children';
 
@@ -88,8 +88,19 @@ export function hitTest(design: HudDesign, side: Side, ux: number, uy: number): 
  * piece there is picked instead of leaving the point to mean the card, so
  * the splatter is reachable by a plain click, not only from Layers. The
  * card background is never a target either way, since it carries no
- * registry entry (`teamChild` returns nothing for it). The rects come from
- * the generated tree through childRects, like everything the canvas draws.
+ * registry entry (`teamChild` returns nothing for it). Nor is a label with
+ * nothing drawn in it (the stock and Modern Status text, blank in every
+ * preview state): a click cannot land on words that are not there, so it
+ * counts for neither `best` nor `decor`, and the point falls through to
+ * whatever real piece or decor is under it instead (labelDrawsNothing, in
+ * render.ts). A label that does draw something, though, still hits on its
+ * whole box, not just its drawn text's own width: Name's box is 120 wide
+ * and a short name leaves most of it blank, but measuring real text extent
+ * needs a canvas context this pure hit test does not have (and should not
+ * gain, matching every other file in Phase 1, which measures nothing of
+ * its own), and a label's box is what every other piece's hit rect already
+ * is, its full box, not its drawn content's. The rects come from the
+ * generated tree through childRects, like everything the canvas draws.
  */
 export function childAt(
   design: HudDesign, state: CardState, ux: number, uy: number,
@@ -103,6 +114,7 @@ export function childAt(
     for (const r of childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)) {
       const def = teamChild(r.name);
       if (!def || !r.visible || hiddenInState('teamColumn', r.name, state) || !inside(r, ux, uy)) continue;
+      if (labelDrawsNothing(design, 'teamColumn', r.name, { state, card: i })) continue;
       const area = r.w * r.h;
       if (def.role === 'decor') { if (!decor || area < decor.area) decor = { name: r.name, card: i, area }; continue; }
       if (!best || area < best.area) best = { name: r.name, card: i, area };

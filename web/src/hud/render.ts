@@ -386,6 +386,25 @@ function sampleText(n: KvNode, opts: DrawOpts): string {
 }
 
 /**
+ * Whether a teammate-card child draws no text at all in the preview: a
+ * label (Status, in both presets) whose own labelText is blank and has no
+ * stand-in of its own (unlike Name, which falls back to a sample name, or
+ * HealthNumber, whose labelText is the literal "%HealthNumber%" token, so
+ * neither is ever blank). Items is a label too but draws stand-in icons
+ * regardless of its own text, so it is never counted empty. Every other
+ * kind (image, bar) always draws something. mock.ts's childAt uses this so
+ * a click cannot land on words that are not there: an empty label is not a
+ * hit target, so the card's own dead space falls through to whatever real
+ * piece or decor sits under it instead. The row is still there in Layers,
+ * which needs no drawn text to click.
+ */
+export function labelDrawsNothing(design: HudDesign, panelId: string, name: string, opts: DrawOpts): boolean {
+  const n = kvFind(buildTrees(design)(PANEL_FILE[panelId]), [name]);
+  if (!n || kindOf(n) !== 'label' || n.key.toLowerCase() === 'items') return false;
+  return !sampleText(n, opts);
+}
+
+/**
  * The teammate's item icons are glyphs in a Valve icon font the page cannot
  * ship, so the preview draws two neutral outlines in their place, a medkit
  * and a pill bottle, each one icon tall at the label's font size: enough to

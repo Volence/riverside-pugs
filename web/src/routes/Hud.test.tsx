@@ -580,6 +580,15 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('36');
   });
 
+  it('picks the splatter under a blank label, not the label, at the top right of a card', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    // Card 3 (Zoey) is at (293, 441): (398, 447) is card-relative (105, 6), Status text's own box,
+    // but Status draws no text in the preview, so the click falls through to the splatter under it.
+    clickAt(canvas, 398, 447);
+    expect(screen.getByText('Damage splatter', { selector: 'legend' })).toBeTruthy();
+  });
+
   it('scales several pieces together by a corner of their box', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
