@@ -417,10 +417,11 @@ function drawGuides(ctx: CanvasRenderingContext2D, guides: Guide[], k: number) {
  *
  * ownHealth, teamColumn, infectedRow and siHealth are drawn from the
  * generated .res files by render.ts, and the weapon selection by weapons.ts,
- * not as stand-ins here; the rest are hand-made approximations. `onAsset` is passed through to every drawPanel
- * call so a texture that finishes loading after this call returns can
- * trigger a redraw. `view` carries what the page shows beyond the design:
- * the teammate card state and the selection chrome, drawn over everything else.
+ * not as stand-ins here; the rest are hand-made approximations. `onAsset`
+ * is passed through to every drawPanel call so a texture that finishes
+ * loading after this call returns can trigger a redraw. `view` carries what
+ * the page shows beyond the design: the teammate card state and the
+ * selection chrome, drawn over everything else.
  */
 export function drawHud(
   ctx: CanvasRenderingContext2D, pxW: number, pxH: number, design: HudDesign, side: Side,
