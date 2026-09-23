@@ -6,18 +6,31 @@ type Ev<K extends LogEvent['kind']> = Extract<LogEvent, { kind: K }>;
 
 /** Resolve the ordinal for a round, handling UDP reorder.
  *
+ *  Half 1 always uses currentOrdinal: it is the first line of a new map, so
+ *  there is nothing earlier it could have reordered behind. Using MAX(ordinal)
+ *  here (the old rule) was the bug: if a map's ROUND_START datagram was lost,
+ *  no match_rounds row exists yet at (currentOrdinal, 1), so MAX(ordinal) fell
+ *  back to the PREVIOUS map's row and every stat and skill_detect for the new
+ *  map's half 1 silently overwrote that map's instead.
+ *
  *  Half-2 ROUND_STAT/ROUND_STATS_END/ROUND_MARK lines can arrive after their
  *  map's MAP_RESULT (UDP reorders datagrams). currentOrdinal counts
- *  match_live_maps rows, so if a new map's round row has been written at
- *  its go-live, currentOrdinal would name the NEXT map, not the one these
- *  lines belong to. Lines carry no map name, so the only reliable signal is
- *  the match_rounds row itself: look for an existing round of this half, and
- *  if one exists, it is the ordinal these lines belong to. Only if no round
- *  is recorded yet does currentOrdinal apply (early in half 1 of a new match
- *  or map). */
+ *  match_live_maps rows, so once a new map's go-live has landed, currentOrdinal
+ *  names the NEW map, not the one these reordered half-2 lines belong to.
+ *  Lines carry no map name, so the signal used is the match_rounds row itself:
+ *  if a round already exists at currentOrdinal (either half, meaning this map
+ *  has started), these lines belong there; otherwise, if the PREVIOUS map has
+ *  a half-2 row, they reordered behind that map's MAP_RESULT and belong there
+ *  instead. Only when neither holds (a genuinely new match or map with no
+ *  round recorded anywhere yet) does currentOrdinal apply on its own. */
 function roundOrdinal(db: DB, matchId: number, half: number): number {
-  const row = db.prepare('SELECT MAX(ordinal) AS o FROM match_rounds WHERE match_id = ? AND half = ?').get(matchId, half) as { o: number | null } | undefined;
-  return row?.o ?? currentOrdinal(db, matchId);
+  const c = currentOrdinal(db, matchId);
+  if (half === 1) return c;
+  const hasRow = (ordinal: number, h: number): boolean =>
+    !!db.prepare('SELECT 1 FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?').get(matchId, ordinal, h);
+  if (hasRow(c, 1) || hasRow(c, 2)) return c;
+  if (c > 0 && hasRow(c - 1, 2)) return c - 1;
+  return c;
 }
 
 /** Per-round deltas for the balance metrics. Upsert, never add: UDP can
