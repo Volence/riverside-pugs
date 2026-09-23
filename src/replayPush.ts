@@ -1,11 +1,12 @@
 import {
-  closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, truncateSync, writeSync,
+  closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, truncateSync, unlinkSync, writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import {
   decodeHeader, HEADER_BYTES, INDEX_RECORD_BYTES,
   STARTED_UNIX_OFFSET, INDEX_OFFSET_OFFSET, FRAME_COUNT_OFFSET,
 } from './replayFormat.js';
+import type { DB } from './db.js';
 
 /**
  * Live replay bytes pushed by a game server.
@@ -286,4 +287,88 @@ export function applyPush(
   }
   if (b.closed && b.final) patchFinal(path, b.final, end);
   return { status: 200, length: end };
+}
+
+const NAME_RE = /^pug_([0-9a-f]{32})_(\d+)_([12])\.rpl$/;
+
+/** A live file untouched this long is deleted whatever its match is doing. */
+export const LIVE_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The header's own `startedUnix`, or null when the file is too short to hold
+ *  one or its magic does not match. Only ever used to compare a live copy
+ *  against a same-named file in the replay directory: the file name alone
+ *  does not identify a round (see the module doc comment on `applyPush`), so
+ *  a byte-count comparison alone is not enough to call one the successor of
+ *  the other. */
+function startedUnixOf(path: string, size: number): number | null {
+  if (size < HEADER_BYTES) return null;
+  return readU32(path, STARTED_UNIX_OFFSET);
+}
+
+/**
+ * Delete live files nobody needs. A file goes once its match is no longer
+ * live and the replay directory holds the same round at least as long (the
+ * pulled final file has taken over), and any file goes after a day untouched.
+ * Never throws: a failed unlink is logged and retried next run.
+ *
+ * "The same round", not just "the same name": an aborted round and its
+ * restart reuse the same token, ordinal and half, so a same-named file that
+ * shows up in the replay directory can belong to an older round than the one
+ * the live copy currently holds. Length alone cannot tell them apart, so a
+ * final file only counts as having superseded the live copy when both are
+ * long enough to carry a header and those headers agree on `startedUnix`.
+ * When either file is too short to hold a header (never true of a real
+ * pushed or pulled replay, whose header is written before anything else),
+ * this falls back to comparing size alone.
+ */
+export function pruneLiveFiles(db: DB, liveDir: string, replayDir: string, nowMs: number): number {
+  if (!liveDir) return 0;
+  let names: string[];
+  try {
+    names = readdirSync(liveDir);
+  } catch {
+    return 0;
+  }
+  const liveTokens = new Set(
+    (db.prepare("SELECT token FROM matches WHERE state = 'live' AND token IS NOT NULL").all() as { token: string }[])
+      .map((r) => r.token),
+  );
+  let removed = 0;
+  for (const name of names) {
+    const m = NAME_RE.exec(name);
+    if (!m) continue;
+    const path = join(liveDir, name);
+    let size: number;
+    let mtimeMs: number;
+    try {
+      const st = statSync(path);
+      if (!st.isFile()) continue;
+      size = st.size;
+      mtimeMs = st.mtimeMs;
+    } catch {
+      continue;
+    }
+    let superseded = false;
+    if (!liveTokens.has(m[1]) && replayDir) {
+      try {
+        const finalPath = join(replayDir, name);
+        const finalSize = statSync(finalPath).size;
+        if (finalSize >= size) {
+          const liveStarted = startedUnixOf(path, size);
+          const finalStarted = startedUnixOf(finalPath, finalSize);
+          superseded = liveStarted === null || finalStarted === null || liveStarted === finalStarted;
+        }
+      } catch {
+        superseded = false;
+      }
+    }
+    if (!superseded && nowMs - mtimeMs <= LIVE_FILE_MAX_AGE_MS) continue;
+    try {
+      unlinkSync(path);
+      removed++;
+    } catch (err) {
+      console.error('[replay] could not delete a live file:', (err as Error).message);
+    }
+  }
+  return removed;
 }

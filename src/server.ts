@@ -85,6 +85,7 @@ import { recordPresenceLine, sweepPresence } from './presence.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
+import { pruneLiveFiles } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { statsRoutes } from './routes/stats.js';
@@ -1115,6 +1116,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 24 * 60 * 60 * 1000);
   pruneTimer.unref();
 
+  // Live replay copies. Every ten minutes, because a finished match's copy is
+  // superseded as soon as the pull job lands its final file, and the live
+  // directory should not hold a day of rounds for nothing.
+  const livePruneTimer = setInterval(() => {
+    try {
+      pruneLiveFiles(deps.db, deps.config.replayLiveDir, deps.config.replayDir, Date.now());
+    } catch (err) {
+      console.error('[replay] live file prune failed:', err);
+    }
+  }, 10 * 60 * 1000);
+  livePruneTimer.unref();
+
   // Demo offload to R2, when it is configured. Hourly rather than daily and on
   // its own timer, because this one RECLAIMS space while the prunes above only
   // stop it growing, and it wants to get ahead of the prune rather than run
@@ -1286,6 +1299,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(reaper);
     clearInterval(presenceSweep);
     clearInterval(pruneTimer);
+    clearInterval(livePruneTimer);
     stopTwitchPoll?.();
     stopSignalRefresh?.();
     clearTimeout(pruneOnBoot);

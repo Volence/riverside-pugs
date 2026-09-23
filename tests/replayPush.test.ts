@@ -3,12 +3,13 @@ import { mkdtempSync, rmSync, readFileSync, statSync, utimesSync, existsSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  parsePush, applyPush, liveFileName, PUSH_MAX_DATA_BYTES, type PushBatch,
+  parsePush, applyPush, liveFileName, pruneLiveFiles, PUSH_MAX_DATA_BYTES, type PushBatch,
 } from '../src/replayPush.js';
 import {
   encodeHeader, encodeFrame, decodeHeader, VERSION, PLAYER_SLOTS,
   type ReplayHeader, type Frame,
 } from '../src/replayFormat.js';
+import { openDb, type DB } from '../src/db.js';
 
 const TOKEN = 'c'.repeat(32);
 const STARTED = 1_785_956_274;
@@ -271,5 +272,107 @@ describe('applyPush', () => {
     writeFileSync(join(liveDir, 'stale.rpl'), Buffer.alloc(2000));
     expect(applyPush(liveDir, batch(1000, whole.subarray(1000)), 1000)).toEqual({ status: 200, length: 3520 });
     expect(readFileSync(livePath()).equals(whole)).toBe(true);
+  });
+});
+
+describe('pruneLiveFiles', () => {
+  const OTHER = 'e'.repeat(32);
+  const NOW = Date.now();
+  let db: DB;
+  let live: string;
+  let replays: string;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    live = join(dir, 'live');
+    replays = join(dir, 'replays');
+    mkdirSync(live);
+    mkdirSync(replays);
+  });
+
+  function put(target: string, name: string, bytes: number, ageMs = 0): void {
+    const path = join(target, name);
+    writeFileSync(path, Buffer.alloc(bytes));
+    const secs = (NOW - ageMs) / 1000;
+    utimesSync(path, secs, secs);
+  }
+  function seed(state: string, token: string): void {
+    db.prepare(`INSERT INTO matches (season_id, state, campaign, token) VALUES (1, ?, 'no_mercy', ?)`).run(state, token);
+  }
+  const name = (token: string) => liveFileName(token, 0, 1);
+
+  it('keeps a live match\'s file even when a final copy exists', () => {
+    seed('live', TOKEN);
+    put(live, name(TOKEN), 100);
+    put(replays, name(TOKEN), 200);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(0);
+    expect(existsSync(join(live, name(TOKEN)))).toBe(true);
+  });
+
+  it('deletes a finished match\'s file once the final copy is at least as long', () => {
+    seed('completed', TOKEN);
+    put(live, name(TOKEN), 100);
+    put(replays, name(TOKEN), 100);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(1);
+    expect(existsSync(join(live, name(TOKEN)))).toBe(false);
+  });
+
+  it('keeps a finished match\'s file while the final copy is shorter or missing', () => {
+    seed('completed', TOKEN);
+    seed('aborted', OTHER);
+    put(live, name(TOKEN), 100);
+    put(replays, name(TOKEN), 50);
+    put(live, name(OTHER), 100);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(0);
+  });
+
+  it('deletes any live file older than a day, live match or not', () => {
+    seed('live', TOKEN);
+    put(live, name(TOKEN), 100, 25 * 60 * 60 * 1000);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(1);
+  });
+
+  it('leaves other names alone and survives a missing or unset directory', () => {
+    put(live, 'notes.txt', 10, 48 * 60 * 60 * 1000);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(0);
+    expect(existsSync(join(live, 'notes.txt'))).toBe(true);
+    expect(pruneLiveFiles(db, join(dir, 'nope'), replays, NOW)).toBe(0);
+    expect(pruneLiveFiles(db, '', replays, NOW)).toBe(0);
+  });
+
+  it('keeps a finished match\'s file when the same-named final file is a different, older round, even though it is longer', () => {
+    // Same token, ordinal and half: an aborted round and its restart reuse
+    // the filename. The final file here belongs to the OLD round (an earlier
+    // startedUnix) and must not be read as having superseded the NEW round's
+    // live copy just because it happens to be at least as long.
+    seed('completed', TOKEN);
+    const liveBytes = Buffer.concat([
+      Buffer.from(encodeHeader(header({ startedUnix: 2000 }))),
+      Buffer.alloc(40),
+    ]);
+    const olderFinalBytes = Buffer.concat([
+      Buffer.from(encodeHeader(header({ startedUnix: 1000 }))),
+      Buffer.alloc(400),
+    ]);
+    writeFileSync(join(live, name(TOKEN)), liveBytes);
+    writeFileSync(join(replays, name(TOKEN)), olderFinalBytes);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(0);
+    expect(existsSync(join(live, name(TOKEN)))).toBe(true);
+  });
+
+  it('deletes a finished match\'s file when the same-named final file is the same round and at least as long', () => {
+    seed('completed', TOKEN);
+    const liveBytes = Buffer.concat([
+      Buffer.from(encodeHeader(header({ startedUnix: 2000 }))),
+      Buffer.alloc(40),
+    ]);
+    const finalBytes = Buffer.concat([
+      Buffer.from(encodeHeader(header({ startedUnix: 2000 }))),
+      Buffer.alloc(400),
+    ]);
+    writeFileSync(join(live, name(TOKEN)), liveBytes);
+    writeFileSync(join(replays, name(TOKEN)), finalBytes);
+    expect(pruneLiveFiles(db, live, replays, NOW)).toBe(1);
+    expect(existsSync(join(live, name(TOKEN)))).toBe(false);
   });
 });
