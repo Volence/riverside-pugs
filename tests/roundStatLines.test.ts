@@ -43,6 +43,35 @@ describe('round stat lines', () => {
     expect(rows).toEqual([{ ordinal: 0 }]);
   });
 
+  it('a half-2 line lands on the current map when one has already started there', () => {
+    const db = setup(); // match_rounds row at (0, 2)
+    db.prepare('INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (1, ?, 0, 0, 0)').run('map1');
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (1, 1, 1, 'a')").run();
+    const ev = { kind: 'round_stat' as const, token: T, half: 2 as const, steamid: '76561198000000001', stats: { crowns: 1 } };
+    recordRoundStat(db, 1, ev);
+    const rows = db.prepare('SELECT ordinal FROM match_round_stats').all();
+    expect(rows).toEqual([{ ordinal: 1 }]);
+  });
+
+  it('a lost ROUND_START on map 2 half 1 lands the new stat on the new map, not the previous one', () => {
+    // Only map 1's rounds exist (ordinal 0, halves 1 and 2), and map 1 has
+    // already gone into match_live_maps, so currentOrdinal is 1. Map 2's
+    // ROUND_START was lost, so no match_rounds row exists at (1, 1) when its
+    // first ROUND_STAT arrives.
+    const db = setup(); // match_rounds row at (0, 2)
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (1, 0, 1, 'a')").run();
+    db.prepare('INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (1, ?, 0, 0, 0)').run('map1');
+    const stat = { kind: 'round_stat' as const, token: T, half: 1 as const, steamid: '76561198000000001', stats: { crowns: 1 } };
+    recordRoundStat(db, 1, stat);
+    recordRoundStatsEnd(db, 1, { kind: 'round_stats_end', token: T, half: 1, players: 8, skillDetect: true });
+    const statRows = db.prepare('SELECT ordinal FROM match_round_stats').all();
+    expect(statRows).toEqual([{ ordinal: 1 }]);
+    // Map 1's own half-1 row (ordinal 0) must be untouched: its skill_detect
+    // stays null rather than being overwritten by map 2's ROUND_STATS_END.
+    const map1Half1 = db.prepare('SELECT skill_detect FROM match_rounds WHERE ordinal = 0 AND half = 1').get();
+    expect(map1Half1).toEqual({ skill_detect: null });
+  });
+
   it('deletes stale stats and markers from a replayed half', () => {
     const db = setup();
     recordRoundStat(db, 1, { kind: 'round_stat' as const, token: T, half: 2, steamid: '76561198000000001', stats: { crowns: 1 } });
