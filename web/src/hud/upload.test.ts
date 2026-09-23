@@ -39,6 +39,41 @@ describe('readHudUpload', () => {
     expect(got.files.has('readme.txt')).toBe(false);
   });
 
+  it('drops OS junk and every path that could land outside the addon or that a VPK cannot hold, and says which', async () => {
+    const x = latin1('x');
+    const unsafe = [
+      'edgehud/../../cfg/autoexec.cfg',                // climbs out of the addon
+      'edgehud/./scripts/extra.res',                   // a "." folder
+      'edgehud//scripts/extra.res',                    // an empty folder
+      '/edgehud/abs.txt',                              // absolute
+      'C:/Windows/evil.txt',                           // a drive letter
+      'edgehud/bad\u0001name.txt',                    // a control character
+      'edgehud/foo.',                                  // ends in a dot: no extension a VPK can hold
+    ];
+    const junk = [
+      '__MACOSX/edgehud/scripts/._HudLayout.res',
+      'edgehud/.DS_Store',
+      'edgehud/scripts/Thumbs.db',
+      'edgehud/desktop.ini',
+      'edgehud/.gitignore',
+    ];
+    const zip = await zipOf([...under('edgehud/', sampleHud()), ...[...unsafe, ...junk].map((path) => ({ path, data: x }))]);
+    const got = await readHudUpload('edgehud.zip', zip);
+    expect(got.dropped).toEqual([...unsafe, ...junk].sort());
+    expect([...got.files.keys()].sort()).toEqual([...sampleHud().keys()].sort());
+    // What is left must download: encodeVPK throws on anything it cannot hold.
+    expect(() => encodeVPK(asList(got.files))).not.toThrow();
+  });
+
+  it('drops the same paths from a .vpk, which a hand-rolled packer can write', async () => {
+    const hud = asList(sampleHud()).map((f) => ({ path: f.path, archive: 0x7FFF, offset: 0, length: 0, preload: f.data }));
+    const bad = ['../../cfg/autoexec.cfg', 'scripts/./x.res', 'desktop.ini'];
+    const vpk = handMade([...hud, ...bad.map((path) => ({ path, archive: 0x7FFF, offset: 0, length: 0, preload: latin1('x') }))]);
+    const got = await readHudUpload('edgehud.vpk', vpk);
+    expect(got.dropped).toEqual([...bad].sort());
+    expect(got.files).toEqual(sampleHud());
+  });
+
   it("imports the VPK inside a zip that has no loose HUD, like the editor's own Advanced download", async () => {
     const files = sampleHud();
     const zip = encodeZip([{ path: 'riversidehud/pak01_dir.vpk', data: vpkOf(files) }, { path: 'README.txt', data: latin1('x') }]);

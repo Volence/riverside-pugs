@@ -8,12 +8,14 @@
  * up and as readVPK already gives them. gameinfo.txt is never a HUD file
  * and shipping one in an addon could break the game, so it is dropped
  * wherever it is, along with everything outside the root; `dropped` names
- * them so the page can say so.
+ * them so the page can say so. So is any path that is unsafe or junk (see
+ * unwanted), before the root is looked for, so junk can never be the root.
  *
  * Every file the editor parses is parsed here once, so a HUD whose files
  * KeyValues cannot read is refused with the file's name rather than failing
  * later inside the canvas draw.
  */
+import { vpkPathProblem } from '../vpk';
 import { readVPK } from '../vpk/read';
 import { readZip, ZipTooBig } from '../vpk/unzip';
 import { parseKv } from './kv';
@@ -35,6 +37,35 @@ const isVpk = (b: Uint8Array) => b.length >= 4 && b[0] === 0x34 && b[1] === 0x12
 const isZip = (b: Uint8Array) => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b;
 const fail = (why: string): never => { throw new Error(why); };
 const total = (m: Map<string, Uint8Array>) => [...m.values()].reduce((n, d) => n + d.length, 0);
+
+/** Files a Mac, Windows or git leaves in a folder it zips, by lower-cased file name. */
+const JUNK_NAMES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini']);
+
+/**
+ * Whether a lower-cased path is dropped rather than imported. Unsafe: an
+ * absolute path, a drive letter, or anything encodeVPK refuses (a ".." or
+ * "." or empty folder, a control character, a name or extension it cannot
+ * store). A path the game would never look up is harmless in the editor,
+ * but the download passes every file through, and a tool that extracts it
+ * would write "../" paths outside the addon. Junk: a Mac's __MACOSX folder
+ * and "._" resource forks, .DS_Store, Thumbs.db, desktop.ini, and dotfiles
+ * such as .gitignore, which no game reads and which a VPK cannot name.
+ */
+function unwanted(p: string): boolean {
+  const segments = p.split('/');
+  const base = segments[segments.length - 1];
+  if (segments.includes('__macosx') || JUNK_NAMES.has(base) || base.startsWith('._')) return true;
+  if (base.startsWith('.') && base.indexOf('.', 1) < 0) return true;
+  if (p.startsWith('/') || /^[a-z]:/.test(p)) return true;
+  return vpkPathProblem(p) !== null;
+}
+
+/** Move every unwanted entry out of `entries` into `dropped`, by the name the upload spells it with. */
+function dropUnwanted(entries: Map<string, Uint8Array>, dropped: string[], original?: Map<string, string>) {
+  for (const p of [...entries.keys()]) {
+    if (unwanted(p)) { entries.delete(p); dropped.push(original?.get(p) ?? p); }
+  }
+}
 
 /** A single-file VPK's files, or the unreadable sentence: a split addon's _dir.vpk is missing most of its data. */
 function vpkFiles(bytes: Uint8Array): Map<string, Uint8Array> {
@@ -82,6 +113,8 @@ export async function readHudUpload(fileName: string, bytes: Uint8Array): Promis
     entries = new Map();
     for (const [name, data] of raw) { const p = name.toLowerCase(); entries.set(p, data); original.set(p, name); }
   } else return fail(IMPORT_ERRORS.unreadable);
+  const dropped: string[] = [];
+  dropUnwanted(entries, dropped, original);
 
   const root = hudRoot([...entries.keys()]);
   if (root === null && original.size) {
@@ -94,23 +127,24 @@ export async function readHudUpload(fileName: string, bytes: Uint8Array): Promis
       let inner: Map<string, Uint8Array>;
       try { inner = vpkFiles(entries.get(p)!); } catch { continue; }
       if (!inner.has(LAYOUT)) continue;
-      const dropped = [...original].filter(([q]) => q !== p).map(([, name]) => name);
-      return finish(nameOf(fileName, ''), inner, dropped);
+      // Everything but this VPK is dropped, junk included, which is in `dropped` already.
+      const others = [...entries.keys()].filter((q) => q !== p).map((q) => original.get(q)!);
+      return finish(nameOf(fileName, ''), inner, [...dropped, ...others]);
     }
   }
   if (root === null) return fail(IMPORT_ERRORS.notHud);
   const files = new Map<string, Uint8Array>();
-  const dropped: string[] = [];
   for (const [p, data] of entries) {
     const inRoot = p.startsWith(root);
     const rel = inRoot ? p.slice(root.length) : p;
     if (!inRoot || rel === 'gameinfo.txt' || rel.endsWith('/gameinfo.txt')) { dropped.push(original.get(p) ?? p); continue; }
     files.set(rel, data);
   }
-  return finish(nameOf(fileName, root), files, dropped.sort());
+  return finish(nameOf(fileName, root), files, dropped);
 }
 
 function finish(name: string, files: Map<string, Uint8Array>, dropped: string[]): HudUpload {
+  dropUnwanted(files, dropped);                                  // again, for a VPK found inside a zip
   for (const p of [...files.keys()]) if (p === 'gameinfo.txt' || p.endsWith('/gameinfo.txt')) { files.delete(p); dropped.push(p); }
   checkParses(files);
   return { name, files, dropped: dropped.sort() };
