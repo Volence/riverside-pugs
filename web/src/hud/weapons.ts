@@ -50,8 +50,10 @@ import type { Aspect } from './units';
 import { screenW } from './units';
 import { buildTrees, pcGet, CLEAR_TEXTURE, WEAPON_BOX_ENTRY, weaponBoxTexture } from './build';
 import { WEAPON_BOX_COLOUR } from './design';
-import { kvFind, type KvNode } from './kv';
-import { artImage, colourOf, fillFontText, fontFace, hatch, isMissing, rgbaOf, setFont, tinted } from './render';
+import { kvFind, kvGet, type KvNode } from './kv';
+import { artImage, colourOf, fillFontText, fontFace, hatch, isMissing, rgbaOf, scratchCanvas, setFont, tinted } from './render';
+import { baseOf } from './base';
+import { importedMaterial } from './importArt';
 import { EQUIP_ICON_SIZE } from './art/index';
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -149,6 +151,26 @@ function textureFiles(design: HudDesign): (entry: string) => string {
     const e = cells && kvFind(cells.value as KvNode[], [entry]);
     return ((e && typeof e.value !== 'string' && e.value.find((n) => n.key.toLowerCase() === 'file')?.value) as string ?? '').toLowerCase();
   };
+}
+
+/**
+ * A mod_textures.txt (then hud_textures.txt) cell the paint asks for by
+ * name: the material it cuts from and its rect in texels. The weapon
+ * selection looks names up in the game's icon dictionary, which both files
+ * fill; mod_textures.txt is the one probe B showed the paint reads, so it
+ * wins. A glyph cell (font and character, no file) has no rect and is left
+ * to the preview's own art.
+ */
+export function iconCell(design: HudDesign, entry: string): { file: string; x: number; y: number; w: number; h: number } | undefined {
+  for (const path of ['scripts/mod_textures.txt', 'scripts/hud_textures.txt']) {
+    const cells = kvFind(buildTrees(design)(path), ['TextureData']);
+    const e = cells && typeof cells.value !== 'string' ? kvFind(cells.value, [entry]) : undefined;
+    const file = e && kvGet(e, 'file');
+    if (!e || !file) continue;
+    const n = (k: string) => parseFloat(kvGet(e, k) ?? '0') || 0;
+    return { file: file.toLowerCase(), x: n('x'), y: n('y'), w: n('width'), h: n('height') };
+  }
+  return undefined;
 }
 
 /** An icon cell's width over its height, from the index; square when the art is not indexed. */
@@ -264,8 +286,8 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
  * `corner` pixels square, its edges stretched between them, its middle
  * stretched to fill, so a box of any size keeps round corners and an even rim.
  */
-function drawNineSlice(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number, corner: number) {
-  const tw = img.naturalWidth, th = img.naturalHeight;
+function drawNineSlice(ctx: CanvasRenderingContext2D, img: CanvasImageSource, tw: number, th: number,
+  x: number, y: number, w: number, h: number, corner: number) {
   const sx = [0, SRC_CORNER, tw - SRC_CORNER], sw = [SRC_CORNER, tw - 2 * SRC_CORNER, SRC_CORNER];
   const sy = [0, SRC_CORNER, th - SRC_CORNER], sh = [SRC_CORNER, th - 2 * SRC_CORNER, SRC_CORNER];
   const dx = [x, x + corner, x + w - corner], dw = [corner, w - 2 * corner, corner];
@@ -283,9 +305,12 @@ function drawNineSlice(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: 
 export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, origin: { x: number; y: number }, k: number,
   panelWide: number, onAsset?: () => void, held: WeaponHeld = 'primary'): void {
   const px = (r: Rect): Rect => ({ x: origin.x + r.x * k, y: origin.y + r.y * k, w: r.w * k, h: r.h * k });
+  // An imported HUD's own box and icon textures come first, where its cells point at them.
+  const key = design.preset === 'imported' ? baseOf(design) : null;
   for (const s of weaponSlots(design, design.aspect, panelWide, held)) {
     const frame = px(s.frame);
-    const box = s.art ? artImage(s.art, onAsset) : undefined;
+    const ownBox = key && s.art ? importedMaterial(key, s.art, scratchCanvas) : null;
+    const box = s.art ? artImage(ownBox && 'stock' in ownBox ? ownBox.stock : s.art, onAsset) : undefined;
     if (s.fill) {
       // The generated texture is the colour edge to edge, its corners cut
       // round by one 16-texel corner for Rounded, nine-sliced over the frame
@@ -299,16 +324,34 @@ export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, or
         ctx.fill();
       } else ctx.fillRect(frame.x, frame.y, frame.w, frame.h);
       ctx.restore();
+    } else if (ownBox && 'src' in ownBox) {
+      ctx.save();
+      ctx.globalAlpha *= BOX_ALPHA;
+      drawNineSlice(ctx, ownBox.src, ownBox.w, ownBox.h, frame.x, frame.y, frame.w, frame.h, s.corner * k);
+      ctx.restore();
     } else if (box) {
       ctx.save();
       ctx.globalAlpha *= BOX_ALPHA;
-      drawNineSlice(ctx, box, frame.x, frame.y, frame.w, frame.h, s.corner * k);
+      drawNineSlice(ctx, box, box.naturalWidth, box.naturalHeight, frame.x, frame.y, frame.w, frame.h, s.corner * k);
       ctx.restore();
     } else if (s.art && isMissing(s.art)) hatch(ctx, { name: s.art, kind: 'image', visible: true, ...frame });
 
     const icon = px(s.icon);
-    const img = s.icon.hidden ? undefined : artImage(s.icon.name, onAsset);
-    if (img) {
+    // An imported HUD that repoints an icon's cell at its own texture shows its own art, cut from that cell.
+    const cellOf = key && !s.icon.hidden ? iconCell(design, s.icon.name.replaceAll('/', '_')) : undefined;
+    const ownIcon = key && cellOf ? importedMaterial(key, cellOf.file, scratchCanvas) : null;
+    const img = s.icon.hidden || (ownIcon && 'src' in ownIcon) ? undefined : artImage(s.icon.name, onAsset);
+    if (cellOf && ownIcon && 'src' in ownIcon) {
+      ctx.save();
+      let src: CanvasImageSource = ownIcon.src;
+      if (s.icon.tint) {
+        const [r, g, b, a] = rgbaOf(design, s.icon.tint);
+        if (r < 255 || g < 255 || b < 255) src = tinted(ownIcon.src, `${key}|${cellOf.file}`, r, g, b, ownIcon.w, ownIcon.h);
+        ctx.globalAlpha *= a / 255;
+      }
+      ctx.drawImage(src, cellOf.x, cellOf.y, cellOf.w, cellOf.h, icon.x, icon.y, icon.w, icon.h);
+      ctx.restore();
+    } else if (img) {
       let src: CanvasImageSource = img;
       ctx.save();
       if (s.icon.tint) {

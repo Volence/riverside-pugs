@@ -71,3 +71,23 @@ export function recordingCtx() {
   }) as unknown as CanvasRenderingContext2D;
   return { ctx, calls };
 }
+
+/**
+ * happy-dom has no 2D context. A canvas factory whose canvases take
+ * putImageData and keep the pixels, so a test can see which decoded texture
+ * a drawImage call was handed.
+ */
+export function fakeCanvas() {
+  const made: { w: number; h: number; pixels?: Uint8ClampedArray }[] = [];
+  const factory = (w: number, h: number) => {
+    const rec: { w: number; h: number; pixels?: Uint8ClampedArray } = { w, h };
+    made.push(rec);
+    const ctx = {
+      createImageData: (cw: number, ch: number) => ({ data: new Uint8ClampedArray(cw * ch * 4) }),
+      putImageData: (img: { data: Uint8ClampedArray }) => { rec.pixels = img.data; },
+      drawImage: () => {}, fillRect: () => {}, globalCompositeOperation: 'source-over', fillStyle: '',
+    };
+    return { width: w, height: h, getContext: () => ctx, rec } as unknown as HTMLCanvasElement;
+  };
+  return { factory, made };
+}

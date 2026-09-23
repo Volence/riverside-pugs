@@ -7,7 +7,8 @@ import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { artUrl } from './art';
 import { cssFamily, fontCell, _resetImportFaces } from './fonts';
 import { registerImport, unregisterImport, baseFile } from './base';
-import { sampleHud } from './importFixtures';
+import { sampleHud, fakeCanvas, recordingCtx } from './importFixtures';
+import { _resetImportedArt } from './importArt';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -693,5 +694,48 @@ describe("an imported HUD's own fonts", () => {
     const ctx = {} as CanvasRenderingContext2D;
     setFont(ctx, design('Futurot', false), 'HudImpFont', 1);
     expect(ctx.font).not.toMatch(/HudImp_/);
+  });
+});
+
+describe("an imported HUD's own textures", () => {
+  const ID = '7'.repeat(64);
+  const card = (image: string) => baseFile('stock', 'resource/ui/hud/teammatepanel.res').replace(/\}\s*$/,
+    `\t"HudImpArt"\r\n\t{\r\n\t\t"ControlName" "ImagePanel"\r\n\t\t"fieldName" "HudImpArt"\r\n\t\t"xpos" "0"\r\n\t\t"ypos" "0"\r\n\t\t"wide" "20"\r\n\t\t"tall" "10"\r\n\t\t"visible" "1"\r\n\t\t"image" "${image}"\r\n\t\t"scaleImage" "1"\r\n\t}\r\n}\r\n`);
+  afterEach(() => { unregisterImport(ID); _setCanvasFactory(null); _resetImportedArt(); _resetAssetCache(); });
+  const design = (over: Record<string, string | Uint8Array>) => {
+    registerImport(ID, sampleHud(over));
+    return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'e' }, crosshair: 'none' });
+  };
+  const drawnFrom = (calls: { m: string; a: unknown[] }[]) => calls.filter((c) => c.m === 'drawImage').map((c) => c.a[0] as { rec?: { pixels?: Uint8ClampedArray } });
+
+  it('draws an ImagePanel that names a material the upload carries from that material, stretched to the panel', () => {
+    const { factory, made } = fakeCanvas();
+    _setCanvasFactory(factory);
+    const d = design({ 'resource/ui/hud/teammatepanel.res': card('hud/myart') });
+    const { ctx, calls } = recordingCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 100, y: 50 }, 2);
+    const own = calls.find((c) => c.m === 'drawImage' && (c.a[0] as { rec?: unknown }).rec);
+    expect(own?.a.slice(1)).toEqual([100, 50, 40, 20]);
+    expect(made[0]).toMatchObject({ w: 2, h: 2 });
+    expect([...made[0].pixels!.subarray(0, 4)]).toEqual([255, 0, 0, 255]);        // the fixture's red texel, decoded from BGRA
+    expect(drawnFrom(calls).some((s) => s.rec)).toBe(true);
+  });
+
+  it('draws it added onto the scene when its material says $additive 1', () => {
+    _setCanvasFactory(fakeCanvas().factory);
+    const vmt = '"UnlitGeneric"\r\n{\r\n\t"$baseTexture" "vgui/hud/myart"\r\n\t"$additive" "1"\r\n}\r\n';
+    const d = design({ 'resource/ui/hud/teammatepanel.res': card('hud/myglow'), 'materials/vgui/hud/myglow.vmt': vmt });
+    const { ctx, calls } = recordingCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1);
+    const own = calls.find((c) => c.m === 'drawImage' && (c.a[0] as { rec?: unknown }).rec)!;
+    expect(own.gco).toBe('lighter');
+  });
+
+  it('uses the stock art when the upload has no material by that name', () => {
+    _setCanvasFactory(fakeCanvas().factory);
+    const d = design({});
+    const { ctx, calls } = recordingCtx();
+    drawPanel(ctx, d, 'teamColumn', { x: 0, y: 0 }, 1);
+    expect(drawnFrom(calls).some((s) => s.rec)).toBe(false);
   });
 });

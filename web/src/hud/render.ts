@@ -34,6 +34,7 @@ import { parseColour } from './textures';
 import { SLOTS } from './slots';
 import { canvasFont, fontCell, importedFace, loadFace, type FontCell } from './fonts';
 import { baseOf } from './base';
+import { importedMaterial, _resetImportedArt } from './importArt';
 import { addLinear } from './additive';
 
 export type ChildKind = 'image' | 'label' | 'bar' | 'other';
@@ -407,13 +408,20 @@ function defaultCanvas(w: number, h: number): HTMLCanvasElement | null {
   return c;
 }
 export function _setCanvasFactory(f: ((w: number, h: number) => HTMLCanvasElement | null) | null): void { canvasFactory = f ?? defaultCanvas; }
+/** A scratch canvas from the same factory tests replace: importArt.ts decodes an imported texture into one. */
+export function scratchCanvas(w: number, h: number): HTMLCanvasElement | null { return canvasFactory(w, h); }
 const tints = new Map<string, CanvasImageSource>();
 
-export function tinted(img: HTMLImageElement, material: string, r: number, g: number, b: number): CanvasImageSource {
-  const key = `${material}|${r},${g},${b}`;
-  const cached = tints.get(key);
+/**
+ * `key` names the source for the cache: a stock material, or an import's
+ * base key and material (a decoded texture is a canvas, with no natural
+ * size, so its size comes in as w and h).
+ */
+export function tinted(img: CanvasImageSource, key: string, r: number, g: number, b: number,
+  w = (img as HTMLImageElement).naturalWidth, h = (img as HTMLImageElement).naturalHeight): CanvasImageSource {
+  const id = `${key}|${r},${g},${b}`;
+  const cached = tints.get(id);
   if (cached) return cached;
-  const w = img.naturalWidth, h = img.naturalHeight;
   const c = canvasFactory(w, h);
   const t = c?.getContext('2d');
   if (!c || !t) return img;
@@ -424,12 +432,12 @@ export function tinted(img: HTMLImageElement, material: string, r: number, g: nu
   t.globalCompositeOperation = 'destination-in';
   t.drawImage(img, 0, 0, w, h);
   t.globalCompositeOperation = 'source-over';
-  tints.set(key, c);
+  tints.set(id, c);
   return c;
 }
 
 /** Test seam: forget every loaded image, tint and warned-about material. */
-export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); warnedNoIcons = false; }
+export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); warnedNoIcons = false; _resetImportedArt(); }
 
 export function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();
@@ -490,20 +498,36 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
       drawSlotStyle(ctx, design, material.slice('vgui/hud/hudeditor/'.length), r);   // false: an upload; the game shows it, we cannot yet
       return;
     }
-    const img = artImage(material, opts.onAsset);
-    if (!img) { if (missing.has(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
-    const rawDrawColor = kvGet(n, 'drawColor');
-    let [tr, tg, tb, ta] = parseColour(rawDrawColor ?? '255 255 255 255');
-    if (HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = sampleHealthRgb(opts);   // game code's colour, over the file's
-    const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
-    ctx.save();
-    ctx.globalAlpha *= ta / 255;
-    if ((kvGet(n, 'scaleImage') ?? '0') !== '0') ctx.drawImage(src, r.x, r.y, r.w, r.h);
-    else ctx.drawImage(src, r.x, r.y, img.naturalWidth * k, img.naturalHeight * k);   // unscaled: texture pixels are HUD units
-    ctx.restore();
+    // An imported HUD's own material first; the stock art where it has none.
+    const key = baseOf(design);
+    const own = design.preset === 'imported' ? importedMaterial(key, material, canvasFactory) : null;
+    if (own && 'src' in own) { drawTexture(ctx, n, r, k, opts, own.src, own.w, own.h, `${key}|${material}`, own.additive); return; }
+    const stock = own && 'stock' in own ? own.stock : material;
+    const img = artImage(stock, opts.onAsset);
+    if (!img) { if (missing.has(stock)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
+    drawTexture(ctx, n, r, k, opts, img, img.naturalWidth, img.naturalHeight, stock, own !== null && own.additive);
     return;
   }
   if (fill) { ctx.fillStyle = colourOf(design, fill); ctx.fillRect(r.x, r.y, r.w, r.h); }
+}
+
+/**
+ * A texture drawn as an ImagePanel draws it: tinted by drawColor (or the
+ * health colour), stretched to the rect or unscaled, and added onto the
+ * scene when its material is additive. Stock art and an imported HUD's own
+ * decoded texture both come through here, so they draw alike.
+ */
+function drawTexture(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: number, opts: DrawOpts,
+  src0: CanvasImageSource, w: number, h: number, key: string, additive: boolean) {
+  let [tr, tg, tb, ta] = parseColour(kvGet(n, 'drawColor') ?? '255 255 255 255');
+  if (HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = sampleHealthRgb(opts);   // game code's colour, over the file's
+  const src = tr < 255 || tg < 255 || tb < 255 ? tinted(src0, key, tr, tg, tb, w, h) : src0;
+  const dest = (kvGet(n, 'scaleImage') ?? '0') !== '0' ? r : { ...r, w: w * k, h: h * k };   // unscaled: texture pixels are HUD units
+  const paint = (c: CanvasRenderingContext2D) => c.drawImage(src, dest.x, dest.y, dest.w, dest.h);
+  ctx.save();
+  ctx.globalAlpha *= ta / 255;
+  if (additive) paintAdditive(ctx, dest, paint); else paint(ctx);
+  ctx.restore();
 }
 
 function sampleText(n: KvNode, opts: DrawOpts): string {

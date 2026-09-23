@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { weaponSlots, drawWeapons, WEAPON_SAMPLE, BOX_ALPHA } from './weapons';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { weaponSlots, drawWeapons, iconCell, WEAPON_SAMPLE, BOX_ALPHA } from './weapons';
 import { _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
+import { registerImport, unregisterImport } from './base';
+import { _resetImportedArt } from './importArt';
+import { sampleHud, fakeCanvas, recordingCtx } from './importFixtures';
+import { decodeText } from './text';
+import { encodeVTF } from '../vpk';
 import { artUrl } from './art';
 import { screenW } from './units';
 import { canvasFont, fontCell } from './fonts';
@@ -313,5 +318,48 @@ describe('the weapon edits in the preview', () => {
     expect(pistol.texts[0].font).toBe('HudEd_HudAmmo_t12');
     const text = drawn(d).filter((c) => c.m === 'fillText');
     expect(text.map((c) => c.font)).toEqual([30, 12, 12].map((t) => canvasFont('Trade Gothic Bold', 0, t * k)));
+  });
+});
+
+describe("an imported HUD's own weapon art", () => {
+  const ID = '6'.repeat(64);
+  afterEach(() => { unregisterImport(ID); _setCanvasFactory(null); _resetImportedArt(); });
+  const modtex = () => decodeText(sampleHud().get('scripts/mod_textures.txt')!).text;
+  const cell = (name: string, file: string) => `"${name}"\r\n\t\t{\r\n\t\t\t"file" "${file}"\r\n\t\t\t"x" "0" "y" "0" "width" "2" "height" "2"\r\n\t\t}`;
+  const design = (over: Record<string, string | Uint8Array>) => {
+    registerImport(ID, sampleHud(over));
+    return validateDesign({ v: 1, preset: 'imported', imported: { id: ID, name: 'e' }, crosshair: 'none' });
+  };
+  const own = (calls: { m: string; a: unknown[] }[]) => calls.filter((c) => c.m === 'drawImage' && (c.a[0] as { rec?: unknown }).rec);
+
+  it("cuts a weapon icon from the upload's texture where its mod_textures.txt cell points", () => {
+    _setCanvasFactory(fakeCanvas().factory);
+    const d = design({ 'scripts/mod_textures.txt': modtex().replace(/"icon_equip_pumpshotgun"\s*\{[^}]*\}/, cell('icon_equip_pumpshotgun', 'vgui/hud/myart')) });
+    expect(iconCell(d, 'icon_equip_pumpshotgun')).toEqual({ file: 'vgui/hud/myart', x: 0, y: 0, w: 2, h: 2 });
+    const { ctx, calls } = recordingCtx();
+    drawWeapons(ctx, d, { x: 0, y: 0 }, 1, 200);
+    expect(own(calls)[0]?.a.slice(1, 5)).toEqual([0, 0, 2, 2]);
+  });
+
+  it('finds a cell in hud_textures.txt when mod_textures.txt has none by that name', () => {
+    const hudtex = '"sprites/640_hud"\r\n{\r\n\tTextureData\r\n\t{\r\n\t\t' + cell('icon_equip_pumpshotgun', 'vgui/hud/myart') + '\r\n\t}\r\n}\r\n';
+    const d = design({
+      'scripts/mod_textures.txt': modtex().replace(/"icon_equip_pumpshotgun"\s*\{[^}]*\}/, ''),
+      'scripts/hud_textures.txt': hudtex,
+    });
+    expect(iconCell(d, 'icon_equip_pumpshotgun')?.file).toBe('vgui/hud/myart');
+  });
+
+  it("nine-slices a weapon box from the upload's own box texture", () => {
+    _setCanvasFactory(fakeCanvas().factory);
+    const box = encodeVTF(64, 64, new Uint8ClampedArray(64 * 64 * 4).fill(200));
+    const d = design({
+      'materials/vgui/hud/mybox.vtf': box,
+      'materials/vgui/hud/mybox.vmt': '"UnlitGeneric" { "$baseTexture" "vgui/hud/mybox" }',
+      'scripts/mod_textures.txt': modtex().replace(/"rounded_background_glow"\s*\{[^}]*\}/, cell('rounded_background_glow', 'vgui/hud/mybox')),
+    });
+    const { ctx, calls } = recordingCtx();
+    drawWeapons(ctx, d, { x: 0, y: 0 }, 1, 200);
+    expect(own(calls).length).toBeGreaterThanOrEqual(9);
   });
 });
