@@ -1425,6 +1425,7 @@ describe('Hud page', () => {
       expect((screen.getByRole('checkbox', { name: 'Item pictures' }) as HTMLInputElement).checked).toBe(true);
       expect(screen.getByText(/clip numbers are always white/i)).toBeTruthy();
       expect(screen.getByText(/pistol always sits just under the main gun/i)).toBeTruthy();
+      expect(screen.getByText(/nudges its numbers a little left/i)).toBeTruthy();
     });
 
     it('applies Ammo only in one undo step', () => {
@@ -1492,6 +1493,17 @@ describe('Hud page', () => {
       fireEvent.input(box('Clip text size'), { target: { value: '2' } });
       fireEvent.keyDown(box('Clip text size'), { key: 'Enter' });
       expect(box('Clip text size').value).toBe('6');
+    });
+
+    it('previews each slot being held, from the toolbar, on the survivor side only', () => {
+      render(<Hud />);
+      const held = screen.getByRole('tablist', { name: 'Holding' });
+      expect(within(held).getByRole('tab', { name: 'Gun' }).getAttribute('aria-selected')).toBe('true');
+      fireEvent.click(within(held).getByRole('tab', { name: 'Pistol' }));
+      expect(within(held).getByRole('tab', { name: 'Pistol' }).getAttribute('aria-selected')).toBe('true');
+      expect(within(held).getByRole('tab', { name: 'Item' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+      expect(screen.queryByRole('tablist', { name: 'Holding' })).toBeNull();
     });
 
     it('offers a colour only for a flat or rounded box', () => {

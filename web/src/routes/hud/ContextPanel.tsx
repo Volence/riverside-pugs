@@ -256,7 +256,8 @@ function WeaponControls({ design, edit, end }: { design: HudDesign; edit: Edit; 
       </label>
       <p class="muted hud__note">
         The game fixes the rest: clip numbers are always white, the slot order and the gap between slots cannot change,
-        and the pistol always sits just under the main gun.
+        and the pistol always sits just under the main gun. While the gun is held, the game nudges its numbers a little
+        left and grows its box; switch Holding above the preview to see each.
       </p>
     </>
   );

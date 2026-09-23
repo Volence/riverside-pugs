@@ -20,7 +20,7 @@ import { SCREEN_H, parseSize } from './units';
 import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, fontFace, PREVIEW_FONT, type CardState } from './render';
 import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
-import { drawWeapons } from './weapons';
+import { drawWeapons, type WeaponHeld } from './weapons';
 
 export type Side = 'survivor' | 'infected';
 
@@ -43,6 +43,8 @@ interface Rect { x: number; y: number; w: number; h: number }
  */
 export interface HudView {
   state?: CardState;
+  /** The weapon slot the preview survivor holds (weapons.ts's WeaponHeld); the gun when absent. */
+  held?: WeaponHeld;
   frames?: Box[];
   box?: Box | null;
   handles?: { x: number; y: number }[];
@@ -209,8 +211,8 @@ function paintTeamColumn(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesi
  * rect: the top of the shotgun, which the game centres on its box's top edge,
  * is cut where the panel starts, as in game.
  */
-function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
-  clipToRect(ctx, r, () => drawWeapons(ctx, design, { x: r.x, y: r.y }, k, r.w / k, onAsset));
+function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
+  clipToRect(ctx, r, () => drawWeapons(ctx, design, { x: r.x, y: r.y }, k, r.w / k, onAsset, view.held));
 }
 
 function paintChat(ctx: CanvasRenderingContext2D, r: Rect) {

@@ -9,6 +9,7 @@ import type { HudDesign } from '../../hud/design';
 import type { Aspect } from '../../hud/units';
 import type { Side } from '../../hud/mock';
 import type { CardState } from '../../hud/render';
+import type { WeaponHeld } from '../../hud/weapons';
 import type { Preset } from '../../hud/base';
 
 const BACKDROPS: [Backdrop, string][] = [
@@ -19,11 +20,16 @@ const CARD_STATES: { key: CardState; label: string }[] = [
   { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
 ];
 
+/** What the preview survivor holds: the game moves the weapon numbers when this changes. */
+const HELD: { key: WeaponHeld; label: string }[] = [
+  { key: 'primary', label: 'Gun' }, { key: 'pistol', label: 'Pistol' }, { key: 'item', label: 'Item' },
+];
+
 export interface ToolbarProps {
-  design: HudDesign; side: Side; cardState: CardState; backdrop: Backdrop; shotError?: string;
+  design: HudDesign; side: Side; cardState: CardState; held: WeaponHeld; backdrop: Backdrop; shotError?: string;
   canUndo: boolean; canRedo: boolean;
   onUndo: () => void; onRedo: () => void;
-  onSide: (s: Side) => void; onState: (s: CardState) => void;
+  onSide: (s: Side) => void; onState: (s: CardState) => void; onHeld: (h: WeaponHeld) => void;
   onPreset: (p: Preset) => void; onAspect: (a: Aspect) => void; onBackdrop: (b: Backdrop) => void;
   onShot: (e: Event) => void; onFont: (f: 'preset' | 'roboto') => void; onDownload: () => void;
 }
@@ -46,6 +52,9 @@ export function Toolbar(p: ToolbarProps) {
       />
       {p.side === 'survivor' && (
         <Tabs tabs={CARD_STATES.map((s) => ({ key: s.key, label: s.label }))} active={p.cardState} onSelect={(k) => p.onState(k as CardState)} />
+      )}
+      {p.side === 'survivor' && (
+        <Tabs label="Holding" tabs={HELD} active={p.held} onSelect={(k) => p.onHeld(k as WeaponHeld)} />
       )}
       <span class="hud__tbsep" aria-hidden="true" />
 

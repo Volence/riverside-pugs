@@ -121,6 +121,37 @@ describe('weaponSlots', () => {
   });
 });
 
+describe('the slot being held', () => {
+  // The owner's Ammo only screenshots, 2026-09-23: switching from the gun to the
+  // pistol moved the gun's clip about 5 units right and its reserve about 3, and
+  // the pistol's number about 1 right and half a unit up, as its box grew.
+  it('draws the gun at its own size, its numbers without the held nudge, when the pistol is held', () => {
+    const slots = weaponSlots(design(), '16:9', 100, 'pistol');
+    expect(slots.map((s) => s.active)).toEqual([false, true, false, false, false]);
+    nearBox(slots[0].box, 100 - 53 - 10, 10, 53, 24);
+    const [clip, reserve] = slots[0].texts;
+    near(clip.x, 100 - 38 - U);
+    near(reserve.x, 100 - 38 + U);
+    near(clip.y, 10);
+    const y1 = 10 + 24 + 2 * U;
+    nearBox(slots[1].box, 100 - 53 - 10 - 53 * 0.2, y1, 53 * 1.2, 24 * 1.2);
+    near(slots[1].icon.x, 100 - 10 - 24 * 1.2 - U);
+    near(slots[1].texts[0].y, y1 + (24 * 1.2 - 18) / 2);
+  });
+
+  it('grows the first item when an item is held, and holds nothing visible when there are no item slots', () => {
+    const slots = weaponSlots(design(), '16:9', 100, 'item');
+    expect(slots.map((s) => s.active)).toEqual([false, false, true, false, false]);
+    expect(slots[2].box.w).toBeCloseTo(24 * 1.2, 6);
+    const none = weaponSlots(design({ weapons: { itemSize: 0 } }), '16:9', 100, 'item');
+    expect(none.map((s) => s.active)).toEqual([false, false]);
+  });
+
+  it('holds the gun by default', () => {
+    expect(weaponSlots(design(), '16:9', 100)).toEqual(weaponSlots(design(), '16:9', 100, 'primary'));
+  });
+});
+
 describe('drawWeapons', () => {
   const k = 2;
   const origin = { x: 1000, y: 300 };

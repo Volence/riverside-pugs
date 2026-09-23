@@ -16,6 +16,7 @@ import { elementById } from '../hud/elements';
 import { elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, type BuildAssets, type CardChild } from '../hud/build';
 import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
+import type { WeaponHeld } from '../hud/weapons';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
 import * as undoStack from '../hud/history';
@@ -332,6 +333,7 @@ export default function Hud() {
   // Which state the teammate cards are previewed in. Game code picks it in
   // game; this only changes the picture, never the design or the file.
   const [cardState, setCardState] = useState<CardState>('healthy');
+  const [held, setHeld] = useState<WeaponHeld>('primary');
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
   // On load only: a design's own crosshair choice is loaded and coerced
   // twice (here and in `design`, above), rather than threading the loaded
@@ -410,6 +412,7 @@ export default function Hud() {
     const box = selectionBox(design, sel);
     drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
       state: cardState,
+      held,
       frames: selectionFrames(design, sel),
       box,
       handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
@@ -417,7 +420,7 @@ export default function Hud() {
       marquee,
       guides,
     });
-  }, [design, side, sel, backdrop, imgTick, cardState, hover, guides, marquee]);
+  }, [design, side, sel, backdrop, imgTick, cardState, held, hover, guides, marquee]);
 
   // The preview draws labels in Roboto Condensed, the Modern preset's real
   // font and the closest shipped stand-in for stock's Trade Gothic. Canvas
@@ -919,11 +922,12 @@ export default function Hud() {
 
         <Panel class="hud__stage">
           <Toolbar
-            design={design} side={side} cardState={cardState} backdrop={backdrop} shotError={uploadErrors.shot}
+            design={design} side={side} cardState={cardState} held={held} backdrop={backdrop} shotError={uploadErrors.shot}
             canUndo={canUndo} canRedo={hist.current.future.length > 0}
             onUndo={doUndo} onRedo={doRedo}
             onSide={(s) => { setSide(s); setSel(NONE); }}
             onState={setCardState}
+            onHeld={setHeld}
             onPreset={(p) => { void changePreset(p); }}
             onAspect={(a) => edit((d) => ({ ...d, aspect: a }))}
             onBackdrop={setBackdrop}

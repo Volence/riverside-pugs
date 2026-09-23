@@ -97,14 +97,16 @@ export function Bars({ label, children }: { label?: string; children: ComponentC
  * persisted later without rewriting every use site.
  */
 export function Tabs(
-  { tabs, active, onSelect }: {
+  { tabs, active, onSelect, label }: {
     tabs: { key: string; label: string; count?: number }[];
     active: string;
     onSelect: (key: string) => void;
+    /** The tablist's accessible name, when the page has more than one. */
+    label?: string;
   },
 ) {
   return (
-    <div class="tabs" role="tablist">
+    <div class="tabs" role="tablist" aria-label={label}>
       {tabs.map((t) => (
         <button
           type="button"

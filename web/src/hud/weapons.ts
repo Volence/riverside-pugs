@@ -158,10 +158,20 @@ function cellAspect(name: string): number {
 }
 
 /**
- * Every slot the preview draws for the sample loadout, in HUD units inside
- * the panel (its top-left is 0, 0), panelWide being the panel's own wide.
+ * Which slot the survivor holds, for the preview: the gun, the pistol, or an
+ * item (the first, the molotov). The held slot is the active one, grown, and
+ * only a held gun gets its numbers nudged left, so switching moves them; the
+ * owner saw exactly that in game on 2026-09-23, and the page lets the player
+ * flip between the three to see it before downloading.
  */
-export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number): WeaponSlot[] {
+export type WeaponHeld = 'primary' | 'pistol' | 'item';
+
+/**
+ * Every slot the preview draws for the sample loadout, in HUD units inside
+ * the panel (its top-left is 0, 0), panelWide being the panel's own wide,
+ * with `held` the active slot.
+ */
+export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number, held: WeaponHeld = 'primary'): WeaponSlot[] {
   const get = keys(design);
   const n = (key: string) => { const v = parseFloat(get(key)); return Number.isFinite(v) ? v : parseFloat(DEFAULTS[key]); };
   const u = unit640(aspect);
@@ -193,13 +203,9 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
   // centred on the box's top edge. The clip ends PrimaryWeaponAmmoX in from
   // the right (5 more when active), the reserve starts just past it, both
   // spaced by one 640-unit, and the reserve sits ReserveAmmoYPos lower.
-  // Each slot below sets `active` as a fixed const rather than inlining true/false, since
-  // the sample loadout always shows the primary as the active one: boxAt and frameOf already
-  // branch on it generically, so a later feature that lets the preview choose the active slot
-  // can compute these instead of writing them here and reuse those branches unchanged.
   let y = n('PrimaryWeaponsYPos');
   {
-    const active = true;
+    const active = held === 'primary';
     const f = active ? GROW : 1;
     const box = boxAt(y, n('PrimaryWeaponBoxWide'), n('PrimaryWeaponBoxTall'), active);
     const ih = n('PrimaryWeaponTall') * f;
@@ -224,7 +230,7 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
   // The pistol: its icon a square as tall as the box, one 640-unit in from
   // the box's right edge; the clip ends two 640-units left of the icon.
   {
-    const active = false;
+    const active = held === 'pistol';
     const box = boxAt(y, n('PistolBoxWide'), n('PistolBoxTall'), active);
     const iconX = panelWide - indent - box.h - u;
     const font = get('PistolAmmoFont');
@@ -239,8 +245,8 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
   // The items: IconSize squares, each icon filling its box. At IconSize 0
   // the game draws no item slot at all, not even the box's rim (probe B).
   if (n('IconSize') <= 0) return slots;
-  for (const item of SAMPLE_ITEMS) {
-    const active = false;
+  for (const [i, item] of SAMPLE_ITEMS.entries()) {
+    const active = held === 'item' && i === 0;
     const size = n('IconSize');
     const box = boxAt(y, size, size, active);
     slots.push({
@@ -275,9 +281,9 @@ function drawNineSlice(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: 
  * hatched where it would be.
  */
 export function drawWeapons(ctx: CanvasRenderingContext2D, design: HudDesign, origin: { x: number; y: number }, k: number,
-  panelWide: number, onAsset?: () => void): void {
+  panelWide: number, onAsset?: () => void, held: WeaponHeld = 'primary'): void {
   const px = (r: Rect): Rect => ({ x: origin.x + r.x * k, y: origin.y + r.y * k, w: r.w * k, h: r.h * k });
-  for (const s of weaponSlots(design, design.aspect, panelWide)) {
+  for (const s of weaponSlots(design, design.aspect, panelWide, held)) {
     const frame = px(s.frame);
     const box = s.art ? artImage(s.art, onAsset) : undefined;
     if (s.fill) {
