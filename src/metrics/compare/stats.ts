@@ -73,21 +73,54 @@ export function weightedValue(side: MatchSample[], weights: Map<string, number>)
   return wsum > 0 ? v / wsum : null;
 }
 
+/** Paired B-minus-A rate, weighted, over only the maps with data on BOTH
+ *  sides of this replicate. This avoids the bias weightedValue's separate
+ *  per-side renormalization introduces when one side drops a map from a
+ *  resample and the other does not: null when no map qualifies. */
+export function weightedDiff(a: MatchSample[], b: MatchSample[], weights: Map<string, number>): number | null {
+  const ta = totalsByMap(a), tb = totalsByMap(b);
+  let v = 0, wsum = 0;
+  for (const [map, w] of weights) {
+    const sa = ta.get(map), sb = tb.get(map);
+    if (!sa || !sb || sa.den <= 0 || sb.den <= 0 || w <= 0) continue;
+    v += w * (sb.num / sb.den - sa.num / sa.den);
+    wsum += w;
+  }
+  return wsum > 0 ? v / wsum : null;
+}
+
 function resample(side: MatchSample[], rand: () => number): MatchSample[] {
   const out: MatchSample[] = new Array(side.length);
   for (let i = 0; i < side.length; i++) out[i] = side[Math.floor(rand() * side.length)];
   return out;
 }
 
-/** Bootstrap of B minus A by resampling whole matches on each side. */
+function stdev(xs: number[]): number {
+  if (xs.length < 2) return 0;
+  const mean = xs.reduce((s, x) => s + x, 0) / xs.length;
+  return Math.sqrt(xs.reduce((s, x) => s + (x - mean) ** 2, 0) / (xs.length - 1));
+}
+
+/** Bootstrap of B minus A by resampling whole matches on each side. Uses the
+ *  paired weightedDiff (not weightedValue(b) - weightedValue(a)) for every
+ *  replicate so a map dropped from one side's resample but not the other's
+ *  cannot bias the difference. seA/seB are each side's own replicate spread,
+ *  used by matchesNeeded to see how much of the uncertainty A already fixes. */
 export function bootstrapDiff(a: MatchSample[], b: MatchSample[], weights: Map<string, number>,
-  reps: number, rand: () => number): { lo: number; hi: number; p: number; se: number } | null {
+  reps: number, rand: () => number): { lo: number; hi: number; p: number; se: number; seA: number; seB: number } | null {
   if (a.length === 0 || b.length === 0) return null;
   const diffs: number[] = [];
+  const vas: number[] = [];
+  const vbs: number[] = [];
   for (let r = 0; r < reps; r++) {
-    const va = weightedValue(resample(a, rand), weights);
-    const vb = weightedValue(resample(b, rand), weights);
-    if (va !== null && vb !== null) diffs.push(vb - va);
+    const ra = resample(a, rand);
+    const rb = resample(b, rand);
+    const va = weightedValue(ra, weights);
+    const vb = weightedValue(rb, weights);
+    if (va !== null) vas.push(va);
+    if (vb !== null) vbs.push(vb);
+    const d = weightedDiff(ra, rb, weights);
+    if (d !== null) diffs.push(d);
   }
   if (diffs.length < 2) return null;
   diffs.sort((x, y) => x - y);
@@ -95,7 +128,8 @@ export function bootstrapDiff(a: MatchSample[], b: MatchSample[], weights: Map<s
   const ge = diffs.filter((d) => d >= 0).length / diffs.length;
   const mean = diffs.reduce((s, d) => s + d, 0) / diffs.length;
   const se = Math.sqrt(diffs.reduce((s, d) => s + (d - mean) ** 2, 0) / (diffs.length - 1));
-  return { lo: quantile(diffs, 0.025), hi: quantile(diffs, 0.975), p: Math.min(1, 2 * Math.min(le, ge)), se };
+  const p = Math.max(1 / (reps + 1), Math.min(1, 2 * Math.min(le, ge)));
+  return { lo: quantile(diffs, 0.025), hi: quantile(diffs, 0.975), p, se, seA: stdev(vas), seB: stdev(vbs) };
 }
 
 /** Which p-values survive Benjamini-Hochberg at false discovery rate q. */
@@ -110,12 +144,19 @@ export function benjaminiHochberg(ps: (number | null)[], q: number): boolean[] {
   return out;
 }
 
-/** Extra matches per side for the current difference to clear a 95% interval,
- *  assuming the standard error shrinks with the square root of the sample. */
-export function matchesNeeded(diff: number, se: number, n: number): number | null {
-  if (diff === 0 || se <= 0 || n <= 0) return null;
-  const factor = (Z95 * se / Math.abs(diff)) ** 2;
-  return Math.max(0, Math.ceil(n * factor - n));
+/** Extra matches for side B alone (the newer patch) for the difference to
+ *  clear a 95% interval, holding side A's match count fixed. Side A's own
+ *  replicate variance (seA) already contributes a fixed amount to the target
+ *  variance; only the leftover budget can be paid down by adding B matches,
+ *  which is assumed to shrink B's variance with the square root of its
+ *  sample. Null when the diff is zero or seA alone already meets or exceeds
+ *  the target, meaning no amount of additional B matches can settle it. */
+export function matchesNeeded(diff: number, seA: number, seB: number, nB: number): number | null {
+  if (diff === 0) return null;
+  const target = (Math.abs(diff) / Z95) ** 2;
+  if (seA * seA >= target) return null;
+  const nBPrime = (nB * seB * seB) / (target - seA * seA);
+  return Math.max(1, Math.ceil(nBPrime - nB));
 }
 
 export type Verdict = 'real' | 'too_early' | 'noise' | 'no_data';
