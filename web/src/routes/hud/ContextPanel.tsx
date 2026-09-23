@@ -14,6 +14,7 @@ import {
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
+import { TEAMMATES, type Selection } from '../../hud/selection';
 import {
   Slider, Field, patchNum, endsOn, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode, type Patch,
 } from './controls';
@@ -399,4 +400,66 @@ export function ElementsControls({ design, edit, ids }: { design: HudDesign; edi
       )}
     </Field>
   );
+}
+
+/**
+ * One Free teammate card: where it is drawn, as X and Y. The boxes read and
+ * write the stored slot plus the fit offset, the same as the Teammates'
+ * per-card list (TeamControls' setSlot): teamCardRects' centre-anchor
+ * rounding would show a value like 294 for a stored 293 and drift while
+ * typing, so the slot is the source of truth here too. The cards share one
+ * size (the Teammates' Scale), so there is no size here.
+ */
+export function CardControls({ design, edit, end, card }: { design: HudDesign; edit: Edit; end: () => void; card: number }) {
+  const off = cardOffset(design);
+  const slot = design.elements.teamColumn?.slots?.[card];
+  if (!slot) return null;
+  const place = (key: 'x' | 'y', e: Event) => {
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(n)) return;
+    edit((d) => {
+      const cur = d.elements.teamColumn?.slots?.[card];
+      if (!cur) return d;
+      const o2 = cardOffset(d);
+      return placeCard(d, card, key === 'x' ? n : cur.x + o2.x, key === 'y' ? n : cur.y + o2.y);
+    }, 'gesture');
+  };
+  return (
+    <Field legend={`Teammate card ${card + 1}`}>
+      {card === 3 && <p class="muted hud__note">Card 4 shows only while you spectate a full team.</p>}
+      <div class="hud__row2">
+        <label class="hud__field">
+          <span>X</span>
+          <input type="number" value={Math.round(slot.x + off.x)} onInput={(e) => place('x', e)} {...endsOn(end)} />
+        </label>
+        <label class="hud__field">
+          <span>Y</span>
+          <input type="number" value={Math.round(slot.y + off.y)} onInput={(e) => place('y', e)} {...endsOn(end)} />
+        </label>
+      </div>
+      <p class="muted hud__note">The cards share one size: scale them from the Teammates.</p>
+    </Field>
+  );
+}
+
+/** The right-hand panel: only what the selection can do. */
+export function ContextPanel(
+  { design, sel, edit, end, onSelect }: {
+    design: HudDesign; sel: Selection; edit: Edit; end: () => void; onSelect: (s: Selection) => void;
+  },
+) {
+  switch (sel.kind) {
+    case 'none':
+      return <p class="muted">Select an element on the canvas or in Layers. A click picks the piece under the pointer; a drag moves its whole section.</p>;
+    case 'elements':
+      return sel.ids.length === 1
+        ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} />
+        : <ElementsControls design={design} edit={edit} ids={sel.ids} />;
+    case 'card':
+      return <CardControls design={design} edit={edit} end={end} card={sel.card} />;
+    case 'children':
+      return sel.names.length === 1
+        ? <ChildControls design={design} edit={edit} end={end} name={sel.names[0]} onBack={() => onSelect(TEAMMATES)} />
+        : <PiecesControls design={design} edit={edit} end={end} names={sel.names} />;
+  }
 }

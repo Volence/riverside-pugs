@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact';
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/preact';
 import { toUnits } from './Hud';
 import Hud from './Hud';
 
@@ -132,8 +132,7 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
     fireEvent.click(screen.getByRole('button', { name: 'Card 2' }));
-    // The side panel's own card note arrives with Task 15; the breadcrumb names the card meanwhile.
-    expect(screen.getByText('Card 2', { selector: '.hud__crumbs span' })).toBeTruthy();
+    expect(screen.getByText('Teammate card 2', { selector: 'legend' })).toBeTruthy();
   });
 
   it("snaps a child's X box to its cap, and goes back to the teammates", () => {
@@ -485,10 +484,9 @@ describe('Hud page', () => {
     expect(screen.getByRole('button', { name: 'Up to Card 2' })).toBeTruthy();
     // (133, 442) is on card 1 but on none of its pieces.
     dragFrom(canvas, [133, 442], [233, 242]);
-    // The side panel's own card note arrives with Task 15; the breadcrumb names the card meanwhile.
-    expect(screen.getByText('Card 1', { selector: '.hud__crumbs span' })).toBeTruthy();
-    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
-    expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('241');
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('113');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('241');
   });
 
   it('clears the selection with a click on empty screen', () => {
@@ -625,12 +623,13 @@ describe('Hud page', () => {
     fireEvent.pointerMove(canvas, { clientX: 183, clientY: 342, pointerId: 1, altKey: true });
     fireEvent.pointerMove(canvas, { clientX: 233, clientY: 242, pointerId: 1, altKey: true });
     fireEvent.pointerUp(canvas, { clientX: 233, clientY: 242, pointerId: 1, altKey: true });
-    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('113');
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('113');
     undoKey();
-    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('13');
-    // The Layout change before it is its own step.
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
+    // The Layout change before it is its own step; leaving Free climbs the card to the Teammates.
     undoKey();
-    expect(screen.queryByLabelText('Card 1 X')).toBeNull();
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
   });
 
   it('coalesces a run of arrow-key nudges into one step', () => {
@@ -708,5 +707,37 @@ describe('Hud page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Align left' }));
     fireEvent.click(screen.getByRole('button', { name: 'Your health' }));
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('10');
+  });
+
+  it('puts every page control in one toolbar, Download on it', () => {
+    const { container } = render(<Hud />);
+    const bar = within(container.querySelector('.hud__toolbar') as HTMLElement);
+    for (const name of ['Undo', 'Redo']) expect(bar.getByRole('button', { name }), name).toBeTruthy();
+    for (const name of ['Survivor', 'Infected', 'Healthy', 'Down', 'Dead']) expect(bar.getByRole('tab', { name }), name).toBeTruthy();
+    for (const name of [/preset/i, /aspect/i, /backdrop/i, /font/i]) expect(bar.getByRole('combobox', { name }), String(name)).toBeTruthy();
+    const download = bar.getByRole('button', { name: /download/i });
+    expect(download.classList.contains('hud__download')).toBe(true);
+    expect(download.textContent).toBe('Download .vpk');
+    expect(screen.getAllByRole('button', { name: /download/i })).toHaveLength(1);
+  });
+
+  it('shows a Free card its own X and Y, placing the card where it is drawn', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Card 3' }));
+    expect(screen.getByText('Teammate card 3', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('293');
+    fireEvent.input(screen.getByLabelText('X'), { target: { value: '500' } });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('500');
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByLabelText('Card 3 X') as HTMLInputElement).value).toBe('500');
+  });
+
+  it('shows a hint, then Styles and Save, with nothing selected', () => {
+    render(<Hud />);
+    expect(screen.getByText(/a drag moves its whole section/)).toBeTruthy();
+    expect(screen.getByText('Styles')).toBeTruthy();
+    expect(screen.getByText('Save your HUD')).toBeTruthy();
   });
 });

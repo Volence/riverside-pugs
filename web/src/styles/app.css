@@ -186,6 +186,9 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 
 .hud__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); font-size: var(--fs-dense); color: var(--text-muted); }
 .hud__toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-1) var(--sp-2); font: inherit; font-size: var(--fs-dense); }
+.hud__tbsep { width: 1px; align-self: stretch; background: var(--border); }
+/* Download sits at the right end of the toolbar, whatever wraps before it. */
+.hud__download { margin-left: auto; }
 
 /* The backing store is sized to this box every draw, 1:1, so it must never be
  * scaled by CSS after the fact. touch-action: none is what lets a drag win
@@ -204,22 +207,6 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 }
 .hud__crumbs button { background: none; border: 0; padding: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
 .hud__crumbs button:hover { color: var(--text-bright); text-decoration: underline; }
-
-.hud__list { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
-.hud__pill {
-  background: var(--surface-2);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-dense);
-  cursor: pointer;
-}
-.hud__pill:hover { color: var(--text-bright); border-color: var(--border-strong); }
-.hud__pill.is-active { color: var(--text-bright); border-color: var(--accent); }
-/* A hidden element is still reachable, but struck through so the list also
- * doubles as a visibility summary at a glance. */
-.hud__pill--hidden { text-decoration: line-through; }
 
 /* The Layers list: one row per element, pieces indented under the
  * Teammates. The name is a button (click selects, Shift+click adds), the eye

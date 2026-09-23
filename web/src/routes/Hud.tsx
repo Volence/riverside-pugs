@@ -1,6 +1,6 @@
 import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Panel, Tabs } from '../components/bits';
+import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { confirm } from '../components/Confirm';
 import { drawBackdrop, type Backdrop } from '../crosshair/draw';
@@ -8,7 +8,7 @@ import {
   loadDesign, saveDesign, validateDesign, safeName, encodeShare, decodeShare, DEFAULT_DESIGN,
   type HudDesign, type StyleOverride, type Box,
 } from '../hud/design';
-import { screenW, SCREEN_H, type Aspect } from '../hud/units';
+import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
 import { elementRect, teamLayout, teamCardRects, cardFrame, packHud, type BuildAssets, type CardChild } from '../hud/build';
 import { drawHud, visibleElements, type Side } from '../hud/mock';
@@ -29,8 +29,9 @@ import {
   selectionBox, handlesFor, handlePoint, handleAt,
   type Selection, type Hit, type Mods, type Crumb,
 } from '../hud/selection';
-import { ElementControls, ChildControls, PiecesControls, ElementsControls } from './hud/ContextPanel';
+import { ContextPanel } from './hud/ContextPanel';
 import { LayersPanel } from './hud/LayersPanel';
+import { Toolbar } from './hud/Toolbar';
 import { endsOn, typedInto, hexOf, alphaPct, withHex, withAlphaPct, type Edit, type EditMode } from './hud/controls';
 import regularUrl from '../hud/base/fonts/RobotoCondensed-Regular.ttf?url';
 import boldUrl from '../hud/base/fonts/RobotoCondensed-Bold.ttf?url';
@@ -118,10 +119,6 @@ export async function assetsFor(design: HudDesign): Promise<BuildAssets> {
   return assets;
 }
 
-const BACKDROPS: [Backdrop, string][] = [
-  ['scene', 'Saferoom'], ['dark', 'Dark'], ['bright', 'Bright'], ['grey', 'Grey'], ['shot', 'My screenshot'],
-];
-
 /**
  * One row of the styles panel: a kind, a colour and an opacity slider that
  * together edit `design.styles[slot.id]`, and for the Image kind a file
@@ -208,10 +205,6 @@ const RESIZE_CURSOR: Record<Handle, string> = {
   n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
   ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
 };
-
-const CARD_STATES: { key: CardState; label: string }[] = [
-  { key: 'healthy', label: 'Healthy' }, { key: 'down', label: 'Down' }, { key: 'dead', label: 'Dead' },
-];
 
 /** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
 function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
@@ -783,7 +776,6 @@ export default function Hud() {
 
   const basicSlots = SLOTS.filter((s) => !s.advancedOnly);
   const advancedSlots = SLOTS.filter((s) => s.advancedOnly);
-  const oneChild = sel.kind === 'children' && sel.names.length === 1 ? sel.names[0] : null;
 
   return (
     <div class="page page--wide">
@@ -801,86 +793,19 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__stage">
-          <div class="hud__toolbar">
-            <button
-              type="button" class="btn btn--ghost btn--sm" aria-label="Undo" title="Undo (Ctrl+Z)"
-              disabled={!hist.current.past.length} onClick={doUndo}
-            >
-              ↶ Undo
-            </button>
-            <button
-              type="button" class="btn btn--ghost btn--sm" aria-label="Redo" title="Redo (Ctrl+Shift+Z)"
-              disabled={!hist.current.future.length} onClick={doRedo}
-            >
-              ↷ Redo
-            </button>
-
-            <label>
-              Preset{' '}
-              <select
-                value={design.preset}
-                onChange={(e) => { void changePreset((e.target as HTMLSelectElement).value as Preset); }}
-              >
-                <option value="stock">Stock</option>
-                <option value="modern">Modern</option>
-              </select>
-            </label>
-
-            <Tabs
-              tabs={[{ key: 'survivor', label: 'Survivor' }, { key: 'infected', label: 'Infected' }]}
-              active={side}
-              onSelect={(k) => { setSide(k as Side); setSel(NONE); }}
-            />
-
-            {side === 'survivor' && (
-              <Tabs
-                tabs={CARD_STATES.map((s) => ({ key: s.key, label: s.label }))}
-                active={cardState}
-                onSelect={(k) => setCardState(k as CardState)}
-              />
-            )}
-
-            <label>
-              Aspect{' '}
-              <select
-                value={design.aspect}
-                onChange={(e) => edit((d) => ({ ...d, aspect: (e.target as HTMLSelectElement).value as Aspect }))}
-              >
-                <option value="16:9">16:9</option>
-                <option value="16:10">16:10</option>
-                <option value="4:3">4:3</option>
-              </select>
-            </label>
-
-            <label>
-              Backdrop{' '}
-              <select
-                value={backdrop}
-                onChange={(e) => setBackdrop((e.target as HTMLSelectElement).value as Backdrop)}
-              >
-                {BACKDROPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </label>
-            {backdrop === 'shot' && (
-              <label class="hud__file hud__file--inline">
-                <span class="btn btn--ghost btn--sm">Load screenshot</span>
-                <input type="file" accept="image/*" aria-label="Load a screenshot for the backdrop" onChange={pickShot} />
-              </label>
-            )}
-            {backdrop === 'shot' && uploadErrors.shot && <span class="error">{uploadErrors.shot}</span>}
-
-            <label>
-              Font{' '}
-              <select
-                value={design.font} disabled={design.preset === 'modern'}
-                onChange={(e) => edit((d) => ({ ...d, font: (e.target as HTMLSelectElement).value as 'preset' | 'roboto' }))}
-              >
-                <option value="preset">Preset default</option>
-                <option value="roboto">Roboto Condensed</option>
-              </select>
-            </label>
-            {design.preset === 'modern' && <span class="muted hud__note">Modern already uses Roboto Condensed.</span>}
-          </div>
+          <Toolbar
+            design={design} side={side} cardState={cardState} backdrop={backdrop} shotError={uploadErrors.shot}
+            canUndo={hist.current.past.length > 0} canRedo={hist.current.future.length > 0}
+            onUndo={doUndo} onRedo={doRedo}
+            onSide={(s) => { setSide(s); setSel(NONE); }}
+            onState={setCardState}
+            onPreset={(p) => { void changePreset(p); }}
+            onAspect={(a) => edit((d) => ({ ...d, aspect: a }))}
+            onBackdrop={setBackdrop}
+            onShot={pickShot}
+            onFont={(f) => edit((d) => ({ ...d, font: f }))}
+            onDownload={() => { void download(); }}
+          />
 
           <div class="hud__canvaswrap">
             <canvas
@@ -901,17 +826,7 @@ export default function Hud() {
         </Panel>
 
         <Panel class="hud__side">
-          {oneChild
-            ? <ChildControls design={design} edit={edit} end={endGesture} name={oneChild} onBack={() => setSel(TEAMMATES)} />
-            : sel.kind === 'elements' && sel.ids.length === 1
-              ? <ElementControls design={design} edit={edit} end={endGesture} id={sel.ids[0]} />
-              : sel.kind === 'card'
-                ? <ElementControls design={design} edit={edit} end={endGesture} id="teamColumn" />
-                : sel.kind === 'children'
-                  ? <PiecesControls design={design} edit={edit} end={endGesture} names={sel.names} />
-                  : sel.kind === 'elements'
-                    ? <ElementsControls design={design} edit={edit} ids={sel.ids} />
-                    : <p class="muted">Select an element on the canvas or in Layers.</p>}
+          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} />
         </Panel>
       </div>
 
@@ -957,9 +872,6 @@ export default function Hud() {
           <span />
         </label>
 
-        <button type="button" class="btn btn--block" onClick={() => { void download(); }}>
-          {design.advanced ? 'Download .zip' : 'Download .vpk'}
-        </button>
         <p class="muted hud__note">
           {design.advanced
             ? 'Unzip it and follow README.txt. It works alongside a crosshair addon. A rebuilt HUD only shows after a game restart. Custom HUDs are allowed on the Riverside servers.'
