@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { makeVpk } from './fixtures/makeVpk.js';
-import { parseKeyValues, parseMission, missionFromVpk, listVpkPaths, MissionError } from '../src/vpk.js';
+import { crc32 } from 'node:zlib';
+import { makeVpk, makeVpkMulti } from './fixtures/makeVpk.js';
+import { parseKeyValues, parseMission, missionFromVpk, listVpkPaths, openVpk, MissionError } from '../src/vpk.js';
 
 const MISSION = `
 "mission"
@@ -203,5 +204,61 @@ describe('listVpkPaths', () => {
     const p = join(dir, 'd.vpk');
     writeFileSync(p, 'not a vpk at all');
     expect(listVpkPaths(p)).toEqual([]);
+  });
+});
+
+describe('openVpk', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vpk-open-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('is null for a file that is not a VPK', () => {
+    const p = join(dir, 'a.vpk');
+    writeFileSync(p, 'not a vpk at all');
+    expect(openVpk(p)).toBeNull();
+  });
+
+  it('gives every entry its path, size and stored CRC', () => {
+    const p = join(dir, 'pak01_dir.vpk');
+    makeVpkMulti(p, [
+      { ext: 'vmt', dir: 'materials/particle', name: 'warp', body: 'spritecard {}' },
+      { ext: 'pcf', dir: 'particles', name: 'fire_fx', body: 'pcf-bytes' },
+    ]);
+    const vpk = openVpk(p)!;
+    expect(vpk.entries.map((e) => [e.path, e.size, e.crc])).toEqual([
+      ['materials/particle/warp.vmt', 13, crc32(Buffer.from('spritecard {}'))],
+      ['particles/fire_fx.pcf', 9, crc32(Buffer.from('pcf-bytes'))],
+    ]);
+  });
+
+  it('reads a body stored inline, after the tree', () => {
+    const p = join(dir, 'pak01_dir.vpk');
+    makeVpkMulti(p, [
+      { ext: 'vmt', dir: 'materials/a', name: 'one', body: 'first' },
+      { ext: 'vmt', dir: 'materials/a', name: 'two', body: 'second' },
+    ]);
+    const vpk = openVpk(p)!;
+    expect(vpk.read(vpk.entries[1]).toString()).toBe('second');
+  });
+
+  // pak01 keeps almost nothing inline: the directory file names a numbered
+  // archive and an offset into it.
+  it('reads a body out of the numbered archive beside the directory file', () => {
+    const p = join(dir, 'pak01_dir.vpk');
+    makeVpkMulti(p, [
+      { ext: 'vmt', dir: 'materials/a', name: 'one', body: 'first', archiveIndex: 3 },
+      { ext: 'vmt', dir: 'materials/a', name: 'two', body: 'second', archiveIndex: 3 },
+      { ext: 'vtf', dir: 'materials/a', name: 'tex', body: 'pixels', archiveIndex: 12 },
+    ]);
+    const vpk = openVpk(p)!;
+    expect(vpk.entries.map((e) => vpk.read(e).toString())).toEqual(['first', 'second', 'pixels']);
+  });
+
+  it('joins the preload bytes to the rest', () => {
+    const p = join(dir, 'b.vpk');
+    makeVpk(p, { ext: 'txt', dir: 'scripts', name: 'x', body: 'abcdef', preloadBytes: 4 });
+    const vpk = openVpk(p)!;
+    expect(vpk.entries[0].size).toBe(6);
+    expect(vpk.read(vpk.entries[0]).toString()).toBe('abcdef');
   });
 });

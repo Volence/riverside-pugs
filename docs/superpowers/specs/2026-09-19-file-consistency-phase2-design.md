@@ -3,6 +3,10 @@
 Status: design approved in conversation 2026-09-19, spec written the same day. File-type
 probes and the pure-whitelist spike done the same evening; nothing else built.
 
+Update 2026-09-21: groups 1 to 5 are live on all four servers. Batch 2 (groups 7 to 15, 880
+more paths) is generated beside the shipped list and is NOT live; see "Batch 2" for what it
+holds. Update 2026-09-23: batch 2 passed the owner's client gate (see "The batch 2 gate").
+
 Related: `2026-09-18-file-consistency-design.md` (Phase 1, the mechanism, PASSED for
 materials and sounds), `2026-09-17-integrity-design.md` (the replay analyzer, a different
 cheat class).
@@ -200,33 +204,128 @@ and the file name lands in the disconnect reason. It does not work for this prob
 - A force-listed file drops the client at signon, before pure ever runs, so the two cannot be
   combined to get attribution for the same file.
 
-## Known gap: per-map sound overrides (proven 2026-09-19, accepted)
+## Batch 2: groups 7 to 15 (880 files), generated 2026-09-21, NOT live
 
-The L4D1 sound emitter loads `maps/<mapname>_level_sounds.txt` as overrides that REPLACE
-any entry the manifest and soundscripts defined. Stock maps ship no such file, so a client
-can add one. Proven by ear: a new loose
-`maps/l4d_vs_hospital01_apartment_level_sounds.txt` redefining `Pistol.Fire` to a witch
-shriek played the shriek, with all 651 files forced and no rejection. The same file could
-point gunfire at a new quiet wav.
+The 2026-09-21 integrity audit (items 16 to 18) made the point that decides this batch:
+**anything unforced can be overridden from a search path put first in `gameinfo.txt`**, which
+is exactly how `left4dead_dlc3`, `left4dead_dlc4` and the owner's `modernhud` mount. "pak01
+beats addons" stops a lazy install and nothing else. So what matters is coverage around the
+things already forced: a forced `.mdl` beside an unforced `.vvd`, a forced `.vmt` that names
+an unforced `.vtf`, seven forced particle definitions out of thirty-two.
 
-File forcing cannot close it. Each step was tested on the local server:
+Batch 2 is generated to its own file, `consistency/configs/l4d_consistency.batch2.cfg`, with
+`gen-consistency-list.ts --batch2`. It holds the shipped 651 paths unchanged and in order,
+then the groups below: **1,531 paths**. Nothing reads that file. The servers and the campaign
+uploader stay on `l4d_consistency.cfg` until batch 2 is promoted, after the owner's client
+gate (passed 2026-09-23).
 
-1. The engine will not force a path the server lacks: `ForceExactFile` returns 1 but the
-   string never enters the `downloadables` table.
-2. Give the server its own copy and force that, and the client's modified copy IS rejected
-   by name. But a client with NO such file, which is every legitimate player, is rejected
-   too.
-3. `sv_downloadurl` does not rescue it. L4D1 has no `sv_allowdownload`, and with a working
-   HTTP download URL the client made no request at all: the consistency check runs before
-   any download and the client drops within two seconds.
+| group | what | paths | size | stops |
+|---|---|---|---|---|
+| 7 | the Sacrifice tank: `models/infected/hulk_dlc3.mdl`, `materials/models/infected/hulk/hulk_traincar_01.vmt`, `.vtf`, `_normal.vtf` | 4 | 4.0 MB | a skinned tank on the one map set group 1 never reached |
+| 8 | textures the forced materials borrow: `materials/effects/flat_normal.vtf`, `materials/effects/burned.vtf`, `materials/models/props/cs_office/plant01.vtf`, `plant01_p.vtf` | 4 | 0.4 MB | re-skinning a forced material through a texture it names |
+| 9 | SI mesh companions: `.vvd`, `.dx90.vtx`, `.vtx`, `.phy` beside the seven forced SI models (`hulk_dlc3` included) | 28 | 5.5 MB | a mesh swap that leaves the `.mdl` alone |
+| 10 | `materials/models/infected/common/common_infected_shared.vmt` | 1 | 300 B | 65 common materials `include` it, so one edit re-skins every common. The rest of group 6 stays out |
+| 11 | every other `particles/*.pcf` (17), every `.vmt` and `.vtf` under `materials/particle/**` not already in group 5 (222), and the 7 textures those materials borrow from `materials/effects/` and `materials/cable/` | 246 | 30.4 MB | thinned choke smoke, removed fire, muzzle flash and blood, emptied screen effects |
+| 12 | `sound/player/footsteps/infected/**`, `sound/player/footsteps/boomer/**` | 296 | 11.0 MB | loud-footstep packs. These two sets are what the hunter, smoker and boomer walk on |
+| 13 | `materials/detail/{detailsprites,detailsprites_overgrown,ruraldetailsprites}.{vmt,vtf}` | 6 | 2.0 MB | the cornfield and tall grass made transparent |
+| 14 | `materials/effects/flashlight001.vtf`, `flashlight001_infected.vtf`; the tank rock `models/props_debris/concrete_chunk01a.{mdl,vvd,dx90.vtx,vtx,phy}` and `materials/models/props_debris/concretedebris_chunk01.{vmt,vtf}` | 9 | 2.2 MB | a widened or brightened flashlight cone; a rock made huge, bright or invisible |
+| 15 | foliage mesh companions: `.vvd`, `.dx90.vtx`, `.vtx`, `.phy` beside the 75 forced foliage and plant models | 286 | 13.2 MB | a no-trees pack that empties the `.vvd`. Its own group so that `--without 15` drops it: large, and the rarer trick |
 
-So the only way to make it pass would be every player installing our per-map files by hand,
-which is the opposite of "nothing asked of players". Accepted as a gap. It needs a
-hand-written file per map, no downloadable silencer pack works this way, and everything
-such packs do use (replacement wavs, edited soundscripts, `soundmixers.txt`) is forced. The
-manifest-insert route (see group 3) is the same class and is likewise open; it was not
-tested by ear because this result makes it moot. Do not describe either route on the help
-page.
+Stock L4D1 has no `.dx80.vtx` or `.sw.vtx` for any of these models. The companions rule asks
+for both and would pick them up if an update added them.
+
+Two things the rules deliberately do not take from `materials/particle/`:
+`grayscalegradient.tga` and `grayscalegradient.txt`, loose source art the engine never opens.
+
+### What the generator had to learn
+
+- **The dlc3 pak.** Groups 1 to 6 read `left4dead/pak01_dir.vpk` and nothing else, so the
+  Sacrifice tank and `detailsprites_overgrown` were invisible to them. Archive rules now
+  resolve `left4dead_dlc3` over `left4dead`, which is `gameinfo.txt`'s order. **Groups 1 to 6
+  stay pinned to the base pak** (`baseOnly`): re-run against both paks, group 1's
+  `materials/models/infected/hulk` rule would take in the traincar tank and group 2 would
+  take in 77 Sacrifice foliage files, and the live list would change with nobody deciding it
+  should. The default run is byte-identical to the shipped file, and a test pins that batch 2
+  starts with those 651 paths in order.
+- **Companions.** A rule kind that selects `<model>.<ext>` beside every `.mdl` the named
+  groups force in this run, so it follows the models and never a directory.
+- **The material reference check.** Every forced `.vmt` is read and every value in it that
+  names a stock texture (under any key: `$basetexture`, `$bumpmap`, `$detail`, `$envmap`,
+  `$selfillummask`, `$phongexponenttexture` and the rest), and every `include`, must itself be
+  forced, or be waived with a reason, or generation fails. Run over the shipped list it found
+  the four textures that became group 8 (the reviewer's two `cs_office/plant01*.vtf` loose ends
+  among them); run over batch 2 it found seven more under `materials/particle/` vmts, now in
+  group 11. One waiver: `materials/ads/ad01.vtf`, named only by `materials/particle/ctest.vmt`,
+  a developer test card that no particle definition uses. A reference that cannot be forced (a
+  never-force path, an overlay collision) is printed as a note and is never a failure. On the
+  shipped list the four group 8 textures print as "forced by group 8, which this run leaves
+  out".
+- **Dual copies.** See the next section.
+- **`--verify` reads archives.** It used to compare loose files and the md5 of
+  `pak01_dir.vpk`. It now CRCs the content of every listed file on both sides, archived or
+  loose, and compares both directory files. Run 2026-09-21 against the owner's real client
+  (`~/.local/share/Steam/steamapps/common/left 4 dead/left4dead`): 760 loose and 771 archived
+  files compared, 0 differ, 0 missing.
+
+### Paths that base and dlc3 both hold
+
+The generator now fails on a listed path that exists in more than one stock location with
+different content, unless it is waived. The worry came from the `sv_pure` spike, where any
+path present in two search paths mismatched for a stock client. Whether ForceExactFile has
+the same problem was never measured directly, so batch 2 assumes it does:
+
+- **Eight particle definitions are excluded from group 11** because `left4dead_dlc3`'s pak
+  holds a different version of each: `burning_fx`, `environment_fx`, `environmental_fx`,
+  `fire_01`, `fire_01l4d`, `fire_infected_fx`, `water_fx`, `weapon_fx`. These are the only
+  eight paths the two paks share at all. Every run prints each exclusion.
+- **Two live paths are already in this state**, found by the new check:
+  `scripts/game_sounds_music.txt` and `scripts/level_sounds_general.txt` are loose in both
+  `left4dead_dlc3/scripts` and `left4dead/scripts` with different content, and both have been
+  forced on four servers since 2026-09-20 with stock clients connecting. They are waived with
+  that as the reason. It is also evidence that ForceExactFile is fine with a dual copy: server
+  and client both resolve dlc3 first and checksum the same file.
+- **Group 16** forces the eight excluded particle definitions and is reached only with
+  `--groups`. It exists so the question can be settled with a real client instead of
+  leaving muzzle flash, fire and water particles open on an untested assumption.
+
+Against `left4dead_dlc4` (the overlay that only some clients mount): 0 of the 1,531 paths
+collide. Also checked and clean: the owner's `modernhud` search path (84 paths) and
+`left4dead_lv` (63). The manifests stay off limits for the reason group 3 gives:
+`scripts/game_sounds_manifest.txt`, `particles/particles_manifest.txt`,
+`scripts/weapon_manifest.txt`, `scripts/propdata.txt` and `scripts/soundscapes_manifest.txt`
+are all shipped by dlc4, and a test pins their absence.
+
+### Budget
+
+- **The downloadables table** holds 8,192 entries. The live servers report 671 used with 651
+  forced, so about 20 belong to the map and the plugins. Batch 2: about **1,551 of 8,192**
+  (19%). Without group 15: about 1,265. Batch 2 plus group 6: about 2,001.
+- **Bytes re-checksummed on every map load**, which is what loading time follows: the shipped
+  list is 92.6 MB, batch 2 is 161.4 MB (148.2 MB without group 15). Group 11 is the heavy one
+  at 30.4 MB, and three 5.3 MB sheets are more than half of it (`fire_burning_character`,
+  `fire_explosion_1`, `spray1`). The gate measured about 0.7 s more per map load than the
+  shipped list on the owner's machine; if players feel it, those three are the first to go.
+- **The plugin reports at most 16 groups** (`MAX_GROUPS` in `l4d_consistency.sp`). Sixteen are
+  defined, and a test fails if a seventeenth is added without raising it.
+
+### Custom campaigns against batch 2 (checked 2026-09-21)
+
+`check-campaign-collisions.ts --list consistency/configs/l4d_consistency.batch2.cfg` was run
+over every addons directory on this workstation: the local test server (2 VPKs), the owner's
+client (18), and the two Zen trees (4 and 3). Two VPKs collide, both in the client's addons:
+
+- `precinct84.vpk`: `materials/effects/flat_normal.vtf` (new in group 8).
+- `undead_zone.vpk`: `models/infected/witch.mdl` and five `materials/models/infected/witch/*`
+  files, which collide with the **live** list already, plus new in batch 2
+  `models/infected/witch.vvd`, `.vtx`, `.phy` and `materials/detail/detailsprites_overgrown.vtf`.
+
+Nothing was excluded because of them. Every colliding path is an archive path, and the
+2026-09-19 probe found that pak01 beats an addon VPK on L4D1, so the addon's copy should never
+load on either side and should never be what gets checksummed. That is an inference from one
+probe of four hunter files, which is why population B in the gate keeps both VPKs installed:
+if B connects, it holds. Either way the uploader would refuse both VPKs today, and neither is
+known to be in the site's campaign pool (no local registry to check; run the script against
+each server's addons directory before promoting, as the README already says).
 
 ## The plugin, Phase 2
 
@@ -317,9 +416,16 @@ effect for everyone at the next map load. Rollback is
 `sv_consistency 0` over rcon, instant, no restart. Group 6 repeats steps 2 to 4 and the
 staging.
 
+## The batch 2 gate
+
+Passed on 2026-09-23 with the owner's real client: a stock client and a client with dlc4, a
+custom HUD and campaign VPKs both connected and survived map changes, and each new group
+rejected a modified file. The procedure, the results and what file consistency can and
+cannot stop are kept in the private repository, not here.
+
 ## Risks
 
-- **Disconnecting legitimate players.** The stock-client gate above, and both off switches.
+- **Disconnecting legitimate players.** The stock-client gate, and both off switches.
   Mac and Linux clients ship the same archive and the same loose sounds; the loose
   `.dx80.vtx` files seen on this workstation's client are outside the list.
 - **A game update changes a stock file.** The engine CRCs the server's copy at force time, so

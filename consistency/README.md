@@ -43,8 +43,11 @@ also not needed.)
   and emits the `L4DC SIGNON_DROP` line.
 - `configs/l4d_consistency.cfg` the enforced list. GENERATED and committed; never
   edited by hand.
-- `../scripts/gen-consistency-list.ts` the generator, with its `--overlay` check and
-  its `--verify`.
+- `configs/l4d_consistency.batch2.cfg` the shipped list plus groups 7 to 15. Generated
+  and committed, read by NOTHING until it is promoted (see Batch 2).
+- `../src/consistencyGen.ts` the rules, and the checks a generated list has to pass.
+- `../scripts/gen-consistency-list.ts` the generator's command line, with `--overlay`
+  and `--verify`.
 - `../scripts/check-campaign-collisions.ts` checks the VPKs already on a server
   against the list.
 - `Makefile`, `Dockerfile.build`, `build.sh` the extension build.
@@ -139,6 +142,9 @@ matches nothing is a silent zero, and a generated file is diffable.
 
     npx tsx scripts/gen-consistency-list.ts                     # groups 1 to 5 (651 paths)
     npx tsx scripts/gen-consistency-list.ts --commons           # also group 6, common infected
+    npx tsx scripts/gen-consistency-list.ts --batch2            # also groups 7 to 15 (1531), to l4d_consistency.batch2.cfg
+    npx tsx scripts/gen-consistency-list.ts --batch2 --without 15
+    npx tsx scripts/gen-consistency-list.ts --groups 1-5,7-16 --out /tmp/probe.cfg
     npx tsx scripts/gen-consistency-list.ts --game /path/to/left4dead
     npx tsx scripts/gen-consistency-list.ts --overlay /path/to/left4dead_dlc4
     npx tsx scripts/gen-consistency-list.ts --verify /path/to/other/left4dead
@@ -148,6 +154,24 @@ Run from `pug/`. `--game` is a STOCK install and defaults to the local test serv
 from its `pak01_dir.vpk`; sounds and scripts are loose files on L4D1 and are walked
 on disk, resolved through `left4dead_dlc3` first and then `left4dead`, which is the
 engine's own search order (several soundscripts exist only in the dlc3 directory).
+Groups 7 and up read `left4dead_dlc3/pak01_dir.vpk` as well, in the same order; groups
+1 to 6 are pinned to the base pak so that the live list cannot drift.
+
+`--batch2` writes to `l4d_consistency.batch2.cfg` unless `--out` says otherwise, so the
+shipped file is never replaced by accident. `--groups` names the groups outright (group
+16 is reachable no other way) and refuses to run without `--out`. `--without` drops
+groups from whatever else was selected. Every run prints, per group, the path count and
+the bytes a client re-checksums on each map load, the downloadables table estimate, and
+a `note:` line for every exclusion and waiver, so nothing is left out silently.
+
+Beyond never-force and `--overlay`, three checks fail generation:
+
+- a listed path the stock install does not have (the engine will not force it);
+- a listed path that `left4dead` and `left4dead_dlc3` hold with DIFFERENT content, unless
+  it is waived with a reason (`DUAL_COPY_WAIVED`) or excluded from its rule (`except`);
+- a forced `.vmt` that names a stock texture, under any key, or `include`s a material
+  that nothing forces, unless it is waived with a reason (`REF_WAIVED`). A forced
+  material is only as forced as the textures it names.
 
 `--overlay` names a search-path directory that some legitimate clients mount ahead
 of `left4dead` and others do not, such as `left4dead_dlc4` (the L4D2 maps pack). A
@@ -158,8 +182,9 @@ that exists and may be given more than once. This is why
 `scripts/game_sounds_manifest.txt` is deliberately not on the list: the dlc4 pack
 ships its own.
 
-`--verify` compares every loose file on the list, and `pak01_dir.vpk` itself,
-against a second install and names anything that differs or is missing. **Run it
+`--verify` checksums the content of every file on the list, loose or inside an
+archive, on both installs, compares both `pak01_dir.vpk` files as well, and names
+anything that differs or is missing. **Run it
 against a real client before trusting a server.** The engine checksums the
 SERVER's copy, so one customised sound on the server would disconnect every stock
 client, and that failure looks identical to everyone cheating at once.
@@ -172,9 +197,24 @@ After regenerating, in this order:
    in the same commit.
 3. `npx tsx scripts/check-campaign-collisions.ts` against every server's addons
    directory, because a path that is newly forced may be one a published campaign
-   already ships.
+   already ships. `--list <cfg>` checks a list that is not live yet.
 4. Copy the cfg to every game server (see Installing). The web reads its own copy
    from the repo checkout, which `deploy-web.sh` ships.
+
+## Batch 2
+
+Groups 7 to 15, 880 paths on top of the shipped 651: the Sacrifice tank, the textures
+forced materials borrow, SI and foliage mesh companions, the commons parent material,
+the rest of the particle definitions and particle materials, SI footsteps, detail
+sprites, the flashlight textures and the tank rock. The spec has the table, what was
+excluded and why, the budget (about 1,551 of 8,192 table entries, 161 MB re-checksummed
+per map load against 93 MB today). It passed the owner's client gate on 2026-09-23: a
+stock client and a client with dlc4, a custom HUD and campaign VPKs both connected and
+survived map changes, and each new group rejected a modified file. The gate's procedure
+and full results are kept privately, not in this repository.
+
+Until it is promoted nothing reads `l4d_consistency.batch2.cfg`. Promoting it is moving the
+group numbers from `BATCH2` to `SHIPPED` in `src/consistencyGen.ts` and regenerating.
 
 ## Installing
 
@@ -343,5 +383,8 @@ own rollout, after groups 1 to 5 have survived real matches.
 - Phase 2 plugin and list: built, 651 paths in groups 1 to 5.
 - Phase 2 web: parser, admission, storage, admin feed, DM, admin page, help page,
   uploader refusal and the collision script are built and tested.
-- Not yet done: the local stock gate, the loading-time measurement, and everything
-  under Dallas above.
+- Batch 2 (2026-09-21): rules, checks and `l4d_consistency.batch2.cfg` built, verified
+  against the owner's real client install (1,531 files, 0 differ, 0 missing), 0
+  overlay collisions. Client gate PASSED 2026-09-23; about 0.7 s more per map load
+  than the shipped list on the owner's machine. NOT live until promoted.
+- Groups 1 to 5 have been live on all four servers since 2026-09-20.
