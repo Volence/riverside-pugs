@@ -31,6 +31,13 @@ describe('QuickCheck', () => {
     await waitFor(() => expect(screen.getByText(/Excluded maps/)).toBeTruthy());
     expect(screen.getByText(/about 60 more matches/)).toBeTruthy();
     expect(container.querySelector('svg')).toBeTruthy();
+    const boundaryLines = container.querySelectorAll('svg line');
+    expect(boundaryLines.length).toBe(2);
+    boundaryLines.forEach((line) => {
+      const x1 = Number(line.getAttribute('x1'));
+      expect(x1).toBeGreaterThanOrEqual(0);
+      expect(x1).toBeLessThanOrEqual(800);
+    });
     expect(screen.getByText(/l4d_vs_hospital01_apartment/, { selector: '.balance-map *, .balance-map' })).toBeTruthy();
     const link = container.querySelector('a[href="/match/2?ordinal=0&half=1"]');
     expect(link).toBeTruthy();
