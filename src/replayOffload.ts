@@ -37,24 +37,32 @@ export interface EligibleReplaysResult {
  * Pulled out of `sweepReplays` so `scripts/offload-replays.ts` can print
  * exactly what the sweep would upload, without a second copy of the query and
  * the per-file checks drifting from the real thing.
+ *
+ * `limit` bounds the ELIGIBLE rows returned, not the rows queried: a row
+ * whose file can never qualify (missing, never closed, or fails the filename
+ * pattern) is skipped and the scan keeps going, oldest match first, rather
+ * than counting that row against the window and stalling behind it forever.
+ * A few thousand `stat` calls an hour is trivial next to a sweep that quietly
+ * stops uploading.
  */
 export function eligibleReplays(
   db: DB, replayDir: string, opts: { limit?: number; nowMs?: number } = {},
 ): EligibleReplaysResult {
   if (!replayDir) return { eligible: [], skipped: 0 };
   const nowMs = opts.nowMs ?? Date.now();
+  const limit = opts.limit ?? 50;
   const rows = db.prepare(
     `SELECT r.match_id AS matchId, r.ordinal, r.half
        FROM match_replays r JOIN matches m ON m.id = r.match_id
       WHERE r.r2_key IS NULL AND r.pruned_at IS NULL
         AND m.state IN ('completed', 'aborted')
-      ORDER BY r.match_id ASC, r.ordinal ASC, r.half ASC
-      LIMIT ?`,
-  ).all(opts.limit ?? 50) as { matchId: number; ordinal: number; half: number }[];
+      ORDER BY r.match_id ASC, r.ordinal ASC, r.half ASC`,
+  ).all() as { matchId: number; ordinal: number; half: number }[];
 
   const eligible: EligibleReplay[] = [];
   let skipped = 0;
   for (const row of rows) {
+    if (eligible.length >= limit) break;
     const found = resolveReplayPath(db, row.matchId, row.ordinal, row.half, replayDir);
     if (!found) { skipped++; continue; }
     try {
@@ -66,6 +74,9 @@ export function eligibleReplays(
       matchId: row.matchId, ordinal: row.ordinal, half: row.half,
       path: found.path, filename: found.filename, bytes: found.bytes,
     });
+  }
+  if (eligible.length === 0 && skipped > 0) {
+    console.log(`[replayOffload] ${skipped} row(s) considered but none eligible; the backlog may be stuck`);
   }
   return { eligible, skipped };
 }

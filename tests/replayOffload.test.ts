@@ -291,6 +291,41 @@ describe('sweepReplays', () => {
     expect(rows.find((x) => x.matchId === 6)!.r2Key).toBe('replays/6/0_1.rpl');
     expect(rows.find((x) => x.matchId === 7)!.r2Key).toBeNull();
   });
+
+  // Important 1 from the final review: a row that can never become eligible
+  // (missing file, or a crash file that was never closed) must not occupy the
+  // limited window forever. 60 unfixable rows, oldest first by match id, plus
+  // one good row newer than all of them: with the default limit of 50 the old
+  // behaviour (LIMIT applied before the file checks) never even looks at the
+  // good row, because it sorts after all 60 bad ones.
+  it('does not let a backlog of never-eligible rows stall the good row behind it', async () => {
+    for (let id = 1; id <= 60; id++) {
+      seedMatch(id, 'completed');
+      const file = `pug_${tok(id)}_0_1.rpl`;
+      if (id % 2 === 0) {
+        // Missing file: the row exists but nothing was ever written for it.
+        seedReplayRow(id, 0, 1, file, 0, 0);
+      } else {
+        // Never-closed: a crash file, frameCount stays 0.
+        const path = writeReplayFile(file, 0);
+        setMtimeMinutesAgo(path, 20);
+        seedReplayRow(id, 0, 1, file, statSync(path).size, 0);
+      }
+    }
+    seedMatch(61, 'completed');
+    const goodFile = `pug_${tok(61)}_0_1.rpl`;
+    const goodPath = writeReplayFile(goodFile, 3);
+    setMtimeMinutesAgo(goodPath, 20);
+    seedReplayRow(61, 0, 1, goodFile, statSync(goodPath).size, 3);
+
+    const { ops, uploads } = fakeOps();
+    const r = await sweepReplays(db, CFG, dir, { ops, nowMs: Date.now() });
+    expect(r.uploaded).toBe(1);
+    expect(r.failed).toBe(0);
+    expect(uploads.has('replays/61/0_1.rpl')).toBe(true);
+    const row = db.prepare('SELECT r2_key FROM match_replays WHERE match_id = 61').get() as any;
+    expect(row.r2_key).toBe('replays/61/0_1.rpl');
+  });
 });
 
 describe('REPLAY_QUIET_MS', () => {
