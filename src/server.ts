@@ -1338,7 +1338,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
-  await app.register(replayRoutes, { db: deps.db, replayDir: deps.config.replayDir });
+  await app.register(replayRoutes, {
+    db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir,
+  });
   await app.register(campaignRoutes, {
     db: deps.db, addonsDir: deps.config.addonsDir, freeBytes: deps.freeBytes,
     installTargets: deps.installTargets, maxUploadBytes: deps.maxUploadBytes,

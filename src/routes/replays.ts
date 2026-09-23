@@ -8,6 +8,7 @@ import { resolveReplayPath } from '../replays.js';
 import { releasableBytes } from '../replayTail.js';
 import {
   decodeFrames, decodeHeader, HEADER_BYTES, VERSION, TOKEN_BYTES, TOKEN_OFFSET, INFECTED_MASK_OFFSET, SIDES_FLAG_OFFSET } from '../replayFormat.js';
+import { applyPush, parsePush, PUSH_BODY_LIMIT } from '../replayPush.js';
 
 /** How long a computed cutoff is reused.
  *
@@ -222,10 +223,32 @@ export function infectedMaskFor(
 }
 
 export async function replayRoutes(
-  app: FastifyInstance, opts: { db: DB; replayDir: string },
+  app: FastifyInstance, opts: { db: DB; replayDir: string; liveDir?: string },
 ): Promise<void> {
-  const { db, replayDir } = opts;
+  const { db, replayDir, liveDir = '' } = opts;
 
+  /**
+   * Live replay bytes from a game server, about once a second per match.
+   *
+   * The match's token is the credential: it is secret, it only travels over
+   * HTTPS (or stays inside the Dallas box), and only a match in the 'live'
+   * state accepts data. An unknown, finished or aborted token gets the same
+   * 404 so the answer says nothing about which tokens exist. The reply is a
+   * length or an error and never names a file. See src/replayPush.ts for the
+   * offset rule that keeps the live copy an exact prefix of the real file.
+   */
+  app.post('/api/replays/push', { bodyLimit: PUSH_BODY_LIMIT }, async (req, reply) => {
+    if (!liveDir) return reply.code(404).send({ error: 'live push is not configured' });
+    const parsed = parsePush(req.body);
+    if (!parsed.ok) return reply.code(parsed.status).send({ error: parsed.error });
+    const live = db
+      .prepare("SELECT id FROM matches WHERE token = ? AND state = 'live'")
+      .get(parsed.batch.token) as { id: number } | undefined;
+    if (!live) return reply.code(404).send({ error: 'no live match for that token' });
+    const result = applyPush(liveDir, parsed.batch);
+    if (result.status === 400) return reply.code(400).send({ error: result.error });
+    return reply.code(result.status).send({ length: result.length });
+  });
 
   /**
    * Which round of a match is being recorded right now, addressed by match id.
