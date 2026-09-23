@@ -125,16 +125,20 @@ describe('Hud page', () => {
     expect(screen.getByRole('button', { name: 'Portrait' }).closest('.hud__layer')!.classList.contains('hud__layer--hidden')).toBe(true);
   });
 
-  it('selects from Layers, Shift+click adding, and lists the Free cards', () => {
+  it('selects from Layers, Shift+click adding, and lists the cards in every layout, card 4 in Free only', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
     fireEvent.click(screen.getByRole('button', { name: 'Your health' }), { shiftKey: true });
     expect(screen.getByText('2 elements', { selector: 'legend' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Card 2' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
     fireEvent.click(screen.getByRole('button', { name: 'Card 2' }));
     expect(screen.getByText('Teammate card 2', { selector: 'legend' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Card 3' }), { shiftKey: true });
+    expect(screen.getByText('2 cards', { selector: 'legend' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Card 4' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Card 4' }));
+    expect(screen.getByText('Teammate card 4', { selector: 'legend' })).toBeTruthy();
   });
 
   it("snaps a child's X box to its cap, and goes back to the teammates", () => {
@@ -372,6 +376,9 @@ describe('Hud page', () => {
     clickAt(canvas, 24, 454);
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Up to Teammates' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Up to Card 1' })).toBeTruthy();
+    fireEvent.keyDown(canvas, { key: 'Escape' });
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
     fireEvent.keyDown(canvas, { key: 'Escape' });
     expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
     fireEvent.keyDown(canvas, { key: 'Escape' });
@@ -382,6 +389,8 @@ describe('Hud page', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
     clickAt(canvas, 24, 454, { ctrlKey: true });
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+    clickAt(canvas, 24, 454, { ctrlKey: true });
     expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
     clickAt(canvas, 24, 454);
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
@@ -389,12 +398,58 @@ describe('Hud page', () => {
     expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
   });
 
-  it('moves the whole team when a drag starts on a piece not yet picked', () => {
+  // Card 3 of the stock row is drawn at (293, 441); (304, 454) is its portrait.
+  it('moves only the card a drag starts on in the default Row, going Free, and one Ctrl+Z puts the Row back', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
-    dragFrom(canvas, [24, 454], [24, 404]);
+    dragFrom(canvas, [304, 454], [354, 354]);
+    expect(screen.getByText('Teammate card 3', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('343');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('341');
+    expect(screen.getByText('Teammates switched to Free layout')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('free');
+    const at = (n: number) => ['X', 'Y'].map((k) => (screen.getByLabelText(`Card ${n} ${k}`) as HTMLInputElement).value);
+    expect(at(1)).toEqual(['13', '441']);
+    expect(at(2)).toEqual(['153', '441']);
+    expect(at(3)).toEqual(['343', '341']);
+    undoKey();
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
+    expect(screen.queryByLabelText('Card 1 X')).toBeNull();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('405');
+    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('moves two cards picked with Ctrl+click and Shift+click together', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    clickAt(canvas, 24, 454, { ctrlKey: true });
+    clickAt(canvas, 164, 454, { shiftKey: true });
+    expect(screen.getByText('2 cards', { selector: 'legend' })).toBeTruthy();
+    expect(screen.getByText('2 cards', { selector: '.hud__crumbs span' })).toBeTruthy();
+    dragFrom(canvas, [164, 454], [174, 434]);
+    expect(screen.getByText('2 cards', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('23');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('421');
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByLabelText('Card 1 X') as HTMLInputElement).value).toBe('23');
+    expect((screen.getByLabelText('Card 2 X') as HTMLInputElement).value).toBe('163');
+    expect((screen.getByLabelText('Card 2 Y') as HTMLInputElement).value).toBe('421');
+    expect((screen.getByLabelText('Card 3 X') as HTMLInputElement).value).toBe('293');
+    expect((screen.getByLabelText('Card 3 Y') as HTMLInputElement).value).toBe('441');
+  });
+
+  it('moves the whole Row team when the Teammates are picked from Layers', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    dragFrom(canvas, [304, 454], [304, 404]);
     expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('0');
     expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('355');
+    expect(screen.queryByText('Teammates switched to Free layout')).toBeNull();
   });
 
   it('moves just the picked piece when the drag starts on it', () => {
@@ -629,8 +684,10 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('113');
     undoKey();
     expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('13');
-    // The Layout change before it is its own step; leaving Free climbs the card to the Teammates.
+    // The Layout change before it is its own step; card 1 stays picked, as cards are a level in Row too.
     undoKey();
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
     expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
   });
 
@@ -738,7 +795,7 @@ describe('Hud page', () => {
 
   it('shows a hint, then Styles and Save, with nothing selected', () => {
     render(<Hud />);
-    expect(screen.getByText(/a drag moves its whole section/)).toBeTruthy();
+    expect(screen.getByText(/a drag moves the card or element under it/)).toBeTruthy();
     expect(screen.getByText('Styles')).toBeTruthy();
     expect(screen.getByText('Save your HUD')).toBeTruthy();
   });
@@ -750,7 +807,7 @@ describe('Hud page', () => {
     const canvas = unitCanvas(container);
     fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
     expect(screen.getByRole('menu')).toBeTruthy();
-    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select Teammates']);
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
     expect(screen.getByText('Portrait', { selector: 'legend' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
     expect(screen.queryByRole('menu')).toBeNull();
@@ -769,15 +826,28 @@ describe('Hud page', () => {
     expect(hiddenRow('Health bar')).toBe(true);
   });
 
-  it('offers Select whole card for a piece in Free', () => {
+  it('offers Select whole card for a piece, and only Select Teammates for a card, in any layout', () => {
     const { container } = render(<Hud />);
     const canvas = unitCanvas(container);
-    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
-    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
     fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Select whole card' }));
     expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+    // (133, 442) is on card 1 but on none of its pieces: the menu is the card's.
+    fireEvent.contextMenu(canvas, { clientX: 133, clientY: 442 });
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Select Teammates']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Select Teammates' }));
+    expect(screen.getByText('Teammates', { selector: 'legend' })).toBeTruthy();
+    // A card cannot be hidden alone: Delete on one does nothing.
+    clickAt(canvas, 133, 442);
+    expect(screen.getByText('Teammate card 1', { selector: 'legend' })).toBeTruthy();
+    fireEvent.keyDown(canvas, { key: 'Delete' });
+    expect(hiddenRow('Teammates')).toBe(false);
+    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    fireEvent.change(screen.getByRole('combobox', { name: /^Layout/ }), { target: { value: 'free' } });
+    fireEvent.contextMenu(canvas, { clientX: 24, clientY: 454 });
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide', 'Reset', 'Select whole card', 'Select Teammates']);
   });
 
   it('closes the menu with Escape or a press elsewhere, and opens none over empty screen', () => {
@@ -894,5 +964,51 @@ describe('Hud page', () => {
     fireEvent.contextMenu(canvas, { clientX: 30, clientY: 300 });
     fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Hide' }), { key: 'Escape' });
     expect(document.activeElement).toBe(canvas);
+  });
+
+  it('nudges a card picked in Row with the arrows, going Free, one undo step for the run', () => {
+    const { container } = render(<Hud />);
+    const canvas = unitCanvas(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Card 2' }));
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('156');
+    expect(screen.getByText('Teammates switched to Free layout')).toBeTruthy();
+    undoKey();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
+  });
+
+  it("types a Row card's X and Y, going Free with the others where they were", () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Card 2' }));
+    expect((screen.getByLabelText('X') as HTMLInputElement).value).toBe('153');
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('441');
+    fireEvent.input(screen.getByLabelText('Y'), { target: { value: '300' } });
+    expect((screen.getByLabelText('Y') as HTMLInputElement).value).toBe('300');
+    expect(screen.getByText('Teammates switched to Free layout')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('441');
+    expect((screen.getByLabelText('Card 2 X') as HTMLInputElement).value).toBe('153');
+    expect((screen.getByLabelText('Card 2 Y') as HTMLInputElement).value).toBe('300');
+    undoKey();
+    expect((screen.getByRole('combobox', { name: /^Layout/ }) as HTMLSelectElement).value).toBe('row');
+  });
+
+  it('places and aligns several cards from their panel', () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('button', { name: 'Card 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card 3' }), { shiftKey: true });
+    expect(screen.getByText('2 cards', { selector: 'legend' })).toBeTruthy();
+    expect(screen.queryByText('Visible')).toBeNull();
+    fireEvent.input(screen.getByLabelText('Y'), { target: { value: '200' } });
+    fireEvent.blur(screen.getByLabelText('Y'));
+    fireEvent.click(screen.getByRole('button', { name: 'Card 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card 3' }), { shiftKey: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Align top' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Teammates' }));
+    expect((screen.getByLabelText('Card 1 Y') as HTMLInputElement).value).toBe('200');
+    expect((screen.getByLabelText('Card 2 Y') as HTMLInputElement).value).toBe('200');
+    expect((screen.getByLabelText('Card 3 Y') as HTMLInputElement).value).toBe('200');
+    expect((screen.getByLabelText('Card 3 X') as HTMLInputElement).value).toBe('293');
   });
 });

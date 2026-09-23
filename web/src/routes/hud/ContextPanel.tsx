@@ -7,10 +7,10 @@ import {
   clampOverride, clampChild, type HudDesign, type ElementOverride, type TeamDir, type ChildOverride, type ChildRangeKey,
 } from '../../hud/design';
 import { elementById, type HudElement } from '../../hud/elements';
-import { elementRect, teamLayout, cardChild, baseHasChild } from '../../hud/build';
+import { elementRect, teamLayout, cardChild, baseHasChild, isFreeTeam } from '../../hud/build';
 import { teamChild } from '../../hud/children';
 import {
-  cardOffset, withTeamDir, placeCard, placeElement, patchChild, resetElement, resetChild,
+  cardOffset, withTeamDir, freeInPlace, cardBoxes, placeCard, placeCards, alignCards, placeElement, patchChild, resetElement, resetChild,
   startsOf, placeChildren, alignChildren, alignElements, setChildrenVisible, resetChildren, setSelectionVisible, type Align,
 } from '../../hud/edit';
 import { unionBox } from '../../hud/guides';
@@ -420,41 +420,84 @@ export function ElementsControls({ design, edit, ids }: { design: HudDesign; edi
   );
 }
 
-/**
- * One Free teammate card: where it is drawn, as X and Y. The boxes read and
- * write the stored slot plus the fit offset, the same as the Teammates'
- * per-card list (TeamControls' setSlot): teamCardRects' centre-anchor
- * rounding would show a value like 294 for a stored 293 and drift while
- * typing, so the slot is the source of truth here too. The cards share one
- * size (the Teammates' Scale), so there is no size here.
- */
-export function CardControls({ design, edit, end, card }: { design: HudDesign; edit: Edit; end: () => void; card: number }) {
-  const off = cardOffset(design);
-  const slot = design.elements.teamColumn?.slots?.[card];
-  if (!slot) return null;
-  const place = (key: 'x' | 'y', e: Event) => {
+/** The X and Y boxes of one card or a group of cards, showing `box` and handing a typed number to `place`. */
+function CardXY({ box, end, place }: { box: { x: number; y: number }; end: () => void; place: (key: 'x' | 'y', n: number) => void }) {
+  const typed = (key: 'x' | 'y', e: Event) => {
     const n = parseFloat((e.target as HTMLInputElement).value);
-    if (!Number.isFinite(n)) return;
+    if (Number.isFinite(n)) place(key, n);
+  };
+  return (
+    <div class="hud__row2">
+      <label class="hud__field">
+        <span>X</span>
+        <input type="number" value={Math.round(box.x)} onInput={(e) => typed('x', e)} {...endsOn(end)} />
+      </label>
+      <label class="hud__field">
+        <span>Y</span>
+        <input type="number" value={Math.round(box.y)} onInput={(e) => typed('y', e)} {...endsOn(end)} />
+      </label>
+    </div>
+  );
+}
+
+/**
+ * One teammate card, in any layout: where it is drawn, as X and Y. The
+ * boxes read and write the stored slot plus the fit offset (edit.ts's
+ * cardBoxes), the same as the Teammates' per-card list (TeamControls'
+ * setSlot): teamCardRects' centre-anchor rounding would show a value like
+ * 294 for a stored 293 and drift while typing, so the slot is the source of
+ * truth here too. In Row or Column a typed value first makes the team Free
+ * with every card where it was (freeInPlace), within the same step, and
+ * `onWentFree` says so. The cards share one size (the Teammates' Scale), so
+ * there is no size here.
+ */
+export function CardControls(
+  { design, edit, end, card, onWentFree }: { design: HudDesign; edit: Edit; end: () => void; card: number; onWentFree: () => void },
+) {
+  const box = cardBoxes(design)[card];
+  if (!box) return null;
+  const place = (key: 'x' | 'y', n: number) => {
+    if (!isFreeTeam(design)) onWentFree();
     edit((d) => {
-      const cur = d.elements.teamColumn?.slots?.[card];
-      if (!cur) return d;
-      const o2 = cardOffset(d);
-      return placeCard(d, card, key === 'x' ? n : cur.x + o2.x, key === 'y' ? n : cur.y + o2.y);
+      const f = freeInPlace(d);
+      const cur = cardBoxes(f)[card];
+      return placeCard(f, card, key === 'x' ? n : cur.x, key === 'y' ? n : cur.y);
     }, 'gesture');
   };
   return (
     <Field legend={`Teammate card ${card + 1}`}>
       {card === 3 && <p class="muted hud__note">Card 4 shows only while you spectate a full team.</p>}
-      <div class="hud__row2">
-        <label class="hud__field">
-          <span>X</span>
-          <input type="number" value={Math.round(slot.x + off.x)} onInput={(e) => place('x', e)} {...endsOn(end)} />
-        </label>
-        <label class="hud__field">
-          <span>Y</span>
-          <input type="number" value={Math.round(slot.y + off.y)} onInput={(e) => place('y', e)} {...endsOn(end)} />
-        </label>
-      </div>
+      <CardXY box={box} end={end} place={place} />
+      <p class="muted hud__note">The cards share one size: scale them from the Teammates.</p>
+    </Field>
+  );
+}
+
+/**
+ * Several teammate cards: the group's X and Y (the box around them, moving
+ * all of them) and Align against that box. Like one card, a Row or Column
+ * team goes Free first. No size and no Visible: the cards share the
+ * Teammates' Scale, and a card cannot be hidden alone.
+ */
+export function CardsControls(
+  { design, edit, end, cards, onWentFree }: { design: HudDesign; edit: Edit; end: () => void; cards: number[]; onWentFree: () => void },
+) {
+  const boxes = cardBoxes(design);
+  const box = unionBox(cards.map((c) => boxes[c]).filter(Boolean));
+  if (!box) return null;
+  const going = () => { if (!isFreeTeam(design)) onWentFree(); };
+  const place = (key: 'x' | 'y', n: number) => {
+    going();
+    edit((d) => {
+      const all = cardBoxes(d);
+      const b = unionBox(cards.map((c) => all[c]))!;
+      return placeCards(d, cards, key === 'x' ? n : b.x, key === 'y' ? n : b.y);
+    }, 'gesture');
+  };
+  return (
+    <Field legend={`${cards.length} cards`}>
+      <CardXY box={box} end={end} place={place} />
+      <AlignRow onAlign={(how) => { going(); edit((d) => alignCards(d, cards, how)); }} />
       <p class="muted hud__note">The cards share one size: scale them from the Teammates.</p>
     </Field>
   );
@@ -462,19 +505,21 @@ export function CardControls({ design, edit, end, card }: { design: HudDesign; e
 
 /** The right-hand panel: only what the selection can do. */
 export function ContextPanel(
-  { design, sel, edit, end, onSelect }: {
-    design: HudDesign; sel: Selection; edit: Edit; end: () => void; onSelect: (s: Selection) => void;
+  { design, sel, edit, end, onSelect, onWentFree }: {
+    design: HudDesign; sel: Selection; edit: Edit; end: () => void; onSelect: (s: Selection) => void; onWentFree: () => void;
   },
 ) {
   switch (sel.kind) {
     case 'none':
-      return <p class="muted">Select an element on the canvas or in Layers. A click picks the piece under the pointer; a drag moves its whole section.</p>;
+      return <p class="muted">Select an element on the canvas or in Layers. A click picks the piece under the pointer; a drag moves the card or element under it.</p>;
     case 'elements':
       return sel.ids.length === 1
         ? <ElementControls design={design} edit={edit} end={end} id={sel.ids[0]} />
         : <ElementsControls design={design} edit={edit} ids={sel.ids} />;
-    case 'card':
-      return <CardControls design={design} edit={edit} end={end} card={sel.card} />;
+    case 'cards':
+      return sel.cards.length === 1
+        ? <CardControls design={design} edit={edit} end={end} card={sel.cards[0]} onWentFree={onWentFree} />
+        : <CardsControls design={design} edit={edit} end={end} cards={sel.cards} onWentFree={onWentFree} />;
     case 'children':
       return sel.names.length === 1
         ? <ChildControls design={design} edit={edit} end={end} name={sel.names[0]} onBack={() => onSelect(TEAMMATES)} />

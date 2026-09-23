@@ -1,7 +1,8 @@
 /**
  * The Layers list, left of the canvas: every element of the current side in
  * registry order, with an eye that shows or hides it, struck through while
- * hidden. The Teammates expand to their cards (in Free) and to every piece
+ * hidden. The Teammates expand to their cards (the three drawn, and in
+ * Free the fourth, which shows only while spectating) and to every piece
  * of the teammate card from the child registry, splatter included, which
  * makes this the one way to reach a hidden, tiny or state-only piece. Click
  * selects and Shift+click adds, by the same rule as the canvas
@@ -9,10 +10,10 @@
  * Escape, Ctrl+A) while a row has focus.
  */
 import type { HudDesign } from '../../hud/design';
-import { elementRect, cardChild, isFreeTeam } from '../../hud/build';
+import { elementRect, cardChild } from '../../hud/build';
 import { TEAM_PANEL } from '../../hud/children';
 import { visibleElements, type Side } from '../../hud/mock';
-import type { Selection } from '../../hud/selection';
+import { cardsOf, pickableCards, type Selection } from '../../hud/selection';
 
 /** State pieces the game shows only sometimes, and when. */
 const WHEN: Record<string, string> = { Incapacitated: 'shown when down', Dead: 'shown when dead', Voice: 'shown when talking' };
@@ -20,7 +21,7 @@ const WHEN: Record<string, string> = { Incapacitated: 'shown when down', Dead: '
 /** Whether one row's target is part of the selection. */
 function isIn(sel: Selection, target: Selection): boolean {
   if (sel.kind === 'elements' && target.kind === 'elements') return sel.ids.includes(target.ids[0]);
-  if (sel.kind === 'card' && target.kind === 'card') return sel.card === target.card;
+  if (sel.kind === 'cards' && target.kind === 'cards') return sel.cards.includes(target.cards[0]);
   if (sel.kind === 'children' && target.kind === 'children') return sel.names.includes(target.names[0]);
   return false;
 }
@@ -71,8 +72,8 @@ export function LayersPanel(
   },
 ) {
   // A piece picked here keeps the card the selection was in, for the handles and the breadcrumb.
-  const card = sel.kind === 'children' || sel.kind === 'card' ? sel.card : 0;
-  const free = isFreeTeam(design);
+  const card = sel.kind === 'children' ? sel.card : sel.kind === 'cards' ? sel.cards[0] : 0;
+  const cards = Array.from({ length: pickableCards(design) }, (_, i) => i);
   return (
     <nav class="hud__layers" aria-label="Layers" onKeyDown={onKeyDown}>
       <p class="eyebrow">{side === 'survivor' ? 'Survivor HUD' : 'Infected HUD'}</p>
@@ -85,8 +86,8 @@ export function LayersPanel(
               onPick={(shift) => onPick(target, shift)}
               onEye={el.props.includes('visible') ? (v) => onVisible(target, v) : undefined}
             />
-            {el.id === 'teamColumn' && free && [0, 1, 2, 3].map((i) => {
-              const t: Selection = { kind: 'card', card: i };
+            {el.id === 'teamColumn' && cards.map((i) => {
+              const t = cardsOf([i]);
               return <Row key={`card${i}`} label={`Card ${i + 1}`} depth={1} active={isIn(sel, t)} hidden={false} onPick={(shift) => onPick(t, shift)} />;
             })}
             {el.id === 'teamColumn' && TEAM_PANEL.children.map((def) => {

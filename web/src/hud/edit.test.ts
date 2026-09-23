@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  nudge, nudgeCard, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
+  nudge, nudgeCards, freeInPlace, cardBoxes, placeCards, alignCards, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
-  placeElement, moveElements, moveCard, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
+  placeElement, moveElements, moveCards, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
 } from './edit';
 import { DEFAULT_DESIGN } from './design';
-import { teamCardRects, elementRect, cardChild } from './build';
+import { teamCardRects, elementRect, cardChild, isFreeTeam } from './build';
 import { elementFrame } from './selection';
 
 describe('nudge', () => {
@@ -159,14 +159,32 @@ describe('moving a teammate card child', () => {
   });
 });
 
-describe('nudgeCard', () => {
+// A card left of the screen's centre is written with a left anchor and
+// lands where its slot says; card 3 of the stock row sits near the centre,
+// whose token resolves against half the 853-unit screen, so in Free it is
+// drawn half a unit right of the whole number its slot holds (293.5 for
+// 293). That half unit is the file's own, and the Layout select's switch to
+// Free has always had it, so card 3 is compared to within it here.
+const within = (got: number, want: number) => expect(Math.abs(got - want)).toBeLessThanOrEqual(0.5);
+
+describe('nudgeCards', () => {
   it('moves a Free card from its slot and keeps 8 units of it on screen, like a drag', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
     // The slot is the unfitted origin, 13 left of the drawn card.
-    expect(nudgeCard(free, 0, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
+    expect(nudgeCards(free, [0], 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
     let d = free;
-    for (let i = 0; i < 200; i++) d = nudgeCard(d, 0, -10, 0);
+    for (let i = 0; i < 200; i++) d = nudgeCards(d, [0], -10, 0);
     expect(teamCardRects(d, d.aspect)[0].x).toBe(8 - 121);
+  });
+
+  it('switches a Row team to Free first, so the nudge moves one card', () => {
+    const d = nudgeCards(DEFAULT_DESIGN, [2], 1, 0);
+    expect(isFreeTeam(d)).toBe(true);
+    const before = teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect), after = teamCardRects(d, d.aspect);
+    expect(after[0]).toEqual(before[0]);
+    expect(after[1]).toEqual(before[1]);
+    within(after[2].x, before[2].x + 1);
+    expect(after[2].y).toBe(before[2].y);
   });
 
   it('leaves the element position alone in Free, where it moves nothing', () => {
@@ -295,9 +313,61 @@ describe('element edits', () => {
 
   it('moves a Free card from where it started, keeping 8 units on screen', () => {
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
-    const start = teamCardRects(free, free.aspect)[0];
-    expect(teamCardRects(moveCard(free, 0, start, 100, -200), free.aspect)[0]).toMatchObject({ x: 113, y: 241 });
-    expect(teamCardRects(moveCard(free, 0, start, -5000, 0), free.aspect)[0].x).toBe(8 - 121);
+    const starts = { 0: teamCardRects(free, free.aspect)[0] };
+    expect(teamCardRects(moveCards(free, [0], starts, 100, -200), free.aspect)[0]).toMatchObject({ x: 113, y: 241 });
+    expect(teamCardRects(moveCards(free, [0], starts, -5000, 0), free.aspect)[0].x).toBe(8 - 121);
+  });
+
+  // The default design lays its cards out in a Row, which stores one
+  // position for the team: moving one card must first make it Free.
+  it('moves one card of a Row team, switching it to Free with the other cards where they were drawn', () => {
+    const D = DEFAULT_DESIGN;
+    const before = teamCardRects(D, D.aspect);
+    const d = moveCards(D, [2], { 2: before[2] }, 50, -100);
+    expect(isFreeTeam(d)).toBe(true);
+    const after = teamCardRects(d, d.aspect);
+    expect(after[0]).toEqual(before[0]);
+    expect(after[1]).toEqual(before[1]);
+    within(after[2].x, before[2].x + 50);
+    expect(after[2].y).toBe(before[2].y - 100);
+  });
+
+  it('seeds Free from where the cards are drawn, not from slots a past Free layout left behind', () => {
+    const stale = withTeamDir(placeCard(withTeamDir(DEFAULT_DESIGN, 'free'), 0, 50, 60), 'row');
+    expect(stale.elements.teamColumn!.slots).toBeDefined();
+    const before = teamCardRects(stale, stale.aspect);
+    const free = freeInPlace(stale);
+    expect(teamCardRects(free, free.aspect).slice(0, 2)).toEqual(before.slice(0, 2));
+    expect(freeInPlace(free)).toBe(free);
+  });
+
+  it('moves several cards together, keeping their spacing even against the screen edge', () => {
+    const D = DEFAULT_DESIGN;
+    const r = teamCardRects(D, D.aspect);
+    const d = moveCards(D, [0, 1], { 0: r[0], 1: r[1] }, 20, -30);
+    const a = teamCardRects(d, d.aspect);
+    expect(a[0]).toMatchObject({ x: 33, y: 411 });
+    expect(a[1]).toMatchObject({ x: 173, y: 411 });
+    within(a[2].x, r[2].x);
+    expect(a[2].y).toBe(r[2].y);
+    const edge = teamCardRects(moveCards(D, [0, 1], { 0: r[0], 1: r[1] }, -5000, 0), D.aspect);
+    expect(edge[0].x).toBe(8 - 121);
+    expect(edge[1].x - edge[0].x).toBe(140);
+  });
+
+  it('places and aligns several cards by the box around them', () => {
+    const D = DEFAULT_DESIGN;
+    const placed = placeCards(D, [0, 2], 100, 200);
+    expect(isFreeTeam(placed)).toBe(true);
+    expect(cardBoxes(placed)[0]).toMatchObject({ x: 100, y: 200 });
+    expect(cardBoxes(placed)[2]).toMatchObject({ x: 380, y: 200 });
+    expect(cardBoxes(placed)[1]).toEqual(cardBoxes(D)[1]);
+    const r = teamCardRects(D, D.aspect);
+    const staggered = moveCards(D, [1], { 1: r[1] }, 0, -50);
+    const top = alignCards(staggered, [0, 1], 'top');
+    expect(cardBoxes(top)[0].y).toBe(391);
+    expect(cardBoxes(top)[1].y).toBe(391);
+    expect(cardBoxes(alignCards(staggered, [0, 1], 'left'))[1].x).toBe(13);
   });
 
   it('aligns several elements against their box', () => {
@@ -366,7 +436,9 @@ describe('edits for any selection', () => {
     expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'children', names: ['Head', 'Health'], card: 0 }, 0, 1).children.teamColumn)
       .toEqual({ Head: { x: 13, y: 39 }, Health: { x: 37, y: 53 } });
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
-    expect(nudgeSelection(free, { kind: 'card', card: 0 }, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
+    expect(nudgeSelection(free, { kind: 'cards', cards: [0] }, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
+    const two = nudgeSelection(DEFAULT_DESIGN, { kind: 'cards', cards: [0, 1] }, 0, -1);
+    expect(two.elements.teamColumn!.slots!.slice(0, 2)).toEqual([{ x: 0, y: 404 }, { x: 140, y: 404 }]);
     expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'none' }, 1, 1)).toBe(DEFAULT_DESIGN);
   });
 
@@ -378,7 +450,8 @@ describe('edits for any selection', () => {
     const kids = hideSelection(DEFAULT_DESIGN, { kind: 'children', names: ['Head', 'Name'], card: 0 });
     expect(kids.children.teamColumn).toEqual({ Head: { visible: false }, Name: { visible: false } });
     const free = withTeamDir(DEFAULT_DESIGN, 'free');
-    expect(hideSelection(free, { kind: 'card', card: 1 })).toBe(free);
+    expect(hideSelection(free, { kind: 'cards', cards: [1] })).toBe(free);
+    expect(resetSelection(free, { kind: 'cards', cards: [1] })).toBe(free);
     expect(setSelectionVisible(els, { kind: 'elements', ids: ['chat'] }, true).elements.chat).toEqual({ visible: true });
   });
 

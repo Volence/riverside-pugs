@@ -10,7 +10,7 @@ import {
 } from '../hud/design';
 import { screenW, SCREEN_H } from '../hud/units';
 import { elementById } from '../hud/elements';
-import { elementRect, teamLayout, teamCardRects, cardFrame, packHud, type BuildAssets, type CardChild } from '../hud/build';
+import { elementRect, teamLayout, teamCardRects, cardFrame, isFreeTeam, packHud, type BuildAssets, type CardChild } from '../hud/build';
 import { drawHud, visibleElements, type Side } from '../hud/mock';
 import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
@@ -18,13 +18,13 @@ import type { Preset } from '../hud/base';
 import * as undoStack from '../hud/history';
 import { teamChild } from '../hud/children';
 import {
-  elementsTouched, hasOverrides, moveElements, moveCard, moveChildren, startsOf, nudgeSelection,
+  elementsTouched, hasOverrides, moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
-  NONE, TEAMMATES, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
+  NONE, TEAMMATES, cardsOf, hitAt, targetOf, pick, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectionKey, selectedIds, selectionFrames, sectionTargets, pieceTargets, pieceGuideToScreen,
   selectionBox, handlesFor, handlePoint, handleAt, isPicked, menuActions, elementFrame,
   type Selection, type Hit, type Mods, type Crumb, type MenuAction,
@@ -189,7 +189,7 @@ interface Press { cx: number; cy: number; ux: number; uy: number; mods: Mods; hi
  */
 type Drag =
   | { kind: 'elements'; ids: string[]; starts: Record<string, Box> }
-  | { kind: 'card'; card: number; start: Box }
+  | { kind: 'cards'; cards: number[]; starts: Record<number, Box> }
   | { kind: 'children'; names: string[]; card: number; starts: Record<string, CardChild> }
   | { kind: 'box' }
   | { kind: 'resizeElement'; id: string; handle: Handle; start: Box }
@@ -209,6 +209,8 @@ const RESIZE_CURSOR: Record<Handle, string> = {
 const MENU_LABELS: Record<MenuAction, string> = {
   hide: 'Hide', reset: 'Reset', selectCard: 'Select whole card', selectTeam: 'Select Teammates',
 };
+/** Said on the status line when moving a card takes a Row or Column team into Free. */
+const WENT_FREE = 'Teammates switched to Free layout';
 
 /** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
 function Crumbs({ crumbs, onSelect }: { crumbs: Crumb[]; onSelect: (s: Selection) => void }) {
@@ -301,13 +303,17 @@ export default function Hud() {
   const [side, setSide] = useState<Side>('survivor');
   const [sel, setSel] = useState<Selection>(NONE);
   // A new design wholesale (another preset, an import, a share link) keeps
-  // an element selection and climbs a card or pieces to the Teammates.
-  const dropPicks = () => setSel((s) => (s.kind === 'card' || s.kind === 'children' ? TEAMMATES : s));
+  // an element selection and climbs cards or pieces to the Teammates.
+  const dropPicks = () => setSel((s) => (s.kind === 'cards' || s.kind === 'children' ? TEAMMATES : s));
   // Which state the teammate cards are previewed in. Game code picks it in
   // game; this only changes the picture, never the design or the file.
   const [cardState, setCardState] = useState<CardState>('healthy');
   const [backdrop, setBackdrop] = useState<Backdrop>('scene');
   const [status, setStatus] = useState('');
+  // Moving cards of a Row or Column team makes it Free (edit.ts's moveCards
+  // and freeInPlace do it inside the same edit); say so, since the Layout
+  // select that changed is out of sight.
+  const noteFree = () => { if (!isFreeTeam(current.current)) setStatus(WENT_FREE); };
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   // What the pointer is over while nothing is pressed, and whether Ctrl is
   // held: the hover outline shows exactly what a click would pick.
@@ -362,14 +368,14 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
-    const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl) : NONE;
+    const hovered = hover && !press.current ? targetOf(design, hover.hit, hover.ctrl, sel) : NONE;
     const box = selectionBox(design, sel);
     drawHud(ctx, w, h, design, side, selectedIds(sel), () => setImgTick((t) => t + 1), {
       state: cardState,
       frames: selectionFrames(design, sel),
       box,
       handles: box ? handlesFor(design, sel).map((hd) => handlePoint(box, hd)) : [],
-      hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(design, hovered) },
+      hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
       marquee,
       guides,
     });
@@ -487,19 +493,25 @@ export default function Hud() {
           const { x, y, w, h } = elementRect(d, id, d.aspect);
           return [id, { x, y, w, h }];
         })) };
-      case 'card': return { kind: 'card', card: s.card, start: teamCardRects(d, d.aspect)[s.card] };
+      case 'cards': return { kind: 'cards', cards: s.cards, starts: cardStarts(d, s.cards) };
       case 'children': return { kind: 'children', names: s.names, card: s.card, starts: startsOf(d, s.names) };
       default: return null;
     }
   };
 
-  /** The pointer has left the click radius: decide what the drag moves, selecting a section it picks up. */
+  /**
+   * The pointer has left the click radius: decide what the drag moves,
+   * selecting a section it picks up. Cards of a Row or Column team go Free
+   * first, as the first edit of the drag's gesture, so the switch and the
+   * move are one undo step and every move after it starts from Free.
+   */
   const startDrag = (p: Press): Drag | null => {
     const intent = dragIntent(current.current, sel, p.hit, p.mods, p.handle);
     switch (intent.kind) {
       case 'box': return { kind: 'box' };
       case 'move':
         if (intent.sel !== sel) setSel(intent.sel);
+        if (intent.sel.kind === 'cards') { noteFree(); edit(freeInPlace, 'gesture'); }
         return dragFor(intent.sel, current.current);
       case 'resize': return handleDrag(intent.handle, current.current);
       case 'none': return null;
@@ -555,13 +567,13 @@ export default function Hud() {
       edit((x) => moveChildren(x, d.names, d.starts, dx + s.dx, dy + s.dy), 'gesture');
       return;
     }
-    const moving: Selection = d.kind === 'card' ? { kind: 'card', card: d.card } : { kind: 'elements', ids: d.ids };
-    const start = d.kind === 'card' ? d.start : unionBox(Object.values(d.starts));
+    const moving: Selection = d.kind === 'cards' ? cardsOf(d.cards) : { kind: 'elements', ids: d.ids };
+    const start = unionBox(Object.values(d.starts));
     if (!start) return;
     const s = alt ? NO_SNAP : snapMove({ ...start, x: start.x + dux, y: start.y + duy }, sectionTargets(cur, side, moving));
     setGuides(s.guides);
-    edit((x) => (d.kind === 'card'
-      ? moveCard(x, d.card, d.start, dux + s.dx, duy + s.dy)
+    edit((x) => (d.kind === 'cards'
+      ? moveCards(x, d.cards, d.starts, dux + s.dx, duy + s.dy)
       : moveElements(x, d.ids, d.starts, dux + s.dx, duy + s.dy)), 'gesture');
   };
 
@@ -645,7 +657,7 @@ export default function Hud() {
   const runMenu = (a: MenuAction, s: Selection) => {
     if (a === 'hide') edit((d) => hideSelection(d, s));
     else if (a === 'reset') edit((d) => resetSelection(d, s));
-    else if (a === 'selectCard' && s.kind === 'children') setSel({ kind: 'card', card: s.card });
+    else if (a === 'selectCard' && s.kind === 'children') setSel(cardsOf([s.card]));
     else if (a === 'selectTeam') setSel(TEAMMATES);
   };
 
@@ -654,7 +666,7 @@ export default function Hud() {
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       if (press.current) { abortDrag(); return; }
-      setSel((s) => climb(current.current, s));
+      setSel(climb);
       return;
     }
 
@@ -691,6 +703,7 @@ export default function Hud() {
     if (!delta || sel.kind === 'none') return;
     e.preventDefault();
     const s = sel;
+    if (s.kind === 'cards') noteFree();
     edit((d) => nudgeSelection(d, s, delta[0], delta[1]), { nudge: selectionKey(s) });
   };
 
@@ -876,18 +889,18 @@ export default function Hud() {
               onKeyDown={onKeyDown}
               onContextMenu={onContextMenu}
             />
-            <Crumbs crumbs={breadcrumb(design, sel)} onSelect={setSel} />
+            <Crumbs crumbs={breadcrumb(sel)} onSelect={setSel} />
             {menu && (
               <ContextMenu
                 x={menu.x} y={menu.y} onClose={(refocus) => { setMenu(null); if (refocus) canvas.current?.focus(); }}
-                items={menuActions(design, menu.sel).map((a) => ({ label: MENU_LABELS[a], run: () => runMenu(a, menu.sel) }))}
+                items={menuActions(menu.sel).map((a) => ({ label: MENU_LABELS[a], run: () => runMenu(a, menu.sel) }))}
               />
             )}
           </div>
         </Panel>
 
         <Panel class="hud__side">
-          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} />
+          <ContextPanel design={design} sel={sel} edit={edit} end={endGesture} onSelect={setSel} onWentFree={() => setStatus(WENT_FREE)} />
         </Panel>
       </div>
 

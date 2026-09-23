@@ -6,7 +6,7 @@ import { withTeamDir, patchChild } from './edit';
 import {
   NONE, TEAMMATES, hitAt, targetOf, clickSelect, dragIntent, boxSelect, selectAll, climb, breadcrumb, selectionLabel,
   sanitize, selectedIds, selectionFrames, selectionBox, handlesFor, handlePoint, handleAt, pieceTargets, sectionTargets,
-  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, type Selection, type Mods,
+  pieceGuideToScreen, menuActions, drawnPieces, elementFrame, isPicked, pick, cardsOf, type Selection, type Mods,
 } from './selection';
 import { unionBox } from './guides';
 
@@ -21,6 +21,9 @@ const ctrl: Mods = { shift: false, ctrl: true };
 const HEAD2 = { x: 164, y: 454 };
 const HEALTH2 = { x: 200, y: 460 };
 const EMPTY2 = { x: 273, y: 442 };
+// Card 1's portrait, and a point in the stock container between cards 1 and 2 (on no card).
+const HEAD1 = { x: 24, y: 454 };
+const GAP12 = { x: 143, y: 450 };
 const click = (d: HudDesign, sel: Selection, p: { x: number; y: number }, mods = plain, state: CardState = 'healthy') =>
   clickSelect(d, sel, hitAt(d, 'survivor', state, p.x, p.y), mods);
 
@@ -33,21 +36,49 @@ describe('click', () => {
     expect(click(D, NONE, HEAD2, plain, 'down')).toEqual({ kind: 'children', names: ['Incapacitated'], card: 1 });
   });
 
-  it('picks the element where no piece is, and nothing on empty screen', () => {
-    expect(click(D, NONE, EMPTY2)).toEqual(TEAMMATES);
+  it('picks the card where no piece is, the element where no card is, and nothing on empty screen', () => {
+    expect(click(D, NONE, EMPTY2)).toEqual({ kind: 'cards', cards: [1] });
+    expect(click(D, NONE, GAP12)).toEqual(TEAMMATES);
     expect(click(D, NONE, { x: 780, y: 430 })).toEqual({ kind: 'elements', ids: ['ownHealth'] });
     expect(click(D, TEAMMATES, { x: 426, y: 100 })).toEqual(NONE);
   });
 
+  it('reports the card under the pointer in Row as in Free', () => {
+    expect(hitAt(D, 'survivor', 'healthy', EMPTY2.x, EMPTY2.y)).toEqual({ element: 'teamColumn', card: 1, child: null });
+    expect(hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y)).toEqual({ element: 'teamColumn', card: 1, child: 'Head' });
+    expect(hitAt(D, 'survivor', 'healthy', GAP12.x, GAP12.y)).toEqual({ element: 'teamColumn', card: null, child: null });
+  });
+
   it('picks a Free card where no piece is', () => {
-    expect(click(FREE, NONE, EMPTY2)).toEqual({ kind: 'card', card: 1 });
+    expect(click(FREE, NONE, EMPTY2)).toEqual({ kind: 'cards', cards: [1] });
     expect(click(FREE, NONE, HEAD2)).toEqual({ kind: 'children', names: ['Head'], card: 1 });
   });
 
-  it('climbs one level with Ctrl', () => {
-    expect(click(D, NONE, HEAD2, ctrl)).toEqual(TEAMMATES);
-    expect(click(FREE, NONE, HEAD2, ctrl)).toEqual({ kind: 'card', card: 1 });
+  it("climbs one level with Ctrl: the piece's card, and from that card the Teammates", () => {
+    const card2: Selection = { kind: 'cards', cards: [1] };
+    expect(click(D, NONE, HEAD2, ctrl)).toEqual(card2);
+    expect(click(D, card2, HEAD2, ctrl)).toEqual(TEAMMATES);
+    expect(click(D, NONE, EMPTY2, ctrl)).toEqual(TEAMMATES);
+    expect(click(FREE, NONE, HEAD2, ctrl)).toEqual(card2);
+    expect(click(FREE, card2, HEAD2, ctrl)).toEqual(TEAMMATES);
     expect(click(FREE, NONE, EMPTY2, ctrl)).toEqual(TEAMMATES);
+    // Another card picked is not this card: Ctrl still picks this one.
+    expect(click(D, { kind: 'cards', cards: [0] }, HEAD2, ctrl)).toEqual(card2);
+  });
+
+  it('adds and removes cards with Shift while cards are picked, lifting a piece to its card', () => {
+    const card2: Selection = { kind: 'cards', cards: [1] };
+    const both = click(D, card2, HEAD1, shift);
+    expect(both).toEqual({ kind: 'cards', cards: [0, 1] });
+    expect(click(D, both, EMPTY2, shift)).toEqual({ kind: 'cards', cards: [0] });
+    expect(click(D, { kind: 'cards', cards: [0] }, HEAD1, shift)).toEqual(NONE);
+    // Off the cards Shift starts again at the level the click picks.
+    expect(click(D, both, { x: 780, y: 430 }, shift)).toEqual({ kind: 'elements', ids: ['ownHealth'] });
+    // At another level Shift on a card's piece starts a new selection at the piece.
+    expect(click(D, TEAMMATES, HEAD2, shift)).toEqual({ kind: 'children', names: ['Head'], card: 1 });
+    // The Layers list picks cards the same way, kept sorted.
+    expect(pick({ kind: 'cards', cards: [2] }, cardsOf([0]), true)).toEqual({ kind: 'cards', cards: [0, 2] });
+    expect(cardsOf([2, 0, 2])).toEqual({ kind: 'cards', cards: [0, 2] });
   });
 
   it('adds and removes with Shift at the same level, and starts again at another', () => {
@@ -65,13 +96,28 @@ describe('click', () => {
 });
 
 describe('drag', () => {
-  it('moves the outermost section when the drag starts on something not selected', () => {
+  it('moves only the card under the pointer when the drag starts on one not picked, in any layout', () => {
+    const card2: Selection = { kind: 'cards', cards: [1] };
     const hit = hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y);
-    expect(dragIntent(D, NONE, hit, plain)).toEqual({ kind: 'move', sel: TEAMMATES });
+    expect(dragIntent(D, NONE, hit, plain)).toEqual({ kind: 'move', sel: card2 });
+    expect(dragIntent(D, { kind: 'children', names: ['Health'], card: 0 }, hit, plain)).toEqual({ kind: 'move', sel: card2 });
+    expect(dragIntent(D, { kind: 'cards', cards: [0] }, hit, plain)).toEqual({ kind: 'move', sel: card2 });
     const free = hitAt(FREE, 'survivor', 'healthy', HEAD2.x, HEAD2.y);
-    expect(dragIntent(FREE, NONE, free, plain)).toEqual({ kind: 'move', sel: { kind: 'card', card: 1 } });
+    expect(dragIntent(FREE, NONE, free, plain)).toEqual({ kind: 'move', sel: card2 });
     // The Free Teammates cannot move as one, so a drag on a card moves that card.
-    expect(dragIntent(FREE, TEAMMATES, free, plain)).toEqual({ kind: 'move', sel: { kind: 'card', card: 1 } });
+    expect(dragIntent(FREE, TEAMMATES, free, plain)).toEqual({ kind: 'move', sel: card2 });
+    // Off the cards, the stock container still moves the whole team.
+    expect(dragIntent(D, NONE, hitAt(D, 'survivor', 'healthy', GAP12.x, GAP12.y), plain)).toEqual({ kind: 'move', sel: TEAMMATES });
+  });
+
+  it('moves the whole Row team when the Teammates are picked, and every picked card from any of them', () => {
+    const hit = hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y);
+    expect(isPicked(D, TEAMMATES, hit)).toBe(true);
+    expect(dragIntent(D, TEAMMATES, hit, plain)).toEqual({ kind: 'move', sel: TEAMMATES });
+    const cards: Selection = { kind: 'cards', cards: [0, 1] };
+    expect(isPicked(D, cards, hit)).toBe(true);
+    expect(dragIntent(D, cards, hit, plain)).toEqual({ kind: 'move', sel: cards });
+    expect(isPicked(D, cards, hitAt(D, 'survivor', 'healthy', 300, 450))).toBe(false);
   });
 
   it('moves the selection when the drag starts on part of it, in any card', () => {
@@ -122,22 +168,23 @@ describe('box and Ctrl+A', () => {
 });
 
 describe('levels', () => {
-  it('climbs one level on Escape', () => {
-    expect(climb(D, { kind: 'children', names: ['Head'], card: 1 })).toEqual(TEAMMATES);
-    expect(climb(FREE, { kind: 'children', names: ['Head'], card: 1 })).toEqual({ kind: 'card', card: 1 });
-    expect(climb(FREE, { kind: 'card', card: 1 })).toEqual(TEAMMATES);
-    expect(climb(D, TEAMMATES)).toEqual(NONE);
+  // The levels are the same in every layout, so none of these needs the design.
+  it('climbs one level on Escape: piece, card, Teammates, nothing', () => {
+    expect(climb({ kind: 'children', names: ['Head'], card: 1 })).toEqual({ kind: 'cards', cards: [1] });
+    expect(climb({ kind: 'cards', cards: [0, 1] })).toEqual(TEAMMATES);
+    expect(climb(TEAMMATES)).toEqual(NONE);
   });
 
   it('names the path for the breadcrumb', () => {
-    const labels = (d: HudDesign, s: Selection) => breadcrumb(d, s).map((c) => c.label);
-    expect(labels(D, { kind: 'children', names: ['Health'], card: 1 })).toEqual(['Teammates', 'Health bar']);
-    expect(labels(FREE, { kind: 'children', names: ['Health'], card: 1 })).toEqual(['Teammates', 'Card 2', 'Health bar']);
-    expect(labels(D, { kind: 'children', names: ['Head', 'Health', 'Name'], card: 0 })).toEqual(['Teammates', '3 pieces']);
-    expect(labels(FREE, { kind: 'card', card: 1 })).toEqual(['Teammates', 'Card 2']);
-    expect(labels(D, { kind: 'elements', ids: ['chat', 'ownHealth'] })).toEqual(['2 elements']);
-    expect(breadcrumb(FREE, { kind: 'children', names: ['Health'], card: 1 })[1].sel).toEqual({ kind: 'card', card: 1 });
-    expect(selectionLabel(D, { kind: 'elements', ids: ['chat'] })).toBe('Chat');
+    const labels = (s: Selection) => breadcrumb(s).map((c) => c.label);
+    expect(labels({ kind: 'children', names: ['Health'], card: 1 })).toEqual(['Teammates', 'Card 2', 'Health bar']);
+    expect(labels({ kind: 'children', names: ['Head', 'Health', 'Name'], card: 0 })).toEqual(['Teammates', 'Card 1', '3 pieces']);
+    expect(labels({ kind: 'cards', cards: [2] })).toEqual(['Teammates', 'Card 3']);
+    expect(labels({ kind: 'cards', cards: [0, 2] })).toEqual(['Teammates', '2 cards']);
+    expect(breadcrumb({ kind: 'cards', cards: [0, 2] })[0].sel).toEqual(TEAMMATES);
+    expect(labels({ kind: 'elements', ids: ['chat', 'ownHealth'] })).toEqual(['2 elements']);
+    expect(breadcrumb({ kind: 'children', names: ['Health'], card: 1 })[1].sel).toEqual({ kind: 'cards', cards: [1] });
+    expect(selectionLabel({ kind: 'elements', ids: ['chat'] })).toBe('Chat');
   });
 
   it('keeps a selection that still applies and drops what does not', () => {
@@ -149,7 +196,15 @@ describe('levels', () => {
     expect(sanitize(added, 'survivor', kids)).toBe(kids);
     expect(sanitize(D, 'survivor', kids)).toEqual({ kind: 'children', names: ['Head'], card: 0 });
     expect(sanitize(D, 'survivor', { kind: 'children', names: ['HealthNumber'], card: 0 })).toEqual(TEAMMATES);
-    expect(sanitize(D, 'survivor', { kind: 'card', card: 1 })).toEqual(TEAMMATES);
+    // Cards are a level in every layout; card 4 is one only in Free, where it is listed.
+    const cards: Selection = { kind: 'cards', cards: [1, 2] };
+    expect(sanitize(D, 'survivor', cards)).toBe(cards);
+    expect(sanitize(D, 'survivor', { kind: 'cards', cards: [1, 3] })).toEqual({ kind: 'cards', cards: [1] });
+    expect(sanitize(D, 'survivor', { kind: 'cards', cards: [3] })).toEqual(TEAMMATES);
+    const four: Selection = { kind: 'cards', cards: [3] };
+    expect(sanitize(FREE, 'survivor', four)).toBe(four);
+    expect(sanitize(D, 'infected', cards)).toEqual(NONE);
+    expect(selectedIds(cards)).toEqual(['teamColumn']);
     expect(selectedIds({ kind: 'children', names: ['Head'], card: 0 })).toEqual(['teamColumn']);
   });
 });
@@ -184,6 +239,12 @@ describe('what the canvas draws for a selection', () => {
     expect(elementFrame(D, 'chat')).toEqual(selectionBox(D, { kind: 'elements', ids: ['chat'] }));
   });
 
+  it('frames each picked card where it is drawn, in Row as in Free', () => {
+    const rects = teamCardRects(D, D.aspect).map(({ x, y, w, h }) => ({ x, y, w, h }));
+    expect(selectionFrames(D, { kind: 'cards', cards: [0, 2] })).toEqual([rects[0], rects[2]]);
+    expect(selectionBox(D, { kind: 'cards', cards: [0, 2] })).toEqual(unionBox([rects[0], rects[2]]));
+  });
+
   it("boxes several pieces in the card they were picked in", () => {
     expect(selectionBox(D, { kind: 'children', names: ['Head', 'Health'], card: 1 })).toEqual({ x: 153, y: 443, w: 120, h: 23 });
     expect(selectionBox(D, NONE)).toBeNull();
@@ -195,7 +256,8 @@ describe('what the canvas draws for a selection', () => {
     expect(el('chat')).toEqual(['nw', 'ne', 'se', 'sw', 'n', 'e', 's', 'w']);
     expect(el('targetId')).toEqual([]);
     expect(handlesFor(FREE, TEAMMATES)).toEqual([]);
-    expect(handlesFor(FREE, { kind: 'card', card: 0 })).toEqual([]);
+    expect(handlesFor(FREE, { kind: 'cards', cards: [0] })).toEqual([]);
+    expect(handlesFor(D, { kind: 'cards', cards: [0, 1] })).toEqual([]);
     const piece = (names: string[]) => handlesFor(D, { kind: 'children', names, card: 0 });
     expect(piece(['Health'])).toHaveLength(8);
     expect(piece(['Head'])).toEqual(['nw', 'ne', 'se', 'sw']);
@@ -230,9 +292,10 @@ describe('snap targets', () => {
     expect(got).toContainEqual({ x: 728, y: 389, w: 125, h: 91 });
     expect(got).not.toContainEqual({ x: 10, y: 275, w: 320, h: 120 });
     const cards = teamCardRects(FREE, FREE.aspect);
-    const free = sectionTargets(FREE, 'survivor', { kind: 'card', card: 1 });
+    const free = sectionTargets(FREE, 'survivor', { kind: 'cards', cards: [1, 2] });
     expect(free).toContainEqual(cards[0]);
     expect(free).not.toContainEqual(cards[1]);
+    expect(free).not.toContainEqual(cards[2]);
   });
 
   it("draws a piece's guide where the piece is drawn", () => {
@@ -244,11 +307,11 @@ describe('snap targets', () => {
 
 describe('the right-click menu', () => {
   it('offers what applies to the selection', () => {
-    expect(menuActions(D, { kind: 'elements', ids: ['chat'] })).toEqual(['hide', 'reset']);
-    expect(menuActions(D, { kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'selectTeam']);
-    expect(menuActions(FREE, { kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'selectCard', 'selectTeam']);
-    expect(menuActions(FREE, { kind: 'card', card: 0 })).toEqual(['selectTeam']);
-    expect(menuActions(D, NONE)).toEqual([]);
+    expect(menuActions({ kind: 'elements', ids: ['chat'] })).toEqual(['hide', 'reset']);
+    expect(menuActions({ kind: 'children', names: ['Head'], card: 0 })).toEqual(['hide', 'reset', 'selectCard', 'selectTeam']);
+    expect(menuActions({ kind: 'cards', cards: [0] })).toEqual(['selectTeam']);
+    expect(menuActions({ kind: 'cards', cards: [0, 1] })).toEqual(['selectTeam']);
+    expect(menuActions(NONE)).toEqual([]);
   });
 });
 
@@ -256,6 +319,8 @@ describe('targetOf', () => {
   it('is what a hover outlines: the deepest thing, or one up with Ctrl', () => {
     const hit = hitAt(D, 'survivor', 'healthy', HEAD2.x, HEAD2.y);
     expect(targetOf(D, hit)).toEqual({ kind: 'children', names: ['Head'], card: 1 });
-    expect(targetOf(D, hit, true)).toEqual(TEAMMATES);
+    expect(targetOf(D, hit, true)).toEqual({ kind: 'cards', cards: [1] });
+    // With that card already picked, a Ctrl+click (and so the Ctrl hover) goes to the Teammates.
+    expect(targetOf(D, hit, true, { kind: 'cards', cards: [1] })).toEqual(TEAMMATES);
   });
 });

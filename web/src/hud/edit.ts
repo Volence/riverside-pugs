@@ -109,6 +109,34 @@ export function withTeamDir(d: HudDesign, dir: TeamDir): HudDesign {
 }
 
 /**
+ * The survivor team laid out Free with every card where it is drawn now:
+ * what moving one card of a Row or Column team starts from, so that card
+ * can move alone and the others stay put. Slots a past Free layout left
+ * behind are dropped first, so withTeamDir seeds all four from the cards'
+ * drawn places rather than bringing the old ones back. A team already Free
+ * is returned unchanged, `===`.
+ */
+export function freeInPlace(d: HudDesign): HudDesign {
+  if (isFreeTeam(d)) return d;
+  const { slots: _stale, ...rest } = d.elements.teamColumn ?? {};
+  return withTeamDir({ ...d, elements: { ...d.elements, teamColumn: rest } }, 'free');
+}
+
+/**
+ * Where each of the four cards is drawn once the team is Free: its slot plus
+ * the fit offset, sized as teamCardRects sizes it. This is what the X and Y
+ * boxes show and take, since teamCardRects' centre-anchor rounding can put a
+ * card half a unit off its slot and a typed number must read back as typed.
+ * A Row or Column team is measured as freeInPlace would lay it out.
+ */
+export function cardBoxes(design: HudDesign): Box[] {
+  const d = freeInPlace(design);
+  const off = cardOffset(d);
+  const rects = teamCardRects(d, d.aspect);
+  return (d.elements.teamColumn?.slots ?? []).map((s, i) => ({ x: s.x + off.x, y: s.y + off.y, w: rects[i].w, h: rects[i].h }));
+}
+
+/**
  * Draw one Free card's top-left at (x, y): its slot becomes that less the fit
  * offset, clamped through the same table as an element's position.
  */
@@ -122,14 +150,19 @@ export function placeCard(design: HudDesign, card: number, x: number, y: number)
 }
 
 /**
- * Nudge a Free card by (dx, dy) from where it is drawn, through the same
- * clamp a drag uses (moveCard), so repeated arrow presses cannot walk it off
- * screen.
+ * Nudge cards by (dx, dy) from where they are placed (cardBoxes, what the X
+ * and Y boxes show, so three presses read as three more there), through the
+ * same clamp a drag uses (moveCards), so repeated arrow presses cannot walk
+ * them off screen. A Row or Column team goes Free first, as a drag does.
  */
-export function nudgeCard(design: HudDesign, card: number, dx: number, dy: number): HudDesign {
-  if (!design.elements.teamColumn?.slots?.[card]) return design;
-  const r = teamCardRects(design, design.aspect)[card];
-  return moveCard(design, card, r, dx, dy);
+export function nudgeCards(design: HudDesign, cards: number[], dx: number, dy: number): HudDesign {
+  return moveCards(design, cards, cardStarts(design, cards), dx, dy);
+}
+
+/** Where a gesture on these cards starts them: their cardBoxes, keyed by card. */
+export function cardStarts(design: HudDesign, cards: number[]): Record<number, Box> {
+  const boxes = cardBoxes(design);
+  return Object.fromEntries(cards.filter((c) => boxes[c]).map((c) => [c, boxes[c]]));
 }
 
 /** Merge into one teammate-card child's override. */
@@ -397,10 +430,46 @@ export function moveElements(design: HudDesign, ids: string[], starts: Record<st
   return ids.reduce((d, id) => (starts[id] ? placeElement(d, id, starts[id].x + dx, starts[id].y + dy) : d), design);
 }
 
-/** Move a Free card by (dx, dy) from where a gesture started it, keeping 8 units on screen. */
-export function moveCard(design: HudDesign, card: number, start: Box, dx: number, dy: number): HudDesign {
-  const W = screenW(design.aspect);
-  return placeCard(design, card, clampSpan(start.x + dx, start.w, W, 8), clampSpan(start.y + dy, start.h, SCREEN_H, 8));
+/**
+ * Move cards by (dx, dy) from where a gesture started them (`starts`, each
+ * card's cardBoxes place, from cardStarts). A Row or Column team goes Free
+ * first (freeInPlace), so the cards not moving stay where they were drawn;
+ * inside a gesture the switch and the move are one undo step. The delta is
+ * clamped once for the whole group so every card keeps 8 units on screen,
+ * as a single card's drag always has, and the cards keep their spacing when
+ * the group meets an edge instead of piling up against it. Each then goes
+ * through placeCard's clamp.
+ */
+export function moveCards(design: HudDesign, cards: number[], starts: Record<number, Box>, dx: number, dy: number): HudDesign {
+  const list = cards.filter((c) => starts[c]);
+  if (!list.length) return design;
+  const d = freeInPlace(design);
+  const W = screenW(d.aspect);
+  const range = (dv: number, at: (b: Box) => number, size: (b: Box) => number, extent: number) => Math.min(
+    Math.min(...list.map((c) => extent - 8 - at(starts[c]))),
+    Math.max(Math.max(...list.map((c) => 8 - size(starts[c]) - at(starts[c]))), dv),
+  );
+  const cx = range(dx, (b) => b.x, (b) => b.w, W);
+  const cy = range(dy, (b) => b.y, (b) => b.h, SCREEN_H);
+  return list.reduce((acc, c) => placeCard(acc, c, starts[c].x + cx, starts[c].y + cy), d);
+}
+
+/** The group X and Y boxes: put the cards' box at (x, y), moving all of them, a Row or Column team going Free first. */
+export function placeCards(design: HudDesign, cards: number[], x: number, y: number): HudDesign {
+  const starts = cardStarts(design, cards);
+  const box = unionBox(Object.values(starts));
+  return box ? moveCards(design, cards, starts, x - box.x, y - box.y) : design;
+}
+
+/** Align cards against the box around them, through placeCard's clamp, a Row or Column team going Free first. */
+export function alignCards(design: HudDesign, cards: number[], how: Align): HudDesign {
+  const starts = cardStarts(design, cards);
+  const box = unionBox(Object.values(starts));
+  if (!box) return design;
+  return Object.entries(starts).reduce((d, [c, r]) => {
+    const at = alignedAt(r, box, how);
+    return placeCard(d, Number(c), at.x, at.y);
+  }, freeInPlace(design));
 }
 
 /** Align elements against the box around them. Ones that cannot move stay, and still count toward the box. */
@@ -488,7 +557,7 @@ export function resizeElement(
 export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy: number): HudDesign {
   switch (sel.kind) {
     case 'elements': return sel.ids.reduce((d, id) => nudge(d, id, dx, dy), design);
-    case 'card': return nudgeCard(design, sel.card, dx, dy);
+    case 'cards': return nudgeCards(design, sel.cards, dx, dy);
     case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names), dx, dy);
     default: return design;
   }
@@ -496,8 +565,8 @@ export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy
 
 /**
  * Show or hide a selection: elements with a Visible control and pieces. A
- * Free card cannot be hidden alone (the game draws every teammate's card),
- * so a card selection is returned unchanged.
+ * card cannot be hidden alone (the game draws every teammate's card), so a
+ * card selection is returned unchanged.
  */
 export function setSelectionVisible(design: HudDesign, sel: Selection, visible: boolean): HudDesign {
   if (sel.kind === 'children') return setChildrenVisible(design, sel.names, visible);

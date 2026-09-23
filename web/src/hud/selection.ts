@@ -6,10 +6,14 @@
  * a hit, a frame, a handle or a snap target is wherever the file puts it.
  *
  * A selection is one of four levels: nothing, one or more elements of the
- * current side, one Free teammate card, or pieces of the teammate card.
- * Pieces live in the one teammate card file, so picking a piece in any card
- * picks it in all of them; `card` only says which card it was picked in, for
- * the breadcrumb and the handles.
+ * current side, one or more teammate cards, or pieces of the teammate card.
+ * The levels nest as Teammates, then a card, then a piece, in every layout:
+ * a card can be picked and moved on its own in Row and Column too, and
+ * moving one switches the Teammates to Free (edit.ts's freeInPlace), the
+ * only layout that stores a position per card. Pieces live in the one
+ * teammate card file, so picking a piece in any card picks it in all of
+ * them; `card` only says which card it was picked in, for the breadcrumb
+ * and the handles.
  */
 import { baseTeam, type Box, type HudDesign } from './design';
 import { elementById } from './elements';
@@ -23,11 +27,25 @@ import { ALL_HANDLES, CORNERS, unionBox, type Guide, type Handle } from './guide
 export type Selection =
   | { kind: 'none' }
   | { kind: 'elements'; ids: string[] }
-  | { kind: 'card'; card: number }
+  | { kind: 'cards'; cards: number[] }
   | { kind: 'children'; names: string[]; card: number };
 
 export const NONE: Selection = { kind: 'none' };
 export const TEAMMATES: Selection = { kind: 'elements', ids: ['teamColumn'] };
+
+/** A card selection, sorted and without repeats, so two that pick the same cards are equal. */
+export function cardsOf(cards: number[]): Selection {
+  return { kind: 'cards', cards: [...new Set(cards)].sort((a, b) => a - b) };
+}
+
+/**
+ * How many cards can be picked: the three the preview draws, and in Free
+ * the fourth as well, which shows only while spectating a full team and is
+ * reachable only from Layers, where Free lists it.
+ */
+export function pickableCards(design: HudDesign): number {
+  return isFreeTeam(design) ? 4 : TEAM_CARDS;
+}
 
 export interface Mods { shift: boolean; ctrl: boolean }
 /** Everything under a point, one field per level: the element, the teammate card (in any layout), the piece. */
@@ -45,18 +63,24 @@ export function hitAt(design: HudDesign, side: Side, state: CardState, ux: numbe
   return { element, card: card >= 0 ? card : null, child: piece ? piece.name : null };
 }
 
+const sameCards = (sel: Selection, card: number) => sel.kind === 'cards' && sel.cards.length === 1 && sel.cards[0] === card;
+
 /**
  * The thing a click picks: the deepest level under the pointer (a drawn
- * piece, else a Free card, else the element), or with Ctrl one level up.
- * It is also what a hover outlines.
+ * piece, else a card, else the element), or with Ctrl one level up: a
+ * piece's card, or the Teammates from a card's empty space. When the card
+ * Ctrl would pick is already the selection, it climbs on to the Teammates,
+ * so repeated Ctrl+clicks walk up. It is also what a hover outlines, which
+ * is why it takes the selection.
  */
-export function targetOf(design: HudDesign, hit: Hit, ctrl = false): Selection {
+export function targetOf(design: HudDesign, hit: Hit, ctrl = false, sel: Selection = NONE): Selection {
   if (!hit.element) return NONE;
   const levels: Selection[] = [];
   if (hit.child) levels.push({ kind: 'children', names: [hit.child], card: hit.card ?? 0 });
-  if (hit.element === 'teamColumn' && isFreeTeam(design) && hit.card !== null) levels.push({ kind: 'card', card: hit.card });
+  if (hit.element === 'teamColumn' && hit.card !== null) levels.push(cardsOf([hit.card]));
   levels.push({ kind: 'elements', ids: [hit.element] });
-  return ctrl && levels.length > 1 ? levels[1] : levels[0];
+  if (!ctrl || levels.length === 1) return levels[0];
+  return hit.card !== null && levels[1].kind === 'cards' && sameCards(sel, hit.card) ? levels[2] : levels[1];
 }
 
 function toggle(list: string[], item: string): string[] {
@@ -66,9 +90,9 @@ function toggle(list: string[], item: string): string[] {
 /**
  * Combine a newly picked target with the selection, as the canvas and the
  * Layers list both do. Without Shift the target replaces it. With Shift, an
- * element toggles among elements and a piece among pieces; at another level
- * (or a card, which is picked alone) the target starts a new selection, and
- * Shift on nothing keeps what there is.
+ * element toggles among elements, a card among cards and a piece among
+ * pieces; at another level the target starts a new selection, and Shift on
+ * nothing keeps what there is.
  */
 export function pick(sel: Selection, target: Selection, shift: boolean): Selection {
   if (!shift) return target;
@@ -77,6 +101,10 @@ export function pick(sel: Selection, target: Selection, shift: boolean): Selecti
     const ids = toggle(sel.ids, target.ids[0]);
     return ids.length ? { kind: 'elements', ids } : NONE;
   }
+  if (sel.kind === 'cards' && target.kind === 'cards') {
+    const cards = target.cards.reduce((list, c) => (list.includes(c) ? list.filter((x) => x !== c) : [...list, c]), sel.cards);
+    return cards.length ? cardsOf(cards) : NONE;
+  }
   if (sel.kind === 'children' && target.kind === 'children') {
     const names = toggle(sel.names, target.names[0]);
     return names.length ? { kind: 'children', names, card: sel.card } : NONE;
@@ -84,8 +112,15 @@ export function pick(sel: Selection, target: Selection, shift: boolean): Selecti
   return target;
 }
 
+/**
+ * A click. While cards are picked, Shift on any part of a card (a piece or
+ * its empty space) lifts the target to that card, so it joins or leaves
+ * the cards rather than starting a selection of pieces.
+ */
 export function clickSelect(design: HudDesign, sel: Selection, hit: Hit, mods: Mods): Selection {
-  return pick(sel, targetOf(design, hit, mods.ctrl), mods.shift);
+  const onCard = hit.element === 'teamColumn' && hit.card !== null;
+  const target = mods.shift && sel.kind === 'cards' && onCard ? cardsOf([hit.card!]) : targetOf(design, hit, mods.ctrl, sel);
+  return pick(sel, target, mods.shift);
 }
 
 /**
@@ -98,7 +133,7 @@ export function isPicked(design: HudDesign, sel: Selection, hit: Hit): boolean {
   switch (sel.kind) {
     case 'elements':
       return hit.element !== null && sel.ids.includes(hit.element) && !(hit.element === 'teamColumn' && isFreeTeam(design));
-    case 'card': return isFreeTeam(design) && hit.card === sel.card;
+    case 'cards': return hit.element === 'teamColumn' && hit.card !== null && sel.cards.includes(hit.card);
     case 'children': return hit.child !== null && sel.names.includes(hit.child);
     default: return false;
   }
@@ -110,18 +145,18 @@ export type Intent = { kind: 'resize'; handle: Handle } | { kind: 'box' } | { ki
  * What a drag means once the pointer has moved past a click. A press on one
  * of the selection's handles (`handle`, found by handleAt) resizes, with or
  * without Shift, since Shift there keeps the ratio. Otherwise Shift draws a
- * box. A drag on part of the selection moves the selection; anywhere else it
- * moves the outermost section under the pointer (the element, or in Free the
- * card) and selects it, so no key is needed to move a section.
+ * box. A drag on part of the selection moves the selection (the Row or
+ * Column Teammates picked move as one). Anywhere else it moves the card
+ * under the pointer, in any layout, or where there is no card the element,
+ * and selects it, so no key is needed to move a card or a section.
  */
 export function dragIntent(design: HudDesign, sel: Selection, hit: Hit, mods: Mods, handle: Handle | null = null): Intent {
   if (handle) return { kind: 'resize', handle };
   if (mods.shift) return { kind: 'box' };
   if (isPicked(design, sel, hit)) return { kind: 'move', sel };
   if (!hit.element) return { kind: 'none' };
-  if (hit.element === 'teamColumn' && isFreeTeam(design)) {
-    return hit.card === null ? { kind: 'none' } : { kind: 'move', sel: { kind: 'card', card: hit.card } };
-  }
+  if (hit.element === 'teamColumn' && hit.card !== null) return { kind: 'move', sel: cardsOf([hit.card]) };
+  if (hit.element === 'teamColumn' && isFreeTeam(design)) return { kind: 'none' };
   return { kind: 'move', sel: { kind: 'elements', ids: [hit.element] } };
 }
 
@@ -182,33 +217,33 @@ export function selectAll(design: HudDesign, side: Side, state: CardState, sel: 
   return ids.length ? { kind: 'elements', ids } : NONE;
 }
 
-/** Escape: pieces climb to their card (Free) or the Teammates, a card to the Teammates, anything else to nothing. */
-export function climb(design: HudDesign, sel: Selection): Selection {
-  if (sel.kind === 'children') return isFreeTeam(design) ? { kind: 'card', card: sel.card } : TEAMMATES;
-  if (sel.kind === 'card') return TEAMMATES;
+/** Escape: pieces climb to the card they were picked in, cards to the Teammates, anything else to nothing. */
+export function climb(sel: Selection): Selection {
+  if (sel.kind === 'children') return cardsOf([sel.card]);
+  if (sel.kind === 'cards') return TEAMMATES;
   return NONE;
 }
 
 export interface Crumb { label: string; sel: Selection }
 
 /** The path shown at the canvas corner: each segment selects its level. */
-export function breadcrumb(design: HudDesign, sel: Selection): Crumb[] {
+export function breadcrumb(sel: Selection): Crumb[] {
   const team: Crumb = { label: elementById('teamColumn')!.label, sel: TEAMMATES };
   switch (sel.kind) {
     case 'none': return [];
     case 'elements':
       return [{ label: sel.ids.length === 1 ? elementById(sel.ids[0])!.label : `${sel.ids.length} elements`, sel }];
-    case 'card': return [team, { label: `Card ${sel.card + 1}`, sel }];
+    case 'cards': return [team, { label: sel.cards.length === 1 ? `Card ${sel.cards[0] + 1}` : `${sel.cards.length} cards`, sel }];
     case 'children': {
       const leaf: Crumb = { label: sel.names.length === 1 ? teamChild(sel.names[0])!.label : `${sel.names.length} pieces`, sel };
-      return isFreeTeam(design) ? [team, { label: `Card ${sel.card + 1}`, sel: { kind: 'card', card: sel.card } }, leaf] : [team, leaf];
+      return [team, { label: `Card ${sel.card + 1}`, sel: cardsOf([sel.card]) }, leaf];
     }
   }
 }
 
 /** What a selection is called: the breadcrumb's last label, as the hover label shows it. */
-export function selectionLabel(design: HudDesign, sel: Selection): string {
-  const crumbs = breadcrumb(design, sel);
+export function selectionLabel(sel: Selection): string {
+  const crumbs = breadcrumb(sel);
   return crumbs.length ? crumbs[crumbs.length - 1].label : '';
 }
 
@@ -227,9 +262,12 @@ export function sanitize(design: HudDesign, side: Side, sel: Selection): Selecti
       const ids = sel.ids.filter(onSide);
       return ids.length === sel.ids.length ? sel : ids.length ? { kind: 'elements', ids } : NONE;
     }
-    case 'card':
+    case 'cards': {
+      // Card 4 is a level only in Free, where Layers lists it.
       if (side !== 'survivor') return NONE;
-      return isFreeTeam(design) ? sel : TEAMMATES;
+      const cards = sel.cards.filter((c) => c < pickableCards(design));
+      return cards.length === sel.cards.length ? sel : cards.length ? cardsOf(cards) : TEAMMATES;
+    }
     case 'children': {
       if (side !== 'survivor') return NONE;
       const names = sel.names.filter((n) => cardChild(design, n) !== null);
@@ -243,7 +281,7 @@ export function selectionKey(sel: Selection): string {
   return JSON.stringify(sel);
 }
 
-/** The element ids a selection touches: a card or pieces belong to the Teammates. */
+/** The element ids a selection touches: cards or pieces belong to the Teammates. */
 export function selectedIds(sel: Selection): string[] {
   if (sel.kind === 'elements') return sel.ids;
   return sel.kind === 'none' ? [] : ['teamColumn'];
@@ -262,12 +300,15 @@ export function elementFrame(design: HudDesign, id: string): Box {
   return plain(elementRect(design, id, design.aspect));
 }
 
-/** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, a card, a piece in every card. */
+/** One outline per selected thing as drawn: an element's frame, the Free Teammates' cards, each picked card, a piece in every card. */
 export function selectionFrames(design: HudDesign, sel: Selection): Box[] {
   switch (sel.kind) {
     case 'none': return [];
     case 'elements': return sel.ids.flatMap((id) => (id === 'teamColumn' && isFreeTeam(design) ? drawnCards(design) : [elementFrame(design, id)]));
-    case 'card': return [plain(teamCardRects(design, design.aspect)[sel.card])];
+    case 'cards': {
+      const rects = teamCardRects(design, design.aspect);
+      return sel.cards.map((c) => plain(rects[c]));
+    }
     case 'children':
       return drawnCards(design).flatMap((c) => childRects(design, 'teamColumn', { x: c.x, y: c.y }, 1)
         .filter((r) => sel.names.includes(r.name)).map(plain));
@@ -286,7 +327,7 @@ export function selectionBox(design: HudDesign, sel: Selection): Box | null {
 /**
  * The handles the spec's table gives a selection. Elements: eight for a
  * free-size element, four corners for a scaled one, none otherwise, and
- * none for the Free Teammates (their box is the screen). A card: none (the
+ * none for the Free Teammates (their box is the screen). Cards: none (the
  * cards share one size). One piece: eight for width and height, four
  * corners for square art or the item icons. Several pieces: four corners.
  * Several elements: none.
@@ -342,14 +383,14 @@ export function pieceTargets(design: HudDesign, state: CardState, moving: string
   return out;
 }
 
-/** What a moving element or Free card snaps to, in screen units: the screen, and every other visible thing of the side. */
+/** What moving elements or cards snap to, in screen units: the screen, and every other visible thing of the side. */
 export function sectionTargets(design: HudDesign, side: Side, sel: Selection): Box[] {
   const out: Box[] = [{ x: 0, y: 0, w: screenW(design.aspect), h: SCREEN_H }];
   for (const el of visibleElements(side)) {
     if (sel.kind === 'elements' && sel.ids.includes(el.id)) continue;
     if (!elementRect(design, el.id, design.aspect).visible) continue;
     const rects = sectionRects(design, el.id);
-    out.push(...(el.id === 'teamColumn' && sel.kind === 'card' ? rects.filter((_, i) => i !== sel.card) : rects));
+    out.push(...(el.id === 'teamColumn' && sel.kind === 'cards' ? rects.filter((_, i) => !sel.cards.includes(i)) : rects));
   }
   return out;
 }
@@ -364,11 +405,11 @@ export function pieceGuideToScreen(g: Guide, card: Box, f: CardFrame): Guide {
 export type MenuAction = 'hide' | 'reset' | 'selectCard' | 'selectTeam';
 
 /** The right-click menu for a selection. A card cannot be hidden alone, and has no reset of its own. */
-export function menuActions(design: HudDesign, sel: Selection): MenuAction[] {
+export function menuActions(sel: Selection): MenuAction[] {
   switch (sel.kind) {
     case 'elements': return ['hide', 'reset'];
-    case 'card': return ['selectTeam'];
-    case 'children': return isFreeTeam(design) ? ['hide', 'reset', 'selectCard', 'selectTeam'] : ['hide', 'reset', 'selectTeam'];
+    case 'cards': return ['selectTeam'];
+    case 'children': return ['hide', 'reset', 'selectCard', 'selectTeam'];
     default: return [];
   }
 }
