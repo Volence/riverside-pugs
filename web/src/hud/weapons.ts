@@ -154,6 +154,10 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
   // centred on the box's top edge. The clip ends PrimaryWeaponAmmoX in from
   // the right (5 more when active), the reserve starts just past it, both
   // spaced by one 640-unit, and the reserve sits ReserveAmmoYPos lower.
+  // Each slot below sets `active` as a fixed const rather than inlining true/false, since
+  // the sample loadout always shows the primary as the active one: boxAt and frameOf already
+  // branch on it generically, so a later feature that lets the preview choose the active slot
+  // can compute these instead of writing them here and reuse those branches unchanged.
   let y = n('PrimaryWeaponsYPos');
   {
     const active = true;
