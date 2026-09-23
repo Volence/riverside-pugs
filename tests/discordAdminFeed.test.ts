@@ -44,6 +44,22 @@ const settled = async () => { await sync.idle(); await feed.idle(); };
 const inFeed = () => t.live().filter((m) => m.channelId === 'admins');
 
 describe('admin feed', () => {
+  it('a note shows its text, quoted and escaped, but not when the note is about staff', async () => {
+    logAdmin(db, ADMIN, 'note', IDS[2], { text: 'went afk twice\nsaid sorry after **no ping** @everyone' });
+    await settled();
+    const line = JSON.stringify(inFeed()[0]?.payload);
+    expect(line).toContain('added a note on');
+    expect(line).toContain('went afk twice');
+    expect(line).toContain('said sorry after');
+    expect(line).not.toContain('**no ping**');
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(IDS[3]);
+    logAdmin(db, ADMIN, 'note', IDS[3], { text: 'secret about a mod' });
+    await settled();
+    const staff = JSON.stringify(inFeed()[1]?.payload);
+    expect(staff).toContain('added a note on');
+    expect(staff).not.toContain('secret about a mod');
+  });
+
   it('with no forum set, posts one plain line for a new ticket and another for a further report, never naming the reporter', async () => {
     const a = fileReport(db, IDS[0], { targetId: IDS[5], category: 'griefing', text: 'kept killing us', matchId }, { adminSteamIds: [] }) as { ticketId: number };
     fileReport(db, IDS[1], { targetId: IDS[5], category: 'cheating', text: '' }, { adminSteamIds: [] });

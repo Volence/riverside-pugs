@@ -4,6 +4,7 @@ import { getSetting } from '../settings.js';
 import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
 import { activeTimeout } from '../penalties.js';
+import { hasStaffFlag } from '../tickets/store.js';
 import { discordLabel, escapeName, identityOf } from '../identity.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
@@ -200,7 +201,16 @@ export class AdminFeedPoster {
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;
       case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
-      case 'note': return `${who} added a note on ${target}`;
+      case 'note': {
+        // The note's own words, quoted, so the channel shows what was written
+        // rather than that something was. Not for a note about a member of
+        // staff: they may well read this channel, and a note about them is
+        // for the people who can open their file.
+        const words = typeof d.text === 'string' ? d.text.trim() : '';
+        if (!words || hasStaffFlag(this.deps.db, e.target)) return `${who} added a note on ${target}`;
+        const clipped = words.length > 1500 ? `${words.slice(0, 1500)}...` : words;
+        return `${who} added a note on ${target}:\n${clipped.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
+      }
       case 'clear_penalties': return `${who} cleared ${target}'s penalties`;
       case 'abort_match': return `${who} aborted match ${match}`;
       case 'void_match': return `${who} voided match ${match}: ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
