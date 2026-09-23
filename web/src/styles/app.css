@@ -1619,6 +1619,17 @@ body.is-theater { overflow: hidden; }
 .admin-status--invited, .admin-status--reserved, .admin-status--live { color: var(--rating); }
 .admin-warn { color: var(--loss); }
 
+/* Balance compare: patch-group controls, banners, per-row verdict and the
+ * Task 8 quick-check placeholder. */
+.verdict--real { color: var(--win); font-weight: 600; }
+.verdict--too_early { color: var(--rating); }
+.verdict--noise { color: var(--text-muted); }
+.verdict--no_data { color: var(--text-muted); font-style: italic; }
+.balance-controls { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; }
+.balance-side { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 12rem; overflow-y: auto; }
+.balance-banner { border-left: 3px solid var(--rating); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); }
+.balance-check { padding: var(--sp-3); background: var(--surface-2); }
+
 .admin-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
 .admin-ban { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
 .admin-ban p { margin: 0; }
