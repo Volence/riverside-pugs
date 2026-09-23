@@ -290,6 +290,7 @@ bool g_bHasBoomLanded;
 // calls), so the include must sit below them.
 #include "pug-logauth.inc"
 #include "pug-stats.inc"
+#include "pug-balance.inc"
 
 // ---------- replay recording ----------
 ConVar g_cvReplayHz;                     // 0 = off. Instant rcon kill switch, no reload.
@@ -3215,6 +3216,8 @@ public void OnMapStart()
 		EndMatchNow("finale loaded");
 
 	if (g_State == MS_Pending || g_State == MS_Live) StartMatchDemo();
+
+	BalanceScanStatic();
 }
 
 /** Fill the roster arrays from whoever is on a team right now, WITHOUT starting
@@ -3371,6 +3374,8 @@ public void OnRoundIsLive()
 		// measured against.
 		if (surv[0] == '\0') EmitPug("ROUND_START map=%s half=%d", g_sCurrentMap, g_iHalf);
 		else EmitPug("ROUND_START map=%s half=%d surv=%s", g_sCurrentMap, g_iHalf, surv);
+
+		EmitBalance();
 
 		RosterLateJoiners();
 		CheckRosterMismatch();
