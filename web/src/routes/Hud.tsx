@@ -794,7 +794,7 @@ export default function Hud() {
       const parent = baseTeam(design.preset).card;
       const s = d.start;
       setDesign((cur) => (d.mode === 'resize'
-        ? resizeChild(cur, d.name, s, dux / scale, duy / scale)
+        ? resizeChild(cur, d.name, { ...s, visible: true }, 'se', dux / scale, duy / scale)
         : placeChild(cur, d.name, snap(s.x + dux / scale, s.w, parent.w), snap(s.y + duy / scale, s.h, parent.h))));
       return;
     }

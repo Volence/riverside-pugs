@@ -3,6 +3,7 @@ import {
   nudge, nudgeCard, hasOverrides, elementsTouched, resetElement, withTeamDir, placeCard, patchChild,
   placeChild, nudgeChild, resizeChild, resetChild,
   startsOf, moveChildren, placeChildren, scaleChildren, cornerFactor, anchorOf, alignChildren, setChildrenVisible, resetChildren,
+  placeElement, moveElements, moveCard, alignElements, scaleElement, resizeBox, resizeElement, nudgeSelection, hideSelection, setSelectionVisible, resetSelection,
 } from './edit';
 import { DEFAULT_DESIGN } from './design';
 import { teamCardRects, elementRect, cardChild } from './build';
@@ -40,6 +41,16 @@ describe('nudge', () => {
     expect(elementRect(d, 'teamColumn', d.aspect).x).toBe(0);
     d = nudge(d, 'teamColumn', 1, 0);
     expect(elementRect(d, 'teamColumn', d.aspect).x).toBe(1);
+  });
+
+  // Chat is 320 wide: clampSpan's 8-unit floor alone would allow x = 8 - 320
+  // = -312, but nudge now goes through placeElement, whose validator floor of
+  // -200 is tighter. Keys and a drag must agree on where that lands.
+  it('nudges Chat far left to the same clamped value a drag would give', () => {
+    let d = DEFAULT_DESIGN;
+    for (let i = 0; i < 200; i++) d = nudge(d, 'chat', -10, 0);
+    expect(d.elements.chat).toMatchObject(placeElement(DEFAULT_DESIGN, 'chat', -10000, 275).elements.chat!);
+    expect(d.elements.chat).toMatchObject({ x: -200 });
   });
 });
 
@@ -111,10 +122,32 @@ describe('moving a teammate card child', () => {
   });
 
   it('resizes square art keeping it square, and anything else freely, inside the card', () => {
-    expect(resizeChild(DEFAULT_DESIGN, 'Head', { x: 13, y: 38, w: 23, h: 23 }, 5, 2).children.teamColumn!.Head).toEqual({ w: 28, h: 28 });
-    expect(resizeChild(DEFAULT_DESIGN, 'Head', { x: 13, y: 38, w: 23, h: 23 }, 500, 0).children.teamColumn!.Head).toEqual({ w: 112, h: 112 });
-    expect(resizeChild(DEFAULT_DESIGN, 'Health', { x: 37, y: 52, w: 96, h: 7 }, -48, 0).children.teamColumn!.Health).toEqual({ w: 48, h: 7 });
-    expect(resizeChild(DEFAULT_DESIGN, 'Items', { x: 39, y: 36, w: 50, h: 14 }, 5, 5)).toBe(DEFAULT_DESIGN);
+    const head = { x: 13, y: 38, w: 23, h: 23, visible: true };
+    const health = { x: 37, y: 52, w: 96, h: 7, visible: true };
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'se', 5, 2).children.teamColumn!.Head).toEqual({ w: 28, h: 28 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'se', 500, 0).children.teamColumn!.Head).toEqual({ w: 112, h: 112 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'se', -48, 0).children.teamColumn!.Health).toEqual({ w: 48, h: 7 });
+  });
+
+  it('resizes from any handle, the opposite edge staying put', () => {
+    const head = { x: 13, y: 38, w: 23, h: 23, visible: true };
+    const health = { x: 37, y: 52, w: 96, h: 7, visible: true };
+    expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'w', -10, 0).children.teamColumn!.Health).toEqual({ w: 106, h: 7, x: 27 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'n', 0, -3).children.teamColumn!.Health).toEqual({ w: 96, h: 10, y: 49 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'nw', -5, -2).children.teamColumn!.Head).toEqual({ w: 28, h: 28, x: 8, y: 33 });
+    // A square piece has no side handles.
+    expect(resizeChild(DEFAULT_DESIGN, 'Head', head, 'e', 5, 0)).toBe(DEFAULT_DESIGN);
+  });
+
+  it('keeps the ratio on a side handle with Shift', () => {
+    const health = { x: 37, y: 52, w: 96, h: 7, visible: true };
+    expect(resizeChild(DEFAULT_DESIGN, 'Health', health, 'e', 10, 0, true).children.teamColumn!.Health).toEqual({ w: 106, h: 8 });
+  });
+
+  it('scales the item icons by a corner, and nothing else resizes them', () => {
+    const items = { x: 39, y: 36, w: 50, h: 14, visible: true, fontTall: 18 };
+    expect(resizeChild(DEFAULT_DESIGN, 'Items', items, 'se', 0, 7).children.teamColumn!.Items).toEqual({ fontSize: 27 });
+    expect(resizeChild(DEFAULT_DESIGN, 'Items', items, 'e', 10, 0)).toBe(DEFAULT_DESIGN);
   });
 });
 
@@ -232,5 +265,95 @@ describe('visibility and reset for several pieces', () => {
     const hidden = setChildrenVisible(DEFAULT_DESIGN, ['Head', 'Name'], false);
     expect(hidden.children.teamColumn).toEqual({ Head: { visible: false }, Name: { visible: false } });
     expect(resetChildren(hidden, ['Head', 'Name']).children.teamColumn).toBeUndefined();
+  });
+});
+
+describe('element edits', () => {
+  it('places an element rounded and on screen, and leaves one the game places alone', () => {
+    expect(placeElement(DEFAULT_DESIGN, 'chat', 40.4, 60.6).elements.chat).toEqual({ x: 40, y: 61 });
+    // clampSpan would allow 8 - 320 = -312; the validator's floor of -200 is tighter for a box this wide.
+    expect(placeElement(DEFAULT_DESIGN, 'chat', -900, 0).elements.chat).toEqual({ x: -200, y: 0 });
+    expect(placeElement(DEFAULT_DESIGN, 'targetId', 5, 5)).toBe(DEFAULT_DESIGN);
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(placeElement(free, 'teamColumn', 5, 5)).toBe(free);
+  });
+
+  it('moves several elements by the same amount from where they started', () => {
+    const starts = { chat: { x: 10, y: 275, w: 320, h: 120 }, ownHealth: { x: 728, y: 389, w: 125, h: 91 } };
+    const d = moveElements(DEFAULT_DESIGN, ['chat', 'ownHealth'], starts, -5, 10);
+    expect(d.elements.chat).toEqual({ x: 5, y: 285 });
+    expect(d.elements.ownHealth).toEqual({ x: 723, y: 399 });
+  });
+
+  it('moves a Free card from where it started, keeping 8 units on screen', () => {
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    const start = teamCardRects(free, free.aspect)[0];
+    expect(teamCardRects(moveCard(free, 0, start, 100, -200), free.aspect)[0]).toMatchObject({ x: 113, y: 241 });
+    expect(teamCardRects(moveCard(free, 0, start, -5000, 0), free.aspect)[0].x).toBe(8 - 121);
+  });
+
+  it('aligns several elements against their box', () => {
+    const left = alignElements(DEFAULT_DESIGN, ['chat', 'progressBar'], 'left');
+    expect(left.elements.chat).toEqual({ x: 10, y: 275 });
+    expect(left.elements.progressBar).toEqual({ x: 10, y: 250 });
+    const top = alignElements(DEFAULT_DESIGN, ['chat', 'progressBar'], 'top');
+    expect(top.elements.chat).toEqual({ x: 10, y: 250 });
+  });
+
+  it('scales an element by a corner, proportionally, from the opposite corner, clamped 0.5 to 2', () => {
+    const start = { rect: { x: 728, y: 389, w: 125, h: 91 }, scale: 1 };
+    // Dragging the top-left corner out by half: the bottom-right corner stays on the screen's.
+    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'nw', -62.5, -45.5).elements.ownHealth).toEqual({ scale: 1.5, x: 666, y: 344 });
+    // The bottom-right corner: the element keeps its own position (and its file anchor).
+    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', 125, 0).elements.ownHealth).toEqual({ scale: 2 });
+    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', 1000, 0).elements.ownHealth).toEqual({ scale: 2 });
+    expect(scaleElement(DEFAULT_DESIGN, 'ownHealth', start, 'se', -1000, 0).elements.ownHealth).toEqual({ scale: 0.5 });
+    expect(scaleElement(DEFAULT_DESIGN, 'chat', start, 'se', 10, 10)).toBe(DEFAULT_DESIGN);
+  });
+
+  it('resizes a free-size element from any handle, 20 units at least', () => {
+    const chat = { x: 10, y: 275, w: 320, h: 120 };
+    expect(resizeElement(DEFAULT_DESIGN, 'chat', chat, 'w', -30, 0).elements.chat).toEqual({ x: -20, w: 350, h: 120 });
+    expect(resizeElement(DEFAULT_DESIGN, 'chat', chat, 'e', -400, 0).elements.chat).toEqual({ w: 20, h: 120 });
+    expect(resizeElement(DEFAULT_DESIGN, 'chat', chat, 'e', 32, 0, true).elements.chat).toEqual({ w: 352, h: 132 });
+    expect(resizeElement(DEFAULT_DESIGN, 'ownHealth', chat, 'e', 10, 0)).toBe(DEFAULT_DESIGN);
+  });
+
+  it('computes a resized box with the opposite edge fixed', () => {
+    const b = { x: 10, y: 10, w: 100, h: 50 };
+    expect(resizeBox(b, 'nw', 10, 5, false, 1)).toEqual({ x: 20, y: 15, w: 90, h: 45 });
+    expect(resizeBox(b, 'w', 200, 0, false, 20)).toEqual({ x: 90, y: 10, w: 20, h: 50 });
+    expect(resizeBox(b, 's', 0, 25, true, 1)).toEqual({ x: 10, y: 10, w: 150, h: 75 });
+  });
+});
+
+describe('edits for any selection', () => {
+  it('nudges whatever is selected', () => {
+    expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'elements', ids: ['chat', 'ownHealth'] }, 1, 0).elements)
+      .toMatchObject({ chat: { x: 11, y: 275 }, ownHealth: { x: 729, y: 389 } });
+    expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'children', names: ['Head', 'Health'], card: 0 }, 0, 1).children.teamColumn)
+      .toEqual({ Head: { x: 13, y: 39 }, Health: { x: 37, y: 53 } });
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(nudgeSelection(free, { kind: 'card', card: 0 }, 5, 0).elements.teamColumn!.slots![0]).toEqual({ x: 5, y: 405 });
+    expect(nudgeSelection(DEFAULT_DESIGN, { kind: 'none' }, 1, 1)).toBe(DEFAULT_DESIGN);
+  });
+
+  it('hides elements and pieces, never a card, and skips an element with no Visible control', () => {
+    const els = hideSelection(DEFAULT_DESIGN, { kind: 'elements', ids: ['chat', 'ownHealth', 'xhair'] });
+    expect(els.elements.chat).toEqual({ visible: false });
+    expect(els.elements.ownHealth).toEqual({ visible: false });
+    expect(els.elements.xhair).toBeUndefined();
+    const kids = hideSelection(DEFAULT_DESIGN, { kind: 'children', names: ['Head', 'Name'], card: 0 });
+    expect(kids.children.teamColumn).toEqual({ Head: { visible: false }, Name: { visible: false } });
+    const free = withTeamDir(DEFAULT_DESIGN, 'free');
+    expect(hideSelection(free, { kind: 'card', card: 1 })).toBe(free);
+    expect(setSelectionVisible(els, { kind: 'elements', ids: ['chat'] }, true).elements.chat).toEqual({ visible: true });
+  });
+
+  it('resets elements and pieces', () => {
+    const moved = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { x: 5 } } };
+    expect(resetSelection(moved, { kind: 'elements', ids: ['chat'] }).elements.chat).toBeUndefined();
+    const edited = patchChild(DEFAULT_DESIGN, 'Head', { x: 5 });
+    expect(resetSelection(edited, { kind: 'children', names: ['Head'], card: 0 }).children.teamColumn).toBeUndefined();
   });
 });

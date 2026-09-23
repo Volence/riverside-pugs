@@ -17,7 +17,8 @@ import { screenW, SCREEN_H } from './units';
 import { elementById } from './elements';
 import { elementRect, teamLayout, teamCardRects, isFreeTeam, cardChild, type CardChild } from './build';
 import { teamChild } from './children';
-import { unionBox, type Handle } from './guides';
+import { unionBox, CORNERS, type Handle } from './guides';
+import type { Selection } from './selection';
 
 /** Keeps at least `min` units of a span on screen, whichever side it drifts to. */
 export function clampSpan(v: number, size: number, extent: number, min: number): number {
@@ -32,12 +33,10 @@ export function clampSpan(v: number, size: number, extent: number, min: number):
  * it is returned unchanged, `===` and all, which is what lets a caller skip
  * a re-render when nothing happened.
  *
- * Runs the result through the same `clampSpan` a drag uses, at the same
- * 8-unit floor, so repeated arrow presses cannot walk an element arbitrarily
- * far off screen the way a plain `x + dx` would; a drag and the keyboard
- * agree on how far off screen is too far because they share this call.
- * `design.aspect` (not a hardcoded 16:9) gives the screen width, since a
- * design can be 16:10 or 4:3.
+ * Goes through `placeElement`, the same clamp and rounding a drag uses, so
+ * repeated arrow presses cannot walk an element arbitrarily far off screen
+ * the way a plain `x + dx` would, and a drag and the keyboard always agree
+ * on where an element lands.
  */
 export function nudge(design: HudDesign, id: string, dx: number, dy: number): HudDesign {
   const el = elementById(id);
@@ -46,12 +45,8 @@ export function nudge(design: HudDesign, id: string, dx: number, dy: number): Hu
   // From where the element is drawn, not the stored x and y: a team the
   // on-screen clamp holds at the edge is drawn there whatever it stores, and
   // a press back from the edge must move it at once.
-  const o = design.elements[id];
   const base = elementRect(design, id, design.aspect);
-  const extentW = screenW(design.aspect);
-  const x = clampSpan(base.x + dx, base.w, extentW, 8);
-  const y = clampSpan(base.y + dy, base.h, SCREEN_H, 8);
-  return { ...design, elements: { ...design.elements, [id]: { ...o, x, y } } };
+  return placeElement(design, id, base.x + dx, base.y + dy);
 }
 
 /** Whether the elements differ from a fresh design's. Not the same as having
@@ -128,14 +123,13 @@ export function placeCard(design: HudDesign, card: number, x: number, y: number)
 
 /**
  * Nudge a Free card by (dx, dy) from where it is drawn, through the same
- * clampSpan and 8-unit floor a drag uses, so repeated arrow presses cannot
- * walk it off screen. Its place and size come from the generated file.
+ * clamp a drag uses (moveCard), so repeated arrow presses cannot walk it off
+ * screen.
  */
 export function nudgeCard(design: HudDesign, card: number, dx: number, dy: number): HudDesign {
   if (!design.elements.teamColumn?.slots?.[card]) return design;
   const r = teamCardRects(design, design.aspect)[card];
-  const extentW = screenW(design.aspect);
-  return placeCard(design, card, clampSpan(r.x + dx, r.w, extentW, 8), clampSpan(r.y + dy, r.h, SCREEN_H, 8));
+  return moveCard(design, card, r, dx, dy);
 }
 
 /** Merge into one teammate-card child's override. */
@@ -166,22 +160,65 @@ export function nudgeChild(design: HudDesign, name: string, dx: number, dy: numb
 }
 
 /**
- * Resize a child from `start` by (dw, dh), unscaled, inside the unfitted
- * card. Square art keeps its ratio: the side grows by the larger of the two
- * deltas. A child with no size of its own (the item icons) is unchanged.
+ * A box resized by one handle from `start` by (dx, dy): the dragged edges
+ * move, the opposite edges stay put, no side below `min`. With `keepRatio`
+ * a side handle carries the other dimension along in proportion (Shift on a
+ * side handle). Corners are never ratio-locked here: square art and scaled
+ * elements lock their own ratio.
+ */
+export function resizeBox(start: Box, handle: Handle, dx: number, dy: number, keepRatio: boolean, min: number): Box {
+  let w = start.w, h = start.h;
+  if (handle.includes('e')) w = start.w + dx;
+  if (handle.includes('w')) w = start.w - dx;
+  if (handle.includes('s')) h = start.h + dy;
+  if (handle.includes('n')) h = start.h - dy;
+  w = Math.max(min, Math.round(w));
+  h = Math.max(min, Math.round(h));
+  if (keepRatio && (handle === 'e' || handle === 'w')) h = Math.max(min, Math.round((start.h * w) / (start.w || 1)));
+  if (keepRatio && (handle === 'n' || handle === 's')) w = Math.max(min, Math.round((start.w * h) / (start.h || 1)));
+  return {
+    x: handle.includes('w') ? start.x + start.w - w : start.x,
+    y: handle.includes('n') ? start.y + start.h - h : start.y,
+    w, h,
+  };
+}
+
+/**
+ * Resize one teammate-card piece by a handle from where the gesture started
+ * it, unscaled units, inside the unfitted card. Width-and-height pieces take
+ * any of the eight handles, and a left or top handle moves the origin so the
+ * opposite edge stays put. Square art takes the corners only and grows by
+ * the larger of the two deltas, keeping its ratio. The item icons have no
+ * box of their own: a corner scales their icon size in proportion.
  */
 export function resizeChild(
-  design: HudDesign, name: string, start: { x: number; y: number; w: number; h: number }, dw: number, dh: number,
+  design: HudDesign, name: string, start: CardChild, handle: Handle, dx: number, dy: number, keepRatio = false,
 ): HudDesign {
   const def = teamChild(name);
-  if (!def || def.box === 'none') return design;
+  if (!def) return design;
   const p = baseTeam(design.preset).card;
-  const fit = (v: number, room: number, key: 'w' | 'h') => clampChild(key, Math.round(Math.min(Math.max(1, room), Math.max(1, v))));
-  if (def.box === 'square') {
-    const side = fit(start.w + Math.max(dw, dh), Math.min(p.w - start.x, p.h - start.y), 'w');
-    return patchChild(design, name, { w: side, h: side });
+  if (def.box === 'none') {
+    if (!def.font || start.fontTall === undefined || !CORNERS.includes(handle)) return design;
+    return patchChild(design, name, { fontSize: clampChild('fontSize', Math.round(start.fontTall * cornerFactor(start, handle, dx, dy))) });
   }
-  return patchChild(design, name, { w: fit(start.w + dw, p.w - start.x, 'w'), h: fit(start.h + dh, p.h - start.y, 'h') });
+  if (def.box === 'square') {
+    if (!CORNERS.includes(handle)) return design;
+    const grow = Math.max(handle.includes('w') ? -dx : dx, handle.includes('n') ? -dy : dy);
+    const room = Math.min(handle.includes('w') ? start.x + start.w : p.w - start.x, handle.includes('n') ? start.y + start.h : p.h - start.y);
+    const side = clampChild('w', Math.round(Math.min(Math.max(1, room), Math.max(1, start.w + grow))));
+    const patch: Partial<ChildOverride> = { w: side, h: side };
+    if (handle.includes('w')) patch.x = clampChild('x', start.x + start.w - side);
+    if (handle.includes('n')) patch.y = clampChild('y', start.y + start.h - side);
+    return patchChild(design, name, patch);
+  }
+  const b = resizeBox(start, handle, dx, dy, keepRatio, 1);
+  // Inside the unfitted card: an edge dragged past the card stops at it.
+  const left = Math.max(0, b.x), top = Math.max(0, b.y);
+  const right = Math.min(p.w, b.x + b.w), bottom = Math.min(p.h, b.y + b.h);
+  const patch: Partial<ChildOverride> = { w: clampChild('w', Math.max(1, right - left)), h: clampChild('h', Math.max(1, bottom - top)) };
+  if (handle.includes('w')) patch.x = clampChild('x', left);
+  if (handle.includes('n')) patch.y = clampChild('y', top);
+  return patchChild(design, name, patch);
 }
 
 /**
@@ -329,4 +366,122 @@ export function setChildrenVisible(design: HudDesign, names: string[], visible: 
 
 export function resetChildren(design: HudDesign, names: string[]): HudDesign {
   return names.reduce((d, n) => resetChild(d, n), design);
+}
+
+// --- elements, cards and whole selections ---
+
+/**
+ * Put an element's top-left at (x, y), rounded, keeping 8 units of it on
+ * screen as a drag always has (clampSpan) and inside the validator's range.
+ * An element the game places, or the Free Teammates (each card places
+ * itself), is returned unchanged, `===`.
+ */
+export function placeElement(design: HudDesign, id: string, x: number, y: number): HudDesign {
+  const el = elementById(id);
+  if (!el || !el.move || (id === 'teamColumn' && isFreeTeam(design))) return design;
+  const r = elementRect(design, id, design.aspect);
+  const o = design.elements[id];
+  const px = clampOverride('x', Math.round(clampSpan(x, r.w, screenW(design.aspect), 8)));
+  const py = clampOverride('y', Math.round(clampSpan(y, r.h, SCREEN_H, 8)));
+  return { ...design, elements: { ...design.elements, [id]: { ...o, x: px, y: py } } };
+}
+
+/** Move elements by (dx, dy) from where a gesture started them. */
+export function moveElements(design: HudDesign, ids: string[], starts: Record<string, Box>, dx: number, dy: number): HudDesign {
+  return ids.reduce((d, id) => (starts[id] ? placeElement(d, id, starts[id].x + dx, starts[id].y + dy) : d), design);
+}
+
+/** Move a Free card by (dx, dy) from where a gesture started it, keeping 8 units on screen. */
+export function moveCard(design: HudDesign, card: number, start: Box, dx: number, dy: number): HudDesign {
+  const W = screenW(design.aspect);
+  return placeCard(design, card, clampSpan(start.x + dx, start.w, W, 8), clampSpan(start.y + dy, start.h, SCREEN_H, 8));
+}
+
+/** Align elements against the box around them. Ones that cannot move stay, and still count toward the box. */
+export function alignElements(design: HudDesign, ids: string[], how: Align): HudDesign {
+  const rects = Object.fromEntries(ids.map((id) => {
+    const { x, y, w, h } = elementRect(design, id, design.aspect);
+    return [id, { x, y, w, h }];
+  }));
+  const box = unionBox(Object.values(rects));
+  if (!box) return design;
+  return ids.reduce((d, id) => {
+    const at = alignedAt(rects[id], box, how);
+    return placeElement(d, id, at.x, at.y);
+  }, design);
+}
+
+/**
+ * Scale an element by a corner handle: one proportional factor from the
+ * drag, applied to the scale the gesture started at, rounded to 0.01 and
+ * clamped to the validator's 0.5..2. The opposite corner stays put, so a
+ * left or top corner also moves the element by the size it gained, read
+ * back from elementRect at the new scale. A right or bottom corner leaves
+ * the position alone, so an element still on its file anchor keeps it.
+ */
+export function scaleElement(
+  design: HudDesign, id: string, start: { rect: Box; scale: number }, handle: Handle, dx: number, dy: number,
+): HudDesign {
+  const el = elementById(id);
+  if (!el || el.resize !== 'scale') return design;
+  const o = design.elements[id] ?? {};
+  const scale = clampOverride('scale', Math.round(start.scale * cornerFactor(start.rect, handle, dx, dy) * 100) / 100);
+  const next: HudDesign = { ...design, elements: { ...design.elements, [id]: { ...o, scale } } };
+  if (!handle.includes('w') && !handle.includes('n')) return next;
+  const r = elementRect(next, id, next.aspect);
+  const a = anchorOf(start.rect, handle);
+  return placeElement(next, id, handle.includes('w') ? a.x - r.w : start.rect.x, handle.includes('n') ? a.y - r.h : start.rect.y);
+}
+
+/**
+ * Resize a free-size element (the chat box) by any handle from where the
+ * gesture started it, 20 units at least as the Phase 1 corner drag had it,
+ * through the validator's ranges. A left or top handle moves the origin.
+ */
+export function resizeElement(
+  design: HudDesign, id: string, start: Box, handle: Handle, dx: number, dy: number, keepRatio = false,
+): HudDesign {
+  const el = elementById(id);
+  if (!el || el.resize !== 'free') return design;
+  const b = resizeBox(start, handle, dx, dy, keepRatio, 20);
+  const next: ElementOverride = { ...(design.elements[id] ?? {}), w: clampOverride('w', b.w), h: clampOverride('h', b.h) };
+  if (handle.includes('w')) next.x = clampOverride('x', b.x);
+  if (handle.includes('n')) next.y = clampOverride('y', b.y);
+  return { ...design, elements: { ...design.elements, [id]: next } };
+}
+
+/** Arrow keys: move whatever is selected by (dx, dy), through each level's own clamp. */
+export function nudgeSelection(design: HudDesign, sel: Selection, dx: number, dy: number): HudDesign {
+  switch (sel.kind) {
+    case 'elements': return sel.ids.reduce((d, id) => nudge(d, id, dx, dy), design);
+    case 'card': return nudgeCard(design, sel.card, dx, dy);
+    case 'children': return moveChildren(design, sel.names, startsOf(design, sel.names), dx, dy);
+    default: return design;
+  }
+}
+
+/**
+ * Show or hide a selection: elements with a Visible control and pieces. A
+ * Free card cannot be hidden alone (the game draws every teammate's card),
+ * so a card selection is returned unchanged.
+ */
+export function setSelectionVisible(design: HudDesign, sel: Selection, visible: boolean): HudDesign {
+  if (sel.kind === 'children') return setChildrenVisible(design, sel.names, visible);
+  if (sel.kind !== 'elements') return design;
+  return sel.ids.reduce((d, id) => {
+    if (!elementById(id)?.props.includes('visible')) return d;
+    return { ...d, elements: { ...d.elements, [id]: { ...(d.elements[id] ?? {}), visible } } };
+  }, design);
+}
+
+/** Delete and Backspace, and the menu's Hide. */
+export function hideSelection(design: HudDesign, sel: Selection): HudDesign {
+  return setSelectionVisible(design, sel, false);
+}
+
+/** The menu's Reset: elements back to a fresh design's, pieces back to the file's. */
+export function resetSelection(design: HudDesign, sel: Selection): HudDesign {
+  if (sel.kind === 'children') return resetChildren(design, sel.names);
+  if (sel.kind === 'elements') return sel.ids.reduce((d, id) => resetElement(d, id), design);
+  return design;
 }
