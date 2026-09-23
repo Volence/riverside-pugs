@@ -92,7 +92,9 @@ files.
   textures, so a HUD that repoints weapon or item icons shows its own art.
 - **Crosshair:** when the upload has `materials/vgui/hud/altcrosshair.vtf`, it becomes the design's
   `xhairArt` (`{ kind: 'image' }`) with crosshair 'bundle', as uploading it on the crosshair control
-  does. The HUD's own `xHair` element is kept as the upload has it.
+  does. The HUD's own `xHair` element is kept as the upload has it. Until the player changes the
+  crosshair, the upload's own `altcrosshair.vtf`/`.vmt` ship byte for byte. On an imported HUD, "Game
+  default" means the editor adds no crosshair and removes none, so the HUD's own `xHair` stays.
 
 ## Testing
 
