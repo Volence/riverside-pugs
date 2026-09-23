@@ -38,11 +38,12 @@ describe('balance compare routes', () => {
     const { a, cookies } = await app();
     const res = await a.inject({ method: 'GET', url: '/api/admin/balance/metric?metric=round.saferoom&phase=all&a=1&b=2', cookies });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ metric: 'round.saferoom', trend: [], perMap: [] });
+    expect(res.json()).toMatchObject({ metric: 'round.saferoom', trend: [], perMap: [], perPatch: [{ patchId: 1, value: null, matches: 0 }, { patchId: 2, value: null, matches: 0 }] });
   });
 
   it('refuses a non-admin', async () => {
     const { a, cookies } = await app(false);
     expect((await a.inject({ method: 'GET', url: '/api/admin/balance/compare?a=1&b=2', cookies })).statusCode).toBe(403);
+    expect((await a.inject({ method: 'GET', url: '/api/admin/balance/metric?metric=round.saferoom&phase=all&a=1&b=2', cookies })).statusCode).toBe(403);
   });
 });

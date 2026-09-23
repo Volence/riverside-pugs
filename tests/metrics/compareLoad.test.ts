@@ -36,6 +36,14 @@ describe('loadSide', () => {
     expect(d.summary).toMatchObject({ matches: 2, rounds: 4, meanMu: 25, meanGap: 2, olderEngineRounds: 1, historical: true });
   });
 
+  it('does not count failed rounds as using an older metric definition', () => {
+    const db = setup();
+    db.prepare(`INSERT INTO round_metric_context (match_id, ordinal, half, map, origin, patch_id, has_replay, has_stats, engine, computed_at)
+      VALUES (1, 2, 1, 'mapA', 'queue', 1, 0, 0, ?, 'n'), (1, 3, 1, 'mapA', 'queue', 1, 0, 0, ?, 'n')`)
+      .run(ENGINE + '!failed', 'older-engine!failed');
+    expect(loadSide(db, { patchIds: [1], origin: 'all', maps: null }, ['all']).summary.olderEngineRounds).toBe(1);
+  });
+
   it('filters by origin and map', () => {
     const q = loadSide(setup(), { patchIds: [1], origin: 'in_game', maps: ['mapA'] }, ['all', 'tank']);
     expect(q.summary.matches).toBe(1);

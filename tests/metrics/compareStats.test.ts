@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  benjaminiHochberg, bootstrapDiff, mapWeights, matchesNeeded, mulberry32, quantile,
+  benjaminiHochberg, bootstrapDiff, inverseNormalCdf, mapWeights, matchesNeeded, mulberry32, quantile,
   sharedMaps, verdictOf, weightedDiff, weightedValue, type MatchSample,
 } from '../../src/metrics/compare/stats.js';
 
@@ -127,8 +127,25 @@ describe('compare statistics', () => {
     expect(matchesNeeded(0.1, 0.1, 0.05, 20)).toBeNull();
     // normal case: seA leaves headroom, B needs many more matches to fill it.
     expect(matchesNeeded(0.1, 0.02, 0.15, 20)).toBe(185);
-    // B already has more than enough matches for its share: floored at 1, not 0.
-    expect(matchesNeeded(1, 0.01, 0.01, 20)).toBe(1);
+    // B already has more than enough matches for its share: sample size is
+    // not what holds the row back, so there is no estimate (not a floor of 1).
+    expect(matchesNeeded(1, 0.01, 0.01, 20)).toBeNull();
+    // A stricter z (a BH cutoff below 5%) needs more matches than 1.96 does.
+    expect(matchesNeeded(0.1, 0.02, 0.15, 20, 3)).toBeGreaterThan(185);
+    // Clears 95% (so 1.96 has nothing to add) but not a z of 3.02.
+    expect(matchesNeeded(0.1, 0.02, 0.04, 18)).toBeNull();
+    expect(matchesNeeded(0.1, 0.02, 0.04, 18, 3.0233)).toBe(24);
+  });
+
+  it('inverse normal CDF matches known quantiles in the centre and both tails', () => {
+    expect(inverseNormalCdf(0.5)).toBeCloseTo(0, 9);
+    expect(inverseNormalCdf(0.975)).toBeCloseTo(1.959964, 5);
+    expect(inverseNormalCdf(0.025)).toBeCloseTo(-1.959964, 5);
+    expect(inverseNormalCdf(0.99875)).toBeCloseTo(3.023341, 5);
+    expect(inverseNormalCdf(0.01)).toBeCloseTo(-2.326348, 5);
+    expect(inverseNormalCdf(1 - 1e-6)).toBeCloseTo(4.753424, 4);
+    expect(() => inverseNormalCdf(0)).toThrow(RangeError);
+    expect(() => inverseNormalCdf(1)).toThrow(RangeError);
   });
 
   it('verdicts follow the thresholds', () => {
