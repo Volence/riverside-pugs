@@ -110,10 +110,10 @@ function isTeamColumnHealthbarBg(panelId: string, n: KvNode): boolean {
 
 /**
  * The own-health panel's scratch overlays (HealthbarTextureTop/Bottom, the
- * detail_scratches_top_1/bottom_1 art) have no drawColor in the .res file,
- * but the owner's in-game screenshot at full health shows them tinted the
- * same bright green as the health number and bar, not drawn raw grey/black.
- * Unique to localplayerpanel.res in both presets (Modern ships them
+ * detail_scratches_top_1/bottom_1 art): game code sets their draw colour to
+ * the health colour (healthRgb, below) on every update, whatever the .res
+ * file gives, which is why the owner's screenshot at full health shows them
+ * green. Unique to localplayerpanel.res in both presets (Modern ships them
  * visible 0, so this never fires there).
  */
 const HEALTH_TINT_CHILDREN = new Set(['healthbartexturetop', 'healthbartexturebottom']);
@@ -263,20 +263,34 @@ export function rgbaOf(design: HudDesign, value: string | undefined): [number, n
 }
 
 /**
- * The health colour for the own-health panel's scratch overlays
- * (HEALTH_TINT_CHILDREN, above). clientscheme.res names it explicitly under
- * its TERROR (the game's internal name for this HUD) colours block, right
- * alongside HealthHurtRed: "HealthGreen" "0 200 0 255". Nothing in the .res
- * files points a child at it directly (the game applies it at runtime by
- * health percentage, the same way it colours the health number), but it is
- * the one named green in that block and it matches the bright green in the
- * owner's screenshot, so it is used here rather than a guessed colour.
+ * The health colour, as client.dll works it out for the survivor panel (one
+ * class draws both the own health panel and each teammate card; its update,
+ * at 0x1023f6e0, asks the HealthPanel for this colour at 0x1022a1a0 and sets
+ * it as the fgcolor of HealthNumber and HealthIcon and the draw colour of
+ * HealthbarTextureTop and HealthbarTextureBottom, every update, so the .res
+ * files' own colours for those four never show). Health over max health,
+ * clamped to 0..1: over 0.5 green, over 0.15 orange, else red, and red while
+ * incapacitated. The two thresholds are floats at 0x10516de4 and 0x10516de8
+ * and the colours a table at 0x10516dec (0x1021260e and 0x10212630).
+ * cl_colorblind 2 swaps in a second table (0x10516df8); the preview draws
+ * the default. The health used is the real health only, not the temporary
+ * health the number adds on.
  */
-function healthGreenRgb(design: HudDesign): [number, number, number] {
-  const named = kvFind(buildTrees(design)(SCHEME), ['Colors', 'HealthGreen']);
-  const raw = named && typeof named.value === 'string' ? named.value : '0 200 0 255';
-  const [r, g, b] = parseColour(raw);
-  return [r, g, b];
+export function healthRgb(health: number, maxHealth: number, incap: boolean): [number, number, number] {
+  if (incap) return [161, 25, 25];
+  const f = Math.min(1, Math.max(0, health / maxHealth));
+  if (f > 0.5) return [10, 177, 50];
+  if (f > 0.15) return [216, 146, 12];
+  return [161, 25, 25];
+}
+
+/** The panels drawn by that class, and the children it colours by health. */
+const HEALTH_PANELS = new Set(['ownHealth', 'teamColumn']);
+const HEALTH_LABELS = new Set(['healthnumber', 'healthicon']);
+
+/** The preview's sample: full health, or down (incapacitated) on a teammate card shown down. */
+function sampleHealthRgb(opts: DrawOpts): [number, number, number] {
+  return healthRgb(100, 100, opts.state === 'down');
 }
 
 // --- images: the exported art, or a slot texture the design generated ---
@@ -475,7 +489,7 @@ function drawImageChild(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvN
     if (!img) { if (missing.has(material)) hatch(ctx, r); return; }   // loading: draw nothing yet; missing: say so
     const rawDrawColor = kvGet(n, 'drawColor');
     let [tr, tg, tb, ta] = parseColour(rawDrawColor ?? '255 255 255 255');
-    if (!rawDrawColor && HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = healthGreenRgb(design);
+    if (HEALTH_TINT_CHILDREN.has(n.key.toLowerCase())) [tr, tg, tb] = sampleHealthRgb(opts);   // game code's colour, over the file's
     const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
     ctx.save();
     ctx.globalAlpha *= ta / 255;
@@ -612,16 +626,16 @@ function drawItemStandIns(ctx: CanvasRenderingContext2D, r: ChildRect, s: number
   ctx.restore();
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
+function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, n: KvNode, r: ChildRect, k: number, opts: DrawOpts) {
   if (n.key.toLowerCase() === 'items') { drawItems(ctx, design, n, r, k, opts); return; }
   const s = sampleText(n, opts);
   if (!s) return;
   ctx.save();
   // Scheme tall is already scaled by scalePass when the parent was.
   const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, opts.onAsset);
-  // Down, the game draws a teammate's number in red at the incap health (probe T7).
-  const downNumber = opts.state === 'down' && n.key.toLowerCase() === 'healthnumber';
-  ctx.fillStyle = colourOf(design, downNumber ? 'HealthHurtRed' : kvGet(n, 'fgcolor_override'));
+  // The health number and its + are coloured by game code (healthRgb), not the file: red when down (probe T7).
+  const byHealth = HEALTH_PANELS.has(panelId) && HEALTH_LABELS.has(n.key.toLowerCase());
+  ctx.fillStyle = byHealth ? `rgba(${sampleHealthRgb(opts).join(',')},1)` : colourOf(design, kvGet(n, 'fgcolor_override'));
   const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
   let x = r.x;
   if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + r.w; }
@@ -661,7 +675,7 @@ export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, pane
     if (alpha !== 1) { ctx.save(); ctx.globalAlpha *= alpha; }
     switch (r.kind) {
       case 'image': drawImageChild(ctx, design, n, r, k, opts); break;
-      case 'label': drawLabel(ctx, design, n, r, k, opts); break;
+      case 'label': drawLabel(ctx, design, panelId, n, r, k, opts); break;
       case 'bar': drawBar(ctx, r, opts); break;
       default: break;                                                // Panel, CircularProgressBar: nothing to show
     }

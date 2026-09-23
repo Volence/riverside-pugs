@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { childRects, drawPanel, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
+import { childRects, drawPanel, PANEL_FILE, hiddenInState, ITEM_ROW, itemRowStart, paintAdditive, healthRgb, _setImageFactory, _setCanvasFactory, _resetAssetCache } from './render';
 import { ICON_ADVANCE, ICON_SPACE } from './art/index';
 import { buildHud } from './build';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
@@ -148,6 +148,28 @@ describe('drawPanel', () => {
     const icons = calls.filter((c) => c.m === 'drawImage' && ITEM_ROW.some((n) => (c.a[0] as HTMLImageElement).src === artUrl(n)));
     expect(icons.length).toBe(ITEM_ROW.length);
     for (const c of icons) expect(c.op).toBe('lighter');
+  });
+
+  it("colours the own health number and its + by health, as client.dll does, whatever the file's colour", () => {
+    // client.dll sets HealthNumber's and HealthIcon's fgcolor to the health
+    // colour on every update, so a file's own colour never shows. At the
+    // preview's full health that is the green (10, 177, 50).
+    for (const preset of ['stock', 'modern'] as const) {
+      const { ctx, calls } = recCtx();
+      drawPanel(ctx, design({ preset }), 'ownHealth', { x: 0, y: 0 }, 1);
+      const texts = calls.filter((c) => c.m === 'fillText');
+      expect(texts.find((c) => c.a[0] === '100')!.fill, preset).toBe('rgba(10,177,50,1)');
+      expect(texts.find((c) => c.a[0] !== '100')!.fill, preset).toBe('rgba(10,177,50,1)');
+    }
+  });
+
+  it("colours a teammate's health number by health too, over the Modern file's White", () => {
+    // The same panel class draws the teammate card (TeammatePanel.res); the
+    // owner's Modern screenshot shows the numbers green, not the file's White.
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({ preset: 'modern' }), 'teamColumn', { x: 0, y: 0 }, 1, { card: 1 });
+    expect(calls.find((c) => c.m === 'fillText' && c.a[0] === '100')!.fill).toBe('rgba(10,177,50,1)');
+    expect(calls.find((c) => c.m === 'fillText' && c.a[0] === 'Louis')!.fill).not.toBe('rgba(10,177,50,1)');
   });
 
   it('never draws the state children the game controls', () => {
@@ -365,9 +387,9 @@ describe('drawPanel', () => {
 
   it('tints the own-health scratch overlays with the health colour, matching the in-game screenshot at full health', () => {
     // Stock localplayerpanel.res's HealthbarTextureTop/Bottom (detail_scratches_top_1/bottom_1) carry no
-    // drawColor of their own, but the owner's screenshot at full health shows them the same bright green
-    // as the health number and bar: "HealthGreen" "0 200 0 255" in clientscheme.res's Colors block. This
-    // reuses the same scratch-canvas tint path as the infected card's drawColor above.
+    // drawColor of their own; client.dll sets their draw colour to the health colour every update (healthRgb),
+    // the green (10, 177, 50) at full health. This reuses the same scratch-canvas tint path as the infected
+    // card's drawColor above.
     const scratch = recCtx();
     const made: { width: number; height: number }[] = [];
     _setCanvasFactory((w, h) => {
@@ -381,7 +403,7 @@ describe('drawPanel', () => {
       expect(made).toHaveLength(2);   // top and bottom scratches are different materials, each tinted once
       const multiplies = scratch.calls.filter((c) => c.m === 'fillRect' && c.op === 'multiply');
       expect(multiplies.length).toBeGreaterThanOrEqual(2);
-      for (const m of multiplies) expect(m.fill).toBe('rgb(0,200,0)');
+      for (const m of multiplies) expect(m.fill).toBe('rgb(10,177,50)');
       expect(calls.some((c) => c.m === 'drawImage' && made.includes(c.a[0] as HTMLCanvasElement))).toBe(true);
     } finally { _setCanvasFactory(null); }
   });
@@ -425,7 +447,7 @@ describe('the teammate card states', () => {
     expect(srcs(calls)).toContain(artUrl('vgui/healthbar_red'));
     expect(srcs(calls)).not.toContain(artUrl('vgui/healthbar_green'));
     const number = calls.find((c) => c.m === 'fillText' && c.a[0] === '299')!;
-    expect(number.fill).toBe('rgba(192,28,0,1)');                       // the scheme's HealthHurtRed
+    expect(number.fill).toBe('rgba(161,25,25,1)');                      // client.dll's incapacitated health colour
   });
 
   it('Dead draws the dead art square, dims the name, and draws no bar, number, portrait or icons', () => {
@@ -605,5 +627,21 @@ describe('paintAdditive', () => {
     paintAdditive(ctx, { x: 0, y: 0, w: 5, h: 5 }, (c) => c.fillText('8', 0, 0));
     expect(calls.find((c) => c.m === 'fillText')!.op).toBe('lighter');
     expect(ctx.globalCompositeOperation).toBe('source-over');
+  });
+});
+
+describe('healthRgb', () => {
+  it("is client.dll's table: green over half health, orange down to 15%, red at or under, red when down", () => {
+    // Thresholds 0.5 and 0.15 (0x10516de4, 0x10516de8) on health / max
+    // health clamped to 0..1; colours from the table at 0x10516dec.
+    const green = [10, 177, 50], orange = [216, 146, 12], red = [161, 25, 25];
+    expect(healthRgb(100, 100, false)).toEqual(green);
+    expect(healthRgb(51, 100, false)).toEqual(green);
+    expect(healthRgb(50, 100, false)).toEqual(orange);
+    expect(healthRgb(16, 100, false)).toEqual(orange);
+    expect(healthRgb(15, 100, false)).toEqual(red);
+    expect(healthRgb(0, 100, false)).toEqual(red);
+    expect(healthRgb(300, 100, false)).toEqual(green);
+    expect(healthRgb(100, 100, true)).toEqual(red);
   });
 });
