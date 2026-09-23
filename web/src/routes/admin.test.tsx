@@ -21,6 +21,7 @@ const { mockAdmin, mockApi, mockPeople, mockMod } = vi.hoisted(() => ({
     integrityJob: vi.fn(),
     campaigns: vi.fn(), uploadCampaign: vi.fn(), publishCampaign: vi.fn(),
     reinstallCampaign: vi.fn(), deleteCampaign: vi.fn(), setMapsToPlay: vi.fn(),
+    balancePatches: vi.fn(), balanceDrift: vi.fn(), balancePatch: vi.fn(), editBalancePatch: vi.fn(),
   },
   mockApi: { reportEligibility: vi.fn(), report: vi.fn() },
   // The People desk is where a moderator lands, so a shell test reaches its
@@ -636,6 +637,18 @@ describe('the panel shell', () => {
     renderAdmin('/admin/people/review', asMod);
     expect(await screen.findByText('Nothing is waiting to be looked at.')).toBeTruthy();
     expect(mockAdmin.integrityJob).not.toHaveBeenCalled();
+  });
+
+  // The Balance desk moved the Patches screen out of Setup, so this pins
+  // both that the desk tab exists and that the old screen still renders
+  // under its new path.
+  it('renders the patches page under the Balance desk', async () => {
+    mockAdmin.balancePatches.mockResolvedValue({ patches: [] });
+    mockAdmin.balanceDrift.mockResolvedValue({ servers: [] });
+    renderAdmin('/admin/balance/patches');
+    expect(screen.getByRole('tab', { name: 'Balance' })).toBeTruthy();
+    expect(await screen.findByText('Server drift')).toBeTruthy();
+    expect(mockAdmin.balancePatches).toHaveBeenCalled();
   });
 
   // Desks and sections are links, not buttons: a real href can be opened in

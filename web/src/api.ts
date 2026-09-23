@@ -858,6 +858,67 @@ export interface PatchDetail extends PatchSummary {
 }
 export interface DriftRow { serverId: number; name: string; patchId: number; since: string; differsFrom: { name: string; diff: string }[] }
 
+export type Phase = 'all' | 'tank' | 'witch' | 'event' | 'normal';
+
+export type Verdict = 'real' | 'too_early' | 'noise' | 'no_data';
+
+export interface SideSummary {
+  matches: number;
+  rounds: number;
+  meanMu: number | null;
+  meanGap: number | null;
+  olderEngineRounds: number;
+  historical: boolean;
+}
+
+export interface CompareRow {
+  metric: string;
+  group: string;
+  description: string;
+  phase: Phase;
+  a: number | null;
+  b: number | null;
+  diff: number | null;
+  rel: number | null;
+  lo: number | null;
+  hi: number | null;
+  p: number | null;
+  verdict: Verdict;
+  moreMatches: number | null;
+  excludedMaps: string[];
+  nA: number;
+  nB: number;
+}
+
+export interface CompareResult {
+  a: SideSummary;
+  b: SideSummary;
+  rows: CompareRow[];
+  counts: Record<Verdict, number>;
+  banners: { skill: string | null; approximate: boolean };
+  ms: number;
+}
+
+export interface TrendPoint { matchId: number; endedAt: string; patchId: number | null; side: 'a' | 'b'; value: number }
+export interface MapBar { map: string; a: number; b: number; roundsA: number; roundsB: number }
+export interface ExampleRound { matchId: number; ordinal: number; half: number; map: string | null; value: number }
+export interface MetricDetail {
+  metric: string;
+  phase: Phase;
+  trend: TrendPoint[];
+  boundaries: { patchId: number; label: string; at: string }[];
+  perMap: MapBar[];
+  examples: ExampleRound[];
+}
+
+export interface CompareQuery { a: number[]; b: number[]; origin: 'all' | 'queue' | 'in_game'; maps: string[]; phases: 'all' | 'split' }
+
+function compareParams(q: CompareQuery): string {
+  const p = new URLSearchParams({ a: q.a.join(','), b: q.b.join(','), origin: q.origin, phases: q.phases });
+  if (q.maps.length) p.set('maps', q.maps.join(','));
+  return p.toString();
+}
+
 /** These mirror the DB rows exactly, because the admin campaigns route
  *  returns them unshaped. */
 export interface AdminChapter {
@@ -1354,6 +1415,9 @@ export const adminApi = {
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
     post(`/api/admin/balance/patches/${id}`, body),
+  balanceCompare: (q: CompareQuery, signal?: AbortSignal) => get<CompareResult>(`/api/admin/balance/compare?${compareParams(q)}`, signal),
+  balanceMetric: (q: CompareQuery, metric: string, phase: string, signal?: AbortSignal) =>
+    get<MetricDetail>(`/api/admin/balance/metric?${compareParams(q)}&metric=${encodeURIComponent(metric)}&phase=${encodeURIComponent(phase)}`, signal),
 };
 
 /** A second of a round: which map of the match, which half, how far in. */

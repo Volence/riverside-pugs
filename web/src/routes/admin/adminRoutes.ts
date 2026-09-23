@@ -10,7 +10,7 @@
  * exist so the shell has three desks from the start and so nothing has to be
  * renamed when they arrive.
  */
-export type Desk = 'live' | 'people' | 'setup';
+export type Desk = 'live' | 'people' | 'setup' | 'balance';
 
 export interface AdminRoute {
   /** 'unknown' is a path that names no desk at all, such as /admin/servers. */
@@ -25,6 +25,7 @@ export const DESKS: { key: Desk; label: string; path: string }[] = [
   { key: 'live', label: 'Live', path: '/admin/live' },
   { key: 'people', label: 'People', path: '/admin/people' },
   { key: 'setup', label: 'Setup', path: '/admin/setup' },
+  { key: 'balance', label: 'Balance', path: '/admin/balance' },
 ];
 
 export const PEOPLE_TABS: { key: string; label: string; path: string }[] = [
@@ -41,7 +42,11 @@ export const SETUP_TABS: { key: string; label: string; path: string }[] = [
   { key: 'seasons', label: 'Seasons', path: '/admin/setup/seasons' },
   { key: 'settings', label: 'Settings', path: '/admin/setup/settings' },
   { key: 'audit', label: 'Audit', path: '/admin/setup/audit' },
-  { key: 'patches', label: 'Patches', path: '/admin/setup/patches' },
+];
+
+export const BALANCE_TABS: { key: string; label: string; path: string }[] = [
+  { key: 'compare', label: 'Compare', path: '/admin/balance' },
+  { key: 'patches', label: 'Patches', path: '/admin/balance/patches' },
 ];
 
 /**
@@ -103,6 +108,12 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
       ? { desk: 'setup', section, param: null }
       : { ...NOWHERE, desk: 'setup' };
   }
+  if (desk === 'balance') {
+    const section = a === '' ? 'compare' : a;
+    return BALANCE_TABS.some((t) => t.key === section)
+      ? { desk: 'balance', section, param: null }
+      : { ...NOWHERE, desk: 'balance' };
+  }
   // The bare /admin is redirected to a desk before anything parses it; it is
   // read as Live here so one frame of it cannot say the panel has no page.
   if (desk === 'live' || desk === '') return { desk: 'live', section: 'board', param: null };
@@ -116,6 +127,7 @@ export function parseAdminPath(path: string, opts: { isAdmin: boolean }): AdminR
  * links to, and those messages are permanent, so the redirect is too.
  */
 export function legacyRedirect(path: string, search: string, isAdmin: boolean): string | null {
+  if (isAdmin && (path === '/admin/setup/patches' || path === '/admin/setup/patches/')) return '/admin/balance/patches';
   const bare = path === '/admin' || path === '/admin/';
   if (bare) {
     const q = new URLSearchParams(search);
