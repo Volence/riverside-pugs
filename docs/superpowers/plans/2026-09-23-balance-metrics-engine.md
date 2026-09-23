@@ -971,7 +971,7 @@ describe('metric registry', () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const m of METRICS) expect(ENGINE).toContain(`${m.id}:${m.version}`);
     expect(METRICS.every((m) => /^[a-z]+\.[a-z0-9_.]+$/.test(m.id))).toBe(true);
-    expect(METRICS.every((m) => m.description.length > 10 && !m.description.includes('—'))).toBe(true);
+    expect(METRICS.every((m) => m.description.length > 10 && !m.description.includes('\u2014'))).toBe(true);
   });
 
   it('computes rows for a bare round without throwing, and never a non-finite value', () => {
