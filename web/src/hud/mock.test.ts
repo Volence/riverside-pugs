@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { visibleElements, hitTest, drawHud, freeCardAt, childAt, childCornerAt } from './mock';
+import { selectionFrames, TEAMMATES } from './selection';
 import { DEFAULT_DESIGN, type HudDesign } from './design';
 import { artUrl } from './art';
 import { buildTrees, elementRect, teamCardRects } from './build';
@@ -186,13 +187,11 @@ describe('Free teammate cards', () => {
     expect(freeCardAt(DEFAULT_DESIGN, 73, 459)).toBeNull();           // not Free
   });
 
-  it('outlines each card instead of the whole screen, the selected one solid', () => {
+  it('outlines each card instead of the whole screen when the Free teammates are selected', () => {
     const strokes: number[][] = [];
-    const dashes: number[][] = [];
     const ctx = fakeCtx(() => {});
     ctx.strokeRect = ((...a: number[]) => { strokes.push(a); }) as typeof ctx.strokeRect;
-    ctx.setLineDash = ((d: number[]) => { dashes.push(d); }) as typeof ctx.setLineDash;
-    drawHud(ctx, 853, 480, FREE, 'survivor', 'teamColumn', undefined, { card: 1 });
+    drawHud(ctx, 853, 480, FREE, 'survivor', 'teamColumn', undefined, { frames: selectionFrames(FREE, TEAMMATES) });
     for (const c of teamCardRects(FREE, FREE.aspect).slice(0, 3)) expect(strokes).toContainEqual([c.x, c.y, c.w, c.h]);
     expect(strokes).not.toContainEqual([0, 0, 853, 480]);
   });
@@ -249,15 +248,85 @@ describe('teammate card children on the canvas', () => {
     expect(childCornerAt(DEFAULT_DESIGN, 'healthy', 'Items', items.x + items.w, items.y + items.h)).toBe(false);
   });
 
-  it('outlines the selected child in every drawn card', () => {
+  it('outlines a selected piece in every drawn card', () => {
     _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 64, naturalHeight: 64, onload: null, onerror: null }) as unknown as HTMLImageElement);
     const strokes: number[][] = [];
     const ctx = fakeCtx(() => {});
     ctx.strokeRect = ((...a: number[]) => { strokes.push(a); }) as typeof ctx.strokeRect;
-    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', 'teamColumn', undefined, { child: 'Head' });
+    const frames = selectionFrames(DEFAULT_DESIGN, { kind: 'children', names: ['Head'], card: 0 });
+    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', 'teamColumn', undefined, { frames });
     for (const c of teamCardRects(DEFAULT_DESIGN, DEFAULT_DESIGN.aspect).slice(0, 3)) {
       const head = childRects(DEFAULT_DESIGN, 'teamColumn', { x: c.x, y: c.y }, 1).find((r) => r.name === 'Head')!;
       expect(strokes).toContainEqual([head.x, head.y, head.w, head.h]);
     }
+  });
+});
+
+describe('selection chrome', () => {
+  const recording = () => {
+    const strokes: number[][] = [];
+    const fills: number[][] = [];
+    const dashes: number[][] = [];
+    const texts: string[] = [];
+    const path: (string | number)[][] = [];
+    const ctx = fakeCtx(() => {}, undefined, texts);
+    ctx.strokeRect = ((...a: number[]) => { strokes.push(a); }) as typeof ctx.strokeRect;
+    ctx.fillRect = ((...a: number[]) => { fills.push(a); }) as typeof ctx.fillRect;
+    ctx.setLineDash = ((d: number[]) => { dashes.push(d); }) as typeof ctx.setLineDash;
+    ctx.moveTo = ((...a: number[]) => { path.push(['M', ...a]); }) as typeof ctx.moveTo;
+    ctx.lineTo = ((...a: number[]) => { path.push(['L', ...a]); }) as typeof ctx.lineTo;
+    return { ctx, strokes, fills, dashes, texts, path };
+  };
+
+  it('draws the selection box and a 7-pixel handle centred on each handle point', () => {
+    const r = recording();
+    const box = { x: 100, y: 50, w: 40, h: 20 };
+    drawHud(r.ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { box, handles: [{ x: 100, y: 50 }, { x: 140, y: 70 }] });
+    expect(r.strokes).toContainEqual([100, 50, 40, 20]);
+    expect(r.fills).toContainEqual([96.5, 46.5, 7, 7]);
+    expect(r.fills).toContainEqual([136.5, 66.5, 7, 7]);
+  });
+
+  it('scales HUD units to canvas pixels, and keeps handles 7 pixels', () => {
+    const r = recording();
+    drawHud(r.ctx, 960, 540, DEFAULT_DESIGN, 'survivor', null, undefined, { box: { x: 100, y: 50, w: 40, h: 20 }, handles: [{ x: 100, y: 50 }] });
+    expect(r.strokes).toContainEqual([112.5, 56.25, 45, 22.5]);
+    expect(r.fills).toContainEqual([109, 52.75, 7, 7]);
+  });
+
+  it('draws the hover outline dashed, with its name', () => {
+    const r = recording();
+    drawHud(r.ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { hover: { rects: [{ x: 10, y: 20, w: 30, h: 40 }], label: 'Portrait' } });
+    expect(r.strokes).toContainEqual([10, 20, 30, 40]);
+    expect(r.dashes).toContainEqual([3, 3]);
+    expect(r.texts).toContain('Portrait');
+  });
+
+  it('draws the Shift+drag box filled and outlined', () => {
+    const r = recording();
+    drawHud(r.ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, { marquee: { x: 5, y: 6, w: 70, h: 80 } });
+    expect(r.strokes).toContainEqual([5, 6, 70, 80]);
+    expect(r.fills).toContainEqual([5, 6, 70, 80]);
+  });
+
+  it('draws each guide as a line across its span', () => {
+    const r = recording();
+    drawHud(r.ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null, undefined, {
+      guides: [{ axis: 'x', at: 100, from: 10, to: 200 }, { axis: 'y', at: 50, from: 0, to: 853 }],
+    });
+    expect(r.path).toContainEqual(['M', 100, 10]);
+    expect(r.path).toContainEqual(['L', 100, 200]);
+    expect(r.path).toContainEqual(['M', 0, 50]);
+    expect(r.path).toContainEqual(['L', 853, 50]);
+  });
+
+  it('still draws a hidden element dimmed when it is one of several selected', () => {
+    const hidden = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { visible: false } } };
+    const texts: string[] = [];
+    drawHud(fakeCtx(() => {}, undefined, texts), 853, 480, hidden, 'survivor', ['ownHealth', 'chat']);
+    expect(texts).toContain('Francis: got it');
+    const without: string[] = [];
+    drawHud(fakeCtx(() => {}, undefined, without), 853, 480, hidden, 'survivor', ['ownHealth']);
+    expect(without).not.toContain('Francis: got it');
   });
 });

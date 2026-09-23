@@ -16,6 +16,7 @@ import {
 import { screenW, SCREEN_H, type Aspect } from '../hud/units';
 import { elementById, type HudElement } from '../hud/elements';
 import { drawHud, hitTest, freeCardAt, childAt, childCornerAt, visibleElements, type Side } from '../hud/mock';
+import { NONE, selectionFrames, type Selection } from '../hud/selection';
 import type { CardState } from '../hud/render';
 import { SLOTS, type StyleSlot } from '../hud/slots';
 import type { Preset } from '../hud/base';
@@ -644,7 +645,11 @@ export default function Hud() {
 
     const shotSize = shot.current ? { w: shot.current.naturalWidth, h: shot.current.naturalHeight } : null;
     drawBackdrop(ctx, w, h, backdrop, shot.current, shotSize);
-    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1), { state: cardState, card: selectedCard, child: selectedChild });
+    // The page still keeps three picks; they map onto one Selection for drawing.
+    const picked: Selection = selectedChild ? { kind: 'children', names: [selectedChild], card: selectedCard ?? 0 }
+      : selectedCard !== null ? { kind: 'card', card: selectedCard }
+        : selected ? { kind: 'elements', ids: [selected] } : NONE;
+    drawHud(ctx, w, h, design, side, selected, () => setImgTick((t) => t + 1), { state: cardState, frames: selectionFrames(design, picked) });
   }, [design, side, selected, backdrop, imgTick, cardState, selectedCard, selectedChild]);
 
   // The preview draws labels in Roboto Condensed, the Modern preset's real
