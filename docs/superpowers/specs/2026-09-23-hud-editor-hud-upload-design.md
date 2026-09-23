@@ -84,7 +84,7 @@ files.
     reader in TypeScript that reads `head`, `hhea`, `OS/2`, `VDMX` and `name` and returns what
     fontCell needs. A test checks it against export-hud-art.py's baked numbers for Trade Gothic.
   - A face the upload does not carry falls back as today.
-- **Textures:** an ImagePanel or scheme border that names a material the upload carries is drawn from
+- **Textures:** an ImagePanel that names a material the upload carries is drawn from
   that material. The editor reads the `.vmt`, resolves `$baseTexture` to the `.vtf`, and decodes it
   with `decodeVTF`, including DXT, and mip 0 is enough. It is drawn as the game draws that panel
   (scaleImage, drawColor, additive where the `.vmt` says `$additive 1`).
@@ -123,6 +123,8 @@ files.
 ## Out of scope
 
 - Community HUD sharing (later; see "Managing imports").
+- Scheme borders drawn from the upload's own textures: the preview draws no scheme borders for any preset
+  yet (decided in the plan).
 - Special handling for HUDs made for L4D2. Such an upload imports like any other, and whatever the
   L4D1 game ignores is simply ignored; there is no warning.
 - Phase 2 (own health insides, infected panels).
