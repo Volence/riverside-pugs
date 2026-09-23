@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, statSync, utimesSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, statSync, utimesSync, existsSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  parsePush, applyPush, liveFileName, pruneLiveFiles, PUSH_MAX_DATA_BYTES, type PushBatch,
+  parsePush, applyPush, liveFileName, pruneLiveFiles, pruneLiveFilesSafely, PUSH_MAX_DATA_BYTES, type PushBatch,
 } from '../src/replayPush.js';
 import {
   encodeHeader, encodeFrame, decodeHeader, VERSION, PLAYER_SLOTS,
@@ -374,5 +374,40 @@ describe('pruneLiveFiles', () => {
     writeFileSync(join(replays, name(TOKEN)), finalBytes);
     expect(pruneLiveFiles(db, live, replays, NOW)).toBe(1);
     expect(existsSync(join(live, name(TOKEN)))).toBe(false);
+  });
+
+  // An unlink error's message is "EACCES: permission denied, unlink
+  // '<dir>/pug_<token>_0_1.rpl'": logging it would put the token in the log.
+  it('logs only the error code when a delete fails, never the token', () => {
+    put(live, name(TOKEN), 100, 25 * 60 * 60 * 1000);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    chmodSync(live, 0o555);
+    try {
+      expect(pruneLiveFiles(db, live, replays, NOW)).toBe(0);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]).toEqual(['[replay] could not delete a live file:', 'EACCES']);
+      for (const arg of spy.mock.calls.flat()) expect(String(arg)).not.toContain(TOKEN);
+    } finally {
+      chmodSync(live, 0o755);
+      spy.mockRestore();
+    }
+  });
+
+  it('logs only the error name when a prune run throws, and does not rethrow', () => {
+    put(live, name(TOKEN), 100);
+    db.close();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => pruneLiveFilesSafely(db, live, replays, NOW)).not.toThrow();
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [label, code] = spy.mock.calls[0];
+      expect(label).toBe('[replay] live file prune failed:');
+      expect(typeof code).toBe('string');
+      expect(code).not.toMatch(/\s/);
+      for (const arg of spy.mock.calls.flat()) expect(String(arg)).not.toContain(TOKEN);
+    } finally {
+      spy.mockRestore();
+      db = openDb(':memory:');
+    }
   });
 });

@@ -117,6 +117,17 @@ describe('POST /api/replays/push', () => {
     expect(readFileSync(livePath()).equals(WHOLE)).toBe(true);
   });
 
+  it('says why when it refuses a stale round with 409', async () => {
+    seedMatch('live');
+    await push(body(0, WHOLE));
+    // An older round under the same file name: its header's startedUnix is
+    // earlier than the one the live copy already holds.
+    const older = Buffer.concat([encodeHeader(header({ startedUnix: STARTED - 60 })), WHOLE.subarray(encodeHeader(header()).length)]);
+    const res = await push(body(0, older, { started: STARTED - 60 }));
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ length: 3520, error: 'stale round' });
+  });
+
   it('refuses a malformed batch with 400', async () => {
     seedMatch('live');
     const res = await push(body(0, WHOLE, { half: 3 }));
