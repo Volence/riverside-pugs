@@ -365,6 +365,23 @@ describe('buildHud, the chat window (basechat.res)', () => {
       expect(console360(history)).toEqual(console360(base));
     });
 
+    // Every other basechat child scales the same way HudChatHistory does,
+    // not only the history: the box you type into (ChatInputLine) and the
+    // label above it (KeyStateLabel), left at the base file's size before.
+    it(`scales the other basechat children too, not only HudChatHistory: ${preset}`, () => {
+      const files = build(design({ preset, elements: { chat: { x: 10, y: 200, w: 560, h: 240 } } }));
+      const nodes = chatOf(files, preset);
+      const input = kvFind(nodes, ['ChatInputLine'])!;
+      // Base: xpos 10, ypos 395, wide 260, tall 2; the box doubled, so does every number.
+      expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(input, k))).toEqual(['20', '790', '520', '4']);
+      const inputBase = kvFind(parseKv(baseFile(preset, CHAT))[0].value as KvNode[], ['ChatInputLine'])!;
+      expect(console360(input)).toEqual(console360(inputBase));
+
+      const keyState = kvFind(nodes, ['KeyStateLabel'])!;
+      // Base: xpos 10, ypos 2, wide 300, tall 12.
+      expect(['xpos', 'ypos', 'wide', 'tall'].map((k) => pc(keyState, k))).toEqual(['20', '4', '600', '24']);
+    });
+
     it(`hides the chat window by size as well as visible 0: ${preset}`, () => {
       const nodes = chatOf(build(design({ preset, elements: { chat: { visible: false } } })), preset);
       for (const name of ['HudChat', 'HudChatHistory']) {

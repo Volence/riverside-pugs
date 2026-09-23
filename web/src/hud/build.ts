@@ -164,15 +164,16 @@ function pcSet(block: KvNode, key: string, value: string) {
  * hudlayout.res's, which is only a background panel the animation file
  * places. So a moved or resized chat writes the same tokens and size here as
  * it does to hudlayout, which is also the rect elementRect reports and the
- * preview draws. The history keeps the share of the box it has in the base
- * file (stock and Modern both: 10, 17, 260 x 75 in a 280 x 120 box), so a
- * bigger box shows more lines rather than the same few in a corner. The
- * file is untouched, and so not shipped on stock, until the chat moves,
- * resizes or hides.
+ * preview draws. Every other basechat child (HudChatHistory, ChatInputLine,
+ * KeyStateLabel, ChatFiltersButton) keeps the share of the box it has in the
+ * base file (stock and Modern both: the history at 10, 17, 260 x 75 in a
+ * 280 x 120 box), so a bigger box shows more lines and a wider typing line
+ * rather than the same few, in a corner, at the base size. The file is
+ * untouched, and so not shipped on stock, until the chat moves, resizes or
+ * hides.
  */
 function chatWindow(work: Work, p: { xpos: string; ypos: string; w: number; h: number }) {
   const chat = work.panel(BASECHAT, ['HudChat']);
-  const history = work.panel(BASECHAT, ['HudChatHistory']);
   const baseW = num(pcGet(chat, 'wide')), baseH = num(pcGet(chat, 'tall'));
   const w = Math.round(p.w), h = Math.round(p.h);
   pcSet(chat, 'xpos', p.xpos);
@@ -181,8 +182,12 @@ function chatWindow(work: Work, p: { xpos: string; ypos: string; w: number; h: n
   pcSet(chat, 'tall', String(h));
   if (baseW > 0 && baseH > 0 && (w !== baseW || h !== baseH)) {
     const sx = w / baseW, sy = h / baseH;
-    for (const [key, k] of [['xpos', sx], ['ypos', sy], ['wide', sx], ['tall', sy]] as const) {
-      pcSet(history, key, String(Math.round(num(pcGet(history, key)) * k)));
+    for (const child of work.tree(BASECHAT)) {
+      if (child.key === 'HudChat' || typeof child.value === 'string') continue;
+      for (const [key, k] of [['xpos', sx], ['ypos', sy], ['wide', sx], ['tall', sy]] as const) {
+        if (pcGet(child, key) === undefined) continue;
+        pcSet(child, key, String(Math.round(num(pcGet(child, key)) * k)));
+      }
     }
   }
 }
