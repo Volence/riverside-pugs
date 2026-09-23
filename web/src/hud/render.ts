@@ -240,6 +240,24 @@ function artImage(material: string, onAsset?: () => void): HTMLImageElement | un
   return img.complete && img.naturalWidth > 0 ? img : undefined;
 }
 
+const urls = new Map<string, HTMLImageElement>();
+/**
+ * An image the design itself carries (an uploaded crosshair's data URL),
+ * once decoded; undefined while it loads, and onAsset asks for a redraw
+ * then. Only the latest few are kept: each upload or undo step can bring a
+ * new one, and the old ones are never drawn again.
+ */
+export function urlImage(url: string, onAsset?: () => void): HTMLImageElement | undefined {
+  let img = urls.get(url);
+  if (!img) {
+    if (urls.size >= 8) urls.delete(urls.keys().next().value!);
+    img = imageFactory(url);
+    img.onload = () => onAsset?.();
+    urls.set(url, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : undefined;
+}
+
 /**
  * A restyled slot, drawn straight from the design's colour rather than from a
  * generated texture. stylePass makes a flat or rounded texture in that colour
@@ -305,7 +323,7 @@ function tinted(img: HTMLImageElement, material: string, r: number, g: number, b
 }
 
 /** Test seam: forget every loaded image, tint and warned-about material. */
-export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); warnedNoIcons = false; }
+export function _resetAssetCache(): void { images.clear(); missing.clear(); tints.clear(); urls.clear(); warnedNoIcons = false; }
 
 function hatch(ctx: CanvasRenderingContext2D, r: ChildRect) {
   ctx.save();

@@ -6,7 +6,8 @@ import { artUrl } from './art';
 import { buildTrees, elementRect, teamCardRects } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { DEFAULT_STATE } from '../crosshair/draw';
+import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
+import { PNG_PREFIX } from '../crosshair/model';
 import { _setImageFactory, _resetAssetCache, childRects } from './render';
 
 /**
@@ -99,26 +100,49 @@ describe('drawHud, the crosshair', () => {
   const outlined = (calls: { m: string; a: unknown[] }[], d: HudDesign) => calls.some((c) => c.m === 'strokeRect'
     && c.a[0] === at(d).x && c.a[1] === at(d).y && c.a[2] === 26 && c.a[3] === 26);
 
-  it('draws the bundled crosshair at the xHair rect, as the game would', () => {
-    const d = { ...DEFAULT_DESIGN, crosshair: 'bundle' as const };
+  it("draws the design's own built crosshair at the xHair rect, at the size the game draws it", () => {
+    const d: HudDesign = { ...DEFAULT_DESIGN, crosshair: 'bundle', xhairArt: { kind: 'built', state: DOT } };
     const { ctx, calls } = argsCtx();
-    drawHud(ctx, 853, 480, d, 'survivor', null, undefined, { crosshair: DOT });
+    drawHud(ctx, 853, 480, d, 'survivor', null);
     expect(centred(calls, d)).toBe(true);
     expect(outlined(calls, d)).toBe(false);
+    // A 4-pixel dot at 1080p: radius 2 of the 26 units' PX_AT_1080 screen
+    // pixels, as the texture scales it, not 2 whole HUD units.
+    const arc = calls.find((c) => c.m === 'arc')!;
+    expect(arc.a[2]).toBeCloseTo(2 * 26 / PX_AT_1080, 9);
   });
 
-  it('draws a neutral placeholder for an addon crosshair, whatever the Crosshair page saved', () => {
-    const d = { ...DEFAULT_DESIGN, crosshair: 'addon' as const };
+  it("draws the design's own image crosshair fitted into the xHair rect, once it has loaded", () => {
+    _resetAssetCache();
+    const png = `${PNG_PREFIX}AAAA`;
+    const loaded: string[] = [];
+    _setImageFactory((url) => { loaded.push(url); return { src: url, complete: true, naturalWidth: 64, naturalHeight: 32 } as unknown as HTMLImageElement; });
+    try {
+      const d: HudDesign = { ...DEFAULT_DESIGN, crosshair: 'bundle', xhairArt: { kind: 'image', png, w: 64, h: 32 } };
+      const { ctx, calls } = argsCtx();
+      drawHud(ctx, 853, 480, d, 'survivor', null);
+      expect(loaded).toContain(png);
+      const r = at(d);
+      const draw = calls.find((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === png)!;
+      expect(draw.a.slice(1)).toEqual([r.x, r.y + 6.5, 26, 13]);
+    } finally {
+      _setImageFactory(null);
+      _resetAssetCache();
+    }
+  });
+
+  it('draws a neutral placeholder for a legacy addon crosshair, whatever the design carries', () => {
+    const d: HudDesign = { ...DEFAULT_DESIGN, crosshair: 'addon', xhairArt: { kind: 'built', state: DOT } };
     const { ctx, calls } = argsCtx();
-    drawHud(ctx, 853, 480, d, 'survivor', null, undefined, { crosshair: DOT });
+    drawHud(ctx, 853, 480, d, 'survivor', null);
     expect(outlined(calls, d)).toBe(true);
     expect(centred(calls, d)).toBe(false);
   });
 
-  it('draws nothing for none', () => {
-    const d = { ...DEFAULT_DESIGN, crosshair: 'none' as const };
+  it('draws nothing for the game default, whatever the design carries', () => {
+    const d: HudDesign = { ...DEFAULT_DESIGN, crosshair: 'none', xhairArt: { kind: 'built', state: DOT } };
     const { ctx, calls } = argsCtx();
-    drawHud(ctx, 853, 480, d, 'survivor', null, undefined, { crosshair: DOT });
+    drawHud(ctx, 853, 480, d, 'survivor', null);
     expect(outlined(calls, d)).toBe(false);
     expect(centred(calls, d)).toBe(false);
   });

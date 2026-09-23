@@ -16,8 +16,8 @@ import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam } from './build';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, type CardState } from './render';
-import { drawCrosshair, type CrosshairState } from '../crosshair/draw';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, type CardState } from './render';
+import { drawArt } from '../crosshair/model';
 import { teamChild } from './children';
 
 export type Side = 'survivor' | 'infected';
@@ -37,9 +37,7 @@ interface Rect { x: number; y: number; w: number; h: number }
  * teammate card state, the selection's outlines (one per selected thing as
  * drawn, so a piece is outlined in every card), the box its handles sit on
  * and the handle points, the hover outline and its name, the Shift+drag box,
- * and the snap guides of a drag under way. Plus one thing that is not
- * measured: the crosshair saved on the Crosshair page, which only the page
- * can read and which a 'bundle' design draws.
+ * and the snap guides of a drag under way.
  */
 export interface HudView {
   state?: CardState;
@@ -49,8 +47,6 @@ export interface HudView {
   hover?: { rects: Box[]; label: string } | null;
   marquee?: Box | null;
   guides?: Guide[];
-  /** The crosshair saved on the Crosshair page, which a 'bundle' design ships and so draws. */
-  crosshair?: CrosshairState | null;
 }
 
 /** Whether a point is on a box, edges included. */
@@ -237,15 +233,18 @@ function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect) {
 
 /**
  * The xHair element by the design's crosshair choice. 'bundle' draws the
- * crosshair the download will carry, the page's `view.crosshair` (the one
- * saved on the Crosshair page), and nothing else, as the game will. 'addon'
- * cannot know what a crosshair addon draws, so it shows a neutral dashed
- * placeholder. 'none' writes no element, so drawHud never gets here unless
- * it is selected, and then shows the same placeholder, dimmed.
+ * design's own crosshair, the one the download packs, through drawArt, the
+ * routine the texture is made with, into the element's rect: exactly as the
+ * game draws the texture there. An image draws once decoded (onAsset asks
+ * for the redraw). 'addon' cannot know what a crosshair addon draws, so it
+ * shows a neutral dashed placeholder. 'none' writes no element, so drawHud
+ * never gets here unless it is selected, and then shows the same
+ * placeholder, dimmed.
  */
-function paintXhair(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _k: number, _onAsset?: () => void, view?: HudView) {
+function paintXhair(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _k: number, onAsset?: () => void) {
+  const art = design.xhairArt;
   if (design.crosshair === 'bundle') {
-    if (view?.crosshair) drawCrosshair(ctx, r.x + r.w / 2, r.y + r.h / 2, r.w / 26, view.crosshair, null);   // 26 HUD units, drawCrosshair's own scale
+    if (art) drawArt(ctx, r.x + r.w / 2, r.y + r.h / 2, r.w, art, art.kind === 'image' ? urlImage(art.png, onAsset) ?? null : null);
     return;
   }
   ctx.save();

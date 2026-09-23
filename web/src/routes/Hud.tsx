@@ -413,7 +413,6 @@ export default function Hud() {
       hover: hovered.kind === 'none' ? null : { rects: selectionFrames(design, hovered), label: selectionLabel(hovered) },
       marquee,
       guides,
-      crosshair,
     });
   }, [design, side, sel, backdrop, imgTick, cardState, hover, guides, marquee]);
 
