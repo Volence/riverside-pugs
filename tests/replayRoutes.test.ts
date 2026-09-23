@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, createReadStream } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, readFileSync, createReadStream, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -60,7 +60,7 @@ afterEach(async () => {
  *  one frame per second, so the delay cutoff is easy to reason about. */
 function writeRound(
   name: string, frames: number, startedSecondsAgo: number, closed: boolean,
-  version = VERSION,
+  version = VERSION, into = dir,
 ): void {
   const parts: Uint8Array[] = [
     encodeHeader(header({
@@ -70,7 +70,7 @@ function writeRound(
     })),
   ];
   for (let i = 0; i < frames; i++) parts.push(encodeFrame(emptyFrame(i * 1000)));
-  const path = join(dir, name);
+  const path = join(into, name);
   writeFileSync(path, Buffer.concat(parts));
   const secs = Date.now() / 1000;
   utimesSync(path, secs, secs);
@@ -616,5 +616,50 @@ describe('replayRoutes registration on the real server', () => {
     const res = await real.inject({ url: `/api/replays/file/pug_${TOKEN}_0_1.rpl` });
     expect(res.statusCode).toBe(200);
     await real.close();
+  });
+});
+
+describe('the live directory', () => {
+  let liveDir: string;
+  let liveApp: ReturnType<typeof Fastify>;
+  beforeEach(async () => {
+    liveDir = join(dir, 'live');
+    mkdirSync(liveDir);
+    liveApp = Fastify();
+    await liveApp.register(replayRoutes, { db, replayDir: dir, liveDir });
+    await liveApp.ready();
+  });
+  afterEach(async () => { await liveApp.close(); });
+
+  function seedLiveMatch(): number {
+    db.prepare(`INSERT INTO matches (season_id, state, campaign, token) VALUES (1, 'live', 'no_mercy', ?)`).run(TOKEN);
+    return (db.prepare('SELECT MAX(id) AS id FROM matches').get() as { id: number }).id;
+  }
+
+  it('names a round that only the live directory has', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true, VERSION, liveDir);
+    const id = seedLiveMatch();
+    const res = await liveApp.inject({ url: `/api/replays/live/match/${id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ordinal: 0, half: 1, closed: true });
+  });
+
+  it('serves the round in progress from the live directory, cut off and without the token', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 15, 15, false, VERSION, liveDir);
+    const id = seedLiveMatch();
+    const res = await liveApp.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-replay-closed']).toBe('0');
+    expect(res.rawPayload.length).toBeGreaterThanOrEqual(HEADER_BYTES);
+    expect(res.rawPayload.length).toBeLessThan(HEADER_BYTES + frameBytes(0) * 15);
+    expect(res.rawPayload.includes(TOKEN)).toBe(false);
+  });
+
+  it('serves whichever copy is further along, even when a match_replays row exists', async () => {
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 5, 600, true);
+    writeRound(`pug_${TOKEN}_0_1.rpl`, 10, 600, true, VERSION, liveDir);
+    const id = seedMatchReplay(`pug_${TOKEN}_0_1.rpl`, 0, 1, 0, 5);
+    const res = await liveApp.inject({ url: `/api/replays/match/${id}/0/1` });
+    expect(res.rawPayload.length).toBe(HEADER_BYTES + frameBytes(0) * 10);
   });
 });
