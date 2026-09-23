@@ -229,7 +229,10 @@ export function sideRanks(h: Pick<ReplayHeader, 'slots' | 'infectedMask' | 'side
 
 /** Could this survivor see this spawned infected in this frame. Null when the
  *  file does not record it or a slot has no rank on the side asked about:
- *  unknown is never the same as "could not see". */
+ *  unknown is never the same as "could not see". `false` also covers pairs
+ *  the writer skipped (survivor dead, incapped or ledge-hanging; infected
+ *  dead, a ghost or a tank), so a reader must gate on the frame's STATE
+ *  flags and `cls` before treating `false` as "hidden". */
 export function canSee(h: ReplayHeader, f: Frame, survivorSlot: number, infectedSlot: number): boolean | null {
   if (!h.losKnown) return null;
   const { survivor, infected } = sideRanks(h);
