@@ -4,8 +4,8 @@
  * The SourceTV Manager extension (sourcetvmanager.ext) exposes the local
  * HLTV/SourceTV proxy's connect and disconnect events. This bridges them onto
  * the logaddress stream the site already listens to (src/logParse.ts, the
- * PUGTV branch), in the same shape as PUGNET and the other unsigned-but-
- * marker-anchored lines:
+ * PUGTV branch), signed through PugLog the same as PUGNET and the site's
+ * other marker-anchored lines:
  *
  *   PUGTV event=join slot=3 ip=203.0.113.7 cc=US name=some name here
  *   PUGTV event=leave slot=3 reason=Disconnect by user. name=some name here
@@ -101,9 +101,15 @@ public void SourceTV_OnSpectatorConnected(int client)
 {
 	if (client <= 0 || client >= TVWATCH_MAX_SLOT) return;
 	// Proxies are relays feeding other SourceTV instances, not people
-	// watching; nothing here is interesting to an admin. Uncached, so a
-	// disconnect for this slot is skipped below too.
-	if (SourceTV_IsClientProxy(client)) return;
+	// watching; nothing here is interesting to an admin. Cleared, not left
+	// as-is, so a missed leave for a real spectator that used to hold this
+	// slot cannot have its stale cached name attributed to the proxy's own
+	// later disconnect.
+	if (SourceTV_IsClientProxy(client))
+	{
+		g_bSlotCached[client] = false;
+		return;
+	}
 
 	char raw[128];
 	SourceTV_GetClientName(client, raw, sizeof(raw));
