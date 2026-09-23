@@ -108,4 +108,37 @@ describe('encodeVPK', () => {
     expect(got.get('docs/license')).toEqual(new Uint8Array([7]));
     expect(got.get('readme')).toEqual(new Uint8Array([8]));
   });
+
+  it('keeps every other file when one sits at the archive root or has a dotted name', () => {
+    // A bare "\0" where a name, directory or extension belongs is the
+    // tree's end marker, so one such file used to hide every file after it.
+    const got = readVPK(encodeVPK([
+      file('scripts/hudlayout.res', 'L'),
+      file('a.b.c', 'D'),
+      file('x/y/z.tar.gz', 'Z'),
+    ]));
+    expect([...got.keys()].sort()).toEqual(['a.b.c', 'scripts/hudlayout.res', 'x/y/z.tar.gz']);
+  });
+
+  it('refuses a path the format cannot hold, rather than writing an archive the game reads as empty', () => {
+    const bad = [
+      '.ds_store',            // empty name
+      'x/.gitignore',         // empty name under a folder
+      'foo.',                 // empty extension
+      '/abs.txt',             // empty first folder
+      'a//b.txt',             // empty folder in the middle
+      'dir/',                 // no file name at all
+      '',                     // nothing
+      'a/./b.txt',            // the current folder
+      '../b.txt',             // the parent folder
+      'a/b\\c.txt',          // a backslash, which Windows reads as a separator
+      'a/b\u0000c.txt',       // NUL ends the string early
+      'a/b\u0007c.txt',       // a control character
+      ' /b.txt',              // a folder named " " is the root placeholder
+      'b. ',                  // an extension of " " is the no-extension placeholder
+    ];
+    for (const path of bad) {
+      expect(() => encodeVPK([file('scripts/hudlayout.res', 'L'), file(path, 'X')]), JSON.stringify(path)).toThrow(/VPK/);
+    }
+  });
 });

@@ -76,11 +76,47 @@ export interface VpkFile {
   data: Uint8Array;
 }
 
-/** VPK v1, all data inline in the _dir file. */
+/**
+ * Why `path` cannot be stored in a VPK, or null when it can.
+ *
+ * The directory tree is a run of NUL-terminated strings, extension, then
+ * folder, then name, and an empty string ends the current list. So an empty
+ * extension, folder or name (".DS_Store", "foo.", "/abs.txt", "a//b.txt")
+ * would write a bare NUL that ends the tree early and hides every file after
+ * it. A single space is the format's placeholder for "no folder" and "no
+ * extension", so a real folder or extension named " " would read back as
+ * something else. "." and ".." folders, backslashes (a separator on Windows)
+ * and control characters are refused too: no game file is named that way,
+ * and a tool that extracts the archive could write outside its folder.
+ */
+export function vpkPathProblem(path: string): string | null {
+  if (/[\x00-\x1f\x7f]/.test(path)) return 'a control character';
+  if (path.includes('\\')) return 'a backslash';
+  const segments = path.split('/');
+  const base = segments.pop()!;
+  for (const seg of segments) {
+    if (seg === '' || seg === '.' || seg === '..') return `an empty, "." or ".." folder`;
+    if (seg.trim() === '') return 'a folder named with spaces only';
+  }
+  const dot = base.lastIndexOf('.');
+  const name = dot < 0 ? base : base.slice(0, dot);
+  const ext = dot < 0 ? null : base.slice(dot + 1);
+  if (name.trim() === '') return 'no file name before the extension';
+  if (ext !== null && ext.trim() === '') return 'an empty extension';
+  return null;
+}
+
+/**
+ * VPK v1, all data inline in the _dir file. Throws on a path the format
+ * cannot hold (see vpkPathProblem): writing it anyway gives an archive the
+ * game reads as missing files, which nobody would trace back to one name.
+ */
 export function encodeVPK(files: VpkFile[]): Uint8Array<ArrayBuffer> {
   // ext -> dir -> name -> data
   const tree: Record<string, Record<string, Record<string, Uint8Array>>> = {};
   for (const f of files) {
+    const problem = vpkPathProblem(f.path);
+    if (problem) throw new Error(`A VPK cannot hold ${JSON.stringify(f.path)}: it has ${problem}`);
     const slash = f.path.lastIndexOf('/');
     const dir = slash < 0 ? ' ' : f.path.slice(0, slash);
     const base = f.path.slice(slash + 1);
