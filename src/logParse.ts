@@ -14,6 +14,10 @@ export type WatchedCvar = typeof WATCHED_CVARS[number];
  *  sends no act; it only ever reported, so it reads as `live`. */
 export const CVAR_ACTS = ['held', 'fixed', 'live'] as const;
 export type CvarAct = typeof CVAR_ACTS[number];
+/** Reasons an in-game /mod call (src/modCalls.ts) can give. Anything else on
+ *  a PUGCALL line is refused. */
+export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other'] as const;
+export type ModCallReason = (typeof MOD_CALL_REASONS)[number];
 
 export interface Phase {
   state: PhaseState;
@@ -173,7 +177,14 @@ export type LogEvent =
   // CHAT line above still feeds the match chat log; these feed nothing else.
   // `team` is the game's team number: 1 spectator, 2 survivors, 3 infected.
   | { kind: 'say'; steamid: string; team: number | null; message: string }
-  | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string };
+  | { kind: 'name'; steamid: string; event: 'connect' | 'change'; name: string }
+  // An in-game /mod call (src/modCalls.ts). `target` is a SteamID64 or one of
+  // the targetless words the plugin sends when the caller did not aim at a
+  // player. `matchId`/`ordinal`/`half`/`tMs` are the round moment, present
+  // only inside a match or a round the way PHASE fields are.
+  | { kind: 'call'; steamid: string; target: string; callerTeam: number | null; reason: ModCallReason;
+      matchId: number | null; ordinal: number | null; half: number | null; tMs: number | null;
+      via: 'game' | 'tv'; text: string };
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -410,6 +421,40 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     }
     if (head.event !== 'connect' && head.event !== 'change') return null;
     return { kind: 'name', steamid, event: head.event, name: text.slice(0, 128) };
+  }
+
+  // An in-game /mod call (src/modCalls.ts). Same treatment as PUGSAY: the
+  // details text is LAST and every other field is read from the slice before
+  // the first " text=", so nothing a player types can move the call onto
+  // another account, another target or another match. Empty text is allowed:
+  // most calls are just a reason and a name.
+  if (body.startsWith('PUGCALL ')) {
+    const at = body.indexOf(' text=');
+    if (at < 0) return null;
+    const head = kv(body.slice(0, at).split(/\s+/).slice(1));
+    const text = body.slice(at + ' text='.length);
+    const steamid = steamId64Of(head.steamid ?? '');
+    if (!steamid) return null;
+    const rawTarget = head.target ?? '';
+    const target = rawTarget === 'team' || rawTarget === 'general' || rawTarget === 'none' ? rawTarget : steamId64Of(rawTarget);
+    if (!target) return null;
+    const reason = head.reason ?? '';
+    if (!(MOD_CALL_REASONS as readonly string[]).includes(reason)) return null;
+    const via = head.via;
+    if (via !== 'game' && via !== 'tv') return null;
+    const team = intOf(head.tteam);
+    const match = intOf(head.match);
+    const ord = intOf(head.ord);
+    const half = intOf(head.half);
+    const tms = intOf(head.tms);
+    return {
+      kind: 'call', steamid, target, reason: reason as ModCallReason, via, text,
+      callerTeam: team !== null && team >= 0 && team <= 3 ? team : null,
+      matchId: match !== null && match > 0 ? match : null,
+      ordinal: ord !== null && ord >= 0 ? ord : null,
+      half: half === 1 || half === 2 ? half : null,
+      tMs: tms !== null && tms >= 0 ? tms : null,
+    };
   }
 
   // Where a client connected from. Same protection as SIGNON_DROP and for the
