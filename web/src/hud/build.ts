@@ -100,6 +100,10 @@ class Work {
     if (!p && !this.imported) throw new Error(`${path}: no panel ${keys.join('/')}`);
     return p;
   }
+  /** Whether a pass has parsed this file, so the build writes it. */
+  parsed(path: string): boolean { return this.trees.has(path); }
+  /** The parsed file, its root block included, as writeKv takes it. */
+  rootOf(path: string): KvNode[] { this.tree(path); return this.trees.get(path)!; }
   text(path: string): string { return this.texts.get(path) ?? baseFile(this.key, path); }
   setText(path: string, s: string) { this.texts.set(path, s); }
   /**
@@ -425,11 +429,11 @@ function squarePiece(nodes: KvNode[], edits: Record<string, ChildOverride>, name
  * at the panel width, at x 0, its band (texture y ~95 of 256) on the
  * panel's vertical centre. Shared by the teammate card and your own health.
  */
-function squareBand(nodes: KvNode[], edits: Record<string, ChildOverride>, name: string, panel: { w: number; h: number }) {
+function squareBand(nodes: KvNode[], edits: Record<string, ChildOverride>, name: string, panel: { w: number; h: number }, left = 0) {
   const BAND_CENTRE = 95 / 256;
-  const piece = squarePiece(nodes, edits, name, panel.w);
+  const piece = squarePiece(nodes, edits, name, panel.w - left);
   if (!piece) return;
-  if (piece.e.x === undefined) kvSet(piece.n, 'xpos', '0');
+  if (piece.e.x === undefined) kvSet(piece.n, 'xpos', String(left));
   if (piece.e.y === undefined) kvSet(piece.n, 'ypos', String(Math.round(panel.h / 2 - BAND_CENTRE * piece.s)));
 }
 
@@ -528,7 +532,7 @@ function fitOwn(work: Work, design: HudDesign) {
   if (box && block) {                                              // else nothing to fit to: the file's panel stays
     shiftNodes(nodes, box);
     size = { w: box.w, h: box.h };
-    squareBand(nodes, design.children.ownHealth ?? {}, 'Incapacitated', size);
+    squareBand(nodes, design.children.ownHealth ?? {}, 'Incapacitated', size, downLeft(nodes, size.w));
     stretchFill(nodes, size);
     const at = base ?? { x: 0, y: 0 };
     kvSet(block, 'xpos', String(at.x + box.x)); kvSet(block, 'ypos', String(at.y + box.y));
@@ -536,6 +540,56 @@ function fitOwn(work: Work, design: HudDesign) {
   }
   // The background, as the card's: injected first, after the shift, at the panel's size.
   if (bg && size) nodes.unshift(panelBgBlock(bg, size, OWN_BG));
+}
+
+/**
+ * Where a fitted own panel's down picture starts: at the health bar's x.
+ * client.dll (the player panel's update, 1023f5df to 1023f6da) moves Health
+ * to Incapacitated's x the moment the down picture shows, y kept, so a down
+ * picture that starts anywhere else moves the bar while the player is down
+ * (launch R, parity/x12-incap-own.png: squared at x 0, the bar jumped 26
+ * units left). Stock has both at 26 and so never moves it. The square runs
+ * from the bar to the panel's right edge. A bar that is not in the tree, or
+ * sits outside the panel, leaves the picture at x 0 as before.
+ */
+function downLeft(nodes: KvNode[], w: number): number {
+  const bar = kvFind(nodes, ['Health']);
+  const x = bar ? parseFloat(pcGet(bar, 'xpos') ?? '') : NaN;
+  return Number.isFinite(x) && x >= 0 && x < w ? Math.round(x) : 0;
+}
+
+/**
+ * The revive anchor. The same client.dll code puts Health
+ * back at the x of the panel's "Items" child when the down picture hides
+ * again (the revive), and leaves it at the down picture's x when there is no
+ * Items child, which localplayerpanel.res never has. So on any own panel
+ * whose bar and down picture do not share an x (a dragged bar or down
+ * picture, Modern as it ships: bar 34, down picture 0) the bar stayed where
+ * the down picture was for the rest of the map. This adds a hidden Items
+ * Label at the bar's final x (after scalePass), so a revive puts the bar
+ * back where the file and the preview have it. It runs in buildTrees too,
+ * so the preview's trees stay the download's; the preview never draws it
+ * (visible 0) and never picks it (no registry entry). A Label,
+ * because the game calls Label methods on Items (GetFont, SetText with the
+ * item glyphs); visible 0, so those glyphs never draw. An imported HUD's
+ * panel is anchored only when the design edited it, so an untouched upload
+ * still goes back byte for byte, and a panel that already has an Items child
+ * keeps its own.
+ */
+function reviveAnchorPass(work: Work) {
+  const file = OWN_PANEL.file;
+  const layer = importedFiles(work.key);
+  if (!work.parsed(file) && (layer || !presetOverrides(work.key, file))) return;   // a file the build does not ship
+  const nodes = work.tree(file);
+  if (layer && writeKv(parseKv(baseFile(work.key, file))) === writeKv(work.rootOf(file))) return;
+  const bar = kvFind(nodes, ['Health']), down = kvFind(nodes, ['Incapacitated']);
+  if (!bar || !down || kvFind(nodes, ['Items'])) return;
+  const x = pcGet(bar, 'xpos'), dx = pcGet(down, 'xpos');
+  if (x === undefined || x.trim() === (dx ?? '').trim()) return;
+  nodes.push({ key: 'Items', value: [
+    ['ControlName', 'Label'], ['fieldName', 'Items'], ['xpos', x.trim()], ['ypos', (pcGet(bar, 'ypos') ?? '0').trim()],
+    ['wide', '1'], ['tall', '1'], ['visible', '0'], ['enabled', '1'], ['labelText', ''],
+  ].map(([key, value]) => ({ key, value })) });
 }
 
 /**
@@ -1575,6 +1629,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   splatterPass(work, design, assets, extra);
   teamPass(work, design);
   scalePass(work, design);
+  reviveAnchorPass(work);
   elementHidePass(work, design);
   codeShownPass(work, design);
   fontPass(work, design, assets, extra);
@@ -1656,6 +1711,7 @@ export function buildTrees(design: HudDesign): (path: string) => KvNode[] {
     splatterPass(work, design, {}, null);
     teamPass(work, design);
     scalePass(work, design);
+    reviveAnchorPass(work);
     stylePass(work, design, {}, discard);
     BUILD_TREES.set(design, work);
   }

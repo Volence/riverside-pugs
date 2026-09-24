@@ -32,11 +32,13 @@ describe('the download is unchanged by the preview', () => {
   const cases: [string, HudDesign, string][] = [
     ['an untouched design', structuredClone(DEFAULT_DESIGN), '6d8ec815dd449012fcb2fc549e4392d5d43285751cce51cd5b101ea56cab9e04'],
     ['Ammo only', ammoOnly(structuredClone(DEFAULT_DESIGN)), 'c4376fdc9664eea94ea324011cc9c86744c221db9ecc98663ab76d4630673d18'],
-    ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, 'eb9efa8889f984af2e62f17368d9568647e96aa5c4c1bed78bb3a947301c1d1a'],
+    // Modern moved on purpose with the revive anchor (build.ts reviveAnchorPass): its own panel has the
+    // bar at 34 and the down picture at 0, so it gains a hidden Items label at 34.
+    ['an untouched Modern design', { ...structuredClone(DEFAULT_DESIGN), preset: 'modern' }, '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
     ['an untouched design in Roboto', { ...structuredClone(DEFAULT_DESIGN), font: 'roboto' }, '53437d599a759fc5b4a3c20609d28ce928332146b9598bf90e7a2095a661f180'],
     // A design as a saved one loads, which must give the same bytes as a new one.
     ['a saved design', validateDesign({ v: 1, crosshair: 'none', elements: { teamColumn: { fit: true } } }), '6d8ec815dd449012fcb2fc549e4392d5d43285751cce51cd5b101ea56cab9e04'],
-    ['a saved Modern design', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), 'eb9efa8889f984af2e62f17368d9568647e96aa5c4c1bed78bb3a947301c1d1a'],
+    ['a saved Modern design', validateDesign({ v: 1, preset: 'modern', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '4c67fb0c1bba67763efe27a75b74c4c383ac02dcfbcf47e95349ff276d4d3a54'],
     ['a saved Roboto design', validateDesign({ v: 1, font: 'roboto', crosshair: 'none', elements: { teamColumn: { fit: true } } }), '53437d599a759fc5b4a3c20609d28ce928332146b9598bf90e7a2095a661f180'],
   ];
   for (const [name, d, hash] of cases) {
@@ -71,7 +73,7 @@ describe('saved Phase 1 designs download the same bytes', () => {
       v: 1, preset: 'modern',
       elements: { teamColumn: { fit: true }, siHealth: { scale: 1.5 }, infectedRow: { scale: 2 } },
       children: { teamColumn: { Status: { visible: false }, Head: { w: 20, h: 20 } } },
-    }), 'a4a58415428f8df5ddb5185fdb0bc786b7aebb1a2dfc616987633aa79d4463ed'],
+    }), '9c61b7503e2c1aa2076e17a71d5620c1c0eacafde4d43a3b6940c35e52a51843'],
     ['hidden chat and notices, the game crosshair hidden, weapons edited', () => validateDesign({
       v: 1, crosshair: 'none', hideGameCrosshair: true,
       elements: { chat: { visible: false }, killNotices: { visible: false } },

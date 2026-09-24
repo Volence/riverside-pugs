@@ -1518,9 +1518,17 @@ describe('fitting your own health panel', () => {
       expect(at(own({ fit: true, scale }))).toEqual(at(own({ scale })));
     });
   }
-  it('squares the down picture at the panel width with its band centred', () => {
+  it('starts the down picture at the bar, squared to the panel\'s right edge with its band centred', () => {
+    // client.dll 1023f5df..1023f6da: on the incap the game moves Health to Incapacitated's x (y kept).
+    // Stock has both at 26; a down picture at the bar's x keeps the bar where it was while down.
     const n = kvFind(buildTrees(own({ fit: true }))(OWN), ['Incapacitated'])!;
-    expect(rectOf(n)).toEqual(['0', '-22', '130', '130']);
+    expect(rectOf(n)).toEqual(['26', '-12', '104', '104']);
+  });
+  it('keeps the down picture on a dragged bar, and leaves a down picture the player placed alone', () => {
+    const moved = kvFind(buildTrees(own({ fit: true }, { Health: { x: 30 } }))(OWN), ['Incapacitated'])!;
+    expect(kvGet(moved, 'xpos')).toBe(kvGet(kvFind(buildTrees(own({ fit: true }, { Health: { x: 30 } }))(OWN), ['Health'])!, 'xpos'));
+    const placed = kvFind(buildTrees(own({ fit: true }, { Incapacitated: { x: 5 } }))(OWN), ['Incapacitated'])!;
+    expect(kvGet(placed, 'xpos')).toBe('5');
   });
   it('shifts the PC line of a conditional key and leaves the Mac one', () => {
     const block = kvFind(buildTrees(own({ fit: true }))(OWN), ['HealthNumber'])!;
@@ -1539,6 +1547,46 @@ describe('fitting your own health panel', () => {
   });
   it('leaves an unfitted panel exactly as the file has it', () => {
     expect(text(buildHud(own({ x: 20, y: 380 })), DISPLAY)).toBeUndefined();
+  });
+});
+
+describe('the revive anchor on your own panel (client.dll: the bar goes back to Items\' x)', () => {
+  // client.dll 1023f64e..1023f6da, the player panel class shared by your own panel and the cards:
+  // when the Incapacitated picture turns visible the game sets Health's x to Incapacitated's x; when it
+  // turns hidden again (the revive) it sets Health's x to the "Items" child's x, and keeps it where it
+  // is when there is no Items child, which localplayerpanel.res never has. y is never touched.
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const own = (o: ElementOverride, kids: Record<string, ChildOverride> = {}, preset: 'stock' | 'modern' = 'stock') =>
+    design({ preset, elements: Object.keys(o).length ? { ownHealth: o } : {}, children: Object.keys(kids).length ? { ownHealth: kids } : {} });
+  const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
+  const items = (d: HudDesign) => { const f = text(buildHud(d, { fonts }), OWN); return f === undefined ? undefined : kvFind(parseKv(f)[0].value as KvNode[], ['Items']); };
+  const barX = (d: HudDesign) => kvGet(kvFind(parseKv(text(buildHud(d, { fonts }), OWN)!)[0].value as KvNode[], ['Health'])!, 'xpos');
+
+  it('adds a hidden Items label at a dragged bar\'s x, so a revive puts the bar back', () => {
+    const d = own({}, { Health: { x: 40 } });
+    const a = items(d)!;
+    expect(kvGet(a, 'ControlName')).toBe('Label');
+    expect(kvGet(a, 'visible')).toBe('0');
+    expect(kvGet(a, 'xpos')).toBe('40');
+    expect(barX(d)).toBe('40');
+  });
+  it('follows the bar through fit and scale', () => {
+    for (const d of [own({ fit: true, scale: 2 }, { Incapacitated: { x: 3 } }), own({ scale: 1.5 }, { Incapacitated: { x: 3 } }), own({ scale: 2 }, { Health: { x: 40 } }), own({}, {}, 'modern')]) {
+      expect(kvGet(items(d)!, 'xpos')).toBe(barX(d));
+    }
+  });
+  it('fixes Modern as it ships: its bar at 34 and its down picture at 0', () => {
+    expect(kvGet(items(own({}, {}, 'modern'))!, 'xpos')).toBe('34');
+  });
+  it('adds nothing where the bar and the down picture already share an x', () => {
+    expect(text(buildHud(own({})), OWN)).toBeUndefined();
+    expect(items(own({ fit: true }))).toBeUndefined();
+    expect(items(own({ fit: true, scale: 2 }, { Health: { x: 40 } }))).toBeUndefined();     // the fitted down picture follows the bar
+    expect(items(own({}, { Health: { y: 60 } }))).toBeUndefined();
+  });
+  it('is in the preview trees too, hidden, so the preview reads the file the game gets', () => {
+    const a = kvFind(buildTrees(own({}, { Health: { x: 40 } }))(OWN), ['Items'])!;
+    expect([kvGet(a, 'xpos'), kvGet(a, 'visible')]).toEqual(['40', '0']);
   });
 });
 

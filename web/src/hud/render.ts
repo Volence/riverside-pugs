@@ -962,13 +962,25 @@ function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: numb
 /** HealthPanel's inset when the file gives none: 2 units, 4 px at 1080p (b13/compare/stock-own.png, b1 Q3). */
 const STOCK_BAR_INSET = 2;
 
+/**
+ * The player panel class (your own panel and the teammate cards) moves the
+ * health bar to the down picture's x while that picture shows, keeping the
+ * bar's y (client.dll 1023f5df to 1023f6da; launch R,
+ * /home/volence/l4d/hud/probe-2f/parity/x12-incap-own.png). The preview draws
+ * the Down state the same way. The revive puts it back at the panel's Items
+ * x: the teammate card's item row, and on your own panel the hidden anchor
+ * build.ts's reviveAnchorPass adds at the bar's own x.
+ */
+const DOWN_MOVES_BAR = new Set(['ownHealth', 'teamColumn']);
+
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts0: DrawOpts = {}): void {
   const opts: DrawOpts = { ...opts0, panelRgb: panelColour(design, panelId) };
   const view = previewOf(opts.state);
   const nodes = orderedChildren(buildTrees(design)(PANEL_FILE[panelId]));
   const rects = childRects(design, panelId, origin, k);
+  const downX = view.survivor === 'down' && DOWN_MOVES_BAR.has(panelId) ? rects.find((c) => c.name.toLowerCase() === 'incapacitated')?.x : undefined;
   for (const [i, n] of nodes.entries()) {
-    const r = rects[i];
+    const r = downX !== undefined && n.key.toLowerCase() === 'health' ? { ...rects[i], x: downX } : rects[i];
     const lname = n.key.toLowerCase();
     if (!r.visible || hiddenInState(panelId, lname, view)) continue;
     let alpha = 1;

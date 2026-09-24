@@ -1028,6 +1028,20 @@ describe('your own health in every preview state', () => {
     expect(draws(calls, GREY)).toEqual([]);
   });
 
+  it('draws a down bar at the down picture\'s x, where the game puts it (client.dll 1023f5df..1023f6da), y kept', () => {
+    // Launch R, parity/x12-incap-own.png: once the down picture shows, the game moves Health to its x.
+    const { draws } = tintRig();
+    const d = design({ children: { ownHealth: { Incapacitated: { x: 4 } } } });
+    const r = bar(d, 2);
+    const pic = childRects(d, 'ownHealth', O, 2).find((c) => c.name === 'Incapacitated')!;
+    const down = recCtx();
+    drawPanel(down.ctx, d, 'ownHealth', O, 2, { state: 'down' });
+    expect(draws(down.calls, OUTLINE)).toEqual([[RED, pic.x, r.y, r.w, r.h]]);
+    const healthy = recCtx();
+    drawPanel(healthy.ctx, d, 'ownHealth', O, 2);
+    expect(draws(healthy.calls, OUTLINE)).toEqual([[GREEN, r.x, r.y, r.w, r.h]]);
+  });
+
   it('insets by the file inset while gate Q3 is open, and by the stock 2 units while it is closed', () => {
     // Deliberately rewritten from plumbing Task 15's "Gated inset" test (X9): the outline is stock, drawn always.
     // /home/volence/l4d/hud/probe-phase2/b1v2 (inset 3): 6 px at 1080p.

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { buildHud, packHud, CLEAR_TEXTURE, type BuildReport } from './build';
 import { validateDesign, type HudDesign } from './design';
-import { registerImport, unregisterImport } from './base';
+import { registerImport, unregisterImport, baseFile } from './base';
 import { parseKv, kvFind, kvGet, type KvNode } from './kv';
 import { decodeText } from './text';
 import { readVPK } from '../vpk/read';
@@ -131,3 +131,23 @@ describe("an imported HUD's own crosshair", () => {
     expect(report.replaced).toEqual(['materials/vgui/hud/altcrosshair.vmt', 'materials/vgui/hud/altcrosshair.vtf']);
   });
 });
+
+describe('the revive anchor on an imported HUD', () => {
+  // build.ts reviveAnchorPass: client.dll puts the own bar back at Items' x after a revive.
+  const OWN = 'resource/ui/hud/localplayerpanel.res';
+  const apart = baseFile('modern', OWN);                                // bar at 34, down picture at 0
+  it('leaves an untouched upload byte for byte, even with the bar and the down picture apart', () => {
+    const files = sampleHud({ [OWN]: apart });
+    expect(byPath(buildHud(imported(files))).get(OWN)).toEqual(files.get(OWN));
+  });
+  it('anchors a panel the design edited', () => {
+    const out = byPath(buildHud(imported(sampleHud({ [OWN]: apart }), { children: { ownHealth: { Health: { x: 40 } } } })));
+    const items = kvFind(root(out, OWN), ['Items'])!;
+    expect([kvGet(items, 'ControlName'), kvGet(items, 'xpos'), kvGet(items, 'visible')]).toEqual(['Label', '40', '0']);
+  });
+  it('anchors an edited panel the upload does not ship, which the game reads from its own files', () => {
+    const out = byPath(buildHud(imported(sampleHud(), { children: { ownHealth: { Health: { x: 40 } } } })));
+    expect(kvGet(kvFind(root(out, OWN), ['Items'])!, 'xpos')).toBe('40');
+  });
+});
+
