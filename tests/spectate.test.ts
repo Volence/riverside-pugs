@@ -39,7 +39,7 @@ describe('spectateFor', () => {
   it('is null until SourceTV is switched on for that server', () => {
     expect(spectateFor(db, serverId)).toBeNull();
     enableTv();
-    expect(spectateFor(db, serverId)).toEqual({ host: '203.0.113.5', port: 27020, password: 'dunged', delay: 30 });
+    expect(spectateFor(db, serverId)).toEqual({ host: '203.0.113.5', port: 27020, password: 'dunged', delay: 0 });
   });
 
   it('is null for a server with no row, and carries no password when none is set', () => {

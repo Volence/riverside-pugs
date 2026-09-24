@@ -164,7 +164,8 @@ describe('spectate button', () => {
     // Nobody from the roster: anyone may watch.
     const r = await press(7, `m:${matchId}:spectate`);
     expect(JSON.stringify(r.payload)).toContain('connect 1.2.3.4:27020');
-    expect(JSON.stringify(r.payload)).toContain('30 seconds behind');
+    expect(JSON.stringify(r.payload)).toContain('live, no delay');
+    expect(JSON.stringify(r.payload)).toContain('recorded');
     db.prepare('UPDATE servers SET tv_enabled = 0 WHERE id = ?').run(serverId);
     expect(JSON.stringify(await press(7, `m:${matchId}:spectate`))).toMatch(/no SourceTV/);
   });
