@@ -1241,6 +1241,39 @@ export function openDb(path: string): DB {
       PRIMARY KEY (server_id, path)
     );
   `);
+
+  // Releases (sub-project 2b): commits of the deploy repo sent to the boxes.
+  // docs/superpowers/specs/2026-09-24-release-deploy-design.md
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS releases (
+      id               INTEGER PRIMARY KEY,
+      kind             TEXT NOT NULL CHECK (kind IN ('deploy','undo')),
+      undo_of          INTEGER REFERENCES releases(id),
+      sources_json     TEXT NOT NULL,
+      state            TEXT NOT NULL CHECK (state IN ('staged','invalid','deploying','canary_wait','done','halted')),
+      invalid_json     TEXT,
+      canary_server_id INTEGER,
+      balance_decision TEXT CHECK (balance_decision IN ('balance','not_balance','later')),
+      balance_name     TEXT,
+      balance_notes    TEXT,
+      created_by       TEXT NOT NULL,
+      created_at       TEXT NOT NULL,
+      deployed_by      TEXT,
+      deployed_at      TEXT,
+      backups_expired  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS release_boxes (
+      release_id   INTEGER NOT NULL REFERENCES releases(id),
+      server_id    INTEGER NOT NULL,
+      state        TEXT NOT NULL,
+      error        TEXT,
+      plan_json    TEXT,
+      shipped_json TEXT NOT NULL,
+      updated_at   TEXT NOT NULL,
+      PRIMARY KEY (release_id, server_id)
+    );
+  `);
+  ensureColumn(db, 'balance_patches', 'release_id', 'INTEGER REFERENCES releases(id)');
   ensureColumn(db, 'match_rounds', 'variant', 'TEXT');
   ensureColumn(db, 'match_rounds', 'skill_detect', 'INTEGER');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
