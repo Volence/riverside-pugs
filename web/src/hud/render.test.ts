@@ -1442,6 +1442,26 @@ describe('your own health in every preview state', () => {
       expect(draws(calls, WHITE)).toEqual([[GREEN, r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
     });
 
+    it('draws the bar colour on the bar alone, outline and fill, in every class (probe B14, Q24 passed)', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b14/crops/si-b-zoom.png: monochrome_color 255 0 255 on the
+      // Hunter's Health tints the fill (201 0 201 at its top) and the outline's bright rim, while the number
+      // keeps its own colour (the white "250" of b14-b); b14b-a the same on the Boomer.
+      const { draws } = tintRig();
+      const d = validateDesign({ v: 1, children: { siHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } } } });
+      expect(d.children.siHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255');
+      for (const siClass of ['hunter', 'smoker', 'boomer', 'tank'] as const) {
+        const r = siBar(d, SI(siClass));
+        const { ctx, calls } = recCtx();
+        drawPanel(ctx, d, 'siHealth', O, 1, { state: SI(siClass) });
+        expect(draws(calls, WHITE), siClass).toEqual([['rgb(255,0,255)', r.x + 2, r.y + 2, r.w - 4, r.h - 4]]);
+        expect(draws(calls, artUrl('vgui/hud/s_healthbar_outline')!), siClass).toEqual([['rgb(255,0,255)', r.x, r.y, r.w, r.h]]);
+        const plain = recCtx();
+        drawPanel(plain.ctx, design({}), 'siHealth', O, 1, { state: SI(siClass) });
+        const fills = (cs: { m: string; a: unknown[] }[]) => cs.filter((c) => c.m === 'fillText').map((c) => c.a[0]);
+        expect(fills(calls), siClass).toEqual(fills(plain.calls));
+      }
+    });
+
     it('draws every class\'s pieces where its own file has them after an edit, the Boomer\'s in proportion', () => {
       const d = design({ children: { siHealth: { Health: { w: 112, y: 60 } } } });
       expect(siBar(d, SI('hunter'))).toMatchObject({ x: O.x + 252, y: O.y + 60, w: 112 });

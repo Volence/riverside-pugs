@@ -2493,3 +2493,17 @@ describe('The infected cards on the page (plan Task 13)', () => {
     expect(saved().elements?.infectedRow).toBeUndefined();
   });
 });
+
+describe('The infected bar colour once Q24 passed (plan Task F1)', () => {
+  const saved = () => JSON.parse(localStorage.getItem('hud') ?? '{}') as HudDesign;
+  it('offers Bar colour on your infected health\'s bar and the card\'s bar, and writes the pick', async () => {
+    render(<Hud />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    fireEvent.click(layer('Your infected health').getByRole('button', { name: 'Health bar' }));
+    fireEvent.input(screen.getByLabelText('Bar colour colour'), { target: { value: '#ff00ff' } });
+    await waitFor(() => expect(saved().children?.siHealth?.Health?.keys?.monochrome_color).toBe('255 0 255 255'));
+    fireEvent.click(layer('Infected teammates').getByRole('button', { name: 'Health bar' }));
+    fireEvent.input(screen.getByLabelText('Bar colour colour'), { target: { value: '#00ffff' } });
+    await waitFor(() => expect(saved().children?.infectedRow?.HealthPanel?.keys?.monochrome_color).toBe('0 255 255 255'));
+  });
+});

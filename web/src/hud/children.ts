@@ -289,8 +289,9 @@ export const OWN_PANEL: PanelChildren = {
  * - Q13 the number keeps its fgcolor_override (b9-b, b9-g, b9-j, b9-l).
  * - Q8 (probe B1 b) proved the own panel's crouch icon, the same ImagePanel
  *   use, keeps a tint.
- * The bar colour waits on Q24: Q1 proved monochrome_color recolours the
- * whole own panel, and what it recolours here is unasked. The inset is the
+ * The bar colour is gated on Q24, which B14 passed: monochrome_color here
+ * tints the bar alone, fill and outline, and leaves the number its own
+ * colour (b14/crops/si-b-zoom.png), unlike the whole own panel Q1 found. The inset is the
  * HealthPanel class's one m_inset read, which Q3 proved on that class, so it
  * is offered ungated. ModBg (Modern's fill) stays unregistered, as on the
  * own panel. The zombiehealthleft_* files are never child-edited.
@@ -366,8 +367,8 @@ export const ABILITY_PANEL: PanelChildren = {
  *   stays, no spawn time and no ability ring (bl-abeg.png a).
  * - the ring shows alive, not a ghost, not a Hunter (dll 0x10248700).
  * The backdrop is not a splatter entry: the splatter work does not restyle
- * it, so it has only its tint here. The bar colour waits on Q24, as on your
- * infected health; the inset is the HealthPanel class's one read.
+ * it, so it has only its tint here. The bar colour (Q24, passed in B14) tints
+ * the bar alone, never the name or the icon (b14/crops/card-b.png); the inset is the HealthPanel class's one read.
  */
 export const ZCARD_PANEL: PanelChildren = {
   panelId: 'infectedRow',

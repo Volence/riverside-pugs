@@ -468,6 +468,19 @@ export function shownKey(design: HudDesign, def: KeyDef, value: string | undefin
 }
 
 /**
+ * Where each panel keeps the monochrome_color that recolours it, and the
+ * gate that proved it. On the infected panels (Q24, probe B14,
+ * /home/volence/l4d/hud/probe-phase2-infected/b14/crops/si-b-zoom.png and
+ * card-b.png) it tints the bar alone, fill and outline: their labels are
+ * never coloured by health, so the number, the name and the icon keep their
+ * own colours without a rule of their own.
+ */
+const BAR_COLOUR: Record<string, { block: string; gate: 'Q1' | 'Q24' }> = {
+  ownHealth: { block: 'Health', gate: 'Q1' }, teamColumn: { block: 'Health', gate: 'Q1' },
+  siHealth: { block: 'Health', gate: 'Q24' }, infectedRow: { block: 'HealthPanel', gate: 'Q24' },
+};
+
+/**
  * The panel colour: the monochrome_color of the panel's Health block in the
  * generated tree, while gate Q1 is open; else undefined. Probe Q1
  * (/home/volence/l4d/hud/probe-phase2/RESULTS.md, B1 shots a and c, b1v3
@@ -478,9 +491,10 @@ export function shownKey(design: HudDesign, def: KeyDef, value: string | undefin
  * So it is one colour for the whole panel (plan decision 5), and it replaces
  * the health colour everywhere the health colour is used.
  */
-export function panelColour(design: HudDesign, panelId: string): [number, number, number] | undefined {
-  if (!HEALTH_PANELS.has(panelId) || !probe('Q1')) return undefined;
-  const n = kvFind(buildTrees(design)(PANEL_FILE[panelId]), ['Health']);
+export function panelColour(design: HudDesign, panelId: string, state?: SurvivorState | PreviewState): [number, number, number] | undefined {
+  const bar = BAR_COLOUR[panelId];
+  if (!bar || !probe(bar.gate)) return undefined;
+  const n = kvFind(buildTrees(design)(panelFile(panelId, state)), [bar.block]);
   const v = n ? kvGet(n, 'monochrome_color') : undefined;
   if (v === undefined) return undefined;
   // A scheme colour name (an imported file's "Orange") resolves as every other colour read does.
@@ -1154,7 +1168,7 @@ function drawBar(ctx: CanvasRenderingContext2D, n: KvNode, r: ChildRect, k: numb
 export const DOWN_MOVES_BAR: ReadonlySet<string> = new Set(['ownHealth', 'teamColumn']);
 
 export function drawPanel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: string, origin: PanelBox, k: number, opts0: DrawOpts = {}): void {
-  const opts: DrawOpts = { ...opts0, panelRgb: panelColour(design, panelId) };
+  const opts: DrawOpts = { ...opts0, panelRgb: panelColour(design, panelId, opts0.state) };
   const view = previewOf(opts.state);
   const nodes = orderedChildren(buildTrees(design)(panelFile(panelId, view)));
   // The bar where the game draws it in this state (childRects).

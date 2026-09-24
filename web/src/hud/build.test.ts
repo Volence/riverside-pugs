@@ -2073,3 +2073,20 @@ describe('the infected card fit and the gap between cards (plan Task 11)', () =>
     expect(kvGet(container(d), 'ypos')).toBe(kvGet(container(row({}, undefined, 'modern')), 'ypos'));
   });
 });
+
+describe('the infected bar colour, Q24 passed in B14 (plan Task F1)', () => {
+  it('writes monochrome_color on the Hunter, Smoker and Boomer Health and the card HealthPanel, as B14 set them by hand', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b14/build.mts HAND_EDITS: the same key and block in each file.
+    const d = validateDesign({ v: 1, children: {
+      siHealth: { Health: { keys: { monochrome_color: '255 0 255 255' } } },
+      infectedRow: { HealthPanel: { keys: { monochrome_color: '0 255 255 255' } } },
+    } });
+    const files = buildHud(d);
+    for (const f of ['hunterhealth', 'smokerhealth', 'boomerhealth']) {
+      const n = kvFind(parseKv(text(files, `resource/ui/hud/${f}.res`)!)[0].value as KvNode[], ['Health'])!;
+      expect(kvGet(n, 'monochrome_color'), f).toBe('255 0 255 255');
+    }
+    const card = kvFind(parseKv(text(files, 'resource/ui/hud/zombieteamdisplayplayer.res')!)[0].value as KvNode[], ['HealthPanel'])!;
+    expect(kvGet(card, 'monochrome_color')).toBe('0 255 255 255');
+  });
+});

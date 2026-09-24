@@ -1063,6 +1063,32 @@ describe('the infected cards, as the game lays them out (plan Task 12)', () => {
     expect(texts.filter((t) => t === '12')).toHaveLength(2);
   });
 
+  it('draws a card\'s bar colour on its bar alone, never the name or the icon (probe B14, Q24 passed)', () => {
+    // /home/volence/l4d/hud/probe-phase2-infected/b14/crops/card-b.png: HealthPanel monochrome_color 0 255 255
+    // fills the card's bar cyan (31 174 173 at its top); "Mal" stays white and the Hunter icon white.
+    const fills: string[] = [];
+    _setCanvasFactory(() => {
+      const t = { globalCompositeOperation: 'source-over', fillStyle: '', drawImage: () => {},
+        fillRect: () => { if (t.globalCompositeOperation === 'multiply') fills.push(String(t.fillStyle)); } };
+      return { width: 1, height: 1, getContext: () => t } as unknown as HTMLCanvasElement;
+    });
+    try {
+      const d = validateDesign({ ...only(), children: { infectedRow: { HealthPanel: { keys: { monochrome_color: '0 255 255 255' } } } } });
+      expect(d.children.infectedRow?.HealthPanel?.keys?.monochrome_color).toBe('0 255 255 255');
+      const cs = cardCalls(d);
+      expect(fills).toContain('rgb(0,255,255)');
+      expect(fills).not.toContain('rgb(10,177,50)');
+      for (const cls of ['smoker', 'boomer', 'hunter']) expect(draws(cs, icon(cls)), cls).toHaveLength(1);
+      const texts: string[] = [];
+      const styles: string[] = [];
+      const ctx = fakeCtx(() => {}, undefined, texts);
+      const fillText = ctx.fillText.bind(ctx);
+      ctx.fillText = ((...a: Parameters<typeof ctx.fillText>) => { styles.push(String(ctx.fillStyle)); fillText(...a); }) as typeof ctx.fillText;
+      drawHud(ctx, 1920, 1080, d, 'infected', null);
+      expect(styles.some((c) => c.includes('0,255,255'))).toBe(false);
+    } finally { _setCanvasFactory(null); }
+  });
+
   it('tints the backdrop by its drawColor: stock 64 64 64 over infected_healthbar_bg_1', () => {
     const fills: string[] = [];
     _setCanvasFactory(() => {

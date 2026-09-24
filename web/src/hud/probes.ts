@@ -26,8 +26,8 @@ export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; 
   Q2: { passed: true, batch: 'B1 (a)', question: 'LocalPlayer clips its children and does not paint its own image' },
   Q3: { passed: true, batch: 'B1 (a)', question: 'inset draws the fill inset inside an outline' },
   Q8: { passed: true, batch: 'B1 (b)', question: 'the crouch icon keeps a file drawColor and shows only while crouched' },
-  // Not run yet: the infected panels plan's Task 14 (docs/superpowers/plans/2026-09-24-hud-editor-phase2-infected.md).
-  Q24: { passed: false, batch: 'B14 (planned)', question: 'monochrome_color on the SI Health and the card HealthPanel: what else it recolours' },
+  // /home/volence/l4d/hud/probe-phase2-infected/RESULTS.md, B14: b14/crops/si-b-zoom.png and card-b.png (b), b14b-a (the Boomer).
+  Q24: { passed: true, batch: 'B14 (b, and b14b-a)', question: 'monochrome_color on the SI Health and the card HealthPanel recolours the bar (fill and outline) only, not the number, name or icon' },
 };
 
 /** Test overrides, read before PROBES. */
