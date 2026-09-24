@@ -126,6 +126,11 @@ export function validateSetting(
       const v = raw.trim();
       if (!v && !t.allowEmpty) return { ok: false, error: 'cannot be empty' };
       if (v.length > t.maxLength) return { ok: false, error: `at most ${t.maxLength} characters` };
+      // The mod call card pings <@&value>. A pasted mention or a role name
+      // would post a broken ping on every call, so only a Discord id passes.
+      if (key === 'mod_call_role_id' && v !== '' && !/^\d{17,20}$/.test(v)) {
+        return { ok: false, error: 'must be a Discord role id (17 to 20 digits), or empty' };
+      }
       return { ok: true, value: v };
     }
     case 'bool':

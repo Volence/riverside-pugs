@@ -5,6 +5,7 @@ import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { fileReport } from '../src/tickets/filing.js';
 import { mergePlayers } from '../src/mergePlayers.js';
 import { foldTicket } from '../src/tickets/store.js';
+import { validateSetting } from '../src/settingsSchema.js';
 
 const A = '76561199000000001';
 const B = '76561199000000002';
@@ -56,5 +57,13 @@ describe('mod call storage', () => {
                 VALUES (?, ?, 'player', ?, 'cheating', '', 'game', 1, 'posted', ?)`).run(new Date().toISOString(), A, C, gone.ticketId);
     db.transaction(() => foldTicket(db, gone.ticketId, keep.ticketId, 'merge'))();
     expect((db.prepare('SELECT ticket_id FROM mod_calls').get() as { ticket_id: number }).ticket_id).toBe(keep.ticketId);
+  });
+
+  it('accepts only an empty or snowflake-shaped mod call role', () => {
+    expect(validateSetting('mod_call_role_id', '')).toEqual({ ok: true, value: '' });
+    expect(validateSetting('mod_call_role_id', ' 1551114695010816040 ')).toEqual({ ok: true, value: '1551114695010816040' });
+    for (const bad of ['everyone', '<@&1551114695010816040>', '123', '1'.repeat(21), '15511146950108160x0']) {
+      expect(validateSetting('mod_call_role_id', bad).ok).toBe(false);
+    }
   });
 });
