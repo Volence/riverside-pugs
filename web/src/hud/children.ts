@@ -554,6 +554,33 @@ export const ZPANEL_PANEL: PanelChildren = {
   ],
 };
 
+/**
+ * The Tank frustration meter's pieces (frustrationmeter.res; Modern ships
+ * none, so both presets read the stock file), framed by its hudlayout.res
+ * block, HudFrustrationMeter. No probe has seen the meter drawn
+ * (/home/volence/l4d/hud/probe-phase2-rest/RESULTS.md, T1..T4: r3-h..k,
+ * r6-i..l, and the stock control run ../probe-2f/i/shots-tank-control/), so
+ * every piece waits on gate T1 (plan decision 10); the element's own move
+ * and hide ship now.
+ */
+const FRUST_LINE = (name: string, label: string): ChildDef =>
+  ({ name, label, kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true, gate: 'T1' });
+export const FRUST_PANEL: PanelChildren = {
+  panelId: 'tankPanel',
+  file: 'resource/ui/hud/frustrationmeter.res',
+  repeat: 'single',
+  frame: 'hudlayout',
+  children: [
+    FRUST_LINE('Countdown', 'Title'),
+    FRUST_LINE('Warning', 'Warning'),
+    FRUST_LINE('Warning2', 'Warning, second line'),
+    { name: 'FrustrationBar', label: 'Bar', kind: 'other', role: 'content', box: 'wh', move: true, font: false, colour: false, gate: 'T1',
+      keys: [{ key: 'east_aligned', label: 'Fill from the right', type: 'bool', gate: 'T1',
+        evidence: 'client.dll CFrustrationMeterBarPanel run: east_aligned; stock frustrationmeter.res FrustrationBar "east_aligned" "1"' }] },
+    FRUST_LINE('FrustrationLabel', 'Label'),
+  ],
+};
+
 /** A block's rect, as a linked rule reads it from a base file. */
 export interface LinkRect { x: number; y: number; w: number; h: number }
 export type LinkRule = 'same' | 'delta';
@@ -589,7 +616,7 @@ function mapLinked<T>(rule: LinkRule, key: string, v: T, a: LinkRect, b: LinkRec
   }
 }
 
-export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL, ZPANEL_PANEL];
+export const PANEL_CHILDREN: PanelChildren[] = [TEAM_PANEL, OWN_PANEL, SI_PANEL, ABILITY_PANEL, ZCARD_PANEL, PROGRESS_PANEL, GHOST_PANEL, ZPANEL_PANEL, FRUST_PANEL];
 export const panelChildren = (panelId: string): PanelChildren | undefined => PANEL_CHILDREN.find((p) => p.panelId === panelId);
 export const teamChild = (name: string): ChildDef | undefined => TEAM_PANEL.children.find((c) => c.name === name);
 

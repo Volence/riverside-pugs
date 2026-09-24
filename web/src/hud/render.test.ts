@@ -129,7 +129,9 @@ describe('childRects', () => {
           zombiePanel: { 'TooFarFromSurvivors/TooFarTitle': { x: 80 } } } });
       const files = buildHud(d, { fonts: { regular: new Uint8Array(1), bold: new Uint8Array(1) } });
       for (const panelId of Object.keys(PANEL_FILE)) {
-        const whole = parseKv(text(files, PANEL_FILE[panelId]))[0].value as KvNode[];
+        // A file nothing in the design touches is not in the download: the game reads the base one.
+        const written0 = files.some((f) => f.path === PANEL_FILE[panelId]) ? text(files, PANEL_FILE[panelId]) : baseFile(preset, PANEL_FILE[panelId]);
+        const whole = parseKv(written0)[0].value as KvNode[];
         // A panel whose pieces sit inside its frame block (the too-far box) names them by path.
         const reg = panelChildren(panelId);
         const holder = reg?.inFrame && reg.frame && reg.frame !== 'hudlayout' ? kvFind(whole, [reg.frame.block]) : undefined;
@@ -616,7 +618,7 @@ describe('the teammate card states', () => {
     expect(hiddenInState('teamColumn', 'Incapacitated', 'down')).toBe(false);
     expect(hiddenInState('ownHealth', 'Incapacitated', 'down')).toBe(false);
     // A panel the registry does not have: the old always-hidden list.
-    expect(hiddenInState('tankPanel', 'Incapacitated', 'down')).toBe(true);
+    expect(hiddenInState('chat', 'Incapacitated', 'down')).toBe(true);
     expect(hiddenInState('teamColumn', 'Voice', 'healthy')).toBe(true);
   });
 
@@ -1068,7 +1070,7 @@ describe('the preview state', () => {
     for (const def of TEAM_PANEL.children) expect(hiddenInState('teamColumn', def.name, 'hurt'), def.name).toBe(hiddenInState('teamColumn', def.name, 'healthy'));
   });
   it('keeps the old always-hidden list for panels the registry does not have yet', () => {
-    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('tankPanel', n, 'healthy'), n).toBe(true);
+    for (const n of ['DuckingIcon', 'Incapacitated', 'SpawnTimeLabel', 'SkullIconPlacement']) expect(hiddenInState('chat', n, 'healthy'), n).toBe(true);
   });
   it('shows the infected card\'s pieces as the game does, alive, ghost or dead (plan Task 10)', () => {
     // /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/bl-abeg.png (a ghost, b Hunter, e dead, g Smoker)

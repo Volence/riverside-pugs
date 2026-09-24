@@ -102,6 +102,7 @@ export const PANEL_FILE: Record<string, string> = {
   progressBar: 'resource/ui/hud/progressbar.res',
   ghostPanel: 'resource/ui/hudghostpanel.res',
   zombiePanel: 'resource/ui/zombiepanel.res',
+  tankPanel: 'resource/ui/hud/frustrationmeter.res',
 };
 
 /**

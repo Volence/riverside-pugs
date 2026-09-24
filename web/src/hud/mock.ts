@@ -74,7 +74,8 @@ function rectFor(design: HudDesign, id: string): Rect & { visible: boolean } {
 
 /** Whether the preview shows an element in the page's state: an infected one the game shows only as a ghost, say (HudElement.shownIn). */
 export function shownInState(el: HudElement, state?: SurvivorState | PreviewState): boolean {
-  return !el.shownIn || el.shownIn.includes(previewOf(state).infected);
+  const v = previewOf(state);
+  return (!el.shownIn || el.shownIn.includes(v.infected)) && (!el.shownFor || el.shownFor.includes(v.siClass));
 }
 
 /** Card 4 shows only while spectating a full team: never drawn, never a target. */
@@ -975,12 +976,44 @@ function labelColour(design: HudDesign, n: KvNode): string {
   return own !== undefined ? colourOf(design, own) : labelTextColour(design);
 }
 
-function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect) {
-  text(ctx, 'Frustration', r.x, r.y + 12, 12, '#e8e8e8');
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(r.x, r.y + 18, r.w, r.h - 18);
-  ctx.fillStyle = '#d64545';
-  ctx.fillRect(r.x, r.y + 18, r.w * 0.5, r.h - 18);
+const FRUST = 'resource/ui/hud/frustrationmeter.res';
+/** The sample frustration: half, as the old stand-in showed. */
+const FRUST_SAMPLE = 0.5;
+/**
+ * The frustration meter drawn from frustrationmeter.res (through
+ * buildTrees), for a spawned Tank only: the three lines code fills from
+ * resource/left4dead_english.txt (#L4D_tank_attack_survivors,
+ * _lose_control, _lose_control_1), the CONTROL label, all in their file
+ * colours and fonts, and the bar at FRUST_SAMPLE, filled from the right
+ * while east_aligned is 1 (the stock file's). The bar's own colours were
+ * never seen (no probe drew the meter), so the fill keeps the old
+ * stand-in's red on a dark track. Whatever gate T1 says, this reads the
+ * file as it is: a closed gate only keeps edits out of it.
+ */
+const FRUST_LINES: [string, string][] = [
+  ['Countdown', 'ATTACK THE SURVIVORS'], ['Warning', 'You must attack or you will'], ['Warning2', 'lose control of the Tank'], ['FrustrationLabel', 'CONTROL'],
+];
+function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const nodes = buildTrees(design)(FRUST);
+  const W = screenW(design.aspect);
+  const shown = (name: string) => { const n = kvFind(nodes, [name]); return n && pcGet(n, 'visible') !== '0' ? n : undefined; };
+  clipToRect(ctx, r, () => {
+    ctx.save();
+    const bar = shown('FrustrationBar');
+    if (bar) {
+      const b = blockRect(bar, r, k, W);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      const w = b.w * FRUST_SAMPLE;
+      ctx.fillStyle = '#d64545';
+      ctx.fillRect(pcGet(bar, 'east_aligned') === '0' ? b.x : b.x + b.w - w, b.y, w, b.h);
+    }
+    for (const [name, s] of FRUST_LINES) {
+      const n = shown(name);
+      if (n) paintPanelLabel(ctx, design, n, blockRect(n, r, k, W), k, s, labelColour(design, n), r, onAsset);
+    }
+    ctx.restore();
+  });
 }
 
 const PAINTERS: Record<string, (ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view?: HudView) => void> = {

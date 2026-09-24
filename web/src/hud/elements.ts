@@ -44,6 +44,8 @@ export interface HudElement {
    * it, only when the page shows one of them. Layers reaches it always.
    */
   shownIn?: ('alive' | 'ghost' | 'dead')[];
+  /** An infected element the game shows only for these classes (the frustration meter, only a Tank's). */
+  shownFor?: ('hunter' | 'smoker' | 'boomer' | 'tank')[];
 }
 
 /**
@@ -182,7 +184,12 @@ export const ELEMENTS: HudElement[] = [
    */
   { id: 'zombiePanel', label: 'Too far / Tank offer', side: 'infected', key: 'HudZombiePanel', move: true, resize: 'none',
     children: [], props: ['visible'], shownIn: ['alive'] },
+  /**
+   * The Tank's frustration meter: moves and hides now; its pieces
+   * (frustrationmeter.res, children.ts FRUST_PANEL) wait on gate T1, as no
+   * probe has seen it drawn. The preview draws it for a spawned Tank only.
+   */
   { id: 'tankPanel', label: 'Tank frustration', side: 'infected', key: 'HudFrustrationMeter', move: true, resize: 'none',
-    children: [], props: ['visible'] },
+    children: [], props: ['visible'], shownIn: ['alive'], shownFor: ['tank'] },
 ];
 export const elementById = (id: string) => ELEMENTS.find((e) => e.id === id);

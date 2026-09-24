@@ -14,8 +14,8 @@ const CONTROL: Record<string, string> = { image: 'imagepanel', label: 'label', b
  * the way elements.test.ts pins element keys to hudlayout.res.
  */
 describe('the teammate card registry', () => {
-  it('covers the teammate card, your own health, your infected health, the ability timer, the infected card, the use bar, the spawn panel and the too-far panel', () => {
-    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing', 'infectedRow', 'progressBar', 'ghostPanel', 'zombiePanel']);
+  it('covers the teammate card, your own health, your infected health, the ability timer, the infected card, the use bar, the spawn, too-far and frustration panels', () => {
+    expect(PANEL_CHILDREN.map((p) => p.panelId)).toEqual(['teamColumn', 'ownHealth', 'siHealth', 'abilityRing', 'infectedRow', 'progressBar', 'ghostPanel', 'zombiePanel', 'tankPanel']);
     expect(TEAM_PANEL.file).toBe('resource/ui/hud/teammatepanel.res');
   });
 
