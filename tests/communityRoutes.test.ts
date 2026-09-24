@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync,
+} from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { setSetting } from '../src/settings.js';
 import { mineEntries } from '../src/community/entries.js';
+import { encodeVPK } from '../src/vpkWrite.js';
+import { hudId } from '../src/hudFiles.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
 const GiB = 1024 ** 3;
@@ -233,5 +238,354 @@ describe('mine', () => {
     expect(res.entries.map((e: { id: number }) => e.id)).toEqual([removed, live]);
     expect(res.entries[0]).toMatchObject({ removedByStaff: 'offensive' });
     expect(res.entries[1]).toMatchObject({ removedByStaff: null, title: 'Live one' });
+  });
+});
+
+// ---- HUD shares (Task 7) ----------------------------------------------------
+
+const MB = 1024 * 1024;
+const STOCK = join(import.meta.dirname, '..', 'web', 'src', 'hud', 'base', 'stock');
+
+function stockFiles(): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>();
+  const walk = (d: string) => {
+    for (const e of readdirSync(d)) {
+      const full = join(d, e);
+      if (statSync(full).isDirectory()) walk(full);
+      else out.set(relative(STOCK, full).split('\\').join('/'), new Uint8Array(readFileSync(full)));
+    }
+  };
+  walk(STOCK);
+  return out;
+}
+const vpkOf = (files: Map<string, Uint8Array>) => encodeVPK([...files].map(([path, data]) => ({ path, data })));
+const text = (s: string) => new TextEncoder().encode(s);
+
+/**
+ * A v1 archive written entry by entry, as web/src/vpk/fixtures.ts's handMade
+ * (which the node typecheck cannot import): for layouts encodeVPK never
+ * writes, such as two entries over the same bytes. Every entry is in the
+ * _dir file (0x7FFF) with no preload bytes.
+ */
+function handMade(entries: { path: string; offset: number; length: number; data?: Uint8Array }[]): Uint8Array {
+  const tree: number[] = [];
+  const data: number[] = [];
+  for (const e of entries) {
+    const slash = e.path.lastIndexOf('/');
+    const base = e.path.slice(slash + 1);
+    const dot = base.lastIndexOf('.');
+    tree.push(...text(`${base.slice(dot + 1)}\0${e.path.slice(0, slash)}\0${base.slice(0, dot)}\0`));
+    const entry = new Uint8Array(18);
+    const dv = new DataView(entry.buffer);
+    dv.setUint16(6, 0x7FFF, true);
+    dv.setUint32(8, e.offset, true);
+    dv.setUint32(12, e.length, true);
+    dv.setUint16(16, 0xFFFF, true);
+    tree.push(...entry, 0, 0);
+    if (e.data) data.push(...e.data);
+  }
+  tree.push(0);
+  const out = new Uint8Array(12 + tree.length + data.length);
+  const h = new DataView(out.buffer);
+  h.setUint32(0, 0x55AA1234, true);
+  h.setUint32(4, 1, true);
+  h.setUint32(8, tree.length, true);
+  out.set(tree, 12);
+  out.set(data, 12 + tree.length);
+  return out;
+}
+
+/** A PNG header only: signature, then an IHDR chunk saying w x h, then `pad`
+ *  bytes (a different pad is a different preview hash). Enough for pngSize. */
+function png(w: number, h: number, pad = 0): Uint8Array {
+  const b = new Uint8Array(24 + pad);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  const dv = new DataView(b.buffer);
+  dv.setUint32(16, w);
+  dv.setUint32(20, h);
+  for (let i = 24; i < b.length; i++) b[i] = i & 0xff;
+  return b;
+}
+const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
+
+const modern = (extra: object = {}) => ({ v: 1, name: 'x', preset: 'modern', aspect: '16:9', advanced: false, ...extra });
+const onImport = (id: string) =>
+  ({ v: 1, name: 'x', preset: 'imported', aspect: '16:9', advanced: false, imported: { id, name: 'My Base' } });
+
+interface HudShare {
+  title?: string;
+  permission?: unknown;
+  design?: object;
+  importId?: string;
+  preview?: Uint8Array | null;
+  vpk?: Uint8Array | null;
+}
+function hudForm(o: HudShare = {}): FormData {
+  const form = new FormData();
+  const meta: Record<string, unknown> = {
+    title: o.title ?? 'Clean HUD', description: 'Tidy.', permission: o.permission ?? true,
+    design: JSON.stringify(o.design ?? modern()),
+  };
+  if (o.importId !== undefined) meta.importId = o.importId;
+  form.set('meta', JSON.stringify(meta));
+  const preview = o.preview === undefined ? png(960, 540) : o.preview;
+  if (preview) form.set('preview', new Blob([preview as BlobPart], { type: 'image/png' }), 'preview.png');
+  if (o.vpk) form.set('import', new Blob([o.vpk as BlobPart]), 'base.vpk');
+  return form;
+}
+const shareHud = (as: string | null, o: HudShare = {}) =>
+  app.inject({ method: 'POST', url: '/api/community/huds', ...(as ? { cookies: cookie[as] } : {}), payload: hudForm(o) });
+const get = (as: string | null, url: string) => inject(as, 'GET', url);
+const filesIn = (sub: string) => (existsSync(join(dir, sub)) ? readdirSync(join(dir, sub)) : []);
+
+describe('sharing a HUD', () => {
+  it('needs an active player', async () => {
+    expect((await shareHud(null)).statusCode).toBe(401);
+    expect((await shareHud(P)).statusCode).toBe(403);
+  });
+
+  it('shares a Modern design with its preview, and serves the preview safely', async () => {
+    const preview = png(960, 540, 10);
+    const res = await shareHud(A, { preview });
+    expect(res.statusCode).toBe(200);
+    const { id } = res.json();
+
+    const entry = (await list(null, 'kind=hud')).json().entries[0];
+    expect(entry).toMatchObject({
+      id, kind: 'hud', title: 'Clean HUD', preset: 'modern', aspect: '16:9', advanced: false,
+      importName: null, previewUrl: `/api/community/files/previews/${sha(preview)}.png`,
+    });
+    const one = (await get(null, `/api/community/${id}`)).json();
+    // The design is stored under the title, not the name the browser sent.
+    expect(one.design).toMatchObject({ preset: 'modern', name: 'Clean HUD' });
+
+    const file = await get(null, entry.previewUrl);
+    expect(file.statusCode).toBe(200);
+    expect(file.headers['content-type']).toBe('image/png');
+    expect(file.headers['x-content-type-options']).toBe('nosniff');
+    expect(file.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
+    expect(file.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect(new Uint8Array(file.rawPayload)).toEqual(preview);
+  });
+
+  it('shares a design on an imported HUD, and stores a shared import once', async () => {
+    const files = stockFiles();
+    const id = await hudId(files);
+    const vpk = vpkOf(files);
+    const res = await shareHud(A, { design: onImport(id), importId: id, vpk });
+    expect(res.statusCode).toBe(200);
+    expect((await list(null, 'kind=hud')).json().entries[0]).toMatchObject({ preset: 'imported', importName: 'My Base' });
+
+    const blob = await get(null, `/api/community/files/imports/${id}.vpk`);
+    expect(blob.statusCode).toBe(200);
+    expect(blob.headers['content-type']).toBe('application/octet-stream');
+    expect(blob.headers['content-disposition']).toMatch(/^attachment/);
+    expect(blob.headers['x-content-type-options']).toBe('nosniff');
+    expect(blob.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
+    expect(new Uint8Array(blob.rawPayload)).toEqual(vpk);
+    const before = statSync(join(dir, 'imports', `${id}.vpk`)).mtimeMs;
+
+    const second = await shareHud(B, {
+      title: 'Other take', design: { ...onImport(id), aspect: '4:3' }, importId: id, vpk, preview: png(720, 540),
+    });
+    expect(second.statusCode).toBe(200);
+    expect(filesIn('imports')).toEqual([`${id}.vpk`]);
+    expect(statSync(join(dir, 'imports', `${id}.vpk`)).mtimeMs).toBe(before);
+  });
+
+  it('refuses a bad import, naming what is wrong', async () => {
+    const files = stockFiles();
+    const id = await hudId(files);
+
+    const bad = new Map(files);
+    bad.set('cfg/autoexec.cfg', text('bind w kill\n'));
+    const badId = await hudId(bad);
+    const cfg = await shareHud(A, { design: onImport(badId), importId: badId, vpk: vpkOf(bad) });
+    expect(cfg.statusCode).toBe(400);
+    expect(cfg.json().error).toContain('cfg/autoexec.cfg');
+
+    const vpk = vpkOf(files);
+    const padded = new Uint8Array(vpk.length + 3);
+    padded.set(vpk);
+    expect((await shareHud(A, { design: onImport(id), importId: id, vpk: padded })).statusCode).toBe(400);
+
+    // Two entries over the same bytes: the old length rule passed this one.
+    const overlap = handMade([
+      { path: 'scripts/hudlayout.res', offset: 0, length: 6, data: text('"a"{}hidden!') },
+      { path: 'resource/ui/hud/p.res', offset: 0, length: 6 },
+    ]);
+    const overlapId = await hudId(new Map([['scripts/hudlayout.res', text('"a"{}h')], ['resource/ui/hud/p.res', text('"a"{}h')]]));
+    const o = await shareHud(A, { design: onImport(overlapId), importId: overlapId, vpk: overlap });
+    expect(o.statusCode).toBe(400);
+    expect(o.json().error).toMatch(/not laid out as the editor writes/);
+
+    const clash = handMade([
+      { path: 'scripts/hudlayout.res', offset: 0, length: 6, data: text('"a"{}\n') },
+      { path: 'SCRIPTS/HUDLAYOUT.res', offset: 6, length: 6, data: text('"b"{}\n') },
+    ]);
+    const clashId = await hudId(new Map([['scripts/hudlayout.res', text('"b"{}\n')]]));
+    const c = await shareHud(A, { design: onImport(clashId), importId: clashId, vpk: clash });
+    expect(c.statusCode).toBe(400);
+    expect(c.json().error).toMatch(/differ only in case/);
+
+    // The claimed id is not the files' own.
+    const other = 'f'.repeat(64);
+    expect((await shareHud(A, { design: onImport(other), importId: other, vpk })).statusCode).toBe(400);
+    // An import part on a design that uses none.
+    expect((await shareHud(A, { importId: id, vpk })).statusCode).toBe(400);
+    // An imported design with no import part.
+    expect((await shareHud(A, { design: onImport(id), importId: id })).statusCode).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM community_entries').get()).toEqual({ n: 0 });
+    expect(filesIn('imports')).toEqual([]);
+    expect(filesIn('previews')).toEqual([]);
+  });
+
+  it('refuses a bad preview, a missing one, an oversized import and a missing permission', async () => {
+    const wrongAspect = await shareHud(A, { preview: png(720, 540) });
+    expect(wrongAspect.statusCode).toBe(400);
+    expect((await shareHud(A, { preview: text('not a png at all, no') })).statusCode).toBe(400);
+    expect((await shareHud(A, { preview: null })).statusCode).toBe(400);
+
+    const huge = new Uint8Array(20 * MB + 1);
+    expect((await shareHud(A, { design: onImport('a'.repeat(64)), importId: 'a'.repeat(64), vpk: huge })).statusCode).toBe(413);
+
+    const perm = await shareHud(A, { permission: 'yes' });
+    expect(perm.statusCode).toBe(400);
+    expect(perm.json().error).toBe('Tick the box to confirm you may share this.');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM community_entries').get()).toEqual({ n: 0 });
+  });
+
+  it('refuses a request that is not the three expected parts', async () => {
+    const form = hudForm();
+    form.set('extra', new Blob([png(960, 540) as BlobPart]), 'x.png');
+    const res = await app.inject({ method: 'POST', url: '/api/community/huds', cookies: cookie[A], payload: form });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBeLessThan(500);
+    const noMeta = new FormData();
+    noMeta.set('preview', new Blob([png(960, 540) as BlobPart]), 'p.png');
+    expect((await app.inject({ method: 'POST', url: '/api/community/huds', cookies: cookie[A], payload: noMeta })).statusCode).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM community_entries').get()).toEqual({ n: 0 });
+  });
+
+  it('holds to the HUD cap', async () => {
+    expect((await shareHud(A, { title: 'One HUD', preview: png(960, 540, 1) })).statusCode).toBe(200);
+    expect((await shareHud(A, { title: 'Two HUD', preview: png(960, 540, 2) })).statusCode).toBe(200);
+    const third = await shareHud(A, { title: 'Three HUD', preview: png(960, 540, 3) });
+    expect(third.statusCode).toBe(409);
+    expect(third.json().error).toBe('You are sharing 2 HUDs already. Delete one to share another.');
+    // Refused before anything was written.
+    expect(filesIn('previews')).toHaveLength(2);
+  });
+
+  it('refuses a share while sharing is switched off', async () => {
+    setSetting(db, 'community_uploads', '0');
+    expect((await shareHud(A)).statusCode).toBe(403);
+  });
+
+  it('refuses a share the budget cannot take', async () => {
+    setSetting(db, 'community_store_mb', '100');
+    mkdirSync(join(dir, 'previews'), { recursive: true });
+    const filler = join(dir, 'previews', 'filler.bin');
+    writeFileSync(filler, '');
+    truncateSync(filler, 100 * MB - 1024);
+    const res = await shareHud(A, { preview: png(960, 540, 2048) });
+    expect(res.statusCode).toBe(507);
+    expect(res.json().error).toBe('The community shelf is full right now.');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM community_entries').get()).toEqual({ n: 0 });
+  });
+
+  it('refuses a share that would cross the disk floor', async () => {
+    await app.close();
+    app = await buildServer({
+      config: { ...loadConfig({}), communityDir: dir }, db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {},
+      communityFreeBytes: async () => 12 * GiB + 1024,
+    });
+    cookie[A] = authedCookie(app, db, A);
+    const res = await shareHud(A, { preview: png(960, 540, 2048) });
+    expect(res.statusCode).toBe(507);
+    expect(res.json().error).toBe('The community shelf is full right now.');
+  });
+
+  it('removes only what the request wrote when the insert fails', async () => {
+    const files = stockFiles();
+    const id = await hudId(files);
+    const vpk = vpkOf(files);
+    expect((await shareHud(B, { design: onImport(id), importId: id, vpk, preview: png(960, 540, 1) })).statusCode).toBe(200);
+    db.exec(`CREATE TRIGGER boom BEFORE INSERT ON community_entries WHEN NEW.title = 'Boom HUD'
+             BEGIN SELECT RAISE(ABORT, 'boom'); END`);
+    const fresh = png(960, 540, 7);
+    const res = await shareHud(A, { title: 'Boom HUD', design: onImport(id), importId: id, vpk, preview: fresh });
+    expect(res.statusCode).toBe(500);
+    expect(filesIn('previews')).not.toContain(`${sha(fresh)}.png`);
+    expect(filesIn('previews')).toHaveLength(1);
+    // The import was already there for B's entry, so it stays.
+    expect(filesIn('imports')).toEqual([`${id}.vpk`]);
+  });
+
+  it('serves a tombstone\'s files to staff only, and never caches them', async () => {
+    const files = stockFiles();
+    const id = await hudId(files);
+    const preview = png(960, 540, 5);
+    const res = await shareHud(A, { design: onImport(id), importId: id, vpk: vpkOf(files), preview });
+    const entryId = res.json().id;
+    await inject(A, 'DELETE', `/api/community/${entryId}`);
+    const urls = [`/api/community/files/previews/${sha(preview)}.png`, `/api/community/files/imports/${id}.vpk`];
+    for (const url of urls) {
+      expect((await get(null, url)).statusCode).toBe(404);
+      expect((await get(B, url)).statusCode).toBe(404);
+      const staff = await get(MOD, url);
+      expect(staff.statusCode).toBe(200);
+      expect(staff.headers['cache-control']).toBe('no-store');
+      expect(staff.headers['x-content-type-options']).toBe('nosniff');
+    }
+  });
+
+  it('refuses a file name that is not a hash', async () => {
+    expect((await get(MOD, '/api/community/files/previews/..%2F..%2Fpug.db')).statusCode).toBe(404);
+    expect((await get(MOD, `/api/community/files/previews/${'A'.repeat(64)}.png`)).statusCode).toBe(404);
+    expect((await get(MOD, `/api/community/files/imports/${'a'.repeat(64)}.png`)).statusCode).toBe(404);
+    expect((await get(MOD, `/api/community/files/previews/${'a'.repeat(64)}.png`)).statusCode).toBe(404);
+  });
+});
+
+describe('the sweep at server start', () => {
+  const oldTombstone = (preview: string | null) => {
+    db.prepare("INSERT INTO players (steamid, name) VALUES (?, 'old')").run('76561199000000999');
+    return Number(db.prepare(
+      `INSERT INTO community_entries (kind, author_id, title, payload, preview, created_at, deleted_at, deleted_by)
+       VALUES ('hud', '76561199000000999', 'Old one', '{"v":1}', ?, '2020-01-01T00:00:00.000Z', '2020-01-02T00:00:00.000Z', '76561199000000999')`,
+    ).run(preview).lastInsertRowid);
+  };
+  const row = (id: number) => db.prepare('SELECT payload, purged_at FROM community_entries WHERE id = ?').get(id) as
+    { payload: string; purged_at: string | null };
+
+  it('purges an old tombstone and its preview', async () => {
+    await app.close();
+    db = openDb(':memory:');
+    const name = 'c'.repeat(64);
+    mkdirSync(join(dir, 'previews'), { recursive: true });
+    writeFileSync(join(dir, 'previews', `${name}.png`), png(960, 540));
+    const id = oldTombstone(name);
+    app = await buildServer({
+      config: { ...loadConfig({}), communityDir: dir }, db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {}, communityFreeBytes: async () => 100 * GiB,
+    });
+    expect(row(id).payload).toBe('');
+    expect(row(id).purged_at).not.toBeNull();
+    expect(filesIn('previews')).toEqual([]);
+  });
+
+  it('purges rows but creates no folder when the store was never used', async () => {
+    await app.close();
+    db = openDb(':memory:');
+    const id = oldTombstone(null);
+    const never = join(dir, 'never');
+    app = await buildServer({
+      config: { ...loadConfig({}), communityDir: never }, db, orchestrator: stubOrchestrator(),
+      serverCleaner: async () => {}, serverExec: async () => {}, communityFreeBytes: async () => 100 * GiB,
+    });
+    expect(row(id).payload).toBe('');
+    expect(existsSync(never)).toBe(false);
   });
 });

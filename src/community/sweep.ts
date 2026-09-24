@@ -23,13 +23,19 @@ export interface SweepResult { purged: number; files: number }
  *
  * A purged row stays, with payload '' and purged_at set, so a ticket that
  * links to it still resolves.
+ *
+ * `store` is null when the community folder does not exist yet: nothing was
+ * ever written, so there are no files to sweep, but a crosshair tombstone
+ * (which has none) still needs its payload purged.
  */
-export function sweepCommunity(db: DB, store: CommunityStore, now: Date): SweepResult {
+export function sweepCommunity(db: DB, store: CommunityStore | null, now: Date): SweepResult {
   const cutoff = new Date(now.getTime() - KEEP_TOMBSTONE_MS).toISOString();
   const purged = db.prepare(
     `UPDATE community_entries SET payload = '', purged_at = ?
       WHERE deleted_at IS NOT NULL AND deleted_at < ? AND purged_at IS NULL`,
   ).run(now.toISOString(), cutoff).changes;
+
+  if (!store) return { purged, files: 0 };
 
   const inUse = (column: 'preview' | 'import_id'): Set<string> => new Set(
     (db.prepare(`SELECT DISTINCT ${column} AS v FROM community_entries WHERE purged_at IS NULL AND ${column} IS NOT NULL`)

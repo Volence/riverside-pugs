@@ -48,7 +48,7 @@ import websocket from '@fastify/websocket';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { STATUS_CODES } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { Config } from './config.js';
 import type { DB } from './db.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
@@ -103,6 +103,7 @@ import { devRoutes } from './routes/dev.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { communityRoutes } from './routes/community.js';
 import { CommunityStore } from './community/store.js';
+import { sweepCommunity } from './community/sweep.js';
 import { settingNumber } from './settings.js';
 import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
@@ -1485,14 +1486,31 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // and a server that nobody shares a HUD on (every test, a dev box) should
   // not grow a data/community it never uses.
   let communityStore: CommunityStore | null = null;
-  await app.register(communityRoutes, {
-    db: deps.db,
-    store: () => communityStore ??= new CommunityStore({
-      dir: deps.config.communityDir,
-      freeBytes: deps.communityFreeBytes,
-      maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
-    }),
+  const getCommunityStore = () => communityStore ??= new CommunityStore({
+    dir: deps.config.communityDir,
+    freeBytes: deps.communityFreeBytes,
+    maxBytes: () => settingNumber(deps.db, 'community_store_mb', 1024, { min: 100, max: 20000, integer: true }) * 2 ** 20,
   });
+  await app.register(communityRoutes, { db: deps.db, store: getCommunityStore });
+
+  // Purge community tombstones past their 30 days, once at start and then
+  // daily. With no community folder yet nothing was ever written, so only
+  // the rows are swept (a crosshair tombstone has no files) and the folder is
+  // not created for it. Errors are logged and never stop the server, as with
+  // purgeRemovedFiles above.
+  const sweepCommunityNow = () => {
+    try {
+      const store = communityStore ?? (existsSync(deps.config.communityDir) ? getCommunityStore() : null);
+      const r = sweepCommunity(deps.db, store, new Date());
+      if (r.purged > 0 || r.files > 0) console.log(`[community] swept ${r.purged} entr(ies), ${r.files} file(s)`);
+    } catch (err) {
+      console.error('[community] the sweep failed:', err instanceof Error ? err.message : err);
+    }
+  };
+  sweepCommunityNow();
+  const communitySweepTimer = setInterval(sweepCommunityNow, 24 * 60 * 60 * 1000);
+  communitySweepTimer.unref();
+  app.addHook('onClose', async () => { clearInterval(communitySweepTimer); });
 
   // Registered whether or not dev mode is on, and deliberately NOT inside
   // devRoutes. The dev panel probes this on every page load to decide whether

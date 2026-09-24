@@ -215,3 +215,23 @@ export function like(db: DB, id: number, player: string, now: Date): void {
 export function unlike(db: DB, id: number, player: string): void {
   db.prepare('DELETE FROM community_likes WHERE entry_id = ? AND player_id = ?').run(id, player);
 }
+
+const FILE_COLUMN = { preview: 'preview', import: 'import_id' } as const;
+
+/**
+ * Whether a live entry by an author who is not banned uses this file: the
+ * test for serving it to anyone. Matches what GET /api/community/:id shows.
+ */
+export function fileLive(db: DB, kind: 'preview' | 'import', name: string): boolean {
+  return !!db.prepare(
+    `SELECT 1 FROM community_entries e JOIN players p ON p.steamid = e.author_id
+      WHERE e.${FILE_COLUMN[kind]} = ? AND e.deleted_at IS NULL AND p.status != 'banned' LIMIT 1`,
+  ).get(name);
+}
+
+/** Whether any row that is not purged names this file, tombstones included. */
+export function fileReferenced(db: DB, kind: 'preview' | 'import', name: string): boolean {
+  return !!db.prepare(
+    `SELECT 1 FROM community_entries WHERE ${FILE_COLUMN[kind]} = ? AND purged_at IS NULL LIMIT 1`,
+  ).get(name);
+}

@@ -1,13 +1,18 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import multipart from '@fastify/multipart';
 import type { DB } from '../db.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { getSetting, settingNumber } from '../settings.js';
 import { getPlayer } from '../players.js';
 import type { CommunityStore } from '../community/store.js';
-import { checkCrosshairArt, checkDescription, checkTitle, COMMUNITY_XHAIR_CAPS } from '../community/validate.js';
 import {
-  countLive, ENTRY_KINDS, entryRow, getEntry, insertEntry, like, likeCount, listEntries,
-  mineEntries, sharesSince, tombstone, unlike, type EntryKind,
+  checkCrosshairArt, checkDescription, checkHudDesign, checkImport, checkPreview, checkTitle,
+  COMMUNITY_XHAIR_CAPS, IMPORT_MAX_BYTES,
+} from '../community/validate.js';
+import {
+  countLive, ENTRY_KINDS, entryRow, fileLive, fileReferenced, getEntry, insertEntry, like, likeCount,
+  listEntries, mineEntries, sharesSince, tombstone, unlike, type EntryKind,
 } from '../community/entries.js';
 
 /**
@@ -28,9 +33,26 @@ export interface CommunityRouteOpts {
 
 const DAY_MS = 86_400_000;
 const PERMISSION_ERROR = 'Tick the box to confirm you may share this.';
+const SHELF_FULL = 'The community shelf is full right now.';
+const MB = 2 ** 20;
+/** The meta field holds the design (2 MB at most) plus the short text fields. */
+const META_MAX_BYTES = 2.5 * MB;
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export async function communityRoutes(app: FastifyInstance, opts: CommunityRouteOpts): Promise<void> {
   const { db } = opts;
+
+  // Registered inside this plugin, so the limits apply to these routes only.
+  // throwFileSizeLimit: false leaves an oversized file as part.file.truncated,
+  // turned into a 413 below, as campaignRoutes does. One field (meta) and two
+  // files (preview, import) are all a share ever holds; anything past that
+  // fails in the parser before it is buffered.
+  await app.register(multipart, {
+    throwFileSizeLimit: false,
+    limits: { fileSize: IMPORT_MAX_BYTES, files: 2, fields: 1, fieldSize: META_MAX_BYTES, parts: 3 },
+  });
+
   const now = opts.now ?? (() => new Date());
   const optionalViewer = makeOptionalViewer(db);
   const requireActive = makeRequireActive(db);
@@ -138,6 +160,169 @@ export async function communityRoutes(app: FastifyInstance, opts: CommunityRoute
       return { id: result.id };
     },
   );
+
+  /**
+   * A HUD share: multipart with `meta` (a JSON string of { title,
+   * description, permission, design, importId? }, where design is itself the
+   * design's JSON string, as the editor saves it), `preview` (the PNG), and
+   * `import` (the VPK, only for a design on an imported HUD).
+   *
+   * Everything is checked before the disk is touched. checkImport is the whole
+   * check on the VPK (the allowlist, the canonical layout, the ids); nothing
+   * here second-guesses it or keeps anything it did not return.
+   */
+  app.post('/api/community/huds', async (req, reply) => {
+    const me = requireActive(req, reply);
+    if (!me) return reply;
+    if (!uploadsOn()) return reply.code(403).send({ error: 'Sharing is switched off right now.' });
+
+    // Every part is read to its end before anything is refused, so a refusal
+    // never leaves a file stream half consumed under the parser.
+    let meta: string | null = null;
+    let preview: Buffer | null = null;
+    let vpk: Buffer | null = null;
+    let odd = false;
+    let truncated = false;
+    try {
+      for await (const part of req.parts()) {
+        if (part.type === 'field') {
+          if (part.fieldname !== 'meta' || meta !== null) odd = true;
+          else if (part.valueTruncated) truncated = true;
+          else meta = String(part.value);
+          continue;
+        }
+        const buf = await part.toBuffer();
+        if (part.file.truncated) truncated = true;
+        else if (part.fieldname === 'preview' && preview === null) preview = buf;
+        else if (part.fieldname === 'import' && vpk === null) vpk = buf;
+        else odd = true;
+      }
+    } catch (err) {
+      // The parser's own limits (a third file, a second field) and malformed
+      // bodies. Its messages are not the house's one-liners, so say it here.
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status === 413) return reply.code(413).send({ error: 'The share is over its size limits.' });
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        return reply.code(400).send({ error: 'The share is not in the form the site sends.' });
+      }
+      throw err;
+    }
+    if (truncated) return reply.code(413).send({ error: 'The share is over its size limits.' });
+    if (odd || meta === null) return reply.code(400).send({ error: 'The share is not in the form the site sends.' });
+
+    let m: unknown;
+    try { m = JSON.parse(meta); } catch { m = null; }
+    if (!isObj(m)) return reply.code(400).send({ error: 'The share details are not readable.' });
+    const title = checkTitle(m.title);
+    if (!title.ok) return reply.code(title.status).send({ error: title.error });
+    const description = checkDescription(m.description);
+    if (!description.ok) return reply.code(description.status).send({ error: description.error });
+    if (m.permission !== true) return reply.code(400).send({ error: PERMISSION_ERROR });
+    if (vpk === null && m.importId !== undefined) {
+      return reply.code(400).send({ error: 'The share names an imported HUD but does not include it.' });
+    }
+    if (vpk !== null && typeof m.importId !== 'string') {
+      return reply.code(400).send({ error: 'The imported HUD was sent without its id.' });
+    }
+    const importId = vpk === null ? undefined : (m.importId as string);
+    const design = checkHudDesign(m.design, { title: title.value, importId });
+    if (!design.ok) return reply.code(design.status).send({ error: design.error });
+    if (preview === null) return reply.code(400).send({ error: 'The preview is missing.' });
+    const shot = checkPreview(preview, design.value.aspect);
+    if (!shot.ok) return reply.code(shot.status).send({ error: shot.error });
+    let imported: { id: string } | null = null;
+    if (vpk !== null) {
+      // checkHudDesign has already tied the design's imported.id to importId.
+      const imp = await checkImport(vpk, importId, importId);
+      if (!imp.ok) return reply.code(imp.status).send({ error: imp.error });
+      imported = { id: imp.value.id };
+    }
+
+    // The caps before any write, so a refused share costs no disk; the insert
+    // below checks them again inside its transaction.
+    const early = capProblem(me, 'hud');
+    if (early) return reply.code(early.status).send({ error: early.error });
+
+    const store = opts.store();
+    const previewSha = createHash('sha256').update(preview).digest('hex');
+    const newPreview = !store.has('preview', previewSha);
+    const newImport = imported !== null && !store.has('import', imported.id);
+    const incoming = (newPreview ? preview.length : 0) + (newImport && vpk ? vpk.length : 0);
+    if (!(await store.canTake(incoming))) return reply.code(507).send({ error: SHELF_FULL });
+
+    // Only what this request itself wrote is undone on a failure, and even
+    // that only when no row has come to use it meanwhile (a second share of
+    // the same import racing this one).
+    const wrote: { kind: 'preview' | 'import'; name: string }[] = [];
+    const undo = () => {
+      for (const w of wrote) {
+        if (!fileReferenced(db, w.kind, w.name)) store.remove(w.kind, w.name);
+      }
+    };
+    try {
+      const p = store.putPreview(preview);
+      if (p.wrote) wrote.push({ kind: 'preview', name: p.name });
+      let blobBytes = 0;
+      if (imported && vpk) {
+        const w = store.putImport(imported.id, vpk);
+        if (w.wrote) { wrote.push({ kind: 'import', name: imported.id }); blobBytes = vpk.length; }
+      }
+      const payload = design.value.json;
+      const result = db.transaction(() => {
+        const problem = capProblem(me, 'hud');
+        if (problem) return problem;
+        return {
+          id: insertEntry(db, {
+            kind: 'hud', authorId: me, title: title.value, description: description.value, payload,
+            preset: design.value.preset, aspect: design.value.aspect, advanced: design.value.advanced,
+            importId: imported?.id ?? null, importName: design.value.importName, preview: p.name,
+            bytes: Buffer.byteLength(payload) + preview.length + blobBytes, createdAt: now(),
+          }),
+        };
+      })();
+      if ('error' in result) {
+        undo();
+        return reply.code(result.status).send({ error: result.error });
+      }
+      return { id: result.id };
+    } catch (err) {
+      undo();
+      throw err;
+    }
+  });
+
+  /**
+   * The stored files. Anyone may fetch one a live entry uses; staff may fetch
+   * any, so a report about a removed entry can still be looked at. The name
+   * is checked against 64 hex before it goes near a path, and the headers
+   * make sure a PNG that is also something else never renders as a page.
+   */
+  const serveFile = (kind: 'preview' | 'import') =>
+    async (req: FastifyRequest<{ Params: { file: string } }>, reply: FastifyReply) => {
+      const ext = kind === 'preview' ? 'png' : 'vpk';
+      const match = /^([0-9a-f]{64})\.([a-z]+)$/.exec(req.params.file);
+      const gone = () => reply.code(404).send({ error: 'no such file' });
+      if (!match || match[2] !== ext) return gone();
+      const name = match[1]!;
+      const live = fileLive(db, kind, name);
+      if (!live && !isStaff(optionalViewer(req))) return gone();
+      const store = opts.store();
+      const bytes = kind === 'preview' ? store.readPreview(name) : store.readImport(name);
+      if (!bytes) return gone();
+      reply
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Content-Security-Policy', "default-src 'none'; sandbox")
+        // Content addressed, so a live file never changes; a staff view of a
+        // removed one must not linger in any cache.
+        .header('Cache-Control', live ? 'public, max-age=31536000, immutable' : 'no-store');
+      if (kind === 'preview') return reply.type('image/png').send(bytes);
+      return reply
+        .type('application/octet-stream')
+        .header('Content-Disposition', `attachment; filename="${name}.vpk"`)
+        .send(bytes);
+    };
+  app.get('/api/community/files/previews/:file', serveFile('preview'));
+  app.get('/api/community/files/imports/:file', serveFile('import'));
 
   app.delete<{ Params: { id: string } }>('/api/community/:id', async (req, reply) => {
     const me = requireActive(req, reply);
