@@ -17,9 +17,10 @@ import type { Guide } from './guides';
 import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
-import { SCREEN_H, parseSize } from './units';
+import { SCREEN_H, parseSize, parsePos } from './units';
 import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
 import { normaliseMaterial } from './art';
+import { canvasFont, fontCell, importedFace, loadFace } from './fonts';
 import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
 import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
@@ -259,11 +260,97 @@ function paintWeaponSelection(ctx: CanvasRenderingContext2D, r: Rect, design: Hu
   clipToRect(ctx, r, () => drawWeapons(ctx, design, { x: r.x, y: r.y }, k, r.w / k, onAsset, view.held));
 }
 
-function paintChat(ctx: CanvasRenderingContext2D, r: Rect) {
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  text(ctx, 'Zoey: watch the closet', r.x + 4, r.y + r.h - 28, 12, '#e8e8e8');
-  text(ctx, 'Francis: got it', r.x + 4, r.y + r.h - 12, 12, '#e8e8e8');
+const BASECHAT = 'resource/ui/basechat.res';
+const CHATSCHEME = 'resource/chatscheme.res';
+
+/**
+ * Where the RichText starts its first line inside HudChatHistory, in HUD
+ * units, measured in probe-phase2/b2/shots/b2/b2-e.png: the history's
+ * top-left is x 45, y 657 px (HudChat 10, r205 plus the history's 10, 17),
+ * the "M" of "Mal : probe" inks from x 53 (origin about 51.7, the M's side
+ * bearing about 1.3 px) and its cap top at y 663, so with Tahoma's 16.6 px
+ * ascent the line's cell starts at y 658.5: 6.75 px (3 units) and 1.5 px
+ * (2/3 unit) in.
+ */
+const CHAT_INSET = { x: 3, y: 2 / 3 };
+/**
+ * The chat's colours are code's, not any file's: the speaker's name in the
+ * survivor team colour and the message in the chat text colour, as b2-e
+ * measured them (139 183 221 and 210 200 152, flat).
+ */
+const CHAT_NAME = 'rgba(139,183,221,1)';
+const CHAT_TEXT = 'rgba(210,200,152,1)';
+const CHAT_LINES: [string, string][] = [['Zoey', 'watch the closet'], ['Francis', 'got it']];
+/** The screen the preview assumes when a scheme font gives sizes per resolution: 1080 lines, the probes' own. */
+const PREVIEW_SCREEN_LINES = 1080;
+
+/**
+ * ChatFont from the generated chatscheme.res: the entry whose yres range
+ * holds the screen's line count, as the game picks one. Those entries give
+ * tall in real pixels at that resolution, not in HUD units, so it is turned
+ * into units at PREVIEW_SCREEN_LINES (Tahoma 20 at 1080 on stock: the ink in
+ * b2-e is 16 px from cap top to descender, a 20-pixel cell).
+ */
+function chatFont(design: HudDesign): { face: string; weight: number; tallUnits: number } {
+  const font = kvFind(buildTrees(design)(CHATSCHEME), ['Fonts', 'ChatFont']);
+  const entries = font && typeof font.value !== 'string' ? font.value.filter((e) => typeof e.value !== 'string') : [];
+  const inRange = (e: typeof entries[number]) => {
+    const [lo, hi] = (pcGet(e, 'yres') ?? '').split(/\s+/).map(Number);
+    return Number.isFinite(lo) && Number.isFinite(hi) && PREVIEW_SCREEN_LINES >= lo && PREVIEW_SCREEN_LINES <= hi;
+  };
+  const e = entries.find(inRange) ?? entries[0];
+  if (!e) return { face: 'Tahoma', weight: 700, tallUnits: 12 };
+  const tall = parseFloat(pcGet(e, 'tall') ?? '12');
+  const scaled = pcGet(e, 'yres') !== undefined;
+  return {
+    face: pcGet(e, 'name') ?? 'Tahoma',
+    weight: parseFloat(pcGet(e, 'weight') ?? '0'),
+    tallUnits: scaled ? (tall * SCREEN_H) / PREVIEW_SCREEN_LINES : tall,
+  };
+}
+
+/**
+ * The chat as the game shows it closed (decision 8 of the 2.F plan): only
+ * the history's lines, no box behind them (probe-phase2/b2/shots/b2/b2-e.png).
+ * The history is basechat.res's HudChatHistory, placed inside the chat
+ * window (the element's rect, which chatWindow in build.ts writes for a moved
+ * or resized chat), and the lines start at its top-left plus the RichText's
+ * inset, one ChatFont cell apart, "Name : text" as the game formats a line,
+ * each with the font's one-pixel drop shadow. Clipped to the history, as
+ * VGUI clips a RichText, and to the window. The open chat (typing) is a
+ * state no probe has shot.
+ */
+function paintChat(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
+  const hist = kvFind(buildTrees(design)(BASECHAT), ['HudChatHistory']);
+  const W = r.w / k, H = r.h / k;
+  const hx = hist ? parsePos(pcGet(hist, 'xpos') ?? '0', W) : 0;
+  const hy = hist ? parsePos(pcGet(hist, 'ypos') ?? '0', H) : 0;
+  const hw = hist ? parseSize(pcGet(hist, 'wide') ?? '0', W) : W;
+  const hh = hist ? parseSize(pcGet(hist, 'tall') ?? '0', H) : H;
+  const box = { x: r.x + hx * k, y: r.y + hy * k, w: hw * k, h: hh * k };
+  const f = chatFont(design);
+  const face = design.preset === 'imported' ? importedFace(baseOf(design), f.face) ?? f.face : f.face;
+  loadFace(face, onAsset);
+  const cell = fontCell(face, f.tallUnits * k);
+  clipToRect(ctx, r, () => clipToRect(ctx, box, () => {
+    ctx.save();
+    ctx.font = canvasFont(face, f.weight, f.tallUnits * k);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    CHAT_LINES.forEach(([who, said], i) => {
+      const x = box.x + CHAT_INSET.x * k;
+      const y = box.y + CHAT_INSET.y * k + i * cell.cell + cell.ascent;
+      const name = `${who} : `;
+      const at = x + ctx.measureText(name).width;
+      for (const [t, tx, colour] of [[name, x, CHAT_NAME], [said, at, CHAT_TEXT]] as const) {
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.fillText(t, tx + 1, y + 1);
+        ctx.fillStyle = colour;
+        ctx.fillText(t, tx, y);
+      }
+    });
+    ctx.restore();
+  }));
 }
 
 function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect) {

@@ -12,7 +12,10 @@ import { SCREEN_H } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
 import { PNG_PREFIX } from '../crosshair/model';
 import { _setImageFactory, _resetAssetCache, childRects, DEFAULT_PREVIEW, type PreviewState } from './render';
-import { canvasFont } from './fonts';
+import { canvasFont, fontCell } from './fonts';
+
+/** The RichText's top inset measured in b2-e (see mock.ts CHAT_INSET). */
+const CHAT_INSET_Y_PX = 1.5;
 
 /**
  * A minimal stand-in for CanvasRenderingContext2D: happy-dom has no real
@@ -307,6 +310,65 @@ describe('drawHud delegates panels to the renderer', () => {
     });
   });
 
+  describe('the chat', () => {
+    /** drawHud on the survivor side at 1920 x 1080, recording every call with its fill and font. */
+    function chatCalls(design: HudDesign) {
+      const calls: { m: string; a: unknown[]; fill: string; font: string }[] = [];
+      const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+      base.measureText = (t: string) => ({ width: t.length * 10 });
+      const ctx = new Proxy(base, {
+        get: (t, k) => (typeof t[k] === 'function'
+          ? (...a: unknown[]) => { calls.push({ m: String(k), a, fill: String(t.fillStyle), font: String(t.font) }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+          : t[k]),
+        set: (t, k, v) => { t[k] = v; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      drawHud(ctx, 1920, 1080, design, 'survivor', null);
+      return calls;
+    }
+    const CHAT_TEXT = ['Zoey : ', 'watch the closet', 'Francis : ', 'got it'];
+    /** The chat's own calls: from its clip (the element's rect) to the texts it draws. */
+    const chatTexts = <T extends { m: string; a: unknown[] }>(calls: T[]) => calls.filter((c) => c.m === 'fillText' && CHAT_TEXT.includes(c.a[0] as string));
+
+    it('draws the closed chat: the history lines only, no box (probe B2 e)', () => {
+      // /home/volence/l4d/hud/probe-phase2/b2/shots/b2/b2-e.png: "Mal : probe" with its ink from x 53, y 663 px, the
+      // name in 139 183 221 and the text in 210 200 152, a black drop shadow, nothing behind it. paintChat used to
+      // fill the whole element: that is the open chat, which no probe has shot.
+      const calls = chatCalls(DEFAULT_DESIGN);
+      const r = elementRect(DEFAULT_DESIGN, 'chat', DEFAULT_DESIGN.aspect);
+      const px = { x: r.x * 2.25, y: r.y * 2.25, w: r.w * 2.25, h: r.h * 2.25 };
+      const inChat = (c: { a: unknown[] }) => (c.a[0] as number) >= px.x && (c.a[0] as number) < px.x + px.w && (c.a[1] as number) >= px.y && (c.a[1] as number) < px.y + px.h;
+      expect(calls.filter((c) => c.m === 'fillRect' && inChat(c))).toEqual([]);
+      const texts = chatTexts(calls);
+      // Each piece twice: its shadow, then itself.
+      expect(texts.map((c) => c.a[0])).toEqual(['Zoey : ', 'Zoey : ', 'watch the closet', 'watch the closet', 'Francis : ', 'Francis : ', 'got it', 'got it']);
+      expect(texts.map((c) => c.fill)).toEqual(['rgba(0,0,0,1)', 'rgba(139,183,221,1)', 'rgba(0,0,0,1)', 'rgba(210,200,152,1)', 'rgba(0,0,0,1)', 'rgba(139,183,221,1)', 'rgba(0,0,0,1)', 'rgba(210,200,152,1)']);
+      const name = texts[1];
+      // The history's left (element x 10 + history xpos 10 = 20 units, 45 px) plus the RichText's 3-unit inset.
+      expect(name.a[1] as number).toBeCloseTo(23 * 2.25, 6);
+      // The shadow one pixel right and down.
+      expect(texts[0].a[1] as number).toBeCloseTo((name.a[1] as number) + 1, 6);
+      expect(texts[0].a[2] as number).toBeCloseTo((name.a[2] as number) + 1, 6);
+      // The message follows the name, measured.
+      expect(texts[3].a[1] as number).toBeCloseTo((name.a[1] as number) + 'Zoey : '.length * 10, 6);
+      // ChatFont's 1024 to 1199 line entry: Tahoma 20 pixels at 1080, not scaled by the HUD's units.
+      expect(name.font).toBe(canvasFont('Tahoma', 700, 20));
+      // The second line one cell lower.
+      expect((texts[5].a[2] as number) - (name.a[2] as number)).toBeCloseTo(20, 6);
+    });
+
+    it('puts the lines at the top of the moved and resized history', () => {
+      const d = { ...structuredClone(DEFAULT_DESIGN), elements: { chat: { x: 500, y: 20, w: 300, h: 150 } } };
+      const calls = chatCalls(d);
+      const r = elementRect(d, 'chat', d.aspect);
+      const hist = kvFind(buildTrees(d)('resource/ui/basechat.res'), ['HudChatHistory'])!;
+      const hx = parseFloat(kvGet(hist, 'xpos')!), hy = parseFloat(kvGet(hist, 'ypos')!);
+      const name = chatTexts(calls)[1];
+      expect(name.a[1] as number).toBeCloseTo((r.x + hx + 3) * 2.25, 6);
+      const cellTop = (name.a[2] as number) - fontCell('Tahoma', 20).ascent;
+      expect(cellTop).toBeCloseTo((r.y + hy) * 2.25 + CHAT_INSET_Y_PX, 6);
+    });
+  });
+
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {
     _setImageFactory(instant);
     const green = artUrl('vgui/healthbar_green')!;
@@ -509,10 +571,10 @@ describe('selection chrome', () => {
     const hidden = { ...DEFAULT_DESIGN, elements: { ...DEFAULT_DESIGN.elements, chat: { visible: false } } };
     const texts: string[] = [];
     drawHud(fakeCtx(() => {}, undefined, texts), 853, 480, hidden, 'survivor', ['ownHealth', 'chat']);
-    expect(texts).toContain('Francis: got it');
+    expect(texts).toContain('got it');
     const without: string[] = [];
     drawHud(fakeCtx(() => {}, undefined, without), 853, 480, hidden, 'survivor', ['ownHealth']);
-    expect(without).not.toContain('Francis: got it');
+    expect(without).not.toContain('got it');
   });
 });
 
