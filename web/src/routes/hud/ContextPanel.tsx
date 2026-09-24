@@ -337,6 +337,8 @@ export function ElementControls(
       {id === 'xhair' && <CrosshairControls design={design} edit={edit} selected />}
 
       {id === 'siHealth' && <p class="muted hud__note">{siHealthNote(preview.siClass)}</p>}
+      {/* Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md): the Smoker, Boomer and Tank spawn ready. */}
+      {id === 'abilityRing' && <p class="muted hud__note">Hunter: charging while standing, ready while crouched.</p>}
 
       {el.move && !free && (
         <div class="hud__row2">

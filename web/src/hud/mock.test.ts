@@ -11,7 +11,7 @@ import { kvFind, kvGet } from './kv';
 import { SCREEN_H } from './units';
 import { DEFAULT_STATE, PX_AT_1080 } from '../crosshair/draw';
 import { PNG_PREFIX } from '../crosshair/model';
-import { _setImageFactory, _resetAssetCache, childRects, DEFAULT_PREVIEW, type PreviewState } from './render';
+import { _setImageFactory, _setCanvasFactory, _resetAssetCache, childRects, DEFAULT_PREVIEW, type PreviewState } from './render';
 import { canvasFont, fontCell } from './fonts';
 
 /** The RichText's top inset measured in b2-e (see mock.ts CHAT_INSET). */
@@ -470,7 +470,7 @@ describe('drawHud delegates panels to the renderer', () => {
     /** The draws of one material's art, whether drawn straight or through a tinted copy (render.ts's tinted keeps no src). */
     const drawsOf = (calls: { m: string; a: unknown[] }[], material: string) => calls.filter((c) => c.m === 'drawImage' && src(c) === artUrl(material));
 
-    it('draws AbilityTimerHud.res: the splat, the class icon, and no meter while ready (probe B3 b)', () => {
+    it('draws AbilityTimerHud.res: the splat, the class icon, and the whole meter while ready (probe B3 b, Q15)', () => {
       // /home/volence/l4d/hud/probe-phase2/b3/shots-rerun/b3-rerun/b3-b.png: the black pz_charge_bg splat behind,
       // the Hunter's pz_charge_lunge (its red rings are in the texture) centred at (1847, 899), no orange meter.
       const r = elementRect(DEFAULT_DESIGN, 'abilityRing', DEFAULT_DESIGN.aspect);
@@ -484,7 +484,9 @@ describe('drawHud delegates panels to the renderer', () => {
       const [icon] = drawsOf(calls, 'vgui/hud/pz_charge_lunge');
       expect(icon.a.slice(1)).toEqual([(r.x + 10) * K, (r.y + 10) * K, 60 * K, 60 * K]);
       expect(calls.indexOf(bg)).toBeLessThan(calls.indexOf(icon));
-      expect(drawsOf(calls, 'vgui/hud/pz_charge_meter')).toEqual([]);
+      // Ready, the meter is whole: b10/shots/crops/ring-e.png (the 30 x 30 meter lit all round, R 203).
+      const [meter] = drawsOf(calls, 'vgui/hud/pz_charge_meter');
+      expect(meter.a.slice(1)).toEqual([(r.x + 10) * K, (r.y + 10) * K, 60 * K, 60 * K]);
       const inRing = (c: { m: string; a: unknown[] }) => c.m === 'arc' && (c.a[0] as number) > r.x * K && (c.a[0] as number) < (r.x + 80) * K
         && (c.a[1] as number) > r.y * K && (c.a[1] as number) < (r.y + 80) * K;
       expect(calls.some(inRing)).toBe(false);                          // the old stand-in's white arcs are gone
@@ -500,14 +502,56 @@ describe('drawHud delegates panels to the renderer', () => {
       }
     });
 
-    it('draws the meter over the icon while charging, cut to its sweep', () => {
+    it('draws the meter over the icon while charging, lit from 12 o\'clock counter-clockwise for 0.4 of the turn', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/progress-f-zoom.png: 1.3 s into a 3 s
+      // Smoker cooldown the lit arc runs from 12 o'clock down the left side.
       const r = elementRect(DEFAULT_DESIGN, 'abilityRing', DEFAULT_DESIGN.aspect);
       const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, ability: 'charging' });
       const [meter] = drawsOf(calls, 'vgui/hud/pz_charge_meter');
       expect(meter.a.slice(1)).toEqual([(r.x + 10) * K, (r.y + 10) * K, 60 * K, 60 * K]);
       const arc = calls.find((c) => c.m === 'arc' && Math.abs((c.a[0] as number) - (r.x + 40) * K) < 1e-9)!;
       expect(arc.a[3]).toBeCloseTo(-Math.PI / 2, 9);
-      expect(arc.a[4]).toBeCloseTo(-Math.PI / 2 + 0.6 * 2 * Math.PI, 9);
+      expect(arc.a[4]).toBeCloseTo(-Math.PI / 2 - 0.4 * 2 * Math.PI, 9);
+      expect(arc.a[5]).toBe(true);                                      // anticlockwise
+      expect(calls.indexOf(arc)).toBeLessThan(calls.indexOf(meter));
+    });
+
+    it('tints the icon, the backdrop and the meter alike by the state\'s colour (probe Q15)', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png (magenta ready, cyan charging on
+      // the icon and the ring art) and b10/shots/crops/ring-all.png (meter R 203 ready, R 101 charging with the
+      // stock 127 grey): all three pieces take the state colour.
+      const d = validateDesign({ v: 1, elements: { abilityRing: { keys: { ability_ready_color: '255 0 255 255', ability_charging_color: '0 255 255 255' } } } });
+      const tints = (state: PreviewState) => {
+        const made = new Map<unknown, { src: string; fill: string }>();
+        _setCanvasFactory(() => {
+          const entry = { src: '', fill: '' };
+          const t = {
+            globalCompositeOperation: 'source-over', fillStyle: '',
+            drawImage: (img: { src?: string }) => { if (!entry.src) entry.src = img.src ?? ''; },
+            fillRect: () => { if (t.globalCompositeOperation === 'multiply') entry.fill = String(t.fillStyle); },
+          };
+          const c = { width: 1, height: 1, getContext: () => t } as unknown as HTMLCanvasElement;
+          made.set(c, entry);
+          return c;
+        });
+        try {
+          const calls = ringCalls(d, state);
+          const ring = new Set(['pz_charge_bg', 'pz_charge_lunge', 'pz_charge_meter'].map((m) => artUrl(`vgui/hud/${m}`)));
+          return calls.filter((c) => c.m === 'drawImage' && made.has(c.a[0])).map((c) => made.get(c.a[0])!)
+            .filter((e) => ring.has(e.src)).map((e) => `${e.src.split('/').pop()} ${e.fill}`).sort();
+        } finally { _setCanvasFactory(null); }
+      };
+      const names = (fill: string) => ['pz_charge_bg', 'pz_charge_lunge', 'pz_charge_meter'].map((m) => `${artUrl(`vgui/hud/${m}`)!.split('/').pop()} ${fill}`).sort();
+      expect(tints(DEFAULT_PREVIEW)).toEqual(names('rgb(255,0,255)'));
+      expect(tints({ ...DEFAULT_PREVIEW, ability: 'charging' })).toEqual(names('rgb(0,255,255)'));
+    });
+
+    it('draws nothing while you are a ghost or dead: the game shows it only on a spawned infected', () => {
+      // /home/volence/l4d/hud/probe-phase2-infected/b9/shots/b9/b9-a.png (ghost), b9-e.png (dead).
+      for (const infected of ['ghost', 'dead'] as const) {
+        const calls = ringCalls(DEFAULT_DESIGN, { ...DEFAULT_PREVIEW, infected });
+        for (const m of ['pz_charge_bg', 'pz_charge_lunge', 'pz_charge_meter']) expect(drawsOf(calls, `vgui/hud/${m}`), `${infected} ${m}`).toEqual([]);
+      }
     });
 
     it('draws no splat on Modern, whose file hides BackgroundImage', () => {

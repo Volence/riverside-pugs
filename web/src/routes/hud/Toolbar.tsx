@@ -30,6 +30,11 @@ const INFECTED_STATES: { key: PreviewState['infected']; label: string }[] = [
   { key: 'alive', label: 'Alive' }, { key: 'ghost', label: 'Ghost' }, { key: 'dead', label: 'Dead' },
 ];
 
+/** The ability timer's state: the game tints it by the matching colour, and fills the meter while charging. */
+const ABILITY_STATES: { key: PreviewState['ability']; label: string }[] = [
+  { key: 'ready', label: 'Ready' }, { key: 'charging', label: 'Charging' },
+];
+
 /** What the preview survivor holds: the game moves the weapon numbers when this changes. */
 const HELD: { key: WeaponHeld; label: string }[] = [
   { key: 'primary', label: 'Gun' }, { key: 'pistol', label: 'Pistol' }, { key: 'item', label: 'Item' },
@@ -107,6 +112,12 @@ export function Toolbar(p: ToolbarProps) {
         <Tabs
           label="Infected state" tabs={INFECTED_STATES} active={p.preview.infected}
           onSelect={(k) => p.onPreview({ ...p.preview, infected: k as PreviewState['infected'] })}
+        />
+      )}
+      {p.side === 'infected' && (
+        <Tabs
+          label="Ability" tabs={ABILITY_STATES} active={p.preview.ability}
+          onSelect={(k) => p.onPreview({ ...p.preview, ability: k as PreviewState['ability'] })}
         />
       )}
       {/* Crouching is shown alongside any state: the game draws the crouch icon whatever the health, on both sides. */}

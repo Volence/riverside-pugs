@@ -573,36 +573,42 @@ const ABILITY = 'resource/ui/hud/abilitytimerhud.res';
 const ABILITY_ICON: Record<PreviewState['siClass'], string> = {
   hunter: 'vgui/hud/pz_charge_lunge', smoker: 'vgui/hud/pz_charge_smoker', boomer: 'vgui/hud/pz_charge_boomer', tank: 'vgui/hud/pz_charge_tank',
 };
-/** The charging sample: the meter's share of its sweep (spec 3.3; no probe has shot a charging meter yet). */
-const ABILITY_CHARGE = 0.6;
+/**
+ * The charging sample: the meter's lit share of its turn. Probe Q15 caught
+ * a Smoker 1.3 s into a 3 s cooldown lit about 0.42 of the way round
+ * (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/progress-f-zoom.png).
+ */
+const ABILITY_CHARGE = 0.4;
 
 /**
  * The ability timer drawn from its file (AbilityTimerHud.res through
  * buildTrees), each child at the element's origin plus its own rect, in zpos
- * order: BackgroundImage with pz_charge_bg (code sets it: the file names no
- * image), AbilityImage with the class's icon, Progress with its fg_image,
+ * order: BackgroundImage with pz_charge_bg (code sets it over the file's
+ * image, probe Q14, /home/volence/l4d/hud/probe-phase2-infected/b9/shots/crops/br-bcd.png),
+ * AbilityImage with the class's icon, Progress with its fg_image,
  * pz_charge_meter. Measured in probe-phase2/b3/shots-rerun/b3-rerun/b3-b.png:
- * the black splat behind, the icon's red rings (part of the texture) from
- * x 1782 to 1912 and y 834 to 964 px, centred at (1847, 899), the centre of
- * the 80 x 80 background, not of the 80 x 70 element.
+ * the icon's red rings (part of the texture) centred at (1847, 899), the
+ * centre of the 80 x 80 background, not of the 80 x 70 element.
  *
- * Code tints AbilityImage, rings and all, by the state colour in
- * hudlayout.res: the rings are 206 0 0 in the texture and 101 0 0 in every
- * B3 and B13 shot, the icon 128 grey: 127/255, the surpressed and charging
- * colour, so those shots were a standing Hunter, not a crouched one. The
- * preview's Ready draws ability_ready_color and Charging
- * ability_charging_color; which state lights which piece is probe Q15's to
- * settle. No shot has shown the meter (b3-c, 0.8 s after a pounce, shows
- * none), so Ready draws none and Charging draws it cut to a pie wedge from
- * 12 o'clock clockwise (the spec's guess, pending Q15). Modern hides
- * BackgroundImage (0 x 0, visible 0), so its ring has no splat, as its file
- * says. Clipped to the element, as VGUI clips a panel's children: the
- * background's bottom 10 units fall outside the 70-tall element. The shots
- * cannot show whether the game cuts them, because the SI health splat lies
- * under that strip.
+ * Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md):
+ * - the state colour tints all three pieces: the icon (magenta ready, cyan
+ *   charging in b9/shots/crops/br-bcd.png), the backdrop's ring art, and the
+ *   meter (b10/shots/crops/ring-all.png: R 203 ready, R 101 charging with
+ *   the stock 127 grey);
+ * - ready, the meter is whole; charging, it is lit from 12 o'clock
+ *   counter-clockwise for the charged share (progress-f-zoom.png; a
+ *   clockwise drain would draw the same shape, so this is exact either way);
+ * - the ring shows only on a spawned infected: none as a ghost (b9-a) or
+ *   dead (b9-e).
+ * A Hunter is charging while standing and ready while crouched; the Smoker,
+ * Boomer and Tank spawn ready. Modern hides BackgroundImage (0 x 0, visible
+ * 0), so its ring has no splat, as its file says. Clipped to the element,
+ * as VGUI clips a panel's children: the background's bottom 10 units fall
+ * outside the 70-tall element.
  */
 function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void, view: HudView = {}) {
   const state = previewOf(view.state);
+  if (state.infected !== 'alive') return;
   const trees = buildTrees(design);
   const layout = kvFind(trees('scripts/hudlayout.res'), ['CHudAbilityTimer']);
   const colourKey = state.ability === 'charging' ? 'ability_charging_color' : 'ability_ready_color';
@@ -610,6 +616,16 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
   const kids = trees(ABILITY).filter((n) => typeof n.value !== 'string')
     .map((n, i) => ({ n, i, z: parseFloat(pcGet(n, 'zpos') ?? '0') || 0 }))
     .sort((a, b) => a.z - b.z || a.i - b.i);
+  /** One piece's art, tinted by the state colour at its alpha, stretched to its box. */
+  const paint = (material: string, box: Rect) => {
+    const img = artImage(material, onAsset);
+    if (!img) return;
+    ctx.save();
+    ctx.globalAlpha *= ta / 255;
+    const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
+    ctx.drawImage(src, box.x, box.y, box.w, box.h);
+    ctx.restore();
+  };
   clipToRect(ctx, r, () => {
     for (const { n } of kids) {
       if (pcGet(n, 'visible') === '0') continue;
@@ -617,29 +633,19 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
       if (!(w > 0 && h > 0)) continue;
       const box = { x: r.x + parseFloat(pcGet(n, 'xpos') ?? '0') * k, y: r.y + parseFloat(pcGet(n, 'ypos') ?? '0') * k, w: w * k, h: h * k };
       const name = n.key.toLowerCase();
-      if (name === 'backgroundimage') {
-        const img = artImage('vgui/hud/pz_charge_bg', onAsset);
-        if (img) ctx.drawImage(img, box.x, box.y, box.w, box.h);
-      } else if (name === 'abilityimage') {
-        const material = ABILITY_ICON[state.siClass];
-        const img = artImage(material, onAsset);
-        if (!img) continue;
-        ctx.save();
-        ctx.globalAlpha *= ta / 255;
-        const src = tr < 255 || tg < 255 || tb < 255 ? tinted(img, material, tr, tg, tb) : img;
-        ctx.drawImage(src, box.x, box.y, box.w, box.h);
-        ctx.restore();
-      } else if (name === 'progress' && state.ability === 'charging') {
-        const img = artImage(normaliseMaterial(pcGet(n, 'fg_image') ?? 'HUD/PZ_charge_meter'), onAsset);
-        if (!img) continue;
+      if (name === 'backgroundimage') paint('vgui/hud/pz_charge_bg', box);
+      else if (name === 'abilityimage') paint(ABILITY_ICON[state.siClass], box);
+      else if (name === 'progress') {
+        const material = normaliseMaterial(pcGet(n, 'fg_image') ?? 'HUD/PZ_charge_meter');
+        if (state.ability === 'ready') { paint(material, box); continue; }
         const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, Math.max(box.w, box.h), -Math.PI / 2, -Math.PI / 2 + ABILITY_CHARGE * 2 * Math.PI);
+        ctx.arc(cx, cy, Math.max(box.w, box.h), -Math.PI / 2, -Math.PI / 2 - ABILITY_CHARGE * 2 * Math.PI, true);
         ctx.closePath();
         ctx.clip();
-        ctx.drawImage(img, box.x, box.y, box.w, box.h);
+        paint(material, box);
         ctx.restore();
       }
     }

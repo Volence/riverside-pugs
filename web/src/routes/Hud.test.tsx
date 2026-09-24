@@ -2406,4 +2406,16 @@ describe('The ability timer on the page', () => {
     await waitFor(() => expect(saved().elements?.abilityRing?.keys).toBeUndefined());
     for (const label of ['Backdrop', 'Class icon', 'Recharge meter']) expect(layer('Ability timer').getByRole('button', { name: label }), label).toBeTruthy();
   });
+
+  it('previews Ready or Charging, and says when a Hunter is which', () => {
+    // Probe Q15 (/home/volence/l4d/hud/probe-phase2-infected/RESULTS.md): Hunter standing = charging, crouched = ready.
+    render(<Hud />);
+    expect(screen.queryByRole('tab', { name: 'Ready' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Infected' }));
+    expect(screen.getByRole('tab', { name: 'Ready' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Charging' }));
+    expect(screen.getByRole('tab', { name: 'Charging' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Ability timer' }));
+    expect(screen.getByText('Hunter: charging while standing, ready while crouched.')).toBeTruthy();
+  });
 });
