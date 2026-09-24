@@ -20,6 +20,13 @@ describe('readHudUpload', () => {
     expect(got.dropped).toEqual([]);
   });
 
+  it('names a renamed .vpk after what comes before its .vpk, not the letters of every extension run together', async () => {
+    const files = sampleHud();
+    expect((await readHudUpload('my_hud.vpk.orig', vpkOf(files))).name).toBe('my_hud');
+    expect((await readHudUpload('pak01_dir.vpk.bak', vpkOf(files))).name).toBe('pak01');
+    expect((await readHudUpload('edgehud.zip.1', vpkOf(files))).name).toBe('edgehud');
+  });
+
   it('finds the HUD folder nested inside a zip, lower-casing every path, and is named after it', async () => {
     const files = sampleHud();
     const got = await readHudUpload('download (3).zip', await zipOf(under('Edge HUD v2/EdgeHUD/', files)));

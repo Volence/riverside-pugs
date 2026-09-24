@@ -89,9 +89,15 @@ function hudRoot(paths: string[]): string | null {
   return roots[0] ?? null;
 }
 
+/**
+ * The name an import shows: its HUD folder's, or else the file's without
+ * its .vpk or .zip. A renamed copy keeps what came after (my_hud.vpk.orig,
+ * edgehud.zip.1), so everything from the .vpk or .zip on is dropped;
+ * safeName would otherwise run the extensions into the name (my_hudvpkorig).
+ */
 const nameOf = (fileName: string, root: string) => {
   const folder = root.replace(/\/$/, '').split('/').pop();
-  const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(vpk|zip)$/i, '').replace(/_dir$/i, '');
+  const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(vpk|zip)(\.[^.]*)*$/i, '').replace(/_dir$/i, '');
   return safeName(folder || base);
 };
 
