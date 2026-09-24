@@ -953,7 +953,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // (Riverside #3 and #4 share one IP, see resolveServerBySource).
             recordBalanceSighting(deps.db, {
               matchId: m.id, serverId: m.server_id ?? serverOf(source, meta), half: ev.half,
-              inventory: inv, versionless: balanceKnobs.versionless,
+              inventory: inv, versionless: balanceKnobs.versionless, ignored: balanceKnobs.ignored,
             });
             return;
           }

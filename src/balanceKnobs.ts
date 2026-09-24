@@ -6,6 +6,9 @@ export interface BalanceKnobs {
   files: { path: string; label: string }[];
   dirs: { path: string; ext: string; label: string }[];
   versionless: string[];
+  /** Plugins that are not balance at all and get loaded and unloaded around a
+   *  match, so their presence is noise. Dropped from the inventory entirely. */
+  ignored?: string[];
 }
 
 export const BALANCE_KNOBS_PATH = fileURLToPath(new URL('../balance/knobs.json', import.meta.url));
@@ -22,6 +25,7 @@ export function loadBalanceKnobs(path: string = BALANCE_KNOBS_PATH, raw?: unknow
   if (!Array.isArray(k.files)) throw new Error('balance knobs: files must be an array');
   if (!Array.isArray(k.dirs)) throw new Error('balance knobs: dirs must be an array');
   if (!Array.isArray(k.versionless)) throw new Error('balance knobs: versionless must be an array');
+  if (k.ignored !== undefined && !Array.isArray(k.ignored)) throw new Error('balance knobs: ignored must be an array');
   for (const c of k.cvars) if (!CVAR_RE.test(c.cvar)) throw new Error(`bad cvar name: ${c.cvar}`);
   for (const f of k.files) if (!PATH_RE.test(f.path)) throw new Error(`bad file path: ${f.path}`);
   for (const d of k.dirs) {
