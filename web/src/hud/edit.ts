@@ -141,6 +141,27 @@ export function hasOverrides(d: HudDesign, saved: CrosshairArt | null): boolean 
     || d.advanced !== DEFAULT_DESIGN.advanced;
 }
 
+/**
+ * "Reset to game default": the game's own HUD, untouched. Unlike a new
+ * design (DEFAULT_DESIGN), nothing is fitted: every field is the one that
+ * leaves the game's files alone, so the download writes no HUD file at all
+ * (build.ts Work.files skips a stock file no edit changed). The crosshair
+ * goes back to the game's own and its art is dropped with it; Undo brings it
+ * back. Two fields stay: the name, which is only the file's, and the aspect,
+ * which is the player's screen and changes nothing in an untouched build.
+ */
+export function gameDefault(d: HudDesign): HudDesign {
+  return {
+    v: 1, name: d.name, preset: 'stock', advanced: false, aspect: d.aspect, font: 'preset', crosshair: 'none',
+    elements: {}, styles: {}, images: {}, children: {},
+  };
+}
+
+/** Whether a design is exactly the game default, whatever its name and aspect. */
+export function isGameDefault(d: HudDesign): boolean {
+  return JSON.stringify({ ...d, name: '', aspect: '16:9' }) === JSON.stringify(gameDefault({ ...d, name: '', aspect: '16:9' }));
+}
+
 /** "Reset this element": back to what a fresh design has for it, which for
  *  the teammates is a fitted card with no inside edits, not nothing. */
 export function resetElement(d: HudDesign, id: string): HudDesign {

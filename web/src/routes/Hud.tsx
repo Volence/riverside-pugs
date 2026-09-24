@@ -33,7 +33,7 @@ import {
   moveElements, moveCards, cardStarts, freeInPlace, moveChildren, startsOf, nudgeSelection,
   resizeBox, resizeElement, scaleElement, resizeChild, scaleChildren, cornerFactor, anchorOf,
   setSelectionVisible, patchChild, hideSelection, resetSelection, raiseChild,
-  patchSplatter, withSplatterImage, resetSplatter, splatterKind,
+  patchSplatter, withSplatterImage, resetSplatter, splatterKind, gameDefault, isGameDefault,
 } from '../hud/edit';
 import { snapMove, snapEdges, unionBox, type Guide, type Snap, type Handle } from '../hud/guides';
 import {
@@ -192,6 +192,10 @@ const TOO_BIG = 'This design is too big for this browser to keep. Remove an uplo
 /** Said on the status line when the Crosshair page's button brings its crosshair in. */
 const FROM_PAGE = 'Your crosshair from the Crosshair page is in this HUD now, and goes into its download.';
 /** Said on the status line when a stored 'bundle' choice loses its crosshair, below. */
+/** Said on the status line after Reset to game default. */
+const RESET_DONE = "This design is the game's own HUD now, with nothing changed. Undo brings back your design.";
+/** Added to the download's status line when the file holds no HUD file. */
+const GAME_OWN = "This is the game's own HUD; you don't need to install anything. The file holds only its name, so it just replaces an older HUD file of the same name.";
 const BUNDLE_LOST = "This design's crosshair is no longer saved on this browser, so it now uses the game default. Choose Custom to make one.";
 
 /** The selection's path at the canvas corner. Each ancestor is a button that selects its level; the last is where you are. */
@@ -1156,6 +1160,10 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       // an out-of-range or non-finite number into a shipped .res file.
       const report: BuildReport = { replaced: [] };
       const p = packHud(validateDesign({ ...design, name: safeName(design.name) }), assets, report);
+      // A design that changes nothing (Reset to game default) packs no HUD
+      // file, only addoninfo.txt: the game's own HUD needs no addon. It still
+      // downloads, since a file of the same name replaces an older one.
+      const nothing = p.files.every((f) => f === 'addoninfo.txt') ? ` ${GAME_OWN}` : '';
       const blob = new Blob([p.bytes], { type: p.mime });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1168,7 +1176,7 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
       // files the editor wrote over, and what the import left out.
       const replaced = report.replaced.length ? ` The editor's own copies replaced these files from your HUD: ${report.replaced.join(', ')}.` : '';
       const dropped = imp ? imports.find((m) => m.id === imp.id)?.dropped ?? [] : [];
-      setStatus(`Saved ${p.filename}.${replaced}${leftOut(dropped, 'Left out when it was imported')}`);
+      setStatus(`Saved ${p.filename}.${nothing}${replaced}${leftOut(dropped, 'Left out when it was imported')}`);
     } catch (err) {
       // The generator's own errors name the file and panel that broke, which
       // is exactly what is needed to file a useful bug report.
@@ -1198,6 +1206,30 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+
+  /**
+   * Reset to game default: every edit goes and the design becomes the game's
+   * own HUD (edit.ts gameDefault), asked first, one step for Undo. It lives
+   * in Save your HUD beside Export, far from the toolbar and the canvas,
+   * so a stray click cannot reach it, and Export is right there to keep a
+   * copy first. A locked design (an import this browser lacks) can use it
+   * too: it is a way out.
+   */
+  const resetToGame = async () => {
+    const ok = await confirm({
+      title: "Reset to the game's own HUD?",
+      body: 'Every change in this design goes: layout, sizes, styles, pictures, splatters, weapons, notices and the crosshair. '
+        + 'The name stays. Undo brings it all back.',
+      confirmLabel: 'Reset', cancelLabel: 'Keep my design', danger: true,
+    });
+    if (!ok) return;
+    letGoOfDrag();
+    endGesture();
+    edit(gameDefault);
+    setSel(NONE);
+    setUploadErrors({});
+    setStatus(RESET_DONE);
   };
 
   const importDesign = async (e: Event) => {
@@ -1417,6 +1449,12 @@ export default function Hud({ session = { kind: 'anonymous' } }: { session?: Ses
               onChange={(e) => { void importDesign(e); }}
             />
           </label>
+          <button
+            type="button" class="btn btn--ghost btn--sm" style={{ marginLeft: 'auto' }}
+            disabled={isGameDefault(design)}
+            title={isGameDefault(design) ? "This design is already the game's own HUD." : "Clear every edit and start from the game's own HUD"}
+            onClick={() => { void resetToGame(); }}
+          >Reset to game default</button>
         </div>
 
         {tooBig && <p class="muted hud__status">{TOO_BIG}</p>}
