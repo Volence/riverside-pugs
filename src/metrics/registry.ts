@@ -9,6 +9,9 @@ import { defs as weapons } from './defs/weapons.js';
 
 export const METRICS: MetricDef[] = [...outcomes, ...pace, ...tank, ...witch, ...si, ...weapons];
 
+/** The metrics shown on the public patch notes page. */
+export const PUBLIC_METRICS: MetricDef[] = METRICS.filter((m) => m.public);
+
 /** Changes whenever a metric is added, removed or has its version bumped; the
  *  job recomputes every round whose stored engine differs. */
 export const ENGINE = METRICS.map((m) => `${m.id}:${m.version}`).sort().join(',');

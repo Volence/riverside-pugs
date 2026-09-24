@@ -73,6 +73,9 @@ export interface MetricDef {
   group: MetricGroup;
   /** Plain English, shown on the dashboard and later the public page. */
   description: string;
+  /** Shown on the public patch notes page under this label. Absent means
+   *  admin only. See docs/superpowers/specs/2026-09-24-balance-public-page-design.md. */
+  public?: { label: string };
   version: number;
   compute(c: RoundCtx): MetricOut | null;
 }
