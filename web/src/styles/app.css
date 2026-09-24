@@ -2499,6 +2499,8 @@ tbody tr.is-lifted td { opacity: 0.55; }
   font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--text-muted);
 }
+/* A profile's Shared panel: compact cards, as many to a row as fit. */
+.profile-shared__cards { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); }
 /* The Share to community dialog: the confirm modal's panel, a little wider for the preview. */
 .share { width: min(40rem, 100%); }
 .share__form { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
