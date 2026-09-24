@@ -113,6 +113,7 @@ export function publicChanges(prevRaw: Record<string, string>, curRaw: Record<st
     } else if (kind === 'f:' || kind === 'd:') {
       out.files.push(pathLabel.get(name) ?? name);
     }
+    // Any other prefix is dropped on purpose (e.g. `x:<cvar>=missing` markers; the plugin change itself is listed).
   }
   out.knobs.sort((x, y) => byLabel(x.label, y.label));
   for (const l of [out.pluginsAdded, out.pluginsRemoved, out.pluginsUpdated, out.files]) l.sort(byLabel);
@@ -130,9 +131,12 @@ export interface PublicEntry extends PublicPatch {
   previous: { id: number; name: string } | null;
   status: 'compared' | 'first' | 'no_rounds';
   changes: PublicChanges | null;
-  /** Why `changes` is null: this patch is historical, the baseline has no recorded
-   *  inputs, or there is no baseline. */
-  changesUnavailable: 'historical' | 'previous_unrecorded' | 'first' | null;
+  /** Why `changes` is null: this patch is historical, this patch or the baseline
+   *  has no recorded inputs, or there is no baseline. */
+  changesUnavailable: 'historical' | 'unrecorded' | 'previous_unrecorded' | 'first' | null;
+  /** The newest patch in the public timeline (a preview counts itself as
+   *  published), or a patch some server is running right now. */
+  live: boolean;
   effect: {
     a: { matches: number; rounds: number }; b: { matches: number; rounds: number };
     skill: 'differs' | 'unavailable' | null; approximate: boolean; rows: PublicRow[];
@@ -172,7 +176,8 @@ export function publicEntry(db: DB, id: number, opts: { knobs: KnobLabels | null
   };
   let changes: PublicChanges | null = null;
   let changesUnavailable: PublicEntry['changesUnavailable'] = null;
-  if (self.source === 'historical' || !self.hasInputs) changesUnavailable = base ? 'historical' : 'first';
+  if (self.source === 'historical') changesUnavailable = base ? 'historical' : 'first';
+  else if (!self.hasInputs) changesUnavailable = base ? 'unrecorded' : 'first';
   else if (!base) changesUnavailable = 'first';
   else {
     const prev = inputsOf(base.id), cur = inputsOf(id);
@@ -205,5 +210,7 @@ export function publicEntry(db: DB, id: number, opts: { knobs: KnobLabels | null
       approximate: r.banners.approximate, rows,
     };
   }
-  return { ...strip(self), previous: base ? { id: base.id, name: base.name } : null, status, changes, changesUnavailable, effect };
+  const live = line[line.length - 1].id === id
+    || db.prepare('SELECT 1 FROM balance_server_state WHERE patch_id = ? LIMIT 1').get(id) !== undefined;
+  return { ...strip(self), live, previous: base ? { id: base.id, name: base.name } : null, status, changes, changesUnavailable, effect };
 }
