@@ -297,11 +297,13 @@ export function weaponSlots(design: HudDesign, aspect: Aspect, panelWide: number
  * CHudTexture::DrawSelfScalableCorners: the texture's 16-texel corners drawn
  * `corner` pixels square, its edges stretched between them, its middle
  * stretched to fill, so a box of any size keeps round corners and an even rim.
+ * A ScalableImagePanel draws the same way with its own src_corner (texels),
+ * which the kill notice box passes (mock.ts).
  */
-function drawNineSlice(ctx: CanvasRenderingContext2D, img: CanvasImageSource, tw: number, th: number,
-  x: number, y: number, w: number, h: number, corner: number) {
-  const sx = [0, SRC_CORNER, tw - SRC_CORNER], sw = [SRC_CORNER, tw - 2 * SRC_CORNER, SRC_CORNER];
-  const sy = [0, SRC_CORNER, th - SRC_CORNER], sh = [SRC_CORNER, th - 2 * SRC_CORNER, SRC_CORNER];
+export function drawNineSlice(ctx: CanvasRenderingContext2D, img: CanvasImageSource, tw: number, th: number,
+  x: number, y: number, w: number, h: number, corner: number, src = SRC_CORNER) {
+  const sx = [0, src, tw - src], sw = [src, tw - 2 * src, src];
+  const sy = [0, src, th - src], sh = [src, th - 2 * src, src];
   const dx = [x, x + corner, x + w - corner], dw = [corner, w - 2 * corner, corner];
   const dy = [y, y + corner, y + h - corner], dh = [corner, h - 2 * corner, corner];
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) ctx.drawImage(img, sx[c], sy[r], sw[c], sh[r], dx[c], dy[r], dw[c], dh[r]);

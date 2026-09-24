@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { visibleElements, hitTest, drawHud, childAt, panelBoxes, TEAM_CARDS } from './mock';
 import { selectionFrames, TEAMMATES } from './selection';
 import { withTeamDir } from './edit';
-import { DEFAULT_DESIGN, type HudDesign } from './design';
+import { DEFAULT_DESIGN, validateDesign, type HudDesign } from './design';
+import { baseFile, registerImport, unregisterImport } from './base';
+import { sampleHud } from './importFixtures';
 import { artUrl } from './art';
 import { buildTrees, elementRect, teamCardRects } from './build';
 import { kvFind, kvGet } from './kv';
@@ -218,30 +220,91 @@ describe('drawHud delegates panels to the renderer', () => {
     expect(fills).not.toContain('rgba(210,190,60,0.85)');
   });
 
-  it('draws the kill/incap sample lines right-aligned, clipped to the element, first row red', () => {
-    // The base files leave every recordlabel blank (game code fills them in),
-    // so this is a sample only: two lines at the first two rows' own
-    // position and colour from pzdamagerecordpanel.res.
-    const rects: number[][] = [];
-    const fills: string[] = [];
-    const ctx = fakeCtx(() => {});
-    ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
-    const fonts: string[] = [];
-    const baselines: string[] = [];
-    ctx.fillText = ((s: string, _x: number, _y: number) => {
-      fills.push(`${ctx.fillStyle as string}: ${s}`);
-      if (s === 'Mal incapacitated Francis' || s === 'Bill killed a Hunter') { fonts.push(ctx.font); baselines.push(ctx.textBaseline); }
-    }) as typeof ctx.fillText;
-    drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null);
-    expect(fills).toContain('rgba(246,5,5,1): Mal incapacitated Francis');
-    expect(fills).toContain('rgba(255,255,255,1): Bill killed a Hunter');
-    const r = elementRect(DEFAULT_DESIGN, 'killNotices', DEFAULT_DESIGN.aspect);
-    // Each row's font is Default, Trade Gothic 12 tall at weight 400, drawn in
-    // that face at its cell's size (853 x 480 is one pixel to a HUD unit),
-    // from the top of its cell centred in the row.
-    expect(fonts).toEqual([canvasFont('Trade Gothic', 400, 12), canvasFont('Trade Gothic', 400, 12)]);
-    expect(baselines).toEqual(['alphabetic', 'alphabetic']);
-    expect(rects).toContainEqual([r.x, r.y, r.w, r.h]);
+  describe('the kill notices', () => {
+    const NOTICE = 'Hunter incapacitated Francis';
+    const box = () => artUrl('vgui/hud/scalablepanel_bgblack_outlinegrey')!;
+    /** drawHud at 1920 x 1080 (2.25 px to a unit), every call recorded with the fill and alignment current at the time. */
+    function killCalls(design: HudDesign) {
+      _setImageFactory((url) => ({ src: url, complete: true, naturalWidth: 128, naturalHeight: 128, onload: null, onerror: null }) as unknown as HTMLImageElement);
+      const calls: { m: string; a: unknown[]; fill: string; align: string; font: string }[] = [];
+      const base = fakeCtx(() => {}) as unknown as Record<string | symbol, unknown>;
+      // measureText: 10 px a character, so the box's width is known.
+      base.measureText = (t: string) => ({ width: t.length * 10 });
+      const ctx = new Proxy(base, {
+        get: (t, k) => (typeof t[k] === 'function'
+          ? (...a: unknown[]) => { calls.push({ m: String(k), a, fill: String(t.fillStyle), align: String(t.textAlign), font: String(t.font) }); return (t[k] as (...x: unknown[]) => unknown)(...a); }
+          : t[k]),
+        set: (t, k, v) => { t[k] = v; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      drawHud(ctx, 1920, 1080, design, 'survivor', null);
+      _setImageFactory(null);
+      return calls;
+    }
+
+    it('draws one notice at the left, in the row\'s colour and font, in the notice box, as the game does (probe B2 f)', () => {
+      // /home/volence/l4d/hud/probe-phase2/b2/shots-kill/b2-killnotice/b2-f.png: the text's first ink at x 46 px
+      // (origin 45 = element x 10 + row xpos 10, times 2.25), the box x 30 to 333 px, y 382 to 416 px (row 0's
+      // 15 units at the element's top, y 170). label_textalign west in hudlayout.res beats the rows' own east.
+      const calls = killCalls(DEFAULT_DESIGN);
+      const text = calls.filter((c) => c.m === 'fillText' && c.a[0] === NOTICE);
+      expect(text).toHaveLength(1);
+      expect(text[0].align).toBe('left');
+      expect(text[0].a[1] as number).toBeCloseTo(20 * 2.25, 6);
+      expect(text[0].fill).toBe('rgba(246,5,5,1)');
+      // Default: Trade Gothic 12 tall, at 2.25 px a unit.
+      expect(text[0].font).toBe(canvasFont('Trade Gothic', 400, 12 * 2.25));
+      // Nine-sliced (nine drawImage calls), before the text, 11 units either side of it, the file's
+      // label4background tall (25) centred on the 15-unit row: the rim (10.1 px in) lands on x 30 and y 382.
+      const slices = calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === box());
+      expect(slices).toHaveLength(9);
+      expect(calls.indexOf(slices[8])).toBeLessThan(calls.indexOf(text[0]));
+      const left = Math.min(...slices.map((c) => c.a[5] as number));
+      const right = Math.max(...slices.map((c) => (c.a[5] as number) + (c.a[7] as number)));
+      const top = Math.min(...slices.map((c) => c.a[6] as number));
+      const bottom = Math.max(...slices.map((c) => (c.a[6] as number) + (c.a[8] as number)));
+      expect(left).toBeCloseTo(45 - 11 * 2.25, 6);
+      expect(right).toBeCloseTo(45 + NOTICE.length * 10 + 11 * 2.25, 6);
+      expect(top).toBeCloseTo((170 - 5) * 2.25, 6);
+      expect(bottom).toBeCloseTo((170 + 20) * 2.25, 6);
+      // The corners: the file's draw_corner_width 8 units, cut from its src_corner_width 16 texels.
+      expect(slices[0].a.slice(1, 5)).toEqual([0, 0, 16, 16]);
+      expect(slices[0].a[7] as number).toBeCloseTo(8 * 2.25, 6);
+      expect(calls.some((c) => c.m === 'fillText' && c.a[0] === 'Bill killed a Hunter')).toBe(false);
+    });
+
+    it('follows label_textalign east and center when a HUD sets them, the box around the text', () => {
+      const ID = '7'.repeat(64);
+      const layout = baseFile('stock', 'scripts/hudlayout.res');
+      for (const [align, want] of [['east', 'right'], ['center', 'center']] as const) {
+        const id = align === 'east' ? ID : '8'.repeat(64);
+        registerImport(id, sampleHud({ 'scripts/hudlayout.res': layout.replace(/("label_textalign"\s*)"west"/, `$1"${align}"`) }));
+        try {
+          const d = validateDesign({ v: 1, preset: 'imported', imported: { id, name: 'k' }, crosshair: 'none' });
+          const calls = killCalls(d);
+          const text = calls.find((c) => c.m === 'fillText' && c.a[0] === NOTICE)!;
+          expect(text.align).toBe(want);
+          const r = elementRect(d, 'killNotices', d.aspect);
+          const row = kvFind(buildTrees(d)('resource/ui/hud/pzdamagerecordpanel.res'), ['recordlabel0'])!;
+          const wide = r.w - 40;                                          // wide f40
+          const xpos = parseFloat(kvGet(row, 'xpos')!);
+          const at = align === 'east' ? (r.x + xpos + wide) * 2.25 : (r.x + xpos + wide / 2) * 2.25;
+          expect(text.a[1] as number).toBeCloseTo(at, 6);
+          const slices = calls.filter((c) => c.m === 'drawImage' && (c.a[0] as HTMLImageElement).src === box());
+          const right = Math.max(...slices.map((c) => (c.a[5] as number) + (c.a[7] as number)));
+          const textRight = align === 'east' ? at : at + NOTICE.length * 5;
+          expect(right).toBeCloseTo(textRight + 11 * 2.25, 6);
+        } finally { unregisterImport(id); }
+      }
+    });
+
+    it('is clipped to the element, as VGUI clips the rows to their container', () => {
+      const rects: number[][] = [];
+      const ctx = fakeCtx(() => {});
+      ctx.rect = ((...a: number[]) => { rects.push(a); }) as typeof ctx.rect;
+      drawHud(ctx, 853, 480, DEFAULT_DESIGN, 'survivor', null);
+      const r = elementRect(DEFAULT_DESIGN, 'killNotices', DEFAULT_DESIGN.aspect);
+      expect(rects).toContainEqual([r.x, r.y, r.w, r.h]);           // 853 x 480: one pixel to a unit
+    });
   });
 
   it('draws siHealth and infectedRow from their generated files on the infected side', () => {

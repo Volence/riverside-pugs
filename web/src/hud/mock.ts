@@ -14,14 +14,15 @@
 import type { Box, HudDesign } from './design';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import type { Guide } from './guides';
-import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement } from './build';
+import { buildTrees, elementRect, teamLayout, teamCardRects, isFreeTeam, baseHasElement, pcGet } from './build';
 import { baseOf } from './base';
 import { kvFind, kvGet } from './kv';
 import { SCREEN_H, parseSize } from './units';
-import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, colourOf, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { drawPanel, childRects, hiddenInState, labelDrawsNothing, urlImage, artImage, colourOf, setFont, fillFontText, type PreviewState, type SurvivorState } from './render';
+import { normaliseMaterial } from './art';
 import { drawArt } from '../crosshair/model';
 import { childDef, panelChildren } from './children';
-import { drawWeapons, type WeaponHeld } from './weapons';
+import { drawWeapons, drawNineSlice, type WeaponHeld } from './weapons';
 
 export type Side = 'survivor' | 'infected';
 
@@ -275,44 +276,71 @@ function paintProgressBar(ctx: CanvasRenderingContext2D, r: Rect) {
 const PZ_RECORD = 'resource/ui/hud/pzdamagerecordpanel.res';
 
 /**
- * The kill/incap feed. Its rows (recordlabel0..4) are blank in the base
- * files and filled in by game code, so the preview can only ever show a
- * sample: two lines at the first two rows' own xpos, ypos, tall, font and
- * colour, read straight from pzdamagerecordpanel.res through buildTrees, the
- * same generated tree the download would carry. Both rows are textAlignment
- * east (right-aligned against the row's own right edge, xpos + wide), and
- * only the first carries its own red (fgcolor_override "246 5 5 255"); the
- * second falls back to colourOf's default white, the row's real look until
- * game code recolours a given line. Clipped to the element, as VGUI clips
- * the rows to their container.
+ * The notice box's pad either side of the text's advance, in HUD units,
+ * measured in probe-phase2/b2/shots-kill/b2-killnotice/b2-f.png. The box
+ * art (scalablepanel_bgblack_outlinegrey) has 9 texels of soft shadow
+ * outside its 3-texel grey rim, so with the file's 8-unit corners (18 px for
+ * 16 texels) the rim sits 10.1 px inside the drawn box. The game's rim runs
+ * from x 30 to 333 px around text whose origin is x 45 and whose advance
+ * ends about x 319: the drawn box runs from about x 19.9 to 343.6, 25.1 px
+ * left of the text and 24.1 right of it, about 11 units either side. The
+ * rim's top and bottom (y 382 and 416) fit the file's label4background tall
+ * of 25 units centred on the 15-unit row (y 371.25 to 427.5 px drawn).
+ */
+const NOTICE_PAD = 11;
+
+/**
+ * The kill/incap notices (HudPZDamageRecord). Its rows (recordlabel0..4)
+ * are blank and hidden in the base files and filled in by game code, so the
+ * preview shows one sample notice (decision 7 of the 2.F plan): row 0,
+ * "Hunter incapacitated Francis", the notice probe B2 shot
+ * (probe-phase2/b2/shots-kill/b2-killnotice/b2-f.png: first ink x 46 px,
+ * box x 30 to 333, y 382 to 416). Everything is read from the generated
+ * trees (buildTrees): the row's place, tall, font and fgcolor_override from
+ * pzdamagerecordpanel.res, and the alignment from hudlayout.res's
+ * label_textalign, which the game applies to every row over the row's own
+ * textAlignment (the stock rows say east; the shot is at the left, as the
+ * stock block's west says). Behind the text, the label4background art
+ * nine-sliced with the file's src_corner (texels) and draw_corner (units),
+ * its own tall centred on the row, the text's width plus NOTICE_PAD. How a second notice
+ * stacks is probe B12's to settle. Clipped to the element, as VGUI clips the
+ * rows to their container.
  */
 function paintKillNotices(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, k: number, onAsset?: () => void) {
-  const nodes = buildTrees(design)(PZ_RECORD);
-  const lines = [
-    { row: 'recordlabel0', text: 'Mal incapacitated Francis' },
-    { row: 'recordlabel1', text: 'Bill killed a Hunter' },
-  ];
+  const trees = buildTrees(design);
+  const nodes = trees(PZ_RECORD);
+  const n = kvFind(nodes, ['recordlabel0']);
+  if (!n) return;
+  const layout = kvFind(trees('scripts/hudlayout.res'), ['HudPZDamageRecord']);
+  const align = ((layout && pcGet(layout, 'label_textalign')) ?? 'west').toLowerCase();
+  const line = 'Hunter incapacitated Francis';
   clipToRect(ctx, r, () => {
     ctx.save();
-    for (const { row, text: line } of lines) {
-      const n = kvFind(nodes, [row]);
-      if (!n) continue;
-      const xpos = parseFloat(kvGet(n, 'xpos') ?? '0');
-      const ypos = parseFloat(kvGet(n, 'ypos') ?? '0');
-      const tall = parseFloat(kvGet(n, 'tall') ?? '15');
-      const wide = parseSize(kvGet(n, 'wide') ?? '0', r.w / k);
-      const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();
-      // The row's font at its own size, its cell centred in the row as a
-      // Label centres it, the glyphs hanging from the cell's top.
-      const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, onAsset);
-      ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
-      const top = r.y + ypos * k + (tall * k - cell.cell) / 2;
-      let x = r.x + xpos * k;
-      if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + (xpos + wide) * k; }
-      else if (align.includes('center')) { ctx.textAlign = 'center'; x = r.x + (xpos + wide / 2) * k; }
-      else ctx.textAlign = 'left';
-      fillFontText(ctx, cell, line, x, top + cell.ascent, top, r);
+    const xpos = parseFloat(kvGet(n, 'xpos') ?? '0');
+    const ypos = parseFloat(kvGet(n, 'ypos') ?? '0');
+    const tall = parseFloat(kvGet(n, 'tall') ?? '15');
+    const wide = parseSize(kvGet(n, 'wide') ?? '0', r.w / k);
+    // The row's font at its own size, its cell centred in the row as a
+    // Label centres it, the glyphs hanging from the cell's top.
+    const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, onAsset);
+    const textW = ctx.measureText(line).width;
+    let x = r.x + xpos * k, left = x;
+    if (align.includes('east')) { ctx.textAlign = 'right'; x = r.x + (xpos + wide) * k; left = x - textW; }
+    else if (align.includes('center')) { ctx.textAlign = 'center'; x = r.x + (xpos + wide / 2) * k; left = x - textW / 2; }
+    else ctx.textAlign = 'left';
+    const bg = kvFind(nodes, ['label4background']);
+    const img = bg && artImage(normaliseMaterial(kvGet(bg, 'image') ?? ''), onAsset);
+    if (bg && img) {
+      const pad = NOTICE_PAD * k;
+      const src = parseFloat(kvGet(bg, 'src_corner_width') ?? '16');
+      const corner = parseFloat(kvGet(bg, 'draw_corner_width') ?? '8') * k;
+      const bgTall = parseFloat(kvGet(bg, 'tall') ?? '25') * k;
+      const y = r.y + ypos * k + (tall * k - bgTall) / 2;
+      drawNineSlice(ctx, img, img.naturalWidth, img.naturalHeight, left - pad, y, textW + 2 * pad, bgTall, corner, src);
     }
+    ctx.fillStyle = colourOf(design, kvGet(n, 'fgcolor_override'));
+    const top = r.y + ypos * k + (tall * k - cell.cell) / 2;
+    fillFontText(ctx, cell, line, x, top + cell.ascent, top, r);
     ctx.restore();
   });
 }
