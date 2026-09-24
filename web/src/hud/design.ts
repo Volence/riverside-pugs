@@ -720,10 +720,11 @@ function element(id: string, raw: unknown, key: BaseKey): ElementOverride {
   return out;
 }
 
-function boxStyle(v: unknown, hasImage: boolean): WeaponBoxStyle | undefined {
+function boxStyle(v: unknown): WeaponBoxStyle | undefined {
   if (!isObj(v) || (v.kind !== 'hidden' && v.kind !== 'flat' && v.kind !== 'rounded' && v.kind !== 'image')) return undefined;
-  // An Image box with no picture stored (a share link carries none) is stock.
-  if (v.kind === 'image' && !hasImage) return undefined;
+  // An Image box with no picture stored (a share link carries none) keeps its
+  // kind, as a splatter does: the page says "No picture yet", and the build
+  // and the preview draw the game's box until one is uploaded.
   const out: WeaponBoxStyle = { kind: v.kind };
   const c = colour(v.color);
   if (c && (v.kind === 'flat' || v.kind === 'rounded')) out.color = c;
@@ -749,7 +750,7 @@ function weaponsOf(raw: unknown, oldStyles: unknown, advanced: boolean, images: 
   const ic = colour(w.inactiveColor); if (ic) out.inactiveColor = ic;
   const old = advanced && isObj(oldStyles) ? oldStyles : {};
   for (const [box, slot] of [['boxActive', 'weaponBoxActive'], ['boxInactive', 'weaponBoxInactive']] as const) {
-    const style = boxStyle(w[box], images[WEAPON_BOX_IMAGE[box]] !== undefined);
+    const style = boxStyle(w[box]);
     const was = old[slot];
     if (style) out[box] = style;
     else if (isObj(was) && (was.kind === 'flat' || was.kind === 'rounded')) out[box] = { kind: was.kind, color: colour(was.color) ?? WEAPON_BOX_COLOUR[box] };

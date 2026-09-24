@@ -1495,6 +1495,13 @@ describe('buildHud, the weapon selection', () => {
     expect([vtf.w, vtf.h, ...vtf.rgba.slice(0, 8)]).toEqual([128, 128, ...box.px.slice(0, 8)]);
   });
 
+  it("builds an Image box with no picture (a share link's) as the game's box", () => {
+    const d = design({ weapons: { boxActive: { kind: 'image' } } });
+    const files = buildHud(d, { images: {} });
+    expect(files.some((f) => f.path.includes('hudeditor/weaponboxactive'))).toBe(false);
+    expect(files.some((f) => f.path === 'scripts/mod_textures.txt')).toBe(false);
+  });
+
   it('turns a font glyph entry into a texture cell: file and rect in, font and character out', () => {
     const e = parseKv('"voice_self" { "font" "L4D_Icons_large" "character" "V" }')[0];
     pointCell(e, 'vgui/hud/hudeditor/voice_self', 64, 64);

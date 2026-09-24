@@ -329,7 +329,7 @@ describe('validateDesign, the weapon selection', () => {
       boxActive: { kind: 'rounded', color: '10 20 30 200' }, boxInactive: { kind: 'hidden', color: '1 2 3 4' },
     } });
     expect(d.weapons).toEqual({ boxActive: { kind: 'rounded', color: '10 20 30 200' }, boxInactive: { kind: 'hidden' } });
-    expect(validateDesign({ v: 1, weapons: { boxActive: { kind: 'stock' }, boxInactive: { kind: 'image' } } }).weapons).toBeUndefined();
+    expect(validateDesign({ v: 1, weapons: { boxActive: { kind: 'stock' } } }).weapons).toBeUndefined();
   });
 
   it('leaves an untouched design without weapons, so its download is unchanged', () => {
@@ -391,12 +391,19 @@ describe('validateDesign, the weapon selection', () => {
     expect(Object.keys(d.images)).toEqual(['wiconUzi']);
   });
 
-  it("keeps an Image box only with its 128-texel picture, and drops it back to stock without one", () => {
+  it('keeps an Image box with its 128-texel picture, and keeps the kind with none (the "No picture yet" note, as splatters do)', () => {
     const d = validateDesign({ v: 1,
       images: { weaponBoxActive: img(128, 128), weaponBoxInactive: img(64, 64) },
       weapons: { boxActive: { kind: 'image', color: '1 2 3 4' }, boxInactive: { kind: 'image' } } });
-    expect(d.weapons).toEqual({ boxActive: { kind: 'image' } });
+    expect(d.weapons).toEqual({ boxActive: { kind: 'image' }, boxInactive: { kind: 'image' } });
     expect(Object.keys(d.images)).toEqual(['weaponBoxActive']);
+  });
+
+  it('keeps an Image box kind through a share link, which carries no picture', async () => {
+    const d = { ...structuredClone(DEFAULT_DESIGN), images: { weaponBoxActive: img(128, 128) }, weapons: { boxActive: { kind: 'image' as const } } };
+    const back = await decodeShare(await encodeShare(d));
+    expect(back?.weapons).toEqual({ boxActive: { kind: 'image' } });
+    expect(back?.images).toEqual({});
   });
 
   it('keeps the uploads while the pictures are hidden, so turning them back on brings them back', () => {
